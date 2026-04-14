@@ -13,20 +13,20 @@ import {
 const INITIAL_STATE = {
   products: [
     { id: 1, nombre: 'Crema Hidratante', descripcion: 'Crema hidratante intensiva', costoLab: 120, precioVenta: 450, stock: 15 },
-    { id: 2, nombre: 'SÃ©rum Vitamina C', descripcion: 'SÃ©rum antioxidante', costoLab: 180, precioVenta: 650, stock: 8 },
+    { id: 2, nombre: 'Sérum Vitamina C', descripcion: 'Sérum antioxidante', costoLab: 180, precioVenta: 650, stock: 8 },
     { id: 3, nombre: 'Contorno de Ojos', descripcion: 'Contorno iluminador', costoLab: 150, precioVenta: 550, stock: 12 },
     { id: 4, nombre: 'Limpiador Facial', descripcion: 'Limpiador suave', costoLab: 90, precioVenta: 320, stock: 20 },
     { id: 5, nombre: 'Mascarilla Nutritiva', descripcion: 'Mascarilla reparadora', costoLab: 110, precioVenta: 420, stock: 4 },
   ],
   clients: [
-    { id: 1, nombre: 'Martina GonzÃ¡lez', contacto: '11 2345-6789', mentorId: 1, fechaAlta: '2024-01-15', totalCompras: 3 },
-    { id: 2, nombre: 'Valentina LÃ³pez', contacto: 'valentina@email.com', mentorId: 2, fechaAlta: '2024-02-20', totalCompras: 5 },
-    { id: 3, nombre: 'Carolina FernÃ¡ndez', contacto: '11 3456-7890', mentorId: 1, fechaAlta: '2024-01-10', totalCompras: 2 },
-    { id: 4, nombre: 'Paula RodrÃ­guez', contacto: 'paula@email.com', mentorId: 2, fechaAlta: '2024-03-05', totalCompras: 4 },
-    { id: 5, nombre: 'Daniela MartÃ­nez', contacto: '11 4567-8901', mentorId: 1, fechaAlta: '2024-02-25', totalCompras: 1 },
-    { id: 6, nombre: 'SofÃ­a PÃ©rez', contacto: 'sofia@email.com', mentorId: 2, fechaAlta: '2024-03-10', totalCompras: 6 },
-    { id: 7, nombre: 'LucÃ­a SÃ¡nchez', contacto: '11 5678-9012', mentorId: 1, fechaAlta: '2024-01-20', totalCompras: 2 },
-    { id: 8, nombre: 'Isabel GÃ³mez', contacto: 'isabel@email.com', mentorId: 2, fechaAlta: '2024-02-28', totalCompras: 3 },
+    { id: 1, nombre: 'Martina González', contacto: '11 2345-6789', mentorId: 1, fechaAlta: '2024-01-15', totalCompras: 3 },
+    { id: 2, nombre: 'Valentina López', contacto: 'valentina@email.com', mentorId: 2, fechaAlta: '2024-02-20', totalCompras: 5 },
+    { id: 3, nombre: 'Carolina Fernández', contacto: '11 3456-7890', mentorId: 1, fechaAlta: '2024-01-10', totalCompras: 2 },
+    { id: 4, nombre: 'Paula Rodríguez', contacto: 'paula@email.com', mentorId: 2, fechaAlta: '2024-03-05', totalCompras: 4 },
+    { id: 5, nombre: 'Daniela Martínez', contacto: '11 4567-8901', mentorId: 1, fechaAlta: '2024-02-25', totalCompras: 1 },
+    { id: 6, nombre: 'Sofía Pérez', contacto: 'sofia@email.com', mentorId: 2, fechaAlta: '2024-03-10', totalCompras: 6 },
+    { id: 7, nombre: 'Lucía Sánchez', contacto: '11 5678-9012', mentorId: 1, fechaAlta: '2024-01-20', totalCompras: 2 },
+    { id: 8, nombre: 'Isabel Gómez', contacto: 'isabel@email.com', mentorId: 2, fechaAlta: '2024-02-28', totalCompras: 3 },
   ],
   mentors: [
     { id: 1, nombre: 'Sofia', contacto: '11 9876-5432', fechaInicio: '2023-12-01', clientesAsignados: 4 },
@@ -225,7 +225,7 @@ export default function DASHLaboratorio() {
           <button
             onClick={handleLogout}
             className="w-full flex items-center justify-center gap-2 p-2 rounded-lg hover:bg-pink-700 transition"
-            title="Cerrar sesiÃ³n"
+            title="Cerrar sesión"
           >
             <LogOut size={20} />
           </button>
@@ -331,13 +331,13 @@ function LoginScreen({ onLogin, darkMode, toggleDarkMode }) {
           <div className="space-y-4">
             <input
               type="password"
-              placeholder="ContraseÃ±a"
+              placeholder="Contraseña"
               value={adminPassword}
               onChange={(e) => setAdminPassword(e.target.value)}
               className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
             />
             <button
-              onClick={() => adminPassword === 'admin' ? onLogin('admin', 'Administrador') : alert('ContraseÃ±a incorrecta')}
+              onClick={() => adminPassword === 'admin' ? onLogin('admin', 'Administrador') : alert('Contraseña incorrecta')}
               className="w-full py-2 bg-pink-900 dark:bg-pink-700 text-white rounded-lg hover:bg-pink-800 dark:hover:bg-pink-600 transition"
             >
               Ingresar
@@ -401,7 +401,7 @@ function InicioSection({ state, getCurrentMonthSales, getPendingCommissions, get
       </div>
 
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
-        <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-6">Ventas Ãltimos 6 Meses</h3>
+        <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-6">Ventas Últimos 6 Meses</h3>
         <ResponsiveContainer width="100%" height={300}>
           <LineChart data={monthlySales}>
             <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200 dark:stroke-gray-700" />
@@ -456,7 +456,7 @@ function VentasSection({ state, onAddSale, showModal, setShowModal }) {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">GestiÃ³n de Ventas</h2>
+        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Gestión de Ventas</h2>
         <button
           onClick={() => setShowModal(true)}
           className="flex items-center gap-2 bg-pink-900 text-white px-6 py-2 rounded-lg hover:bg-pink-800 transition font-semibold"
@@ -529,7 +529,7 @@ function VentasSection({ state, onAddSale, showModal, setShowModal }) {
                 <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Cantidad</th>
                 <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Monto Total</th>
                 <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Mentor</th>
-                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">ComisiÃ³n</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Comisión</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
@@ -570,7 +570,7 @@ function ProductosSection({ state, onAddProduct, showModal, setShowModal, calcul
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">CatÃ¡logo de Productos</h2>
+        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Catálogo de Productos</h2>
         <button
           onClick={() => setShowModal(true)}
           className="flex items-center gap-2 bg-pink-900 text-white px-6 py-2 rounded-lg hover:bg-pink-800 transition font-semibold"
@@ -594,7 +594,7 @@ function ProductosSection({ state, onAddProduct, showModal, setShowModal, calcul
               type="text"
               value={formData.descripcion}
               onChange={(e) => setFormData({ ...formData, descripcion: e.target.value })}
-              placeholder="DescripciÃ³n"
+              placeholder="Descripción"
               className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
               required
             />
@@ -706,7 +706,7 @@ function ClientesSection({ state, onAddClient, showModal, setShowModal }) {
               type="text"
               value={formData.contacto}
               onChange={(e) => setFormData({ ...formData, contacto: e.target.value })}
-              placeholder="TelÃ©fono o Email"
+              placeholder="Teléfono o Email"
               className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
               required
             />
@@ -716,7 +716,7 @@ function ClientesSection({ state, onAddClient, showModal, setShowModal }) {
               className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
               required
             >
-              <option value="">Mentor que lo refiriÃ³</option>
+              <option value="">Mentor que lo refirió</option>
               {state.mentors.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
             </select>
             <button
@@ -763,7 +763,7 @@ function StockSection({ state }) {
   const getStockStatus = (stock) => {
     if (stock > 10) return { color: 'bg-green-100 dark:bg-green-900/30 border-green-300 dark:border-green-700', badge: 'bg-green-500', text: 'En Stock' };
     if (stock >= 5) return { color: 'bg-yellow-100 dark:bg-yellow-900/30 border-yellow-300 dark:border-yellow-700', badge: 'bg-yellow-500', text: 'Stock Bajo' };
-    return { color: 'bg-red-100 dark:bg-red-900/30 border-red-300 dark:border-red-700', badge: 'bg-red-500', text: 'CrÃ­tico' };
+    return { color: 'bg-red-100 dark:bg-red-900/30 border-red-300 dark:border-red-700', badge: 'bg-red-500', text: 'Crítico' };
   };
 
   return (
@@ -813,7 +813,7 @@ function ComisionesSection({ state, dispatch, getMentorStats, filterMentor, setF
       return;
     }
 
-    if (window.confirm(`Â¿Liquidar ${salesToPay.length} comisiones pendientes?`)) {
+    if (window.confirm(`¿Liquidar ${salesToPay.length} comisiones pendientes?`)) {
       dispatch({ type: 'PAY_COMMISSIONS', payload: salesToPay.map(s => s.id) });
       setSelectedMentors([]);
     }
@@ -824,7 +824,7 @@ function ComisionesSection({ state, dispatch, getMentorStats, filterMentor, setF
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">GestiÃ³n de Comisiones</h2>
+        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Gestión de Comisiones</h2>
         <button
           onClick={handlePayCommissions}
           className="flex items-center gap-2 bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 transition font-semibold"
@@ -857,15 +857,15 @@ function ComisionesSection({ state, dispatch, getMentorStats, filterMentor, setF
                   <span className="font-semibold text-gray-900 dark:text-gray-100">${stats.totalSales.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-600 dark:text-gray-400">ComisiÃ³n Generada:</span>
+                  <span className="text-gray-600 dark:text-gray-400">Comisión Generada:</span>
                   <span className="font-semibold text-gray-900 dark:text-gray-100">${stats.totalCommission.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-600 dark:text-gray-400">ComisiÃ³n Pagada:</span>
+                  <span className="text-gray-600 dark:text-gray-400">Comisión Pagada:</span>
                   <span className="font-semibold text-green-600">${stats.paidCommission.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between border-t border-gray-200 dark:border-gray-700 pt-3">
-                  <span className="text-gray-600 dark:text-gray-400 font-semibold">ComisiÃ³n Pendiente:</span>
+                  <span className="text-gray-600 dark:text-gray-400 font-semibold">Comisión Pendiente:</span>
                   <span className="font-bold text-amber-600">${stats.pendingCommission.toLocaleString()}</span>
                 </div>
               </div>
@@ -883,7 +883,7 @@ function ComisionesSection({ state, dispatch, getMentorStats, filterMentor, setF
                 <th className="px-4 py-2 text-left font-semibold text-gray-900 dark:text-gray-100">Fecha</th>
                 <th className="px-4 py-2 text-left font-semibold text-gray-900 dark:text-gray-100">Mentor</th>
                 <th className="px-4 py-2 text-left font-semibold text-gray-900 dark:text-gray-100">Monto Venta</th>
-                <th className="px-4 py-2 text-left font-semibold text-gray-900 dark:text-gray-100">ComisiÃ³n (50%)</th>
+                <th className="px-4 py-2 text-left font-semibold text-gray-900 dark:text-gray-100">Comisión (50%)</th>
                 <th className="px-4 py-2 text-left font-semibold text-gray-900 dark:text-gray-100">Estado</th>
               </tr>
             </thead>
@@ -939,7 +939,7 @@ function MentoresSection({ state, getMentorStats }) {
                   <span className="font-bold text-blue-600 text-lg">${stats.totalSales.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-600 dark:text-gray-400">ComisiÃ³n Total:</span>
+                  <span className="text-gray-600 dark:text-gray-400">Comisión Total:</span>
                   <span className="font-bold text-purple-600 text-lg">${stats.totalCommission.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between">
@@ -1020,7 +1020,7 @@ function MentorComisionesSection({ currentUser, state, filterMonth, setFilterMon
                 <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Cliente</th>
                 <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Producto</th>
                 <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Monto Venta</th>
-                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Tu ComisiÃ³n (50%)</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Tu Comisión (50%)</th>
                 <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Estado</th>
               </tr>
             </thead>
@@ -1087,7 +1087,7 @@ function Modal({ title, onClose, children }) {
             onClick={onClose}
             className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition"
           >
-            â
+            ×
           </button>
         </div>
         {children}

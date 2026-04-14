@@ -9,14 +9,43 @@ import {
   Moon, Sun
 } from 'lucide-react';
 
+// Estados del pipeline de producción de una orden
+export const ORDER_STATES = [
+  'pendiente-cotizacion',
+  'cotizado',
+  'abonado',
+  'en-produccion',
+  'listo-enviar',
+  'despachado',
+];
+
+export const ORDER_STATE_LABELS = {
+  'pendiente-cotizacion': 'Pendiente Cotización',
+  'cotizado': 'Cotizado',
+  'abonado': 'Abonado',
+  'en-produccion': 'En Producción',
+  'listo-enviar': 'Listo para enviar',
+  'despachado': 'Despachado',
+};
+
+// Clases tailwind para el chip de estado
+export const ORDER_STATE_STYLES = {
+  'pendiente-cotizacion': 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200',
+  'cotizado': 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300',
+  'abonado': 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300',
+  'en-produccion': 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
+  'listo-enviar': 'bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300',
+  'despachado': 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300',
+};
+
 // Sample data
 const INITIAL_STATE = {
   products: [
-    { id: 1, nombre: 'Crema Hidratante', descripcion: 'Crema hidratante intensiva', costoLab: 120, precioVenta: 450, stock: 15 },
-    { id: 2, nombre: 'Sérum Vitamina C', descripcion: 'Sérum antioxidante', costoLab: 180, precioVenta: 650, stock: 8 },
-    { id: 3, nombre: 'Contorno de Ojos', descripcion: 'Contorno iluminador', costoLab: 150, precioVenta: 550, stock: 12 },
-    { id: 4, nombre: 'Limpiador Facial', descripcion: 'Limpiador suave', costoLab: 90, precioVenta: 320, stock: 20 },
-    { id: 5, nombre: 'Mascarilla Nutritiva', descripcion: 'Mascarilla reparadora', costoLab: 110, precioVenta: 420, stock: 4 },
+    { id: 1, nombre: 'Crema Hidratante', descripcion: 'Crema hidratante intensiva', costoContenido: 70, costoEnvase: 35, costoEtiqueta: 15, precioVenta: 450, stock: 15 },
+    { id: 2, nombre: 'Sérum Vitamina C', descripcion: 'Sérum antioxidante', costoContenido: 110, costoEnvase: 50, costoEtiqueta: 20, precioVenta: 650, stock: 8 },
+    { id: 3, nombre: 'Contorno de Ojos', descripcion: 'Contorno iluminador', costoContenido: 85, costoEnvase: 45, costoEtiqueta: 20, precioVenta: 550, stock: 12 },
+    { id: 4, nombre: 'Limpiador Facial', descripcion: 'Limpiador suave', costoContenido: 50, costoEnvase: 30, costoEtiqueta: 10, precioVenta: 320, stock: 20 },
+    { id: 5, nombre: 'Mascarilla Nutritiva', descripcion: 'Mascarilla reparadora', costoContenido: 65, costoEnvase: 30, costoEtiqueta: 15, precioVenta: 420, stock: 4 },
   ],
   clients: [
     { id: 1, nombre: 'Martina González', contacto: '11 2345-6789', mentorId: 1, fechaAlta: '2024-01-15', totalCompras: 3 },
@@ -33,21 +62,21 @@ const INITIAL_STATE = {
     { id: 2, nombre: 'Mariano', contacto: '11 8765-4321', fechaInicio: '2023-12-15', clientesAsignados: 4 },
   ],
   sales: [
-    { id: 1, fecha: '2024-02-15', clienteId: 1, productoId: 1, cantidad: 1, montoTotal: 450, mentorId: 1, estadoComision: 'pagada' },
-    { id: 2, fecha: '2024-02-18', clienteId: 2, productoId: 2, cantidad: 1, montoTotal: 650, mentorId: 2, estadoComision: 'pagada' },
-    { id: 3, fecha: '2024-02-22', clienteId: 3, productoId: 3, cantidad: 2, montoTotal: 1100, mentorId: 1, estadoComision: 'pendiente' },
-    { id: 4, fecha: '2024-03-01', clienteId: 4, productoId: 1, cantidad: 1, montoTotal: 450, mentorId: 2, estadoComision: 'pagada' },
-    { id: 5, fecha: '2024-03-05', clienteId: 5, productoId: 4, cantidad: 2, montoTotal: 640, mentorId: 1, estadoComision: 'pendiente' },
-    { id: 6, fecha: '2024-03-08', clienteId: 2, productoId: 1, cantidad: 1, montoTotal: 450, mentorId: 2, estadoComision: 'pendiente' },
-    { id: 7, fecha: '2024-03-12', clienteId: 6, productoId: 2, cantidad: 1, montoTotal: 650, mentorId: 2, estadoComision: 'pagada' },
-    { id: 8, fecha: '2024-03-15', clienteId: 1, productoId: 5, cantidad: 2, montoTotal: 840, mentorId: 1, estadoComision: 'pendiente' },
-    { id: 9, fecha: '2024-03-18', clienteId: 4, productoId: 3, cantidad: 1, montoTotal: 550, mentorId: 2, estadoComision: 'pagada' },
-    { id: 10, fecha: '2024-03-22', clienteId: 7, productoId: 1, cantidad: 1, montoTotal: 450, mentorId: 1, estadoComision: 'pendiente' },
-    { id: 11, fecha: '2024-04-02', clienteId: 3, productoId: 2, cantidad: 1, montoTotal: 650, mentorId: 1, estadoComision: 'pendiente' },
-    { id: 12, fecha: '2024-04-05', clienteId: 6, productoId: 4, cantidad: 2, montoTotal: 640, mentorId: 2, estadoComision: 'pendiente' },
-    { id: 13, fecha: '2024-04-08', clienteId: 2, productoId: 5, cantidad: 1, montoTotal: 420, mentorId: 2, estadoComision: 'pendiente' },
-    { id: 14, fecha: '2024-04-10', clienteId: 8, productoId: 3, cantidad: 1, montoTotal: 550, mentorId: 2, estadoComision: 'pendiente' },
-    { id: 15, fecha: '2024-04-12', clienteId: 4, productoId: 1, cantidad: 1, montoTotal: 450, mentorId: 2, estadoComision: 'pendiente' },
+    { id: 1, fecha: '2024-02-15', clienteId: 1, productoId: 1, cantidad: 100, montoTotal: 45000, mentorId: 1, estadoComision: 'pagada', estado: 'despachado', tieneIncidencia: false, incidenciaDetalle: '' },
+    { id: 2, fecha: '2024-02-18', clienteId: 2, productoId: 2, cantidad: 150, montoTotal: 97500, mentorId: 2, estadoComision: 'pagada', estado: 'despachado', tieneIncidencia: false, incidenciaDetalle: '' },
+    { id: 3, fecha: '2024-02-22', clienteId: 3, productoId: 3, cantidad: 200, montoTotal: 110000, mentorId: 1, estadoComision: 'pendiente', estado: 'en-produccion', tieneIncidencia: false, incidenciaDetalle: '' },
+    { id: 4, fecha: '2024-03-01', clienteId: 4, productoId: 1, cantidad: 100, montoTotal: 45000, mentorId: 2, estadoComision: 'pagada', estado: 'despachado', tieneIncidencia: false, incidenciaDetalle: '' },
+    { id: 5, fecha: '2024-03-05', clienteId: 5, productoId: 4, cantidad: 300, montoTotal: 96000, mentorId: 1, estadoComision: 'pendiente', estado: 'en-produccion', tieneIncidencia: true, incidenciaDetalle: 'Demora con proveedor de envases' },
+    { id: 6, fecha: '2024-03-08', clienteId: 2, productoId: 1, cantidad: 100, montoTotal: 45000, mentorId: 2, estadoComision: 'pendiente', estado: 'abonado', tieneIncidencia: false, incidenciaDetalle: '' },
+    { id: 7, fecha: '2024-03-12', clienteId: 6, productoId: 2, cantidad: 150, montoTotal: 97500, mentorId: 2, estadoComision: 'pagada', estado: 'despachado', tieneIncidencia: false, incidenciaDetalle: '' },
+    { id: 8, fecha: '2024-03-15', clienteId: 1, productoId: 5, cantidad: 200, montoTotal: 84000, mentorId: 1, estadoComision: 'pendiente', estado: 'listo-enviar', tieneIncidencia: false, incidenciaDetalle: '' },
+    { id: 9, fecha: '2024-03-18', clienteId: 4, productoId: 3, cantidad: 100, montoTotal: 55000, mentorId: 2, estadoComision: 'pagada', estado: 'despachado', tieneIncidencia: false, incidenciaDetalle: '' },
+    { id: 10, fecha: '2024-03-22', clienteId: 7, productoId: 1, cantidad: 100, montoTotal: 45000, mentorId: 1, estadoComision: 'pendiente', estado: 'cotizado', tieneIncidencia: false, incidenciaDetalle: '' },
+    { id: 11, fecha: '2024-04-02', clienteId: 3, productoId: 2, cantidad: 100, montoTotal: 65000, mentorId: 1, estadoComision: 'pendiente', estado: 'pendiente-cotizacion', tieneIncidencia: false, incidenciaDetalle: '' },
+    { id: 12, fecha: '2024-04-05', clienteId: 6, productoId: 4, cantidad: 200, montoTotal: 64000, mentorId: 2, estadoComision: 'pendiente', estado: 'abonado', tieneIncidencia: false, incidenciaDetalle: '' },
+    { id: 13, fecha: '2024-04-08', clienteId: 2, productoId: 5, cantidad: 100, montoTotal: 42000, mentorId: 2, estadoComision: 'pendiente', estado: 'en-produccion', tieneIncidencia: false, incidenciaDetalle: '' },
+    { id: 14, fecha: '2024-04-10', clienteId: 8, productoId: 3, cantidad: 150, montoTotal: 82500, mentorId: 2, estadoComision: 'pendiente', estado: 'cotizado', tieneIncidencia: false, incidenciaDetalle: '' },
+    { id: 15, fecha: '2024-04-12', clienteId: 4, productoId: 1, cantidad: 250, montoTotal: 112500, mentorId: 2, estadoComision: 'pendiente', estado: 'pendiente-cotizacion', tieneIncidencia: false, incidenciaDetalle: '' },
   ],
 };
 
@@ -69,9 +98,55 @@ function appReducer(state, action) {
         ...state,
         sales: state.sales.map(s => action.payload.includes(s.id) ? { ...s, estadoComision: 'pagada' } : s)
       };
+    case 'UPDATE_ORDER_STATE':
+      return {
+        ...state,
+        sales: state.sales.map(s => s.id === action.payload.orderId ? { ...s, estado: action.payload.estado } : s)
+      };
+    case 'UPDATE_ORDER_INCIDENCIA':
+      return {
+        ...state,
+        sales: state.sales.map(s => s.id === action.payload.orderId
+          ? { ...s, tieneIncidencia: action.payload.tieneIncidencia, incidenciaDetalle: action.payload.incidenciaDetalle }
+          : s)
+      };
     default:
       return state;
   }
+}
+
+// Helpers de cálculo de costos y profit
+export function getProductUnitCost(product) {
+  if (!product) return 0;
+  return (product.costoContenido || 0) + (product.costoEnvase || 0) + (product.costoEtiqueta || 0);
+}
+
+export function getOrderCosts(order, product) {
+  const unit = getProductUnitCost(product);
+  const cantidad = order.cantidad || 0;
+  return {
+    contenidoUnit: product?.costoContenido || 0,
+    envaseUnit: product?.costoEnvase || 0,
+    etiquetaUnit: product?.costoEtiqueta || 0,
+    costoUnit: unit,
+    contenidoTotal: (product?.costoContenido || 0) * cantidad,
+    envaseTotal: (product?.costoEnvase || 0) * cantidad,
+    etiquetaTotal: (product?.costoEtiqueta || 0) * cantidad,
+    costoTotal: unit * cantidad,
+  };
+}
+
+export function getOrderProfit(order, product) {
+  // Profit del laboratorio = (precioVenta - costos) * cantidad.
+  // La comisión del mentor NO se descuenta acá porque es profit del mentor.
+  const unitCost = getProductUnitCost(product);
+  const precioVenta = product?.precioVenta || 0;
+  const cantidad = order.cantidad || 0;
+  return (precioVenta - unitCost) * cantidad;
+}
+
+export function getMentorCommission(order) {
+  return (order.montoTotal || 0) * 0.5;
 }
 
 export default function DASHLaboratorio() {
@@ -144,7 +219,10 @@ export default function DASHLaboratorio() {
     setShowNewProductModal(false);
   };
 
-  const calculateMargin = (costo, precio) => Math.round(((precio - costo) / precio) * 100);
+  const calculateMargin = (costo, precio) => {
+    if (!precio || precio <= 0) return 0;
+    return Math.round(((precio - costo) / precio) * 100);
+  };
 
   const getMonthlySalesData = () => {
     const months = {};
@@ -254,7 +332,7 @@ export default function DASHLaboratorio() {
 
         <div className="p-8">
           {/* Admin Views */}
-          {currentUser.role === 'admin' && currentSection === 'inicio' && <InicioSection state={state} calculateMargin={calculateMargin} getMonthlySalesData={getMonthlySalesData} getCurrentMonthSales={getCurrentMonthSales} getPendingCommissions={getPendingCommissions} getLowStockCount={getLowStockCount} getActiveClients={getActiveClients} />}
+          {currentUser.role === 'admin' && currentSection === 'inicio' && <InicioSection state={state} dispatch={dispatch} calculateMargin={calculateMargin} getMonthlySalesData={getMonthlySalesData} getCurrentMonthSales={getCurrentMonthSales} getPendingCommissions={getPendingCommissions} getLowStockCount={getLowStockCount} getActiveClients={getActiveClients} />}
           {currentUser.role === 'admin' && currentSection === 'ventas' && <VentasSection state={state} onAddSale={handleAddSale} showModal={showNewSaleModal} setShowModal={setShowNewSaleModal} />}
           {currentUser.role === 'admin' && currentSection === 'productos' && <ProductosSection state={state} onAddProduct={handleAddProduct} showModal={showNewProductModal} setShowModal={setShowNewProductModal} calculateMargin={calculateMargin} />}
           {currentUser.role === 'admin' && currentSection === 'clientes' && <ClientesSection state={state} onAddClient={handleAddClient} showModal={showNewClientModal} setShowModal={setShowNewClientModal} />}
@@ -384,21 +462,29 @@ function LoginScreen({ onLogin, darkMode, toggleDarkMode }) {
   );
 }
 
-function InicioSection({ state, getCurrentMonthSales, getPendingCommissions, getLowStockCount, getActiveClients, getMonthlySalesData }) {
+function InicioSection({ state, dispatch, getCurrentMonthSales, getPendingCommissions, getLowStockCount, getActiveClients, getMonthlySalesData }) {
   const monthlySales = getMonthlySalesData();
   const currentMonthSales = getCurrentMonthSales();
   const pendingCommissions = getPendingCommissions();
-  const lowStockCount = getLowStockCount();
   const activeClients = getActiveClients();
+
+  // Totales del listado
+  const totalProfit = state.sales.reduce((acc, order) => {
+    const product = state.products.find(p => p.id === order.productoId);
+    return acc + getOrderProfit(order, product);
+  }, 0);
+  const ordersConIncidencia = state.sales.filter(s => s.tieneIncidencia).length;
 
   return (
     <div className="space-y-8">
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <StatCard icon={DollarSign} label="Ventas del Mes" value={`$${currentMonthSales.toLocaleString()}`} color="from-pink-500 to-rose-500" />
+        <StatCard icon={TrendingUp} label="Profit Total" value={`$${totalProfit.toLocaleString()}`} color="from-emerald-500 to-teal-500" />
         <StatCard icon={CreditCard} label="Comisiones Pendientes" value={`$${pendingCommissions.toLocaleString()}`} color="from-amber-500 to-orange-500" />
-        <StatCard icon={AlertCircle} label="Stock Bajo" value={lowStockCount} color="from-red-500 to-pink-500" />
-        <StatCard icon={Users} label="Clientes Activos" value={activeClients} color="from-purple-500 to-pink-500" />
+        <StatCard icon={AlertCircle} label="Incidencias" value={ordersConIncidencia} color="from-red-500 to-pink-500" />
       </div>
+
+      <OrdersList state={state} dispatch={dispatch} />
 
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
         <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-6">Ventas Últimos 6 Meses</h3>
@@ -412,6 +498,156 @@ function InicioSection({ state, getCurrentMonthSales, getPendingCommissions, get
             <Line type="monotone" dataKey="total" stroke="#be185d" strokeWidth={3} name="Total Ventas ($)" />
           </LineChart>
         </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+// Listado de órdenes con toggle total/unidad, edición de estado e incidencia
+function OrdersList({ state, dispatch }) {
+  const [viewMode, setViewMode] = useState('total'); // 'total' | 'unidad'
+  const [incidenciaDraft, setIncidenciaDraft] = useState({}); // { [orderId]: texto }
+
+  const handleStateChange = (orderId, nuevoEstado) => {
+    dispatch({ type: 'UPDATE_ORDER_STATE', payload: { orderId, estado: nuevoEstado } });
+  };
+
+  const handleToggleIncidencia = (order) => {
+    const enabling = !order.tieneIncidencia;
+    dispatch({
+      type: 'UPDATE_ORDER_INCIDENCIA',
+      payload: {
+        orderId: order.id,
+        tieneIncidencia: enabling,
+        incidenciaDetalle: enabling ? (incidenciaDraft[order.id] ?? order.incidenciaDetalle ?? '') : '',
+      },
+    });
+  };
+
+  const handleIncidenciaDetalleChange = (order, text) => {
+    setIncidenciaDraft(prev => ({ ...prev, [order.id]: text }));
+    if (order.tieneIncidencia) {
+      dispatch({
+        type: 'UPDATE_ORDER_INCIDENCIA',
+        payload: { orderId: order.id, tieneIncidencia: true, incidenciaDetalle: text },
+      });
+    }
+  };
+
+  const getClientName = (id) => state.clients.find(c => c.id === id)?.nombre || '-';
+  const getMentorName = (id) => state.mentors.find(m => m.id === id)?.nombre || '-';
+  const getProduct = (id) => state.products.find(p => p.id === id);
+
+  const fmtMoney = (n) => `$${Math.round(n).toLocaleString()}`;
+
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden">
+      <div className="p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-gray-200 dark:border-gray-700">
+        <div>
+          <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100">Órdenes</h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Mostrando valores {viewMode === 'total' ? 'totales por orden' : 'por unidad'}</p>
+        </div>
+        <div className="inline-flex rounded-lg border border-gray-300 dark:border-gray-600 p-1 bg-gray-50 dark:bg-gray-900 self-start sm:self-auto">
+          <button
+            type="button"
+            onClick={() => setViewMode('total')}
+            className={`px-3 py-1.5 text-sm rounded-md transition ${viewMode === 'total' ? 'bg-pink-600 text-white' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'}`}
+          >
+            Total
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('unidad')}
+            className={`px-3 py-1.5 text-sm rounded-md transition ${viewMode === 'unidad' ? 'bg-pink-600 text-white' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'}`}
+          >
+            Por unidad
+          </button>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700">
+            <tr className="text-left text-gray-700 dark:text-gray-200">
+              <th className="px-4 py-3 font-semibold">Fecha</th>
+              <th className="px-4 py-3 font-semibold">Cliente</th>
+              <th className="px-4 py-3 font-semibold">Producto</th>
+              <th className="px-4 py-3 font-semibold text-right">Cant.</th>
+              <th className="px-4 py-3 font-semibold text-right">Contenido</th>
+              <th className="px-4 py-3 font-semibold text-right">Envase</th>
+              <th className="px-4 py-3 font-semibold text-right">Etiqueta</th>
+              <th className="px-4 py-3 font-semibold text-right">Precio venta</th>
+              <th className="px-4 py-3 font-semibold text-right">Com. Mentor</th>
+              <th className="px-4 py-3 font-semibold text-right">Profit</th>
+              <th className="px-4 py-3 font-semibold">Estado</th>
+              <th className="px-4 py-3 font-semibold">Incidencia</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+            {state.sales.length === 0 && (
+              <tr><td colSpan={12} className="px-4 py-10 text-center text-gray-500 dark:text-gray-400">Todavía no hay órdenes cargadas.</td></tr>
+            )}
+            {state.sales.map(order => {
+              const product = getProduct(order.productoId);
+              const costs = getOrderCosts(order, product);
+              const profitTotal = getOrderProfit(order, product);
+              const profitUnit = product ? (product.precioVenta - getProductUnitCost(product)) : 0;
+              const mentorId = order.mentorId;
+              const hasMentor = !!mentorId;
+              const commissionTotal = hasMentor ? getMentorCommission(order) : 0;
+              const commissionUnit = hasMentor ? (product ? product.precioVenta * 0.5 : 0) : 0;
+              const precioVentaUnit = product?.precioVenta || 0;
+              const precioVentaTotal = precioVentaUnit * (order.cantidad || 0);
+
+              const isTotal = viewMode === 'total';
+              return (
+                <tr key={order.id} className={`transition ${order.tieneIncidencia ? 'bg-red-50/40 dark:bg-red-900/10' : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}>
+                  <td className="px-4 py-3 text-gray-900 dark:text-gray-100 whitespace-nowrap">{order.fecha}</td>
+                  <td className="px-4 py-3 text-gray-900 dark:text-gray-100">{getClientName(order.clienteId)}</td>
+                  <td className="px-4 py-3 text-gray-900 dark:text-gray-100">{product?.nombre || '-'}</td>
+                  <td className="px-4 py-3 text-right text-gray-900 dark:text-gray-100">{order.cantidad}</td>
+                  <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300">{fmtMoney(isTotal ? costs.contenidoTotal : costs.contenidoUnit)}</td>
+                  <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300">{fmtMoney(isTotal ? costs.envaseTotal : costs.envaseUnit)}</td>
+                  <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300">{fmtMoney(isTotal ? costs.etiquetaTotal : costs.etiquetaUnit)}</td>
+                  <td className="px-4 py-3 text-right font-semibold text-gray-900 dark:text-gray-100">{fmtMoney(isTotal ? precioVentaTotal : precioVentaUnit)}</td>
+                  <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300">
+                    {hasMentor ? fmtMoney(isTotal ? commissionTotal : commissionUnit) : <span className="text-gray-400 dark:text-gray-500">—</span>}
+                  </td>
+                  <td className="px-4 py-3 text-right font-bold text-emerald-600 dark:text-emerald-400">{fmtMoney(isTotal ? profitTotal : profitUnit)}</td>
+                  <td className="px-4 py-3">
+                    <select
+                      value={order.estado || 'pendiente-cotizacion'}
+                      onChange={(e) => handleStateChange(order.id, e.target.value)}
+                      className={`text-xs font-semibold px-2 py-1 rounded-full border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-pink-500 ${ORDER_STATE_STYLES[order.estado || 'pendiente-cotizacion']}`}
+                    >
+                      {ORDER_STATES.map(s => (
+                        <option key={s} value={s} className="bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100">{ORDER_STATE_LABELS[s]}</option>
+                      ))}
+                    </select>
+                  </td>
+                  <td className="px-4 py-3 min-w-[220px]">
+                    <div className="flex items-start gap-2">
+                      <input
+                        type="checkbox"
+                        checked={!!order.tieneIncidencia}
+                        onChange={() => handleToggleIncidencia(order)}
+                        className="mt-1 h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-red-600 focus:ring-red-500"
+                        title="Marcar incidencia"
+                      />
+                      <input
+                        type="text"
+                        value={incidenciaDraft[order.id] ?? order.incidenciaDetalle ?? ''}
+                        onChange={(e) => handleIncidenciaDetalleChange(order, e.target.value)}
+                        placeholder={order.tieneIncidencia ? 'Motivo...' : 'Motivo (tildá para activar)'}
+                        className="flex-1 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-red-500"
+                      />
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   );
@@ -553,18 +789,24 @@ function VentasSection({ state, onAddSale, showModal, setShowModal }) {
 }
 
 function ProductosSection({ state, onAddProduct, showModal, setShowModal, calculateMargin }) {
-  const [formData, setFormData] = useState({ nombre: '', descripcion: '', costoLab: '', precioVenta: '', stock: '' });
+  const [formData, setFormData] = useState({
+    nombre: '', descripcion: '',
+    costoContenido: '', costoEnvase: '', costoEtiqueta: '',
+    precioVenta: '', stock: '',
+  });
 
   const handleSubmit = (e) => {
     e.preventDefault();
     onAddProduct({
       nombre: formData.nombre,
       descripcion: formData.descripcion,
-      costoLab: parseInt(formData.costoLab),
-      precioVenta: parseInt(formData.precioVenta),
-      stock: parseInt(formData.stock),
+      costoContenido: parseInt(formData.costoContenido) || 0,
+      costoEnvase: parseInt(formData.costoEnvase) || 0,
+      costoEtiqueta: parseInt(formData.costoEtiqueta) || 0,
+      precioVenta: parseInt(formData.precioVenta) || 0,
+      stock: parseInt(formData.stock) || 0,
     });
-    setFormData({ nombre: '', descripcion: '', costoLab: '', precioVenta: '', stock: '' });
+    setFormData({ nombre: '', descripcion: '', costoContenido: '', costoEnvase: '', costoEtiqueta: '', precioVenta: '', stock: '' });
   };
 
   return (
@@ -598,28 +840,39 @@ function ProductosSection({ state, onAddProduct, showModal, setShowModal, calcul
               className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
               required
             />
-            <input
-              type="number"
-              value={formData.costoLab}
-              onChange={(e) => setFormData({ ...formData, costoLab: e.target.value })}
-              placeholder="Costo Lab"
-              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-              required
-            />
+            <div className="grid grid-cols-3 gap-2">
+              <input
+                type="number"
+                value={formData.costoContenido}
+                onChange={(e) => setFormData({ ...formData, costoContenido: e.target.value })}
+                placeholder="Contenido"
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                required
+              />
+              <input
+                type="number"
+                value={formData.costoEnvase}
+                onChange={(e) => setFormData({ ...formData, costoEnvase: e.target.value })}
+                placeholder="Envase"
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                required
+              />
+              <input
+                type="number"
+                value={formData.costoEtiqueta}
+                onChange={(e) => setFormData({ ...formData, costoEtiqueta: e.target.value })}
+                placeholder="Etiqueta"
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                required
+              />
+            </div>
+            <p className="text-xs text-gray-500 dark:text-gray-400 -mt-2">Costos unitarios: contenido, envase, etiqueta</p>
             <input
               type="number"
               value={formData.precioVenta}
               onChange={(e) => setFormData({ ...formData, precioVenta: e.target.value })}
-              placeholder="Precio Venta"
-              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-              required
-            />
-            <input
-              type="number"
-              value={formData.stock}
-              onChange={(e) => setFormData({ ...formData, stock: e.target.value })}
-              placeholder="Stock Inicial"
-              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+              placeholder="Precio Venta unitario"
+              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
               required
             />
             <button
@@ -633,30 +886,41 @@ function ProductosSection({ state, onAddProduct, showModal, setShowModal, calcul
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {state.products.map(product => (
+        {state.products.map(product => {
+          const unitCost = getProductUnitCost(product);
+          return (
           <div key={product.id} className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 hover:shadow-xl transition">
             <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-2">{product.nombre}</h3>
             <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">{product.descripcion}</p>
             <div className="space-y-2 text-sm mb-4">
               <div className="flex justify-between">
-                <span className="text-gray-600 dark:text-gray-400">Costo Lab:</span>
-                <span className="font-semibold">${product.costoLab}</span>
+                <span className="text-gray-600 dark:text-gray-400">Contenido:</span>
+                <span className="font-semibold text-gray-900 dark:text-gray-100">${product.costoContenido?.toLocaleString() || 0}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600 dark:text-gray-400">Envase:</span>
+                <span className="font-semibold text-gray-900 dark:text-gray-100">${product.costoEnvase?.toLocaleString() || 0}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600 dark:text-gray-400">Etiqueta:</span>
+                <span className="font-semibold text-gray-900 dark:text-gray-100">${product.costoEtiqueta?.toLocaleString() || 0}</span>
+              </div>
+              <div className="flex justify-between border-t border-gray-200 dark:border-gray-700 pt-2">
+                <span className="text-gray-600 dark:text-gray-400 font-semibold">Costo total unitario:</span>
+                <span className="font-semibold text-gray-900 dark:text-gray-100">${unitCost.toLocaleString()}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-600 dark:text-gray-400">Precio Venta:</span>
-                <span className="font-semibold">${product.precioVenta}</span>
+                <span className="font-semibold text-gray-900 dark:text-gray-100">${product.precioVenta?.toLocaleString() || 0}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-600 dark:text-gray-400">Margen:</span>
-                <span className="font-semibold text-green-600">{calculateMargin(product.costoLab, product.precioVenta)}%</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600 dark:text-gray-400">Stock:</span>
-                <span className="font-semibold">{product.stock} unidades</span>
+                <span className="font-semibold text-green-600 dark:text-green-400">{calculateMargin(unitCost, product.precioVenta)}%</span>
               </div>
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

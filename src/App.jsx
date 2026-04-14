@@ -1,0 +1,1076 @@
+import React, { useState, useReducer } from 'react';
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  LineChart, Line, PieChart, Pie, Cell
+} from 'recharts';
+import {
+  Menu, LogOut, Home, ShoppingCart, Package, Users, AlertCircle, CreditCard,
+  UserCheck, TrendingUp, Plus, Filter, Eye, Edit2, Trash2, Calendar, DollarSign
+} from 'lucide-react';
+
+// Sample data
+const INITIAL_STATE = {
+  products: [
+    { id: 1, nombre: 'Crema Hidratante', descripcion: 'Crema hidratante intensiva', costoLab: 120, precioVenta: 450, stock: 15 },
+    { id: 2, nombre: 'SÃ©rum Vitamina C', descripcion: 'SÃ©rum antioxidante', costoLab: 180, precioVenta: 650, stock: 8 },
+    { id: 3, nombre: 'Contorno de Ojos', descripcion: 'Contorno iluminador', costoLab: 150, precioVenta: 550, stock: 12 },
+    { id: 4, nombre: 'Limpiador Facial', descripcion: 'Limpiador suave', costoLab: 90, precioVenta: 320, stock: 20 },
+    { id: 5, nombre: 'Mascarilla Nutritiva', descripcion: 'Mascarilla reparadora', costoLab: 110, precioVenta: 420, stock: 4 },
+  ],
+  clients: [
+    { id: 1, nombre: 'Martina GonzÃ¡lez', contacto: '11 2345-6789', mentorId: 1, fechaAlta: '2024-01-15', totalCompras: 3 },
+    { id: 2, nombre: 'Valentina LÃ³pez', contacto: 'valentina@email.com', mentorId: 2, fechaAlta: '2024-02-20', totalCompras: 5 },
+    { id: 3, nombre: 'Carolina FernÃ¡ndez', contacto: '11 3456-7890', mentorId: 1, fechaAlta: '2024-01-10', totalCompras: 2 },
+    { id: 4, nombre: 'Paula RodrÃ­guez', contacto: 'paula@email.com', mentorId: 2, fechaAlta: '2024-03-05', totalCompras: 4 },
+    { id: 5, nombre: 'Daniela MartÃ­nez', contacto: '11 4567-8901', mentorId: 1, fechaAlta: '2024-02-25', totalCompras: 1 },
+    { id: 6, nombre: 'SofÃ­a PÃ©rez', contacto: 'sofia@email.com', mentorId: 2, fechaAlta: '2024-03-10', totalCompras: 6 },
+    { id: 7, nombre: 'LucÃ­a SÃ¡nchez', contacto: '11 5678-9012', mentorId: 1, fechaAlta: '2024-01-20', totalCompras: 2 },
+    { id: 8, nombre: 'Isabel GÃ³mez', contacto: 'isabel@email.com', mentorId: 2, fechaAlta: '2024-02-28', totalCompras: 3 },
+  ],
+  mentors: [
+    { id: 1, nombre: 'Sofia', contacto: '11 9876-5432', fechaInicio: '2023-12-01', clientesAsignados: 4 },
+    { id: 2, nombre: 'Mariano', contacto: '11 8765-4321', fechaInicio: '2023-12-15', clientesAsignados: 4 },
+  ],
+  sales: [
+    { id: 1, fecha: '2024-02-15', clienteId: 1, productoId: 1, cantidad: 1, montoTotal: 450, mentorId: 1, estadoComision: 'pagada' },
+    { id: 2, fecha: '2024-02-18', clienteId: 2, productoId: 2, cantidad: 1, montoTotal: 650, mentorId: 2, estadoComision: 'pagada' },
+    { id: 3, fecha: '2024-02-22', clienteId: 3, productoId: 3, cantidad: 2, montoTotal: 1100, mentorId: 1, estadoComision: 'pendiente' },
+    { id: 4, fecha: '2024-03-01', clienteId: 4, productoId: 1, cantidad: 1, montoTotal: 450, mentorId: 2, estadoComision: 'pagada' },
+    { id: 5, fecha: '2024-03-05', clienteId: 5, productoId: 4, cantidad: 2, montoTotal: 640, mentorId: 1, estadoComision: 'pendiente' },
+    { id: 6, fecha: '2024-03-08', clienteId: 2, productoId: 1, cantidad: 1, montoTotal: 450, mentorId: 2, estadoComision: 'pendiente' },
+    { id: 7, fecha: '2024-03-12', clienteId: 6, productoId: 2, cantidad: 1, montoTotal: 650, mentorId: 2, estadoComision: 'pagada' },
+    { id: 8, fecha: '2024-03-15', clienteId: 1, productoId: 5, cantidad: 2, montoTotal: 840, mentorId: 1, estadoComision: 'pendiente' },
+    { id: 9, fecha: '2024-03-18', clienteId: 4, productoId: 3, cantidad: 1, montoTotal: 550, mentorId: 2, estadoComision: 'pagada' },
+    { id: 10, fecha: '2024-03-22', clienteId: 7, productoId: 1, cantidad: 1, montoTotal: 450, mentorId: 1, estadoComision: 'pendiente' },
+    { id: 11, fecha: '2024-04-02', clienteId: 3, productoId: 2, cantidad: 1, montoTotal: 650, mentorId: 1, estadoComision: 'pendiente' },
+    { id: 12, fecha: '2024-04-05', clienteId: 6, productoId: 4, cantidad: 2, montoTotal: 640, mentorId: 2, estadoComision: 'pendiente' },
+    { id: 13, fecha: '2024-04-08', clienteId: 2, productoId: 5, cantidad: 1, montoTotal: 420, mentorId: 2, estadoComision: 'pendiente' },
+    { id: 14, fecha: '2024-04-10', clienteId: 8, productoId: 3, cantidad: 1, montoTotal: 550, mentorId: 2, estadoComision: 'pendiente' },
+    { id: 15, fecha: '2024-04-12', clienteId: 4, productoId: 1, cantidad: 1, montoTotal: 450, mentorId: 2, estadoComision: 'pendiente' },
+  ],
+};
+
+function appReducer(state, action) {
+  switch (action.type) {
+    case 'ADD_SALE':
+      return { ...state, sales: [...state.sales, action.payload] };
+    case 'ADD_CLIENT':
+      return { ...state, clients: [...state.clients, action.payload] };
+    case 'ADD_PRODUCT':
+      return { ...state, products: [...state.products, action.payload] };
+    case 'UPDATE_STOCK':
+      return {
+        ...state,
+        products: state.products.map(p => p.id === action.payload.productId ? { ...p, stock: p.stock - action.payload.cantidad } : p)
+      };
+    case 'PAY_COMMISSIONS':
+      return {
+        ...state,
+        sales: state.sales.map(s => action.payload.includes(s.id) ? { ...s, estadoComision: 'pagada' } : s)
+      };
+    default:
+      return state;
+  }
+}
+
+export default function DASHLaboratorio() {
+  const [state, dispatch] = useReducer(appReducer, INITIAL_STATE);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [currentSection, setCurrentSection] = useState('inicio');
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [showNewSaleModal, setShowNewSaleModal] = useState(false);
+  const [showNewClientModal, setShowNewClientModal] = useState(false);
+  const [showNewProductModal, setShowNewProductModal] = useState(false);
+  const [filterMentor, setFilterMentor] = useState('');
+  const [filterMonth, setFilterMonth] = useState('');
+
+  // Handlers
+  const handleLogin = (role, name) => {
+    setCurrentUser({ role, name, id: role === 'admin' ? 'admin' : (name === 'Sofia' ? 1 : 2) });
+    setCurrentSection('inicio');
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    setCurrentSection('inicio');
+  };
+
+  const handleAddSale = (saleData) => {
+    const newSale = {
+      id: state.sales.length + 1,
+      ...saleData,
+      estadoComision: 'pendiente'
+    };
+    dispatch({ type: 'ADD_SALE', payload: newSale });
+    dispatch({ type: 'UPDATE_STOCK', payload: { productId: saleData.productoId, cantidad: saleData.cantidad } });
+    setShowNewSaleModal(false);
+  };
+
+  const handleAddClient = (clientData) => {
+    const newClient = {
+      id: state.clients.length + 1,
+      ...clientData,
+      totalCompras: 0
+    };
+    dispatch({ type: 'ADD_CLIENT', payload: newClient });
+    setShowNewClientModal(false);
+  };
+
+  const handleAddProduct = (productData) => {
+    const newProduct = {
+      id: state.products.length + 1,
+      ...productData
+    };
+    dispatch({ type: 'ADD_PRODUCT', payload: newProduct });
+    setShowNewProductModal(false);
+  };
+
+  const calculateMargin = (costo, precio) => Math.round(((precio - costo) / precio) * 100);
+
+  const getMonthlySalesData = () => {
+    const months = {};
+    state.sales.forEach(sale => {
+      const month = sale.fecha.substring(0, 7);
+      months[month] = (months[month] || 0) + sale.montoTotal;
+    });
+    return Object.entries(months)
+      .sort()
+      .map(([month, total]) => ({ month: new Date(month + '-01').toLocaleDateString('es-ES', { month: 'short', year: '2-digit' }), total }));
+  };
+
+  const getCurrentMonthSales = () => {
+    const currentMonth = new Date().toISOString().substring(0, 7);
+    return state.sales.filter(s => s.fecha.startsWith(currentMonth)).reduce((sum, s) => sum + s.montoTotal, 0);
+  };
+
+  const getPendingCommissions = () => {
+    return state.sales
+      .filter(s => s.estadoComision === 'pendiente')
+      .reduce((sum, s) => sum + (s.montoTotal * 0.5), 0);
+  };
+
+  const getLowStockCount = () => state.products.filter(p => p.stock < 5).length;
+
+  const getActiveClients = () => state.clients.length;
+
+  const getMentorStats = (mentorId) => {
+    const mentorSales = state.sales.filter(s => s.mentorId === mentorId);
+    const totalSales = mentorSales.reduce((sum, s) => sum + s.montoTotal, 0);
+    const totalCommission = totalSales * 0.5;
+    const paidCommission = mentorSales.filter(s => s.estadoComision === 'pagada').reduce((sum, s) => sum + (s.montoTotal * 0.5), 0);
+    const pendingCommission = totalCommission - paidCommission;
+    return { totalSales, totalCommission, paidCommission, pendingCommission };
+  };
+
+  if (!currentUser) {
+    return <LoginScreen onLogin={handleLogin} />;
+  }
+
+  return (
+    <div className="flex h-screen bg-gray-50">
+      {/* Sidebar */}
+      <aside className={`${sidebarOpen ? 'w-64' : 'w-20'} bg-gradient-to-b from-pink-900 to-pink-800 text-white transition-all duration-300 flex flex-col`}>
+        <div className="p-6 border-b border-pink-700">
+          <h1 className={`${!sidebarOpen && 'hidden'} text-2xl font-bold bg-gradient-to-r from-pink-200 to-rose-200 bg-clip-text text-transparent`}>
+            DASH
+          </h1>
+        </div>
+
+        <nav className="flex-1 p-4 space-y-2">
+          {currentUser.role === 'admin' ? (
+            <>
+              <NavItem icon={Home} label="Inicio" section="inicio" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              <NavItem icon={TrendingUp} label="Ventas" section="ventas" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              <NavItem icon={Package} label="Productos" section="productos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              <NavItem icon={Users} label="Clientes" section="clientes" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              <NavItem icon={AlertCircle} label="Stock" section="stock" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              <NavItem icon={CreditCard} label="Comisiones" section="comisiones" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              <NavItem icon={UserCheck} label="Mentores" section="mentores" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+            </>
+          ) : (
+            <>
+              <NavItem icon={Home} label="Mi Resumen" section="resumen" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              <NavItem icon={CreditCard} label="Mis Comisiones" section="mis-comisiones" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              <NavItem icon={Users} label="Mis Clientes" section="mis-clientes" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+            </>
+          )}
+        </nav>
+
+        <div className="p-4 border-t border-pink-700 space-y-2">
+          <button
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            className="w-full flex items-center justify-center p-2 rounded-lg hover:bg-pink-700 transition"
+          >
+            <Menu size={20} />
+          </button>
+          <button
+            onClick={handleLogout}
+            className="w-full flex items-center justify-center gap-2 p-2 rounded-lg hover:bg-pink-700 transition"
+            title="Cerrar sesiÃ³n"
+          >
+            <LogOut size={20} />
+          </button>
+        </div>
+      </aside>
+
+      {/* Main Content */}
+      <main className="flex-1 overflow-auto">
+        <header className="bg-white shadow-sm border-b border-gray-200 p-6 flex justify-between items-center">
+          <div>
+            <h2 className="text-3xl font-bold text-gray-900">DASH Laboratorio</h2>
+            <p className="text-gray-600 text-sm">Bienvenido, {currentUser.name}</p>
+          </div>
+          <div className="flex items-center gap-4">
+            <span className="text-sm text-gray-600">{new Date().toLocaleDateString('es-ES')}</span>
+          </div>
+        </header>
+
+        <div className="p-8">
+          {/* Admin Views */}
+          {currentUser.role === 'admin' && currentSection === 'inicio' && <InicioSection state={state} calculateMargin={calculateMargin} getMonthlySalesData={getMonthlySalesData} getCurrentMonthSales={getCurrentMonthSales} getPendingCommissions={getPendingCommissions} getLowStockCount={getLowStockCount} getActiveClients={getActiveClients} />}
+          {currentUser.role === 'admin' && currentSection === 'ventas' && <VentasSection state={state} onAddSale={handleAddSale} showModal={showNewSaleModal} setShowModal={setShowNewSaleModal} />}
+          {currentUser.role === 'admin' && currentSection === 'productos' && <ProductosSection state={state} onAddProduct={handleAddProduct} showModal={showNewProductModal} setShowModal={setShowNewProductModal} calculateMargin={calculateMargin} />}
+          {currentUser.role === 'admin' && currentSection === 'clientes' && <ClientesSection state={state} onAddClient={handleAddClient} showModal={showNewClientModal} setShowModal={setShowNewClientModal} />}
+          {currentUser.role === 'admin' && currentSection === 'stock' && <StockSection state={state} />}
+          {currentUser.role === 'admin' && currentSection === 'comisiones' && <ComisionesSection state={state} dispatch={dispatch} getMentorStats={getMentorStats} filterMentor={filterMentor} setFilterMentor={setFilterMentor} />}
+          {currentUser.role === 'admin' && currentSection === 'mentores' && <MentoresSection state={state} getMentorStats={getMentorStats} />}
+
+          {/* Mentor Views */}
+          {currentUser.role === 'mentor' && currentSection === 'resumen' && <MentorResumenSection currentUser={currentUser} state={state} getMentorStats={getMentorStats} />}
+          {currentUser.role === 'mentor' && currentSection === 'mis-comisiones' && <MentorComisionesSection currentUser={currentUser} state={state} filterMonth={filterMonth} setFilterMonth={setFilterMonth} />}
+          {currentUser.role === 'mentor' && currentSection === 'mis-clientes' && <MentorClientesSection currentUser={currentUser} state={state} />}
+        </div>
+      </main>
+    </div>
+  );
+}
+
+function NavItem({ icon: Icon, label, section, currentSection, onSelect, sidebarOpen }) {
+  const isActive = currentSection === section;
+  return (
+    <button
+      onClick={() => onSelect(section)}
+      className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${
+        isActive ? 'bg-pink-700 text-white' : 'text-pink-100 hover:bg-pink-700'
+      }`}
+    >
+      <Icon size={20} />
+      {sidebarOpen && <span className="text-sm">{label}</span>}
+    </button>
+  );
+}
+
+function LoginScreen({ onLogin }) {
+  const [loginMode, setLoginMode] = useState('select');
+  const [selectedRole, setSelectedRole] = useState(null);
+  const [adminPassword, setAdminPassword] = useState('');
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-pink-50 to-rose-50 flex items-center justify-center p-4">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl p-8">
+        <div className="text-center mb-8">
+          <h1 className="text-4xl font-bold bg-gradient-to-r from-pink-900 to-rose-700 bg-clip-text text-transparent">
+            DASH Laboratorio
+          </h1>
+          <p className="text-gray-600 mt-2">Cosmetics Business Dashboard</p>
+        </div>
+
+        {loginMode === 'select' && (
+          <div className="space-y-4">
+            <button
+              onClick={() => { setSelectedRole('admin'); setLoginMode('admin-login'); }}
+              className="w-full py-3 px-4 bg-gradient-to-r from-pink-900 to-rose-700 text-white rounded-lg hover:shadow-lg transition font-semibold"
+            >
+              Administrador
+            </button>
+            <button
+              onClick={() => { setSelectedRole('mentor'); setLoginMode('mentor-select'); }}
+              className="w-full py-3 px-4 bg-gradient-to-r from-pink-600 to-rose-500 text-white rounded-lg hover:shadow-lg transition font-semibold"
+            >
+              Mentor
+            </button>
+          </div>
+        )}
+
+        {loginMode === 'admin-login' && (
+          <div className="space-y-4">
+            <input
+              type="password"
+              placeholder="ContraseÃ±a"
+              value={adminPassword}
+              onChange={(e) => setAdminPassword(e.target.value)}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            />
+            <button
+              onClick={() => adminPassword === 'admin' ? onLogin('admin', 'Administrador') : alert('ContraseÃ±a incorrecta')}
+              className="w-full py-2 bg-pink-900 text-white rounded-lg hover:bg-pink-800 transition"
+            >
+              Ingresar
+            </button>
+            <button
+              onClick={() => setLoginMode('select')}
+              className="w-full py-2 text-pink-900 border border-pink-900 rounded-lg hover:bg-pink-50 transition"
+            >
+              Volver
+            </button>
+          </div>
+        )}
+
+        {loginMode === 'mentor-select' && (
+          <div className="space-y-4">
+            <button
+              onClick={() => onLogin('mentor', 'Sofia')}
+              className="w-full py-3 px-4 bg-pink-600 text-white rounded-lg hover:shadow-lg transition font-semibold"
+            >
+              Sofia
+            </button>
+            <button
+              onClick={() => onLogin('mentor', 'Mariano')}
+              className="w-full py-3 px-4 bg-rose-600 text-white rounded-lg hover:shadow-lg transition font-semibold"
+            >
+              Mariano
+            </button>
+            <button
+              onClick={() => setLoginMode('select')}
+              className="w-full py-2 text-pink-900 border border-pink-900 rounded-lg hover:bg-pink-50 transition"
+            >
+              Volver
+            </button>
+          </div>
+        )}
+
+        <div className="mt-8 p-4 bg-pink-50 rounded-lg text-sm text-gray-700">
+          <p className="font-semibold mb-2">Demo Credentials:</p>
+          <p>Admin: password "admin"</p>
+          <p>Mentors: Sofia / Mariano</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InicioSection({ state, getCurrentMonthSales, getPendingCommissions, getLowStockCount, getActiveClients, getMonthlySalesData }) {
+  const monthlySales = getMonthlySalesData();
+  const currentMonthSales = getCurrentMonthSales();
+  const pendingCommissions = getPendingCommissions();
+  const lowStockCount = getLowStockCount();
+  const activeClients = getActiveClients();
+
+  return (
+    <div className="space-y-8">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <StatCard icon={DollarSign} label="Ventas del Mes" value={`$${currentMonthSales.toLocaleString()}`} color="from-pink-500 to-rose-500" />
+        <StatCard icon={CreditCard} label="Comisiones Pendientes" value={`$${pendingCommissions.toLocaleString()}`} color="from-amber-500 to-orange-500" />
+        <StatCard icon={AlertCircle} label="Stock Bajo" value={lowStockCount} color="from-red-500 to-pink-500" />
+        <StatCard icon={Users} label="Clientes Activos" value={activeClients} color="from-purple-500 to-pink-500" />
+      </div>
+
+      <div className="bg-white rounded-xl shadow-lg p-6">
+        <h3 className="text-xl font-bold text-gray-900 mb-6">Ventas Ãltimos 6 Meses</h3>
+        <ResponsiveContainer width="100%" height={300}>
+          <LineChart data={monthlySales}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+            <XAxis dataKey="month" />
+            <YAxis />
+            <Tooltip />
+            <Legend />
+            <Line type="monotone" dataKey="total" stroke="#be185d" strokeWidth={3} name="Total Ventas ($)" />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+function StatCard({ icon: Icon, label, value, color }) {
+  return (
+    <div className={`bg-gradient-to-br ${color} text-white rounded-xl shadow-lg p-6`}>
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="text-sm font-medium opacity-90">{label}</p>
+          <p className="text-3xl font-bold mt-2">{value}</p>
+        </div>
+        <Icon size={32} className="opacity-50" />
+      </div>
+    </div>
+  );
+}
+
+function VentasSection({ state, onAddSale, showModal, setShowModal }) {
+  const [formData, setFormData] = useState({ clienteId: '', productoId: '', cantidad: 1, mentorId: '' });
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    const producto = state.products.find(p => p.id === parseInt(formData.productoId));
+    const newSale = {
+      fecha: new Date().toISOString().split('T')[0],
+      clienteId: parseInt(formData.clienteId),
+      productoId: parseInt(formData.productoId),
+      cantidad: parseInt(formData.cantidad),
+      montoTotal: producto.precioVenta * parseInt(formData.cantidad),
+      mentorId: parseInt(formData.mentorId),
+    };
+    onAddSale(newSale);
+    setFormData({ clienteId: '', productoId: '', cantidad: 1, mentorId: '' });
+  };
+
+  const getClientName = (clienteId) => state.clients.find(c => c.id === clienteId)?.nombre || '-';
+  const getProductName = (productoId) => state.products.find(p => p.id === productoId)?.nombre || '-';
+  const getMentorName = (mentorId) => state.mentors.find(m => m.id === mentorId)?.nombre || '-';
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold text-gray-900">GestiÃ³n de Ventas</h2>
+        <button
+          onClick={() => setShowModal(true)}
+          className="flex items-center gap-2 bg-pink-900 text-white px-6 py-2 rounded-lg hover:bg-pink-800 transition font-semibold"
+        >
+          <Plus size={20} /> Nueva Venta
+        </button>
+      </div>
+
+      {showModal && (
+        <Modal title="Registrar Nueva Venta" onClose={() => setShowModal(false)}>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <select
+              value={formData.clienteId}
+              onChange={(e) => setFormData({ ...formData, clienteId: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+              required
+            >
+              <option value="">Seleccionar Cliente</option>
+              {state.clients.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+            </select>
+
+            <select
+              value={formData.productoId}
+              onChange={(e) => setFormData({ ...formData, productoId: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+              required
+            >
+              <option value="">Seleccionar Producto</option>
+              {state.products.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+            </select>
+
+            <input
+              type="number"
+              min="1"
+              value={formData.cantidad}
+              onChange={(e) => setFormData({ ...formData, cantidad: e.target.value })}
+              placeholder="Cantidad"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+              required
+            />
+
+            <select
+              value={formData.mentorId}
+              onChange={(e) => setFormData({ ...formData, mentorId: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+              required
+            >
+              <option value="">Asignar a Mentor</option>
+              {state.mentors.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
+            </select>
+
+            <button
+              type="submit"
+              className="w-full bg-pink-900 text-white py-2 rounded-lg hover:bg-pink-800 transition font-semibold"
+            >
+              Registrar Venta
+            </button>
+          </form>
+        </Modal>
+      )}
+
+      <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-gray-100 border-b border-gray-200">
+              <tr>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Fecha</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Cliente</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Producto</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Cantidad</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Monto Total</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Mentor</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">ComisiÃ³n</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {state.sales.map(sale => (
+                <tr key={sale.id} className="hover:bg-gray-50 transition">
+                  <td className="px-6 py-4 text-sm text-gray-900">{sale.fecha}</td>
+                  <td className="px-6 py-4 text-sm text-gray-900">{getClientName(sale.clienteId)}</td>
+                  <td className="px-6 py-4 text-sm text-gray-900">{getProductName(sale.productoId)}</td>
+                  <td className="px-6 py-4 text-sm text-gray-900">{sale.cantidad}</td>
+                  <td className="px-6 py-4 text-sm font-semibold text-gray-900">${sale.montoTotal.toLocaleString()}</td>
+                  <td className="px-6 py-4 text-sm text-gray-900">{getMentorName(sale.mentorId)}</td>
+                  <td className="px-6 py-4 text-sm"><Badge text={sale.estadoComision} type={sale.estadoComision === 'pagada' ? 'success' : 'warning'} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProductosSection({ state, onAddProduct, showModal, setShowModal, calculateMargin }) {
+  const [formData, setFormData] = useState({ nombre: '', descripcion: '', costoLab: '', precioVenta: '', stock: '' });
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    onAddProduct({
+      nombre: formData.nombre,
+      descripcion: formData.descripcion,
+      costoLab: parseInt(formData.costoLab),
+      precioVenta: parseInt(formData.precioVenta),
+      stock: parseInt(formData.stock),
+    });
+    setFormData({ nombre: '', descripcion: '', costoLab: '', precioVenta: '', stock: '' });
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold text-gray-900">CatÃ¡logo de Productos</h2>
+        <button
+          onClick={() => setShowModal(true)}
+          className="flex items-center gap-2 bg-pink-900 text-white px-6 py-2 rounded-lg hover:bg-pink-800 transition font-semibold"
+        >
+          <Plus size={20} /> Nuevo Producto
+        </button>
+      </div>
+
+      {showModal && (
+        <Modal title="Agregar Nuevo Producto" onClose={() => setShowModal(false)}>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <input
+              type="text"
+              value={formData.nombre}
+              onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
+              placeholder="Nombre del producto"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+              required
+            />
+            <input
+              type="text"
+              value={formData.descripcion}
+              onChange={(e) => setFormData({ ...formData, descripcion: e.target.value })}
+              placeholder="DescripciÃ³n"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+              required
+            />
+            <input
+              type="number"
+              value={formData.costoLab}
+              onChange={(e) => setFormData({ ...formData, costoLab: e.target.value })}
+              placeholder="Costo Lab"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+              required
+            />
+            <input
+              type="number"
+              value={formData.precioVenta}
+              onChange={(e) => setFormData({ ...formData, precioVenta: e.target.value })}
+              placeholder="Precio Venta"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+              required
+            />
+            <input
+              type="number"
+              value={formData.stock}
+              onChange={(e) => setFormData({ ...formData, stock: e.target.value })}
+              placeholder="Stock Inicial"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+              required
+            />
+            <button
+              type="submit"
+              className="w-full bg-pink-900 text-white py-2 rounded-lg hover:bg-pink-800 transition font-semibold"
+            >
+              Agregar Producto
+            </button>
+          </form>
+        </Modal>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {state.products.map(product => (
+          <div key={product.id} className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition">
+            <h3 className="text-lg font-bold text-gray-900 mb-2">{product.nombre}</h3>
+            <p className="text-sm text-gray-600 mb-4">{product.descripcion}</p>
+            <div className="space-y-2 text-sm mb-4">
+              <div className="flex justify-between">
+                <span className="text-gray-600">Costo Lab:</span>
+                <span className="font-semibold">${product.costoLab}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600">Precio Venta:</span>
+                <span className="font-semibold">${product.precioVenta}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600">Margen:</span>
+                <span className="font-semibold text-green-600">{calculateMargin(product.costoLab, product.precioVenta)}%</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600">Stock:</span>
+                <span className="font-semibold">{product.stock} unidades</span>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ClientesSection({ state, onAddClient, showModal, setShowModal }) {
+  const [formData, setFormData] = useState({ nombre: '', contacto: '', mentorId: '' });
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    onAddClient({
+      nombre: formData.nombre,
+      contacto: formData.contacto,
+      mentorId: parseInt(formData.mentorId),
+      fechaAlta: new Date().toISOString().split('T')[0],
+    });
+    setFormData({ nombre: '', contacto: '', mentorId: '' });
+  };
+
+  const getMentorName = (mentorId) => state.mentors.find(m => m.id === mentorId)?.nombre || '-';
+  const getMentorClients = (mentorId) => state.clients.filter(c => c.mentorId === mentorId).reduce((sum, c) => sum + c.totalCompras, 0);
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold text-gray-900">Base de Clientes</h2>
+        <button
+          onClick={() => setShowModal(true)}
+          className="flex items-center gap-2 bg-pink-900 text-white px-6 py-2 rounded-lg hover:bg-pink-800 transition font-semibold"
+        >
+          <Plus size={20} /> Nuevo Cliente
+        </button>
+      </div>
+
+      {showModal && (
+        <Modal title="Agregar Nuevo Cliente" onClose={() => setShowModal(false)}>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <input
+              type="text"
+              value={formData.nombre}
+              onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
+              placeholder="Nombre completo"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+              required
+            />
+            <input
+              type="text"
+              value={formData.contacto}
+              onChange={(e) => setFormData({ ...formData, contacto: e.target.value })}
+              placeholder="TelÃ©fono o Email"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+              required
+            />
+            <select
+              value={formData.mentorId}
+              onChange={(e) => setFormData({ ...formData, mentorId: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+              required
+            >
+              <option value="">Mentor que lo refiriÃ³</option>
+              {state.mentors.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
+            </select>
+            <button
+              type="submit"
+              className="w-full bg-pink-900 text-white py-2 rounded-lg hover:bg-pink-800 transition font-semibold"
+            >
+              Agregar Cliente
+            </button>
+          </form>
+        </Modal>
+      )}
+
+      <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-gray-100 border-b border-gray-200">
+              <tr>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Nombre</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Contacto</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Mentor</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Fecha Alta</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Total Compras</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {state.clients.map(client => (
+                <tr key={client.id} className="hover:bg-gray-50 transition">
+                  <td className="px-6 py-4 text-sm text-gray-900">{client.nombre}</td>
+                  <td className="px-6 py-4 text-sm text-gray-900">{client.contacto}</td>
+                  <td className="px-6 py-4 text-sm text-gray-900">{getMentorName(client.mentorId)}</td>
+                  <td className="px-6 py-4 text-sm text-gray-900">{client.fechaAlta}</td>
+                  <td className="px-6 py-4 text-sm font-semibold text-gray-900">{client.totalCompras}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StockSection({ state }) {
+  const getStockStatus = (stock) => {
+    if (stock > 10) return { color: 'bg-green-100 border-green-300', badge: 'bg-green-500', text: 'En Stock' };
+    if (stock >= 5) return { color: 'bg-yellow-100 border-yellow-300', badge: 'bg-yellow-500', text: 'Stock Bajo' };
+    return { color: 'bg-red-100 border-red-300', badge: 'bg-red-500', text: 'CrÃ­tico' };
+  };
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-2xl font-bold text-gray-900">Control de Stock</h2>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {state.products.map(product => {
+          const status = getStockStatus(product.stock);
+          return (
+            <div key={product.id} className={`border-2 rounded-xl p-6 ${status.color} hover:shadow-lg transition`}>
+              <div className="flex items-start justify-between mb-4">
+                <h3 className="text-lg font-bold text-gray-900">{product.nombre}</h3>
+                <span className={`${status.badge} text-white px-3 py-1 rounded-full text-xs font-semibold`}>
+                  {status.text}
+                </span>
+              </div>
+              <div className="text-center">
+                <p className="text-4xl font-bold text-gray-900">{product.stock}</p>
+                <p className="text-sm text-gray-600 mt-2">unidades disponibles</p>
+              </div>
+              <div className="mt-4 w-full bg-gray-300 rounded-full h-2 overflow-hidden">
+                <div
+                  className={`h-full transition-all ${status.badge}`}
+                  style={{ width: `${Math.min((product.stock / 20) * 100, 100)}%` }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ComisionesSection({ state, dispatch, getMentorStats, filterMentor, setFilterMentor }) {
+  const [selectedMentors, setSelectedMentors] = useState([]);
+
+  const handlePayCommissions = () => {
+    const salesToPay = state.sales.filter(s => {
+      if (filterMentor && s.mentorId !== parseInt(filterMentor)) return false;
+      return s.estadoComision === 'pendiente' && (selectedMentors.length === 0 || selectedMentors.includes(s.mentorId));
+    });
+
+    if (salesToPay.length === 0) {
+      alert('No hay comisiones pendientes para liquidar');
+      return;
+    }
+
+    if (window.confirm(`Â¿Liquidar ${salesToPay.length} comisiones pendientes?`)) {
+      dispatch({ type: 'PAY_COMMISSIONS', payload: salesToPay.map(s => s.id) });
+      setSelectedMentors([]);
+    }
+  };
+
+  const filteredMentors = state.mentors.filter(m => !filterMentor || m.id === parseInt(filterMentor));
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold text-gray-900">GestiÃ³n de Comisiones</h2>
+        <button
+          onClick={handlePayCommissions}
+          className="flex items-center gap-2 bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 transition font-semibold"
+        >
+          <CreditCard size={20} /> Liquidar
+        </button>
+      </div>
+
+      <div className="bg-white rounded-xl shadow-lg p-6">
+        <label className="block text-sm font-semibold text-gray-900 mb-3">Filtrar por Mentor</label>
+        <select
+          value={filterMentor}
+          onChange={(e) => setFilterMentor(e.target.value)}
+          className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+        >
+          <option value="">Todos</option>
+          {state.mentors.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
+        </select>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {filteredMentors.map(mentor => {
+          const stats = getMentorStats(mentor.id);
+          return (
+            <div key={mentor.id} className="bg-white rounded-xl shadow-lg p-6">
+              <h3 className="text-xl font-bold text-gray-900 mb-4">{mentor.nombre}</h3>
+              <div className="space-y-3 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Ventas Totales:</span>
+                  <span className="font-semibold text-gray-900">${stats.totalSales.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">ComisiÃ³n Generada:</span>
+                  <span className="font-semibold text-gray-900">${stats.totalCommission.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">ComisiÃ³n Pagada:</span>
+                  <span className="font-semibold text-green-600">${stats.paidCommission.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between border-t border-gray-200 pt-3">
+                  <span className="text-gray-600 font-semibold">ComisiÃ³n Pendiente:</span>
+                  <span className="font-bold text-amber-600">${stats.pendingCommission.toLocaleString()}</span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="bg-white rounded-xl shadow-lg p-6">
+        <h3 className="text-lg font-bold text-gray-900 mb-4">Detalle de Ventas y Comisiones</h3>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-100 border-b border-gray-200">
+              <tr>
+                <th className="px-4 py-2 text-left font-semibold text-gray-900">Fecha</th>
+                <th className="px-4 py-2 text-left font-semibold text-gray-900">Mentor</th>
+                <th className="px-4 py-2 text-left font-semibold text-gray-900">Monto Venta</th>
+                <th className="px-4 py-2 text-left font-semibold text-gray-900">ComisiÃ³n (50%)</th>
+                <th className="px-4 py-2 text-left font-semibold text-gray-900">Estado</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {state.sales
+                .filter(s => !filterMentor || s.mentorId === parseInt(filterMentor))
+                .map(sale => {
+                  const mentor = state.mentors.find(m => m.id === sale.mentorId);
+                  return (
+                    <tr key={sale.id} className="hover:bg-gray-50">
+                      <td className="px-4 py-2 text-gray-900">{sale.fecha}</td>
+                      <td className="px-4 py-2 text-gray-900">{mentor?.nombre}</td>
+                      <td className="px-4 py-2 text-gray-900">${sale.montoTotal.toLocaleString()}</td>
+                      <td className="px-4 py-2 font-semibold text-gray-900">${(sale.montoTotal * 0.5).toLocaleString()}</td>
+                      <td className="px-4 py-2"><Badge text={sale.estadoComision} type={sale.estadoComision === 'pagada' ? 'success' : 'warning'} /></td>
+                    </tr>
+                  );
+                })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MentoresSection({ state, getMentorStats }) {
+  return (
+    <div className="space-y-6">
+      <h2 className="text-2xl font-bold text-gray-900">Perfiles de Mentores</h2>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {state.mentors.map(mentor => {
+          const stats = getMentorStats(mentor.id);
+          const mentorClients = state.clients.filter(c => c.mentorId === mentor.id);
+          return (
+            <div key={mentor.id} className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition">
+              <h3 className="text-xl font-bold text-gray-900 mb-4">{mentor.nombre}</h3>
+              <div className="space-y-3 text-sm mb-6 border-b border-gray-200 pb-4">
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Contacto:</span>
+                  <span className="font-semibold text-gray-900">{mentor.contacto}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Desde:</span>
+                  <span className="font-semibold text-gray-900">{mentor.fechaInicio}</span>
+                </div>
+              </div>
+
+              <div className="space-y-3 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Ventas Referidas:</span>
+                  <span className="font-bold text-blue-600 text-lg">${stats.totalSales.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">ComisiÃ³n Total:</span>
+                  <span className="font-bold text-purple-600 text-lg">${stats.totalCommission.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Clientes Asignados:</span>
+                  <span className="font-bold text-pink-600 text-lg">{mentorClients.length}</span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// Mentor Views
+function MentorResumenSection({ currentUser, state, getMentorStats }) {
+  const stats = getMentorStats(currentUser.id);
+  const totalGanado = stats.totalCommission;
+  const pendiente = stats.pendingCommission;
+  const pagado = stats.paidCommission;
+  const mesActualSales = state.sales
+    .filter(s => s.mentorId === currentUser.id && s.fecha.startsWith(new Date().toISOString().substring(0, 7)))
+    .reduce((sum, s) => sum + (s.montoTotal * 0.5), 0);
+
+  return (
+    <div className="space-y-8">
+      <div className="text-center mb-8 p-6 bg-gradient-to-r from-pink-100 to-rose-100 rounded-xl">
+        <h2 className="text-3xl font-bold text-pink-900">Bienvenido, {currentUser.name}</h2>
+        <p className="text-gray-600 mt-2">Panel de mentores - Vista de lectura</p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <StatCard icon={DollarSign} label="Ganado Total" value={`$${totalGanado.toLocaleString()}`} color="from-green-500 to-emerald-500" />
+        <StatCard icon={AlertCircle} label="Pendiente de Cobro" value={`$${pendiente.toLocaleString()}`} color="from-amber-500 to-orange-500" />
+        <StatCard icon={CreditCard} label="Pagado" value={`$${pagado.toLocaleString()}`} color="from-blue-500 to-cyan-500" />
+        <StatCard icon={TrendingUp} label="Mes Actual" value={`$${mesActualSales.toLocaleString()}`} color="from-purple-500 to-pink-500" />
+      </div>
+    </div>
+  );
+}
+
+function MentorComisionesSection({ currentUser, state, filterMonth, setFilterMonth }) {
+  const mentorSales = state.sales.filter(s => s.mentorId === currentUser.id);
+  const months = [...new Set(mentorSales.map(s => s.fecha.substring(0, 7)))].sort().reverse();
+
+  const getClientName = (clienteId) => state.clients.find(c => c.id === clienteId)?.nombre || '-';
+  const getProductName = (productoId) => state.products.find(p => p.id === productoId)?.nombre || '-';
+
+  const filteredSales = filterMonth ? mentorSales.filter(s => s.fecha.startsWith(filterMonth)) : mentorSales;
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-2xl font-bold text-gray-900">Mis Comisiones</h2>
+
+      <div className="bg-white rounded-xl shadow-lg p-6">
+        <label className="block text-sm font-semibold text-gray-900 mb-3">Filtrar por Mes</label>
+        <select
+          value={filterMonth}
+          onChange={(e) => setFilterMonth(e.target.value)}
+          className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+        >
+          <option value="">Todos</option>
+          {months.map(month => (
+            <option key={month} value={month}>
+              {new Date(month + '-01').toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-gray-100 border-b border-gray-200">
+              <tr>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Fecha</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Cliente</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Producto</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Monto Venta</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Tu ComisiÃ³n (50%)</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Estado</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {filteredSales.map(sale => (
+                <tr key={sale.id} className="hover:bg-gray-50 transition">
+                  <td className="px-6 py-4 text-sm text-gray-900">{sale.fecha}</td>
+                  <td className="px-6 py-4 text-sm text-gray-900">{getClientName(sale.clienteId)}</td>
+                  <td className="px-6 py-4 text-sm text-gray-900">{getProductName(sale.productoId)}</td>
+                  <td className="px-6 py-4 text-sm font-semibold text-gray-900">${sale.montoTotal.toLocaleString()}</td>
+                  <td className="px-6 py-4 text-sm font-bold text-green-600">${(sale.montoTotal * 0.5).toLocaleString()}</td>
+                  <td className="px-6 py-4 text-sm"><Badge text={sale.estadoComision} type={sale.estadoComision === 'pagada' ? 'success' : 'warning'} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MentorClientesSection({ currentUser, state }) {
+  const mentorClients = state.clients.filter(c => c.mentorId === currentUser.id);
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-2xl font-bold text-gray-900">Mis Clientes</h2>
+
+      <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-gray-100 border-b border-gray-200">
+              <tr>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Nombre</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Contacto</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Total Compras</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {mentorClients.map(client => (
+                <tr key={client.id} className="hover:bg-gray-50 transition">
+                  <td className="px-6 py-4 text-sm text-gray-900">{client.nombre}</td>
+                  <td className="px-6 py-4 text-sm text-gray-900">{client.contacto}</td>
+                  <td className="px-6 py-4 text-sm font-semibold text-gray-900">{client.totalCompras}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Utility Components
+function Modal({ title, onClose, children }) {
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-2xl p-8 w-full max-w-md">
+        <div className="flex justify-between items-center mb-6">
+          <h3 className="text-xl font-bold text-gray-900">{title}</h3>
+          <button
+            onClick={onClose}
+            className="text-gray-500 hover:text-gray-700 transition"
+          >
+            â
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function Badge({ text, type }) {
+  const types = {
+    success: 'bg-green-100 text-green-800',
+    warning: 'bg-amber-100 text-amber-800',
+    danger: 'bg-red-100 text-red-800',
+  };
+
+  return (
+    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${types[type]}`}>
+      {text.charAt(0).toUpperCase() + text.slice(1)}
+    </span>
+  );
+}

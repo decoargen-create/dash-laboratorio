@@ -48,14 +48,14 @@ const INITIAL_STATE = {
     { id: 5, nombre: 'Mascarilla Nutritiva', descripcion: 'Mascarilla reparadora', costoContenido: 65, costoEnvase: 30, costoEtiqueta: 15, precioVenta: 420, stock: 4 },
   ],
   clients: [
-    { id: 1, nombre: 'Martina González', contacto: '11 2345-6789', mentorId: 1, fechaAlta: '2024-01-15', totalCompras: 3 },
-    { id: 2, nombre: 'Valentina López', contacto: 'valentina@email.com', mentorId: 2, fechaAlta: '2024-02-20', totalCompras: 5 },
-    { id: 3, nombre: 'Carolina Fernández', contacto: '11 3456-7890', mentorId: 1, fechaAlta: '2024-01-10', totalCompras: 2 },
-    { id: 4, nombre: 'Paula Rodríguez', contacto: 'paula@email.com', mentorId: 2, fechaAlta: '2024-03-05', totalCompras: 4 },
-    { id: 5, nombre: 'Daniela Martínez', contacto: '11 4567-8901', mentorId: 1, fechaAlta: '2024-02-25', totalCompras: 1 },
-    { id: 6, nombre: 'Sofía Pérez', contacto: 'sofia@email.com', mentorId: 2, fechaAlta: '2024-03-10', totalCompras: 6 },
-    { id: 7, nombre: 'Lucía Sánchez', contacto: '11 5678-9012', mentorId: 1, fechaAlta: '2024-01-20', totalCompras: 2 },
-    { id: 8, nombre: 'Isabel Gómez', contacto: 'isabel@email.com', mentorId: 2, fechaAlta: '2024-02-28', totalCompras: 3 },
+    { id: 1, nombre: 'Martina González', telefono: '11 2345-6789', domicilio: 'Av. Corrientes 1234, CABA', mentorId: 1, fechaAlta: '2024-01-15', totalCompras: 3, unidadesProducidas: 350 },
+    { id: 2, nombre: 'Valentina López', telefono: '11 3000-1122', domicilio: 'Belgrano 456, Vicente López', mentorId: 2, fechaAlta: '2024-02-20', totalCompras: 5, unidadesProducidas: 600 },
+    { id: 3, nombre: 'Carolina Fernández', telefono: '11 3456-7890', domicilio: 'San Martín 789, San Isidro', mentorId: 1, fechaAlta: '2024-01-10', totalCompras: 2, unidadesProducidas: 300 },
+    { id: 4, nombre: 'Paula Rodríguez', telefono: '11 3111-2233', domicilio: 'Av. Rivadavia 2500, CABA', mentorId: 2, fechaAlta: '2024-03-05', totalCompras: 4, unidadesProducidas: 550 },
+    { id: 5, nombre: 'Daniela Martínez', telefono: '11 4567-8901', domicilio: 'Sarmiento 345, Quilmes', mentorId: 1, fechaAlta: '2024-02-25', totalCompras: 1, unidadesProducidas: 300 },
+    { id: 6, nombre: 'Sofía Pérez', telefono: '11 3444-5566', domicilio: 'Libertador 1800, CABA', mentorId: 2, fechaAlta: '2024-03-10', totalCompras: 6, unidadesProducidas: 900 },
+    { id: 7, nombre: 'Lucía Sánchez', telefono: '11 5678-9012', domicilio: 'Mitre 567, Morón', mentorId: 1, fechaAlta: '2024-01-20', totalCompras: 2, unidadesProducidas: 200 },
+    { id: 8, nombre: 'Isabel Gómez', telefono: '11 3666-7788', domicilio: 'Cabildo 900, CABA', mentorId: 2, fechaAlta: '2024-02-28', totalCompras: 3, unidadesProducidas: 400 },
   ],
   mentors: [
     { id: 1, nombre: 'Sofia', contacto: '11 9876-5432', fechaInicio: '2023-12-01', clientesAsignados: 4 },
@@ -86,6 +86,11 @@ function appReducer(state, action) {
       return { ...state, sales: [...state.sales, action.payload] };
     case 'ADD_CLIENT':
       return { ...state, clients: [...state.clients, action.payload] };
+    case 'UPDATE_CLIENT':
+      return {
+        ...state,
+        clients: state.clients.map(c => c.id === action.payload.id ? { ...c, ...action.payload } : c)
+      };
     case 'ADD_PRODUCT':
       return { ...state, products: [...state.products, action.payload] };
     case 'UPDATE_STOCK':
@@ -201,13 +206,19 @@ export default function DASHLaboratorio() {
   };
 
   const handleAddClient = (clientData) => {
+    const maxId = state.clients.reduce((m, c) => Math.max(m, c.id), 0);
     const newClient = {
-      id: state.clients.length + 1,
+      id: maxId + 1,
+      totalCompras: 0,
+      unidadesProducidas: 0,
       ...clientData,
-      totalCompras: 0
     };
     dispatch({ type: 'ADD_CLIENT', payload: newClient });
     setShowNewClientModal(false);
+  };
+
+  const handleUpdateClient = (clientData) => {
+    dispatch({ type: 'UPDATE_CLIENT', payload: clientData });
   };
 
   const handleAddProduct = (productData) => {
@@ -335,7 +346,7 @@ export default function DASHLaboratorio() {
           {currentUser.role === 'admin' && currentSection === 'inicio' && <InicioSection state={state} dispatch={dispatch} calculateMargin={calculateMargin} getMonthlySalesData={getMonthlySalesData} getCurrentMonthSales={getCurrentMonthSales} getPendingCommissions={getPendingCommissions} getLowStockCount={getLowStockCount} getActiveClients={getActiveClients} />}
           {currentUser.role === 'admin' && currentSection === 'ventas' && <VentasSection state={state} onAddSale={handleAddSale} showModal={showNewSaleModal} setShowModal={setShowNewSaleModal} />}
           {currentUser.role === 'admin' && currentSection === 'productos' && <ProductosSection state={state} onAddProduct={handleAddProduct} showModal={showNewProductModal} setShowModal={setShowNewProductModal} calculateMargin={calculateMargin} />}
-          {currentUser.role === 'admin' && currentSection === 'clientes' && <ClientesSection state={state} onAddClient={handleAddClient} showModal={showNewClientModal} setShowModal={setShowNewClientModal} />}
+          {currentUser.role === 'admin' && currentSection === 'clientes' && <ClientesSection state={state} onAddClient={handleAddClient} onUpdateClient={handleUpdateClient} showModal={showNewClientModal} setShowModal={setShowNewClientModal} />}
           {currentUser.role === 'admin' && currentSection === 'stock' && <StockSection state={state} />}
           {currentUser.role === 'admin' && currentSection === 'comisiones' && <ComisionesSection state={state} dispatch={dispatch} getMentorStats={getMentorStats} filterMentor={filterMentor} setFilterMentor={setFilterMentor} />}
           {currentUser.role === 'admin' && currentSection === 'mentores' && <MentoresSection state={state} getMentorStats={getMentorStats} />}
@@ -926,29 +937,64 @@ function ProductosSection({ state, onAddProduct, showModal, setShowModal, calcul
   );
 }
 
-function ClientesSection({ state, onAddClient, showModal, setShowModal }) {
-  const [formData, setFormData] = useState({ nombre: '', contacto: '', mentorId: '' });
+function ClientesSection({ state, onAddClient, onUpdateClient, showModal, setShowModal }) {
+  const emptyForm = { nombre: '', telefono: '', domicilio: '', mentorId: '', totalCompras: '', unidadesProducidas: '' };
+  const [formData, setFormData] = useState(emptyForm);
+  const [editingId, setEditingId] = useState(null);
+
+  const openNew = () => {
+    setEditingId(null);
+    setFormData(emptyForm);
+    setShowModal(true);
+  };
+
+  const openEdit = (client) => {
+    setEditingId(client.id);
+    setFormData({
+      nombre: client.nombre || '',
+      telefono: client.telefono || '',
+      domicilio: client.domicilio || '',
+      mentorId: client.mentorId ? String(client.mentorId) : '',
+      totalCompras: String(client.totalCompras ?? ''),
+      unidadesProducidas: String(client.unidadesProducidas ?? ''),
+    });
+    setShowModal(true);
+  };
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    onAddClient({
-      nombre: formData.nombre,
-      contacto: formData.contacto,
-      mentorId: parseInt(formData.mentorId),
-      fechaAlta: new Date().toISOString().split('T')[0],
-    });
-    setFormData({ nombre: '', contacto: '', mentorId: '' });
+    const payload = {
+      nombre: formData.nombre.trim(),
+      telefono: formData.telefono.trim(),
+      domicilio: formData.domicilio.trim(),
+      mentorId: formData.mentorId ? parseInt(formData.mentorId) : null,
+      totalCompras: formData.totalCompras === '' ? 0 : parseInt(formData.totalCompras) || 0,
+      unidadesProducidas: formData.unidadesProducidas === '' ? 0 : parseInt(formData.unidadesProducidas) || 0,
+    };
+    if (editingId) {
+      onUpdateClient({ id: editingId, ...payload });
+    } else {
+      onAddClient({ ...payload, fechaAlta: new Date().toISOString().split('T')[0] });
+    }
+    setFormData(emptyForm);
+    setEditingId(null);
+    setShowModal(false);
+  };
+
+  const handleClose = () => {
+    setShowModal(false);
+    setEditingId(null);
+    setFormData(emptyForm);
   };
 
   const getMentorName = (mentorId) => state.mentors.find(m => m.id === mentorId)?.nombre || '-';
-  const getMentorClients = (mentorId) => state.clients.filter(c => c.mentorId === mentorId).reduce((sum, c) => sum + c.totalCompras, 0);
 
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Base de Clientes</h2>
         <button
-          onClick={() => setShowModal(true)}
+          onClick={openNew}
           className="flex items-center gap-2 bg-pink-900 text-white px-6 py-2 rounded-lg hover:bg-pink-800 transition font-semibold"
         >
           <Plus size={20} /> Nuevo Cliente
@@ -956,38 +1002,80 @@ function ClientesSection({ state, onAddClient, showModal, setShowModal }) {
       </div>
 
       {showModal && (
-        <Modal title="Agregar Nuevo Cliente" onClose={() => setShowModal(false)}>
+        <Modal title={editingId ? 'Editar Cliente' : 'Agregar Nuevo Cliente'} onClose={handleClose}>
           <form onSubmit={handleSubmit} className="space-y-4">
-            <input
-              type="text"
-              value={formData.nombre}
-              onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
-              placeholder="Nombre completo"
-              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-              required
-            />
-            <input
-              type="text"
-              value={formData.contacto}
-              onChange={(e) => setFormData({ ...formData, contacto: e.target.value })}
-              placeholder="Teléfono o Email"
-              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-              required
-            />
-            <select
-              value={formData.mentorId}
-              onChange={(e) => setFormData({ ...formData, mentorId: e.target.value })}
-              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-              required
-            >
-              <option value="">Mentor que lo refirió</option>
-              {state.mentors.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
-            </select>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Nombre completo</label>
+              <input
+                type="text"
+                value={formData.nombre}
+                onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
+                placeholder="Nombre y apellido"
+                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Teléfono</label>
+              <input
+                type="text"
+                value={formData.telefono}
+                onChange={(e) => setFormData({ ...formData, telefono: e.target.value })}
+                placeholder="11 1234-5678"
+                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Domicilio de despacho</label>
+              <input
+                type="text"
+                value={formData.domicilio}
+                onChange={(e) => setFormData({ ...formData, domicilio: e.target.value })}
+                placeholder="Calle 123, Localidad"
+                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Mentor asignado</label>
+              <select
+                value={formData.mentorId}
+                onChange={(e) => setFormData({ ...formData, mentorId: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+              >
+                <option value="">Sin mentor</option>
+                {state.mentors.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Órdenes pedidas</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={formData.totalCompras}
+                  onChange={(e) => setFormData({ ...formData, totalCompras: e.target.value })}
+                  placeholder="0"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Unidades producidas</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={formData.unidadesProducidas}
+                  onChange={(e) => setFormData({ ...formData, unidadesProducidas: e.target.value })}
+                  placeholder="0"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                />
+              </div>
+            </div>
             <button
               type="submit"
               className="w-full bg-pink-900 text-white py-2 rounded-lg hover:bg-pink-800 transition font-semibold"
             >
-              Agregar Cliente
+              {editingId ? 'Guardar cambios' : 'Agregar Cliente'}
             </button>
           </form>
         </Modal>
@@ -998,21 +1086,38 @@ function ClientesSection({ state, onAddClient, showModal, setShowModal }) {
           <table className="w-full">
             <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700">
               <tr>
-                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Nombre</th>
-                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Contacto</th>
-                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Mentor</th>
-                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Fecha Alta</th>
-                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Total Compras</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Nombre</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Teléfono</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Domicilio</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Mentor</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Fecha Alta</th>
+                <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">Órdenes</th>
+                <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">Unid. Producidas</th>
+                <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+              {state.clients.length === 0 && (
+                <tr><td colSpan={8} className="px-4 py-10 text-center text-gray-500 dark:text-gray-400">Todavía no hay clientes.</td></tr>
+              )}
               {state.clients.map(client => (
                 <tr key={client.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition">
-                  <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100">{client.nombre}</td>
-                  <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100">{client.contacto}</td>
-                  <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100">{getMentorName(client.mentorId)}</td>
-                  <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100">{client.fechaAlta}</td>
-                  <td className="px-6 py-4 text-sm font-semibold text-gray-900 dark:text-gray-100">{client.totalCompras}</td>
+                  <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">{client.nombre}</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{client.telefono || '-'}</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{client.domicilio || <span className="text-gray-400 dark:text-gray-500">Sin datos</span>}</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{getMentorName(client.mentorId)}</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">{client.fechaAlta}</td>
+                  <td className="px-4 py-3 text-sm text-right font-semibold text-gray-900 dark:text-gray-100">{client.totalCompras ?? 0}</td>
+                  <td className="px-4 py-3 text-sm text-right font-semibold text-gray-900 dark:text-gray-100">{(client.unidadesProducidas ?? 0).toLocaleString()}</td>
+                  <td className="px-4 py-3 text-sm text-right">
+                    <button
+                      onClick={() => openEdit(client)}
+                      className="inline-flex items-center gap-1 px-3 py-1 rounded-md text-pink-700 dark:text-pink-300 hover:bg-pink-50 dark:hover:bg-pink-900/30 transition"
+                      title="Editar cliente"
+                    >
+                      <Edit2 size={14} /> Editar
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -1320,7 +1425,8 @@ function MentorClientesSection({ currentUser, state }) {
             <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700">
               <tr>
                 <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Nombre</th>
-                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Contacto</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Teléfono</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Domicilio</th>
                 <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Total Compras</th>
               </tr>
             </thead>
@@ -1328,8 +1434,9 @@ function MentorClientesSection({ currentUser, state }) {
               {mentorClients.map(client => (
                 <tr key={client.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition">
                   <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100">{client.nombre}</td>
-                  <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100">{client.contacto}</td>
-                  <td className="px-6 py-4 text-sm font-semibold text-gray-900 dark:text-gray-100">{client.totalCompras}</td>
+                  <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100">{client.telefono || '-'}</td>
+                  <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100">{client.domicilio || '-'}</td>
+                  <td className="px-6 py-4 text-sm font-semibold text-gray-900 dark:text-gray-100">{client.totalCompras ?? 0}</td>
                 </tr>
               ))}
             </tbody>

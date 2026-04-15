@@ -257,27 +257,71 @@ export function getOrderCosts(order, product) {
 }
 
 export function getOrderProfit(order, product) {
-  // Profit del laboratorio = (precioVenta - costos) * cantidad.
-  // La comisión del mentor NO se descuenta acá porque es profit del mentor.
-  // Usamos los valores efectivos (respetando overrides por orden).
+  // Profit CRUDO sobre el costo INTERNO real.
+  // Este es el "profit antes de descontar comisión del mentor".
+  // Para el profit real que queda para el lab, usar getLabRealProfit.
   const eff = getOrderEffectiveUnit(order, product);
   const unitCost = eff.costoContenido + eff.costoEnvase + eff.costoEtiqueta;
   const cantidad = order?.cantidad || 0;
   return (eff.precioVenta - unitCost) * cantidad;
 }
 
-// Comisión del mentor = porcentaje (del mentor) × profit de la orden.
+// Costo INFORMADO al mentor/cliente (por unidad). Puede ser distinto al
+// costo real cuando el lab no quiere que el mentor vea el costo verdadero.
+//
+// Prioridad:
+//   1. order.costoInformado (override por orden)
+//   2. product.costoInformado (default del producto)
+//   3. Fallback: el costo INTERNO real (compatible con productos que no
+//      tienen costo informado cargado).
+export function getInformedCostUnit(order, product) {
+  const orderOverride = order?.costoInformado;
+  if (orderOverride != null && orderOverride !== '') {
+    const n = parseFloat(orderOverride);
+    if (!Number.isNaN(n) && n >= 0) return n;
+  }
+  const prodInformed = product?.costoInformado;
+  if (prodInformed != null && prodInformed !== '') {
+    const n = parseFloat(prodInformed);
+    if (!Number.isNaN(n) && n >= 0) return n;
+  }
+  const eff = getOrderEffectiveUnit(order, product);
+  return eff.costoContenido + eff.costoEnvase + eff.costoEtiqueta;
+}
+
+// Profit SOBRE EL COSTO INFORMADO (el que "ve" el mentor).
+// Base para calcular la comisión del mentor: es justo que ellos cobren
+// sobre lo que ellos creen que cuesta, no sobre lo que realmente cuesta.
+export function getOrderInformedProfit(order, product) {
+  const eff = getOrderEffectiveUnit(order, product);
+  const informedUnit = getInformedCostUnit(order, product);
+  const cantidad = order?.cantidad || 0;
+  return Math.max(0, (eff.precioVenta - informedUnit) * cantidad);
+}
+
+// Profit REAL del laboratorio (lo que nos queda en el bolsillo):
+//   profitInterno - comisiónMentor
+// donde profitInterno es sobre el costo REAL, y la comisión sale del
+// profit informado (lo que ve el mentor).
+export function getLabRealProfit(order, product, mentor) {
+  const profitInterno = getOrderProfit(order, product);
+  if (!order?.mentorId || !mentor) return profitInterno;
+  const mentorCommission = getMentorCommission(order, product, mentor);
+  return profitInterno - mentorCommission;
+}
+
+// Comisión del mentor = porcentaje × profit INFORMADO (sobre costoInformado).
 // Prioridad:
 //  1. Si la orden tiene un presupuesto fijo asignado (order.mentorPresupuesto), ese gana.
-//  2. Si se pasa mentor y product, usa mentor.porcentajeComision (default 50) × profit.
-//  3. Si solo se pasa product, usa 50% del profit como fallback.
-//  4. Sin product, último fallback: 50% del montoTotal.
+//  2. Si se pasa mentor y product, usa mentor.porcentajeComision (default 50)
+//     × profit informado (sobre costoInformado del producto/orden).
+//  3. Sin mentor/product, último fallback: 50% del montoTotal.
 export function getMentorCommission(order, product, mentor) {
   if (order?.mentorPresupuesto != null && order.mentorPresupuesto !== '') {
     return parseFloat(order.mentorPresupuesto) || 0;
   }
   if (product) {
-    const profit = getOrderProfit(order, product);
+    const profit = getOrderInformedProfit(order, product);
     const pct = mentor?.porcentajeComision != null ? Number(mentor.porcentajeComision) : 50;
     return Math.max(0, profit * (pct / 100));
   }
@@ -2662,11 +2706,14 @@ function VentasSection({ state, onAddSale, onQuickAddClient, onQuickAddProduct, 
 function ProductosSection({ state, onAddProduct, showModal, setShowModal, calculateMargin }) {
   // modoCosto: 'total' (un único número) | 'desglose' (contenido/envase/etiqueta).
   // La mayoría de los casos usa 'total' porque el proveedor entrega todo junto.
+  // costoInformado es lo que le informamos al mentor (puede ser distinto al real).
   const [formData, setFormData] = useState({
     nombre: '', descripcion: '',
     modoCosto: 'total',
     costoTotal: '',
     costoContenido: '', costoEnvase: '', costoEtiqueta: '',
+    usaCostoInformado: false,
+    costoInformado: '',
     precioVenta: '',
   });
   const [expanded, setExpanded] = useState(() => new Set());
@@ -2728,12 +2775,19 @@ function ProductosSection({ state, onAddProduct, showModal, setShowModal, calcul
       payload.costoEtiqueta = parseInt(formData.costoEtiqueta) || 0;
       payload.costoSinDesglosar = null;
     }
+    // Costo informado: si no se activó el toggle, queda null (= el mentor ve
+    // el costo interno real). Si se activó, guardamos el valor.
+    payload.costoInformado = formData.usaCostoInformado
+      ? (parseFloat(formData.costoInformado) || 0)
+      : null;
     onAddProduct(payload);
     setFormData({
       nombre: '', descripcion: '',
       modoCosto: 'total',
       costoTotal: '',
       costoContenido: '', costoEnvase: '', costoEtiqueta: '',
+      usaCostoInformado: false,
+      costoInformado: '',
       precioVenta: '',
     });
   };
@@ -2858,6 +2912,36 @@ function ProductosSection({ state, onAddProduct, showModal, setShowModal, calcul
                     />
                   </div>
                 </div>
+              )}
+            </div>
+
+            {/* Costo informado al mentor (opcional). Si está seteado, el mentor
+                ve ESTE valor en lugar del costo real y su comisión se calcula
+                sobre (precio - costoInformado). */}
+            <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formData.usaCostoInformado}
+                  onChange={(e) => setFormData({ ...formData, usaCostoInformado: e.target.checked })}
+                  className="mt-0.5 w-4 h-4 rounded accent-pink-600"
+                />
+                <div className="flex-1">
+                  <span className="text-xs font-semibold text-amber-900 dark:text-amber-200">Costo informado distinto al real</span>
+                  <p className="text-[11px] text-amber-800 dark:text-amber-300/80 mt-0.5">
+                    Lo que el mentor ve como "costo del producto". La comisión del mentor se calcula sobre este valor, no sobre el costo real.
+                  </p>
+                </div>
+              </label>
+              {formData.usaCostoInformado && (
+                <input
+                  type="number"
+                  step="0.01"
+                  value={formData.costoInformado}
+                  onChange={(e) => setFormData({ ...formData, costoInformado: e.target.value })}
+                  placeholder="Costo informado por unidad"
+                  className="w-full mt-2 px-3 py-2 border border-amber-300 dark:border-amber-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
+                />
               )}
             </div>
             <div>

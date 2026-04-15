@@ -629,7 +629,7 @@ function AppShell({ onExit }) {
           onOpenMobileMenu={() => setMobileMenuOpen(true)}
         />
 
-        <div key={currentSection} className="p-8 animate-fade-in-up">
+        <div key={currentSection} className="p-4 md:p-8 animate-fade-in-up">
           {/* Admin Views */}
           {currentUser.role === 'admin' && currentSection === 'inicio' && <InicioSection state={state} dispatch={dispatch} />}
           {currentUser.role === 'admin' && currentSection === 'ventas' && <VentasSection state={state} onAddSale={handleAddSale} onQuickAddClient={createClient} onQuickAddProduct={createProduct} showModal={showNewSaleModal} setShowModal={setShowNewSaleModal} />}
@@ -965,7 +965,7 @@ function InicioSection({ state, dispatch }) {
   return (
     <div className="space-y-8">
       <DailyQuoteBanner />
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 md:gap-4">
         <StatCard
           icon={DollarSign}
           label="Ventas del Período"
@@ -2883,7 +2883,7 @@ function MentorBalanceCard({ mentor, balance, onChangePagos }) {
       </div>
 
       {/* 3 cards de balance */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="bg-gray-50 dark:bg-gray-900/40 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
           <p className="text-[10px] uppercase tracking-wider text-gray-500 dark:text-gray-400">Generado</p>
           <p className="text-lg font-bold text-gray-900 dark:text-gray-100 tabular-nums">{fmtMoney(balance.generado)}</p>
@@ -3892,7 +3892,7 @@ function CobrosPanel({ order, summary, onChange }) {
       </div>
 
       {/* Vista simple: 3 números grandes (Total / Cobrado editable / Falta abonar) */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
           <p className="text-[10px] uppercase tracking-wider text-gray-500 dark:text-gray-400">Total venta</p>
           <p className="text-lg font-bold text-gray-900 dark:text-gray-100 tabular-nums">{fmtMoney(total)}</p>
@@ -4169,8 +4169,8 @@ function QuickClientModal({ mentors, onClose, onCreate }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[60] p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl p-8 w-full max-w-md">
+    <div className="fixed inset-0 bg-black bg-opacity-60 flex items-end sm:items-center justify-center z-[60] p-0 sm:p-4">
+      <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-xl shadow-2xl p-5 sm:p-8 w-full max-w-md max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center mb-6">
           <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100">Nuevo Cliente</h3>
           <button
@@ -4270,8 +4270,8 @@ function QuickProductModal({ onClose, onCreate }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[60] p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl p-8 w-full max-w-md">
+    <div className="fixed inset-0 bg-black bg-opacity-60 flex items-end sm:items-center justify-center z-[60] p-0 sm:p-4">
+      <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-xl shadow-2xl p-5 sm:p-8 w-full max-w-md max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center mb-6">
           <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100">Nuevo Producto</h3>
           <button
@@ -4388,16 +4388,16 @@ function Modal({ title, onClose, children }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fade-in"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fade-in"
       onClick={onClose}
     >
       <div aria-hidden="true" className="absolute inset-0 bg-black/60 backdrop-blur-md" />
       <div
         onClick={(e) => e.stopPropagation()}
-        className="relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-8 w-full max-w-md border border-gray-100 dark:border-gray-700 animate-scale-in"
+        className="relative bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl p-5 sm:p-8 w-full max-w-md max-h-[90vh] overflow-y-auto border border-gray-100 dark:border-gray-700 animate-scale-in"
       >
-        <div className="flex justify-between items-center mb-6">
-          <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100">{title}</h3>
+        <div className="flex justify-between items-center mb-5 sm:mb-6">
+          <h3 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-gray-100">{title}</h3>
           <button
             onClick={onClose}
             className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100 transition-all duration-200 hover:rotate-90"

@@ -6,7 +6,8 @@ import {
 import {
   Menu, LogOut, Home, ShoppingCart, Package, Users, AlertCircle, CreditCard,
   UserCheck, TrendingUp, Plus, Filter, Eye, Edit2, Trash2, Calendar, DollarSign,
-  Moon, Sun, ChevronDown, ChevronRight, Search, X, Command, Check, Bell
+  Moon, Sun, ChevronDown, ChevronRight, Search, X, Command, Check, Bell,
+  AlignJustify, LayoutGrid, Columns3
 } from 'lucide-react';
 import { VioraLogo, VioraMark } from './logo.jsx';
 import LandingPage from './LandingPage.jsx';
@@ -824,6 +825,7 @@ function InicioSection({ state, dispatch }) {
     states: new Set(), // vacío = todos
     onlyIncidencia: false,
     search: '',
+    focus: null, // null | 'comisionesPendientes' | 'pagosProveedoresPendientes' | 'saldoPendiente'
   });
 
   // Órdenes filtradas según el estado actual de los filtros
@@ -834,6 +836,25 @@ function InicioSection({ state, dispatch }) {
       if (filters.dateTo && (order.fecha || '') > filters.dateTo) return false;
       if (filters.states.size > 0 && !filters.states.has(order.estado || 'pendiente-cotizacion')) return false;
       if (filters.onlyIncidencia && !order.tieneIncidencia) return false;
+      // Foco: filtros rápidos disparados al clickear un stat card.
+      if (filters.focus === 'comisionesPendientes') {
+        if (!order.mentorId || order.estadoComision === 'pagada') return false;
+      }
+      if (filters.focus === 'pagosProveedoresPendientes') {
+        const product = state.products.find(p => p.id === order.productoId);
+        const mentor = state.mentors.find(m => m.id === order.mentorId);
+        const pagos = getOrderPayments(order, product, mentor);
+        const hayPendiente = ['contenido', 'envase', 'etiqueta']
+          .some(k => pagos[k]?.estado === 'pendiente' && (pagos[k]?.monto || 0) > 0);
+        if (!hayPendiente) return false;
+      }
+      if (filters.focus === 'saldoPendiente') {
+        const totalCobrado = Array.isArray(order.cobros)
+          ? order.cobros.reduce((s, c) => s + (parseFloat(c?.monto) || 0), 0)
+          : 0;
+        const saldo = (order.montoTotal || 0) - totalCobrado;
+        if (saldo <= 0) return false;
+      }
       if (q) {
         const client = state.clients.find(c => c.id === order.clienteId);
         const product = state.products.find(p => p.id === order.productoId);
@@ -895,11 +916,55 @@ function InicioSection({ state, dispatch }) {
     <div className="space-y-8">
       <DailyQuoteBanner />
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-        <StatCard icon={DollarSign} label="Ventas del Período" value={`$${Math.round(ventasPeriodo).toLocaleString()}`} color="from-pink-500 to-rose-500" delay={0} />
-        <StatCard icon={TrendingUp} label="Profit del Período" value={`$${Math.round(totalProfit).toLocaleString()}`} color="from-emerald-500 to-teal-500" delay={80} />
-        <StatCard icon={CreditCard} label="Comisiones Pendientes" value={`$${Math.round(pendingCommissionsPeriodo).toLocaleString()}`} color="from-amber-500 to-orange-500" delay={160} />
-        <StatCard icon={Package} label="A pagar Proveedores" value={`$${Math.round(totalPagosProveedoresPendientes).toLocaleString()}`} color="from-sky-500 to-blue-500" delay={240} />
-        <StatCard icon={AlertCircle} label="Incidencias" value={ordersConIncidencia} color="from-red-500 to-pink-500" delay={320} />
+        <StatCard
+          icon={DollarSign}
+          label="Ventas del Período"
+          value={`$${Math.round(ventasPeriodo).toLocaleString()}`}
+          color="from-pink-500 to-rose-500"
+          delay={0}
+          active={filters.focus === 'saldoPendiente'}
+          tooltip="Click para filtrar: solo órdenes con saldo pendiente de cobro"
+          onClick={() => setFilters(f => ({ ...f, focus: f.focus === 'saldoPendiente' ? null : 'saldoPendiente' }))}
+        />
+        <StatCard
+          icon={TrendingUp}
+          label="Profit del Período"
+          value={`$${Math.round(totalProfit).toLocaleString()}`}
+          color="from-emerald-500 to-teal-500"
+          delay={80}
+          tooltip="Click para limpiar filtros y ver todas las órdenes"
+          onClick={() => setFilters(f => ({ ...f, focus: null, onlyIncidencia: false, states: new Set(), search: '' }))}
+        />
+        <StatCard
+          icon={CreditCard}
+          label="Comisiones Pendientes"
+          value={`$${Math.round(pendingCommissionsPeriodo).toLocaleString()}`}
+          color="from-amber-500 to-orange-500"
+          delay={160}
+          active={filters.focus === 'comisionesPendientes'}
+          tooltip="Click para filtrar: solo órdenes con comisión del mentor pendiente"
+          onClick={() => setFilters(f => ({ ...f, focus: f.focus === 'comisionesPendientes' ? null : 'comisionesPendientes' }))}
+        />
+        <StatCard
+          icon={Package}
+          label="A pagar Proveedores"
+          value={`$${Math.round(totalPagosProveedoresPendientes).toLocaleString()}`}
+          color="from-sky-500 to-blue-500"
+          delay={240}
+          active={filters.focus === 'pagosProveedoresPendientes'}
+          tooltip="Click para filtrar: solo órdenes con pagos pendientes a proveedores"
+          onClick={() => setFilters(f => ({ ...f, focus: f.focus === 'pagosProveedoresPendientes' ? null : 'pagosProveedoresPendientes' }))}
+        />
+        <StatCard
+          icon={AlertCircle}
+          label="Incidencias"
+          value={ordersConIncidencia}
+          color="from-red-500 to-pink-500"
+          delay={320}
+          active={filters.onlyIncidencia}
+          tooltip="Click para filtrar: solo órdenes con incidencia activa"
+          onClick={() => setFilters(f => ({ ...f, onlyIncidencia: !f.onlyIncidencia }))}
+        />
       </div>
 
       <FilterBar filters={filters} onChange={setFilters} totalShown={filteredOrders.length} totalAll={state.sales.length} />
@@ -959,10 +1024,10 @@ function FilterBar({ filters, onChange, totalShown, totalAll }) {
   };
 
   const clearAll = () => onChange({
-    dateFrom: '', dateTo: '', states: new Set(), onlyIncidencia: false, search: '',
+    dateFrom: '', dateTo: '', states: new Set(), onlyIncidencia: false, search: '', focus: null,
   });
 
-  const anyActive = filters.dateFrom || filters.dateTo || filters.states.size > 0 || filters.onlyIncidencia || filters.search;
+  const anyActive = filters.dateFrom || filters.dateTo || filters.states.size > 0 || filters.onlyIncidencia || filters.search || filters.focus;
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-5 space-y-4">
@@ -1073,6 +1138,14 @@ function OrdersList({ state, dispatch, orders }) {
   const [viewMode, setViewMode] = useState('total'); // 'total' | 'unidad'
   const [incidenciaDraft, setIncidenciaDraft] = useState({}); // { [orderId]: texto }
   const [expanded, setExpanded] = useState(() => new Set());
+  // Vista del listado: 'table' | 'cards' | 'kanban'. Persistida en localStorage.
+  const [layout, setLayout] = useState(() => {
+    if (typeof window === 'undefined') return 'table';
+    return localStorage.getItem('viora-layout-orders') || 'table';
+  });
+  useEffect(() => {
+    try { localStorage.setItem('viora-layout-orders', layout); } catch {}
+  }, [layout]);
   const ordersToRender = orders ?? state.sales;
 
   const toggleExpand = (id) => {
@@ -1165,26 +1238,67 @@ function OrdersList({ state, dispatch, orders }) {
       <div className="p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-gray-200 dark:border-gray-700">
         <div>
           <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100">Órdenes</h3>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Mostrando valores {viewMode === 'total' ? 'totales por orden' : 'por unidad'}</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            {layout === 'kanban' ? 'Vista kanban agrupada por estado' : `Mostrando valores ${viewMode === 'total' ? 'totales por orden' : 'por unidad'}`}
+          </p>
         </div>
-        <div className="inline-flex rounded-lg border border-gray-300 dark:border-gray-600 p-1 bg-gray-50 dark:bg-gray-900 self-start sm:self-auto">
-          <button
-            type="button"
-            onClick={() => setViewMode('total')}
-            className={`px-3 py-1.5 text-sm rounded-md transition ${viewMode === 'total' ? 'bg-pink-600 text-white' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'}`}
-          >
-            Total
-          </button>
-          <button
-            type="button"
-            onClick={() => setViewMode('unidad')}
-            className={`px-3 py-1.5 text-sm rounded-md transition ${viewMode === 'unidad' ? 'bg-pink-600 text-white' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'}`}
-          >
-            Por unidad
-          </button>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <LayoutSwitcher
+            value={layout}
+            onChange={setLayout}
+            options={[
+              { key: 'table', icon: AlignJustify, label: 'Tabla' },
+              { key: 'cards', icon: LayoutGrid, label: 'Cards' },
+              { key: 'kanban', icon: Columns3, label: 'Kanban' },
+            ]}
+          />
+          {layout !== 'kanban' && (
+            <div className="inline-flex rounded-lg border border-gray-300 dark:border-gray-600 p-1 bg-gray-50 dark:bg-gray-900">
+              <button
+                type="button"
+                onClick={() => setViewMode('total')}
+                className={`px-3 py-1.5 text-sm rounded-md transition ${viewMode === 'total' ? 'bg-pink-600 text-white' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'}`}
+              >
+                Total
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('unidad')}
+                className={`px-3 py-1.5 text-sm rounded-md transition ${viewMode === 'unidad' ? 'bg-pink-600 text-white' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'}`}
+              >
+                Por unidad
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
+      {layout === 'cards' && (
+        <OrdersCardView
+          orders={ordersToRender}
+          state={state}
+          viewMode={viewMode}
+          onStateChange={handleStateChange}
+          expanded={expanded}
+          toggleExpand={toggleExpand}
+          handleCobrosChange={handleCobrosChange}
+          handlePaymentChange={handlePaymentChange}
+          getClientName={getClientName}
+          getMentorName={getMentorName}
+          getProduct={getProduct}
+        />
+      )}
+      {layout === 'kanban' && (
+        <OrdersKanbanView
+          orders={ordersToRender}
+          state={state}
+          onStateChange={handleStateChange}
+          getClientName={getClientName}
+          getMentorName={getMentorName}
+          getProduct={getProduct}
+        />
+      )}
+      {layout === 'table' && (
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700">
@@ -1361,6 +1475,234 @@ function OrdersList({ state, dispatch, orders }) {
           </tbody>
         </table>
       </div>
+      )}
+    </div>
+  );
+}
+
+// Switcher visual para elegir vista (tabla / cards / kanban / etc).
+// Recibe `value`, `onChange` y un array de `{ key, icon, label }`.
+function LayoutSwitcher({ value, onChange, options }) {
+  return (
+    <div className="inline-flex rounded-lg border border-gray-300 dark:border-gray-600 p-1 bg-gray-50 dark:bg-gray-900">
+      {options.map(opt => {
+        const Icon = opt.icon;
+        const active = value === opt.key;
+        return (
+          <button
+            key={opt.key}
+            type="button"
+            onClick={() => onChange(opt.key)}
+            title={opt.label}
+            className={`p-1.5 rounded-md transition ${
+              active
+                ? 'bg-pink-600 text-white shadow'
+                : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+            }`}
+          >
+            <Icon size={16} />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// Vista de cards para el listado de órdenes. Cada card muestra lo esencial
+// con estado destacado, mentor, cantidad, precio y progreso de cobro.
+// Click en la card expande el panel de detalle (cobros + pagos).
+function OrdersCardView({ orders, state, viewMode, onStateChange, expanded, toggleExpand, handleCobrosChange, handlePaymentChange, getClientName, getMentorName, getProduct }) {
+  const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
+  if (!orders || orders.length === 0) {
+    return <div className="p-10 text-center text-gray-500 dark:text-gray-400">No hay órdenes que coincidan con los filtros.</div>;
+  }
+  return (
+    <div className="p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+      {orders.map(order => {
+        const product = getProduct(order.productoId);
+        const mentor = order.mentorId ? state.mentors.find(m => m.id === order.mentorId) : null;
+        const estado = order.estado || 'pendiente-cotizacion';
+        const isTotal = viewMode === 'total';
+        const cantidad = order.cantidad || 0;
+        const precioVentaUnit = product?.precioVenta || 0;
+        const precioVentaTotal = (order.montoTotal != null ? order.montoTotal : precioVentaUnit * cantidad);
+        const profitTotal = getOrderProfit(order, product);
+        const commissionTotal = mentor ? getMentorCommission(order, product, mentor) : 0;
+        const cobros = getOrderCobrosSummary(order);
+        const isOpen = expanded.has(order.id);
+        return (
+          <div
+            key={order.id}
+            className={`relative rounded-xl border p-4 flex flex-col gap-2 transition-all hover:shadow-lg ${
+              order.tieneIncidencia
+                ? 'bg-red-50/40 dark:bg-red-900/10 border-red-200 dark:border-red-800'
+                : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700'
+            }`}
+          >
+            {order.tieneIncidencia && (
+              <span className="absolute top-2 right-2 text-[10px] font-bold text-red-600 dark:text-red-400" title={order.incidenciaDetalle || 'Incidencia'}>⚠</span>
+            )}
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-[10px] uppercase tracking-wider text-gray-500 dark:text-gray-400">{order.fecha}</p>
+                <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{getClientName(order.clienteId)}</p>
+                <p className="text-xs text-gray-600 dark:text-gray-400 truncate">{product?.nombre || '-'} · {cantidad} u.</p>
+              </div>
+              <select
+                value={estado}
+                onChange={(e) => onStateChange(order.id, e.target.value)}
+                className={`text-[10px] font-semibold px-2 py-1 rounded-full border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-pink-500 ${ORDER_STATE_STYLES[estado]}`}
+              >
+                {ORDER_STATES.map(s => (
+                  <option key={s} value={s} className="bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100">{ORDER_STATE_LABELS[s]}</option>
+                ))}
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-xs pt-2 border-t border-gray-100 dark:border-gray-700">
+              <div>
+                <p className="text-gray-500 dark:text-gray-400">Precio venta</p>
+                <p className="font-semibold text-gray-900 dark:text-gray-100 tabular-nums">{fmtMoney(isTotal ? precioVentaTotal : precioVentaUnit)}</p>
+              </div>
+              <div>
+                <p className="text-gray-500 dark:text-gray-400">Profit</p>
+                <p className="font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{fmtMoney(isTotal ? profitTotal : (cantidad > 0 ? profitTotal / cantidad : 0))}</p>
+              </div>
+              {mentor && (
+                <>
+                  <div>
+                    <p className="text-gray-500 dark:text-gray-400">Mentor</p>
+                    <p className="text-gray-900 dark:text-gray-100 truncate">{mentor.nombre}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-500 dark:text-gray-400">Com.</p>
+                    <p className="text-gray-700 dark:text-gray-300 tabular-nums">{fmtMoney(isTotal ? commissionTotal : (cantidad > 0 ? commissionTotal / cantidad : 0))}</p>
+                  </div>
+                </>
+              )}
+            </div>
+            <div>
+              <div className="flex items-center justify-between text-[10px] mt-1">
+                <span className="text-gray-500 dark:text-gray-400">Cobrado</span>
+                <span className={`font-semibold tabular-nums ${cobros.saldo <= 0 && cobros.total > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                  {cobros.saldo <= 0 && cobros.total > 0 ? 'Saldada' : `${cobros.porcentaje}%`}
+                </span>
+              </div>
+              <div className="w-full h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden mt-1">
+                <div
+                  className={`h-full transition-all ${cobros.saldo <= 0 && cobros.total > 0 ? 'bg-emerald-500' : 'bg-gradient-to-r from-amber-400 to-emerald-500'}`}
+                  style={{ width: `${Math.min(100, cobros.porcentaje)}%` }}
+                />
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => toggleExpand(order.id)}
+              className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-pink-700 dark:text-pink-300 hover:underline self-start"
+            >
+              {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+              {isOpen ? 'Ocultar detalle' : 'Ver cobros y pagos'}
+            </button>
+            {isOpen && product && (
+              <div className="pt-3 border-t border-gray-200 dark:border-gray-700 space-y-4">
+                <CobrosPanel
+                  order={order}
+                  summary={cobros}
+                  onChange={(patch) => handleCobrosChange(order, patch)}
+                />
+                <PaymentsPanel
+                  order={order}
+                  payments={getOrderPayments(order, product, mentor)}
+                  mentorNombre={mentor?.nombre || null}
+                  onChange={(rubro, data) => handlePaymentChange(order.id, rubro, data)}
+                />
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// Vista kanban agrupada por estado del pipeline. Cada columna es un estado
+// y cada card una orden minimalista. Cambiar el estado desde el dropdown
+// "mueve" la orden a otra columna.
+function OrdersKanbanView({ orders, state, onStateChange, getClientName, getMentorName, getProduct }) {
+  const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
+  const byState = ORDER_STATES.reduce((acc, s) => { acc[s] = []; return acc; }, {});
+  orders.forEach(o => {
+    const s = o.estado || 'pendiente-cotizacion';
+    if (!byState[s]) byState[s] = [];
+    byState[s].push(o);
+  });
+  return (
+    <div className="p-4 overflow-x-auto">
+      <div className="flex gap-3 min-w-max">
+        {ORDER_STATES.map(s => {
+          const ordersInState = byState[s] || [];
+          const total = ordersInState.reduce((sum, o) => sum + (o.montoTotal || 0), 0);
+          return (
+            <div key={s} className="w-72 shrink-0 bg-gray-50 dark:bg-gray-900/50 rounded-xl p-3">
+              <div className="flex items-center justify-between mb-2">
+                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${ORDER_STATE_STYLES[s]}`}>
+                  {ORDER_STATE_LABELS[s]}
+                </span>
+                <span className="text-[10px] text-gray-500 dark:text-gray-400 font-semibold">
+                  {ordersInState.length} · {fmtMoney(total)}
+                </span>
+              </div>
+              <div className="space-y-2 min-h-[60px]">
+                {ordersInState.length === 0 ? (
+                  <p className="text-xs text-gray-400 dark:text-gray-500 italic text-center py-4">Vacío</p>
+                ) : (
+                  ordersInState.map(order => {
+                    const product = getProduct(order.productoId);
+                    const cobros = getOrderCobrosSummary(order);
+                    return (
+                      <div
+                        key={order.id}
+                        className={`rounded-lg p-2.5 shadow-sm border text-xs ${
+                          order.tieneIncidencia
+                            ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'
+                            : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-1">
+                          <div className="min-w-0 flex-1">
+                            <p className="font-semibold text-gray-900 dark:text-gray-100 truncate">{getClientName(order.clienteId)}</p>
+                            <p className="text-gray-500 dark:text-gray-400 truncate">{product?.nombre || '-'} · {order.cantidad}u</p>
+                          </div>
+                          {order.tieneIncidencia && <span className="text-red-600 dark:text-red-400" title={order.incidenciaDetalle || 'Incidencia'}>⚠</span>}
+                        </div>
+                        <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-100 dark:border-gray-700">
+                          <span className="text-gray-500 dark:text-gray-400">{order.fecha}</span>
+                          <span className="font-bold text-gray-900 dark:text-gray-100 tabular-nums">{fmtMoney(order.montoTotal || 0)}</span>
+                        </div>
+                        <div className="mt-1.5 w-full h-1 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+                          <div
+                            className={`h-full transition-all ${cobros.saldo <= 0 && cobros.total > 0 ? 'bg-emerald-500' : 'bg-gradient-to-r from-amber-400 to-emerald-500'}`}
+                            style={{ width: `${Math.min(100, cobros.porcentaje)}%` }}
+                          />
+                        </div>
+                        <select
+                          value={order.estado || 'pendiente-cotizacion'}
+                          onChange={(e) => onStateChange(order.id, e.target.value)}
+                          className="mt-2 w-full text-[10px] font-semibold px-1.5 py-0.5 rounded border border-gray-200 dark:border-gray-700 bg-transparent text-gray-600 dark:text-gray-300 cursor-pointer focus:outline-none focus:ring-1 focus:ring-pink-500"
+                          title="Mover a otro estado"
+                        >
+                          {ORDER_STATES.map(st => (
+                            <option key={st} value={st} className="bg-white dark:bg-gray-800">{ORDER_STATE_LABELS[st]}</option>
+                          ))}
+                        </select>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -1405,7 +1747,7 @@ function DailyQuoteBanner() {
   );
 }
 
-function StatCard({ icon: Icon, label, value, color, delay = 0 }) {
+function StatCard({ icon: Icon, label, value, color, delay = 0, onClick, active = false, tooltip = null }) {
   // Si el value es una cadena con formato $X.XXX, intentamos animarlo.
   // Si no, lo mostramos tal cual (soporta números crudos también).
   const numeric = typeof value === 'number'
@@ -1418,9 +1760,27 @@ function StatCard({ icon: Icon, label, value, color, delay = 0 }) {
     ? `${prefix}${Math.round(animated).toLocaleString()}`
     : value;
 
+  // Ajustamos el font-size al largo del string para que siempre entre
+  // en el ancho de la card sin truncarse. Mapeo empírico simple.
+  const valueLength = String(displayValue).length;
+  const valueSizeClass = valueLength >= 13
+    ? 'text-base md:text-lg'
+    : valueLength >= 11
+      ? 'text-lg md:text-xl'
+      : valueLength >= 9
+        ? 'text-xl md:text-2xl'
+        : 'text-2xl md:text-3xl';
+
+  const Wrapper = onClick ? 'button' : 'div';
+
   return (
-    <div
-      className={`group relative bg-gradient-to-br ${color} text-white rounded-2xl shadow-lg p-6 overflow-hidden transition-all duration-500 hover:-translate-y-1 hover:shadow-2xl animate-fade-in-up`}
+    <Wrapper
+      onClick={onClick}
+      title={tooltip || undefined}
+      type={onClick ? 'button' : undefined}
+      className={`group relative text-left bg-gradient-to-br ${color} text-white rounded-2xl shadow-lg p-5 overflow-hidden transition-all duration-500 hover:-translate-y-1 hover:shadow-2xl animate-fade-in-up ${
+        onClick ? 'cursor-pointer' : ''
+      } ${active ? 'ring-2 ring-white/70 ring-offset-2 ring-offset-gray-50 dark:ring-offset-gray-900 scale-[1.02]' : ''}`}
       style={{ animationDelay: `${delay}ms`, animationFillMode: 'backwards' }}
     >
       {/* Efecto shimmer sutil sobre gradiente */}
@@ -1430,16 +1790,19 @@ function StatCard({ icon: Icon, label, value, color, delay = 0 }) {
       />
       {/* Halo glass atrás del ícono */}
       <div aria-hidden="true" className="absolute -top-8 -right-8 w-32 h-32 rounded-full bg-white/20 blur-2xl" />
-      <div className="relative flex items-start justify-between">
+      <div className="relative flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
-          <p className="text-xs uppercase tracking-wider font-semibold opacity-80">{label}</p>
-          <p className="text-2xl md:text-3xl font-bold mt-2 truncate tabular-nums">{displayValue}</p>
+          <p className="text-[10px] uppercase tracking-wider font-semibold opacity-80">{label}</p>
+          <p className={`${valueSizeClass} font-bold mt-1.5 tabular-nums break-words leading-tight`}>{displayValue}</p>
         </div>
-        <div className="shrink-0 p-2 rounded-xl bg-white/10 backdrop-blur-sm">
-          <Icon size={22} className="opacity-90" />
+        <div className="shrink-0 p-1.5 rounded-xl bg-white/10 backdrop-blur-sm">
+          <Icon size={18} className="opacity-90" />
         </div>
       </div>
-    </div>
+      {active && (
+        <p className="relative text-[10px] uppercase tracking-wider font-bold mt-2 opacity-90">Filtrando ·</p>
+      )}
+    </Wrapper>
   );
 }
 

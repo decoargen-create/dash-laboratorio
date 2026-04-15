@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { VioraLogo, VioraMark } from './logo.jsx';
 import LandingPage from './LandingPage.jsx';
+import ChatbotWidget from './ChatbotWidget.jsx';
 
 // Estados del pipeline de producción de una orden
 export const ORDER_STATES = [
@@ -583,8 +584,83 @@ function AppShell({ onExit }) {
 
       {/* Toast container */}
       <ToastContainer toasts={toasts} />
+
+      {/* Chatbot con contexto del negocio */}
+      <ChatbotWidget
+        mode="panel"
+        context={buildPanelChatContext(state, currentUser)}
+      />
     </div>
   );
+}
+
+// Construye el snapshot de contexto para el chatbot en el panel. No queremos
+// mandar todo el estado, sino un resumen compacto que Claude pueda usar para
+// contestar preguntas de negocio sin que el prompt se vuelva enorme.
+function buildPanelChatContext(state, currentUser) {
+  const ordenesPorEstado = {};
+  state.sales.forEach(o => {
+    const k = ORDER_STATE_LABELS[o.estado || 'pendiente-cotizacion'] || o.estado || 'sin estado';
+    ordenesPorEstado[k] = (ordenesPorEstado[k] || 0) + 1;
+  });
+
+  const ventasPeriodo = state.sales.reduce((s, o) => s + (o.montoTotal || 0), 0);
+  const profitPeriodo = state.sales.reduce((s, o) => {
+    const p = state.products.find(p => p.id === o.productoId);
+    return s + getOrderProfit(o, p);
+  }, 0);
+  const comisionesPendientes = state.sales
+    .filter(o => o.mentorId && o.estadoComision !== 'pagada')
+    .reduce((s, o) => {
+      const p = state.products.find(p => p.id === o.productoId);
+      const m = state.mentors.find(m => m.id === o.mentorId);
+      return s + getMentorCommission(o, p, m);
+    }, 0);
+  const pagosProveedoresPendientes = state.sales.reduce((acc, o) => {
+    const p = state.products.find(p => p.id === o.productoId);
+    const m = state.mentors.find(m => m.id === o.mentorId);
+    const pagos = getOrderPayments(o, p, m);
+    return acc
+      + (pagos.contenido.estado === 'pendiente' ? (pagos.contenido.monto || 0) : 0)
+      + (pagos.envase.estado === 'pendiente' ? (pagos.envase.monto || 0) : 0)
+      + (pagos.etiqueta.estado === 'pendiente' ? (pagos.etiqueta.monto || 0) : 0);
+  }, 0);
+  const incidencias = state.sales.filter(s => s.tieneIncidencia).length;
+
+  const ultimasOrdenes = state.sales
+    .slice()
+    .sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''))
+    .slice(0, 5)
+    .map(o => {
+      const cliente = state.clients.find(c => c.id === o.clienteId);
+      const producto = state.products.find(p => p.id === o.productoId);
+      return {
+        fecha: o.fecha,
+        cliente: cliente?.nombre || '-',
+        producto: producto?.nombre || '-',
+        cantidad: o.cantidad || 0,
+        monto: o.montoTotal || 0,
+        estado: ORDER_STATE_LABELS[o.estado || 'pendiente-cotizacion'] || '-',
+        incidencia: !!o.tieneIncidencia,
+      };
+    });
+
+  return {
+    usuario: currentUser ? { name: currentUser.name, role: currentUser.role } : null,
+    metricas: {
+      ordenesTotal: state.sales.length,
+      ventasPeriodo,
+      profitPeriodo,
+      comisionesPendientes,
+      pagosProveedoresPendientes,
+      incidencias,
+    },
+    ordenesPorEstado,
+    ultimasOrdenes,
+    clientes: state.clients.map(c => ({ nombre: c.nombre, telefono: c.telefono, domicilio: c.domicilio })),
+    productos: state.products.map(p => ({ nombre: p.nombre, precio: p.precioVenta })),
+    mentores: state.mentors.map(m => ({ nombre: m.nombre, porcentaje: m.porcentajeComision ?? 50 })),
+  };
 }
 
 function NavItem({ icon: Icon, label, section, currentSection, onSelect, sidebarOpen }) {

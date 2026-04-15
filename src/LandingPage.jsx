@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ArrowRight, Package2, Clock, Sparkles, Moon, Sun, MessageCircle } from 'lucide-react';
 import { VioraLogo, VioraMark } from './logo.jsx';
+import ChatbotWidget from './ChatbotWidget.jsx';
 
 const WHATSAPP_NUMBER = '5492236877663';
 const WHATSAPP_DISPLAY = '+54 9 2236 87-7663';
@@ -259,6 +260,9 @@ export default function LandingPage({ onAccess }) {
           </div>
         </div>
       </footer>
+
+      {/* Chatbot comercial: responde sobre plazos, mínimos, proceso */}
+      <ChatbotWidget mode="landing" accent="amber" />
     </div>
   );
 }

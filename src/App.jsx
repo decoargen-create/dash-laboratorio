@@ -5676,6 +5676,17 @@ function CobrosPanel({ order, summary, onChange }) {
 
 function PaymentsPanel({ order, payments, mentorNombre, onChange }) {
   const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
+
+  // Modo de despliegue: 'simple' (1 card producción) | 'desglose' (3 cards).
+  // Default: simple. En la mayoría de los casos el proveedor entrega todo
+  // junto y no hace falta discriminar. Se persiste en la orden para que al
+  // volver a abrir el panel quede igual.
+  const initialMode = order.paymentsMode || (order.costoSinDesglosar != null ? 'simple' : (
+    // Si la orden ya tiene datos en los 3 rubros → asumimos desglose
+    (payments.envase?.monto || payments.etiqueta?.monto) ? 'desglose' : 'simple'
+  ));
+  const [mode, setMode] = useState(initialMode);
+
   const totalPagado = Object.values(payments)
     .filter(p => p.estado === 'pagado')
     .reduce((s, p) => s + (parseFloat(p.monto) || 0), 0);
@@ -5683,21 +5694,23 @@ function PaymentsPanel({ order, payments, mentorNombre, onChange }) {
     .filter(p => p.estado === 'pendiente')
     .reduce((s, p) => s + (parseFloat(p.monto) || 0), 0);
 
-  const rubros = [
+  // En modo simple, el pago de "producción" se guarda en el rubro 'contenido'
+  // (histórico por compatibilidad), y los otros 2 se ponen en 0 pagado.
+  const rubrosDesglose = [
     { key: 'contenido', label: 'Contenido' },
     { key: 'envase',    label: 'Envase / Pote' },
     { key: 'etiqueta',  label: 'Etiqueta' },
-    { key: 'mentor',    label: mentorNombre ? `Comisión — ${mentorNombre}` : 'Comisión mentor' },
   ];
+  const rubroMentor = { key: 'mentor', label: mentorNombre ? `Comisión — ${mentorNombre}` : 'Comisión mentor' };
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap gap-2 items-center justify-between">
-        <div>
+      <div className="flex flex-wrap gap-3 items-start justify-between">
+        <div className="flex-1 min-w-[200px]">
           <h4 className="text-sm font-bold text-gray-900 dark:text-gray-100">Pagos de esta orden</h4>
-          <p className="text-xs text-gray-500 dark:text-gray-400">Tildá "Pagado" cuando se haya abonado y completá los datos.</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Tildá "Pagado" cuando se haya abonado.</p>
         </div>
-        <div className="flex gap-4 text-xs">
+        <div className="flex gap-3 text-xs">
           <div className="text-right">
             <p className="text-gray-500 dark:text-gray-400">Pendiente</p>
             <p className="font-bold text-amber-600 dark:text-amber-400">{fmtMoney(totalPendiente)}</p>
@@ -5709,86 +5722,118 @@ function PaymentsPanel({ order, payments, mentorNombre, onChange }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-        {rubros.map(rubro => {
-          const data = payments[rubro.key];
-          const isMentorSinAsignar = rubro.key === 'mentor' && !order.mentorId;
-          const paid = data.estado === 'pagado';
-          return (
-            <div
-              key={rubro.key}
-              className={`rounded-lg border p-3 space-y-2 ${
-                isMentorSinAsignar
-                  ? 'bg-gray-100 dark:bg-gray-800 border-gray-200 dark:border-gray-700 opacity-60'
-                  : paid
-                    ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800'
-                    : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-gray-800 dark:text-gray-100 truncate">{rubro.label}</span>
-                {isMentorSinAsignar ? (
-                  <span className="text-[10px] text-gray-500 dark:text-gray-400 italic">sin mentor</span>
-                ) : (
-                  <label className="inline-flex items-center gap-1 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={paid}
-                      onChange={(e) => onChange(rubro.key, { estado: e.target.checked ? 'pagado' : 'pendiente' })}
-                      className="h-3.5 w-3.5 rounded border-gray-300 dark:border-gray-600 text-emerald-600 focus:ring-emerald-500"
-                    />
-                    <span className={`text-[10px] font-semibold uppercase ${paid ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}`}>
-                      {paid ? 'Pagado' : 'Pendiente'}
-                    </span>
-                  </label>
-                )}
-              </div>
-              <div>
-                <label className="block text-[10px] uppercase text-gray-500 dark:text-gray-400 mb-0.5">Monto</label>
-                <input
-                  type="number"
-                  disabled={isMentorSinAsignar}
-                  value={data.monto ?? ''}
-                  onChange={(e) => onChange(rubro.key, { monto: parseFloat(e.target.value) || 0 })}
-                  placeholder="0"
-                  className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-pink-500 disabled:cursor-not-allowed"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] uppercase text-gray-500 dark:text-gray-400 mb-0.5">Fecha pago</label>
-                <input
-                  type="date"
-                  disabled={isMentorSinAsignar}
-                  value={data.fecha || ''}
-                  onChange={(e) => onChange(rubro.key, { fecha: e.target.value })}
-                  className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-pink-500 disabled:cursor-not-allowed"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] uppercase text-gray-500 dark:text-gray-400 mb-0.5">Proveedor</label>
-                <input
-                  type="text"
-                  disabled={isMentorSinAsignar}
-                  value={data.proveedor || ''}
-                  onChange={(e) => onChange(rubro.key, { proveedor: e.target.value })}
-                  placeholder={rubro.key === 'mentor' ? 'Mentor' : 'Nombre del proveedor'}
-                  className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-pink-500 disabled:cursor-not-allowed"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] uppercase text-gray-500 dark:text-gray-400 mb-0.5">Nota</label>
-                <input
-                  type="text"
-                  disabled={isMentorSinAsignar}
-                  value={data.nota || ''}
-                  onChange={(e) => onChange(rubro.key, { nota: e.target.value })}
-                  placeholder="Opcional"
-                  className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-pink-500 disabled:cursor-not-allowed"
-                />
-              </div>
-            </div>
-          );
-        })}
+      {/* Tabs modo simple / desglose */}
+      <div className="flex gap-1 p-1 bg-gray-100 dark:bg-gray-700 rounded-lg max-w-xs">
+        <button
+          type="button"
+          onClick={() => setMode('simple')}
+          className={`flex-1 py-1 px-2 text-[11px] rounded-md transition font-semibold ${
+            mode === 'simple'
+              ? 'bg-white dark:bg-gray-800 text-pink-900 dark:text-pink-300 shadow'
+              : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+          }`}
+        >
+          Todo junto
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode('desglose')}
+          className={`flex-1 py-1 px-2 text-[11px] rounded-md transition font-semibold ${
+            mode === 'desglose'
+              ? 'bg-white dark:bg-gray-800 text-pink-900 dark:text-pink-300 shadow'
+              : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+          }`}
+        >
+          Desglosado
+        </button>
+      </div>
+
+      <div className={`grid grid-cols-1 gap-3 ${mode === 'simple' ? 'md:grid-cols-2' : 'md:grid-cols-2 xl:grid-cols-4'}`}>
+        {/* Modo simple: 1 sola card "Producción total" */}
+        {mode === 'simple' && (
+          <PaymentCard
+            label="Producción (todo junto)"
+            data={payments.contenido || {}}
+            onChange={(patch) => onChange('contenido', patch)}
+          />
+        )}
+
+        {/* Modo desglose: 3 cards separadas */}
+        {mode === 'desglose' && rubrosDesglose.map(rubro => (
+          <PaymentCard
+            key={rubro.key}
+            label={rubro.label}
+            data={payments[rubro.key] || {}}
+            onChange={(patch) => onChange(rubro.key, patch)}
+          />
+        ))}
+
+        {/* Comisión del mentor — siempre se muestra si hay mentor asignado */}
+        <PaymentCard
+          label={rubroMentor.label}
+          data={payments.mentor || {}}
+          onChange={(patch) => onChange('mentor', patch)}
+          disabled={!order.mentorId}
+          disabledLabel="sin mentor"
+          variant="mentor"
+        />
+      </div>
+    </div>
+  );
+}
+
+// Card individual para un rubro de pago. Simplificada: solo monto, fecha
+// y toggle pagado/pendiente. Sin proveedor ni nota (ruido innecesario).
+function PaymentCard({ label, data, onChange, disabled = false, disabledLabel = null, variant = 'default' }) {
+  const paid = data.estado === 'pagado';
+  const bg = disabled
+    ? 'bg-gray-100 dark:bg-gray-800 border-gray-200 dark:border-gray-700 opacity-60'
+    : paid
+      ? (variant === 'mentor'
+          ? 'bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800'
+          : 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800')
+      : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700';
+
+  return (
+    <div className={`rounded-lg border p-3 space-y-2 ${bg}`}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-bold text-gray-800 dark:text-gray-100 truncate">{label}</span>
+        {disabled ? (
+          <span className="text-[10px] text-gray-500 dark:text-gray-400 italic">{disabledLabel}</span>
+        ) : (
+          <label className="inline-flex items-center gap-1 cursor-pointer whitespace-nowrap">
+            <input
+              type="checkbox"
+              checked={paid}
+              onChange={(e) => onChange({ estado: e.target.checked ? 'pagado' : 'pendiente' })}
+              className="h-3.5 w-3.5 rounded border-gray-300 dark:border-gray-600 text-emerald-600 focus:ring-emerald-500"
+            />
+            <span className={`text-[10px] font-semibold uppercase ${paid ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}`}>
+              {paid ? 'Pagado' : 'Pendiente'}
+            </span>
+          </label>
+        )}
+      </div>
+      <div>
+        <label className="block text-[10px] uppercase text-gray-500 dark:text-gray-400 mb-0.5">Monto</label>
+        <input
+          type="number"
+          disabled={disabled}
+          value={data.monto ?? ''}
+          onChange={(e) => onChange({ monto: parseFloat(e.target.value) || 0 })}
+          placeholder="0"
+          className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-pink-500 disabled:cursor-not-allowed"
+        />
+      </div>
+      <div>
+        <label className="block text-[10px] uppercase text-gray-500 dark:text-gray-400 mb-0.5">Fecha pago</label>
+        <input
+          type="date"
+          disabled={disabled}
+          value={data.fecha || ''}
+          onChange={(e) => onChange({ fecha: e.target.value })}
+          className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-pink-500 disabled:cursor-not-allowed"
+        />
       </div>
     </div>
   );

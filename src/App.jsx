@@ -1422,18 +1422,18 @@ function OrdersList({ state, dispatch, orders }) {
           <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700">
             <tr className="text-left text-gray-700 dark:text-gray-200">
               <th className="px-2 py-3 w-8"></th>
-              {isColVisible('fecha') && <th className="px-4 py-3 font-semibold">Fecha</th>}
-              {isColVisible('cliente') && <th className="px-4 py-3 font-semibold">Cliente</th>}
-              {isColVisible('producto') && <th className="px-4 py-3 font-semibold">Producto</th>}
-              {isColVisible('mentor') && <th className="px-4 py-3 font-semibold">Equipo</th>}
-              {isColVisible('cantidad') && <th className="px-4 py-3 font-semibold text-right">Cant.</th>}
-              {isColVisible('costo') && <th className="px-4 py-3 font-semibold text-right">Costo</th>}
-              {isColVisible('precio') && <th className="px-4 py-3 font-semibold text-right">Precio venta</th>}
-              {isColVisible('comision') && <th className="px-4 py-3 font-semibold text-right">Com. equipo</th>}
-              {isColVisible('profit') && <th className="px-4 py-3 font-semibold text-right">Profit</th>}
-              {isColVisible('estado') && <th className="px-4 py-3 font-semibold">Estado</th>}
-              {isColVisible('cobro') && <th className="px-4 py-3 font-semibold text-center">Cobro</th>}
-              {isColVisible('incidencia') && <th className="px-4 py-3 font-semibold">Incidencia</th>}
+              {isColVisible('fecha') && <th className="px-4 py-3 font-semibold" title="Fecha de creación de la orden">Fecha</th>}
+              {isColVisible('cliente') && <th className="px-4 py-3 font-semibold" title="Cliente que solicitó la orden">Cliente</th>}
+              {isColVisible('producto') && <th className="px-4 py-3 font-semibold" title="Producto producido">Producto</th>}
+              {isColVisible('mentor') && <th className="px-4 py-3 font-semibold" title="Persona del equipo que refirió al cliente (opcional)">Equipo</th>}
+              {isColVisible('cantidad') && <th className="px-4 py-3 font-semibold text-right" title="Unidades a producir. Doble click en la celda para editar.">Cant.</th>}
+              {isColVisible('costo') && <th className="px-4 py-3 font-semibold text-right" title="Costo total: contenido + envase + etiqueta. Click en la celda para ver el desglose o cambiar a modo 'sin discriminar'.">Costo</th>}
+              {isColVisible('precio') && <th className="px-4 py-3 font-semibold text-right" title="Precio cobrado al cliente. Doble click en la celda para editar.">Precio venta</th>}
+              {isColVisible('comision') && <th className="px-4 py-3 font-semibold text-right" title="Comisión que se le paga al equipo (% del profit, configurable en Comisiones)">Com. equipo</th>}
+              {isColVisible('profit') && <th className="px-4 py-3 font-semibold text-right" title="Profit del laboratorio = precio venta − costo. NO descuenta la comisión del equipo.">Profit</th>}
+              {isColVisible('estado') && <th className="px-4 py-3 font-semibold" title="Estado del pipeline: Pendiente cotización → Cotizado → Abonado → En producción → Listo para enviar → Despachado">Estado</th>}
+              {isColVisible('cobro') && <th className="px-4 py-3 font-semibold text-center" title="Progreso de cobro al cliente. Click para ver detalle o registrar pagos.">Cobro</th>}
+              {isColVisible('incidencia') && <th className="px-4 py-3 font-semibold" title="Marcá esta orden con incidencia si hay alguna demora o problema.">Incidencia</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200 dark:divide-gray-700">

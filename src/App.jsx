@@ -499,45 +499,15 @@ function AppShell({ onExit }) {
           )}
         </nav>
 
-        {/* Footer: pill de usuario + botón de logout alineados prolijo */}
+        {/* Footer: pill de usuario con menú personalizado */}
         <div className="relative p-3">
           <div aria-hidden="true" className="mx-1 h-px mb-3 bg-gradient-to-r from-transparent via-white/10 to-transparent" />
-          {sidebarOpen ? (
-            <div className="flex items-center gap-2 p-2 rounded-xl bg-white/5 hover:bg-white/10 transition-colors duration-200">
-              <div className="w-9 h-9 rounded-full bg-gradient-to-br from-amber-200 to-amber-400 text-[#4a0f22] font-bold flex items-center justify-center shrink-0 shadow">
-                {(currentUser.name || 'U').charAt(0).toUpperCase()}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold truncate">{currentUser.name}</p>
-                <p className="text-[10px] uppercase tracking-wider text-pink-200/70">{currentUser.role}</p>
-              </div>
-              <button
-                onClick={handleLogout}
-                className="p-2 rounded-lg text-pink-100/70 hover:text-white hover:bg-white/10 transition-all duration-200 hover:rotate-12"
-                title="Cerrar sesión"
-                aria-label="Cerrar sesión"
-              >
-                <LogOut size={16} />
-              </button>
-            </div>
-          ) : (
-            <div className="flex flex-col items-center gap-2">
-              <div
-                className="w-10 h-10 rounded-full bg-gradient-to-br from-amber-200 to-amber-400 text-[#4a0f22] font-bold flex items-center justify-center shadow"
-                title={currentUser.name}
-              >
-                {(currentUser.name || 'U').charAt(0).toUpperCase()}
-              </div>
-              <button
-                onClick={handleLogout}
-                className="group w-10 h-10 rounded-lg flex items-center justify-center text-pink-100/70 hover:text-white hover:bg-white/10 transition-all duration-200"
-                title="Cerrar sesión"
-                aria-label="Cerrar sesión"
-              >
-                <LogOut size={16} className="group-hover:rotate-12 transition-transform duration-200" />
-              </button>
-            </div>
-          )}
+          <UserMenu
+            currentUser={currentUser}
+            sidebarOpen={sidebarOpen}
+            state={state}
+            onLogout={handleLogout}
+          />
         </div>
       </aside>
 
@@ -3337,6 +3307,243 @@ function getSectionTitle(user, section) {
 
 // Header sticky que agrega blur + border al hacer scroll. Incluye el botón
 // del command palette con el keyboard hint (Cmd+K), toggle de tema y fecha.
+// Pill de usuario con menú desplegable al click. Incluye:
+// - saludo dinámico por horario del día (buen día / buenas tardes / buenas noches)
+// - reloj en vivo (HH:mm, refrescado cada 60s) + fecha
+// - mini-stats útiles (órdenes pendientes, incidencias, ventas del día)
+// - nombre de display editable, persistido en localStorage
+// - línea motivacional según el estado del negocio
+// - botón de cerrar sesión al final
+function UserMenu({ currentUser, sidebarOpen, state, onLogout }) {
+  const [open, setOpen] = useState(false);
+  const [now, setNow] = useState(() => new Date());
+  const storageKey = `viora-pref-displayName-${currentUser.role}-${currentUser.id}`;
+  const [displayName, setDisplayName] = useState(() => {
+    try { return localStorage.getItem(storageKey) || currentUser.name || ''; } catch { return currentUser.name || ''; }
+  });
+  const [editingName, setEditingName] = useState(false);
+  const [draftName, setDraftName] = useState(displayName);
+  const menuRef = useRef(null);
+  const nameInputRef = useRef(null);
+
+  // Reloj en vivo (refresca cada 30 segundos)
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 30000);
+    return () => clearInterval(t);
+  }, []);
+
+  // Persistir nombre
+  useEffect(() => {
+    try { localStorage.setItem(storageKey, displayName); } catch {}
+  }, [displayName, storageKey]);
+
+  // Cerrar al click fuera o Escape
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setOpen(false);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (editingName) setTimeout(() => nameInputRef.current?.select(), 30);
+  }, [editingName]);
+
+  // Saludo según la hora
+  const hour = now.getHours();
+  const greeting = hour < 6 ? 'Buena madrugada'
+    : hour < 12 ? 'Buen día'
+    : hour < 20 ? 'Buenas tardes'
+    : 'Buenas noches';
+
+  // Formatos
+  const clock = now.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+  const dayName = now.toLocaleDateString('es-AR', { weekday: 'long' });
+  const fullDate = now.toLocaleDateString('es-AR', { day: 'numeric', month: 'long' });
+
+  // Mini-stats alineadas al workflow de una administradora que toma pedidos,
+  // cobra, costea y paga: qué órdenes están activas, cuánta plata tiene por
+  // cobrar del cliente y cuánta tiene que pagar (mentores + proveedores).
+  const sales = state?.sales || [];
+  const products = state?.products || [];
+  const mentors = state?.mentors || [];
+
+  const ordenesActivas = sales.filter(o => (o.estado || 'pendiente-cotizacion') !== 'despachado').length;
+  const incidencias = sales.filter(s => s.tieneIncidencia).length;
+
+  const aCobrar = sales.reduce((acc, o) => {
+    const total = o.montoTotal || 0;
+    const cobrado = Array.isArray(o.cobros)
+      ? o.cobros.reduce((s, c) => s + (parseFloat(c?.monto) || 0), 0)
+      : 0;
+    return acc + Math.max(0, total - cobrado);
+  }, 0);
+
+  const aPagar = sales.reduce((acc, o) => {
+    const product = products.find(p => p.id === o.productoId);
+    const mentor = mentors.find(m => m.id === o.mentorId);
+    const pagos = getOrderPayments(o, product, mentor);
+    let pend = 0;
+    ['contenido', 'envase', 'etiqueta'].forEach(k => {
+      if (pagos[k]?.estado === 'pendiente') pend += pagos[k].monto || 0;
+    });
+    if (o.mentorId && pagos.mentor?.estado === 'pendiente') pend += pagos.mentor.monto || 0;
+    return acc + pend;
+  }, 0);
+
+  // Línea motivacional según la situación
+  const moodLine = incidencias > 0
+    ? `Hay ${incidencias} ${incidencias === 1 ? 'incidencia' : 'incidencias'} sin resolver — ojo ahí.`
+    : ordenesActivas === 0
+      ? 'Todo despachado. Día limpio 🌟'
+      : ordenesActivas > 10
+        ? `Semana cargada (${ordenesActivas} órdenes activas). A full.`
+        : `${ordenesActivas} ${ordenesActivas === 1 ? 'orden activa' : 'órdenes activas'}. Buen ritmo.`;
+
+  const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString('es-AR')}`;
+  const initial = (displayName || currentUser.name || 'U').charAt(0).toUpperCase();
+
+  const saveName = () => {
+    const cleaned = draftName.trim();
+    setDisplayName(cleaned || currentUser.name || '');
+    setEditingName(false);
+  };
+
+  return (
+    <div className="relative" ref={menuRef}>
+      {/* Trigger: el pill en sí */}
+      {sidebarOpen ? (
+        <button
+          onClick={() => setOpen(v => !v)}
+          className={`w-full flex items-center gap-2 p-2 rounded-xl transition-colors duration-200 ${
+            open ? 'bg-white/10' : 'bg-white/5 hover:bg-white/10'
+          }`}
+        >
+          <div className="relative w-9 h-9 rounded-full bg-gradient-to-br from-amber-200 to-amber-400 text-[#4a0f22] font-bold flex items-center justify-center shrink-0 shadow">
+            {initial}
+            <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-[#4a0f22]" aria-label="En línea" />
+          </div>
+          <div className="flex-1 min-w-0 text-left">
+            <p className="text-sm font-semibold truncate text-white">{displayName || currentUser.name}</p>
+            <p className="text-[10px] uppercase tracking-wider text-pink-200/70 flex items-center gap-1.5">
+              <span>{currentUser.role}</span>
+              <span className="text-pink-200/40">·</span>
+              <span className="tabular-nums">{clock}</span>
+            </p>
+          </div>
+          <ChevronDown size={14} className={`text-pink-100/70 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
+        </button>
+      ) : (
+        <button
+          onClick={() => setOpen(v => !v)}
+          className="w-full flex flex-col items-center"
+          title={`${displayName} (${currentUser.role})`}
+        >
+          <div className="relative w-10 h-10 rounded-full bg-gradient-to-br from-amber-200 to-amber-400 text-[#4a0f22] font-bold flex items-center justify-center shadow">
+            {initial}
+            <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-[#4a0f22]" />
+          </div>
+        </button>
+      )}
+
+      {/* Dropdown del menú */}
+      {open && (
+        <div
+          className="absolute bottom-full left-0 right-0 mb-2 z-40 bg-gray-900/95 dark:bg-gray-950/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-white/10 overflow-hidden animate-scale-in"
+          style={{ transformOrigin: 'bottom center', minWidth: sidebarOpen ? undefined : '16rem', left: sidebarOpen ? undefined : '100%', marginLeft: sidebarOpen ? undefined : '0.5rem', right: sidebarOpen ? undefined : 'auto' }}
+        >
+          {/* Header del menú */}
+          <div className="p-4 bg-gradient-to-br from-pink-900/40 to-[#4a0f22]/40 border-b border-white/10">
+            <div className="flex items-start gap-3">
+              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-amber-200 to-amber-400 text-[#4a0f22] font-bold text-lg flex items-center justify-center shadow shrink-0">
+                {initial}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[11px] uppercase tracking-wider text-amber-300">{greeting},</p>
+                {editingName ? (
+                  <input
+                    ref={nameInputRef}
+                    type="text"
+                    value={draftName}
+                    onChange={(e) => setDraftName(e.target.value)}
+                    onBlur={saveName}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') { e.preventDefault(); saveName(); }
+                      if (e.key === 'Escape') { setEditingName(false); setDraftName(displayName); }
+                    }}
+                    className="w-full bg-white/10 text-white text-base font-bold px-2 py-0.5 rounded border border-amber-300/40 focus:outline-none focus:ring-2 focus:ring-amber-300/50"
+                    placeholder="Tu nombre"
+                  />
+                ) : (
+                  <p
+                    onClick={() => { setDraftName(displayName); setEditingName(true); }}
+                    className="text-base font-bold text-white truncate cursor-pointer hover:text-amber-200 transition"
+                    title="Click para cambiar tu nombre de display"
+                  >
+                    {displayName || currentUser.name}
+                  </p>
+                )}
+                <p className="text-[11px] text-pink-200/70 capitalize">{dayName}, {fullDate} · <span className="tabular-nums">{clock}</span></p>
+              </div>
+            </div>
+            <p className="text-xs text-white/70 mt-3 leading-snug">{moodLine}</p>
+          </div>
+
+          {/* Mini-stats: los 3 números que más le importan a la admin día a día */}
+          <div className="grid grid-cols-3 gap-px bg-white/5">
+            <StatMini label="Activas" value={ordenesActivas} accent={incidencias > 0 ? 'amber' : 'neutral'} />
+            <StatMini label="A cobrar" value={fmtMoney(aCobrar)} accent="emerald" small />
+            <StatMini label="A pagar" value={fmtMoney(aPagar)} accent={aPagar > 0 ? 'red' : 'neutral'} small />
+          </div>
+
+          {/* Preferencia: nombre */}
+          <div className="p-3 border-t border-white/10">
+            <button
+              onClick={() => { setDraftName(displayName); setEditingName(true); }}
+              className="w-full flex items-center gap-2 text-xs text-white/70 hover:text-white transition"
+            >
+              <Edit2 size={12} />
+              Cambiar mi nombre de display
+            </button>
+          </div>
+
+          {/* Logout */}
+          <button
+            onClick={() => { onLogout(); setOpen(false); }}
+            className="w-full flex items-center gap-2 px-4 py-3 border-t border-white/10 text-pink-200/90 hover:bg-red-500/20 hover:text-white transition text-sm font-medium"
+          >
+            <LogOut size={14} />
+            Cerrar sesión
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatMini({ label, value, accent = 'neutral', small = false }) {
+  const color = accent === 'amber'
+    ? 'text-amber-300'
+    : accent === 'red'
+      ? 'text-red-400'
+      : accent === 'emerald'
+        ? 'text-emerald-400'
+        : 'text-white/80';
+  return (
+    <div className="bg-gray-900 dark:bg-gray-950 py-2.5 text-center">
+      <p className={`${small ? 'text-xs' : 'text-base'} font-bold tabular-nums ${color}`}>{value}</p>
+      <p className="text-[9px] uppercase tracking-wider text-white/50 mt-0.5">{label}</p>
+    </div>
+  );
+}
+
 function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, onOpenCommand }) {
   const [scrolled, setScrolled] = useState(false);
   const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform);

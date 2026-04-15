@@ -14,11 +14,6 @@ import LandingPage from './LandingPage.jsx';
 import ChatbotWidget from './ChatbotWidget.jsx';
 import { generateCSV, downloadCSV, parseCSV, toNumber, toBool } from './csv.js';
 
-// Flag de build que habilita el "Acceso demo" (login sin email).
-// Default true en dev para no romper el flujo local; en producción hay que
-// setear VITE_ALLOW_DEMO=false en las env vars de Vercel para esconderlo.
-const ALLOW_DEMO = import.meta.env.VITE_ALLOW_DEMO !== 'false';
-
 // Estados del pipeline de producción de una orden
 export const ORDER_STATES = [
   'pendiente-cotizacion',
@@ -105,6 +100,17 @@ function appReducer(state, action) {
       return {
         ...state,
         mentors: state.mentors.map(m => m.id === action.payload.id ? { ...m, ...action.payload } : m)
+      };
+    case 'ADD_MENTOR':
+      return { ...state, mentors: [...state.mentors, action.payload] };
+    case 'REMOVE_MENTOR':
+      // Al borrar un mentor, lo desasignamos de las órdenes/clientes para
+      // no dejar referencias colgadas (mentorId a un mentor que no existe).
+      return {
+        ...state,
+        mentors: state.mentors.filter(m => m.id !== action.payload.id),
+        sales: state.sales.map(s => s.mentorId === action.payload.id ? { ...s, mentorId: null } : s),
+        clients: state.clients.map(c => c.mentorId === action.payload.id ? { ...c, mentorId: null } : c),
       };
     case 'UPDATE_PRODUCT': {
       // payload: { id, patch: {...} }
@@ -262,27 +268,71 @@ export function getOrderCosts(order, product) {
 }
 
 export function getOrderProfit(order, product) {
-  // Profit del laboratorio = (precioVenta - costos) * cantidad.
-  // La comisión del mentor NO se descuenta acá porque es profit del mentor.
-  // Usamos los valores efectivos (respetando overrides por orden).
+  // Profit CRUDO sobre el costo INTERNO real.
+  // Este es el "profit antes de descontar comisión del mentor".
+  // Para el profit real que queda para el lab, usar getLabRealProfit.
   const eff = getOrderEffectiveUnit(order, product);
   const unitCost = eff.costoContenido + eff.costoEnvase + eff.costoEtiqueta;
   const cantidad = order?.cantidad || 0;
   return (eff.precioVenta - unitCost) * cantidad;
 }
 
-// Comisión del mentor = porcentaje (del mentor) × profit de la orden.
+// Costo INFORMADO al mentor/cliente (por unidad). Puede ser distinto al
+// costo real cuando el lab no quiere que el mentor vea el costo verdadero.
+//
+// Prioridad:
+//   1. order.costoInformado (override por orden)
+//   2. product.costoInformado (default del producto)
+//   3. Fallback: el costo INTERNO real (compatible con productos que no
+//      tienen costo informado cargado).
+export function getInformedCostUnit(order, product) {
+  const orderOverride = order?.costoInformado;
+  if (orderOverride != null && orderOverride !== '') {
+    const n = parseFloat(orderOverride);
+    if (!Number.isNaN(n) && n >= 0) return n;
+  }
+  const prodInformed = product?.costoInformado;
+  if (prodInformed != null && prodInformed !== '') {
+    const n = parseFloat(prodInformed);
+    if (!Number.isNaN(n) && n >= 0) return n;
+  }
+  const eff = getOrderEffectiveUnit(order, product);
+  return eff.costoContenido + eff.costoEnvase + eff.costoEtiqueta;
+}
+
+// Profit SOBRE EL COSTO INFORMADO (el que "ve" el mentor).
+// Base para calcular la comisión del mentor: es justo que ellos cobren
+// sobre lo que ellos creen que cuesta, no sobre lo que realmente cuesta.
+export function getOrderInformedProfit(order, product) {
+  const eff = getOrderEffectiveUnit(order, product);
+  const informedUnit = getInformedCostUnit(order, product);
+  const cantidad = order?.cantidad || 0;
+  return Math.max(0, (eff.precioVenta - informedUnit) * cantidad);
+}
+
+// Profit REAL del laboratorio (lo que nos queda en el bolsillo):
+//   profitInterno - comisiónMentor
+// donde profitInterno es sobre el costo REAL, y la comisión sale del
+// profit informado (lo que ve el mentor).
+export function getLabRealProfit(order, product, mentor) {
+  const profitInterno = getOrderProfit(order, product);
+  if (!order?.mentorId || !mentor) return profitInterno;
+  const mentorCommission = getMentorCommission(order, product, mentor);
+  return profitInterno - mentorCommission;
+}
+
+// Comisión del mentor = porcentaje × profit INFORMADO (sobre costoInformado).
 // Prioridad:
 //  1. Si la orden tiene un presupuesto fijo asignado (order.mentorPresupuesto), ese gana.
-//  2. Si se pasa mentor y product, usa mentor.porcentajeComision (default 50) × profit.
-//  3. Si solo se pasa product, usa 50% del profit como fallback.
-//  4. Sin product, último fallback: 50% del montoTotal.
+//  2. Si se pasa mentor y product, usa mentor.porcentajeComision (default 50)
+//     × profit informado (sobre costoInformado del producto/orden).
+//  3. Sin mentor/product, último fallback: 50% del montoTotal.
 export function getMentorCommission(order, product, mentor) {
   if (order?.mentorPresupuesto != null && order.mentorPresupuesto !== '') {
     return parseFloat(order.mentorPresupuesto) || 0;
   }
   if (product) {
-    const profit = getOrderProfit(order, product);
+    const profit = getOrderInformedProfit(order, product);
     const pct = mentor?.porcentajeComision != null ? Number(mentor.porcentajeComision) : 50;
     return Math.max(0, profit * (pct / 100));
   }
@@ -458,6 +508,28 @@ function AppShell({ onExit }) {
   const [cmdOpen, setCmdOpen] = useState(false);
   const [toasts, setToasts] = useState([]);
 
+  // Analytics IA: el state vive en el shell para que los reportes sigan
+  // corriendo aunque el usuario navegue a otra sección.
+  const [analyticsState, setAnalyticsState] = useState({
+    report: null, loading: false, error: '', lastFetch: 0,
+  });
+  const fetchAnalytics = async (snapshot) => {
+    setAnalyticsState(s => ({ ...s, loading: true, error: '' }));
+    try {
+      const res = await fetch('/api/analytics', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ snapshot }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      setAnalyticsState({ report: data, loading: false, error: '', lastFetch: Date.now() });
+      addToast({ type: 'success', message: 'Reporte de IA listo' });
+    } catch (err) {
+      setAnalyticsState(s => ({ ...s, loading: false, error: err.message || 'No pude generar el reporte.' }));
+    }
+  };
+
   const addToast = (toast) => {
     const id = Date.now() + Math.random();
     setToasts(prev => [...prev, { id, ...toast }]);
@@ -547,7 +619,19 @@ function AppShell({ onExit }) {
           }
           const data = await resp.json();
           if (data?.ok && data.user && !cancelled) {
-            setCurrentUser({ role: data.user.role, name: data.user.name, email: data.user.email, id: data.user.role === 'admin' ? 'admin' : data.user.email });
+            const u = data.user;
+            // Matcheamos id del mentor por nombre si aplica
+            let id = u.username || u.email || u.name;
+            if (u.role === 'admin') {
+              id = 'admin';
+            }
+            setCurrentUser({
+              role: u.role,
+              name: u.name,
+              email: u.email || null,
+              username: u.username || null,
+              id,
+            });
             setCurrentSection('inicio');
           }
         }
@@ -566,6 +650,29 @@ function AppShell({ onExit }) {
   const handleLogin = (role, name) => {
     setCurrentUser({ role, name, id: role === 'admin' ? 'admin' : (name === 'Sofia' ? 1 : 2) });
     setCurrentSection('inicio');
+  };
+
+  // Usado por LoginScreen después de un login exitoso contra /api/auth.
+  // Recibe el user que devuelve el backend (con username/email + name + role).
+  const handleSessionAuth = (user) => {
+    // id: si es admin usamos 'admin', si es mentor intentamos matchear con los
+    // mentores cargados por nombre (fallback al username).
+    let id = user.username || user.email || user.name;
+    if (user.role === 'admin') {
+      id = 'admin';
+    } else {
+      const matched = state.mentors.find(m => m.nombre.toLowerCase() === (user.name || '').toLowerCase());
+      if (matched) id = matched.id;
+    }
+    setCurrentUser({
+      role: user.role,
+      name: user.name,
+      email: user.email || null,
+      username: user.username || null,
+      id,
+    });
+    setCurrentSection('inicio');
+    addToast({ type: 'success', message: `Bienvenido, ${user.name}` });
   };
 
   const handleLogout = () => {
@@ -617,6 +724,27 @@ function AppShell({ onExit }) {
 
   const handleUpdateMentor = (mentorData) => {
     dispatch({ type: 'UPDATE_MENTOR', payload: mentorData });
+  };
+
+  const handleAddMentor = (mentorData) => {
+    const maxId = state.mentors.reduce((m, x) => Math.max(m, x.id), 0);
+    const newMentor = {
+      id: maxId + 1,
+      porcentajeComision: 50,
+      pagosRecibidos: [],
+      fechaInicio: new Date().toISOString().split('T')[0],
+      ...mentorData,
+    };
+    dispatch({ type: 'ADD_MENTOR', payload: newMentor });
+    addToast({ type: 'success', message: `Mentor "${newMentor.nombre}" creado` });
+    return newMentor;
+  };
+
+  const handleRemoveMentor = (id) => {
+    const mentor = state.mentors.find(m => m.id === id);
+    if (!mentor) return;
+    dispatch({ type: 'REMOVE_MENTOR', payload: { id } });
+    addToast({ type: 'warning', message: `Mentor "${mentor.nombre}" eliminado` });
   };
 
   const createProduct = (productData) => {
@@ -806,7 +934,7 @@ function AppShell({ onExit }) {
     // bootstrap de auth (link inválido, link enviado) sean visibles.
     return (
       <>
-        <LoginScreen onLogin={handleLogin} darkMode={darkMode} toggleDarkMode={toggleDarkMode} />
+        <LoginScreen onLogin={handleLogin} onSessionAuth={handleSessionAuth} darkMode={darkMode} toggleDarkMode={toggleDarkMode} />
         <ToastContainer toasts={toasts} />
       </>
     );
@@ -870,7 +998,6 @@ function AppShell({ onExit }) {
               <NavItem icon={Package} label="Productos" section="productos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={Users} label="Clientes" section="clientes" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={CreditCard} label="Comisiones" section="comisiones" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={UserCheck} label="Equipo" section="mentores" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={Sparkles} label="Analytics IA" section="analytics" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={Package} label="Datos" section="datos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
             </>
@@ -906,17 +1033,19 @@ function AppShell({ onExit }) {
           onOpenCommand={() => setCmdOpen(true)}
           onOpenMobileMenu={() => setMobileMenuOpen(true)}
           notificationsSnapshot={currentUser.role === 'admin' ? buildPanelChatContext(state, currentUser) : null}
+          bgTasks={analyticsState.loading ? ['Generando reporte IA…'] : []}
         />
 
         <div key={currentSection} className="p-4 md:p-8 animate-fade-in-up">
           {/* Admin Views */}
-          {currentUser.role === 'admin' && currentSection === 'inicio' && <InicioSection state={state} dispatch={dispatch} />}
+          {currentUser.role === 'admin' && currentSection === 'inicio' && <InicioSection state={state} dispatch={dispatch} onAddSale={handleAddSale} onQuickAddClient={createClient} onQuickAddProduct={createProduct} />}
           {currentUser.role === 'admin' && currentSection === 'ventas' && <VentasSection state={state} onAddSale={handleAddSale} onQuickAddClient={createClient} onQuickAddProduct={createProduct} showModal={showNewSaleModal} setShowModal={setShowNewSaleModal} />}
           {currentUser.role === 'admin' && currentSection === 'productos' && <ProductosSection state={state} onAddProduct={handleAddProduct} showModal={showNewProductModal} setShowModal={setShowNewProductModal} calculateMargin={calculateMargin} />}
           {currentUser.role === 'admin' && currentSection === 'clientes' && <ClientesSection state={state} onAddClient={handleAddClient} onUpdateClient={handleUpdateClient} showModal={showNewClientModal} setShowModal={setShowNewClientModal} />}
-          {currentUser.role === 'admin' && currentSection === 'comisiones' && <ComisionesSection state={state} dispatch={dispatch} onUpdateMentor={handleUpdateMentor} getMentorStats={getMentorStats} filterMentor={filterMentor} setFilterMentor={setFilterMentor} />}
-          {currentUser.role === 'admin' && currentSection === 'mentores' && <MentoresSection state={state} getMentorStats={getMentorStats} />}
-          {currentUser.role === 'admin' && currentSection === 'analytics' && <AnalyticsSection state={state} currentUser={currentUser} />}
+          {currentUser.role === 'admin' && currentSection === 'comisiones' && <ComisionesSection state={state} dispatch={dispatch} onUpdateMentor={handleUpdateMentor} onAddMentor={handleAddMentor} onRemoveMentor={handleRemoveMentor} getMentorStats={getMentorStats} filterMentor={filterMentor} setFilterMentor={setFilterMentor} />}
+          {/* La sección "Equipo" (mentores) se unificó adentro de Comisiones */}
+          {currentUser.role === 'admin' && currentSection === 'mentores' && <ComisionesSection state={state} dispatch={dispatch} onUpdateMentor={handleUpdateMentor} onAddMentor={handleAddMentor} onRemoveMentor={handleRemoveMentor} getMentorStats={getMentorStats} filterMentor={filterMentor} setFilterMentor={setFilterMentor} />}
+          {currentUser.role === 'admin' && currentSection === 'analytics' && <AnalyticsSection state={state} currentUser={currentUser} analyticsState={analyticsState} onFetch={fetchAnalytics} />}
           {currentUser.role === 'admin' && currentSection === 'datos' && <DatosSection state={state} dispatch={dispatch} addToast={addToast} />}
 
           {/* Mentor Views */}
@@ -1061,15 +1190,52 @@ function NavItem({ icon: Icon, label, section, currentSection, onSelect, sidebar
   );
 }
 
-function LoginScreen({ onLogin, darkMode, toggleDarkMode }) {
-  // loginMode: 'select' | 'email' | 'email-sent' | 'demo' | 'admin-login' | 'mentor-select'
-  const [loginMode, setLoginMode] = useState('select');
-  const [selectedRole, setSelectedRole] = useState(null);
-  const [adminPassword, setAdminPassword] = useState('');
+function LoginScreen({ onLogin, onSessionAuth, darkMode, toggleDarkMode }) {
+  // loginMode: 'login' (user+pass, default) | 'email' | 'email-sent'
+  const [loginMode, setLoginMode] = useState('login');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
+  const [loggingIn, setLoggingIn] = useState(false);
+
+  // Magic link (opcional, secundario)
   const [email, setEmail] = useState('');
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState('');
-  const [sendResult, setSendResult] = useState(null); // { emailSent, devLink? }
+  const [sendResult, setSendResult] = useState(null);
+
+  const doLogin = async () => {
+    setLoginError('');
+    if (!username.trim() || !password) {
+      setLoginError('Completá usuario y contraseña');
+      return;
+    }
+    setLoggingIn(true);
+    try {
+      const resp = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'login', username: username.trim(), password }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data?.ok) {
+        setLoginError(data?.error || 'Usuario o contraseña inválidos');
+        return;
+      }
+      // Guardamos la session y avisamos al parent
+      localStorage.setItem('viora-session', data.session);
+      if (typeof onSessionAuth === 'function') {
+        onSessionAuth(data.user);
+      } else {
+        // Fallback: llamar onLogin con los datos equivalentes
+        onLogin(data.user.role, data.user.name);
+      }
+    } catch (err) {
+      setLoginError('No pude conectar con el servidor.');
+    } finally {
+      setLoggingIn(false);
+    }
+  };
 
   const sendMagicLink = async () => {
     setSendError('');
@@ -1091,7 +1257,7 @@ function LoginScreen({ onLogin, darkMode, toggleDarkMode }) {
         setLoginMode('email-sent');
       }
     } catch (err) {
-      setSendError('No pude conectar con el servidor. ¿AUTH_SECRET configurado?');
+      setSendError('No pude conectar con el servidor.');
     } finally {
       setSending(false);
     }
@@ -1113,25 +1279,43 @@ function LoginScreen({ onLogin, darkMode, toggleDarkMode }) {
           <p className="text-gray-600 dark:text-gray-400 mt-1 text-xs tracking-widest uppercase">Panel de gestión</p>
         </div>
 
-        {loginMode === 'select' && (
+        {loginMode === 'login' && (
           <div className="space-y-3">
+            <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300">Usuario</label>
+            <input
+              type="text"
+              autoFocus
+              autoComplete="username"
+              placeholder="usuario"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') doLogin(); }}
+              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            />
+            <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mt-3">Contraseña</label>
+            <input
+              type="password"
+              autoComplete="current-password"
+              placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') doLogin(); }}
+              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            />
+            {loginError && <p className="text-xs text-red-600 dark:text-red-400">{loginError}</p>}
+            <button
+              onClick={doLogin}
+              disabled={loggingIn}
+              className="w-full py-2.5 mt-2 bg-gradient-to-r from-pink-900 to-rose-700 text-white rounded-lg hover:shadow-lg transition font-semibold disabled:opacity-60"
+            >
+              {loggingIn ? 'Ingresando…' : 'Ingresar'}
+            </button>
             <button
               onClick={() => setLoginMode('email')}
-              className="w-full py-3 px-4 bg-gradient-to-r from-pink-900 to-rose-700 text-white rounded-lg hover:shadow-lg transition font-semibold"
+              className="w-full pt-3 text-[11px] text-gray-500 dark:text-gray-400 hover:text-pink-700 dark:hover:text-pink-300 transition border-t border-gray-100 dark:border-gray-700"
             >
-              Ingresar con tu email
+              ¿Preferís ingresar con email? →
             </button>
-            <p className="text-center text-[11px] text-gray-500 dark:text-gray-400">Te mandamos un link mágico al mail</p>
-            {ALLOW_DEMO && (
-              <div className="pt-3 border-t border-gray-100 dark:border-gray-700">
-                <button
-                  onClick={() => setLoginMode('demo')}
-                  className="w-full py-2 text-xs text-gray-600 dark:text-gray-400 hover:text-pink-700 dark:hover:text-pink-300 transition"
-                >
-                  Acceso demo (sin email) →
-                </button>
-              </div>
-            )}
           </div>
         )}
 
@@ -1156,10 +1340,10 @@ function LoginScreen({ onLogin, darkMode, toggleDarkMode }) {
               {sending ? 'Enviando…' : 'Enviarme el link'}
             </button>
             <button
-              onClick={() => setLoginMode('select')}
+              onClick={() => setLoginMode('login')}
               className="w-full py-2 text-pink-900 dark:text-pink-300 border border-pink-900 dark:border-pink-300 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition text-sm"
             >
-              Volver
+              Volver al login con usuario
             </button>
           </div>
         )}
@@ -1189,102 +1373,23 @@ function LoginScreen({ onLogin, darkMode, toggleDarkMode }) {
                       {sendResult.devLink}
                     </a>
                   )}
-                  <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-2">Para producción configurá <span className="font-mono">RESEND_API_KEY</span>.</p>
                 </>
               )}
             </div>
             <button
-              onClick={() => { setLoginMode('select'); setSendResult(null); setEmail(''); }}
+              onClick={() => { setLoginMode('login'); setSendResult(null); setEmail(''); }}
               className="w-full py-2 text-pink-900 dark:text-pink-300 border border-pink-900 dark:border-pink-300 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition text-sm"
             >
               Volver
             </button>
           </div>
         )}
-
-        {ALLOW_DEMO && loginMode === 'demo' && (
-          <div className="space-y-3">
-            <button
-              onClick={() => { setSelectedRole('admin'); setLoginMode('admin-login'); }}
-              className="w-full py-3 px-4 bg-gradient-to-r from-pink-900 to-rose-700 text-white rounded-lg hover:shadow-lg transition font-semibold"
-            >
-              Administrador (demo)
-            </button>
-            <button
-              onClick={() => { setSelectedRole('mentor'); setLoginMode('mentor-select'); }}
-              className="w-full py-3 px-4 bg-gradient-to-r from-pink-600 to-rose-500 text-white rounded-lg hover:shadow-lg transition font-semibold"
-            >
-              Equipo (demo)
-            </button>
-            <button
-              onClick={() => setLoginMode('select')}
-              className="w-full py-2 text-pink-900 dark:text-pink-300 border border-pink-900 dark:border-pink-300 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition text-sm"
-            >
-              Volver
-            </button>
-          </div>
-        )}
-
-        {ALLOW_DEMO && loginMode === 'admin-login' && (
-          <div className="space-y-4">
-            <input
-              type="password"
-              placeholder="Contraseña"
-              value={adminPassword}
-              onChange={(e) => setAdminPassword(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-            />
-            <button
-              onClick={() => adminPassword === 'admin' ? onLogin('admin', 'Administrador') : alert('Contraseña incorrecta')}
-              className="w-full py-2 bg-pink-900 dark:bg-pink-700 text-white rounded-lg hover:bg-pink-800 dark:hover:bg-pink-600 transition"
-            >
-              Ingresar
-            </button>
-            <button
-              onClick={() => setLoginMode('demo')}
-              className="w-full py-2 text-pink-900 dark:text-pink-300 border border-pink-900 dark:border-pink-300 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition"
-            >
-              Volver
-            </button>
-          </div>
-        )}
-
-        {ALLOW_DEMO && loginMode === 'mentor-select' && (
-          <div className="space-y-4">
-            <button
-              onClick={() => onLogin('mentor', 'Sofia')}
-              className="w-full py-3 px-4 bg-pink-600 text-white rounded-lg hover:shadow-lg transition font-semibold"
-            >
-              Sofia
-            </button>
-            <button
-              onClick={() => onLogin('mentor', 'Mariano')}
-              className="w-full py-3 px-4 bg-rose-600 text-white rounded-lg hover:shadow-lg transition font-semibold"
-            >
-              Mariano
-            </button>
-            <button
-              onClick={() => setLoginMode('demo')}
-              className="w-full py-2 text-pink-900 dark:text-pink-300 border border-pink-900 dark:border-pink-300 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition"
-            >
-              Volver
-            </button>
-          </div>
-        )}
-
-        {ALLOW_DEMO && (loginMode === 'admin-login' || loginMode === 'mentor-select') ? (
-          <div className="mt-8 p-4 bg-pink-50 dark:bg-pink-900/30 rounded-lg text-sm text-gray-700 dark:text-gray-300">
-            <p className="font-semibold mb-2">Demo Credentials:</p>
-            <p>Admin: password "admin"</p>
-            <p>Mentors: Sofia / Mariano</p>
-          </div>
-        ) : null}
       </div>
     </div>
   );
 }
 
-function InicioSection({ state, dispatch }) {
+function InicioSection({ state, dispatch, onAddSale, onQuickAddClient, onQuickAddProduct }) {
   const [filters, setFilters] = useState({
     dateFrom: '',
     dateTo: '',
@@ -1293,6 +1398,8 @@ function InicioSection({ state, dispatch }) {
     search: '',
     focus: null, // null | 'comisionesPendientes' | 'pagosProveedoresPendientes' | 'saldoPendiente'
   });
+  // Modal para crear orden sin salir de Inicio.
+  const [showNewOrderModal, setShowNewOrderModal] = useState(false);
 
   // Órdenes filtradas según el estado actual de los filtros
   const filteredOrders = useMemo(() => {
@@ -1380,7 +1487,30 @@ function InicioSection({ state, dispatch }) {
 
   return (
     <div className="space-y-8">
-      <DailyQuoteBanner />
+      {/* Botón principal de "Nueva orden" — destacado arriba de todo para que
+          sea lo primero que ves al entrar. Abre un modal con el form completo
+          sin tener que navegar a Ventas. */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <DailyQuoteBanner />
+        <button
+          onClick={() => setShowNewOrderModal(true)}
+          className="flex items-center gap-2 bg-gradient-to-r from-pink-700 to-rose-600 text-white px-5 py-2.5 rounded-xl shadow-lg hover:shadow-xl hover:scale-[1.02] active:scale-100 transition font-semibold text-sm"
+          title="Registrar una nueva orden"
+        >
+          <Plus size={18} /> Nueva orden
+        </button>
+      </div>
+
+      {showNewOrderModal && (
+        <NewSaleModal
+          state={state}
+          onAddSale={(data) => { onAddSale?.(data); setShowNewOrderModal(false); }}
+          onQuickAddClient={onQuickAddClient}
+          onQuickAddProduct={onQuickAddProduct}
+          onClose={() => setShowNewOrderModal(false)}
+        />
+      )}
+
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 md:gap-4">
         <StatCard
           icon={DollarSign}
@@ -1615,7 +1745,7 @@ const ORDERS_COLUMNS = [
   { key: 'profit',    label: 'Profit',    default: true,  required: false },
   { key: 'estado',    label: 'Estado',    default: true,  required: false },
   { key: 'cobro',     label: 'Cobro',     default: true,  required: false },
-  { key: 'incidencia', label: 'Incidencia', default: false, required: false },
+  { key: 'incidencia', label: 'Incidencia', default: true, required: false },
 ];
 
 const ORDERS_DEFAULT_VISIBLE = ORDERS_COLUMNS.filter(c => c.default).map(c => c.key);
@@ -1814,7 +1944,7 @@ function OrdersList({ state, dispatch, orders }) {
       {layout === 'table' && (
       <div className="overflow-x-auto orders-table-scroll">
         <table className="w-full text-xs md:text-sm orders-compact-table">
-          <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700">
+          <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10">
             <tr className="text-left text-gray-700 dark:text-gray-200">
               <th className="px-2 py-3 w-8"></th>
               {isColVisible('fecha') && <th className="px-4 py-3 font-semibold" title="Fecha de creación de la orden">Fecha</th>}
@@ -1979,6 +2109,7 @@ function OrdersList({ state, dispatch, orders }) {
                         mentorNombre={hasMentor ? getMentorName(mentorId) : null}
                         onCobrosChange={(patch) => handleCobrosChange(order, patch)}
                         onPaymentChange={(rubro, data) => handlePaymentChange(order.id, rubro, data)}
+                        onIncidenciaChange={(patch) => dispatch({ type: 'UPDATE_ORDER_INCIDENCIA', payload: { orderId: order.id, ...patch } })}
                       />
                     </td>
                   </tr>
@@ -2404,20 +2535,20 @@ function StatCard({ icon: Icon, label, value, color, delay = 0, onClick, active 
   );
 }
 
-function VentasSection({ state, onAddSale, onQuickAddClient, onQuickAddProduct, showModal, setShowModal }) {
+// Modal reutilizable para registrar una nueva venta/orden. Se usa desde
+// VentasSection y desde InicioSection para dejar la creación a un click
+// sin tener que navegar a otra sección.
+function NewSaleModal({ state, onAddSale, onQuickAddClient, onQuickAddProduct, onClose }) {
   const [formData, setFormData] = useState({ clienteId: '', productoId: '', cantidad: 1, mentorId: '', mentorPresupuesto: '' });
   const [showClientQuickModal, setShowClientQuickModal] = useState(false);
   const [showProductQuickModal, setShowProductQuickModal] = useState(false);
 
   // Cálculos derivados para sugerir el presupuesto del mentor al cargar la venta.
-  // La comisión se calcula como 50% del profit (precioVenta - costos) * cantidad.
   const productoSel = state.products.find(p => p.id === parseInt(formData.productoId));
   const cantidadNum = parseInt(formData.cantidad) || 0;
   const profitSugerido = productoSel ? (productoSel.precioVenta - getProductUnitCost(productoSel)) * cantidadNum : 0;
   const mentorSugerido = Math.max(0, Math.round(profitSugerido * 0.5));
 
-  // Cuando cambia el mentor, producto o cantidad, y el usuario no tocó el
-  // presupuesto manualmente, reseteamos el valor sugerido (50% de la venta).
   const [presupuestoTouched, setPresupuestoTouched] = useState(false);
   useEffect(() => {
     if (!presupuestoTouched) {
@@ -2441,25 +2572,21 @@ function VentasSection({ state, onAddSale, onQuickAddClient, onQuickAddProduct, 
       cantidad,
       montoTotal: producto.precioVenta * cantidad,
       mentorId,
-      // Solo guardamos el presupuesto si hay mentor asignado y un valor numérico.
       mentorPresupuesto: mentorId && presupuestoParsed != null && !Number.isNaN(presupuestoParsed)
         ? presupuestoParsed
         : null,
     };
     onAddSale(newSale);
-    setFormData({ clienteId: '', productoId: '', cantidad: 1, mentorId: '', mentorPresupuesto: '' });
-    setPresupuestoTouched(false);
   };
 
   const handleQuickClientCreated = (clientData) => {
     const newClient = onQuickAddClient(clientData);
-    // auto-select the new client, and pre-fill mentor if the client has one
     setFormData(prev => ({
       ...prev,
       clienteId: String(newClient.id),
       mentorId: newClient.mentorId ? String(newClient.mentorId) : prev.mentorId,
     }));
-    setPresupuestoTouched(false); // dejar que se recalcule el 50% sugerido
+    setPresupuestoTouched(false);
     setShowClientQuickModal(false);
   };
 
@@ -2469,140 +2596,21 @@ function VentasSection({ state, onAddSale, onQuickAddClient, onQuickAddProduct, 
     setShowProductQuickModal(false);
   };
 
-  const getClientName = (clienteId) => state.clients.find(c => c.id === clienteId)?.nombre || '-';
-  const getProductName = (productoId) => state.products.find(p => p.id === productoId)?.nombre || '-';
-  const getMentorName = (mentorId) => state.mentors.find(m => m.id === mentorId)?.nombre || '-';
-
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Gestión de Ventas</h2>
-        <button
-          onClick={() => setShowModal(true)}
-          className="flex items-center gap-2 bg-pink-900 text-white px-6 py-2 rounded-lg hover:bg-pink-800 transition font-semibold"
-        >
-          <Plus size={20} /> Nueva Venta
-        </button>
-      </div>
-
-      {showModal && (
-        <Modal title="Registrar Nueva Venta" onClose={() => setShowModal(false)}>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <FormLabel required>Cliente</FormLabel>
-              <div className="flex gap-2">
-                <select
-                  value={formData.clienteId}
-                  onChange={(e) => setFormData({ ...formData, clienteId: e.target.value })}
-                  className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-                  required
-                >
-                  <option value="">Seleccionar Cliente</option>
-                  {state.clients.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-                </select>
-                <button
-                  type="button"
-                  onClick={() => setShowClientQuickModal(true)}
-                  className="inline-flex items-center gap-1 px-3 py-2 border border-pink-600 text-pink-700 dark:text-pink-300 dark:border-pink-500 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition text-sm font-semibold whitespace-nowrap"
-                  title="Crear un nuevo cliente sin salir de esta pantalla"
-                >
-                  <Plus size={16} /> Nuevo
-                </button>
-              </div>
-            </div>
-
-            <div>
-              <FormLabel required>Producto</FormLabel>
-              <div className="flex gap-2">
-                <select
-                  value={formData.productoId}
-                  onChange={(e) => setFormData({ ...formData, productoId: e.target.value })}
-                  className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-                  required
-                >
-                  <option value="">Seleccionar Producto</option>
-                  {state.products.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-                </select>
-                <button
-                  type="button"
-                  onClick={() => setShowProductQuickModal(true)}
-                  className="inline-flex items-center gap-1 px-3 py-2 border border-pink-600 text-pink-700 dark:text-pink-300 dark:border-pink-500 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition text-sm font-semibold whitespace-nowrap"
-                  title="Crear un nuevo producto sin salir de esta pantalla"
-                >
-                  <Plus size={16} /> Nuevo
-                </button>
-              </div>
-            </div>
-
-            <div>
-              <FormLabel required tip="Mínimo 100 unidades por producción.">Cantidad</FormLabel>
-              <input
-                type="number"
-                min="1"
-                value={formData.cantidad}
-                onChange={(e) => setFormData({ ...formData, cantidad: e.target.value })}
-                placeholder="Cantidad"
-                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-                required
-              />
-            </div>
-
-            <div>
-              <FormLabel tip="Si hay mentor, cobrará comisión sobre el profit (%) o el presupuesto fijo que pongas abajo.">Mentor asignado</FormLabel>
-              <select
-                value={formData.mentorId}
-                onChange={(e) => { setFormData({ ...formData, mentorId: e.target.value }); setPresupuestoTouched(false); }}
-                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-              >
-                <option value="">Sin mentor</option>
-                {state.mentors.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
-              </select>
-            </div>
-
-            {formData.mentorId && (
-              <div>
-                <FormLabel tip="Monto FIJO que se paga al mentor por esta orden. Si lo dejás vacío, usa el % configurado en Comisiones.">
-                  Presupuesto para el mentor
-                  <span className="ml-1 text-gray-400 dark:text-gray-500 font-normal">
-                    · sugerido ${mentorSugerido.toLocaleString()}
-                  </span>
-                </FormLabel>
-                <div className="flex items-center gap-2">
-                  <div className="relative flex-1">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 text-sm">$</span>
-                    <input
-                      type="number"
-                      min="0"
-                      value={formData.mentorPresupuesto}
-                      onChange={(e) => { setFormData({ ...formData, mentorPresupuesto: e.target.value }); setPresupuestoTouched(true); }}
-                      placeholder={String(mentorSugerido)}
-                      className="w-full pl-6 pr-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-                    />
-                  </div>
-                  {presupuestoTouched && (
-                    <button
-                      type="button"
-                      onClick={() => { setFormData({ ...formData, mentorPresupuesto: String(mentorSugerido) }); setPresupuestoTouched(false); }}
-                      className="text-xs text-pink-700 dark:text-pink-300 hover:underline font-semibold whitespace-nowrap"
-                      title="Restaurar al 50% sugerido"
-                    >
-                      Usar 50%
-                    </button>
-                  )}
-                </div>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Este será el monto fijo que se le paga al mentor por esta orden.</p>
-              </div>
-            )}
-
-            <button
-              type="submit"
-              className="w-full bg-pink-900 text-white py-2 rounded-lg hover:bg-pink-800 transition font-semibold"
-            >
-              Registrar Venta
-            </button>
-          </form>
-        </Modal>
-      )}
+    <>
+      <Modal title="Registrar Nueva Orden" onClose={onClose}>
+        <NewSaleFormContent
+          state={state}
+          formData={formData}
+          setFormData={setFormData}
+          handleSubmit={handleSubmit}
+          mentorSugerido={mentorSugerido}
+          presupuestoTouched={presupuestoTouched}
+          setPresupuestoTouched={setPresupuestoTouched}
+          openQuickClient={() => setShowClientQuickModal(true)}
+          openQuickProduct={() => setShowProductQuickModal(true)}
+        />
+      </Modal>
 
       {showClientQuickModal && (
         <QuickClientModal
@@ -2618,11 +2626,161 @@ function VentasSection({ state, onAddSale, onQuickAddClient, onQuickAddProduct, 
           onCreate={handleQuickProductCreated}
         />
       )}
+    </>
+  );
+}
+
+// Solo los campos del form — extraído para no duplicar el JSX.
+function NewSaleFormContent({ state, formData, setFormData, handleSubmit, mentorSugerido, presupuestoTouched, setPresupuestoTouched, openQuickClient, openQuickProduct }) {
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div>
+        <FormLabel required>Cliente</FormLabel>
+        <div className="flex gap-2">
+          <select
+            value={formData.clienteId}
+            onChange={(e) => setFormData({ ...formData, clienteId: e.target.value })}
+            className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            required
+          >
+            <option value="">Seleccionar Cliente</option>
+            {state.clients.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+          </select>
+          <button
+            type="button"
+            onClick={openQuickClient}
+            className="inline-flex items-center gap-1 px-3 py-2 border border-pink-600 text-pink-700 dark:text-pink-300 dark:border-pink-500 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition text-sm font-semibold whitespace-nowrap"
+            title="Crear un nuevo cliente sin salir de esta pantalla"
+          >
+            <Plus size={16} /> Nuevo
+          </button>
+        </div>
+      </div>
+
+      <div>
+        <FormLabel required>Producto</FormLabel>
+        <div className="flex gap-2">
+          <select
+            value={formData.productoId}
+            onChange={(e) => setFormData({ ...formData, productoId: e.target.value })}
+            className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            required
+          >
+            <option value="">Seleccionar Producto</option>
+            {state.products.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+          </select>
+          <button
+            type="button"
+            onClick={openQuickProduct}
+            className="inline-flex items-center gap-1 px-3 py-2 border border-pink-600 text-pink-700 dark:text-pink-300 dark:border-pink-500 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition text-sm font-semibold whitespace-nowrap"
+            title="Crear un nuevo producto sin salir de esta pantalla"
+          >
+            <Plus size={16} /> Nuevo
+          </button>
+        </div>
+      </div>
+
+      <div>
+        <FormLabel required tip="Mínimo 100 unidades por producción.">Cantidad</FormLabel>
+        <input
+          type="number"
+          min="1"
+          value={formData.cantidad}
+          onChange={(e) => setFormData({ ...formData, cantidad: e.target.value })}
+          placeholder="Cantidad"
+          className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+          required
+        />
+      </div>
+
+      <div>
+        <FormLabel tip="Si hay mentor, cobrará comisión sobre el profit (%) o el presupuesto fijo que pongas abajo.">Mentor asignado</FormLabel>
+        <select
+          value={formData.mentorId}
+          onChange={(e) => { setFormData({ ...formData, mentorId: e.target.value }); setPresupuestoTouched(false); }}
+          className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+        >
+          <option value="">Sin mentor</option>
+          {state.mentors.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
+        </select>
+      </div>
+
+      {formData.mentorId && (
+        <div>
+          <FormLabel tip="Monto FIJO que se paga al mentor por esta orden. Si lo dejás vacío, usa el % configurado en Comisiones.">
+            Presupuesto para el mentor
+            <span className="ml-1 text-gray-400 dark:text-gray-500 font-normal">
+              · sugerido ${mentorSugerido.toLocaleString()}
+            </span>
+          </FormLabel>
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 text-sm">$</span>
+              <input
+                type="number"
+                min="0"
+                value={formData.mentorPresupuesto}
+                onChange={(e) => { setFormData({ ...formData, mentorPresupuesto: e.target.value }); setPresupuestoTouched(true); }}
+                placeholder={String(mentorSugerido)}
+                className="w-full pl-6 pr-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+              />
+            </div>
+            {presupuestoTouched && (
+              <button
+                type="button"
+                onClick={() => { setFormData({ ...formData, mentorPresupuesto: String(mentorSugerido) }); setPresupuestoTouched(false); }}
+                className="text-xs text-pink-700 dark:text-pink-300 hover:underline font-semibold whitespace-nowrap"
+                title="Restaurar al 50% sugerido"
+              >
+                Usar 50%
+              </button>
+            )}
+          </div>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Este será el monto fijo que se le paga al mentor por esta orden.</p>
+        </div>
+      )}
+
+      <button
+        type="submit"
+        className="w-full bg-pink-900 text-white py-2 rounded-lg hover:bg-pink-800 transition font-semibold"
+      >
+        Registrar Orden
+      </button>
+    </form>
+  );
+}
+
+function VentasSection({ state, onAddSale, onQuickAddClient, onQuickAddProduct, showModal, setShowModal }) {
+  const getClientName = (clienteId) => state.clients.find(c => c.id === clienteId)?.nombre || '-';
+  const getProductName = (productoId) => state.products.find(p => p.id === productoId)?.nombre || '-';
+  const getMentorName = (mentorId) => state.mentors.find(m => m.id === mentorId)?.nombre || '-';
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Gestión de Ventas</h2>
+        <button
+          onClick={() => setShowModal(true)}
+          className="flex items-center gap-2 bg-pink-900 text-white px-6 py-2 rounded-lg hover:bg-pink-800 transition font-semibold"
+        >
+          <Plus size={20} /> Nueva Orden
+        </button>
+      </div>
+
+      {showModal && (
+        <NewSaleModal
+          state={state}
+          onAddSale={(data) => { onAddSale(data); setShowModal(false); }}
+          onQuickAddClient={onQuickAddClient}
+          onQuickAddProduct={onQuickAddProduct}
+          onClose={() => setShowModal(false)}
+        />
+      )}
 
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700">
+            <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10">
               <tr>
                 <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Fecha</th>
                 <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Cliente</th>
@@ -2654,9 +2812,16 @@ function VentasSection({ state, onAddSale, onQuickAddClient, onQuickAddProduct, 
 }
 
 function ProductosSection({ state, onAddProduct, showModal, setShowModal, calculateMargin }) {
+  // modoCosto: 'total' (un único número) | 'desglose' (contenido/envase/etiqueta).
+  // La mayoría de los casos usa 'total' porque el proveedor entrega todo junto.
+  // costoInformado es lo que le informamos al mentor (puede ser distinto al real).
   const [formData, setFormData] = useState({
     nombre: '', descripcion: '',
+    modoCosto: 'total',
+    costoTotal: '',
     costoContenido: '', costoEnvase: '', costoEtiqueta: '',
+    usaCostoInformado: false,
+    costoInformado: '',
     precioVenta: '',
   });
   const [expanded, setExpanded] = useState(() => new Set());
@@ -2699,15 +2864,40 @@ function ProductosSection({ state, onAddProduct, showModal, setShowModal, calcul
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    onAddProduct({
+    const payload = {
       nombre: formData.nombre,
       descripcion: formData.descripcion,
-      costoContenido: parseInt(formData.costoContenido) || 0,
-      costoEnvase: parseInt(formData.costoEnvase) || 0,
-      costoEtiqueta: parseInt(formData.costoEtiqueta) || 0,
       precioVenta: parseInt(formData.precioVenta) || 0,
+    };
+    if (formData.modoCosto === 'total') {
+      // Modo simple: un único número. Se guarda en costoSinDesglosar y los
+      // 3 campos desglosados se dejan en 0 (no se usan en los cálculos).
+      payload.costoSinDesglosar = parseFloat(formData.costoTotal) || 0;
+      payload.costoContenido = 0;
+      payload.costoEnvase = 0;
+      payload.costoEtiqueta = 0;
+    } else {
+      // Modo desglose: los 3 campos separados, costoSinDesglosar queda null.
+      payload.costoContenido = parseInt(formData.costoContenido) || 0;
+      payload.costoEnvase = parseInt(formData.costoEnvase) || 0;
+      payload.costoEtiqueta = parseInt(formData.costoEtiqueta) || 0;
+      payload.costoSinDesglosar = null;
+    }
+    // Costo informado: si no se activó el toggle, queda null (= el mentor ve
+    // el costo interno real). Si se activó, guardamos el valor.
+    payload.costoInformado = formData.usaCostoInformado
+      ? (parseFloat(formData.costoInformado) || 0)
+      : null;
+    onAddProduct(payload);
+    setFormData({
+      nombre: '', descripcion: '',
+      modoCosto: 'total',
+      costoTotal: '',
+      costoContenido: '', costoEnvase: '', costoEtiqueta: '',
+      usaCostoInformado: false,
+      costoInformado: '',
+      precioVenta: '',
     });
-    setFormData({ nombre: '', descripcion: '', costoContenido: '', costoEnvase: '', costoEtiqueta: '', precioVenta: '' });
   };
 
   return (
@@ -2758,30 +2948,109 @@ function ProductosSection({ state, onAddProduct, showModal, setShowModal, calcul
               />
             </div>
             <div>
-              <FormLabel tip="Costos por UNIDAD. Dejá en 0 lo que no tengas y lo completás después (con doble click en el listado).">Costos unitarios (contenido / envase / etiqueta)</FormLabel>
-              <div className="grid grid-cols-3 gap-2">
-                <input
-                  type="number"
-                  value={formData.costoContenido}
-                  onChange={(e) => setFormData({ ...formData, costoContenido: e.target.value })}
-                  placeholder="Contenido"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-                />
-                <input
-                  type="number"
-                  value={formData.costoEnvase}
-                  onChange={(e) => setFormData({ ...formData, costoEnvase: e.target.value })}
-                  placeholder="Envase"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-                />
-                <input
-                  type="number"
-                  value={formData.costoEtiqueta}
-                  onChange={(e) => setFormData({ ...formData, costoEtiqueta: e.target.value })}
-                  placeholder="Etiqueta"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-                />
+              <FormLabel required tip="Lo que te cuesta producir una unidad. Si querés, podés desglosarlo en contenido / envase / etiqueta; pero en la mayoría de los casos alcanza con un solo número.">
+                Costo del producto (por unidad)
+              </FormLabel>
+
+              {/* Tabs: costo total vs desglosado */}
+              <div className="flex gap-1 p-1 bg-gray-100 dark:bg-gray-700 rounded-lg mb-3">
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, modoCosto: 'total' })}
+                  className={`flex-1 py-1.5 text-xs rounded-md transition font-semibold ${
+                    formData.modoCosto === 'total'
+                      ? 'bg-white dark:bg-gray-800 text-pink-900 dark:text-pink-300 shadow'
+                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+                  }`}
+                >
+                  Costo total
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, modoCosto: 'desglose' })}
+                  className={`flex-1 py-1.5 text-xs rounded-md transition font-semibold ${
+                    formData.modoCosto === 'desglose'
+                      ? 'bg-white dark:bg-gray-800 text-pink-900 dark:text-pink-300 shadow'
+                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+                  }`}
+                >
+                  Desglosado
+                </button>
               </div>
+
+              {formData.modoCosto === 'total' ? (
+                <input
+                  type="number"
+                  step="0.01"
+                  value={formData.costoTotal}
+                  onChange={(e) => setFormData({ ...formData, costoTotal: e.target.value })}
+                  placeholder="Ej. 120"
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                />
+              ) : (
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-1">Contenido</label>
+                    <input
+                      type="number"
+                      value={formData.costoContenido}
+                      onChange={(e) => setFormData({ ...formData, costoContenido: e.target.value })}
+                      placeholder="0"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-1">Envase / pote</label>
+                    <input
+                      type="number"
+                      value={formData.costoEnvase}
+                      onChange={(e) => setFormData({ ...formData, costoEnvase: e.target.value })}
+                      placeholder="0"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-1">Etiqueta</label>
+                    <input
+                      type="number"
+                      value={formData.costoEtiqueta}
+                      onChange={(e) => setFormData({ ...formData, costoEtiqueta: e.target.value })}
+                      placeholder="0"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Costo informado al mentor (opcional). Si está seteado, el mentor
+                ve ESTE valor en lugar del costo real y su comisión se calcula
+                sobre (precio - costoInformado). */}
+            <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formData.usaCostoInformado}
+                  onChange={(e) => setFormData({ ...formData, usaCostoInformado: e.target.checked })}
+                  className="mt-0.5 w-4 h-4 rounded accent-pink-600"
+                />
+                <div className="flex-1">
+                  <span className="text-xs font-semibold text-amber-900 dark:text-amber-200">Costo informado distinto al real</span>
+                  <p className="text-[11px] text-amber-800 dark:text-amber-300/80 mt-0.5">
+                    Lo que el mentor ve como "costo del producto". La comisión del mentor se calcula sobre este valor, no sobre el costo real.
+                  </p>
+                </div>
+              </label>
+              {formData.usaCostoInformado && (
+                <input
+                  type="number"
+                  step="0.01"
+                  value={formData.costoInformado}
+                  onChange={(e) => setFormData({ ...formData, costoInformado: e.target.value })}
+                  placeholder="Costo informado por unidad"
+                  className="w-full mt-2 px-3 py-2 border border-amber-300 dark:border-amber-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
+                />
+              )}
             </div>
             <div>
               <FormLabel required tip="El precio por unidad que le cobrás al cliente.">Precio de venta unitario</FormLabel>
@@ -2918,7 +3187,7 @@ function ProductosTableView({ products, sales, clients, calculateMargin, expande
     <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700">
+          <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10">
             <tr className="text-left text-gray-700 dark:text-gray-200">
               <th className="px-4 py-3 font-semibold">Nombre</th>
               <th className="px-4 py-3 font-semibold">Descripción</th>
@@ -3222,7 +3491,7 @@ function ClientesSection({ state, onAddClient, onUpdateClient, showModal, setSho
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700">
+            <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10">
               <tr>
                 <th className="px-2 py-3 w-8"></th>
                 <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Nombre</th>
@@ -3291,8 +3560,10 @@ function ClientesSection({ state, onAddClient, onUpdateClient, showModal, setSho
   );
 }
 
-function ComisionesSection({ state, dispatch, onUpdateMentor, getMentorStats, filterMentor, setFilterMentor }) {
+function ComisionesSection({ state, dispatch, onUpdateMentor, onAddMentor, onRemoveMentor, getMentorStats, filterMentor, setFilterMentor }) {
   const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
+  const [showNewMentorModal, setShowNewMentorModal] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(null); // mentor id a borrar
 
   const handlePercentChange = (mentorId, value) => {
     const parsed = parseFloat(value);
@@ -3301,8 +3572,14 @@ function ComisionesSection({ state, dispatch, onUpdateMentor, getMentorStats, fi
     onUpdateMentor?.({ id: mentorId, porcentajeComision: clamped });
   };
 
-  // Manejo de pagos recibidos por mentor — reemplaza al flujo "Liquidar todo".
-  // Cada mentor tiene su propio array persistido en mentor.pagosRecibidos.
+  const handleNameChange = (mentorId, value) => {
+    onUpdateMentor?.({ id: mentorId, nombre: value });
+  };
+
+  const handleContactoChange = (mentorId, value) => {
+    onUpdateMentor?.({ id: mentorId, contacto: value });
+  };
+
   const updateMentorPagos = (mentorId, nuevosPagos) => {
     onUpdateMentor?.({ id: mentorId, pagosRecibidos: nuevosPagos });
   };
@@ -3313,59 +3590,147 @@ function ComisionesSection({ state, dispatch, onUpdateMentor, getMentorStats, fi
     <div className="space-y-6">
       <div className="flex flex-wrap justify-between items-center gap-3">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Gestión de Comisiones</h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Cuánto genera cada mentor, cuánto se le pagó, cuánto le queda.</p>
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Comisiones y Mentores</h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Gestioná los mentores, sus porcentajes y los pagos recibidos.</p>
         </div>
-        <select
-          value={filterMentor}
-          onChange={(e) => setFilterMentor(e.target.value)}
-          className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-        >
-          <option value="">Todos los mentores</option>
-          {state.mentors.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
-        </select>
+        <div className="flex items-center gap-2">
+          <select
+            value={filterMentor}
+            onChange={(e) => setFilterMentor(e.target.value)}
+            className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+          >
+            <option value="">Todos los mentores</option>
+            {state.mentors.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
+          </select>
+          {onAddMentor && (
+            <button
+              onClick={() => setShowNewMentorModal(true)}
+              className="inline-flex items-center gap-2 bg-pink-900 text-white px-4 py-2 rounded-lg hover:bg-pink-800 transition font-semibold text-sm"
+            >
+              <Plus size={16} /> Nuevo mentor
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Porcentaje de comisión por mentor (editable inline) */}
+      {showNewMentorModal && (
+        <NewMentorModal
+          onClose={() => setShowNewMentorModal(false)}
+          onCreate={(data) => { onAddMentor?.(data); setShowNewMentorModal(false); }}
+        />
+      )}
+
+      {confirmDelete != null && (
+        <Modal
+          title="¿Eliminar mentor?"
+          onClose={() => setConfirmDelete(null)}
+        >
+          <div className="space-y-4 text-sm text-gray-700 dark:text-gray-200">
+            <p>Esta acción elimina al mentor y desasigna sus órdenes y clientes. Los pagos registrados a este mentor se pierden.</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Si solo querés pausarlo, cambiá su % de comisión a 0 en vez de eliminarlo.</p>
+            <div className="flex gap-2 pt-2">
+              <button
+                onClick={() => setConfirmDelete(null)}
+                className="flex-1 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition font-semibold"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => { onRemoveMentor?.(confirmDelete); setConfirmDelete(null); }}
+                className="flex-1 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition font-semibold"
+              >
+                Eliminar
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {state.mentors.length === 0 && (
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-12 text-center border border-dashed border-gray-300 dark:border-gray-700">
+          <UserCheck size={36} className="mx-auto mb-3 text-gray-400" />
+          <h3 className="text-base font-bold text-gray-900 dark:text-gray-100 mb-1">No hay mentores todavía</h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Agregá el primer mentor para empezar a referir órdenes y pagar comisiones.</p>
+          <button
+            onClick={() => setShowNewMentorModal(true)}
+            className="inline-flex items-center gap-2 bg-pink-900 text-white px-4 py-2 rounded-lg hover:bg-pink-800 transition font-semibold text-sm"
+          >
+            <Plus size={16} /> Nuevo mentor
+          </button>
+        </div>
+      )}
+
+      {/* Editor de mentores: nombre, contacto, % comisión, y stats */}
+      {state.mentors.length > 0 && (
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
         <div className="flex items-start justify-between mb-4">
           <div>
-            <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Porcentaje de comisión por mentor</h3>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">Se aplica sobre el <span className="font-semibold">profit</span> de cada orden. Podés pisarlo por orden al registrarla.</p>
+            <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Mentores</h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">El % de comisión se aplica sobre el <span className="font-semibold">profit informado</span> de cada orden.</p>
           </div>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {state.mentors.map(mentor => {
             const pct = mentor.porcentajeComision ?? 50;
+            const stats = getMentorStats(mentor.id);
+            const mentorClients = state.clients.filter(c => c.mentorId === mentor.id);
             return (
               <div
                 key={mentor.id}
-                className="group flex items-center gap-3 p-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/60 dark:bg-gray-900/40 hover:border-pink-300 dark:hover:border-pink-600 transition-colors"
+                className="group p-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/60 dark:bg-gray-900/40 hover:border-pink-300 dark:hover:border-pink-600 transition-colors space-y-3"
               >
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-amber-200 to-amber-400 text-[#4a0f22] font-bold flex items-center justify-center shrink-0 shadow-sm">
-                  {(mentor.nombre || 'M').charAt(0).toUpperCase()}
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-amber-200 to-amber-400 text-[#4a0f22] font-bold flex items-center justify-center shrink-0 shadow-sm">
+                    {(mentor.nombre || 'M').charAt(0).toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0 space-y-1.5">
+                    <input
+                      type="text"
+                      value={mentor.nombre || ''}
+                      onChange={(e) => handleNameChange(mentor.id, e.target.value)}
+                      className="w-full px-2 py-1 text-sm font-semibold border border-transparent hover:border-gray-300 dark:hover:border-gray-600 bg-transparent text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-pink-500 focus:border-pink-500 focus:bg-white dark:focus:bg-gray-800"
+                    />
+                    <input
+                      type="text"
+                      value={mentor.contacto || ''}
+                      onChange={(e) => handleContactoChange(mentor.id, e.target.value)}
+                      placeholder="Contacto (WhatsApp, email…)"
+                      className="w-full px-2 py-1 text-[11px] text-gray-600 dark:text-gray-400 border border-transparent hover:border-gray-300 dark:hover:border-gray-600 bg-transparent rounded focus:outline-none focus:ring-1 focus:ring-pink-500 focus:border-pink-500 focus:bg-white dark:focus:bg-gray-800"
+                    />
+                  </div>
+                  <button
+                    onClick={() => setConfirmDelete(mentor.id)}
+                    className="opacity-0 group-hover:opacity-100 p-1 rounded text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition"
+                    title="Eliminar mentor"
+                  >
+                    <Trash2 size={14} />
+                  </button>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{mentor.nombre}</p>
-                  <p className="text-[11px] text-gray-500 dark:text-gray-400">Comisión sobre profit</p>
-                </div>
-                <div className="flex items-center gap-1">
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    step="1"
-                    value={pct}
-                    onChange={(e) => handlePercentChange(mentor.id, e.target.value)}
-                    className="w-16 px-2 py-1.5 text-sm font-bold text-right border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-md focus:outline-none focus:ring-2 focus:ring-pink-500 tabular-nums"
-                  />
-                  <span className="text-sm font-semibold text-gray-500 dark:text-gray-400">%</span>
+
+                <div className="flex items-center justify-between gap-3 pt-2 border-t border-gray-200 dark:border-gray-700">
+                  <div className="text-[11px] text-gray-500 dark:text-gray-400 space-y-0.5">
+                    <div>Ventas referidas: <span className="font-bold text-gray-900 dark:text-gray-100">{fmtMoney(stats.totalSales)}</span></div>
+                    <div>Clientes: <span className="font-bold text-gray-900 dark:text-gray-100">{mentorClients.length}</span></div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="1"
+                      value={pct}
+                      onChange={(e) => handlePercentChange(mentor.id, e.target.value)}
+                      className="w-16 px-2 py-1.5 text-sm font-bold text-right border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-md focus:outline-none focus:ring-2 focus:ring-pink-500 tabular-nums"
+                    />
+                    <span className="text-sm font-semibold text-gray-500 dark:text-gray-400">%</span>
+                  </div>
                 </div>
               </div>
             );
           })}
         </div>
       </div>
+      )}
 
       {/* Balance + historial de pagos por mentor */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
@@ -3801,11 +4166,10 @@ function EntityDataCard({ entity, state, dispatch, addToast }) {
   );
 }
 
-function AnalyticsSection({ state, currentUser }) {
-  const [report, setReport] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [lastFetch, setLastFetch] = useState(0);
+function AnalyticsSection({ state, currentUser, analyticsState, onFetch }) {
+  // El estado vive en el AppShell para que el reporte siga generándose
+  // aunque el usuario navegue a otra sección.
+  const { report, loading, error, lastFetch } = analyticsState;
 
   // Snapshot enriquecido para analytics (incluye más histórico que el del chatbot)
   const snapshot = {
@@ -3836,24 +4200,7 @@ function AnalyticsSection({ state, currentUser }) {
     }),
   };
 
-  const fetchReport = async () => {
-    setLoading(true); setError('');
-    try {
-      const res = await fetch('/api/analytics', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ snapshot }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
-      setReport(data);
-      setLastFetch(Date.now());
-    } catch (err) {
-      setError(err.message || 'No pude generar el reporte.');
-    } finally {
-      setLoading(false);
-    }
-  };
+  const fetchReport = () => onFetch?.(snapshot);
 
   return (
     <div className="space-y-6">
@@ -4139,7 +4486,7 @@ function EquipoOrdenesView({ state, mentorId, compact = false }) {
       )}
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700">
+          <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10">
             <tr className="text-left text-gray-700 dark:text-gray-200">
               <th className="px-4 py-3 font-semibold">Fecha</th>
               <th className="px-4 py-3 font-semibold">Cliente</th>
@@ -4251,7 +4598,7 @@ function MentorResumenSection({ currentUser, state, getMentorStats }) {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="text-left text-gray-600 dark:text-gray-300 border-b border-gray-200 dark:border-gray-700">
+              <thead className="text-left text-gray-600 dark:text-gray-300 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10 bg-white dark:bg-gray-800">
                 <tr>
                   <th className="px-3 py-2 font-semibold">Fecha</th>
                   <th className="px-3 py-2 font-semibold text-right">Monto</th>
@@ -4310,7 +4657,7 @@ function MentorComisionesSection({ currentUser, state, filterMonth, setFilterMon
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700">
+            <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10">
               <tr>
                 <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Fecha</th>
                 <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Cliente</th>
@@ -4349,7 +4696,7 @@ function MentorClientesSection({ currentUser, state }) {
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700">
+            <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10">
               <tr>
                 <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Nombre</th>
                 <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Teléfono</th>
@@ -4511,7 +4858,7 @@ function ClientDetailPanel({ stats, products }) {
       ) : (
         <div className="overflow-x-auto bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
           <table className="w-full text-xs">
-            <thead className="bg-gray-50 dark:bg-gray-700/60">
+            <thead className="bg-gray-50 dark:bg-gray-700/60 sticky top-0 z-10">
               <tr className="text-left text-gray-600 dark:text-gray-300">
                 <th className="px-3 py-2 font-semibold">Fecha</th>
                 <th className="px-3 py-2 font-semibold">Producto</th>
@@ -5082,7 +5429,7 @@ function EditableCell({ value, onSave, className = '', prefix = '', suffix = '',
 // como tabs en lugar de apilados (mucho menos vertical, más práctico).
 // El tab default es 'cobros' porque suele ser lo primero que la admin
 // quiere consultar al expandir una orden (cuánto cobré / falta cobrar).
-function OrderExpansion({ order, cobrosSummary, payments, mentorNombre, onCobrosChange, onPaymentChange }) {
+function OrderExpansion({ order, cobrosSummary, payments, mentorNombre, onCobrosChange, onPaymentChange, onIncidenciaChange }) {
   const [tab, setTab] = useState('cobros');
   const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
 
@@ -5116,6 +5463,18 @@ function OrderExpansion({ order, cobrosSummary, payments, mentorNombre, onCobros
             {aPagarTotal > 0 ? `${fmtMoney(aPagarTotal)} a pagar` : 'Todo pagado ✓'}
           </p>
         </button>
+        <button
+          type="button"
+          onClick={() => setTab('incidencia')}
+          className={`flex-1 px-4 py-2.5 text-left transition border-l border-gray-200 dark:border-gray-700 ${tab === 'incidencia' ? 'bg-red-50 dark:bg-red-900/20 border-b-2 border-red-500' : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b-2 border-transparent'}`}
+        >
+          <p className={`text-xs font-bold uppercase tracking-wider flex items-center gap-1 ${tab === 'incidencia' ? 'text-red-700 dark:text-red-300' : 'text-gray-500 dark:text-gray-400'}`}>
+            <AlertCircle size={12} /> Incidencia
+          </p>
+          <p className={`text-sm font-semibold ${order.tieneIncidencia ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-500'}`}>
+            {order.tieneIncidencia ? 'Activa ⚠' : 'Sin incidencias'}
+          </p>
+        </button>
       </div>
 
       <div className="p-4">
@@ -5125,6 +5484,77 @@ function OrderExpansion({ order, cobrosSummary, payments, mentorNombre, onCobros
         {tab === 'pagos' && (
           <PaymentsPanel order={order} payments={payments} mentorNombre={mentorNombre} onChange={onPaymentChange} />
         )}
+        {tab === 'incidencia' && (
+          <IncidenciaPanel order={order} onChange={onIncidenciaChange} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Panel de incidencias: textarea con el motivo y botón toggle para activar/resolver.
+// Si hay incidencia activa, el panel se ve en rojo. Al resolver, se limpia el motivo.
+function IncidenciaPanel({ order, onChange }) {
+  const [draft, setDraft] = useState(order.incidenciaDetalle || '');
+  useEffect(() => {
+    setDraft(order.incidenciaDetalle || '');
+  }, [order.id, order.incidenciaDetalle]);
+
+  const activa = !!order.tieneIncidencia;
+
+  const toggle = () => {
+    if (activa) {
+      // Desactivar: confirmamos con el usuario y limpiamos el motivo.
+      onChange?.({ tieneIncidencia: false, incidenciaDetalle: '' });
+    } else {
+      onChange?.({ tieneIncidencia: true, incidenciaDetalle: draft });
+    }
+  };
+
+  const saveDetalle = () => {
+    if (activa) {
+      onChange?.({ tieneIncidencia: true, incidenciaDetalle: draft });
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className={`p-3 rounded-lg border-2 ${activa ? 'bg-red-50 dark:bg-red-900/20 border-red-300 dark:border-red-800' : 'bg-gray-50 dark:bg-gray-900/40 border-gray-200 dark:border-gray-700'}`}>
+        <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">
+          {activa ? '⚠ Esta orden tiene una incidencia activa' : 'Esta orden no tiene incidencias registradas.'}
+        </p>
+        <p className="text-[11px] text-gray-500 dark:text-gray-400">
+          Marcá una incidencia si hay un problema que bloquea o demora el avance (ej. falta de stock, demora de proveedor, observación del cliente). Aparece en el listado y en las notificaciones.
+        </p>
+      </div>
+
+      <div>
+        <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Motivo</label>
+        <textarea
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={saveDetalle}
+          placeholder="Ej. Proveedor demoró el envío de envases. ETA nueva: 15/05."
+          rows={3}
+          className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 resize-y"
+        />
+        {activa && draft !== (order.incidenciaDetalle || '') && (
+          <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-1">Se guarda cuando salís del campo.</p>
+        )}
+      </div>
+
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={toggle}
+          className={`flex-1 py-2 rounded-lg font-semibold text-sm transition ${
+            activa
+              ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow'
+              : 'bg-red-600 hover:bg-red-700 text-white shadow'
+          }`}
+        >
+          {activa ? '✓ Resolver incidencia' : '⚠ Marcar incidencia'}
+        </button>
       </div>
     </div>
   );
@@ -5296,7 +5726,7 @@ function CobrosPanel({ order, summary, onChange }) {
 
       <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
         <table className="w-full text-xs">
-          <thead className="bg-gray-50 dark:bg-gray-700/60">
+          <thead className="bg-gray-50 dark:bg-gray-700/60 sticky top-0 z-10">
             <tr className="text-left text-gray-600 dark:text-gray-300">
               <th className="px-3 py-2 font-semibold w-32">Concepto</th>
               <th className="px-3 py-2 font-semibold text-right">Monto</th>
@@ -5379,6 +5809,17 @@ function CobrosPanel({ order, summary, onChange }) {
 
 function PaymentsPanel({ order, payments, mentorNombre, onChange }) {
   const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
+
+  // Modo de despliegue: 'simple' (1 card producción) | 'desglose' (3 cards).
+  // Default: simple. En la mayoría de los casos el proveedor entrega todo
+  // junto y no hace falta discriminar. Se persiste en la orden para que al
+  // volver a abrir el panel quede igual.
+  const initialMode = order.paymentsMode || (order.costoSinDesglosar != null ? 'simple' : (
+    // Si la orden ya tiene datos en los 3 rubros → asumimos desglose
+    (payments.envase?.monto || payments.etiqueta?.monto) ? 'desglose' : 'simple'
+  ));
+  const [mode, setMode] = useState(initialMode);
+
   const totalPagado = Object.values(payments)
     .filter(p => p.estado === 'pagado')
     .reduce((s, p) => s + (parseFloat(p.monto) || 0), 0);
@@ -5386,21 +5827,23 @@ function PaymentsPanel({ order, payments, mentorNombre, onChange }) {
     .filter(p => p.estado === 'pendiente')
     .reduce((s, p) => s + (parseFloat(p.monto) || 0), 0);
 
-  const rubros = [
+  // En modo simple, el pago de "producción" se guarda en el rubro 'contenido'
+  // (histórico por compatibilidad), y los otros 2 se ponen en 0 pagado.
+  const rubrosDesglose = [
     { key: 'contenido', label: 'Contenido' },
     { key: 'envase',    label: 'Envase / Pote' },
     { key: 'etiqueta',  label: 'Etiqueta' },
-    { key: 'mentor',    label: mentorNombre ? `Comisión — ${mentorNombre}` : 'Comisión mentor' },
   ];
+  const rubroMentor = { key: 'mentor', label: mentorNombre ? `Comisión — ${mentorNombre}` : 'Comisión mentor' };
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap gap-2 items-center justify-between">
-        <div>
+      <div className="flex flex-wrap gap-3 items-start justify-between">
+        <div className="flex-1 min-w-[200px]">
           <h4 className="text-sm font-bold text-gray-900 dark:text-gray-100">Pagos de esta orden</h4>
-          <p className="text-xs text-gray-500 dark:text-gray-400">Tildá "Pagado" cuando se haya abonado y completá los datos.</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Tildá "Pagado" cuando se haya abonado.</p>
         </div>
-        <div className="flex gap-4 text-xs">
+        <div className="flex gap-3 text-xs">
           <div className="text-right">
             <p className="text-gray-500 dark:text-gray-400">Pendiente</p>
             <p className="font-bold text-amber-600 dark:text-amber-400">{fmtMoney(totalPendiente)}</p>
@@ -5412,88 +5855,190 @@ function PaymentsPanel({ order, payments, mentorNombre, onChange }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-        {rubros.map(rubro => {
-          const data = payments[rubro.key];
-          const isMentorSinAsignar = rubro.key === 'mentor' && !order.mentorId;
-          const paid = data.estado === 'pagado';
-          return (
-            <div
-              key={rubro.key}
-              className={`rounded-lg border p-3 space-y-2 ${
-                isMentorSinAsignar
-                  ? 'bg-gray-100 dark:bg-gray-800 border-gray-200 dark:border-gray-700 opacity-60'
-                  : paid
-                    ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800'
-                    : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-gray-800 dark:text-gray-100 truncate">{rubro.label}</span>
-                {isMentorSinAsignar ? (
-                  <span className="text-[10px] text-gray-500 dark:text-gray-400 italic">sin mentor</span>
-                ) : (
-                  <label className="inline-flex items-center gap-1 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={paid}
-                      onChange={(e) => onChange(rubro.key, { estado: e.target.checked ? 'pagado' : 'pendiente' })}
-                      className="h-3.5 w-3.5 rounded border-gray-300 dark:border-gray-600 text-emerald-600 focus:ring-emerald-500"
-                    />
-                    <span className={`text-[10px] font-semibold uppercase ${paid ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}`}>
-                      {paid ? 'Pagado' : 'Pendiente'}
-                    </span>
-                  </label>
-                )}
-              </div>
-              <div>
-                <label className="block text-[10px] uppercase text-gray-500 dark:text-gray-400 mb-0.5">Monto</label>
-                <input
-                  type="number"
-                  disabled={isMentorSinAsignar}
-                  value={data.monto ?? ''}
-                  onChange={(e) => onChange(rubro.key, { monto: parseFloat(e.target.value) || 0 })}
-                  placeholder="0"
-                  className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-pink-500 disabled:cursor-not-allowed"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] uppercase text-gray-500 dark:text-gray-400 mb-0.5">Fecha pago</label>
-                <input
-                  type="date"
-                  disabled={isMentorSinAsignar}
-                  value={data.fecha || ''}
-                  onChange={(e) => onChange(rubro.key, { fecha: e.target.value })}
-                  className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-pink-500 disabled:cursor-not-allowed"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] uppercase text-gray-500 dark:text-gray-400 mb-0.5">Proveedor</label>
-                <input
-                  type="text"
-                  disabled={isMentorSinAsignar}
-                  value={data.proveedor || ''}
-                  onChange={(e) => onChange(rubro.key, { proveedor: e.target.value })}
-                  placeholder={rubro.key === 'mentor' ? 'Mentor' : 'Nombre del proveedor'}
-                  className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-pink-500 disabled:cursor-not-allowed"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] uppercase text-gray-500 dark:text-gray-400 mb-0.5">Nota</label>
-                <input
-                  type="text"
-                  disabled={isMentorSinAsignar}
-                  value={data.nota || ''}
-                  onChange={(e) => onChange(rubro.key, { nota: e.target.value })}
-                  placeholder="Opcional"
-                  className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-pink-500 disabled:cursor-not-allowed"
-                />
-              </div>
-            </div>
-          );
-        })}
+      {/* Tabs modo simple / desglose */}
+      <div className="flex gap-1 p-1 bg-gray-100 dark:bg-gray-700 rounded-lg max-w-xs">
+        <button
+          type="button"
+          onClick={() => setMode('simple')}
+          className={`flex-1 py-1 px-2 text-[11px] rounded-md transition font-semibold ${
+            mode === 'simple'
+              ? 'bg-white dark:bg-gray-800 text-pink-900 dark:text-pink-300 shadow'
+              : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+          }`}
+        >
+          Todo junto
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode('desglose')}
+          className={`flex-1 py-1 px-2 text-[11px] rounded-md transition font-semibold ${
+            mode === 'desglose'
+              ? 'bg-white dark:bg-gray-800 text-pink-900 dark:text-pink-300 shadow'
+              : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+          }`}
+        >
+          Desglosado
+        </button>
+      </div>
+
+      <div className={`grid grid-cols-1 gap-3 ${mode === 'simple' ? 'md:grid-cols-2' : 'md:grid-cols-2 xl:grid-cols-4'}`}>
+        {/* Modo simple: 1 sola card "Producción total" */}
+        {mode === 'simple' && (
+          <PaymentCard
+            label="Producción (todo junto)"
+            data={payments.contenido || {}}
+            onChange={(patch) => onChange('contenido', patch)}
+          />
+        )}
+
+        {/* Modo desglose: 3 cards separadas */}
+        {mode === 'desglose' && rubrosDesglose.map(rubro => (
+          <PaymentCard
+            key={rubro.key}
+            label={rubro.label}
+            data={payments[rubro.key] || {}}
+            onChange={(patch) => onChange(rubro.key, patch)}
+          />
+        ))}
+
+        {/* Comisión del mentor — siempre se muestra si hay mentor asignado */}
+        <PaymentCard
+          label={rubroMentor.label}
+          data={payments.mentor || {}}
+          onChange={(patch) => onChange('mentor', patch)}
+          disabled={!order.mentorId}
+          disabledLabel="sin mentor"
+          variant="mentor"
+        />
       </div>
     </div>
+  );
+}
+
+// Card individual para un rubro de pago. Simplificada: solo monto, fecha
+// y toggle pagado/pendiente. Sin proveedor ni nota (ruido innecesario).
+function PaymentCard({ label, data, onChange, disabled = false, disabledLabel = null, variant = 'default' }) {
+  const paid = data.estado === 'pagado';
+  const bg = disabled
+    ? 'bg-gray-100 dark:bg-gray-800 border-gray-200 dark:border-gray-700 opacity-60'
+    : paid
+      ? (variant === 'mentor'
+          ? 'bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800'
+          : 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800')
+      : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700';
+
+  return (
+    <div className={`rounded-lg border p-3 space-y-2 ${bg}`}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-bold text-gray-800 dark:text-gray-100 truncate">{label}</span>
+        {disabled ? (
+          <span className="text-[10px] text-gray-500 dark:text-gray-400 italic">{disabledLabel}</span>
+        ) : (
+          <label className="inline-flex items-center gap-1 cursor-pointer whitespace-nowrap">
+            <input
+              type="checkbox"
+              checked={paid}
+              onChange={(e) => onChange({ estado: e.target.checked ? 'pagado' : 'pendiente' })}
+              className="h-3.5 w-3.5 rounded border-gray-300 dark:border-gray-600 text-emerald-600 focus:ring-emerald-500"
+            />
+            <span className={`text-[10px] font-semibold uppercase ${paid ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}`}>
+              {paid ? 'Pagado' : 'Pendiente'}
+            </span>
+          </label>
+        )}
+      </div>
+      <div>
+        <label className="block text-[10px] uppercase text-gray-500 dark:text-gray-400 mb-0.5">Monto</label>
+        <input
+          type="number"
+          disabled={disabled}
+          value={data.monto ?? ''}
+          onChange={(e) => onChange({ monto: parseFloat(e.target.value) || 0 })}
+          placeholder="0"
+          className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-pink-500 disabled:cursor-not-allowed"
+        />
+      </div>
+      <div>
+        <label className="block text-[10px] uppercase text-gray-500 dark:text-gray-400 mb-0.5">Fecha pago</label>
+        <input
+          type="date"
+          disabled={disabled}
+          value={data.fecha || ''}
+          onChange={(e) => onChange({ fecha: e.target.value })}
+          className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-pink-500 disabled:cursor-not-allowed"
+        />
+      </div>
+    </div>
+  );
+}
+
+// Modal para crear un mentor nuevo desde la sección de Comisiones.
+function NewMentorModal({ onClose, onCreate }) {
+  const [data, setData] = useState({ nombre: '', contacto: '', porcentajeComision: 50 });
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!data.nombre.trim()) return;
+    onCreate({
+      nombre: data.nombre.trim(),
+      contacto: data.contacto.trim(),
+      porcentajeComision: Math.max(0, Math.min(100, parseFloat(data.porcentajeComision) || 50)),
+    });
+  };
+  return (
+    <Modal title="Nuevo mentor" onClose={onClose}>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <FormLabel required>Nombre</FormLabel>
+          <input
+            type="text"
+            autoFocus
+            value={data.nombre}
+            onChange={(e) => setData({ ...data, nombre: e.target.value })}
+            placeholder="Nombre del mentor"
+            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            required
+          />
+        </div>
+        <div>
+          <FormLabel tip="Teléfono, email o lo que quieras para ubicarlo. Opcional.">Contacto</FormLabel>
+          <input
+            type="text"
+            value={data.contacto}
+            onChange={(e) => setData({ ...data, contacto: e.target.value })}
+            placeholder="Ej. 11 1234-5678 o email"
+            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+          />
+        </div>
+        <div>
+          <FormLabel required tip="Sobre el profit informado de cada orden. Podés editarlo después.">Comisión (%)</FormLabel>
+          <input
+            type="number"
+            min="0"
+            max="100"
+            step="1"
+            value={data.porcentajeComision}
+            onChange={(e) => setData({ ...data, porcentajeComision: e.target.value })}
+            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            required
+          />
+        </div>
+        <div className="flex gap-2 pt-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-1 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition font-semibold"
+          >
+            Cancelar
+          </button>
+          <button
+            type="submit"
+            className="flex-1 bg-pink-900 text-white py-2 rounded-lg hover:bg-pink-800 transition font-semibold"
+          >
+            Crear mentor
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
@@ -5595,20 +6140,31 @@ function QuickClientModal({ mentors, onClose, onCreate }) {
 function QuickProductModal({ onClose, onCreate }) {
   const [data, setData] = useState({
     nombre: '', descripcion: '', precioVenta: '',
+    costoTotal: '',
+    modoCosto: 'total',
     costoContenido: '', costoEnvase: '', costoEtiqueta: '',
   });
   const [showCosts, setShowCosts] = useState(false);
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    onCreate({
+    const payload = {
       nombre: data.nombre.trim(),
       descripcion: data.descripcion.trim(),
       precioVenta: parseInt(data.precioVenta) || 0,
-      costoContenido: parseInt(data.costoContenido) || 0,
-      costoEnvase: parseInt(data.costoEnvase) || 0,
-      costoEtiqueta: parseInt(data.costoEtiqueta) || 0,
-    });
+    };
+    if (data.modoCosto === 'total') {
+      payload.costoSinDesglosar = parseFloat(data.costoTotal) || 0;
+      payload.costoContenido = 0;
+      payload.costoEnvase = 0;
+      payload.costoEtiqueta = 0;
+    } else {
+      payload.costoContenido = parseInt(data.costoContenido) || 0;
+      payload.costoEnvase = parseInt(data.costoEnvase) || 0;
+      payload.costoEtiqueta = parseInt(data.costoEtiqueta) || 0;
+      payload.costoSinDesglosar = null;
+    }
+    onCreate(payload);
   };
 
   return (
@@ -5664,38 +6220,73 @@ function QuickProductModal({ onClose, onCreate }) {
             onClick={() => setShowCosts(s => !s)}
             className="text-xs font-semibold text-pink-700 dark:text-pink-300 hover:underline"
           >
-            {showCosts ? '− Ocultar costos' : '+ Cargar costos ahora (opcional)'}
+            {showCosts ? '− Ocultar costo' : '+ Cargar costo ahora (opcional)'}
           </button>
           {showCosts && (
             <div>
-              <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Costos unitarios (contenido / envase / etiqueta)</label>
-              <div className="grid grid-cols-3 gap-2">
-                <input
-                  type="number"
-                  min="0"
-                  value={data.costoContenido}
-                  onChange={(e) => setData({ ...data, costoContenido: e.target.value })}
-                  placeholder="Contenido"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-                />
-                <input
-                  type="number"
-                  min="0"
-                  value={data.costoEnvase}
-                  onChange={(e) => setData({ ...data, costoEnvase: e.target.value })}
-                  placeholder="Envase"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-                />
-                <input
-                  type="number"
-                  min="0"
-                  value={data.costoEtiqueta}
-                  onChange={(e) => setData({ ...data, costoEtiqueta: e.target.value })}
-                  placeholder="Etiqueta"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-                />
+              <div className="flex gap-1 p-1 bg-gray-100 dark:bg-gray-700 rounded-lg mb-2">
+                <button
+                  type="button"
+                  onClick={() => setData({ ...data, modoCosto: 'total' })}
+                  className={`flex-1 py-1 text-[11px] rounded-md transition font-semibold ${
+                    data.modoCosto === 'total'
+                      ? 'bg-white dark:bg-gray-800 text-pink-900 dark:text-pink-300 shadow'
+                      : 'text-gray-600 dark:text-gray-400'
+                  }`}
+                >
+                  Costo total
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setData({ ...data, modoCosto: 'desglose' })}
+                  className={`flex-1 py-1 text-[11px] rounded-md transition font-semibold ${
+                    data.modoCosto === 'desglose'
+                      ? 'bg-white dark:bg-gray-800 text-pink-900 dark:text-pink-300 shadow'
+                      : 'text-gray-600 dark:text-gray-400'
+                  }`}
+                >
+                  Desglosado
+                </button>
               </div>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Si los dejás vacíos se guardan en 0 y los completás después.</p>
+              {data.modoCosto === 'total' ? (
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={data.costoTotal}
+                  onChange={(e) => setData({ ...data, costoTotal: e.target.value })}
+                  placeholder="Costo total por unidad"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                />
+              ) : (
+                <div className="grid grid-cols-3 gap-2">
+                  <input
+                    type="number"
+                    min="0"
+                    value={data.costoContenido}
+                    onChange={(e) => setData({ ...data, costoContenido: e.target.value })}
+                    placeholder="Contenido"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    value={data.costoEnvase}
+                    onChange={(e) => setData({ ...data, costoEnvase: e.target.value })}
+                    placeholder="Envase"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    value={data.costoEtiqueta}
+                    onChange={(e) => setData({ ...data, costoEtiqueta: e.target.value })}
+                    placeholder="Etiqueta"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                  />
+                </div>
+              )}
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Podés completarlo después desde el listado de productos.</p>
             </div>
           )}
           <div className="flex gap-2 pt-2">
@@ -5721,7 +6312,8 @@ function QuickProductModal({ onClose, onCreate }) {
 
 // Utility Components
 function Modal({ title, onClose, children }) {
-  // Cerrar con Escape
+  // Cerrar con Escape. Click afuera NO cierra — evita perder datos por un
+  // click accidental. Para cerrar hay que usar el botón X o apretar Esc.
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose?.(); };
     window.addEventListener('keydown', onKey);
@@ -5731,11 +6323,9 @@ function Modal({ title, onClose, children }) {
   return (
     <div
       className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fade-in"
-      onClick={onClose}
     >
       <div aria-hidden="true" className="absolute inset-0 bg-black/60 backdrop-blur-md" />
       <div
-        onClick={(e) => e.stopPropagation()}
         className="relative bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl p-5 sm:p-8 w-full max-w-md max-h-[90vh] overflow-y-auto border border-gray-100 dark:border-gray-700 animate-scale-in"
       >
         <div className="flex justify-between items-center mb-5 sm:mb-6">
@@ -5780,8 +6370,8 @@ function getSectionTitle(user, section) {
     ventas: 'Ventas',
     productos: 'Productos',
     clientes: 'Clientes',
-    comisiones: 'Comisiones',
-    mentores: 'Equipo',
+    comisiones: 'Comisiones y Mentores',
+    mentores: 'Comisiones y Mentores', // fallback: sección vieja cae al mismo lugar
     analytics: 'Analytics con IA',
     datos: 'Datos (Export / Import)',
   };
@@ -6199,7 +6789,7 @@ function AlertItem({ alerta }) {
   );
 }
 
-function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, onOpenCommand, onOpenMobileMenu, notificationsSnapshot }) {
+function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, onOpenCommand, onOpenMobileMenu, notificationsSnapshot, bgTasks = [] }) {
   const [scrolled, setScrolled] = useState(false);
   const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform);
 
@@ -6256,6 +6846,15 @@ function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, onOpenCommand
         >
           <Search size={18} />
         </button>
+        {bgTasks.length > 0 && (
+          <div
+            className="hidden sm:inline-flex items-center gap-2 px-3 py-1.5 text-[11px] rounded-lg bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800/50 text-amber-800 dark:text-amber-200 animate-pulse"
+            title={bgTasks.join(', ')}
+          >
+            <Sparkles size={12} className="animate-spin" />
+            <span>{bgTasks[0]}{bgTasks.length > 1 ? ` +${bgTasks.length - 1}` : ''}</span>
+          </div>
+        )}
         {notificationsSnapshot && (
           <NotificationsBell snapshot={notificationsSnapshot} />
         )}
@@ -6321,8 +6920,7 @@ function CommandPalette({ state, currentUser, onClose, onNavigate, onNewSale, on
       { id: 'go-ventas', group: 'Ir a', label: 'Ventas', icon: TrendingUp, shortcut: 'G V', run: () => onNavigate('ventas') },
       { id: 'go-productos', group: 'Ir a', label: 'Productos', icon: Package, shortcut: 'G P', run: () => onNavigate('productos') },
       { id: 'go-clientes', group: 'Ir a', label: 'Clientes', icon: Users, shortcut: 'G C', run: () => onNavigate('clientes') },
-      { id: 'go-comisiones', group: 'Ir a', label: 'Comisiones', icon: CreditCard, shortcut: 'G $', run: () => onNavigate('comisiones') },
-      { id: 'go-mentores', group: 'Ir a', label: 'Mentores', icon: UserCheck, shortcut: 'G M', run: () => onNavigate('mentores') },
+      { id: 'go-comisiones', group: 'Ir a', label: 'Comisiones y Mentores', icon: CreditCard, shortcut: 'G $', run: () => onNavigate('comisiones') },
       { id: 'new-sale', group: 'Acciones', label: 'Nueva venta', icon: Plus, shortcut: 'N V', run: onNewSale },
       { id: 'new-client', group: 'Acciones', label: 'Nuevo cliente', icon: Plus, shortcut: 'N C', run: onNewClient },
       { id: 'new-product', group: 'Acciones', label: 'Nuevo producto', icon: Plus, shortcut: 'N P', run: onNewProduct },

@@ -1579,20 +1579,15 @@ function OrdersList({ state, dispatch, orders }) {
                 </tr>
                 {isOpen && payments && cobrosSummary && (
                   <tr className="bg-gray-50 dark:bg-gray-900/40">
-                    <td colSpan={13} className="px-6 py-4 space-y-6">
-                      <CobrosPanel
+                    <td colSpan={13} className="px-4 md:px-6 py-3">
+                      <OrderExpansion
                         order={order}
-                        summary={cobrosSummary}
-                        onChange={(patch) => handleCobrosChange(order, patch)}
+                        cobrosSummary={cobrosSummary}
+                        payments={payments}
+                        mentorNombre={hasMentor ? getMentorName(mentorId) : null}
+                        onCobrosChange={(patch) => handleCobrosChange(order, patch)}
+                        onPaymentChange={(rubro, data) => handlePaymentChange(order.id, rubro, data)}
                       />
-                      <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
-                        <PaymentsPanel
-                          order={order}
-                          payments={payments}
-                          mentorNombre={hasMentor ? getMentorName(mentorId) : null}
-                          onChange={(rubro, data) => handlePaymentChange(order.id, rubro, data)}
-                        />
-                      </div>
                     </td>
                   </tr>
                 )}
@@ -4422,6 +4417,58 @@ function EditableCell({ value, onSave, className = '', prefix = '', suffix = '',
 
 // Panel de cobros del cliente: plan de cuotas, lista de cobros recibidos,
 // cálculo automático de saldo pendiente. Plata que ENTRA del cliente.
+// Wrapper compacto para la expansión de una orden. Muestra Cobros y Pagos
+// como tabs en lugar de apilados (mucho menos vertical, más práctico).
+// El tab default es 'cobros' porque suele ser lo primero que la admin
+// quiere consultar al expandir una orden (cuánto cobré / falta cobrar).
+function OrderExpansion({ order, cobrosSummary, payments, mentorNombre, onCobrosChange, onPaymentChange }) {
+  const [tab, setTab] = useState('cobros');
+  const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
+
+  // Mini-stats para el botón de cada tab (preview de su contenido)
+  const saldoPendiente = cobrosSummary.saldo > 0 ? cobrosSummary.saldo : 0;
+  const aPagarTotal = ['contenido', 'envase', 'etiqueta', 'mentor']
+    .filter(k => k !== 'mentor' || order.mentorId)
+    .reduce((sum, k) => sum + (payments[k]?.estado === 'pendiente' ? (payments[k]?.monto || 0) : 0), 0);
+
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+      {/* Tabs compactos */}
+      <div className="flex border-b border-gray-200 dark:border-gray-700">
+        <button
+          type="button"
+          onClick={() => setTab('cobros')}
+          className={`flex-1 px-4 py-2.5 text-left transition ${tab === 'cobros' ? 'bg-emerald-50 dark:bg-emerald-900/20 border-b-2 border-emerald-500' : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b-2 border-transparent'}`}
+        >
+          <p className={`text-xs font-bold uppercase tracking-wider ${tab === 'cobros' ? 'text-emerald-700 dark:text-emerald-300' : 'text-gray-500 dark:text-gray-400'}`}>Cobros del cliente</p>
+          <p className={`text-sm font-semibold tabular-nums ${saldoPendiente > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+            {saldoPendiente > 0 ? `${fmtMoney(saldoPendiente)} pendiente` : 'Saldada ✓'}
+          </p>
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab('pagos')}
+          className={`flex-1 px-4 py-2.5 text-left transition border-l border-gray-200 dark:border-gray-700 ${tab === 'pagos' ? 'bg-sky-50 dark:bg-sky-900/20 border-b-2 border-sky-500' : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b-2 border-transparent'}`}
+        >
+          <p className={`text-xs font-bold uppercase tracking-wider ${tab === 'pagos' ? 'text-sky-700 dark:text-sky-300' : 'text-gray-500 dark:text-gray-400'}`}>Pagos a proveedores y equipo</p>
+          <p className={`text-sm font-semibold tabular-nums ${aPagarTotal > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+            {aPagarTotal > 0 ? `${fmtMoney(aPagarTotal)} a pagar` : 'Todo pagado ✓'}
+          </p>
+        </button>
+      </div>
+
+      <div className="p-4">
+        {tab === 'cobros' && (
+          <CobrosPanel order={order} summary={cobrosSummary} onChange={onCobrosChange} />
+        )}
+        {tab === 'pagos' && (
+          <PaymentsPanel order={order} payments={payments} mentorNombre={mentorNombre} onChange={onPaymentChange} />
+        )}
+      </div>
+    </div>
+  );
+}
+
 function CobrosPanel({ order, summary, onChange }) {
   const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
   const cobros = summary.cobros;

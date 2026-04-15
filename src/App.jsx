@@ -8,6 +8,8 @@ import {
   UserCheck, TrendingUp, Plus, Filter, Eye, Edit2, Trash2, Calendar, DollarSign,
   Moon, Sun, ChevronDown, ChevronRight, Search, X
 } from 'lucide-react';
+import { VioraLogo, VioraMark } from './logo.jsx';
+import LandingPage from './LandingPage.jsx';
 
 // Estados del pipeline de producción de una orden
 export const ORDER_STATES = [
@@ -198,7 +200,7 @@ export function getOrderPayments(order, product) {
   };
 }
 
-export default function LaboratorioViora() {
+function AppShell({ onExit }) {
   const [state, dispatch] = useReducer(appReducer, INITIAL_STATE);
   const [currentUser, setCurrentUser] = useState(null);
   const [currentSection, setCurrentSection] = useState('inicio');
@@ -236,6 +238,8 @@ export default function LaboratorioViora() {
   const handleLogout = () => {
     setCurrentUser(null);
     setCurrentSection('inicio');
+    // Al cerrar sesión, volvemos a la landing pública si el parent lo soporta.
+    if (typeof onExit === 'function') onExit();
   };
 
   const handleAddSale = (saleData) => {
@@ -2315,109 +2319,6 @@ function QuickProductModal({ onClose, onCreate }) {
 }
 
 // Utility Components
-
-// Logo del Laboratorio Viora recreado como SVG inline.
-// - variant: 'default' (claro) para fondos claros, 'light' para sidebar oscuro (el arco se aclara).
-// - size: 'sm' | 'md' | 'lg' controla alto/ancho.
-function VioraLogo({ variant = 'default', size = 'md', className = '' }) {
-  const sizes = {
-    sm: { w: 140, h: 70 },
-    md: { w: 260, h: 140 },
-    lg: { w: 360, h: 190 },
-  };
-  const { w, h } = sizes[size] || sizes.md;
-  const arcGradientId = `viora-arc-${variant}-${size}`;
-  const starGradientId = `viora-star-${variant}-${size}`;
-  // Colores del texto según el contexto. El dorado se mantiene igual.
-  const textMain = variant === 'light' ? '#ffffff' : '#111111';
-  const textLabel = variant === 'light' ? '#f5e9d6' : '#6b4a2a';
-  return (
-    <svg
-      viewBox="0 0 400 200"
-      className={className}
-      width={w}
-      height={h}
-      role="img"
-      aria-label="Laboratorio Viora"
-    >
-      <defs>
-        <linearGradient id={arcGradientId} x1="0%" y1="0%" x2="100%" y2="0%">
-          <stop offset="0%" stopColor="#e9c99d" />
-          <stop offset="40%" stopColor="#c39866" />
-          <stop offset="70%" stopColor="#b8895a" />
-          <stop offset="100%" stopColor="#e9c99d" />
-        </linearGradient>
-        <linearGradient id={starGradientId} x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#e9c99d" />
-          <stop offset="100%" stopColor="#b8895a" />
-        </linearGradient>
-      </defs>
-      {/* Arco elíptico dorado (casi completo, con una sutil apertura a la derecha) */}
-      <ellipse
-        cx="200" cy="100" rx="170" ry="68"
-        fill="none"
-        stroke={`url(#${arcGradientId})`}
-        strokeWidth="4.5"
-        strokeLinecap="round"
-        strokeDasharray="820 40"
-        strokeDashoffset="-45"
-      />
-      {/* Estrellas decorativas arriba a la derecha */}
-      <g fill={`url(#${starGradientId})`}>
-        <path d="M 350 38 L 352 48 L 362 50 L 352 52 L 350 62 L 348 52 L 338 50 L 348 48 Z" />
-        <path d="M 372 58 L 373.5 63 L 378.5 64 L 373.5 65 L 372 70 L 370.5 65 L 365.5 64 L 370.5 63 Z" />
-        <path d="M 360 70 L 361 74 L 365 75 L 361 76 L 360 80 L 359 76 L 355 75 L 359 74 Z" />
-      </g>
-      {/* "LABORATORIO" */}
-      <text
-        x="200" y="76" textAnchor="middle"
-        fontFamily="'Montserrat', 'Helvetica Neue', Arial, sans-serif"
-        fontSize="18"
-        fontWeight="500"
-        letterSpacing="5.5"
-        fill={textLabel}
-      >
-        LABORATORIO
-      </text>
-      {/* "Viora" cursivo */}
-      <text
-        x="200" y="150" textAnchor="middle"
-        fontFamily="'Allura', 'Brush Script MT', 'Segoe Script', cursive"
-        fontSize="110"
-        fontStyle="italic"
-        fill={textMain}
-      >
-        Viora
-      </text>
-    </svg>
-  );
-}
-
-// Versión monograma super-compacta (sólo la "V" dorada con el arco) para espacios estrechos
-// como el sidebar colapsado.
-function VioraMark({ className = '', size = 40 }) {
-  return (
-    <svg viewBox="0 0 100 100" width={size} height={size} className={className} role="img" aria-label="Viora">
-      <defs>
-        <linearGradient id="viora-mark-g" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#e9c99d" />
-          <stop offset=".5" stopColor="#b8895a" />
-          <stop offset="1" stopColor="#d6b084" />
-        </linearGradient>
-      </defs>
-      <text
-        x="50" y="78" textAnchor="middle"
-        fontFamily="'Allura', 'Brush Script MT', cursive"
-        fontSize="90"
-        fontStyle="italic"
-        fill="url(#viora-mark-g)"
-      >
-        V
-      </text>
-    </svg>
-  );
-}
-
 function Modal({ title, onClose, children }) {
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -2449,4 +2350,33 @@ function Badge({ text, type }) {
       {text.charAt(0).toUpperCase() + text.slice(1)}
     </span>
   );
+}
+
+
+// Router minimal: decide entre la landing pública (/) y el panel de gestión (/acceso)
+// en base a window.location.pathname. Sin dependencia de react-router para mantener
+// el bundle chico. Escucha popstate y expone navigate() vía history.pushState.
+export default function App() {
+  const [path, setPath] = useState(() => (typeof window !== 'undefined' ? window.location.pathname : '/'));
+
+  useEffect(() => {
+    const onPop = () => setPath(window.location.pathname);
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  const navigate = (to) => {
+    if (typeof window === 'undefined') return;
+    if (window.location.pathname !== to) {
+      window.history.pushState({}, '', to);
+    }
+    setPath(to);
+    window.scrollTo({ top: 0 });
+  };
+
+  const normalized = path.replace(/\/+$/, '') || '/';
+  if (normalized === '/acceso') {
+    return <AppShell onExit={() => navigate('/')} />;
+  }
+  return <LandingPage onAccess={() => navigate('/acceso')} />;
 }

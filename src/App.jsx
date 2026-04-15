@@ -462,10 +462,12 @@ function AppShell({ onExit }) {
           className="pointer-events-none absolute inset-0 opacity-[0.07] [background-image:radial-gradient(circle_at_1px_1px,_white_1px,_transparent_0)] [background-size:16px_16px]"
         />
 
-        {/* Botón de colapsar: flota en el borde derecho del sidebar */}
+        {/* Botón de colapsar: flota en el borde derecho del sidebar, anclado
+            al divisor del logo para no chocarse con el header sticky del main.
+            z-50 > z-30 del header para estar siempre visible. */}
         <button
           onClick={() => setSidebarOpen(!sidebarOpen)}
-          className="absolute -right-3 top-20 z-20 w-6 h-6 rounded-full bg-pink-900 border border-pink-700 text-white hover:bg-pink-800 hover:scale-110 transition-all duration-200 flex items-center justify-center shadow-lg"
+          className="absolute -right-3 top-[90px] z-50 w-6 h-6 rounded-full bg-pink-900 border border-pink-700 text-white hover:bg-pink-800 hover:scale-110 transition-all duration-200 flex items-center justify-center shadow-lg opacity-70 hover:opacity-100"
           aria-label={sidebarOpen ? 'Colapsar sidebar' : 'Expandir sidebar'}
           title={sidebarOpen ? 'Colapsar' : 'Expandir'}
         >

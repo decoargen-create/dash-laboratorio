@@ -1528,7 +1528,7 @@ function VentasSection({ state, onAddSale, onQuickAddClient, onQuickAddProduct, 
         <Modal title="Registrar Nueva Venta" onClose={() => setShowModal(false)}>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Cliente</label>
+              <FormLabel required>Cliente</FormLabel>
               <div className="flex gap-2">
                 <select
                   value={formData.clienteId}
@@ -1551,7 +1551,7 @@ function VentasSection({ state, onAddSale, onQuickAddClient, onQuickAddProduct, 
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Producto</label>
+              <FormLabel required>Producto</FormLabel>
               <div className="flex gap-2">
                 <select
                   value={formData.productoId}
@@ -1573,36 +1573,39 @@ function VentasSection({ state, onAddSale, onQuickAddClient, onQuickAddProduct, 
               </div>
             </div>
 
-            <input
-              type="number"
-              min="1"
-              value={formData.cantidad}
-              onChange={(e) => setFormData({ ...formData, cantidad: e.target.value })}
-              placeholder="Cantidad"
-              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-              required
-            />
+            <div>
+              <FormLabel required tip="Mínimo 100 unidades por producción.">Cantidad</FormLabel>
+              <input
+                type="number"
+                min="1"
+                value={formData.cantidad}
+                onChange={(e) => setFormData({ ...formData, cantidad: e.target.value })}
+                placeholder="Cantidad"
+                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                required
+              />
+            </div>
 
             <div>
-              <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Mentor asignado</label>
+              <FormLabel tip="Si hay mentor, cobrará comisión sobre el profit (%) o el presupuesto fijo que pongas abajo.">Mentor asignado</FormLabel>
               <select
                 value={formData.mentorId}
                 onChange={(e) => { setFormData({ ...formData, mentorId: e.target.value }); setPresupuestoTouched(false); }}
                 className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
               >
-                <option value="">Sin mentor (opcional)</option>
+                <option value="">Sin mentor</option>
                 {state.mentors.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
               </select>
             </div>
 
             {formData.mentorId && (
               <div>
-                <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">
+                <FormLabel tip="Monto FIJO que se paga al mentor por esta orden. Si lo dejás vacío, usa el % configurado en Comisiones.">
                   Presupuesto para el mentor
-                  <span className="ml-2 text-gray-400 dark:text-gray-500 font-normal">
-                    (sugerido 50% del profit: ${mentorSugerido.toLocaleString()})
+                  <span className="ml-1 text-gray-400 dark:text-gray-500 font-normal">
+                    · sugerido ${mentorSugerido.toLocaleString()}
                   </span>
-                </label>
+                </FormLabel>
                 <div className="flex items-center gap-2">
                   <div className="relative flex-1">
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 text-sm">$</span>
@@ -1754,57 +1757,64 @@ function ProductosSection({ state, onAddProduct, showModal, setShowModal, calcul
       {showModal && (
         <Modal title="Agregar Nuevo Producto" onClose={() => setShowModal(false)}>
           <form onSubmit={handleSubmit} className="space-y-4">
-            <input
-              type="text"
-              value={formData.nombre}
-              onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
-              placeholder="Nombre del producto"
-              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-              required
-            />
-            <input
-              type="text"
-              value={formData.descripcion}
-              onChange={(e) => setFormData({ ...formData, descripcion: e.target.value })}
-              placeholder="Descripción"
-              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-              required
-            />
-            <div className="grid grid-cols-3 gap-2">
+            <div>
+              <FormLabel required tip="Cómo aparece en el catálogo y en los listados.">Nombre</FormLabel>
               <input
-                type="number"
-                value={formData.costoContenido}
-                onChange={(e) => setFormData({ ...formData, costoContenido: e.target.value })}
-                placeholder="Contenido"
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-                required
-              />
-              <input
-                type="number"
-                value={formData.costoEnvase}
-                onChange={(e) => setFormData({ ...formData, costoEnvase: e.target.value })}
-                placeholder="Envase"
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-                required
-              />
-              <input
-                type="number"
-                value={formData.costoEtiqueta}
-                onChange={(e) => setFormData({ ...formData, costoEtiqueta: e.target.value })}
-                placeholder="Etiqueta"
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                type="text"
+                value={formData.nombre}
+                onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
+                placeholder="Nombre del producto"
+                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
                 required
               />
             </div>
-            <p className="text-xs text-gray-500 dark:text-gray-400 -mt-2">Costos unitarios: contenido, envase, etiqueta</p>
-            <input
-              type="number"
-              value={formData.precioVenta}
-              onChange={(e) => setFormData({ ...formData, precioVenta: e.target.value })}
-              placeholder="Precio Venta unitario"
-              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-              required
-            />
+            <div>
+              <FormLabel tip="Ej: 'Crema hidratante para piel seca'. Sirve para distinguir entre productos similares.">Descripción</FormLabel>
+              <input
+                type="text"
+                value={formData.descripcion}
+                onChange={(e) => setFormData({ ...formData, descripcion: e.target.value })}
+                placeholder="Descripción"
+                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+              />
+            </div>
+            <div>
+              <FormLabel tip="Costos por UNIDAD. Dejá en 0 lo que no tengas y lo completás después (con doble click en el listado).">Costos unitarios (contenido / envase / etiqueta)</FormLabel>
+              <div className="grid grid-cols-3 gap-2">
+                <input
+                  type="number"
+                  value={formData.costoContenido}
+                  onChange={(e) => setFormData({ ...formData, costoContenido: e.target.value })}
+                  placeholder="Contenido"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                />
+                <input
+                  type="number"
+                  value={formData.costoEnvase}
+                  onChange={(e) => setFormData({ ...formData, costoEnvase: e.target.value })}
+                  placeholder="Envase"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                />
+                <input
+                  type="number"
+                  value={formData.costoEtiqueta}
+                  onChange={(e) => setFormData({ ...formData, costoEtiqueta: e.target.value })}
+                  placeholder="Etiqueta"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                />
+              </div>
+            </div>
+            <div>
+              <FormLabel required tip="El precio por unidad que le cobrás al cliente.">Precio de venta unitario</FormLabel>
+              <input
+                type="number"
+                value={formData.precioVenta}
+                onChange={(e) => setFormData({ ...formData, precioVenta: e.target.value })}
+                placeholder="0"
+                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                required
+              />
+            </div>
             <button
               type="submit"
               className="w-full bg-pink-900 text-white py-2 rounded-lg hover:bg-pink-800 transition font-semibold"
@@ -2003,7 +2013,7 @@ function ClientesSection({ state, onAddClient, onUpdateClient, showModal, setSho
         <Modal title={editingId ? 'Editar Cliente' : 'Agregar Nuevo Cliente'} onClose={handleClose}>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Nombre completo</label>
+              <FormLabel required>Nombre completo</FormLabel>
               <input
                 type="text"
                 value={formData.nombre}
@@ -2014,7 +2024,7 @@ function ClientesSection({ state, onAddClient, onUpdateClient, showModal, setSho
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Teléfono</label>
+              <FormLabel required tip="Es el único canal de contacto del cliente. Poné el número con código de área.">Teléfono</FormLabel>
               <input
                 type="text"
                 value={formData.telefono}
@@ -2025,7 +2035,7 @@ function ClientesSection({ state, onAddClient, onUpdateClient, showModal, setSho
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Domicilio de despacho</label>
+              <FormLabel tip="Dirección a la que se despachan las órdenes de este cliente.">Domicilio de despacho</FormLabel>
               <input
                 type="text"
                 value={formData.domicilio}
@@ -2035,7 +2045,7 @@ function ClientesSection({ state, onAddClient, onUpdateClient, showModal, setSho
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Mentor asignado</label>
+              <FormLabel tip="Mentor que refirió al cliente. Cobrará comisión sobre sus ventas según el % configurado en Comisiones.">Mentor asignado</FormLabel>
               <select
                 value={formData.mentorId}
                 onChange={(e) => setFormData({ ...formData, mentorId: e.target.value })}
@@ -2047,7 +2057,7 @@ function ClientesSection({ state, onAddClient, onUpdateClient, showModal, setSho
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Órdenes pedidas</label>
+                <FormLabel tip="Contador manual. Te sirve si arrancás con un cliente que ya tenía historia previa.">Órdenes pedidas</FormLabel>
                 <input
                   type="number"
                   min="0"
@@ -2058,7 +2068,7 @@ function ClientesSection({ state, onAddClient, onUpdateClient, showModal, setSho
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Unidades producidas</label>
+                <FormLabel tip="Total de unidades fabricadas históricamente para este cliente (manual).">Unidades producidas</FormLabel>
                 <input
                   type="number"
                   min="0"
@@ -2734,6 +2744,34 @@ function CobroMiniCell({ summary, onClick }) {
   );
 }
 
+// Label unificado para formularios. Props:
+//   children: el texto del label
+//   required: si es true, suma un asterisco dorado
+//   tip: string con ayuda contextual; renderiza un ícono `?` con tooltip
+// Cuando no es required, muestra sufijo "(opcional)" en gris para que quede
+// explícito para la persona que carga el formulario.
+function FormLabel({ children, required = false, tip = null }) {
+  return (
+    <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1 inline-flex items-center gap-1">
+      <span>{children}</span>
+      {required ? (
+        <span className="text-amber-500" title="Campo obligatorio">*</span>
+      ) : (
+        <span className="font-normal text-gray-400 dark:text-gray-500 lowercase">(opcional)</span>
+      )}
+      {tip && (
+        <span
+          className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400 text-[9px] cursor-help select-none hover:bg-amber-200 dark:hover:bg-amber-700 hover:text-gray-700 dark:hover:text-gray-100 transition"
+          title={tip}
+          aria-label={tip}
+        >
+          ?
+        </span>
+      )}
+    </label>
+  );
+}
+
 function EditableCell({ value, onSave, className = '', prefix = '', suffix = '', align = 'right', disabled = false, placeholder = '—', title = 'Doble click para editar' }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
@@ -3189,7 +3227,7 @@ function QuickClientModal({ mentors, onClose, onCreate }) {
         </div>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Nombre completo *</label>
+            <FormLabel required>Nombre completo</FormLabel>
             <input
               type="text"
               value={data.nombre}
@@ -3201,7 +3239,7 @@ function QuickClientModal({ mentors, onClose, onCreate }) {
             />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Teléfono *</label>
+            <FormLabel required tip="Es el único canal de contacto que guardamos. Poné el número con código de área.">Teléfono</FormLabel>
             <input
               type="text"
               value={data.telefono}
@@ -3212,7 +3250,7 @@ function QuickClientModal({ mentors, onClose, onCreate }) {
             />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Mentor asignado (opcional)</label>
+            <FormLabel tip="Si el cliente vino referido por un mentor, asignalo para que se calcule su comisión sobre las ventas.">Mentor asignado</FormLabel>
             <select
               value={data.mentorId}
               onChange={(e) => setData({ ...data, mentorId: e.target.value })}
@@ -3223,7 +3261,7 @@ function QuickClientModal({ mentors, onClose, onCreate }) {
             </select>
           </div>
           <div>
-            <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Domicilio de despacho (opcional)</label>
+            <FormLabel tip="Dirección donde se despachan las órdenes. Después la podés completar desde el módulo de Clientes.">Domicilio de despacho</FormLabel>
             <input
               type="text"
               value={data.domicilio}
@@ -3290,7 +3328,7 @@ function QuickProductModal({ onClose, onCreate }) {
         </div>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Nombre *</label>
+            <FormLabel required tip="Cómo aparece en el catálogo y en los listados.">Nombre</FormLabel>
             <input
               type="text"
               value={data.nombre}
@@ -3302,7 +3340,7 @@ function QuickProductModal({ onClose, onCreate }) {
             />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Precio de venta unitario *</label>
+            <FormLabel required tip="El precio por unidad que le cobrás al cliente.">Precio de venta unitario</FormLabel>
             <input
               type="number"
               min="0"
@@ -3314,7 +3352,7 @@ function QuickProductModal({ onClose, onCreate }) {
             />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Descripción (opcional)</label>
+            <FormLabel tip="Ej: 'Crema hidratante para piel seca'. Sirve para distinguir entre productos similares.">Descripción</FormLabel>
             <input
               type="text"
               value={data.descripcion}

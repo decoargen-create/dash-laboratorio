@@ -984,7 +984,7 @@ function AppShell({ onExit }) {
 
         <div key={currentSection} className="p-4 md:p-8 animate-fade-in-up">
           {/* Admin Views */}
-          {currentUser.role === 'admin' && currentSection === 'inicio' && <InicioSection state={state} dispatch={dispatch} />}
+          {currentUser.role === 'admin' && currentSection === 'inicio' && <InicioSection state={state} dispatch={dispatch} onAddSale={handleAddSale} onQuickAddClient={createClient} onQuickAddProduct={createProduct} />}
           {currentUser.role === 'admin' && currentSection === 'ventas' && <VentasSection state={state} onAddSale={handleAddSale} onQuickAddClient={createClient} onQuickAddProduct={createProduct} showModal={showNewSaleModal} setShowModal={setShowNewSaleModal} />}
           {currentUser.role === 'admin' && currentSection === 'productos' && <ProductosSection state={state} onAddProduct={handleAddProduct} showModal={showNewProductModal} setShowModal={setShowNewProductModal} calculateMargin={calculateMargin} />}
           {currentUser.role === 'admin' && currentSection === 'clientes' && <ClientesSection state={state} onAddClient={handleAddClient} onUpdateClient={handleUpdateClient} showModal={showNewClientModal} setShowModal={setShowNewClientModal} />}
@@ -1334,7 +1334,7 @@ function LoginScreen({ onLogin, onSessionAuth, darkMode, toggleDarkMode }) {
   );
 }
 
-function InicioSection({ state, dispatch }) {
+function InicioSection({ state, dispatch, onAddSale, onQuickAddClient, onQuickAddProduct }) {
   const [filters, setFilters] = useState({
     dateFrom: '',
     dateTo: '',
@@ -1343,6 +1343,8 @@ function InicioSection({ state, dispatch }) {
     search: '',
     focus: null, // null | 'comisionesPendientes' | 'pagosProveedoresPendientes' | 'saldoPendiente'
   });
+  // Modal para crear orden sin salir de Inicio.
+  const [showNewOrderModal, setShowNewOrderModal] = useState(false);
 
   // Órdenes filtradas según el estado actual de los filtros
   const filteredOrders = useMemo(() => {
@@ -1430,7 +1432,30 @@ function InicioSection({ state, dispatch }) {
 
   return (
     <div className="space-y-8">
-      <DailyQuoteBanner />
+      {/* Botón principal de "Nueva orden" — destacado arriba de todo para que
+          sea lo primero que ves al entrar. Abre un modal con el form completo
+          sin tener que navegar a Ventas. */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <DailyQuoteBanner />
+        <button
+          onClick={() => setShowNewOrderModal(true)}
+          className="flex items-center gap-2 bg-gradient-to-r from-pink-700 to-rose-600 text-white px-5 py-2.5 rounded-xl shadow-lg hover:shadow-xl hover:scale-[1.02] active:scale-100 transition font-semibold text-sm"
+          title="Registrar una nueva orden"
+        >
+          <Plus size={18} /> Nueva orden
+        </button>
+      </div>
+
+      {showNewOrderModal && (
+        <NewSaleModal
+          state={state}
+          onAddSale={(data) => { onAddSale?.(data); setShowNewOrderModal(false); }}
+          onQuickAddClient={onQuickAddClient}
+          onQuickAddProduct={onQuickAddProduct}
+          onClose={() => setShowNewOrderModal(false)}
+        />
+      )}
+
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 md:gap-4">
         <StatCard
           icon={DollarSign}
@@ -2455,20 +2480,20 @@ function StatCard({ icon: Icon, label, value, color, delay = 0, onClick, active 
   );
 }
 
-function VentasSection({ state, onAddSale, onQuickAddClient, onQuickAddProduct, showModal, setShowModal }) {
+// Modal reutilizable para registrar una nueva venta/orden. Se usa desde
+// VentasSection y desde InicioSection para dejar la creación a un click
+// sin tener que navegar a otra sección.
+function NewSaleModal({ state, onAddSale, onQuickAddClient, onQuickAddProduct, onClose }) {
   const [formData, setFormData] = useState({ clienteId: '', productoId: '', cantidad: 1, mentorId: '', mentorPresupuesto: '' });
   const [showClientQuickModal, setShowClientQuickModal] = useState(false);
   const [showProductQuickModal, setShowProductQuickModal] = useState(false);
 
   // Cálculos derivados para sugerir el presupuesto del mentor al cargar la venta.
-  // La comisión se calcula como 50% del profit (precioVenta - costos) * cantidad.
   const productoSel = state.products.find(p => p.id === parseInt(formData.productoId));
   const cantidadNum = parseInt(formData.cantidad) || 0;
   const profitSugerido = productoSel ? (productoSel.precioVenta - getProductUnitCost(productoSel)) * cantidadNum : 0;
   const mentorSugerido = Math.max(0, Math.round(profitSugerido * 0.5));
 
-  // Cuando cambia el mentor, producto o cantidad, y el usuario no tocó el
-  // presupuesto manualmente, reseteamos el valor sugerido (50% de la venta).
   const [presupuestoTouched, setPresupuestoTouched] = useState(false);
   useEffect(() => {
     if (!presupuestoTouched) {
@@ -2492,25 +2517,21 @@ function VentasSection({ state, onAddSale, onQuickAddClient, onQuickAddProduct, 
       cantidad,
       montoTotal: producto.precioVenta * cantidad,
       mentorId,
-      // Solo guardamos el presupuesto si hay mentor asignado y un valor numérico.
       mentorPresupuesto: mentorId && presupuestoParsed != null && !Number.isNaN(presupuestoParsed)
         ? presupuestoParsed
         : null,
     };
     onAddSale(newSale);
-    setFormData({ clienteId: '', productoId: '', cantidad: 1, mentorId: '', mentorPresupuesto: '' });
-    setPresupuestoTouched(false);
   };
 
   const handleQuickClientCreated = (clientData) => {
     const newClient = onQuickAddClient(clientData);
-    // auto-select the new client, and pre-fill mentor if the client has one
     setFormData(prev => ({
       ...prev,
       clienteId: String(newClient.id),
       mentorId: newClient.mentorId ? String(newClient.mentorId) : prev.mentorId,
     }));
-    setPresupuestoTouched(false); // dejar que se recalcule el 50% sugerido
+    setPresupuestoTouched(false);
     setShowClientQuickModal(false);
   };
 
@@ -2520,140 +2541,21 @@ function VentasSection({ state, onAddSale, onQuickAddClient, onQuickAddProduct, 
     setShowProductQuickModal(false);
   };
 
-  const getClientName = (clienteId) => state.clients.find(c => c.id === clienteId)?.nombre || '-';
-  const getProductName = (productoId) => state.products.find(p => p.id === productoId)?.nombre || '-';
-  const getMentorName = (mentorId) => state.mentors.find(m => m.id === mentorId)?.nombre || '-';
-
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Gestión de Ventas</h2>
-        <button
-          onClick={() => setShowModal(true)}
-          className="flex items-center gap-2 bg-pink-900 text-white px-6 py-2 rounded-lg hover:bg-pink-800 transition font-semibold"
-        >
-          <Plus size={20} /> Nueva Venta
-        </button>
-      </div>
-
-      {showModal && (
-        <Modal title="Registrar Nueva Venta" onClose={() => setShowModal(false)}>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <FormLabel required>Cliente</FormLabel>
-              <div className="flex gap-2">
-                <select
-                  value={formData.clienteId}
-                  onChange={(e) => setFormData({ ...formData, clienteId: e.target.value })}
-                  className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-                  required
-                >
-                  <option value="">Seleccionar Cliente</option>
-                  {state.clients.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-                </select>
-                <button
-                  type="button"
-                  onClick={() => setShowClientQuickModal(true)}
-                  className="inline-flex items-center gap-1 px-3 py-2 border border-pink-600 text-pink-700 dark:text-pink-300 dark:border-pink-500 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition text-sm font-semibold whitespace-nowrap"
-                  title="Crear un nuevo cliente sin salir de esta pantalla"
-                >
-                  <Plus size={16} /> Nuevo
-                </button>
-              </div>
-            </div>
-
-            <div>
-              <FormLabel required>Producto</FormLabel>
-              <div className="flex gap-2">
-                <select
-                  value={formData.productoId}
-                  onChange={(e) => setFormData({ ...formData, productoId: e.target.value })}
-                  className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-                  required
-                >
-                  <option value="">Seleccionar Producto</option>
-                  {state.products.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-                </select>
-                <button
-                  type="button"
-                  onClick={() => setShowProductQuickModal(true)}
-                  className="inline-flex items-center gap-1 px-3 py-2 border border-pink-600 text-pink-700 dark:text-pink-300 dark:border-pink-500 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition text-sm font-semibold whitespace-nowrap"
-                  title="Crear un nuevo producto sin salir de esta pantalla"
-                >
-                  <Plus size={16} /> Nuevo
-                </button>
-              </div>
-            </div>
-
-            <div>
-              <FormLabel required tip="Mínimo 100 unidades por producción.">Cantidad</FormLabel>
-              <input
-                type="number"
-                min="1"
-                value={formData.cantidad}
-                onChange={(e) => setFormData({ ...formData, cantidad: e.target.value })}
-                placeholder="Cantidad"
-                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-                required
-              />
-            </div>
-
-            <div>
-              <FormLabel tip="Si hay mentor, cobrará comisión sobre el profit (%) o el presupuesto fijo que pongas abajo.">Mentor asignado</FormLabel>
-              <select
-                value={formData.mentorId}
-                onChange={(e) => { setFormData({ ...formData, mentorId: e.target.value }); setPresupuestoTouched(false); }}
-                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-              >
-                <option value="">Sin mentor</option>
-                {state.mentors.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
-              </select>
-            </div>
-
-            {formData.mentorId && (
-              <div>
-                <FormLabel tip="Monto FIJO que se paga al mentor por esta orden. Si lo dejás vacío, usa el % configurado en Comisiones.">
-                  Presupuesto para el mentor
-                  <span className="ml-1 text-gray-400 dark:text-gray-500 font-normal">
-                    · sugerido ${mentorSugerido.toLocaleString()}
-                  </span>
-                </FormLabel>
-                <div className="flex items-center gap-2">
-                  <div className="relative flex-1">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 text-sm">$</span>
-                    <input
-                      type="number"
-                      min="0"
-                      value={formData.mentorPresupuesto}
-                      onChange={(e) => { setFormData({ ...formData, mentorPresupuesto: e.target.value }); setPresupuestoTouched(true); }}
-                      placeholder={String(mentorSugerido)}
-                      className="w-full pl-6 pr-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-                    />
-                  </div>
-                  {presupuestoTouched && (
-                    <button
-                      type="button"
-                      onClick={() => { setFormData({ ...formData, mentorPresupuesto: String(mentorSugerido) }); setPresupuestoTouched(false); }}
-                      className="text-xs text-pink-700 dark:text-pink-300 hover:underline font-semibold whitespace-nowrap"
-                      title="Restaurar al 50% sugerido"
-                    >
-                      Usar 50%
-                    </button>
-                  )}
-                </div>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Este será el monto fijo que se le paga al mentor por esta orden.</p>
-              </div>
-            )}
-
-            <button
-              type="submit"
-              className="w-full bg-pink-900 text-white py-2 rounded-lg hover:bg-pink-800 transition font-semibold"
-            >
-              Registrar Venta
-            </button>
-          </form>
-        </Modal>
-      )}
+    <>
+      <Modal title="Registrar Nueva Orden" onClose={onClose}>
+        <NewSaleFormContent
+          state={state}
+          formData={formData}
+          setFormData={setFormData}
+          handleSubmit={handleSubmit}
+          mentorSugerido={mentorSugerido}
+          presupuestoTouched={presupuestoTouched}
+          setPresupuestoTouched={setPresupuestoTouched}
+          openQuickClient={() => setShowClientQuickModal(true)}
+          openQuickProduct={() => setShowProductQuickModal(true)}
+        />
+      </Modal>
 
       {showClientQuickModal && (
         <QuickClientModal
@@ -2667,6 +2569,156 @@ function VentasSection({ state, onAddSale, onQuickAddClient, onQuickAddProduct, 
         <QuickProductModal
           onClose={() => setShowProductQuickModal(false)}
           onCreate={handleQuickProductCreated}
+        />
+      )}
+    </>
+  );
+}
+
+// Solo los campos del form — extraído para no duplicar el JSX.
+function NewSaleFormContent({ state, formData, setFormData, handleSubmit, mentorSugerido, presupuestoTouched, setPresupuestoTouched, openQuickClient, openQuickProduct }) {
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div>
+        <FormLabel required>Cliente</FormLabel>
+        <div className="flex gap-2">
+          <select
+            value={formData.clienteId}
+            onChange={(e) => setFormData({ ...formData, clienteId: e.target.value })}
+            className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            required
+          >
+            <option value="">Seleccionar Cliente</option>
+            {state.clients.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+          </select>
+          <button
+            type="button"
+            onClick={openQuickClient}
+            className="inline-flex items-center gap-1 px-3 py-2 border border-pink-600 text-pink-700 dark:text-pink-300 dark:border-pink-500 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition text-sm font-semibold whitespace-nowrap"
+            title="Crear un nuevo cliente sin salir de esta pantalla"
+          >
+            <Plus size={16} /> Nuevo
+          </button>
+        </div>
+      </div>
+
+      <div>
+        <FormLabel required>Producto</FormLabel>
+        <div className="flex gap-2">
+          <select
+            value={formData.productoId}
+            onChange={(e) => setFormData({ ...formData, productoId: e.target.value })}
+            className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            required
+          >
+            <option value="">Seleccionar Producto</option>
+            {state.products.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+          </select>
+          <button
+            type="button"
+            onClick={openQuickProduct}
+            className="inline-flex items-center gap-1 px-3 py-2 border border-pink-600 text-pink-700 dark:text-pink-300 dark:border-pink-500 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition text-sm font-semibold whitespace-nowrap"
+            title="Crear un nuevo producto sin salir de esta pantalla"
+          >
+            <Plus size={16} /> Nuevo
+          </button>
+        </div>
+      </div>
+
+      <div>
+        <FormLabel required tip="Mínimo 100 unidades por producción.">Cantidad</FormLabel>
+        <input
+          type="number"
+          min="1"
+          value={formData.cantidad}
+          onChange={(e) => setFormData({ ...formData, cantidad: e.target.value })}
+          placeholder="Cantidad"
+          className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+          required
+        />
+      </div>
+
+      <div>
+        <FormLabel tip="Si hay mentor, cobrará comisión sobre el profit (%) o el presupuesto fijo que pongas abajo.">Mentor asignado</FormLabel>
+        <select
+          value={formData.mentorId}
+          onChange={(e) => { setFormData({ ...formData, mentorId: e.target.value }); setPresupuestoTouched(false); }}
+          className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+        >
+          <option value="">Sin mentor</option>
+          {state.mentors.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
+        </select>
+      </div>
+
+      {formData.mentorId && (
+        <div>
+          <FormLabel tip="Monto FIJO que se paga al mentor por esta orden. Si lo dejás vacío, usa el % configurado en Comisiones.">
+            Presupuesto para el mentor
+            <span className="ml-1 text-gray-400 dark:text-gray-500 font-normal">
+              · sugerido ${mentorSugerido.toLocaleString()}
+            </span>
+          </FormLabel>
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 text-sm">$</span>
+              <input
+                type="number"
+                min="0"
+                value={formData.mentorPresupuesto}
+                onChange={(e) => { setFormData({ ...formData, mentorPresupuesto: e.target.value }); setPresupuestoTouched(true); }}
+                placeholder={String(mentorSugerido)}
+                className="w-full pl-6 pr-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+              />
+            </div>
+            {presupuestoTouched && (
+              <button
+                type="button"
+                onClick={() => { setFormData({ ...formData, mentorPresupuesto: String(mentorSugerido) }); setPresupuestoTouched(false); }}
+                className="text-xs text-pink-700 dark:text-pink-300 hover:underline font-semibold whitespace-nowrap"
+                title="Restaurar al 50% sugerido"
+              >
+                Usar 50%
+              </button>
+            )}
+          </div>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Este será el monto fijo que se le paga al mentor por esta orden.</p>
+        </div>
+      )}
+
+      <button
+        type="submit"
+        className="w-full bg-pink-900 text-white py-2 rounded-lg hover:bg-pink-800 transition font-semibold"
+      >
+        Registrar Orden
+      </button>
+    </form>
+  );
+}
+
+function VentasSection({ state, onAddSale, onQuickAddClient, onQuickAddProduct, showModal, setShowModal }) {
+  const getClientName = (clienteId) => state.clients.find(c => c.id === clienteId)?.nombre || '-';
+  const getProductName = (productoId) => state.products.find(p => p.id === productoId)?.nombre || '-';
+  const getMentorName = (mentorId) => state.mentors.find(m => m.id === mentorId)?.nombre || '-';
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Gestión de Ventas</h2>
+        <button
+          onClick={() => setShowModal(true)}
+          className="flex items-center gap-2 bg-pink-900 text-white px-6 py-2 rounded-lg hover:bg-pink-800 transition font-semibold"
+        >
+          <Plus size={20} /> Nueva Orden
+        </button>
+      </div>
+
+      {showModal && (
+        <NewSaleModal
+          state={state}
+          onAddSale={(data) => { onAddSale(data); setShowModal(false); }}
+          onQuickAddClient={onQuickAddClient}
+          onQuickAddProduct={onQuickAddProduct}
+          onClose={() => setShowModal(false)}
         />
       )}
 

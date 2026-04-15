@@ -1665,7 +1665,7 @@ const ORDERS_COLUMNS = [
   { key: 'profit',    label: 'Profit',    default: true,  required: false },
   { key: 'estado',    label: 'Estado',    default: true,  required: false },
   { key: 'cobro',     label: 'Cobro',     default: true,  required: false },
-  { key: 'incidencia', label: 'Incidencia', default: false, required: false },
+  { key: 'incidencia', label: 'Incidencia', default: true, required: false },
 ];
 
 const ORDERS_DEFAULT_VISIBLE = ORDERS_COLUMNS.filter(c => c.default).map(c => c.key);
@@ -2029,6 +2029,7 @@ function OrdersList({ state, dispatch, orders }) {
                         mentorNombre={hasMentor ? getMentorName(mentorId) : null}
                         onCobrosChange={(patch) => handleCobrosChange(order, patch)}
                         onPaymentChange={(rubro, data) => handlePaymentChange(order.id, rubro, data)}
+                        onIncidenciaChange={(patch) => dispatch({ type: 'UPDATE_ORDER_INCIDENCIA', payload: { orderId: order.id, ...patch } })}
                       />
                     </td>
                   </tr>
@@ -5243,7 +5244,7 @@ function EditableCell({ value, onSave, className = '', prefix = '', suffix = '',
 // como tabs en lugar de apilados (mucho menos vertical, más práctico).
 // El tab default es 'cobros' porque suele ser lo primero que la admin
 // quiere consultar al expandir una orden (cuánto cobré / falta cobrar).
-function OrderExpansion({ order, cobrosSummary, payments, mentorNombre, onCobrosChange, onPaymentChange }) {
+function OrderExpansion({ order, cobrosSummary, payments, mentorNombre, onCobrosChange, onPaymentChange, onIncidenciaChange }) {
   const [tab, setTab] = useState('cobros');
   const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
 
@@ -5277,6 +5278,18 @@ function OrderExpansion({ order, cobrosSummary, payments, mentorNombre, onCobros
             {aPagarTotal > 0 ? `${fmtMoney(aPagarTotal)} a pagar` : 'Todo pagado ✓'}
           </p>
         </button>
+        <button
+          type="button"
+          onClick={() => setTab('incidencia')}
+          className={`flex-1 px-4 py-2.5 text-left transition border-l border-gray-200 dark:border-gray-700 ${tab === 'incidencia' ? 'bg-red-50 dark:bg-red-900/20 border-b-2 border-red-500' : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b-2 border-transparent'}`}
+        >
+          <p className={`text-xs font-bold uppercase tracking-wider flex items-center gap-1 ${tab === 'incidencia' ? 'text-red-700 dark:text-red-300' : 'text-gray-500 dark:text-gray-400'}`}>
+            <AlertCircle size={12} /> Incidencia
+          </p>
+          <p className={`text-sm font-semibold ${order.tieneIncidencia ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-500'}`}>
+            {order.tieneIncidencia ? 'Activa ⚠' : 'Sin incidencias'}
+          </p>
+        </button>
       </div>
 
       <div className="p-4">
@@ -5286,6 +5299,77 @@ function OrderExpansion({ order, cobrosSummary, payments, mentorNombre, onCobros
         {tab === 'pagos' && (
           <PaymentsPanel order={order} payments={payments} mentorNombre={mentorNombre} onChange={onPaymentChange} />
         )}
+        {tab === 'incidencia' && (
+          <IncidenciaPanel order={order} onChange={onIncidenciaChange} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Panel de incidencias: textarea con el motivo y botón toggle para activar/resolver.
+// Si hay incidencia activa, el panel se ve en rojo. Al resolver, se limpia el motivo.
+function IncidenciaPanel({ order, onChange }) {
+  const [draft, setDraft] = useState(order.incidenciaDetalle || '');
+  useEffect(() => {
+    setDraft(order.incidenciaDetalle || '');
+  }, [order.id, order.incidenciaDetalle]);
+
+  const activa = !!order.tieneIncidencia;
+
+  const toggle = () => {
+    if (activa) {
+      // Desactivar: confirmamos con el usuario y limpiamos el motivo.
+      onChange?.({ tieneIncidencia: false, incidenciaDetalle: '' });
+    } else {
+      onChange?.({ tieneIncidencia: true, incidenciaDetalle: draft });
+    }
+  };
+
+  const saveDetalle = () => {
+    if (activa) {
+      onChange?.({ tieneIncidencia: true, incidenciaDetalle: draft });
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className={`p-3 rounded-lg border-2 ${activa ? 'bg-red-50 dark:bg-red-900/20 border-red-300 dark:border-red-800' : 'bg-gray-50 dark:bg-gray-900/40 border-gray-200 dark:border-gray-700'}`}>
+        <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">
+          {activa ? '⚠ Esta orden tiene una incidencia activa' : 'Esta orden no tiene incidencias registradas.'}
+        </p>
+        <p className="text-[11px] text-gray-500 dark:text-gray-400">
+          Marcá una incidencia si hay un problema que bloquea o demora el avance (ej. falta de stock, demora de proveedor, observación del cliente). Aparece en el listado y en las notificaciones.
+        </p>
+      </div>
+
+      <div>
+        <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Motivo</label>
+        <textarea
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={saveDetalle}
+          placeholder="Ej. Proveedor demoró el envío de envases. ETA nueva: 15/05."
+          rows={3}
+          className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 resize-y"
+        />
+        {activa && draft !== (order.incidenciaDetalle || '') && (
+          <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-1">Se guarda cuando salís del campo.</p>
+        )}
+      </div>
+
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={toggle}
+          className={`flex-1 py-2 rounded-lg font-semibold text-sm transition ${
+            activa
+              ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow'
+              : 'bg-red-600 hover:bg-red-700 text-white shadow'
+          }`}
+        >
+          {activa ? '✓ Resolver incidencia' : '⚠ Marcar incidencia'}
+        </button>
       </div>
     </div>
   );

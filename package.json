@@ -1,8 +1,8 @@
 {
-  "name": "dash-laboratorio",
+  "name": "laboratorio-viora",
   "private": true,
   "version": "1.0.0",
-  "description": "Dashboard para gestion de ventas, comisiones y stock - Laboratorio de cosmetica",
+  "description": "Laboratorio Viora - Panel de gestion de ordenes, produccion, comisiones y pagos",
   "type": "module",
   "scripts": {
     "dev": "vite",

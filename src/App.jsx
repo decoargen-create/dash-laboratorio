@@ -198,7 +198,7 @@ export function getOrderPayments(order, product) {
   };
 }
 
-export default function DASHLaboratorio() {
+export default function LaboratorioViora() {
   const [state, dispatch] = useReducer(appReducer, INITIAL_STATE);
   const [currentUser, setCurrentUser] = useState(null);
   const [currentSection, setCurrentSection] = useState('inicio');
@@ -339,10 +339,12 @@ export default function DASHLaboratorio() {
     <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
       {/* Sidebar */}
       <aside className={`${sidebarOpen ? 'w-64' : 'w-20'} bg-gradient-to-b from-pink-900 to-pink-800 text-white transition-all duration-300 flex flex-col`}>
-        <div className="p-6 border-b border-pink-700">
-          <h1 className={`${!sidebarOpen && 'hidden'} text-2xl font-bold bg-gradient-to-r from-pink-200 to-rose-200 bg-clip-text text-transparent`}>
-            DASH
-          </h1>
+        <div className="p-4 border-b border-pink-700 flex items-center justify-center min-h-[80px]">
+          {sidebarOpen ? (
+            <VioraLogo variant="light" size="sm" />
+          ) : (
+            <VioraMark size={36} />
+          )}
         </div>
 
         <nav className="flex-1 p-4 space-y-2">
@@ -385,7 +387,7 @@ export default function DASHLaboratorio() {
       <main className="flex-1 overflow-auto">
         <header className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700 p-6 flex justify-between items-center">
           <div>
-            <h2 className="text-3xl font-bold text-gray-900 dark:text-gray-100">DASH Laboratorio</h2>
+            <h2 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Laboratorio Viora</h2>
             <p className="text-gray-600 dark:text-gray-400 text-sm">Bienvenido, {currentUser.name}</p>
           </div>
           <div className="flex items-center gap-4">
@@ -451,11 +453,9 @@ function LoginScreen({ onLogin, darkMode, toggleDarkMode }) {
         {darkMode ? <Sun size={20} /> : <Moon size={20} />}
       </button>
       <div className="w-full max-w-md bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-8">
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold bg-gradient-to-r from-pink-900 to-rose-700 dark:from-pink-300 dark:to-rose-400 bg-clip-text text-transparent">
-            DASH Laboratorio
-          </h1>
-          <p className="text-gray-600 dark:text-gray-400 mt-2">Cosmetics Business Dashboard</p>
+        <div className="text-center mb-8 flex flex-col items-center">
+          <VioraLogo size="md" variant={darkMode ? 'light' : 'default'} />
+          <p className="text-gray-600 dark:text-gray-400 mt-1 text-xs tracking-widest uppercase">Panel de gestión</p>
         </div>
 
         {loginMode === 'select' && (
@@ -2315,6 +2315,109 @@ function QuickProductModal({ onClose, onCreate }) {
 }
 
 // Utility Components
+
+// Logo del Laboratorio Viora recreado como SVG inline.
+// - variant: 'default' (claro) para fondos claros, 'light' para sidebar oscuro (el arco se aclara).
+// - size: 'sm' | 'md' | 'lg' controla alto/ancho.
+function VioraLogo({ variant = 'default', size = 'md', className = '' }) {
+  const sizes = {
+    sm: { w: 140, h: 70 },
+    md: { w: 260, h: 140 },
+    lg: { w: 360, h: 190 },
+  };
+  const { w, h } = sizes[size] || sizes.md;
+  const arcGradientId = `viora-arc-${variant}-${size}`;
+  const starGradientId = `viora-star-${variant}-${size}`;
+  // Colores del texto según el contexto. El dorado se mantiene igual.
+  const textMain = variant === 'light' ? '#ffffff' : '#111111';
+  const textLabel = variant === 'light' ? '#f5e9d6' : '#6b4a2a';
+  return (
+    <svg
+      viewBox="0 0 400 200"
+      className={className}
+      width={w}
+      height={h}
+      role="img"
+      aria-label="Laboratorio Viora"
+    >
+      <defs>
+        <linearGradient id={arcGradientId} x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stopColor="#e9c99d" />
+          <stop offset="40%" stopColor="#c39866" />
+          <stop offset="70%" stopColor="#b8895a" />
+          <stop offset="100%" stopColor="#e9c99d" />
+        </linearGradient>
+        <linearGradient id={starGradientId} x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#e9c99d" />
+          <stop offset="100%" stopColor="#b8895a" />
+        </linearGradient>
+      </defs>
+      {/* Arco elíptico dorado (casi completo, con una sutil apertura a la derecha) */}
+      <ellipse
+        cx="200" cy="100" rx="170" ry="68"
+        fill="none"
+        stroke={`url(#${arcGradientId})`}
+        strokeWidth="4.5"
+        strokeLinecap="round"
+        strokeDasharray="820 40"
+        strokeDashoffset="-45"
+      />
+      {/* Estrellas decorativas arriba a la derecha */}
+      <g fill={`url(#${starGradientId})`}>
+        <path d="M 350 38 L 352 48 L 362 50 L 352 52 L 350 62 L 348 52 L 338 50 L 348 48 Z" />
+        <path d="M 372 58 L 373.5 63 L 378.5 64 L 373.5 65 L 372 70 L 370.5 65 L 365.5 64 L 370.5 63 Z" />
+        <path d="M 360 70 L 361 74 L 365 75 L 361 76 L 360 80 L 359 76 L 355 75 L 359 74 Z" />
+      </g>
+      {/* "LABORATORIO" */}
+      <text
+        x="200" y="76" textAnchor="middle"
+        fontFamily="'Montserrat', 'Helvetica Neue', Arial, sans-serif"
+        fontSize="18"
+        fontWeight="500"
+        letterSpacing="5.5"
+        fill={textLabel}
+      >
+        LABORATORIO
+      </text>
+      {/* "Viora" cursivo */}
+      <text
+        x="200" y="150" textAnchor="middle"
+        fontFamily="'Allura', 'Brush Script MT', 'Segoe Script', cursive"
+        fontSize="110"
+        fontStyle="italic"
+        fill={textMain}
+      >
+        Viora
+      </text>
+    </svg>
+  );
+}
+
+// Versión monograma super-compacta (sólo la "V" dorada con el arco) para espacios estrechos
+// como el sidebar colapsado.
+function VioraMark({ className = '', size = 40 }) {
+  return (
+    <svg viewBox="0 0 100 100" width={size} height={size} className={className} role="img" aria-label="Viora">
+      <defs>
+        <linearGradient id="viora-mark-g" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#e9c99d" />
+          <stop offset=".5" stopColor="#b8895a" />
+          <stop offset="1" stopColor="#d6b084" />
+        </linearGradient>
+      </defs>
+      <text
+        x="50" y="78" textAnchor="middle"
+        fontFamily="'Allura', 'Brush Script MT', cursive"
+        fontSize="90"
+        fontStyle="italic"
+        fill="url(#viora-mark-g)"
+      >
+        V
+      </text>
+    </svg>
+  );
+}
+
 function Modal({ title, onClose, children }) {
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">

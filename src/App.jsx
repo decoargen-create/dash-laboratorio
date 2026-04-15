@@ -336,7 +336,7 @@ export const PAYMENT_RUBRO_LABELS = {
   contenido: 'Contenido',
   envase: 'Envase / Pote',
   etiqueta: 'Etiqueta',
-  mentor: 'Comisión mentor',
+  mentor: 'Comisión equipo',
 };
 
 // Devuelve los 4 rubros de pago de una orden con valores calculados por defecto.
@@ -564,12 +564,13 @@ function AppShell({ onExit }) {
               <NavItem icon={Package} label="Productos" section="productos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={Users} label="Clientes" section="clientes" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={CreditCard} label="Comisiones" section="comisiones" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={UserCheck} label="Mentores" section="mentores" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              <NavItem icon={UserCheck} label="Equipo" section="mentores" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
             </>
           ) : (
             <>
-              <NavItem icon={Home} label="Mi Resumen" section="resumen" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={CreditCard} label="Mis Comisiones" section="mis-comisiones" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              <NavItem icon={Home} label="Inicio" section="inicio" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              <NavItem icon={TrendingUp} label="Mis Órdenes" section="mis-ordenes" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              <NavItem icon={CreditCard} label="Mi Balance" section="resumen" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={Users} label="Mis Clientes" section="mis-clientes" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
             </>
           )}
@@ -607,8 +608,9 @@ function AppShell({ onExit }) {
           {currentUser.role === 'admin' && currentSection === 'mentores' && <MentoresSection state={state} getMentorStats={getMentorStats} />}
 
           {/* Mentor Views */}
+          {currentUser.role === 'mentor' && currentSection === 'inicio' && <EquipoInicioSection currentUser={currentUser} state={state} />}
+          {currentUser.role === 'mentor' && currentSection === 'mis-ordenes' && <EquipoOrdenesSection currentUser={currentUser} state={state} />}
           {currentUser.role === 'mentor' && currentSection === 'resumen' && <MentorResumenSection currentUser={currentUser} state={state} getMentorStats={getMentorStats} />}
-          {currentUser.role === 'mentor' && currentSection === 'mis-comisiones' && <MentorComisionesSection currentUser={currentUser} state={state} filterMonth={filterMonth} setFilterMonth={setFilterMonth} />}
           {currentUser.role === 'mentor' && currentSection === 'mis-clientes' && <MentorClientesSection currentUser={currentUser} state={state} />}
         </div>
       </main>
@@ -773,7 +775,7 @@ function LoginScreen({ onLogin, darkMode, toggleDarkMode }) {
               onClick={() => { setSelectedRole('mentor'); setLoginMode('mentor-select'); }}
               className="w-full py-3 px-4 bg-gradient-to-r from-pink-600 to-rose-500 text-white rounded-lg hover:shadow-lg transition font-semibold"
             >
-              Mentor
+              Equipo
             </button>
           </div>
         )}
@@ -2993,6 +2995,141 @@ function MentoresSection({ state, getMentorStats }) {
 }
 
 // Mentor Views
+// Vista de inicio para el rol equipo (antes mentor): es un resumen del lab
+// pero recortado — no muestra costos ni profit (información sensible que
+// queda sólo para la admin). Sí ve sus comisiones, sus clientes, sus
+// órdenes y los KPIs operativos generales.
+function EquipoInicioSection({ currentUser, state }) {
+  const mentor = state.mentors.find(m => m.id === currentUser.id);
+  const balance = mentor
+    ? getMentorBalance(mentor, state.sales, state.products)
+    : { generado: 0, cobrado: 0, saldo: 0, porcentaje: 0, ordenes: 0, pagos: [] };
+
+  // Stats del lab que SÍ puede ver: número total de órdenes activas,
+  // sus órdenes referidas, lo que generó este mes, y las incidencias
+  // del lab (igual que la admin, son operativas).
+  const totalOrdenesActivas = state.sales.filter(o => (o.estado || 'pendiente-cotizacion') !== 'despachado').length;
+  const incidenciasLab = state.sales.filter(s => s.tieneIncidencia).length;
+  const mesActual = state.sales
+    .filter(s => s.mentorId === currentUser.id && (s.fecha || '').startsWith(new Date().toISOString().substring(0, 7)))
+    .reduce((sum, s) => {
+      const p = state.products.find(pp => pp.id === s.productoId);
+      return sum + getMentorCommission(s, p, mentor);
+    }, 0);
+
+  return (
+    <div className="space-y-8">
+      <DailyQuoteBanner />
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <StatCard icon={DollarSign} label="Generado total" value={`$${Math.round(balance.generado).toLocaleString()}`} color="from-emerald-500 to-teal-500" delay={0} />
+        <StatCard icon={CreditCard} label="Te queda cobrar" value={`$${Math.max(0, Math.round(balance.saldo)).toLocaleString()}`} color="from-amber-500 to-orange-500" delay={80} />
+        <StatCard icon={TrendingUp} label="Comisión este mes" value={`$${Math.round(mesActual).toLocaleString()}`} color="from-purple-500 to-pink-500" delay={160} />
+        <StatCard icon={AlertCircle} label="Incidencias del lab" value={incidenciasLab} color="from-red-500 to-pink-500" delay={240} />
+      </div>
+
+      <EquipoOrdenesView state={state} mentorId={currentUser.id} compact />
+    </div>
+  );
+}
+
+// Sección dedicada de "Mis Órdenes" para el rol equipo. Muestra la tabla
+// completa de las órdenes referidas por la persona, sin columnas sensibles
+// (costos / profit). Read-only.
+function EquipoOrdenesSection({ currentUser, state }) {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Mis Órdenes</h2>
+        <p className="text-sm text-gray-500 dark:text-gray-400">Las órdenes que referiste, con su estado actual y tu comisión.</p>
+      </div>
+      <EquipoOrdenesView state={state} mentorId={currentUser.id} />
+    </div>
+  );
+}
+
+// Componente compartido: tabla read-only de órdenes de un equipo (mentor).
+// Sin columnas de costos ni profit. Sólo info que le concierne.
+// Si compact=true, limita a las 8 últimas y sin paginación.
+function EquipoOrdenesView({ state, mentorId, compact = false }) {
+  const mentor = state.mentors.find(m => m.id === mentorId);
+  const ordenes = state.sales
+    .filter(s => s.mentorId === mentorId)
+    .slice()
+    .sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
+  const visibles = compact ? ordenes.slice(0, 8) : ordenes;
+
+  const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
+  const getClientName = (id) => state.clients.find(c => c.id === id)?.nombre || '-';
+  const getProductName = (id) => state.products.find(p => p.id === id)?.nombre || '-';
+
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden">
+      {compact && (
+        <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+          <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Mis órdenes recientes</h3>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Mostrando las {Math.min(8, ordenes.length)} más recientes de un total de {ordenes.length}.</p>
+        </div>
+      )}
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700">
+            <tr className="text-left text-gray-700 dark:text-gray-200">
+              <th className="px-4 py-3 font-semibold">Fecha</th>
+              <th className="px-4 py-3 font-semibold">Cliente</th>
+              <th className="px-4 py-3 font-semibold">Producto</th>
+              <th className="px-4 py-3 font-semibold text-right">Cant.</th>
+              <th className="px-4 py-3 font-semibold text-right">Monto venta</th>
+              <th className="px-4 py-3 font-semibold text-right">Tu comisión</th>
+              <th className="px-4 py-3 font-semibold">Estado</th>
+              <th className="px-4 py-3 font-semibold">Cobro cliente</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+            {visibles.length === 0 && (
+              <tr><td colSpan={8} className="px-4 py-10 text-center text-gray-500 dark:text-gray-400">Todavía no tenés órdenes referidas.</td></tr>
+            )}
+            {visibles.map(order => {
+              const product = state.products.find(p => p.id === order.productoId);
+              const comision = getMentorCommission(order, product, mentor);
+              const cobros = getOrderCobrosSummary(order);
+              const estado = order.estado || 'pendiente-cotizacion';
+              const saldada = cobros.saldo <= 0 && cobros.total > 0;
+              return (
+                <tr key={order.id} className={`${order.tieneIncidencia ? 'bg-red-50/40 dark:bg-red-900/10' : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}>
+                  <td className="px-4 py-3 text-gray-900 dark:text-gray-100 whitespace-nowrap">{order.fecha}</td>
+                  <td className="px-4 py-3 text-gray-900 dark:text-gray-100">{getClientName(order.clienteId)}</td>
+                  <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{getProductName(order.productoId)}</td>
+                  <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300">{order.cantidad}</td>
+                  <td className="px-4 py-3 text-right text-gray-900 dark:text-gray-100 tabular-nums">{fmtMoney(order.montoTotal || 0)}</td>
+                  <td className="px-4 py-3 text-right font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{fmtMoney(comision)}</td>
+                  <td className="px-4 py-3">
+                    <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${ORDER_STATE_STYLES[estado]}`}>
+                      {ORDER_STATE_LABELS[estado]}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <span className={`text-[11px] font-bold tabular-nums shrink-0 ${saldada ? 'text-emerald-600 dark:text-emerald-400' : cobros.cobrado > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500 dark:text-gray-500'}`}>
+                        {saldada ? '✓' : `${cobros.porcentaje}%`}
+                      </span>
+                      <div className="w-16 h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+                        <div
+                          className={`h-full ${saldada ? 'bg-emerald-500' : 'bg-gradient-to-r from-amber-400 to-emerald-500'}`}
+                          style={{ width: `${Math.min(100, cobros.porcentaje)}%` }}
+                        />
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function MentorResumenSection({ currentUser, state, getMentorStats }) {
   const mentor = state.mentors.find(m => m.id === currentUser.id);
   // Balance en vivo calculado sobre TODAS las órdenes del mentor y sus
@@ -4271,11 +4408,12 @@ function getSectionTitle(user, section) {
     productos: 'Productos',
     clientes: 'Clientes',
     comisiones: 'Comisiones',
-    mentores: 'Mentores',
+    mentores: 'Equipo',
   };
   const mentor = {
-    resumen: 'Mi Resumen',
-    'mis-comisiones': 'Mis Comisiones',
+    inicio: 'Inicio',
+    'mis-ordenes': 'Mis Órdenes',
+    resumen: 'Mi Balance',
     'mis-clientes': 'Mis Clientes',
   };
   return (user?.role === 'admin' ? admin[section] : mentor[section]) || 'Laboratorio Viora';

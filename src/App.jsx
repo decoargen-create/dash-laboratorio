@@ -648,6 +648,7 @@ function AppShell({ onExit }) {
           toggleDarkMode={toggleDarkMode}
           onOpenCommand={() => setCmdOpen(true)}
           onOpenMobileMenu={() => setMobileMenuOpen(true)}
+          notificationsSnapshot={currentUser.role === 'admin' ? buildPanelChatContext(state, currentUser) : null}
         />
 
         <div key={currentSection} className="p-4 md:p-8 animate-fade-in-up">
@@ -5109,7 +5110,152 @@ function StatMini({ label, value, accent = 'neutral', small = false }) {
   );
 }
 
-function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, onOpenCommand, onOpenMobileMenu }) {
+// Centro de notificaciones con IA: una campanita en el header. Al click,
+// llama a /api/insights con un snapshot del negocio y Claude devuelve
+// alertas accionables (demoras, saldos grandes, mentores sin pagar).
+// Cachea localmente para no quemar API si se abre seguido.
+function NotificationsBell({ snapshot }) {
+  const [open, setOpen] = useState(false);
+  const [alertas, setAlertas] = useState(null); // null = no cargado, [] = sin alertas
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [lastFetch, setLastFetch] = useState(0);
+  const ref = useRef(null);
+
+  // Cierre por click afuera
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
+  const fetchInsights = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch('/api/insights', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ snapshot }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      setAlertas(Array.isArray(data.alertas) ? data.alertas : []);
+      setLastFetch(Date.now());
+    } catch (err) {
+      setError(err.message || 'No pude obtener alertas.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Auto-fetch al abrir si no hay datos o cache es viejo (>5min)
+  useEffect(() => {
+    if (!open) return;
+    const cacheAge = Date.now() - lastFetch;
+    if (alertas == null || cacheAge > 5 * 60 * 1000) fetchInsights();
+  }, [open]);
+
+  const count = alertas ? alertas.length : 0;
+  const hasAlta = alertas?.some(a => a.prioridad === 'alta');
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="relative p-2 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 transition shrink-0"
+        title="Alertas e insights del negocio"
+        aria-label="Notificaciones"
+      >
+        <Bell size={18} />
+        {count > 0 && (
+          <span className={`absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full ${hasAlta ? 'bg-red-500' : 'bg-amber-500'} text-white text-[10px] font-bold flex items-center justify-center shadow`}>
+            {count}
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full mt-2 z-50 w-[min(420px,calc(100vw-2rem))] bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden animate-scale-in" style={{ transformOrigin: 'top right' }}>
+          <div className="p-4 bg-gradient-to-r from-pink-50 to-rose-50 dark:from-gray-800 dark:to-gray-900 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Sparkles size={16} className="text-amber-600 dark:text-amber-400" />
+              <div>
+                <p className="text-sm font-bold text-gray-900 dark:text-gray-100">Alertas con IA</p>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400">Generadas por Claude · Estado actual</p>
+              </div>
+            </div>
+            <button
+              onClick={fetchInsights}
+              disabled={loading}
+              className="p-1.5 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-white/80 dark:hover:bg-gray-700 transition disabled:opacity-50"
+              title="Refrescar alertas"
+            >
+              <Search size={14} className={loading ? 'animate-spin' : ''} />
+            </button>
+          </div>
+          <div className="max-h-[60vh] overflow-y-auto">
+            {loading && alertas == null && (
+              <div className="p-8 text-center text-sm text-gray-500 dark:text-gray-400">
+                <Sparkles size={24} className="mx-auto mb-2 text-amber-500 animate-pulse" />
+                Analizando el estado del negocio…
+              </div>
+            )}
+            {error && (
+              <div className="m-3 p-3 rounded-lg bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-xs text-red-700 dark:text-red-300">
+                {error}
+              </div>
+            )}
+            {!loading && alertas != null && alertas.length === 0 && !error && (
+              <div className="p-8 text-center text-sm text-gray-500 dark:text-gray-400">
+                <Check size={24} className="mx-auto mb-2 text-emerald-500" />
+                Todo en orden. Sin alertas para hoy.
+              </div>
+            )}
+            {alertas && alertas.length > 0 && (
+              <div className="divide-y divide-gray-100 dark:divide-gray-800">
+                {alertas.map((a, i) => (
+                  <AlertItem key={i} alerta={a} />
+                ))}
+              </div>
+            )}
+          </div>
+          {lastFetch > 0 && (
+            <div className="px-4 py-2 text-[10px] text-gray-400 dark:text-gray-500 border-t border-gray-100 dark:border-gray-800 text-center">
+              Última actualización: hace {Math.round((Date.now() - lastFetch) / 1000)}s
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AlertItem({ alerta }) {
+  const styles = {
+    alta: { bg: 'bg-red-50 dark:bg-red-900/20', border: 'border-l-red-500', icon: 'text-red-600 dark:text-red-400', label: 'ALTA' },
+    media: { bg: 'bg-amber-50 dark:bg-amber-900/20', border: 'border-l-amber-500', icon: 'text-amber-600 dark:text-amber-400', label: 'MEDIA' },
+    baja: { bg: 'bg-blue-50 dark:bg-blue-900/20', border: 'border-l-blue-400', icon: 'text-blue-600 dark:text-blue-400', label: 'INFO' },
+  };
+  const s = styles[alerta.prioridad] || styles.baja;
+  return (
+    <div className={`px-4 py-3 ${s.bg} border-l-4 ${s.border}`}>
+      <div className="flex items-start gap-2">
+        <AlertCircle size={14} className={`mt-0.5 ${s.icon} shrink-0`} />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-0.5">
+            <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{alerta.titulo}</p>
+            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${s.icon} bg-white/60 dark:bg-gray-900/40`}>{s.label}</span>
+          </div>
+          {alerta.detalle && <p className="text-xs text-gray-600 dark:text-gray-300 leading-snug">{alerta.detalle}</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, onOpenCommand, onOpenMobileMenu, notificationsSnapshot }) {
   const [scrolled, setScrolled] = useState(false);
   const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform);
 
@@ -5166,6 +5312,9 @@ function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, onOpenCommand
         >
           <Search size={18} />
         </button>
+        {notificationsSnapshot && (
+          <NotificationsBell snapshot={notificationsSnapshot} />
+        )}
         <button
           onClick={toggleDarkMode}
           className="p-2 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 transition-all duration-200 hover:scale-105 active:scale-95 shrink-0"

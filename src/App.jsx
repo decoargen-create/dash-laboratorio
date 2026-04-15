@@ -6,7 +6,7 @@ import {
 import {
   Menu, LogOut, Home, ShoppingCart, Package, Users, AlertCircle, CreditCard,
   UserCheck, TrendingUp, Plus, Filter, Eye, Edit2, Trash2, Calendar, DollarSign,
-  Moon, Sun, ChevronDown, ChevronRight, Search, X
+  Moon, Sun, ChevronDown, ChevronRight, Search, X, Command, Check, Bell
 } from 'lucide-react';
 import { VioraLogo, VioraMark } from './logo.jsx';
 import LandingPage from './LandingPage.jsx';
@@ -194,11 +194,17 @@ export function getOrderProfit(order, product) {
   return (eff.precioVenta - unitCost) * cantidad;
 }
 
-export function getMentorCommission(order) {
-  // Si al crear la venta se cargó un presupuesto fijo para el mentor, ese gana.
-  // Si no, se asume 50% del monto total como regla general.
+// Comisión del mentor = 50% del PROFIT de la orden (no del monto total).
+// Si la orden tiene un presupuesto fijo asignado al mentor, ese gana.
+// Si no se pasa el producto, cae a un fallback del 50% del montoTotal
+// para mantener retrocompatibilidad con llamadas viejas.
+export function getMentorCommission(order, product) {
   if (order?.mentorPresupuesto != null && order.mentorPresupuesto !== '') {
     return parseFloat(order.mentorPresupuesto) || 0;
+  }
+  if (product) {
+    const profit = getOrderProfit(order, product);
+    return Math.max(0, profit * 0.5);
   }
   return (order?.montoTotal || 0) * 0.5;
 }
@@ -237,7 +243,7 @@ export function getOrderPayments(order, product) {
     contenido: { estado: 'pendiente', monto: costs.contenidoTotal, fecha: '', proveedor: '', nota: '' },
     envase:    { estado: 'pendiente', monto: costs.envaseTotal,    fecha: '', proveedor: '', nota: '' },
     etiqueta:  { estado: 'pendiente', monto: costs.etiquetaTotal,  fecha: '', proveedor: '', nota: '' },
-    mentor:    { estado: order.estadoComision === 'pagada' ? 'pagado' : 'pendiente', monto: getMentorCommission(order), fecha: '', proveedor: '', nota: '' },
+    mentor:    { estado: order.estadoComision === 'pagada' ? 'pagado' : 'pendiente', monto: getMentorCommission(order, product), fecha: '', proveedor: '', nota: '' },
   };
   const stored = order.pagos || {};
   return {
@@ -258,6 +264,14 @@ function AppShell({ onExit }) {
   const [showNewProductModal, setShowNewProductModal] = useState(false);
   const [filterMentor, setFilterMentor] = useState('');
   const [filterMonth, setFilterMonth] = useState('');
+  const [cmdOpen, setCmdOpen] = useState(false);
+  const [toasts, setToasts] = useState([]);
+
+  const addToast = (toast) => {
+    const id = Date.now() + Math.random();
+    setToasts(prev => [...prev, { id, ...toast }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), toast.duration || 3500);
+  };
   const [darkMode, setDarkMode] = useState(() => {
     if (typeof window === 'undefined') return false;
     const stored = localStorage.getItem('dash-dark-mode');
@@ -276,6 +290,19 @@ function AppShell({ onExit }) {
   }, [darkMode]);
 
   const toggleDarkMode = () => setDarkMode(prev => !prev);
+
+  // Atajo global Cmd+K / Ctrl+K para abrir la command palette
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setCmdOpen(prev => !prev);
+      }
+      if (e.key === 'Escape') setCmdOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   // Handlers
   const handleLogin = (role, name) => {
@@ -302,6 +329,7 @@ function AppShell({ onExit }) {
     };
     dispatch({ type: 'ADD_SALE', payload: newSale });
     setShowNewSaleModal(false);
+    addToast({ type: 'success', message: 'Orden registrada' });
   };
 
   const createClient = (clientData) => {
@@ -314,6 +342,7 @@ function AppShell({ onExit }) {
       ...clientData,
     };
     dispatch({ type: 'ADD_CLIENT', payload: newClient });
+    addToast({ type: 'success', message: `Cliente "${newClient.nombre}" creado` });
     return newClient;
   };
 
@@ -337,6 +366,7 @@ function AppShell({ onExit }) {
       ...productData,
     };
     dispatch({ type: 'ADD_PRODUCT', payload: newProduct });
+    addToast({ type: 'success', message: `Producto "${newProduct.nombre}" creado` });
     return newProduct;
   };
 
@@ -390,16 +420,32 @@ function AppShell({ onExit }) {
   return (
     <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
       {/* Sidebar */}
-      <aside className={`${sidebarOpen ? 'w-64' : 'w-20'} bg-gradient-to-b from-pink-900 to-pink-800 text-white transition-all duration-300 flex flex-col`}>
-        <div className="p-4 border-b border-pink-700 flex items-center justify-center min-h-[80px]">
-          {sidebarOpen ? (
-            <VioraLogo variant="light" size="sm" />
-          ) : (
-            <VioraMark size={36} />
-          )}
+      <aside className={`${sidebarOpen ? 'w-64' : 'w-20'} relative bg-gradient-to-b from-[#4a0f22] via-pink-900 to-[#3f0c1e] text-white transition-all duration-500 ease-out flex flex-col shadow-2xl`}>
+        {/* Patrón decorativo sutil */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 opacity-[0.07] [background-image:radial-gradient(circle_at_1px_1px,_white_1px,_transparent_0)] [background-size:16px_16px]"
+        />
+
+        {/* Botón de colapsar: flota en el borde derecho del sidebar */}
+        <button
+          onClick={() => setSidebarOpen(!sidebarOpen)}
+          className="absolute -right-3 top-20 z-20 w-6 h-6 rounded-full bg-pink-900 border border-pink-700 text-white hover:bg-pink-800 hover:scale-110 transition-all duration-200 flex items-center justify-center shadow-lg"
+          aria-label={sidebarOpen ? 'Colapsar sidebar' : 'Expandir sidebar'}
+          title={sidebarOpen ? 'Colapsar' : 'Expandir'}
+        >
+          <ChevronRight size={14} className={`transition-transform duration-300 ${sidebarOpen ? 'rotate-180' : 'rotate-0'}`} />
+        </button>
+
+        {/* Logo */}
+        <div className="relative p-4 flex items-center justify-center min-h-[90px]">
+          {sidebarOpen ? <VioraLogo variant="light" size="sm" /> : <VioraMark size={36} />}
         </div>
 
-        <nav className="flex-1 p-4 space-y-2">
+        {/* Divisor dorado sutil */}
+        <div aria-hidden="true" className="mx-4 h-px bg-gradient-to-r from-transparent via-amber-300/30 to-transparent" />
+
+        <nav className="relative flex-1 p-3 space-y-1 overflow-y-auto">
           {currentUser.role === 'admin' ? (
             <>
               <NavItem icon={Home} label="Inicio" section="inicio" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
@@ -418,44 +464,59 @@ function AppShell({ onExit }) {
           )}
         </nav>
 
-        <div className="p-4 border-t border-pink-700 space-y-2">
-          <button
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="w-full flex items-center justify-center p-2 rounded-lg hover:bg-pink-700 transition"
-          >
-            <Menu size={20} />
-          </button>
-          <button
-            onClick={handleLogout}
-            className="w-full flex items-center justify-center gap-2 p-2 rounded-lg hover:bg-pink-700 transition"
-            title="Cerrar sesión"
-          >
-            <LogOut size={20} />
-          </button>
+        {/* Footer: pill de usuario + botón de logout alineados prolijo */}
+        <div className="relative p-3">
+          <div aria-hidden="true" className="mx-1 h-px mb-3 bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+          {sidebarOpen ? (
+            <div className="flex items-center gap-2 p-2 rounded-xl bg-white/5 hover:bg-white/10 transition-colors duration-200">
+              <div className="w-9 h-9 rounded-full bg-gradient-to-br from-amber-200 to-amber-400 text-[#4a0f22] font-bold flex items-center justify-center shrink-0 shadow">
+                {(currentUser.name || 'U').charAt(0).toUpperCase()}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold truncate">{currentUser.name}</p>
+                <p className="text-[10px] uppercase tracking-wider text-pink-200/70">{currentUser.role}</p>
+              </div>
+              <button
+                onClick={handleLogout}
+                className="p-2 rounded-lg text-pink-100/70 hover:text-white hover:bg-white/10 transition-all duration-200 hover:rotate-12"
+                title="Cerrar sesión"
+                aria-label="Cerrar sesión"
+              >
+                <LogOut size={16} />
+              </button>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center gap-2">
+              <div
+                className="w-10 h-10 rounded-full bg-gradient-to-br from-amber-200 to-amber-400 text-[#4a0f22] font-bold flex items-center justify-center shadow"
+                title={currentUser.name}
+              >
+                {(currentUser.name || 'U').charAt(0).toUpperCase()}
+              </div>
+              <button
+                onClick={handleLogout}
+                className="group w-10 h-10 rounded-lg flex items-center justify-center text-pink-100/70 hover:text-white hover:bg-white/10 transition-all duration-200"
+                title="Cerrar sesión"
+                aria-label="Cerrar sesión"
+              >
+                <LogOut size={16} className="group-hover:rotate-12 transition-transform duration-200" />
+              </button>
+            </div>
+          )}
         </div>
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-auto">
-        <header className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700 p-6 flex justify-between items-center">
-          <div>
-            <h2 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Laboratorio Viora</h2>
-            <p className="text-gray-600 dark:text-gray-400 text-sm">Bienvenido, {currentUser.name}</p>
-          </div>
-          <div className="flex items-center gap-4">
-            <button
-              onClick={toggleDarkMode}
-              className="p-2 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 transition"
-              title={darkMode ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
-              aria-label="Toggle dark mode"
-            >
-              {darkMode ? <Sun size={20} /> : <Moon size={20} />}
-            </button>
-            <span className="text-sm text-gray-600 dark:text-gray-400">{new Date().toLocaleDateString('es-ES')}</span>
-          </div>
-        </header>
+      <main className="flex-1 overflow-auto relative">
+        <StickyHeader
+          title={getSectionTitle(currentUser, currentSection)}
+          subtitle={`Bienvenido, ${currentUser.name}`}
+          darkMode={darkMode}
+          toggleDarkMode={toggleDarkMode}
+          onOpenCommand={() => setCmdOpen(true)}
+        />
 
-        <div className="p-8">
+        <div key={currentSection} className="p-8 animate-fade-in-up">
           {/* Admin Views */}
           {currentUser.role === 'admin' && currentSection === 'inicio' && <InicioSection state={state} dispatch={dispatch} />}
           {currentUser.role === 'admin' && currentSection === 'ventas' && <VentasSection state={state} onAddSale={handleAddSale} onQuickAddClient={createClient} onQuickAddProduct={createProduct} showModal={showNewSaleModal} setShowModal={setShowNewSaleModal} />}
@@ -470,6 +531,24 @@ function AppShell({ onExit }) {
           {currentUser.role === 'mentor' && currentSection === 'mis-clientes' && <MentorClientesSection currentUser={currentUser} state={state} />}
         </div>
       </main>
+
+      {/* Command palette global */}
+      {cmdOpen && (
+        <CommandPalette
+          state={state}
+          currentUser={currentUser}
+          onClose={() => setCmdOpen(false)}
+          onNavigate={(section) => { setCurrentSection(section); setCmdOpen(false); }}
+          onNewSale={() => { setCurrentSection('ventas'); setShowNewSaleModal(true); setCmdOpen(false); }}
+          onNewClient={() => { setCurrentSection('clientes'); setShowNewClientModal(true); setCmdOpen(false); }}
+          onNewProduct={() => { setCurrentSection('productos'); setShowNewProductModal(true); setCmdOpen(false); }}
+          onToggleTheme={() => { toggleDarkMode(); setCmdOpen(false); }}
+          onLogout={() => { handleLogout(); setCmdOpen(false); }}
+        />
+      )}
+
+      {/* Toast container */}
+      <ToastContainer toasts={toasts} />
     </div>
   );
 }
@@ -479,12 +558,28 @@ function NavItem({ icon: Icon, label, section, currentSection, onSelect, sidebar
   return (
     <button
       onClick={() => onSelect(section)}
-      className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${
-        isActive ? 'bg-pink-700 text-white' : 'text-pink-100 hover:bg-pink-700'
+      title={!sidebarOpen ? label : undefined}
+      className={`group relative w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all duration-200 ${
+        isActive
+          ? 'bg-gradient-to-r from-pink-600/80 to-rose-500/60 text-white shadow-lg shadow-pink-900/40'
+          : 'text-pink-100/80 hover:text-white hover:bg-white/5'
       }`}
     >
-      <Icon size={20} />
-      {sidebarOpen && <span className="text-sm">{label}</span>}
+      {/* Indicador lateral animado sobre el activo */}
+      <span
+        aria-hidden="true"
+        className={`absolute left-0 top-1/2 -translate-y-1/2 w-1 rounded-r-full bg-gradient-to-b from-amber-200 to-amber-400 transition-all duration-300 ${
+          isActive ? 'h-6 opacity-100' : 'h-0 opacity-0'
+        }`}
+      />
+      <Icon size={19} className={`shrink-0 transition-transform duration-200 ${isActive ? 'scale-110' : 'group-hover:scale-110'}`} />
+      {sidebarOpen && <span className="text-sm font-medium whitespace-nowrap">{label}</span>}
+      {/* Tooltip en modo colapsado */}
+      {!sidebarOpen && (
+        <span className="pointer-events-none absolute left-full ml-3 px-2 py-1 rounded-md text-xs font-semibold whitespace-nowrap bg-gray-900 text-white opacity-0 group-hover:opacity-100 translate-x-[-6px] group-hover:translate-x-0 transition-all duration-150 z-50 shadow-lg">
+          {label}
+        </span>
+      )}
     </button>
   );
 }
@@ -626,7 +721,10 @@ function InicioSection({ state, dispatch }) {
   }, 0);
   const pendingCommissionsPeriodo = filteredOrders
     .filter(o => o.mentorId && o.estadoComision !== 'pagada')
-    .reduce((s, o) => s + getMentorCommission(o), 0);
+    .reduce((s, o) => {
+      const product = state.products.find(p => p.id === o.productoId);
+      return s + getMentorCommission(o, product);
+    }, 0);
   const totalPagosProveedoresPendientes = filteredOrders.reduce((acc, order) => {
     const product = state.products.find(p => p.id === order.productoId);
     const pagos = getOrderPayments(order, product);
@@ -655,12 +753,12 @@ function InicioSection({ state, dispatch }) {
 
   return (
     <div className="space-y-8">
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
-        <StatCard icon={DollarSign} label="Ventas del Período" value={`$${Math.round(ventasPeriodo).toLocaleString()}`} color="from-pink-500 to-rose-500" />
-        <StatCard icon={TrendingUp} label="Profit del Período" value={`$${Math.round(totalProfit).toLocaleString()}`} color="from-emerald-500 to-teal-500" />
-        <StatCard icon={CreditCard} label="Comisiones Pendientes" value={`$${Math.round(pendingCommissionsPeriodo).toLocaleString()}`} color="from-amber-500 to-orange-500" />
-        <StatCard icon={Package} label="A pagar Proveedores" value={`$${Math.round(totalPagosProveedoresPendientes).toLocaleString()}`} color="from-sky-500 to-blue-500" />
-        <StatCard icon={AlertCircle} label="Incidencias" value={ordersConIncidencia} color="from-red-500 to-pink-500" />
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+        <StatCard icon={DollarSign} label="Ventas del Período" value={`$${Math.round(ventasPeriodo).toLocaleString()}`} color="from-pink-500 to-rose-500" delay={0} />
+        <StatCard icon={TrendingUp} label="Profit del Período" value={`$${Math.round(totalProfit).toLocaleString()}`} color="from-emerald-500 to-teal-500" delay={80} />
+        <StatCard icon={CreditCard} label="Comisiones Pendientes" value={`$${Math.round(pendingCommissionsPeriodo).toLocaleString()}`} color="from-amber-500 to-orange-500" delay={160} />
+        <StatCard icon={Package} label="A pagar Proveedores" value={`$${Math.round(totalPagosProveedoresPendientes).toLocaleString()}`} color="from-sky-500 to-blue-500" delay={240} />
+        <StatCard icon={AlertCircle} label="Incidencias" value={ordersConIncidencia} color="from-red-500 to-pink-500" delay={320} />
       </div>
 
       <FilterBar filters={filters} onChange={setFilters} totalShown={filteredOrders.length} totalAll={state.sales.length} />
@@ -965,8 +1063,8 @@ function OrdersList({ state, dispatch, orders }) {
               const profitUnit = product ? (product.precioVenta - getProductUnitCost(product)) : 0;
               const mentorId = order.mentorId;
               const hasMentor = !!mentorId;
-              const commissionTotal = hasMentor ? getMentorCommission(order) : 0;
-              const commissionUnit = hasMentor ? (product ? product.precioVenta * 0.5 : 0) : 0;
+              const commissionTotal = hasMentor ? getMentorCommission(order, product) : 0;
+              const commissionUnit = hasMentor && (order.cantidad || 0) > 0 ? (commissionTotal / (order.cantidad || 1)) : 0;
               const precioVentaUnit = product?.precioVenta || 0;
               const precioVentaTotal = precioVentaUnit * (order.cantidad || 0);
 
@@ -1089,15 +1187,39 @@ function OrdersList({ state, dispatch, orders }) {
   );
 }
 
-function StatCard({ icon: Icon, label, value, color }) {
+function StatCard({ icon: Icon, label, value, color, delay = 0 }) {
+  // Si el value es una cadena con formato $X.XXX, intentamos animarlo.
+  // Si no, lo mostramos tal cual (soporta números crudos también).
+  const numeric = typeof value === 'number'
+    ? value
+    : parseFloat(String(value).replace(/[^\d.-]/g, ''));
+  const hasNumber = !Number.isNaN(numeric);
+  const animated = useCountUp(hasNumber ? numeric : 0, 900);
+  const prefix = typeof value === 'string' && value.startsWith('$') ? '$' : '';
+  const displayValue = hasNumber
+    ? `${prefix}${Math.round(animated).toLocaleString()}`
+    : value;
+
   return (
-    <div className={`bg-gradient-to-br ${color} text-white rounded-xl shadow-lg p-6`}>
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="text-sm font-medium opacity-90">{label}</p>
-          <p className="text-3xl font-bold mt-2">{value}</p>
+    <div
+      className={`group relative bg-gradient-to-br ${color} text-white rounded-2xl shadow-lg p-6 overflow-hidden transition-all duration-500 hover:-translate-y-1 hover:shadow-2xl animate-fade-in-up`}
+      style={{ animationDelay: `${delay}ms`, animationFillMode: 'backwards' }}
+    >
+      {/* Efecto shimmer sutil sobre gradiente */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-700 bg-gradient-to-r from-transparent via-white/20 to-transparent bg-[length:200%_100%] animate-shimmer"
+      />
+      {/* Halo glass atrás del ícono */}
+      <div aria-hidden="true" className="absolute -top-8 -right-8 w-32 h-32 rounded-full bg-white/20 blur-2xl" />
+      <div className="relative flex items-start justify-between">
+        <div className="flex-1 min-w-0">
+          <p className="text-xs uppercase tracking-wider font-semibold opacity-80">{label}</p>
+          <p className="text-2xl md:text-3xl font-bold mt-2 truncate tabular-nums">{displayValue}</p>
         </div>
-        <Icon size={32} className="opacity-50" />
+        <div className="shrink-0 p-2 rounded-xl bg-white/10 backdrop-blur-sm">
+          <Icon size={22} className="opacity-90" />
+        </div>
       </div>
     </div>
   );
@@ -1108,11 +1230,12 @@ function VentasSection({ state, onAddSale, onQuickAddClient, onQuickAddProduct, 
   const [showClientQuickModal, setShowClientQuickModal] = useState(false);
   const [showProductQuickModal, setShowProductQuickModal] = useState(false);
 
-  // Cálculos derivados para sugerir el presupuesto del mentor al cargar la venta
+  // Cálculos derivados para sugerir el presupuesto del mentor al cargar la venta.
+  // La comisión se calcula como 50% del profit (precioVenta - costos) * cantidad.
   const productoSel = state.products.find(p => p.id === parseInt(formData.productoId));
   const cantidadNum = parseInt(formData.cantidad) || 0;
-  const montoTotalSugerido = (productoSel?.precioVenta || 0) * cantidadNum;
-  const mentorSugerido = Math.round(montoTotalSugerido * 0.5);
+  const profitSugerido = productoSel ? (productoSel.precioVenta - getProductUnitCost(productoSel)) * cantidadNum : 0;
+  const mentorSugerido = Math.max(0, Math.round(profitSugerido * 0.5));
 
   // Cuando cambia el mentor, producto o cantidad, y el usuario no tocó el
   // presupuesto manualmente, reseteamos el valor sugerido (50% de la venta).
@@ -1259,7 +1382,7 @@ function VentasSection({ state, onAddSale, onQuickAddClient, onQuickAddProduct, 
                 <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">
                   Presupuesto para el mentor
                   <span className="ml-2 text-gray-400 dark:text-gray-500 font-normal">
-                    (sugerido 50%: ${mentorSugerido.toLocaleString()})
+                    (sugerido 50% del profit: ${mentorSugerido.toLocaleString()})
                   </span>
                 </label>
                 <div className="flex items-center gap-2">
@@ -2741,16 +2864,31 @@ function QuickProductModal({ onClose, onCreate }) {
 
 // Utility Components
 function Modal({ title, onClose, children }) {
+  // Cerrar con Escape
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose?.(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl p-8 w-full max-w-md">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fade-in"
+      onClick={onClose}
+    >
+      <div aria-hidden="true" className="absolute inset-0 bg-black/60 backdrop-blur-md" />
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-8 w-full max-w-md border border-gray-100 dark:border-gray-700 animate-scale-in"
+      >
         <div className="flex justify-between items-center mb-6">
           <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100">{title}</h3>
           <button
             onClick={onClose}
-            className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition"
+            className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100 transition-all duration-200 hover:rotate-90"
+            aria-label="Cerrar"
           >
-            ×
+            <X size={18} />
           </button>
         </div>
         {children}
@@ -2773,6 +2911,295 @@ function Badge({ text, type }) {
   );
 }
 
+
+// ============================================================================
+// MODERN UX PRIMITIVES
+// ============================================================================
+
+// Título dinámico según la sección que está viendo el usuario.
+function getSectionTitle(user, section) {
+  const admin = {
+    inicio: 'Dashboard',
+    ventas: 'Ventas',
+    productos: 'Productos',
+    clientes: 'Clientes',
+    comisiones: 'Comisiones',
+    mentores: 'Mentores',
+  };
+  const mentor = {
+    resumen: 'Mi Resumen',
+    'mis-comisiones': 'Mis Comisiones',
+    'mis-clientes': 'Mis Clientes',
+  };
+  return (user?.role === 'admin' ? admin[section] : mentor[section]) || 'Laboratorio Viora';
+}
+
+// Header sticky que agrega blur + border al hacer scroll. Incluye el botón
+// del command palette con el keyboard hint (Cmd+K), toggle de tema y fecha.
+function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, onOpenCommand }) {
+  const [scrolled, setScrolled] = useState(false);
+  const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform);
+
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 4 || (document.querySelector('main')?.scrollTop ?? 0) > 4);
+    const main = document.querySelector('main');
+    main?.addEventListener('scroll', onScroll);
+    window.addEventListener('scroll', onScroll);
+    return () => {
+      main?.removeEventListener('scroll', onScroll);
+      window.removeEventListener('scroll', onScroll);
+    };
+  }, []);
+
+  return (
+    <header
+      className={`sticky top-0 z-30 px-8 py-5 flex justify-between items-center transition-all duration-300 ${
+        scrolled
+          ? 'backdrop-blur-xl bg-white/70 dark:bg-gray-900/70 border-b border-gray-200/60 dark:border-gray-700/60 shadow-sm'
+          : 'bg-transparent border-b border-transparent'
+      }`}
+    >
+      <div>
+        <h2 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-gray-100 leading-tight">{title}</h2>
+        <p className="text-gray-500 dark:text-gray-400 text-sm">{subtitle}</p>
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={onOpenCommand}
+          className="hidden sm:inline-flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700 hover:border-pink-300 dark:hover:border-pink-600 hover:text-gray-900 dark:hover:text-gray-100 transition-all duration-200 hover:shadow group"
+          title="Abrir command palette"
+        >
+          <Search size={13} className="group-hover:scale-110 transition-transform" />
+          <span>Buscar…</span>
+          <kbd className="hidden md:inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-mono rounded bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400">
+            {isMac ? '⌘' : 'Ctrl'} K
+          </kbd>
+        </button>
+        <button
+          onClick={toggleDarkMode}
+          className="p-2 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 transition-all duration-200 hover:scale-105 active:scale-95"
+          title={darkMode ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
+          aria-label="Toggle dark mode"
+        >
+          <div className="relative w-5 h-5">
+            <Sun size={20} className={`absolute inset-0 transition-all duration-500 ${darkMode ? 'opacity-100 rotate-0 scale-100' : 'opacity-0 -rotate-90 scale-50'}`} />
+            <Moon size={20} className={`absolute inset-0 transition-all duration-500 ${darkMode ? 'opacity-0 rotate-90 scale-50' : 'opacity-100 rotate-0 scale-100'}`} />
+          </div>
+        </button>
+      </div>
+    </header>
+  );
+}
+
+// Hook: cuenta animada de 0 → target en `duration` ms con easing suave.
+export function useCountUp(target, duration = 800) {
+  const [value, setValue] = useState(0);
+  const prevTarget = useRef(0);
+
+  useEffect(() => {
+    const start = prevTarget.current;
+    const end = Number(target) || 0;
+    if (start === end) { setValue(end); return; }
+    const t0 = performance.now();
+    let raf;
+    const tick = (t) => {
+      const elapsed = t - t0;
+      const p = Math.min(1, elapsed / duration);
+      // easeOutCubic
+      const eased = 1 - Math.pow(1 - p, 3);
+      setValue(start + (end - start) * eased);
+      if (p < 1) raf = requestAnimationFrame(tick);
+      else prevTarget.current = end;
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [target, duration]);
+
+  return value;
+}
+
+// Command palette estilo spotlight/raycast. Filtra comandos por texto y
+// permite navegación con flechas + Enter para ejecutar.
+function CommandPalette({ state, currentUser, onClose, onNavigate, onNewSale, onNewClient, onNewProduct, onToggleTheme, onLogout }) {
+  const [query, setQuery] = useState('');
+  const [cursor, setCursor] = useState(0);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  // Armamos la lista de comandos disponibles según el rol
+  const baseCmds = [];
+  if (currentUser?.role === 'admin') {
+    baseCmds.push(
+      { id: 'go-inicio', group: 'Ir a', label: 'Dashboard / Inicio', icon: Home, shortcut: 'G I', run: () => onNavigate('inicio') },
+      { id: 'go-ventas', group: 'Ir a', label: 'Ventas', icon: TrendingUp, shortcut: 'G V', run: () => onNavigate('ventas') },
+      { id: 'go-productos', group: 'Ir a', label: 'Productos', icon: Package, shortcut: 'G P', run: () => onNavigate('productos') },
+      { id: 'go-clientes', group: 'Ir a', label: 'Clientes', icon: Users, shortcut: 'G C', run: () => onNavigate('clientes') },
+      { id: 'go-comisiones', group: 'Ir a', label: 'Comisiones', icon: CreditCard, shortcut: 'G $', run: () => onNavigate('comisiones') },
+      { id: 'go-mentores', group: 'Ir a', label: 'Mentores', icon: UserCheck, shortcut: 'G M', run: () => onNavigate('mentores') },
+      { id: 'new-sale', group: 'Acciones', label: 'Nueva venta', icon: Plus, shortcut: 'N V', run: onNewSale },
+      { id: 'new-client', group: 'Acciones', label: 'Nuevo cliente', icon: Plus, shortcut: 'N C', run: onNewClient },
+      { id: 'new-product', group: 'Acciones', label: 'Nuevo producto', icon: Plus, shortcut: 'N P', run: onNewProduct },
+    );
+  } else {
+    baseCmds.push(
+      { id: 'go-resumen', group: 'Ir a', label: 'Mi Resumen', icon: Home, run: () => onNavigate('resumen') },
+      { id: 'go-mis-comisiones', group: 'Ir a', label: 'Mis Comisiones', icon: CreditCard, run: () => onNavigate('mis-comisiones') },
+      { id: 'go-mis-clientes', group: 'Ir a', label: 'Mis Clientes', icon: Users, run: () => onNavigate('mis-clientes') },
+    );
+  }
+  baseCmds.push(
+    { id: 'toggle-theme', group: 'Preferencias', label: 'Alternar modo claro/oscuro', icon: Moon, run: onToggleTheme },
+    { id: 'logout', group: 'Sesión', label: 'Cerrar sesión', icon: LogOut, run: onLogout },
+  );
+
+  // Resultados dinámicos por texto: además de los comandos base, matcheamos
+  // clientes y productos por nombre y al seleccionar navegamos a la sección.
+  const dynamicCmds = [];
+  const q = query.trim().toLowerCase();
+  if (q && currentUser?.role === 'admin') {
+    state.clients.slice(0, 6).filter(c => c.nombre?.toLowerCase().includes(q)).forEach(c => {
+      dynamicCmds.push({
+        id: `client-${c.id}`,
+        group: 'Clientes',
+        label: c.nombre,
+        meta: c.telefono || '',
+        icon: Users,
+        run: () => onNavigate('clientes'),
+      });
+    });
+    state.products.slice(0, 6).filter(p => p.nombre?.toLowerCase().includes(q)).forEach(p => {
+      dynamicCmds.push({
+        id: `product-${p.id}`,
+        group: 'Productos',
+        label: p.nombre,
+        meta: `$${(p.precioVenta || 0).toLocaleString()}`,
+        icon: Package,
+        run: () => onNavigate('productos'),
+      });
+    });
+  }
+
+  const allCmds = [...baseCmds, ...dynamicCmds];
+  const filtered = q
+    ? allCmds.filter(c => c.label.toLowerCase().includes(q) || c.group.toLowerCase().includes(q))
+    : allCmds;
+
+  useEffect(() => { setCursor(0); }, [query]);
+
+  const handleKey = (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); setCursor(c => Math.min(filtered.length - 1, c + 1)); }
+    if (e.key === 'ArrowUp') { e.preventDefault(); setCursor(c => Math.max(0, c - 1)); }
+    if (e.key === 'Enter') { e.preventDefault(); filtered[cursor]?.run?.(); }
+  };
+
+  // Agrupamos por "group" manteniendo el orden de aparición
+  const groups = [];
+  const byGroup = new Map();
+  filtered.forEach((cmd, idx) => {
+    if (!byGroup.has(cmd.group)) { byGroup.set(cmd.group, []); groups.push(cmd.group); }
+    byGroup.get(cmd.group).push({ ...cmd, _globalIdx: idx });
+  });
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-start justify-center pt-[12vh] px-4 animate-fade-in"
+      onClick={onClose}
+    >
+      <div aria-hidden="true" className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="relative w-full max-w-xl bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden animate-scale-in"
+      >
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 dark:border-gray-800">
+          <Search size={18} className="text-gray-400" />
+          <input
+            ref={inputRef}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={handleKey}
+            placeholder="Buscar comandos, clientes, productos..."
+            className="flex-1 bg-transparent outline-none text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
+          />
+          <kbd className="hidden sm:inline-flex px-1.5 py-0.5 text-[10px] font-mono rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400">ESC</kbd>
+        </div>
+        <div className="max-h-[50vh] overflow-y-auto p-2">
+          {filtered.length === 0 ? (
+            <div className="text-center text-sm text-gray-400 dark:text-gray-500 py-10">
+              Sin resultados para "<span className="font-semibold">{query}</span>"
+            </div>
+          ) : (
+            groups.map(g => (
+              <div key={g} className="mb-1">
+                <div className="px-3 py-1 text-[10px] uppercase tracking-wider text-gray-400 dark:text-gray-500 font-semibold">{g}</div>
+                {byGroup.get(g).map((cmd) => {
+                  const Icon = cmd.icon;
+                  const isActive = cmd._globalIdx === cursor;
+                  return (
+                    <button
+                      key={cmd.id}
+                      onClick={() => cmd.run?.()}
+                      onMouseEnter={() => setCursor(cmd._globalIdx)}
+                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors duration-100 ${
+                        isActive
+                          ? 'bg-pink-50 dark:bg-pink-900/30 text-pink-900 dark:text-pink-100'
+                          : 'text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800'
+                      }`}
+                    >
+                      {Icon && <Icon size={16} className={isActive ? 'text-pink-600 dark:text-pink-300' : 'text-gray-400 dark:text-gray-500'} />}
+                      <span className="flex-1 text-sm font-medium">{cmd.label}</span>
+                      {cmd.meta && <span className="text-xs text-gray-400 dark:text-gray-500">{cmd.meta}</span>}
+                      {cmd.shortcut && !cmd.meta && (
+                        <kbd className="hidden sm:inline-flex px-1.5 py-0.5 text-[10px] font-mono rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400">{cmd.shortcut}</kbd>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            ))
+          )}
+        </div>
+        <div className="flex items-center justify-between px-4 py-2 border-t border-gray-100 dark:border-gray-800 text-[10px] text-gray-400 dark:text-gray-500">
+          <div className="flex items-center gap-3">
+            <span className="inline-flex items-center gap-1"><kbd className="font-mono">↑↓</kbd> navegar</span>
+            <span className="inline-flex items-center gap-1"><kbd className="font-mono">↵</kbd> ejecutar</span>
+          </div>
+          <span>Laboratorio Viora</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Container de toasts fijado abajo a la derecha. Cada toast desliza desde
+// la derecha con animación y se auto-destruye.
+function ToastContainer({ toasts }) {
+  return (
+    <div className="fixed bottom-6 right-6 z-[200] flex flex-col gap-2 pointer-events-none">
+      {toasts.map(t => (
+        <div
+          key={t.id}
+          className={`pointer-events-auto animate-slide-in-right flex items-start gap-3 min-w-[260px] max-w-sm px-4 py-3 rounded-xl shadow-2xl border backdrop-blur-md ${
+            t.type === 'success'
+              ? 'bg-emerald-50/95 dark:bg-emerald-900/70 border-emerald-200 dark:border-emerald-700 text-emerald-900 dark:text-emerald-100'
+              : t.type === 'error'
+                ? 'bg-red-50/95 dark:bg-red-900/70 border-red-200 dark:border-red-700 text-red-900 dark:text-red-100'
+                : 'bg-white/95 dark:bg-gray-800/95 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100'
+          }`}
+        >
+          <div className={`shrink-0 rounded-full p-1 ${
+            t.type === 'success' ? 'bg-emerald-200/60 dark:bg-emerald-800/60' : t.type === 'error' ? 'bg-red-200/60 dark:bg-red-800/60' : 'bg-gray-200/60 dark:bg-gray-700/60'
+          }`}>
+            {t.type === 'success' ? <Check size={14} /> : t.type === 'error' ? <X size={14} /> : <Bell size={14} />}
+          </div>
+          <div className="flex-1 text-sm font-medium">{t.message}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 // Router minimal: decide entre la landing pública (/) y el panel de gestión (/acceso)
 // en base a window.location.pathname. Sin dependencia de react-router para mantener

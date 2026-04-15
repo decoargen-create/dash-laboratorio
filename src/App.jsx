@@ -101,6 +101,17 @@ function appReducer(state, action) {
         ...state,
         mentors: state.mentors.map(m => m.id === action.payload.id ? { ...m, ...action.payload } : m)
       };
+    case 'ADD_MENTOR':
+      return { ...state, mentors: [...state.mentors, action.payload] };
+    case 'REMOVE_MENTOR':
+      // Al borrar un mentor, lo desasignamos de las órdenes/clientes para
+      // no dejar referencias colgadas (mentorId a un mentor que no existe).
+      return {
+        ...state,
+        mentors: state.mentors.filter(m => m.id !== action.payload.id),
+        sales: state.sales.map(s => s.mentorId === action.payload.id ? { ...s, mentorId: null } : s),
+        clients: state.clients.map(c => c.mentorId === action.payload.id ? { ...c, mentorId: null } : c),
+      };
     case 'UPDATE_PRODUCT': {
       // payload: { id, patch: {...} }
       const { id, patch } = action.payload;
@@ -715,6 +726,27 @@ function AppShell({ onExit }) {
     dispatch({ type: 'UPDATE_MENTOR', payload: mentorData });
   };
 
+  const handleAddMentor = (mentorData) => {
+    const maxId = state.mentors.reduce((m, x) => Math.max(m, x.id), 0);
+    const newMentor = {
+      id: maxId + 1,
+      porcentajeComision: 50,
+      pagosRecibidos: [],
+      fechaInicio: new Date().toISOString().split('T')[0],
+      ...mentorData,
+    };
+    dispatch({ type: 'ADD_MENTOR', payload: newMentor });
+    addToast({ type: 'success', message: `Mentor "${newMentor.nombre}" creado` });
+    return newMentor;
+  };
+
+  const handleRemoveMentor = (id) => {
+    const mentor = state.mentors.find(m => m.id === id);
+    if (!mentor) return;
+    dispatch({ type: 'REMOVE_MENTOR', payload: { id } });
+    addToast({ type: 'warning', message: `Mentor "${mentor.nombre}" eliminado` });
+  };
+
   const createProduct = (productData) => {
     const maxId = state.products.reduce((m, p) => Math.max(m, p.id), 0);
     const newProduct = {
@@ -966,7 +998,6 @@ function AppShell({ onExit }) {
               <NavItem icon={Package} label="Productos" section="productos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={Users} label="Clientes" section="clientes" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={CreditCard} label="Comisiones" section="comisiones" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={UserCheck} label="Equipo" section="mentores" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={Sparkles} label="Analytics IA" section="analytics" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={Package} label="Datos" section="datos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
             </>
@@ -1011,8 +1042,9 @@ function AppShell({ onExit }) {
           {currentUser.role === 'admin' && currentSection === 'ventas' && <VentasSection state={state} onAddSale={handleAddSale} onQuickAddClient={createClient} onQuickAddProduct={createProduct} showModal={showNewSaleModal} setShowModal={setShowNewSaleModal} />}
           {currentUser.role === 'admin' && currentSection === 'productos' && <ProductosSection state={state} onAddProduct={handleAddProduct} showModal={showNewProductModal} setShowModal={setShowNewProductModal} calculateMargin={calculateMargin} />}
           {currentUser.role === 'admin' && currentSection === 'clientes' && <ClientesSection state={state} onAddClient={handleAddClient} onUpdateClient={handleUpdateClient} showModal={showNewClientModal} setShowModal={setShowNewClientModal} />}
-          {currentUser.role === 'admin' && currentSection === 'comisiones' && <ComisionesSection state={state} dispatch={dispatch} onUpdateMentor={handleUpdateMentor} getMentorStats={getMentorStats} filterMentor={filterMentor} setFilterMentor={setFilterMentor} />}
-          {currentUser.role === 'admin' && currentSection === 'mentores' && <MentoresSection state={state} getMentorStats={getMentorStats} />}
+          {currentUser.role === 'admin' && currentSection === 'comisiones' && <ComisionesSection state={state} dispatch={dispatch} onUpdateMentor={handleUpdateMentor} onAddMentor={handleAddMentor} onRemoveMentor={handleRemoveMentor} getMentorStats={getMentorStats} filterMentor={filterMentor} setFilterMentor={setFilterMentor} />}
+          {/* La sección "Equipo" (mentores) se unificó adentro de Comisiones */}
+          {currentUser.role === 'admin' && currentSection === 'mentores' && <ComisionesSection state={state} dispatch={dispatch} onUpdateMentor={handleUpdateMentor} onAddMentor={handleAddMentor} onRemoveMentor={handleRemoveMentor} getMentorStats={getMentorStats} filterMentor={filterMentor} setFilterMentor={setFilterMentor} />}
           {currentUser.role === 'admin' && currentSection === 'analytics' && <AnalyticsSection state={state} currentUser={currentUser} analyticsState={analyticsState} onFetch={fetchAnalytics} />}
           {currentUser.role === 'admin' && currentSection === 'datos' && <DatosSection state={state} dispatch={dispatch} addToast={addToast} />}
 
@@ -3528,8 +3560,10 @@ function ClientesSection({ state, onAddClient, onUpdateClient, showModal, setSho
   );
 }
 
-function ComisionesSection({ state, dispatch, onUpdateMentor, getMentorStats, filterMentor, setFilterMentor }) {
+function ComisionesSection({ state, dispatch, onUpdateMentor, onAddMentor, onRemoveMentor, getMentorStats, filterMentor, setFilterMentor }) {
   const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
+  const [showNewMentorModal, setShowNewMentorModal] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(null); // mentor id a borrar
 
   const handlePercentChange = (mentorId, value) => {
     const parsed = parseFloat(value);
@@ -3538,8 +3572,14 @@ function ComisionesSection({ state, dispatch, onUpdateMentor, getMentorStats, fi
     onUpdateMentor?.({ id: mentorId, porcentajeComision: clamped });
   };
 
-  // Manejo de pagos recibidos por mentor — reemplaza al flujo "Liquidar todo".
-  // Cada mentor tiene su propio array persistido en mentor.pagosRecibidos.
+  const handleNameChange = (mentorId, value) => {
+    onUpdateMentor?.({ id: mentorId, nombre: value });
+  };
+
+  const handleContactoChange = (mentorId, value) => {
+    onUpdateMentor?.({ id: mentorId, contacto: value });
+  };
+
   const updateMentorPagos = (mentorId, nuevosPagos) => {
     onUpdateMentor?.({ id: mentorId, pagosRecibidos: nuevosPagos });
   };
@@ -3550,59 +3590,147 @@ function ComisionesSection({ state, dispatch, onUpdateMentor, getMentorStats, fi
     <div className="space-y-6">
       <div className="flex flex-wrap justify-between items-center gap-3">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Gestión de Comisiones</h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Cuánto genera cada mentor, cuánto se le pagó, cuánto le queda.</p>
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Comisiones y Mentores</h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Gestioná los mentores, sus porcentajes y los pagos recibidos.</p>
         </div>
-        <select
-          value={filterMentor}
-          onChange={(e) => setFilterMentor(e.target.value)}
-          className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-        >
-          <option value="">Todos los mentores</option>
-          {state.mentors.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
-        </select>
+        <div className="flex items-center gap-2">
+          <select
+            value={filterMentor}
+            onChange={(e) => setFilterMentor(e.target.value)}
+            className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+          >
+            <option value="">Todos los mentores</option>
+            {state.mentors.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
+          </select>
+          {onAddMentor && (
+            <button
+              onClick={() => setShowNewMentorModal(true)}
+              className="inline-flex items-center gap-2 bg-pink-900 text-white px-4 py-2 rounded-lg hover:bg-pink-800 transition font-semibold text-sm"
+            >
+              <Plus size={16} /> Nuevo mentor
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Porcentaje de comisión por mentor (editable inline) */}
+      {showNewMentorModal && (
+        <NewMentorModal
+          onClose={() => setShowNewMentorModal(false)}
+          onCreate={(data) => { onAddMentor?.(data); setShowNewMentorModal(false); }}
+        />
+      )}
+
+      {confirmDelete != null && (
+        <Modal
+          title="¿Eliminar mentor?"
+          onClose={() => setConfirmDelete(null)}
+        >
+          <div className="space-y-4 text-sm text-gray-700 dark:text-gray-200">
+            <p>Esta acción elimina al mentor y desasigna sus órdenes y clientes. Los pagos registrados a este mentor se pierden.</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Si solo querés pausarlo, cambiá su % de comisión a 0 en vez de eliminarlo.</p>
+            <div className="flex gap-2 pt-2">
+              <button
+                onClick={() => setConfirmDelete(null)}
+                className="flex-1 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition font-semibold"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => { onRemoveMentor?.(confirmDelete); setConfirmDelete(null); }}
+                className="flex-1 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition font-semibold"
+              >
+                Eliminar
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {state.mentors.length === 0 && (
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-12 text-center border border-dashed border-gray-300 dark:border-gray-700">
+          <UserCheck size={36} className="mx-auto mb-3 text-gray-400" />
+          <h3 className="text-base font-bold text-gray-900 dark:text-gray-100 mb-1">No hay mentores todavía</h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Agregá el primer mentor para empezar a referir órdenes y pagar comisiones.</p>
+          <button
+            onClick={() => setShowNewMentorModal(true)}
+            className="inline-flex items-center gap-2 bg-pink-900 text-white px-4 py-2 rounded-lg hover:bg-pink-800 transition font-semibold text-sm"
+          >
+            <Plus size={16} /> Nuevo mentor
+          </button>
+        </div>
+      )}
+
+      {/* Editor de mentores: nombre, contacto, % comisión, y stats */}
+      {state.mentors.length > 0 && (
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
         <div className="flex items-start justify-between mb-4">
           <div>
-            <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Porcentaje de comisión por mentor</h3>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">Se aplica sobre el <span className="font-semibold">profit</span> de cada orden. Podés pisarlo por orden al registrarla.</p>
+            <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Mentores</h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">El % de comisión se aplica sobre el <span className="font-semibold">profit informado</span> de cada orden.</p>
           </div>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {state.mentors.map(mentor => {
             const pct = mentor.porcentajeComision ?? 50;
+            const stats = getMentorStats(mentor.id);
+            const mentorClients = state.clients.filter(c => c.mentorId === mentor.id);
             return (
               <div
                 key={mentor.id}
-                className="group flex items-center gap-3 p-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/60 dark:bg-gray-900/40 hover:border-pink-300 dark:hover:border-pink-600 transition-colors"
+                className="group p-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/60 dark:bg-gray-900/40 hover:border-pink-300 dark:hover:border-pink-600 transition-colors space-y-3"
               >
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-amber-200 to-amber-400 text-[#4a0f22] font-bold flex items-center justify-center shrink-0 shadow-sm">
-                  {(mentor.nombre || 'M').charAt(0).toUpperCase()}
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-amber-200 to-amber-400 text-[#4a0f22] font-bold flex items-center justify-center shrink-0 shadow-sm">
+                    {(mentor.nombre || 'M').charAt(0).toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0 space-y-1.5">
+                    <input
+                      type="text"
+                      value={mentor.nombre || ''}
+                      onChange={(e) => handleNameChange(mentor.id, e.target.value)}
+                      className="w-full px-2 py-1 text-sm font-semibold border border-transparent hover:border-gray-300 dark:hover:border-gray-600 bg-transparent text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-pink-500 focus:border-pink-500 focus:bg-white dark:focus:bg-gray-800"
+                    />
+                    <input
+                      type="text"
+                      value={mentor.contacto || ''}
+                      onChange={(e) => handleContactoChange(mentor.id, e.target.value)}
+                      placeholder="Contacto (WhatsApp, email…)"
+                      className="w-full px-2 py-1 text-[11px] text-gray-600 dark:text-gray-400 border border-transparent hover:border-gray-300 dark:hover:border-gray-600 bg-transparent rounded focus:outline-none focus:ring-1 focus:ring-pink-500 focus:border-pink-500 focus:bg-white dark:focus:bg-gray-800"
+                    />
+                  </div>
+                  <button
+                    onClick={() => setConfirmDelete(mentor.id)}
+                    className="opacity-0 group-hover:opacity-100 p-1 rounded text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition"
+                    title="Eliminar mentor"
+                  >
+                    <Trash2 size={14} />
+                  </button>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{mentor.nombre}</p>
-                  <p className="text-[11px] text-gray-500 dark:text-gray-400">Comisión sobre profit</p>
-                </div>
-                <div className="flex items-center gap-1">
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    step="1"
-                    value={pct}
-                    onChange={(e) => handlePercentChange(mentor.id, e.target.value)}
-                    className="w-16 px-2 py-1.5 text-sm font-bold text-right border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-md focus:outline-none focus:ring-2 focus:ring-pink-500 tabular-nums"
-                  />
-                  <span className="text-sm font-semibold text-gray-500 dark:text-gray-400">%</span>
+
+                <div className="flex items-center justify-between gap-3 pt-2 border-t border-gray-200 dark:border-gray-700">
+                  <div className="text-[11px] text-gray-500 dark:text-gray-400 space-y-0.5">
+                    <div>Ventas referidas: <span className="font-bold text-gray-900 dark:text-gray-100">{fmtMoney(stats.totalSales)}</span></div>
+                    <div>Clientes: <span className="font-bold text-gray-900 dark:text-gray-100">{mentorClients.length}</span></div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="1"
+                      value={pct}
+                      onChange={(e) => handlePercentChange(mentor.id, e.target.value)}
+                      className="w-16 px-2 py-1.5 text-sm font-bold text-right border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-md focus:outline-none focus:ring-2 focus:ring-pink-500 tabular-nums"
+                    />
+                    <span className="text-sm font-semibold text-gray-500 dark:text-gray-400">%</span>
+                  </div>
                 </div>
               </div>
             );
           })}
         </div>
       </div>
+      )}
 
       {/* Balance + historial de pagos por mentor */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
@@ -5844,6 +5972,76 @@ function PaymentCard({ label, data, onChange, disabled = false, disabledLabel = 
   );
 }
 
+// Modal para crear un mentor nuevo desde la sección de Comisiones.
+function NewMentorModal({ onClose, onCreate }) {
+  const [data, setData] = useState({ nombre: '', contacto: '', porcentajeComision: 50 });
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!data.nombre.trim()) return;
+    onCreate({
+      nombre: data.nombre.trim(),
+      contacto: data.contacto.trim(),
+      porcentajeComision: Math.max(0, Math.min(100, parseFloat(data.porcentajeComision) || 50)),
+    });
+  };
+  return (
+    <Modal title="Nuevo mentor" onClose={onClose}>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <FormLabel required>Nombre</FormLabel>
+          <input
+            type="text"
+            autoFocus
+            value={data.nombre}
+            onChange={(e) => setData({ ...data, nombre: e.target.value })}
+            placeholder="Nombre del mentor"
+            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            required
+          />
+        </div>
+        <div>
+          <FormLabel tip="Teléfono, email o lo que quieras para ubicarlo. Opcional.">Contacto</FormLabel>
+          <input
+            type="text"
+            value={data.contacto}
+            onChange={(e) => setData({ ...data, contacto: e.target.value })}
+            placeholder="Ej. 11 1234-5678 o email"
+            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+          />
+        </div>
+        <div>
+          <FormLabel required tip="Sobre el profit informado de cada orden. Podés editarlo después.">Comisión (%)</FormLabel>
+          <input
+            type="number"
+            min="0"
+            max="100"
+            step="1"
+            value={data.porcentajeComision}
+            onChange={(e) => setData({ ...data, porcentajeComision: e.target.value })}
+            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            required
+          />
+        </div>
+        <div className="flex gap-2 pt-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-1 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition font-semibold"
+          >
+            Cancelar
+          </button>
+          <button
+            type="submit"
+            className="flex-1 bg-pink-900 text-white py-2 rounded-lg hover:bg-pink-800 transition font-semibold"
+          >
+            Crear mentor
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 function QuickClientModal({ mentors, onClose, onCreate }) {
   const [data, setData] = useState({ nombre: '', telefono: '', mentorId: '', domicilio: '' });
 
@@ -6172,8 +6370,8 @@ function getSectionTitle(user, section) {
     ventas: 'Ventas',
     productos: 'Productos',
     clientes: 'Clientes',
-    comisiones: 'Comisiones',
-    mentores: 'Equipo',
+    comisiones: 'Comisiones y Mentores',
+    mentores: 'Comisiones y Mentores', // fallback: sección vieja cae al mismo lugar
     analytics: 'Analytics con IA',
     datos: 'Datos (Export / Import)',
   };
@@ -6722,8 +6920,7 @@ function CommandPalette({ state, currentUser, onClose, onNavigate, onNewSale, on
       { id: 'go-ventas', group: 'Ir a', label: 'Ventas', icon: TrendingUp, shortcut: 'G V', run: () => onNavigate('ventas') },
       { id: 'go-productos', group: 'Ir a', label: 'Productos', icon: Package, shortcut: 'G P', run: () => onNavigate('productos') },
       { id: 'go-clientes', group: 'Ir a', label: 'Clientes', icon: Users, shortcut: 'G C', run: () => onNavigate('clientes') },
-      { id: 'go-comisiones', group: 'Ir a', label: 'Comisiones', icon: CreditCard, shortcut: 'G $', run: () => onNavigate('comisiones') },
-      { id: 'go-mentores', group: 'Ir a', label: 'Mentores', icon: UserCheck, shortcut: 'G M', run: () => onNavigate('mentores') },
+      { id: 'go-comisiones', group: 'Ir a', label: 'Comisiones y Mentores', icon: CreditCard, shortcut: 'G $', run: () => onNavigate('comisiones') },
       { id: 'new-sale', group: 'Acciones', label: 'Nueva venta', icon: Plus, shortcut: 'N V', run: onNewSale },
       { id: 'new-client', group: 'Acciones', label: 'Nuevo cliente', icon: Plus, shortcut: 'N C', run: onNewClient },
       { id: 'new-product', group: 'Acciones', label: 'Nuevo producto', icon: Plus, shortcut: 'N P', run: onNewProduct },

@@ -603,23 +603,29 @@ function AppShell({ onExit }) {
     (async () => {
       try {
         if (linkToken) {
-          const resp = await fetch('/api/auth', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'verify', token: linkToken }),
-          });
+          let resp;
+          try {
+            resp = await fetch('/api/auth', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'verify', token: linkToken }),
+            });
+          } catch {
+            clearTokenFromUrl();
+            return; // sin red, dejar que se muestre el login
+          }
           clearTokenFromUrl();
           if (!resp.ok) {
-            addToast({ type: 'error', message: 'El link de acceso es inválido o expiró', duration: 6000 });
+            addToast?.({ type: 'error', message: 'El link de acceso es inválido o expiró', duration: 6000 });
             return;
           }
-          const data = await resp.json();
+          const data = await resp.json().catch(() => null);
           if (data?.ok && data.session && data.user) {
             localStorage.setItem('viora-session', data.session);
             if (!cancelled) {
               setCurrentUser({ role: data.user.role, name: data.user.name, email: data.user.email, id: data.user.role === 'admin' ? 'admin' : data.user.email });
               setCurrentSection('inicio');
-              addToast({ type: 'success', message: `Bienvenido, ${data.user.name}` });
+              addToast?.({ type: 'success', message: `Bienvenido, ${data.user.name}` });
             }
             return;
           }

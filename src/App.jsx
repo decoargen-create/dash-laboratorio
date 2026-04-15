@@ -631,11 +631,19 @@ function AppShell({ onExit }) {
             body: JSON.stringify({ action: 'me', session: storedSession }),
           });
           if (!resp.ok) {
+            // Sesión inválida / expirada / usuario borrado → limpiar y
+            // dejar que el LoginScreen se muestre.
             localStorage.removeItem('viora-session');
+            if (!cancelled) setCurrentUser(null);
             return;
           }
-          const data = await resp.json();
-          if (data?.ok && data.user && !cancelled) {
+          const data = await resp.json().catch(() => null);
+          if (!data?.ok || !data.user) {
+            localStorage.removeItem('viora-session');
+            if (!cancelled) setCurrentUser(null);
+            return;
+          }
+          if (!cancelled) {
             const u = data.user;
             // Matcheamos id del mentor por nombre si aplica
             let id = u.username || u.email || u.name;

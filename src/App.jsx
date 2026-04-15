@@ -110,6 +110,24 @@ function appReducer(state, action) {
           ? { ...s, tieneIncidencia: action.payload.tieneIncidencia, incidenciaDetalle: action.payload.incidenciaDetalle }
           : s)
       };
+    case 'UPDATE_ORDER_PAYMENT': {
+      const { orderId, rubro, data } = action.payload;
+      return {
+        ...state,
+        sales: state.sales.map(s => {
+          if (s.id !== orderId) return s;
+          const existing = s.pagos || {};
+          const merged = { ...existing, [rubro]: { ...(existing[rubro] || {}), ...data } };
+          const updated = { ...s, pagos: merged };
+          // Sincronizo estadoComision cuando se toca el rubro mentor para que
+          // la sección Comisiones (que lee estadoComision) siga consistente.
+          if (rubro === 'mentor' && data.estado !== undefined) {
+            updated.estadoComision = data.estado === 'pagado' ? 'pagada' : 'pendiente';
+          }
+          return updated;
+        })
+      };
+    }
     default:
       return state;
   }
@@ -147,6 +165,37 @@ export function getOrderProfit(order, product) {
 
 export function getMentorCommission(order) {
   return (order.montoTotal || 0) * 0.5;
+}
+
+// Rubros de pago por orden. "envase" se muestra como "Envase / Pote" en la UI
+// porque son lo mismo según el flujo del laboratorio.
+export const PAYMENT_RUBROS = ['contenido', 'envase', 'etiqueta', 'mentor'];
+
+export const PAYMENT_RUBRO_LABELS = {
+  contenido: 'Contenido',
+  envase: 'Envase / Pote',
+  etiqueta: 'Etiqueta',
+  mentor: 'Comisión mentor',
+};
+
+// Devuelve los 4 rubros de pago de una orden con valores calculados por defecto.
+// Si la orden tiene datos guardados en order.pagos, se mergean sobre los defaults.
+// El rubro 'mentor' lee su estado desde estadoComision si no hay override.
+export function getOrderPayments(order, product) {
+  const costs = getOrderCosts(order, product);
+  const defaults = {
+    contenido: { estado: 'pendiente', monto: costs.contenidoTotal, fecha: '', proveedor: '', nota: '' },
+    envase:    { estado: 'pendiente', monto: costs.envaseTotal,    fecha: '', proveedor: '', nota: '' },
+    etiqueta:  { estado: 'pendiente', monto: costs.etiquetaTotal,  fecha: '', proveedor: '', nota: '' },
+    mentor:    { estado: order.estadoComision === 'pagada' ? 'pagado' : 'pendiente', monto: getMentorCommission(order), fecha: '', proveedor: '', nota: '' },
+  };
+  const stored = order.pagos || {};
+  return {
+    contenido: { ...defaults.contenido, ...(stored.contenido || {}) },
+    envase:    { ...defaults.envase,    ...(stored.envase    || {}) },
+    etiqueta:  { ...defaults.etiqueta,  ...(stored.etiqueta  || {}) },
+    mentor:    { ...defaults.mentor,    ...(stored.mentor    || {}) },
+  };
 }
 
 export default function DASHLaboratorio() {
@@ -495,13 +544,23 @@ function InicioSection({ state, dispatch, getCurrentMonthSales, getPendingCommis
     return acc + getOrderProfit(order, product);
   }, 0);
   const ordersConIncidencia = state.sales.filter(s => s.tieneIncidencia).length;
+  // Total de pagos pendientes a proveedores (contenido + envase + etiqueta, sin mentor)
+  const totalPagosProveedoresPendientes = state.sales.reduce((acc, order) => {
+    const product = state.products.find(p => p.id === order.productoId);
+    const pagos = getOrderPayments(order, product);
+    return acc
+      + (pagos.contenido.estado === 'pendiente' ? (pagos.contenido.monto || 0) : 0)
+      + (pagos.envase.estado === 'pendiente' ? (pagos.envase.monto || 0) : 0)
+      + (pagos.etiqueta.estado === 'pendiente' ? (pagos.etiqueta.monto || 0) : 0);
+  }, 0);
 
   return (
     <div className="space-y-8">
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
         <StatCard icon={DollarSign} label="Ventas del Mes" value={`$${currentMonthSales.toLocaleString()}`} color="from-pink-500 to-rose-500" />
         <StatCard icon={TrendingUp} label="Profit Total" value={`$${totalProfit.toLocaleString()}`} color="from-emerald-500 to-teal-500" />
         <StatCard icon={CreditCard} label="Comisiones Pendientes" value={`$${pendingCommissions.toLocaleString()}`} color="from-amber-500 to-orange-500" />
+        <StatCard icon={Package} label="A pagar Proveedores" value={`$${Math.round(totalPagosProveedoresPendientes).toLocaleString()}`} color="from-sky-500 to-blue-500" />
         <StatCard icon={AlertCircle} label="Incidencias" value={ordersConIncidencia} color="from-red-500 to-pink-500" />
       </div>
 
@@ -528,9 +587,23 @@ function InicioSection({ state, dispatch, getCurrentMonthSales, getPendingCommis
 function OrdersList({ state, dispatch }) {
   const [viewMode, setViewMode] = useState('total'); // 'total' | 'unidad'
   const [incidenciaDraft, setIncidenciaDraft] = useState({}); // { [orderId]: texto }
+  const [expanded, setExpanded] = useState(() => new Set());
+
+  const toggleExpand = (id) => {
+    setExpanded(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const handleStateChange = (orderId, nuevoEstado) => {
     dispatch({ type: 'UPDATE_ORDER_STATE', payload: { orderId, estado: nuevoEstado } });
+  };
+
+  const handlePaymentChange = (orderId, rubro, data) => {
+    dispatch({ type: 'UPDATE_ORDER_PAYMENT', payload: { orderId, rubro, data } });
   };
 
   const handleToggleIncidencia = (order) => {
@@ -590,6 +663,7 @@ function OrdersList({ state, dispatch }) {
         <table className="w-full text-sm">
           <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700">
             <tr className="text-left text-gray-700 dark:text-gray-200">
+              <th className="px-2 py-3 w-8"></th>
               <th className="px-4 py-3 font-semibold">Fecha</th>
               <th className="px-4 py-3 font-semibold">Cliente</th>
               <th className="px-4 py-3 font-semibold">Producto</th>
@@ -606,7 +680,7 @@ function OrdersList({ state, dispatch }) {
           </thead>
           <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
             {state.sales.length === 0 && (
-              <tr><td colSpan={12} className="px-4 py-10 text-center text-gray-500 dark:text-gray-400">Todavía no hay órdenes cargadas.</td></tr>
+              <tr><td colSpan={13} className="px-4 py-10 text-center text-gray-500 dark:text-gray-400">Todavía no hay órdenes cargadas.</td></tr>
             )}
             {state.sales.map(order => {
               const product = getProduct(order.productoId);
@@ -621,8 +695,21 @@ function OrdersList({ state, dispatch }) {
               const precioVentaTotal = precioVentaUnit * (order.cantidad || 0);
 
               const isTotal = viewMode === 'total';
+              const isOpen = expanded.has(order.id);
+              const payments = isOpen ? getOrderPayments(order, product) : null;
               return (
-                <tr key={order.id} className={`transition ${order.tieneIncidencia ? 'bg-red-50/40 dark:bg-red-900/10' : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}>
+                <React.Fragment key={order.id}>
+                <tr className={`transition ${order.tieneIncidencia ? 'bg-red-50/40 dark:bg-red-900/10' : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}>
+                  <td className="px-2 py-3 text-center">
+                    <button
+                      onClick={() => toggleExpand(order.id)}
+                      className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300"
+                      title={isOpen ? 'Ocultar pagos' : 'Ver pagos de esta orden'}
+                      aria-label="Expandir fila"
+                    >
+                      {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                    </button>
+                  </td>
                   <td className="px-4 py-3 text-gray-900 dark:text-gray-100 whitespace-nowrap">{order.fecha}</td>
                   <td className="px-4 py-3 text-gray-900 dark:text-gray-100">{getClientName(order.clienteId)}</td>
                   <td className="px-4 py-3 text-gray-900 dark:text-gray-100">{product?.nombre || '-'}</td>
@@ -665,6 +752,19 @@ function OrdersList({ state, dispatch }) {
                     </div>
                   </td>
                 </tr>
+                {isOpen && payments && (
+                  <tr className="bg-gray-50 dark:bg-gray-900/40">
+                    <td colSpan={13} className="px-6 py-4">
+                      <PaymentsPanel
+                        order={order}
+                        payments={payments}
+                        mentorNombre={hasMentor ? getMentorName(mentorId) : null}
+                        onChange={(rubro, data) => handlePaymentChange(order.id, rubro, data)}
+                      />
+                    </td>
+                  </tr>
+                )}
+                </React.Fragment>
               );
             })}
           </tbody>
@@ -1685,6 +1785,129 @@ function ClientDetailPanel({ stats, products }) {
 
 // Mini-form reutilizable para crear clientes desde otros módulos (ej. al registrar una venta).
 // Campos requeridos: nombre + teléfono. Mentor y domicilio son opcionales.
+// Panel de pagos que se abre dentro de una orden del dashboard. Muestra 4 rubros
+// (contenido / envase-pote / etiqueta / mentor) con estado, monto, fecha, proveedor
+// y nota editables. El cambio en cualquier campo dispatchea UPDATE_ORDER_PAYMENT.
+function PaymentsPanel({ order, payments, mentorNombre, onChange }) {
+  const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
+  const totalPagado = Object.values(payments)
+    .filter(p => p.estado === 'pagado')
+    .reduce((s, p) => s + (parseFloat(p.monto) || 0), 0);
+  const totalPendiente = Object.values(payments)
+    .filter(p => p.estado === 'pendiente')
+    .reduce((s, p) => s + (parseFloat(p.monto) || 0), 0);
+
+  const rubros = [
+    { key: 'contenido', label: 'Contenido' },
+    { key: 'envase',    label: 'Envase / Pote' },
+    { key: 'etiqueta',  label: 'Etiqueta' },
+    { key: 'mentor',    label: mentorNombre ? `Comisión — ${mentorNombre}` : 'Comisión mentor' },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-2 items-center justify-between">
+        <div>
+          <h4 className="text-sm font-bold text-gray-900 dark:text-gray-100">Pagos de esta orden</h4>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Tildá "Pagado" cuando se haya abonado y completá los datos.</p>
+        </div>
+        <div className="flex gap-4 text-xs">
+          <div className="text-right">
+            <p className="text-gray-500 dark:text-gray-400">Pendiente</p>
+            <p className="font-bold text-amber-600 dark:text-amber-400">{fmtMoney(totalPendiente)}</p>
+          </div>
+          <div className="text-right">
+            <p className="text-gray-500 dark:text-gray-400">Pagado</p>
+            <p className="font-bold text-emerald-600 dark:text-emerald-400">{fmtMoney(totalPagado)}</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+        {rubros.map(rubro => {
+          const data = payments[rubro.key];
+          const isMentorSinAsignar = rubro.key === 'mentor' && !order.mentorId;
+          const paid = data.estado === 'pagado';
+          return (
+            <div
+              key={rubro.key}
+              className={`rounded-lg border p-3 space-y-2 ${
+                isMentorSinAsignar
+                  ? 'bg-gray-100 dark:bg-gray-800 border-gray-200 dark:border-gray-700 opacity-60'
+                  : paid
+                    ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800'
+                    : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-gray-800 dark:text-gray-100 truncate">{rubro.label}</span>
+                {isMentorSinAsignar ? (
+                  <span className="text-[10px] text-gray-500 dark:text-gray-400 italic">sin mentor</span>
+                ) : (
+                  <label className="inline-flex items-center gap-1 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={paid}
+                      onChange={(e) => onChange(rubro.key, { estado: e.target.checked ? 'pagado' : 'pendiente' })}
+                      className="h-3.5 w-3.5 rounded border-gray-300 dark:border-gray-600 text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <span className={`text-[10px] font-semibold uppercase ${paid ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}`}>
+                      {paid ? 'Pagado' : 'Pendiente'}
+                    </span>
+                  </label>
+                )}
+              </div>
+              <div>
+                <label className="block text-[10px] uppercase text-gray-500 dark:text-gray-400 mb-0.5">Monto</label>
+                <input
+                  type="number"
+                  disabled={isMentorSinAsignar}
+                  value={data.monto ?? ''}
+                  onChange={(e) => onChange(rubro.key, { monto: parseFloat(e.target.value) || 0 })}
+                  placeholder="0"
+                  className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-pink-500 disabled:cursor-not-allowed"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] uppercase text-gray-500 dark:text-gray-400 mb-0.5">Fecha pago</label>
+                <input
+                  type="date"
+                  disabled={isMentorSinAsignar}
+                  value={data.fecha || ''}
+                  onChange={(e) => onChange(rubro.key, { fecha: e.target.value })}
+                  className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-pink-500 disabled:cursor-not-allowed"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] uppercase text-gray-500 dark:text-gray-400 mb-0.5">Proveedor</label>
+                <input
+                  type="text"
+                  disabled={isMentorSinAsignar}
+                  value={data.proveedor || ''}
+                  onChange={(e) => onChange(rubro.key, { proveedor: e.target.value })}
+                  placeholder={rubro.key === 'mentor' ? 'Mentor' : 'Nombre del proveedor'}
+                  className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-pink-500 disabled:cursor-not-allowed"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] uppercase text-gray-500 dark:text-gray-400 mb-0.5">Nota</label>
+                <input
+                  type="text"
+                  disabled={isMentorSinAsignar}
+                  value={data.nota || ''}
+                  onChange={(e) => onChange(rubro.key, { nota: e.target.value })}
+                  placeholder="Opcional"
+                  className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-pink-500 disabled:cursor-not-allowed"
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function QuickClientModal({ mentors, onClose, onCreate }) {
   const [data, setData] = useState({ nombre: '', telefono: '', mentorId: '', domicilio: '' });
 

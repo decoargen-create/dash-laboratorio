@@ -60,8 +60,8 @@ const INITIAL_STATE = {
     { id: 8, nombre: 'Isabel Gómez', telefono: '11 3666-7788', domicilio: 'Cabildo 900, CABA', mentorId: 2, fechaAlta: '2024-02-28', totalCompras: 3, unidadesProducidas: 400 },
   ],
   mentors: [
-    { id: 1, nombre: 'Sofia', contacto: '11 9876-5432', fechaInicio: '2023-12-01', clientesAsignados: 4 },
-    { id: 2, nombre: 'Mariano', contacto: '11 8765-4321', fechaInicio: '2023-12-15', clientesAsignados: 4 },
+    { id: 1, nombre: 'Sofia', contacto: '11 9876-5432', fechaInicio: '2023-12-01', clientesAsignados: 4, porcentajeComision: 50 },
+    { id: 2, nombre: 'Mariano', contacto: '11 8765-4321', fechaInicio: '2023-12-15', clientesAsignados: 4, porcentajeComision: 50 },
   ],
   sales: [
     { id: 1, fecha: '2024-02-15', clienteId: 1, productoId: 1, cantidad: 100, montoTotal: 45000, mentorId: 1, estadoComision: 'pagada', estado: 'despachado', tieneIncidencia: false, incidenciaDetalle: '' },
@@ -92,6 +92,11 @@ function appReducer(state, action) {
       return {
         ...state,
         clients: state.clients.map(c => c.id === action.payload.id ? { ...c, ...action.payload } : c)
+      };
+    case 'UPDATE_MENTOR':
+      return {
+        ...state,
+        mentors: state.mentors.map(m => m.id === action.payload.id ? { ...m, ...action.payload } : m)
       };
     case 'ADD_PRODUCT':
       return { ...state, products: [...state.products, action.payload] };
@@ -194,17 +199,20 @@ export function getOrderProfit(order, product) {
   return (eff.precioVenta - unitCost) * cantidad;
 }
 
-// Comisión del mentor = 50% del PROFIT de la orden (no del monto total).
-// Si la orden tiene un presupuesto fijo asignado al mentor, ese gana.
-// Si no se pasa el producto, cae a un fallback del 50% del montoTotal
-// para mantener retrocompatibilidad con llamadas viejas.
-export function getMentorCommission(order, product) {
+// Comisión del mentor = porcentaje (del mentor) × profit de la orden.
+// Prioridad:
+//  1. Si la orden tiene un presupuesto fijo asignado (order.mentorPresupuesto), ese gana.
+//  2. Si se pasa mentor y product, usa mentor.porcentajeComision (default 50) × profit.
+//  3. Si solo se pasa product, usa 50% del profit como fallback.
+//  4. Sin product, último fallback: 50% del montoTotal.
+export function getMentorCommission(order, product, mentor) {
   if (order?.mentorPresupuesto != null && order.mentorPresupuesto !== '') {
     return parseFloat(order.mentorPresupuesto) || 0;
   }
   if (product) {
     const profit = getOrderProfit(order, product);
-    return Math.max(0, profit * 0.5);
+    const pct = mentor?.porcentajeComision != null ? Number(mentor.porcentajeComision) : 50;
+    return Math.max(0, profit * (pct / 100));
   }
   return (order?.montoTotal || 0) * 0.5;
 }
@@ -237,13 +245,13 @@ export const PAYMENT_RUBRO_LABELS = {
 // Devuelve los 4 rubros de pago de una orden con valores calculados por defecto.
 // Si la orden tiene datos guardados en order.pagos, se mergean sobre los defaults.
 // El rubro 'mentor' lee su estado desde estadoComision si no hay override.
-export function getOrderPayments(order, product) {
+export function getOrderPayments(order, product, mentor) {
   const costs = getOrderCosts(order, product);
   const defaults = {
     contenido: { estado: 'pendiente', monto: costs.contenidoTotal, fecha: '', proveedor: '', nota: '' },
     envase:    { estado: 'pendiente', monto: costs.envaseTotal,    fecha: '', proveedor: '', nota: '' },
     etiqueta:  { estado: 'pendiente', monto: costs.etiquetaTotal,  fecha: '', proveedor: '', nota: '' },
-    mentor:    { estado: order.estadoComision === 'pagada' ? 'pagado' : 'pendiente', monto: getMentorCommission(order, product), fecha: '', proveedor: '', nota: '' },
+    mentor:    { estado: order.estadoComision === 'pagada' ? 'pagado' : 'pendiente', monto: getMentorCommission(order, product, mentor), fecha: '', proveedor: '', nota: '' },
   };
   const stored = order.pagos || {};
   return {
@@ -353,6 +361,10 @@ function AppShell({ onExit }) {
 
   const handleUpdateClient = (clientData) => {
     dispatch({ type: 'UPDATE_CLIENT', payload: clientData });
+  };
+
+  const handleUpdateMentor = (mentorData) => {
+    dispatch({ type: 'UPDATE_MENTOR', payload: mentorData });
   };
 
   const createProduct = (productData) => {
@@ -522,7 +534,7 @@ function AppShell({ onExit }) {
           {currentUser.role === 'admin' && currentSection === 'ventas' && <VentasSection state={state} onAddSale={handleAddSale} onQuickAddClient={createClient} onQuickAddProduct={createProduct} showModal={showNewSaleModal} setShowModal={setShowNewSaleModal} />}
           {currentUser.role === 'admin' && currentSection === 'productos' && <ProductosSection state={state} onAddProduct={handleAddProduct} showModal={showNewProductModal} setShowModal={setShowNewProductModal} calculateMargin={calculateMargin} />}
           {currentUser.role === 'admin' && currentSection === 'clientes' && <ClientesSection state={state} onAddClient={handleAddClient} onUpdateClient={handleUpdateClient} showModal={showNewClientModal} setShowModal={setShowNewClientModal} />}
-          {currentUser.role === 'admin' && currentSection === 'comisiones' && <ComisionesSection state={state} dispatch={dispatch} getMentorStats={getMentorStats} filterMentor={filterMentor} setFilterMentor={setFilterMentor} />}
+          {currentUser.role === 'admin' && currentSection === 'comisiones' && <ComisionesSection state={state} dispatch={dispatch} onUpdateMentor={handleUpdateMentor} getMentorStats={getMentorStats} filterMentor={filterMentor} setFilterMentor={setFilterMentor} />}
           {currentUser.role === 'admin' && currentSection === 'mentores' && <MentoresSection state={state} getMentorStats={getMentorStats} />}
 
           {/* Mentor Views */}
@@ -723,11 +735,13 @@ function InicioSection({ state, dispatch }) {
     .filter(o => o.mentorId && o.estadoComision !== 'pagada')
     .reduce((s, o) => {
       const product = state.products.find(p => p.id === o.productoId);
-      return s + getMentorCommission(o, product);
+      const mentor = state.mentors.find(m => m.id === o.mentorId);
+      return s + getMentorCommission(o, product, mentor);
     }, 0);
   const totalPagosProveedoresPendientes = filteredOrders.reduce((acc, order) => {
     const product = state.products.find(p => p.id === order.productoId);
-    const pagos = getOrderPayments(order, product);
+    const mentor = state.mentors.find(m => m.id === order.mentorId);
+    const pagos = getOrderPayments(order, product, mentor);
     return acc
       + (pagos.contenido.estado === 'pendiente' ? (pagos.contenido.monto || 0) : 0)
       + (pagos.envase.estado === 'pendiente' ? (pagos.envase.monto || 0) : 0)
@@ -802,7 +816,15 @@ function FilterBar({ filters, onChange, totalShown, totalAll }) {
     const fmt = (d) => d.toISOString().split('T')[0];
     const todayStr = fmt(today);
     if (preset === 'all') { update({ dateFrom: '', dateTo: '' }); return; }
+    if (preset === 'today') { update({ dateFrom: todayStr, dateTo: todayStr }); return; }
+    if (preset === 'yesterday') {
+      const y = new Date(today); y.setDate(y.getDate() - 1);
+      const yStr = fmt(y);
+      update({ dateFrom: yStr, dateTo: yStr });
+      return;
+    }
     const d = new Date(today);
+    if (preset === '7') { d.setDate(d.getDate() - 7); update({ dateFrom: fmt(d), dateTo: todayStr }); return; }
     if (preset === '30') { d.setDate(d.getDate() - 30); update({ dateFrom: fmt(d), dateTo: todayStr }); return; }
     if (preset === '90') { d.setDate(d.getDate() - 90); update({ dateFrom: fmt(d), dateTo: todayStr }); return; }
     if (preset === 'thisMonth') { const s = new Date(today.getFullYear(), today.getMonth(), 1); update({ dateFrom: fmt(s), dateTo: todayStr }); return; }
@@ -859,6 +881,9 @@ function FilterBar({ filters, onChange, totalShown, totalAll }) {
       <div className="flex flex-wrap gap-2 items-center">
         <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mr-1">Rango:</span>
         {[
+          { k: 'today', label: 'Hoy' },
+          { k: 'yesterday', label: 'Ayer' },
+          { k: '7', label: 'Últ. 7 días' },
           { k: '30', label: 'Últ. 30 días' },
           { k: '90', label: 'Últ. 90 días' },
           { k: 'thisMonth', label: 'Este mes' },
@@ -1063,14 +1088,15 @@ function OrdersList({ state, dispatch, orders }) {
               const profitUnit = product ? (product.precioVenta - getProductUnitCost(product)) : 0;
               const mentorId = order.mentorId;
               const hasMentor = !!mentorId;
-              const commissionTotal = hasMentor ? getMentorCommission(order, product) : 0;
+              const mentor = hasMentor ? state.mentors.find(m => m.id === mentorId) : null;
+              const commissionTotal = hasMentor ? getMentorCommission(order, product, mentor) : 0;
               const commissionUnit = hasMentor && (order.cantidad || 0) > 0 ? (commissionTotal / (order.cantidad || 1)) : 0;
               const precioVentaUnit = product?.precioVenta || 0;
               const precioVentaTotal = precioVentaUnit * (order.cantidad || 0);
 
               const isTotal = viewMode === 'total';
               const isOpen = expanded.has(order.id);
-              const payments = isOpen ? getOrderPayments(order, product) : null;
+              const payments = isOpen ? getOrderPayments(order, product, mentor) : null;
               const cobrosSummary = isOpen ? getOrderCobrosSummary(order) : null;
               return (
                 <React.Fragment key={order.id}>
@@ -1932,7 +1958,7 @@ function ClientesSection({ state, onAddClient, onUpdateClient, showModal, setSho
   );
 }
 
-function ComisionesSection({ state, dispatch, getMentorStats, filterMentor, setFilterMentor }) {
+function ComisionesSection({ state, dispatch, onUpdateMentor, getMentorStats, filterMentor, setFilterMentor }) {
   const [selectedMentors, setSelectedMentors] = useState([]);
 
   const handlePayCommissions = () => {
@@ -1952,6 +1978,13 @@ function ComisionesSection({ state, dispatch, getMentorStats, filterMentor, setF
     }
   };
 
+  const handlePercentChange = (mentorId, value) => {
+    const parsed = parseFloat(value);
+    if (Number.isNaN(parsed)) return;
+    const clamped = Math.max(0, Math.min(100, parsed));
+    onUpdateMentor?.({ id: mentorId, porcentajeComision: clamped });
+  };
+
   const filteredMentors = state.mentors.filter(m => !filterMentor || m.id === parseInt(filterMentor));
 
   return (
@@ -1964,6 +1997,47 @@ function ComisionesSection({ state, dispatch, getMentorStats, filterMentor, setF
         >
           <CreditCard size={20} /> Liquidar
         </button>
+      </div>
+
+      {/* Porcentaje de comisión por mentor (editable inline) */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Porcentaje de comisión por mentor</h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">Se aplica sobre el <span className="font-semibold">profit</span> de cada orden. Podés pisarlo por orden al registrarla.</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {state.mentors.map(mentor => {
+            const pct = mentor.porcentajeComision ?? 50;
+            return (
+              <div
+                key={mentor.id}
+                className="group flex items-center gap-3 p-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/60 dark:bg-gray-900/40 hover:border-pink-300 dark:hover:border-pink-600 transition-colors"
+              >
+                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-amber-200 to-amber-400 text-[#4a0f22] font-bold flex items-center justify-center shrink-0 shadow-sm">
+                  {(mentor.nombre || 'M').charAt(0).toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{mentor.nombre}</p>
+                  <p className="text-[11px] text-gray-500 dark:text-gray-400">Comisión sobre profit</p>
+                </div>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="1"
+                    value={pct}
+                    onChange={(e) => handlePercentChange(mentor.id, e.target.value)}
+                    className="w-16 px-2 py-1.5 text-sm font-bold text-right border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-md focus:outline-none focus:ring-2 focus:ring-pink-500 tabular-nums"
+                  />
+                  <span className="text-sm font-semibold text-gray-500 dark:text-gray-400">%</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">

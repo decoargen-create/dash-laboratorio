@@ -616,6 +616,7 @@ function AppShell({ onExit }) {
               <NavItem icon={Users} label="Clientes" section="clientes" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={CreditCard} label="Comisiones" section="comisiones" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={UserCheck} label="Equipo" section="mentores" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              <NavItem icon={Sparkles} label="Analytics IA" section="analytics" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
             </>
           ) : (
             <>
@@ -659,6 +660,7 @@ function AppShell({ onExit }) {
           {currentUser.role === 'admin' && currentSection === 'clientes' && <ClientesSection state={state} onAddClient={handleAddClient} onUpdateClient={handleUpdateClient} showModal={showNewClientModal} setShowModal={setShowNewClientModal} />}
           {currentUser.role === 'admin' && currentSection === 'comisiones' && <ComisionesSection state={state} dispatch={dispatch} onUpdateMentor={handleUpdateMentor} getMentorStats={getMentorStats} filterMentor={filterMentor} setFilterMentor={setFilterMentor} />}
           {currentUser.role === 'admin' && currentSection === 'mentores' && <MentoresSection state={state} getMentorStats={getMentorStats} />}
+          {currentUser.role === 'admin' && currentSection === 'analytics' && <AnalyticsSection state={state} currentUser={currentUser} />}
 
           {/* Mentor Views */}
           {currentUser.role === 'mentor' && currentSection === 'inicio' && <EquipoInicioSection currentUser={currentUser} state={state} />}
@@ -3139,6 +3141,225 @@ function MentorBalanceCard({ mentor, balance, onChangePagos }) {
   );
 }
 
+// Sección de analytics con IA. Llama a /api/analytics que pasa el snapshot
+// del negocio a Claude y devuelve un reporte estructurado con: resumen
+// ejecutivo, tiempos de entrega por nicho, fortalezas, debilidades y
+// recomendaciones accionables.
+function AnalyticsSection({ state, currentUser }) {
+  const [report, setReport] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [lastFetch, setLastFetch] = useState(0);
+
+  // Snapshot enriquecido para analytics (incluye más histórico que el del chatbot)
+  const snapshot = {
+    fecha_del_analisis: new Date().toISOString().split('T')[0],
+    productos: state.products.map(p => ({
+      nombre: p.nombre,
+      precio_venta: p.precioVenta,
+      costo_total_unitario: getProductUnitCost(p),
+    })),
+    mentores: state.mentors.map(m => ({
+      nombre: m.nombre,
+      porcentaje_comision: m.porcentajeComision ?? 50,
+    })),
+    ordenes: state.sales.map(o => {
+      const p = state.products.find(pp => pp.id === o.productoId);
+      const c = state.clients.find(cc => cc.id === o.clienteId);
+      const m = state.mentors.find(mm => mm.id === o.mentorId);
+      return {
+        fecha: o.fecha,
+        cliente: c?.nombre || '-',
+        producto: p?.nombre || '-',
+        cantidad: o.cantidad,
+        monto_total: o.montoTotal,
+        estado: ORDER_STATE_LABELS[o.estado || 'pendiente-cotizacion'],
+        incidencia: o.tieneIncidencia ? (o.incidenciaDetalle || 'sin detalle') : null,
+        mentor: m?.nombre || null,
+      };
+    }),
+  };
+
+  const fetchReport = async () => {
+    setLoading(true); setError('');
+    try {
+      const res = await fetch('/api/analytics', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ snapshot }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      setReport(data);
+      setLastFetch(Date.now());
+    } catch (err) {
+      setError(err.message || 'No pude generar el reporte.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+            <Sparkles size={22} className="text-amber-500" />
+            Analytics con IA
+          </h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            Reporte generado por Claude analizando el histórico de órdenes, productos y equipo.
+          </p>
+        </div>
+        <button
+          onClick={fetchReport}
+          disabled={loading}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-pink-900 text-white font-semibold text-sm hover:bg-pink-800 transition disabled:opacity-50"
+        >
+          {loading ? <Sparkles size={16} className="animate-spin" /> : <Sparkles size={16} />}
+          {loading ? 'Analizando...' : (report ? 'Refrescar reporte' : 'Generar reporte')}
+        </button>
+      </div>
+
+      {error && (
+        <div className="p-4 rounded-xl bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-sm text-red-700 dark:text-red-300">
+          {error}
+        </div>
+      )}
+
+      {!report && !loading && !error && (
+        <div className="p-12 rounded-2xl bg-gradient-to-br from-rose-50 to-amber-50 dark:from-gray-800 dark:to-gray-900 border border-rose-100 dark:border-gray-700 text-center">
+          <Sparkles size={36} className="mx-auto mb-3 text-amber-500" />
+          <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-2">Generá tu primer reporte</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400 max-w-md mx-auto">
+            Claude analiza tus órdenes, productos y equipo, y devuelve un reporte con
+            tiempos de entrega por nicho, fortalezas, debilidades y recomendaciones concretas.
+          </p>
+          <button
+            onClick={fetchReport}
+            className="mt-5 inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-gradient-to-r from-amber-600 to-amber-700 text-white font-semibold text-sm hover:shadow-lg transition"
+          >
+            <Sparkles size={16} /> Generar reporte ahora
+          </button>
+        </div>
+      )}
+
+      {loading && !report && (
+        <div className="p-12 rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-center">
+          <Sparkles size={36} className="mx-auto mb-3 text-amber-500 animate-pulse" />
+          <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">Analizando datos…</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Claude está procesando tu histórico. Suele tardar unos segundos.</p>
+        </div>
+      )}
+
+      {report && (
+        <>
+          {/* Resumen ejecutivo */}
+          {report.resumenEjecutivo && (
+            <div className="p-5 rounded-2xl bg-gradient-to-r from-pink-50 to-rose-50 dark:from-gray-800 dark:to-gray-900 border border-rose-100 dark:border-gray-700">
+              <p className="text-[10px] uppercase tracking-widest font-bold text-amber-700 dark:text-amber-300 mb-2">Resumen ejecutivo</p>
+              <p className="text-base text-gray-800 dark:text-gray-200 leading-relaxed">{report.resumenEjecutivo}</p>
+            </div>
+          )}
+
+          {/* Tiempos */}
+          {report.tiempos && (
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Tiempos de entrega</h3>
+                {report.tiempos.promedioGeneralDias != null && (
+                  <span className="text-2xl font-bold text-amber-600 dark:text-amber-400 tabular-nums">
+                    {report.tiempos.promedioGeneralDias} días
+                    <span className="text-xs text-gray-500 dark:text-gray-400 font-normal ml-1">prom.</span>
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {(report.tiempos.porNicho || []).map((n, i) => (
+                  <div key={i} className="p-3 rounded-lg bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-gray-700">
+                    <div className="flex items-baseline justify-between mb-1">
+                      <p className="font-bold text-gray-900 dark:text-gray-100">{n.nicho}</p>
+                      <span className="text-[10px] text-gray-500 dark:text-gray-400">{n.ordenes} órd.</span>
+                    </div>
+                    <p className="text-xl font-bold text-gray-900 dark:text-gray-100 tabular-nums">
+                      {n.diasPromedio != null ? `${n.diasPromedio}` : '—'}
+                      <span className="text-xs text-gray-500 dark:text-gray-400 font-normal ml-1">{n.diasPromedio != null ? 'días' : 'sin datos'}</span>
+                    </p>
+                    {n.comentario && <p className="text-[11px] text-gray-600 dark:text-gray-400 mt-1 leading-snug">{n.comentario}</p>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Fortalezas + Debilidades en 2 columnas */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {report.fortalezas?.length > 0 && (
+              <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-xl border border-emerald-200 dark:border-emerald-800 p-5">
+                <h3 className="text-sm font-bold text-emerald-800 dark:text-emerald-300 mb-3 uppercase tracking-wider">✓ Fortalezas</h3>
+                <ul className="space-y-2">
+                  {report.fortalezas.map((f, i) => (
+                    <li key={i} className="text-sm text-gray-800 dark:text-gray-200 flex items-start gap-2">
+                      <span className="mt-1 w-1 h-1 rounded-full bg-emerald-500 shrink-0" />
+                      <span>{f}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {report.debilidades?.length > 0 && (
+              <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800 p-5">
+                <h3 className="text-sm font-bold text-amber-800 dark:text-amber-300 mb-3 uppercase tracking-wider">! A mejorar</h3>
+                <ul className="space-y-2">
+                  {report.debilidades.map((d, i) => (
+                    <li key={i} className="text-sm text-gray-800 dark:text-gray-200 flex items-start gap-2">
+                      <span className="mt-1 w-1 h-1 rounded-full bg-amber-500 shrink-0" />
+                      <span>{d}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+
+          {/* Recomendaciones */}
+          {report.recomendaciones?.length > 0 && (
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
+              <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-4">Recomendaciones accionables</h3>
+              <div className="space-y-3">
+                {report.recomendaciones.map((r, i) => {
+                  const impactColor = r.impacto === 'alto'
+                    ? 'border-l-red-500 bg-red-50/40 dark:bg-red-900/10'
+                    : r.impacto === 'medio'
+                      ? 'border-l-amber-500 bg-amber-50/40 dark:bg-amber-900/10'
+                      : 'border-l-blue-400 bg-blue-50/40 dark:bg-blue-900/10';
+                  return (
+                    <div key={i} className={`border-l-4 pl-4 py-2 ${impactColor}`}>
+                      <div className="flex items-center gap-2 mb-1">
+                        <p className="font-bold text-gray-900 dark:text-gray-100">{r.titulo}</p>
+                        <span className="text-[9px] uppercase font-bold px-1.5 py-0.5 rounded bg-white/70 dark:bg-gray-900/40 text-gray-600 dark:text-gray-400">
+                          impacto {r.impacto}
+                        </span>
+                      </div>
+                      {r.detalle && <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">{r.detalle}</p>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {lastFetch > 0 && (
+            <p className="text-center text-xs text-gray-400 dark:text-gray-500">
+              Reporte generado hace {Math.round((Date.now() - lastFetch) / 1000)}s
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function MentoresSection({ state, getMentorStats }) {
   return (
     <div className="space-y-6">
@@ -4853,6 +5074,7 @@ function getSectionTitle(user, section) {
     clientes: 'Clientes',
     comisiones: 'Comisiones',
     mentores: 'Equipo',
+    analytics: 'Analytics con IA',
   };
   const mentor = {
     inicio: 'Inicio',

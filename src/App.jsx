@@ -195,25 +195,34 @@ export default function DASHLaboratorio() {
   };
 
   const handleAddSale = (saleData) => {
+    const maxId = state.sales.reduce((m, s) => Math.max(m, s.id), 0);
     const newSale = {
-      id: state.sales.length + 1,
+      id: maxId + 1,
+      estado: 'pendiente-cotizacion',
+      tieneIncidencia: false,
+      incidenciaDetalle: '',
+      estadoComision: 'pendiente',
       ...saleData,
-      estadoComision: 'pendiente'
     };
     dispatch({ type: 'ADD_SALE', payload: newSale });
-    dispatch({ type: 'UPDATE_STOCK', payload: { productId: saleData.productoId, cantidad: saleData.cantidad } });
     setShowNewSaleModal(false);
   };
 
-  const handleAddClient = (clientData) => {
+  const createClient = (clientData) => {
     const maxId = state.clients.reduce((m, c) => Math.max(m, c.id), 0);
     const newClient = {
       id: maxId + 1,
       totalCompras: 0,
       unidadesProducidas: 0,
+      fechaAlta: new Date().toISOString().split('T')[0],
       ...clientData,
     };
     dispatch({ type: 'ADD_CLIENT', payload: newClient });
+    return newClient;
+  };
+
+  const handleAddClient = (clientData) => {
+    createClient(clientData);
     setShowNewClientModal(false);
   };
 
@@ -344,7 +353,7 @@ export default function DASHLaboratorio() {
         <div className="p-8">
           {/* Admin Views */}
           {currentUser.role === 'admin' && currentSection === 'inicio' && <InicioSection state={state} dispatch={dispatch} calculateMargin={calculateMargin} getMonthlySalesData={getMonthlySalesData} getCurrentMonthSales={getCurrentMonthSales} getPendingCommissions={getPendingCommissions} getLowStockCount={getLowStockCount} getActiveClients={getActiveClients} />}
-          {currentUser.role === 'admin' && currentSection === 'ventas' && <VentasSection state={state} onAddSale={handleAddSale} showModal={showNewSaleModal} setShowModal={setShowNewSaleModal} />}
+          {currentUser.role === 'admin' && currentSection === 'ventas' && <VentasSection state={state} onAddSale={handleAddSale} onQuickAddClient={createClient} showModal={showNewSaleModal} setShowModal={setShowNewSaleModal} />}
           {currentUser.role === 'admin' && currentSection === 'productos' && <ProductosSection state={state} onAddProduct={handleAddProduct} showModal={showNewProductModal} setShowModal={setShowNewProductModal} calculateMargin={calculateMargin} />}
           {currentUser.role === 'admin' && currentSection === 'clientes' && <ClientesSection state={state} onAddClient={handleAddClient} onUpdateClient={handleUpdateClient} showModal={showNewClientModal} setShowModal={setShowNewClientModal} />}
           {currentUser.role === 'admin' && currentSection === 'stock' && <StockSection state={state} />}
@@ -678,22 +687,36 @@ function StatCard({ icon: Icon, label, value, color }) {
   );
 }
 
-function VentasSection({ state, onAddSale, showModal, setShowModal }) {
+function VentasSection({ state, onAddSale, onQuickAddClient, showModal, setShowModal }) {
   const [formData, setFormData] = useState({ clienteId: '', productoId: '', cantidad: 1, mentorId: '' });
+  const [showClientQuickModal, setShowClientQuickModal] = useState(false);
 
   const handleSubmit = (e) => {
     e.preventDefault();
     const producto = state.products.find(p => p.id === parseInt(formData.productoId));
+    if (!producto) return;
+    const cantidad = parseInt(formData.cantidad) || 1;
     const newSale = {
       fecha: new Date().toISOString().split('T')[0],
       clienteId: parseInt(formData.clienteId),
       productoId: parseInt(formData.productoId),
-      cantidad: parseInt(formData.cantidad),
-      montoTotal: producto.precioVenta * parseInt(formData.cantidad),
-      mentorId: parseInt(formData.mentorId),
+      cantidad,
+      montoTotal: producto.precioVenta * cantidad,
+      mentorId: formData.mentorId ? parseInt(formData.mentorId) : null,
     };
     onAddSale(newSale);
     setFormData({ clienteId: '', productoId: '', cantidad: 1, mentorId: '' });
+  };
+
+  const handleQuickClientCreated = (clientData) => {
+    const newClient = onQuickAddClient(clientData);
+    // auto-select the new client, and pre-fill mentor if the client has one
+    setFormData(prev => ({
+      ...prev,
+      clienteId: String(newClient.id),
+      mentorId: newClient.mentorId ? String(newClient.mentorId) : prev.mentorId,
+    }));
+    setShowClientQuickModal(false);
   };
 
   const getClientName = (clienteId) => state.clients.find(c => c.id === clienteId)?.nombre || '-';
@@ -715,15 +738,28 @@ function VentasSection({ state, onAddSale, showModal, setShowModal }) {
       {showModal && (
         <Modal title="Registrar Nueva Venta" onClose={() => setShowModal(false)}>
           <form onSubmit={handleSubmit} className="space-y-4">
-            <select
-              value={formData.clienteId}
-              onChange={(e) => setFormData({ ...formData, clienteId: e.target.value })}
-              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-              required
-            >
-              <option value="">Seleccionar Cliente</option>
-              {state.clients.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-            </select>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Cliente</label>
+              <div className="flex gap-2">
+                <select
+                  value={formData.clienteId}
+                  onChange={(e) => setFormData({ ...formData, clienteId: e.target.value })}
+                  className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                  required
+                >
+                  <option value="">Seleccionar Cliente</option>
+                  {state.clients.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => setShowClientQuickModal(true)}
+                  className="inline-flex items-center gap-1 px-3 py-2 border border-pink-600 text-pink-700 dark:text-pink-300 dark:border-pink-500 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition text-sm font-semibold whitespace-nowrap"
+                  title="Crear un nuevo cliente sin salir de esta pantalla"
+                >
+                  <Plus size={16} /> Nuevo
+                </button>
+              </div>
+            </div>
 
             <select
               value={formData.productoId}
@@ -748,10 +784,9 @@ function VentasSection({ state, onAddSale, showModal, setShowModal }) {
             <select
               value={formData.mentorId}
               onChange={(e) => setFormData({ ...formData, mentorId: e.target.value })}
-              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-              required
+              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
             >
-              <option value="">Asignar a Mentor</option>
+              <option value="">Sin mentor (opcional)</option>
               {state.mentors.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
             </select>
 
@@ -763,6 +798,14 @@ function VentasSection({ state, onAddSale, showModal, setShowModal }) {
             </button>
           </form>
         </Modal>
+      )}
+
+      {showClientQuickModal && (
+        <QuickClientModal
+          mentors={state.mentors}
+          onClose={() => setShowClientQuickModal(false)}
+          onCreate={handleQuickClientCreated}
+        />
       )}
 
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden">
@@ -1442,6 +1485,100 @@ function MentorClientesSection({ currentUser, state }) {
             </tbody>
           </table>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Mini-form reutilizable para crear clientes desde otros módulos (ej. al registrar una venta).
+// Campos requeridos: nombre + teléfono. Mentor y domicilio son opcionales.
+function QuickClientModal({ mentors, onClose, onCreate }) {
+  const [data, setData] = useState({ nombre: '', telefono: '', mentorId: '', domicilio: '' });
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    onCreate({
+      nombre: data.nombre.trim(),
+      telefono: data.telefono.trim(),
+      domicilio: data.domicilio.trim(),
+      mentorId: data.mentorId ? parseInt(data.mentorId) : null,
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[60] p-4">
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl p-8 w-full max-w-md">
+        <div className="flex justify-between items-center mb-6">
+          <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100">Nuevo Cliente</h3>
+          <button
+            onClick={onClose}
+            className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition"
+            title="Cancelar"
+          >
+            ×
+          </button>
+        </div>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Nombre completo *</label>
+            <input
+              type="text"
+              value={data.nombre}
+              onChange={(e) => setData({ ...data, nombre: e.target.value })}
+              placeholder="Nombre y apellido"
+              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+              autoFocus
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Teléfono *</label>
+            <input
+              type="text"
+              value={data.telefono}
+              onChange={(e) => setData({ ...data, telefono: e.target.value })}
+              placeholder="11 1234-5678"
+              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Mentor asignado (opcional)</label>
+            <select
+              value={data.mentorId}
+              onChange={(e) => setData({ ...data, mentorId: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            >
+              <option value="">Sin mentor</option>
+              {mentors.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Domicilio de despacho (opcional)</label>
+            <input
+              type="text"
+              value={data.domicilio}
+              onChange={(e) => setData({ ...data, domicilio: e.target.value })}
+              placeholder="Calle 123, Localidad"
+              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            />
+          </div>
+          <div className="flex gap-2 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition font-semibold"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              className="flex-1 bg-pink-900 text-white py-2 rounded-lg hover:bg-pink-800 transition font-semibold"
+            >
+              Crear cliente
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

@@ -364,6 +364,9 @@ function AppShell({ onExit }) {
   const [currentUser, setCurrentUser] = useState(null);
   const [currentSection, setCurrentSection] = useState('inicio');
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  // Estado del menú mobile (sidebar como overlay deslizante en pantallas chicas).
+  // En desktop el sidebar siempre está visible (gestionado por sidebarOpen + Tailwind md:).
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showNewSaleModal, setShowNewSaleModal] = useState(false);
   const [showNewClientModal, setShowNewClientModal] = useState(false);
   const [showNewProductModal, setShowNewProductModal] = useState(false);
@@ -522,14 +525,41 @@ function AppShell({ onExit }) {
     return { totalSales, totalCommission, paidCommission, pendingCommission };
   };
 
+  // Cuando se cambia de sección o de usuario, cerramos el menú mobile
+  // automáticamente (UX esperada al navegar). Va ANTES del early return
+  // para no violar las rules of hooks de React.
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [currentSection]);
+
   if (!currentUser) {
     return <LoginScreen onLogin={handleLogin} darkMode={darkMode} toggleDarkMode={toggleDarkMode} />;
   }
 
+  // En mobile el sidebar es siempre "abierto" cuando se muestra (no tiene
+  // sentido el modo colapsado en un overlay). Forzamos sidebarOpen=true
+  // visualmente cuando se abre el menú mobile.
+  const effectiveSidebarOpen = mobileMenuOpen ? true : sidebarOpen;
+
   return (
     <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
-      {/* Sidebar */}
-      <aside className={`${sidebarOpen ? 'w-64' : 'w-20'} relative bg-gradient-to-b from-[#4a0f22] via-pink-900 to-[#3f0c1e] text-white transition-all duration-500 ease-out flex flex-col shadow-2xl`}>
+      {/* Backdrop oscuro detrás del sidebar mobile */}
+      {mobileMenuOpen && (
+        <div
+          aria-hidden="true"
+          onClick={() => setMobileMenuOpen(false)}
+          className="md:hidden fixed inset-0 z-40 bg-black/50 backdrop-blur-sm animate-fade-in"
+        />
+      )}
+      {/* Sidebar — desktop: lateral fijo. Mobile: overlay deslizante */}
+      <aside className={`
+        ${effectiveSidebarOpen ? 'w-64' : 'w-20'}
+        relative bg-gradient-to-b from-[#4a0f22] via-pink-900 to-[#3f0c1e] text-white shadow-2xl
+        transition-all duration-500 ease-out flex flex-col
+        max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 max-md:w-72
+        max-md:transform max-md:transition-transform
+        ${mobileMenuOpen ? 'max-md:translate-x-0' : 'max-md:-translate-x-full'}
+      `}>
         {/* Patrón decorativo sutil */}
         <div
           aria-hidden="true"
@@ -596,6 +626,7 @@ function AppShell({ onExit }) {
           darkMode={darkMode}
           toggleDarkMode={toggleDarkMode}
           onOpenCommand={() => setCmdOpen(true)}
+          onOpenMobileMenu={() => setMobileMenuOpen(true)}
         />
 
         <div key={currentSection} className="p-8 animate-fade-in-up">
@@ -4666,7 +4697,7 @@ function StatMini({ label, value, accent = 'neutral', small = false }) {
   );
 }
 
-function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, onOpenCommand }) {
+function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, onOpenCommand, onOpenMobileMenu }) {
   const [scrolled, setScrolled] = useState(false);
   const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform);
 
@@ -4683,17 +4714,28 @@ function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, onOpenCommand
 
   return (
     <header
-      className={`sticky top-0 z-30 px-8 py-5 flex justify-between items-center transition-all duration-300 ${
+      className={`sticky top-0 z-30 px-4 md:px-8 py-4 md:py-5 flex justify-between items-center gap-3 transition-all duration-300 ${
         scrolled
           ? 'backdrop-blur-xl bg-white/70 dark:bg-gray-900/70 border-b border-gray-200/60 dark:border-gray-700/60 shadow-sm'
           : 'bg-transparent border-b border-transparent'
       }`}
     >
-      <div>
-        <h2 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-gray-100 leading-tight">{title}</h2>
-        <p className="text-gray-500 dark:text-gray-400 text-sm">{subtitle}</p>
+      <div className="flex items-center gap-3 min-w-0">
+        {onOpenMobileMenu && (
+          <button
+            onClick={onOpenMobileMenu}
+            className="md:hidden p-2 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 transition shrink-0"
+            aria-label="Abrir menú"
+          >
+            <Menu size={20} />
+          </button>
+        )}
+        <div className="min-w-0">
+          <h2 className="text-xl md:text-3xl font-bold text-gray-900 dark:text-gray-100 leading-tight truncate">{title}</h2>
+          <p className="text-gray-500 dark:text-gray-400 text-xs md:text-sm truncate">{subtitle}</p>
+        </div>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 shrink-0">
         <button
           onClick={onOpenCommand}
           className="hidden sm:inline-flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700 hover:border-pink-300 dark:hover:border-pink-600 hover:text-gray-900 dark:hover:text-gray-100 transition-all duration-200 hover:shadow group"
@@ -4706,8 +4748,15 @@ function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, onOpenCommand
           </kbd>
         </button>
         <button
+          onClick={onOpenCommand}
+          className="sm:hidden p-2 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 transition shrink-0"
+          aria-label="Buscar"
+        >
+          <Search size={18} />
+        </button>
+        <button
           onClick={toggleDarkMode}
-          className="p-2 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 transition-all duration-200 hover:scale-105 active:scale-95"
+          className="p-2 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 transition-all duration-200 hover:scale-105 active:scale-95 shrink-0"
           title={darkMode ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
           aria-label="Toggle dark mode"
         >

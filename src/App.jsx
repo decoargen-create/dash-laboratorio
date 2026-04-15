@@ -14,11 +14,6 @@ import LandingPage from './LandingPage.jsx';
 import ChatbotWidget from './ChatbotWidget.jsx';
 import { generateCSV, downloadCSV, parseCSV, toNumber, toBool } from './csv.js';
 
-// Flag de build que habilita el "Acceso demo" (login sin email).
-// Default true en dev para no romper el flujo local; en producción hay que
-// setear VITE_ALLOW_DEMO=false en las env vars de Vercel para esconderlo.
-const ALLOW_DEMO = import.meta.env.VITE_ALLOW_DEMO !== 'false';
-
 // Estados del pipeline de producción de una orden
 export const ORDER_STATES = [
   'pendiente-cotizacion',
@@ -547,7 +542,19 @@ function AppShell({ onExit }) {
           }
           const data = await resp.json();
           if (data?.ok && data.user && !cancelled) {
-            setCurrentUser({ role: data.user.role, name: data.user.name, email: data.user.email, id: data.user.role === 'admin' ? 'admin' : data.user.email });
+            const u = data.user;
+            // Matcheamos id del mentor por nombre si aplica
+            let id = u.username || u.email || u.name;
+            if (u.role === 'admin') {
+              id = 'admin';
+            }
+            setCurrentUser({
+              role: u.role,
+              name: u.name,
+              email: u.email || null,
+              username: u.username || null,
+              id,
+            });
             setCurrentSection('inicio');
           }
         }
@@ -566,6 +573,29 @@ function AppShell({ onExit }) {
   const handleLogin = (role, name) => {
     setCurrentUser({ role, name, id: role === 'admin' ? 'admin' : (name === 'Sofia' ? 1 : 2) });
     setCurrentSection('inicio');
+  };
+
+  // Usado por LoginScreen después de un login exitoso contra /api/auth.
+  // Recibe el user que devuelve el backend (con username/email + name + role).
+  const handleSessionAuth = (user) => {
+    // id: si es admin usamos 'admin', si es mentor intentamos matchear con los
+    // mentores cargados por nombre (fallback al username).
+    let id = user.username || user.email || user.name;
+    if (user.role === 'admin') {
+      id = 'admin';
+    } else {
+      const matched = state.mentors.find(m => m.nombre.toLowerCase() === (user.name || '').toLowerCase());
+      if (matched) id = matched.id;
+    }
+    setCurrentUser({
+      role: user.role,
+      name: user.name,
+      email: user.email || null,
+      username: user.username || null,
+      id,
+    });
+    setCurrentSection('inicio');
+    addToast({ type: 'success', message: `Bienvenido, ${user.name}` });
   };
 
   const handleLogout = () => {
@@ -806,7 +836,7 @@ function AppShell({ onExit }) {
     // bootstrap de auth (link inválido, link enviado) sean visibles.
     return (
       <>
-        <LoginScreen onLogin={handleLogin} darkMode={darkMode} toggleDarkMode={toggleDarkMode} />
+        <LoginScreen onLogin={handleLogin} onSessionAuth={handleSessionAuth} darkMode={darkMode} toggleDarkMode={toggleDarkMode} />
         <ToastContainer toasts={toasts} />
       </>
     );
@@ -1061,15 +1091,52 @@ function NavItem({ icon: Icon, label, section, currentSection, onSelect, sidebar
   );
 }
 
-function LoginScreen({ onLogin, darkMode, toggleDarkMode }) {
-  // loginMode: 'select' | 'email' | 'email-sent' | 'demo' | 'admin-login' | 'mentor-select'
-  const [loginMode, setLoginMode] = useState('select');
-  const [selectedRole, setSelectedRole] = useState(null);
-  const [adminPassword, setAdminPassword] = useState('');
+function LoginScreen({ onLogin, onSessionAuth, darkMode, toggleDarkMode }) {
+  // loginMode: 'login' (user+pass, default) | 'email' | 'email-sent'
+  const [loginMode, setLoginMode] = useState('login');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
+  const [loggingIn, setLoggingIn] = useState(false);
+
+  // Magic link (opcional, secundario)
   const [email, setEmail] = useState('');
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState('');
-  const [sendResult, setSendResult] = useState(null); // { emailSent, devLink? }
+  const [sendResult, setSendResult] = useState(null);
+
+  const doLogin = async () => {
+    setLoginError('');
+    if (!username.trim() || !password) {
+      setLoginError('Completá usuario y contraseña');
+      return;
+    }
+    setLoggingIn(true);
+    try {
+      const resp = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'login', username: username.trim(), password }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data?.ok) {
+        setLoginError(data?.error || 'Usuario o contraseña inválidos');
+        return;
+      }
+      // Guardamos la session y avisamos al parent
+      localStorage.setItem('viora-session', data.session);
+      if (typeof onSessionAuth === 'function') {
+        onSessionAuth(data.user);
+      } else {
+        // Fallback: llamar onLogin con los datos equivalentes
+        onLogin(data.user.role, data.user.name);
+      }
+    } catch (err) {
+      setLoginError('No pude conectar con el servidor.');
+    } finally {
+      setLoggingIn(false);
+    }
+  };
 
   const sendMagicLink = async () => {
     setSendError('');
@@ -1091,7 +1158,7 @@ function LoginScreen({ onLogin, darkMode, toggleDarkMode }) {
         setLoginMode('email-sent');
       }
     } catch (err) {
-      setSendError('No pude conectar con el servidor. ¿AUTH_SECRET configurado?');
+      setSendError('No pude conectar con el servidor.');
     } finally {
       setSending(false);
     }
@@ -1113,25 +1180,43 @@ function LoginScreen({ onLogin, darkMode, toggleDarkMode }) {
           <p className="text-gray-600 dark:text-gray-400 mt-1 text-xs tracking-widest uppercase">Panel de gestión</p>
         </div>
 
-        {loginMode === 'select' && (
+        {loginMode === 'login' && (
           <div className="space-y-3">
+            <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300">Usuario</label>
+            <input
+              type="text"
+              autoFocus
+              autoComplete="username"
+              placeholder="usuario"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') doLogin(); }}
+              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            />
+            <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mt-3">Contraseña</label>
+            <input
+              type="password"
+              autoComplete="current-password"
+              placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') doLogin(); }}
+              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            />
+            {loginError && <p className="text-xs text-red-600 dark:text-red-400">{loginError}</p>}
+            <button
+              onClick={doLogin}
+              disabled={loggingIn}
+              className="w-full py-2.5 mt-2 bg-gradient-to-r from-pink-900 to-rose-700 text-white rounded-lg hover:shadow-lg transition font-semibold disabled:opacity-60"
+            >
+              {loggingIn ? 'Ingresando…' : 'Ingresar'}
+            </button>
             <button
               onClick={() => setLoginMode('email')}
-              className="w-full py-3 px-4 bg-gradient-to-r from-pink-900 to-rose-700 text-white rounded-lg hover:shadow-lg transition font-semibold"
+              className="w-full pt-3 text-[11px] text-gray-500 dark:text-gray-400 hover:text-pink-700 dark:hover:text-pink-300 transition border-t border-gray-100 dark:border-gray-700"
             >
-              Ingresar con tu email
+              ¿Preferís ingresar con email? →
             </button>
-            <p className="text-center text-[11px] text-gray-500 dark:text-gray-400">Te mandamos un link mágico al mail</p>
-            {ALLOW_DEMO && (
-              <div className="pt-3 border-t border-gray-100 dark:border-gray-700">
-                <button
-                  onClick={() => setLoginMode('demo')}
-                  className="w-full py-2 text-xs text-gray-600 dark:text-gray-400 hover:text-pink-700 dark:hover:text-pink-300 transition"
-                >
-                  Acceso demo (sin email) →
-                </button>
-              </div>
-            )}
           </div>
         )}
 
@@ -1156,10 +1241,10 @@ function LoginScreen({ onLogin, darkMode, toggleDarkMode }) {
               {sending ? 'Enviando…' : 'Enviarme el link'}
             </button>
             <button
-              onClick={() => setLoginMode('select')}
+              onClick={() => setLoginMode('login')}
               className="w-full py-2 text-pink-900 dark:text-pink-300 border border-pink-900 dark:border-pink-300 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition text-sm"
             >
-              Volver
+              Volver al login con usuario
             </button>
           </div>
         )}
@@ -1189,96 +1274,17 @@ function LoginScreen({ onLogin, darkMode, toggleDarkMode }) {
                       {sendResult.devLink}
                     </a>
                   )}
-                  <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-2">Para producción configurá <span className="font-mono">RESEND_API_KEY</span>.</p>
                 </>
               )}
             </div>
             <button
-              onClick={() => { setLoginMode('select'); setSendResult(null); setEmail(''); }}
+              onClick={() => { setLoginMode('login'); setSendResult(null); setEmail(''); }}
               className="w-full py-2 text-pink-900 dark:text-pink-300 border border-pink-900 dark:border-pink-300 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition text-sm"
             >
               Volver
             </button>
           </div>
         )}
-
-        {ALLOW_DEMO && loginMode === 'demo' && (
-          <div className="space-y-3">
-            <button
-              onClick={() => { setSelectedRole('admin'); setLoginMode('admin-login'); }}
-              className="w-full py-3 px-4 bg-gradient-to-r from-pink-900 to-rose-700 text-white rounded-lg hover:shadow-lg transition font-semibold"
-            >
-              Administrador (demo)
-            </button>
-            <button
-              onClick={() => { setSelectedRole('mentor'); setLoginMode('mentor-select'); }}
-              className="w-full py-3 px-4 bg-gradient-to-r from-pink-600 to-rose-500 text-white rounded-lg hover:shadow-lg transition font-semibold"
-            >
-              Equipo (demo)
-            </button>
-            <button
-              onClick={() => setLoginMode('select')}
-              className="w-full py-2 text-pink-900 dark:text-pink-300 border border-pink-900 dark:border-pink-300 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition text-sm"
-            >
-              Volver
-            </button>
-          </div>
-        )}
-
-        {ALLOW_DEMO && loginMode === 'admin-login' && (
-          <div className="space-y-4">
-            <input
-              type="password"
-              placeholder="Contraseña"
-              value={adminPassword}
-              onChange={(e) => setAdminPassword(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-            />
-            <button
-              onClick={() => adminPassword === 'admin' ? onLogin('admin', 'Administrador') : alert('Contraseña incorrecta')}
-              className="w-full py-2 bg-pink-900 dark:bg-pink-700 text-white rounded-lg hover:bg-pink-800 dark:hover:bg-pink-600 transition"
-            >
-              Ingresar
-            </button>
-            <button
-              onClick={() => setLoginMode('demo')}
-              className="w-full py-2 text-pink-900 dark:text-pink-300 border border-pink-900 dark:border-pink-300 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition"
-            >
-              Volver
-            </button>
-          </div>
-        )}
-
-        {ALLOW_DEMO && loginMode === 'mentor-select' && (
-          <div className="space-y-4">
-            <button
-              onClick={() => onLogin('mentor', 'Sofia')}
-              className="w-full py-3 px-4 bg-pink-600 text-white rounded-lg hover:shadow-lg transition font-semibold"
-            >
-              Sofia
-            </button>
-            <button
-              onClick={() => onLogin('mentor', 'Mariano')}
-              className="w-full py-3 px-4 bg-rose-600 text-white rounded-lg hover:shadow-lg transition font-semibold"
-            >
-              Mariano
-            </button>
-            <button
-              onClick={() => setLoginMode('demo')}
-              className="w-full py-2 text-pink-900 dark:text-pink-300 border border-pink-900 dark:border-pink-300 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition"
-            >
-              Volver
-            </button>
-          </div>
-        )}
-
-        {ALLOW_DEMO && (loginMode === 'admin-login' || loginMode === 'mentor-select') ? (
-          <div className="mt-8 p-4 bg-pink-50 dark:bg-pink-900/30 rounded-lg text-sm text-gray-700 dark:text-gray-300">
-            <p className="font-semibold mb-2">Demo Credentials:</p>
-            <p>Admin: password "admin"</p>
-            <p>Mentors: Sofia / Mariano</p>
-          </div>
-        ) : null}
       </div>
     </div>
   );

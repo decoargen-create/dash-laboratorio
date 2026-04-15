@@ -6,7 +6,7 @@ import {
 import {
   Menu, LogOut, Home, ShoppingCart, Package, Users, AlertCircle, CreditCard,
   UserCheck, TrendingUp, Plus, Filter, Eye, Edit2, Trash2, Calendar, DollarSign,
-  Moon, Sun
+  Moon, Sun, ChevronDown, ChevronRight
 } from 'lucide-react';
 
 // Estados del pipeline de producción de una orden
@@ -886,6 +886,36 @@ function ProductosSection({ state, onAddProduct, showModal, setShowModal, calcul
     costoContenido: '', costoEnvase: '', costoEtiqueta: '',
     precioVenta: '', stock: '',
   });
+  const [expanded, setExpanded] = useState(() => new Set());
+
+  const toggleExpand = (id) => {
+    setExpanded(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const getClientById = (id) => state.clients.find(c => c.id === id);
+
+  // Estadísticas de relación producto → clientes y órdenes
+  const getProductStats = (productId) => {
+    const orders = state.sales.filter(s => s.productoId === productId);
+    const totalUnidades = orders.reduce((sum, o) => sum + (o.cantidad || 0), 0);
+    const totalFacturado = orders.reduce((sum, o) => sum + (o.montoTotal || 0), 0);
+    // Clientes que lo pidieron (con su cantidad total comprada de este producto)
+    const byClient = new Map();
+    orders.forEach(o => {
+      const prev = byClient.get(o.clienteId) || { clienteId: o.clienteId, ordenes: 0, unidades: 0 };
+      prev.ordenes += 1;
+      prev.unidades += (o.cantidad || 0);
+      byClient.set(o.clienteId, prev);
+    });
+    const clientesBreakdown = Array.from(byClient.values())
+      .sort((a, b) => b.unidades - a.unidades);
+    return { orders, totalUnidades, totalFacturado, clientesBreakdown };
+  };
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -980,10 +1010,12 @@ function ProductosSection({ state, onAddProduct, showModal, setShowModal, calcul
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {state.products.map(product => {
           const unitCost = getProductUnitCost(product);
+          const isOpen = expanded.has(product.id);
+          const stats = isOpen ? getProductStats(product.id) : null;
           return (
           <div key={product.id} className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 hover:shadow-xl transition">
             <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-2">{product.nombre}</h3>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">{product.descripcion}</p>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">{product.descripcion || <span className="italic text-gray-400 dark:text-gray-500">Sin descripción</span>}</p>
             <div className="space-y-2 text-sm mb-4">
               <div className="flex justify-between">
                 <span className="text-gray-600 dark:text-gray-400">Contenido:</span>
@@ -1010,6 +1042,49 @@ function ProductosSection({ state, onAddProduct, showModal, setShowModal, calcul
                 <span className="font-semibold text-green-600 dark:text-green-400">{calculateMargin(unitCost, product.precioVenta)}%</span>
               </div>
             </div>
+            <button
+              onClick={() => toggleExpand(product.id)}
+              className="w-full inline-flex items-center justify-center gap-1 text-xs font-semibold text-pink-700 dark:text-pink-300 hover:bg-pink-50 dark:hover:bg-pink-900/30 transition rounded-md py-2 border border-pink-200 dark:border-pink-800"
+            >
+              {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+              {isOpen ? 'Ocultar clientes' : 'Ver clientes que lo pidieron'}
+            </button>
+            {isOpen && stats && (
+              <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 space-y-3">
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="bg-gray-50 dark:bg-gray-700/50 rounded-md p-2">
+                    <p className="text-[10px] uppercase text-gray-500 dark:text-gray-400">Órdenes</p>
+                    <p className="font-bold text-gray-900 dark:text-gray-100">{stats.orders.length}</p>
+                  </div>
+                  <div className="bg-gray-50 dark:bg-gray-700/50 rounded-md p-2">
+                    <p className="text-[10px] uppercase text-gray-500 dark:text-gray-400">Unid. producidas</p>
+                    <p className="font-bold text-gray-900 dark:text-gray-100">{stats.totalUnidades.toLocaleString()}</p>
+                  </div>
+                  <div className="bg-gray-50 dark:bg-gray-700/50 rounded-md p-2">
+                    <p className="text-[10px] uppercase text-gray-500 dark:text-gray-400">Facturado</p>
+                    <p className="font-bold text-emerald-600 dark:text-emerald-400">${Math.round(stats.totalFacturado).toLocaleString()}</p>
+                  </div>
+                </div>
+                {stats.clientesBreakdown.length === 0 ? (
+                  <p className="text-xs text-gray-500 dark:text-gray-400 italic text-center">Aún nadie pidió este producto.</p>
+                ) : (
+                  <div>
+                    <p className="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-2">Clientes que lo pidieron</p>
+                    <ul className="space-y-1">
+                      {stats.clientesBreakdown.map(row => {
+                        const client = getClientById(row.clienteId);
+                        return (
+                          <li key={row.clienteId} className="flex justify-between text-xs border-b border-gray-100 dark:border-gray-700 pb-1 last:border-0">
+                            <span className="text-gray-900 dark:text-gray-100">{client?.nombre || 'Cliente eliminado'}</span>
+                            <span className="text-gray-600 dark:text-gray-400">{row.unidades.toLocaleString()} u · {row.ordenes} {row.ordenes === 1 ? 'orden' : 'órdenes'}</span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
           );
         })}
@@ -1022,6 +1097,40 @@ function ClientesSection({ state, onAddClient, onUpdateClient, showModal, setSho
   const emptyForm = { nombre: '', telefono: '', domicilio: '', mentorId: '', totalCompras: '', unidadesProducidas: '' };
   const [formData, setFormData] = useState(emptyForm);
   const [editingId, setEditingId] = useState(null);
+  const [expanded, setExpanded] = useState(() => new Set());
+
+  const toggleExpand = (id) => {
+    setExpanded(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const getClientOrders = (clientId) => state.sales.filter(s => s.clienteId === clientId);
+  const getProductById = (id) => state.products.find(p => p.id === id);
+
+  const getClientStats = (clientId) => {
+    const orders = getClientOrders(clientId);
+    const totalFacturado = orders.reduce((sum, o) => sum + (o.montoTotal || 0), 0);
+    const totalUnidades = orders.reduce((sum, o) => sum + (o.cantidad || 0), 0);
+    // Producto más pedido (por cantidad de órdenes)
+    const countByProduct = {};
+    orders.forEach(o => { countByProduct[o.productoId] = (countByProduct[o.productoId] || 0) + 1; });
+    let topProductoId = null;
+    let topCount = 0;
+    Object.entries(countByProduct).forEach(([pid, c]) => {
+      if (c > topCount) { topCount = c; topProductoId = parseInt(pid); }
+    });
+    return {
+      orders,
+      totalFacturado,
+      totalUnidades,
+      topProducto: topProductoId ? getProductById(topProductoId) : null,
+      ordenesCount: orders.length,
+    };
+  };
 
   const openNew = () => {
     setEditingId(null);
@@ -1167,6 +1276,7 @@ function ClientesSection({ state, onAddClient, onUpdateClient, showModal, setSho
           <table className="w-full">
             <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700">
               <tr>
+                <th className="px-2 py-3 w-8"></th>
                 <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Nombre</th>
                 <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Teléfono</th>
                 <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Domicilio</th>
@@ -1179,28 +1289,51 @@ function ClientesSection({ state, onAddClient, onUpdateClient, showModal, setSho
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
               {state.clients.length === 0 && (
-                <tr><td colSpan={8} className="px-4 py-10 text-center text-gray-500 dark:text-gray-400">Todavía no hay clientes.</td></tr>
+                <tr><td colSpan={9} className="px-4 py-10 text-center text-gray-500 dark:text-gray-400">Todavía no hay clientes.</td></tr>
               )}
-              {state.clients.map(client => (
-                <tr key={client.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition">
-                  <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">{client.nombre}</td>
-                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{client.telefono || '-'}</td>
-                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{client.domicilio || <span className="text-gray-400 dark:text-gray-500">Sin datos</span>}</td>
-                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{getMentorName(client.mentorId)}</td>
-                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">{client.fechaAlta}</td>
-                  <td className="px-4 py-3 text-sm text-right font-semibold text-gray-900 dark:text-gray-100">{client.totalCompras ?? 0}</td>
-                  <td className="px-4 py-3 text-sm text-right font-semibold text-gray-900 dark:text-gray-100">{(client.unidadesProducidas ?? 0).toLocaleString()}</td>
-                  <td className="px-4 py-3 text-sm text-right">
-                    <button
-                      onClick={() => openEdit(client)}
-                      className="inline-flex items-center gap-1 px-3 py-1 rounded-md text-pink-700 dark:text-pink-300 hover:bg-pink-50 dark:hover:bg-pink-900/30 transition"
-                      title="Editar cliente"
-                    >
-                      <Edit2 size={14} /> Editar
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {state.clients.map(client => {
+                const isOpen = expanded.has(client.id);
+                const stats = isOpen ? getClientStats(client.id) : null;
+                return (
+                  <React.Fragment key={client.id}>
+                    <tr className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition">
+                      <td className="px-2 py-3 text-center">
+                        <button
+                          onClick={() => toggleExpand(client.id)}
+                          className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300"
+                          title={isOpen ? 'Ocultar detalle' : 'Ver órdenes del cliente'}
+                          aria-label="Expandir fila"
+                        >
+                          {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                        </button>
+                      </td>
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">{client.nombre}</td>
+                      <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{client.telefono || '-'}</td>
+                      <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{client.domicilio || <span className="text-gray-400 dark:text-gray-500">Sin datos</span>}</td>
+                      <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{getMentorName(client.mentorId)}</td>
+                      <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">{client.fechaAlta}</td>
+                      <td className="px-4 py-3 text-sm text-right font-semibold text-gray-900 dark:text-gray-100">{client.totalCompras ?? 0}</td>
+                      <td className="px-4 py-3 text-sm text-right font-semibold text-gray-900 dark:text-gray-100">{(client.unidadesProducidas ?? 0).toLocaleString()}</td>
+                      <td className="px-4 py-3 text-sm text-right">
+                        <button
+                          onClick={() => openEdit(client)}
+                          className="inline-flex items-center gap-1 px-3 py-1 rounded-md text-pink-700 dark:text-pink-300 hover:bg-pink-50 dark:hover:bg-pink-900/30 transition"
+                          title="Editar cliente"
+                        >
+                          <Edit2 size={14} /> Editar
+                        </button>
+                      </td>
+                    </tr>
+                    {isOpen && (
+                      <tr className="bg-pink-50/40 dark:bg-pink-900/10">
+                        <td colSpan={9} className="px-6 py-4">
+                          <ClientDetailPanel stats={stats} products={state.products} />
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -1524,6 +1657,79 @@ function MentorClientesSection({ currentUser, state }) {
           </table>
         </div>
       </div>
+    </div>
+  );
+}
+
+// Panel expandible que muestra el detalle de un cliente: sus órdenes con producto,
+// total facturado, producto más pedido. Se abre desde ClientesSection con el chevron.
+function ClientDetailPanel({ stats, products }) {
+  if (!stats) return null;
+  const fmtMoney = (n) => `$${Math.round(n).toLocaleString()}`;
+  const getProductName = (id) => products.find(p => p.id === id)?.nombre || '-';
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
+          <p className="text-xs text-gray-500 dark:text-gray-400">Órdenes registradas</p>
+          <p className="text-lg font-bold text-gray-900 dark:text-gray-100">{stats.ordenesCount}</p>
+        </div>
+        <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
+          <p className="text-xs text-gray-500 dark:text-gray-400">Total facturado</p>
+          <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400">{fmtMoney(stats.totalFacturado)}</p>
+        </div>
+        <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
+          <p className="text-xs text-gray-500 dark:text-gray-400">Unidades pedidas</p>
+          <p className="text-lg font-bold text-gray-900 dark:text-gray-100">{stats.totalUnidades.toLocaleString()}</p>
+        </div>
+        <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
+          <p className="text-xs text-gray-500 dark:text-gray-400">Producto más pedido</p>
+          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{stats.topProducto?.nombre || '—'}</p>
+        </div>
+      </div>
+      {stats.orders.length === 0 ? (
+        <p className="text-sm text-gray-500 dark:text-gray-400 italic">Este cliente todavía no tiene órdenes registradas.</p>
+      ) : (
+        <div className="overflow-x-auto bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+          <table className="w-full text-xs">
+            <thead className="bg-gray-50 dark:bg-gray-700/60">
+              <tr className="text-left text-gray-600 dark:text-gray-300">
+                <th className="px-3 py-2 font-semibold">Fecha</th>
+                <th className="px-3 py-2 font-semibold">Producto</th>
+                <th className="px-3 py-2 font-semibold text-right">Cant.</th>
+                <th className="px-3 py-2 font-semibold text-right">Monto</th>
+                <th className="px-3 py-2 font-semibold">Estado</th>
+                <th className="px-3 py-2 font-semibold">Incidencia</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+              {stats.orders
+                .slice()
+                .sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''))
+                .map(order => {
+                  const estado = order.estado || 'pendiente-cotizacion';
+                  return (
+                    <tr key={order.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                      <td className="px-3 py-2 text-gray-700 dark:text-gray-300 whitespace-nowrap">{order.fecha}</td>
+                      <td className="px-3 py-2 text-gray-900 dark:text-gray-100">{getProductName(order.productoId)}</td>
+                      <td className="px-3 py-2 text-right text-gray-700 dark:text-gray-300">{order.cantidad}</td>
+                      <td className="px-3 py-2 text-right font-semibold text-gray-900 dark:text-gray-100">{fmtMoney(order.montoTotal || 0)}</td>
+                      <td className="px-3 py-2">
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${ORDER_STATE_STYLES[estado]}`}>{ORDER_STATE_LABELS[estado]}</span>
+                      </td>
+                      <td className="px-3 py-2 text-gray-700 dark:text-gray-300">
+                        {order.tieneIncidencia
+                          ? <span className="text-red-600 dark:text-red-400 font-semibold">⚠ {order.incidenciaDetalle || 'Sin detalle'}</span>
+                          : <span className="text-gray-400 dark:text-gray-500">—</span>}
+                      </td>
+                    </tr>
+                  );
+                })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

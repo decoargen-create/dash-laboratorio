@@ -43,8 +43,21 @@ export const ORDER_STATE_STYLES = {
   'despachado': 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300',
 };
 
-// Sample data
+// Estado inicial vacío — la app arranca en cero para que cargues tu data real
+// (productos, clientes, mentores, órdenes) desde el primer uso.
+//
+// Si querés datos de demo para testear la UI, mirá DEMO_STATE abajo y usá
+// el botón "Cargar datos de demo" en el menú de usuario.
 const INITIAL_STATE = {
+  products: [],
+  clients: [],
+  mentors: [],
+  sales: [],
+};
+
+// Datos demo opcionales. No se cargan por default. Se pueden inyectar desde
+// el menú de usuario para explorar la app con data ya lista.
+const DEMO_STATE = {
   products: [
     { id: 1, nombre: 'Crema Hidratante', descripcion: 'Crema hidratante intensiva', costoContenido: 70, costoEnvase: 35, costoEtiqueta: 15, precioVenta: 450 },
     { id: 2, nombre: 'Sérum Vitamina C', descripcion: 'Sérum antioxidante', costoContenido: 110, costoEnvase: 50, costoEtiqueta: 20, precioVenta: 650 },
@@ -460,7 +473,11 @@ export function getOrderPayments(order, product, mentor) {
 // Clave única del state persistido. Si cambia la forma del state en el
 // futuro, bumpear el número acá invalida la cache y se recrea desde
 // INITIAL_STATE.
-const STATE_STORAGE_KEY = 'viora-state-v1';
+// v2: bumpeada cuando pasamos el INITIAL_STATE a vacío (antes tenía data demo).
+// Al cambiar la key, los usuarios con data en v1 arrancan limpios tras el
+// deploy. Si tenés data importante en v1, exportala desde la sección Datos
+// antes de actualizar, o borrá manualmente viora-state-v1 de localStorage.
+const STATE_STORAGE_KEY = 'viora-state-v2';
 
 function loadPersistedState() {
   if (typeof window === 'undefined') return INITIAL_STATE;
@@ -6601,8 +6618,8 @@ function UserMenu({ currentUser, sidebarOpen, state, onLogout }) {
             </button>
             <button
               onClick={() => {
-                if (window.confirm('¿Borrar todos los datos cargados y volver al estado de demo? Esta acción no se puede deshacer.')) {
-                  try { localStorage.removeItem('viora-state-v1'); } catch {}
+                if (window.confirm('¿Borrar todos los datos cargados? Esta acción no se puede deshacer. Si tenés info importante, exportá primero desde la sección Datos.')) {
+                  try { localStorage.removeItem(STATE_STORAGE_KEY); } catch {}
                   window.location.reload();
                 }
               }}
@@ -6610,7 +6627,22 @@ function UserMenu({ currentUser, sidebarOpen, state, onLogout }) {
               title="Borra todas las órdenes, clientes, productos y pagos cargados"
             >
               <Trash2 size={12} />
-              Resetear datos a demo
+              Vaciar todos los datos
+            </button>
+            <button
+              onClick={() => {
+                if (window.confirm('¿Cargar datos de ejemplo? Esto reemplaza lo que tengas cargado por los datos demo (5 productos, 8 clientes, 2 mentores, 15 órdenes).')) {
+                  try {
+                    localStorage.setItem(STATE_STORAGE_KEY, JSON.stringify(DEMO_STATE));
+                  } catch {}
+                  window.location.reload();
+                }
+              }}
+              className="w-full mt-2 flex items-center gap-2 text-xs text-white/40 hover:text-amber-300 transition"
+              title="Reemplaza los datos cargados por los de demo (útil para probar la app)"
+            >
+              <Package size={12} />
+              Cargar datos de demo
             </button>
           </div>
 

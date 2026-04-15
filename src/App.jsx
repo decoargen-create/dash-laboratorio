@@ -1205,6 +1205,26 @@ function FilterBar({ filters, onChange, totalShown, totalAll }) {
 }
 
 // Listado de órdenes con toggle total/unidad, edición de estado e incidencia
+// Definición de columnas disponibles del listado de órdenes.
+// `key` es el id estable; `label` lo que ve el user; `default` si se muestra
+// al arrancar; `required` si no se puede ocultar (ej: cliente y producto).
+const ORDERS_COLUMNS = [
+  { key: 'fecha',     label: 'Fecha',     default: true,  required: false },
+  { key: 'cliente',   label: 'Cliente',   default: true,  required: true },
+  { key: 'producto',  label: 'Producto',  default: true,  required: true },
+  { key: 'mentor',    label: 'Equipo',    default: true,  required: false },
+  { key: 'cantidad',  label: 'Cant.',     default: true,  required: false },
+  { key: 'costo',     label: 'Costo',     default: true,  required: false },
+  { key: 'precio',    label: 'Precio venta', default: true, required: false },
+  { key: 'comision',  label: 'Com. equipo', default: true, required: false },
+  { key: 'profit',    label: 'Profit',    default: true,  required: false },
+  { key: 'estado',    label: 'Estado',    default: true,  required: false },
+  { key: 'cobro',     label: 'Cobro',     default: true,  required: false },
+  { key: 'incidencia', label: 'Incidencia', default: false, required: false },
+];
+
+const ORDERS_DEFAULT_VISIBLE = ORDERS_COLUMNS.filter(c => c.default).map(c => c.key);
+
 function OrdersList({ state, dispatch, orders }) {
   const [viewMode, setViewMode] = useState('total'); // 'total' | 'unidad'
   const [incidenciaDraft, setIncidenciaDraft] = useState({}); // { [orderId]: texto }
@@ -1217,6 +1237,25 @@ function OrdersList({ state, dispatch, orders }) {
   useEffect(() => {
     try { localStorage.setItem('viora-layout-orders', layout); } catch {}
   }, [layout]);
+
+  // Columnas visibles del listado: configurables y persistidas. Las required
+  // siempre se incluyen aunque el user las desactive (defensiva).
+  const [visibleCols, setVisibleCols] = useState(() => {
+    if (typeof window === 'undefined') return new Set(ORDERS_DEFAULT_VISIBLE);
+    try {
+      const stored = localStorage.getItem('viora-cols-orders');
+      if (stored) return new Set(JSON.parse(stored));
+    } catch {}
+    return new Set(ORDERS_DEFAULT_VISIBLE);
+  });
+  useEffect(() => {
+    try { localStorage.setItem('viora-cols-orders', JSON.stringify(Array.from(visibleCols))); } catch {}
+  }, [visibleCols]);
+  const isColVisible = (key) => {
+    const def = ORDERS_COLUMNS.find(c => c.key === key);
+    if (def?.required) return true;
+    return visibleCols.has(key);
+  };
   const ordersToRender = orders ?? state.sales;
 
   const toggleExpand = (id) => {
@@ -1323,6 +1362,14 @@ function OrdersList({ state, dispatch, orders }) {
               { key: 'kanban', icon: Columns3, label: 'Kanban' },
             ]}
           />
+          {layout === 'table' && (
+            <ColumnPicker
+              available={ORDERS_COLUMNS}
+              visible={visibleCols}
+              onChange={setVisibleCols}
+              defaultKeys={ORDERS_DEFAULT_VISIBLE}
+            />
+          )}
           {layout !== 'kanban' && (
             <div className="inline-flex rounded-lg border border-gray-300 dark:border-gray-600 p-1 bg-gray-50 dark:bg-gray-900">
               <button
@@ -1375,18 +1422,18 @@ function OrdersList({ state, dispatch, orders }) {
           <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700">
             <tr className="text-left text-gray-700 dark:text-gray-200">
               <th className="px-2 py-3 w-8"></th>
-              <th className="px-4 py-3 font-semibold">Fecha</th>
-              <th className="px-4 py-3 font-semibold">Cliente</th>
-              <th className="px-4 py-3 font-semibold">Producto</th>
-              <th className="px-4 py-3 font-semibold">Mentor</th>
-              <th className="px-4 py-3 font-semibold text-right">Cant.</th>
-              <th className="px-4 py-3 font-semibold text-right">Costo</th>
-              <th className="px-4 py-3 font-semibold text-right">Precio venta</th>
-              <th className="px-4 py-3 font-semibold text-right">Com. Equipo</th>
-              <th className="px-4 py-3 font-semibold text-right">Profit</th>
-              <th className="px-4 py-3 font-semibold">Estado</th>
-              <th className="px-4 py-3 font-semibold text-center">Cobro</th>
-              <th className="px-4 py-3 font-semibold">Incidencia</th>
+              {isColVisible('fecha') && <th className="px-4 py-3 font-semibold">Fecha</th>}
+              {isColVisible('cliente') && <th className="px-4 py-3 font-semibold">Cliente</th>}
+              {isColVisible('producto') && <th className="px-4 py-3 font-semibold">Producto</th>}
+              {isColVisible('mentor') && <th className="px-4 py-3 font-semibold">Equipo</th>}
+              {isColVisible('cantidad') && <th className="px-4 py-3 font-semibold text-right">Cant.</th>}
+              {isColVisible('costo') && <th className="px-4 py-3 font-semibold text-right">Costo</th>}
+              {isColVisible('precio') && <th className="px-4 py-3 font-semibold text-right">Precio venta</th>}
+              {isColVisible('comision') && <th className="px-4 py-3 font-semibold text-right">Com. equipo</th>}
+              {isColVisible('profit') && <th className="px-4 py-3 font-semibold text-right">Profit</th>}
+              {isColVisible('estado') && <th className="px-4 py-3 font-semibold">Estado</th>}
+              {isColVisible('cobro') && <th className="px-4 py-3 font-semibold text-center">Cobro</th>}
+              {isColVisible('incidencia') && <th className="px-4 py-3 font-semibold">Incidencia</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
@@ -1425,89 +1472,107 @@ function OrdersList({ state, dispatch, orders }) {
                       {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                     </button>
                   </td>
-                  <td className="px-4 py-3 text-gray-900 dark:text-gray-100 whitespace-nowrap">{order.fecha}</td>
-                  <td className="px-4 py-3 text-gray-900 dark:text-gray-100">{getClientName(order.clienteId)}</td>
-                  <td className="px-4 py-3 text-gray-900 dark:text-gray-100">{product?.nombre || '-'}</td>
-                  <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
-                    {hasMentor ? (
-                      <div className="inline-flex items-center gap-1.5">
-                        <span className="w-6 h-6 rounded-full bg-gradient-to-br from-amber-200 to-amber-400 text-[#4a0f22] font-bold text-[10px] flex items-center justify-center">
-                          {(mentor?.nombre || 'M').charAt(0).toUpperCase()}
-                        </span>
-                        <span className="text-sm">{mentor?.nombre}</span>
+                  {isColVisible('fecha') && <td className="px-4 py-3 text-gray-900 dark:text-gray-100 whitespace-nowrap">{order.fecha}</td>}
+                  {isColVisible('cliente') && <td className="px-4 py-3 text-gray-900 dark:text-gray-100">{getClientName(order.clienteId)}</td>}
+                  {isColVisible('producto') && <td className="px-4 py-3 text-gray-900 dark:text-gray-100">{product?.nombre || '-'}</td>}
+                  {isColVisible('mentor') && (
+                    <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
+                      {hasMentor ? (
+                        <div className="inline-flex items-center gap-1.5">
+                          <span className="w-6 h-6 rounded-full bg-gradient-to-br from-amber-200 to-amber-400 text-[#4a0f22] font-bold text-[10px] flex items-center justify-center">
+                            {(mentor?.nombre || 'M').charAt(0).toUpperCase()}
+                          </span>
+                          <span className="text-sm">{mentor?.nombre}</span>
+                        </div>
+                      ) : (
+                        <span className="text-gray-400 dark:text-gray-500 text-xs">—</span>
+                      )}
+                    </td>
+                  )}
+                  {isColVisible('cantidad') && (
+                    <td className="px-4 py-3 text-right text-gray-900 dark:text-gray-100">
+                      <EditableCell
+                        value={order.cantidad}
+                        onSave={(v) => handleCantidadEdit(order, v)}
+                        prefix=""
+                        title="Doble click para editar cantidad"
+                      />
+                    </td>
+                  )}
+                  {isColVisible('costo') && (
+                    <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300">
+                      <CostBreakdownCell
+                        order={order}
+                        product={product}
+                        costs={costs}
+                        isTotal={isTotal}
+                        onUpdateProduct={(patch) => dispatch({ type: 'UPDATE_PRODUCT', payload: { id: product?.id, patch } })}
+                        onOverrideContenido={(v) => handleCostEdit(order, 'contenido', v, isTotal)}
+                        onOverrideEnvase={(v) => handleCostEdit(order, 'envase', v, isTotal)}
+                        onOverrideEtiqueta={(v) => handleCostEdit(order, 'etiqueta', v, isTotal)}
+                        onSetFlat={(v) => dispatch({ type: 'UPDATE_ORDER', payload: { id: order.id, patch: { costoSinDesglosar: v } } })}
+                        onClearFlat={() => dispatch({ type: 'UPDATE_ORDER', payload: { id: order.id, patch: { costoSinDesglosar: null } } })}
+                      />
+                    </td>
+                  )}
+                  {isColVisible('precio') && (
+                    <td className="px-4 py-3 text-right font-semibold text-gray-900 dark:text-gray-100">
+                      <EditableCell
+                        value={isTotal ? precioVentaTotal : precioVentaUnit}
+                        onSave={(v) => handlePriceEdit(order, v, isTotal)}
+                        prefix="$"
+                      />
+                    </td>
+                  )}
+                  {isColVisible('comision') && (
+                    <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300">
+                      {hasMentor ? fmtMoney(isTotal ? commissionTotal : commissionUnit) : <span className="text-gray-400 dark:text-gray-500">—</span>}
+                    </td>
+                  )}
+                  {isColVisible('profit') && (
+                    <td className="px-4 py-3 text-right font-bold text-emerald-600 dark:text-emerald-400">{fmtMoney(isTotal ? profitTotal : profitUnit)}</td>
+                  )}
+                  {isColVisible('estado') && (
+                    <td className="px-4 py-3">
+                      <select
+                        value={order.estado || 'pendiente-cotizacion'}
+                        onChange={(e) => handleStateChange(order.id, e.target.value)}
+                        className={`text-xs font-semibold px-2 py-1 rounded-full border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-pink-500 ${ORDER_STATE_STYLES[order.estado || 'pendiente-cotizacion']}`}
+                      >
+                        {ORDER_STATES.map(s => (
+                          <option key={s} value={s} className="bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100">{ORDER_STATE_LABELS[s]}</option>
+                        ))}
+                      </select>
+                    </td>
+                  )}
+                  {isColVisible('cobro') && (
+                    <td className="px-4 py-3">
+                      <CobroMiniCell
+                        summary={cobrosQuick}
+                        onClick={() => toggleExpand(order.id)}
+                      />
+                    </td>
+                  )}
+                  {isColVisible('incidencia') && (
+                    <td className="px-4 py-3 min-w-[220px]">
+                      <div className="flex items-start gap-2">
+                        <input
+                          type="checkbox"
+                          checked={!!order.tieneIncidencia}
+                          onChange={() => handleToggleIncidencia(order)}
+                          className="mt-1 h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-red-600 focus:ring-red-500"
+                          title="Marcar incidencia"
+                        />
+                        <input
+                          type="text"
+                          value={incidenciaDraft[order.id] ?? order.incidenciaDetalle ?? ''}
+                          onChange={(e) => handleIncidenciaDetalleChange(order, e.target.value)}
+                          placeholder={order.tieneIncidencia ? 'Motivo...' : 'Motivo (tildá para activar)'}
+                          className="flex-1 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-red-500"
+                        />
                       </div>
-                    ) : (
-                      <span className="text-gray-400 dark:text-gray-500 text-xs">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-right text-gray-900 dark:text-gray-100">
-                    <EditableCell
-                      value={order.cantidad}
-                      onSave={(v) => handleCantidadEdit(order, v)}
-                      prefix=""
-                      title="Doble click para editar cantidad"
-                    />
-                  </td>
-                  <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300">
-                    <CostBreakdownCell
-                      order={order}
-                      product={product}
-                      costs={costs}
-                      isTotal={isTotal}
-                      onUpdateProduct={(patch) => dispatch({ type: 'UPDATE_PRODUCT', payload: { id: product?.id, patch } })}
-                      onOverrideContenido={(v) => handleCostEdit(order, 'contenido', v, isTotal)}
-                      onOverrideEnvase={(v) => handleCostEdit(order, 'envase', v, isTotal)}
-                      onOverrideEtiqueta={(v) => handleCostEdit(order, 'etiqueta', v, isTotal)}
-                      onSetFlat={(v) => dispatch({ type: 'UPDATE_ORDER', payload: { id: order.id, patch: { costoSinDesglosar: v } } })}
-                      onClearFlat={() => dispatch({ type: 'UPDATE_ORDER', payload: { id: order.id, patch: { costoSinDesglosar: null } } })}
-                    />
-                  </td>
-                  <td className="px-4 py-3 text-right font-semibold text-gray-900 dark:text-gray-100">
-                    <EditableCell
-                      value={isTotal ? precioVentaTotal : precioVentaUnit}
-                      onSave={(v) => handlePriceEdit(order, v, isTotal)}
-                      prefix="$"
-                    />
-                  </td>
-                  <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300">
-                    {hasMentor ? fmtMoney(isTotal ? commissionTotal : commissionUnit) : <span className="text-gray-400 dark:text-gray-500">—</span>}
-                  </td>
-                  <td className="px-4 py-3 text-right font-bold text-emerald-600 dark:text-emerald-400">{fmtMoney(isTotal ? profitTotal : profitUnit)}</td>
-                  <td className="px-4 py-3">
-                    <select
-                      value={order.estado || 'pendiente-cotizacion'}
-                      onChange={(e) => handleStateChange(order.id, e.target.value)}
-                      className={`text-xs font-semibold px-2 py-1 rounded-full border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-pink-500 ${ORDER_STATE_STYLES[order.estado || 'pendiente-cotizacion']}`}
-                    >
-                      {ORDER_STATES.map(s => (
-                        <option key={s} value={s} className="bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100">{ORDER_STATE_LABELS[s]}</option>
-                      ))}
-                    </select>
-                  </td>
-                  <td className="px-4 py-3">
-                    <CobroMiniCell
-                      summary={cobrosQuick}
-                      onClick={() => toggleExpand(order.id)}
-                    />
-                  </td>
-                  <td className="px-4 py-3 min-w-[220px]">
-                    <div className="flex items-start gap-2">
-                      <input
-                        type="checkbox"
-                        checked={!!order.tieneIncidencia}
-                        onChange={() => handleToggleIncidencia(order)}
-                        className="mt-1 h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-red-600 focus:ring-red-500"
-                        title="Marcar incidencia"
-                      />
-                      <input
-                        type="text"
-                        value={incidenciaDraft[order.id] ?? order.incidenciaDetalle ?? ''}
-                        onChange={(e) => handleIncidenciaDetalleChange(order, e.target.value)}
-                        placeholder={order.tieneIncidencia ? 'Motivo...' : 'Motivo (tildá para activar)'}
-                        className="flex-1 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-red-500"
-                      />
-                    </div>
-                  </td>
+                    </td>
+                  )}
                 </tr>
                 {isOpen && payments && cobrosSummary && (
                   <tr className="bg-gray-50 dark:bg-gray-900/40">
@@ -1541,6 +1606,90 @@ function OrdersList({ state, dispatch, orders }) {
 
 // Switcher visual para elegir vista (tabla / cards / kanban / etc).
 // Recibe `value`, `onChange` y un array de `{ key, icon, label }`.
+// Picker de columnas visibles. Botón con ícono Filter que abre un dropdown
+// con checkboxes para cada columna disponible. Tiene botón "Restablecer"
+// para volver al default. Las columnas marcadas como required no pueden
+// ocultarse (ej: cliente y producto en órdenes).
+function ColumnPicker({ available, visible, onChange, defaultKeys }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const toggle = (key) => {
+    const next = new Set(visible);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    onChange(next);
+  };
+
+  const reset = () => onChange(new Set(defaultKeys));
+
+  const customCount = available.filter(c => !c.required).length;
+  const visibleCustomCount = available.filter(c => !c.required && visible.has(c.key)).length;
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        title="Mostrar / ocultar columnas"
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:border-pink-400 dark:hover:border-pink-500 transition"
+      >
+        <Filter size={14} />
+        <span className="hidden sm:inline">Columnas</span>
+        <span className="text-[10px] font-bold px-1 rounded bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 tabular-nums">
+          {visibleCustomCount}/{customCount}
+        </span>
+      </button>
+      {open && (
+        <div className="absolute right-0 mt-1 z-40 w-64 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 p-2 animate-scale-in" style={{ transformOrigin: 'top right' }}>
+          <div className="px-2 py-1.5 flex items-center justify-between border-b border-gray-100 dark:border-gray-700">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">Columnas visibles</p>
+            <button
+              onClick={reset}
+              className="text-[11px] text-pink-700 dark:text-pink-300 hover:underline font-semibold"
+              title="Restablecer al default"
+            >
+              Restablecer
+            </button>
+          </div>
+          <div className="max-h-[60vh] overflow-y-auto py-1">
+            {available.map(col => {
+              const checked = col.required || visible.has(col.key);
+              return (
+                <label
+                  key={col.key}
+                  className={`flex items-center gap-2 px-2 py-1.5 rounded text-sm transition cursor-pointer ${col.required ? 'opacity-60 cursor-not-allowed' : 'hover:bg-gray-100 dark:hover:bg-gray-700'}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={col.required}
+                    onChange={() => toggle(col.key)}
+                    className="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-pink-600 focus:ring-pink-500"
+                  />
+                  <span className="flex-1 text-gray-800 dark:text-gray-200">{col.label}</span>
+                  {col.required && <span className="text-[9px] uppercase text-gray-400">fija</span>}
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function LayoutSwitcher({ value, onChange, options }) {
   return (
     <div className="inline-flex rounded-lg border border-gray-300 dark:border-gray-600 p-1 bg-gray-50 dark:bg-gray-900">

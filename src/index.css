@@ -13,3 +13,29 @@ html.dark {
 body {
   @apply bg-gray-50 text-gray-900 dark:bg-gray-900 dark:text-gray-100;
 }
+
+/* Marquee infinito de la landing — mueve el track al -50% para loopear
+   sin saltos (gracias a que duplicamos los items en el JSX). */
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+.marquee-track {
+  animation: marquee 28s linear infinite;
+}
+.marquee-track:hover {
+  animation-play-state: paused;
+}
+
+/* Float ambient: usado por elementos decorativos en el hero (drops, sparkles)
+   para que tengan vida sin distraer. */
+@keyframes float-y {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-12px); }
+}
+.float-y {
+  animation: float-y 6s ease-in-out infinite;
+}
+.float-y-slow {
+  animation: float-y 9s ease-in-out infinite;
+}

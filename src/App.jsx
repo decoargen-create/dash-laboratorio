@@ -195,7 +195,12 @@ export function getOrderProfit(order, product) {
 }
 
 export function getMentorCommission(order) {
-  return (order.montoTotal || 0) * 0.5;
+  // Si al crear la venta se cargó un presupuesto fijo para el mentor, ese gana.
+  // Si no, se asume 50% del monto total como regla general.
+  if (order?.mentorPresupuesto != null && order.mentorPresupuesto !== '') {
+    return parseFloat(order.mentorPresupuesto) || 0;
+  }
+  return (order?.montoTotal || 0) * 0.5;
 }
 
 // Resumen de cobros de una orden (plata que entra del cliente).
@@ -1099,25 +1104,49 @@ function StatCard({ icon: Icon, label, value, color }) {
 }
 
 function VentasSection({ state, onAddSale, onQuickAddClient, onQuickAddProduct, showModal, setShowModal }) {
-  const [formData, setFormData] = useState({ clienteId: '', productoId: '', cantidad: 1, mentorId: '' });
+  const [formData, setFormData] = useState({ clienteId: '', productoId: '', cantidad: 1, mentorId: '', mentorPresupuesto: '' });
   const [showClientQuickModal, setShowClientQuickModal] = useState(false);
   const [showProductQuickModal, setShowProductQuickModal] = useState(false);
+
+  // Cálculos derivados para sugerir el presupuesto del mentor al cargar la venta
+  const productoSel = state.products.find(p => p.id === parseInt(formData.productoId));
+  const cantidadNum = parseInt(formData.cantidad) || 0;
+  const montoTotalSugerido = (productoSel?.precioVenta || 0) * cantidadNum;
+  const mentorSugerido = Math.round(montoTotalSugerido * 0.5);
+
+  // Cuando cambia el mentor, producto o cantidad, y el usuario no tocó el
+  // presupuesto manualmente, reseteamos el valor sugerido (50% de la venta).
+  const [presupuestoTouched, setPresupuestoTouched] = useState(false);
+  useEffect(() => {
+    if (!presupuestoTouched) {
+      setFormData(prev => ({ ...prev, mentorPresupuesto: prev.mentorId ? String(mentorSugerido) : '' }));
+    }
+  }, [formData.mentorId, formData.productoId, formData.cantidad, mentorSugerido, presupuestoTouched]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
     const producto = state.products.find(p => p.id === parseInt(formData.productoId));
     if (!producto) return;
     const cantidad = parseInt(formData.cantidad) || 1;
+    const mentorId = formData.mentorId ? parseInt(formData.mentorId) : null;
+    const presupuestoParsed = formData.mentorPresupuesto === ''
+      ? null
+      : parseFloat(formData.mentorPresupuesto);
     const newSale = {
       fecha: new Date().toISOString().split('T')[0],
       clienteId: parseInt(formData.clienteId),
       productoId: parseInt(formData.productoId),
       cantidad,
       montoTotal: producto.precioVenta * cantidad,
-      mentorId: formData.mentorId ? parseInt(formData.mentorId) : null,
+      mentorId,
+      // Solo guardamos el presupuesto si hay mentor asignado y un valor numérico.
+      mentorPresupuesto: mentorId && presupuestoParsed != null && !Number.isNaN(presupuestoParsed)
+        ? presupuestoParsed
+        : null,
     };
     onAddSale(newSale);
-    setFormData({ clienteId: '', productoId: '', cantidad: 1, mentorId: '' });
+    setFormData({ clienteId: '', productoId: '', cantidad: 1, mentorId: '', mentorPresupuesto: '' });
+    setPresupuestoTouched(false);
   };
 
   const handleQuickClientCreated = (clientData) => {
@@ -1128,6 +1157,7 @@ function VentasSection({ state, onAddSale, onQuickAddClient, onQuickAddProduct, 
       clienteId: String(newClient.id),
       mentorId: newClient.mentorId ? String(newClient.mentorId) : prev.mentorId,
     }));
+    setPresupuestoTouched(false); // dejar que se recalcule el 50% sugerido
     setShowClientQuickModal(false);
   };
 
@@ -1212,14 +1242,52 @@ function VentasSection({ state, onAddSale, onQuickAddClient, onQuickAddProduct, 
               required
             />
 
-            <select
-              value={formData.mentorId}
-              onChange={(e) => setFormData({ ...formData, mentorId: e.target.value })}
-              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-            >
-              <option value="">Sin mentor (opcional)</option>
-              {state.mentors.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
-            </select>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Mentor asignado</label>
+              <select
+                value={formData.mentorId}
+                onChange={(e) => { setFormData({ ...formData, mentorId: e.target.value }); setPresupuestoTouched(false); }}
+                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+              >
+                <option value="">Sin mentor (opcional)</option>
+                {state.mentors.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
+              </select>
+            </div>
+
+            {formData.mentorId && (
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">
+                  Presupuesto para el mentor
+                  <span className="ml-2 text-gray-400 dark:text-gray-500 font-normal">
+                    (sugerido 50%: ${mentorSugerido.toLocaleString()})
+                  </span>
+                </label>
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 text-sm">$</span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={formData.mentorPresupuesto}
+                      onChange={(e) => { setFormData({ ...formData, mentorPresupuesto: e.target.value }); setPresupuestoTouched(true); }}
+                      placeholder={String(mentorSugerido)}
+                      className="w-full pl-6 pr-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                    />
+                  </div>
+                  {presupuestoTouched && (
+                    <button
+                      type="button"
+                      onClick={() => { setFormData({ ...formData, mentorPresupuesto: String(mentorSugerido) }); setPresupuestoTouched(false); }}
+                      className="text-xs text-pink-700 dark:text-pink-300 hover:underline font-semibold whitespace-nowrap"
+                      title="Restaurar al 50% sugerido"
+                    >
+                      Usar 50%
+                    </button>
+                  )}
+                </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Este será el monto fijo que se le paga al mentor por esta orden.</p>
+              </div>
+            )}
 
             <button
               type="submit"

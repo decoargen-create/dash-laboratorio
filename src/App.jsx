@@ -248,7 +248,7 @@ export function getMentorCommission(order, product, mentor) {
 // todas sus órdenes) vs cuánto ya se le pagó (suma de pagosRecibidos).
 // Devuelve también el saldo pendiente y el % cobrado.
 export function getMentorBalance(mentor, allSales, allProducts) {
-  if (!mentor) return { generado: 0, cobrado: 0, saldo: 0, porcentaje: 0, ordenes: 0 };
+  if (!mentor) return { generado: 0, cobrado: 0, saldo: 0, porcentaje: 0, ordenes: 0, pagos: [] };
   const misOrdenes = allSales.filter(o => o.mentorId === mentor.id);
   const generado = misOrdenes.reduce((s, o) => {
     const p = allProducts.find(pp => pp.id === o.productoId);

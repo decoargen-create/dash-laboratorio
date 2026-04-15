@@ -2660,8 +2660,12 @@ function VentasSection({ state, onAddSale, onQuickAddClient, onQuickAddProduct, 
 }
 
 function ProductosSection({ state, onAddProduct, showModal, setShowModal, calculateMargin }) {
+  // modoCosto: 'total' (un único número) | 'desglose' (contenido/envase/etiqueta).
+  // La mayoría de los casos usa 'total' porque el proveedor entrega todo junto.
   const [formData, setFormData] = useState({
     nombre: '', descripcion: '',
+    modoCosto: 'total',
+    costoTotal: '',
     costoContenido: '', costoEnvase: '', costoEtiqueta: '',
     precioVenta: '',
   });
@@ -2705,15 +2709,33 @@ function ProductosSection({ state, onAddProduct, showModal, setShowModal, calcul
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    onAddProduct({
+    const payload = {
       nombre: formData.nombre,
       descripcion: formData.descripcion,
-      costoContenido: parseInt(formData.costoContenido) || 0,
-      costoEnvase: parseInt(formData.costoEnvase) || 0,
-      costoEtiqueta: parseInt(formData.costoEtiqueta) || 0,
       precioVenta: parseInt(formData.precioVenta) || 0,
+    };
+    if (formData.modoCosto === 'total') {
+      // Modo simple: un único número. Se guarda en costoSinDesglosar y los
+      // 3 campos desglosados se dejan en 0 (no se usan en los cálculos).
+      payload.costoSinDesglosar = parseFloat(formData.costoTotal) || 0;
+      payload.costoContenido = 0;
+      payload.costoEnvase = 0;
+      payload.costoEtiqueta = 0;
+    } else {
+      // Modo desglose: los 3 campos separados, costoSinDesglosar queda null.
+      payload.costoContenido = parseInt(formData.costoContenido) || 0;
+      payload.costoEnvase = parseInt(formData.costoEnvase) || 0;
+      payload.costoEtiqueta = parseInt(formData.costoEtiqueta) || 0;
+      payload.costoSinDesglosar = null;
+    }
+    onAddProduct(payload);
+    setFormData({
+      nombre: '', descripcion: '',
+      modoCosto: 'total',
+      costoTotal: '',
+      costoContenido: '', costoEnvase: '', costoEtiqueta: '',
+      precioVenta: '',
     });
-    setFormData({ nombre: '', descripcion: '', costoContenido: '', costoEnvase: '', costoEtiqueta: '', precioVenta: '' });
   };
 
   return (
@@ -2764,30 +2786,79 @@ function ProductosSection({ state, onAddProduct, showModal, setShowModal, calcul
               />
             </div>
             <div>
-              <FormLabel tip="Costos por UNIDAD. Dejá en 0 lo que no tengas y lo completás después (con doble click en el listado).">Costos unitarios (contenido / envase / etiqueta)</FormLabel>
-              <div className="grid grid-cols-3 gap-2">
-                <input
-                  type="number"
-                  value={formData.costoContenido}
-                  onChange={(e) => setFormData({ ...formData, costoContenido: e.target.value })}
-                  placeholder="Contenido"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-                />
-                <input
-                  type="number"
-                  value={formData.costoEnvase}
-                  onChange={(e) => setFormData({ ...formData, costoEnvase: e.target.value })}
-                  placeholder="Envase"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-                />
-                <input
-                  type="number"
-                  value={formData.costoEtiqueta}
-                  onChange={(e) => setFormData({ ...formData, costoEtiqueta: e.target.value })}
-                  placeholder="Etiqueta"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-                />
+              <FormLabel required tip="Lo que te cuesta producir una unidad. Si querés, podés desglosarlo en contenido / envase / etiqueta; pero en la mayoría de los casos alcanza con un solo número.">
+                Costo del producto (por unidad)
+              </FormLabel>
+
+              {/* Tabs: costo total vs desglosado */}
+              <div className="flex gap-1 p-1 bg-gray-100 dark:bg-gray-700 rounded-lg mb-3">
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, modoCosto: 'total' })}
+                  className={`flex-1 py-1.5 text-xs rounded-md transition font-semibold ${
+                    formData.modoCosto === 'total'
+                      ? 'bg-white dark:bg-gray-800 text-pink-900 dark:text-pink-300 shadow'
+                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+                  }`}
+                >
+                  Costo total
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, modoCosto: 'desglose' })}
+                  className={`flex-1 py-1.5 text-xs rounded-md transition font-semibold ${
+                    formData.modoCosto === 'desglose'
+                      ? 'bg-white dark:bg-gray-800 text-pink-900 dark:text-pink-300 shadow'
+                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+                  }`}
+                >
+                  Desglosado
+                </button>
               </div>
+
+              {formData.modoCosto === 'total' ? (
+                <input
+                  type="number"
+                  step="0.01"
+                  value={formData.costoTotal}
+                  onChange={(e) => setFormData({ ...formData, costoTotal: e.target.value })}
+                  placeholder="Ej. 120"
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                />
+              ) : (
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-1">Contenido</label>
+                    <input
+                      type="number"
+                      value={formData.costoContenido}
+                      onChange={(e) => setFormData({ ...formData, costoContenido: e.target.value })}
+                      placeholder="0"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-1">Envase / pote</label>
+                    <input
+                      type="number"
+                      value={formData.costoEnvase}
+                      onChange={(e) => setFormData({ ...formData, costoEnvase: e.target.value })}
+                      placeholder="0"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-1">Etiqueta</label>
+                    <input
+                      type="number"
+                      value={formData.costoEtiqueta}
+                      onChange={(e) => setFormData({ ...formData, costoEtiqueta: e.target.value })}
+                      placeholder="0"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
             <div>
               <FormLabel required tip="El precio por unidad que le cobrás al cliente.">Precio de venta unitario</FormLabel>
@@ -5601,20 +5672,31 @@ function QuickClientModal({ mentors, onClose, onCreate }) {
 function QuickProductModal({ onClose, onCreate }) {
   const [data, setData] = useState({
     nombre: '', descripcion: '', precioVenta: '',
+    costoTotal: '',
+    modoCosto: 'total',
     costoContenido: '', costoEnvase: '', costoEtiqueta: '',
   });
   const [showCosts, setShowCosts] = useState(false);
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    onCreate({
+    const payload = {
       nombre: data.nombre.trim(),
       descripcion: data.descripcion.trim(),
       precioVenta: parseInt(data.precioVenta) || 0,
-      costoContenido: parseInt(data.costoContenido) || 0,
-      costoEnvase: parseInt(data.costoEnvase) || 0,
-      costoEtiqueta: parseInt(data.costoEtiqueta) || 0,
-    });
+    };
+    if (data.modoCosto === 'total') {
+      payload.costoSinDesglosar = parseFloat(data.costoTotal) || 0;
+      payload.costoContenido = 0;
+      payload.costoEnvase = 0;
+      payload.costoEtiqueta = 0;
+    } else {
+      payload.costoContenido = parseInt(data.costoContenido) || 0;
+      payload.costoEnvase = parseInt(data.costoEnvase) || 0;
+      payload.costoEtiqueta = parseInt(data.costoEtiqueta) || 0;
+      payload.costoSinDesglosar = null;
+    }
+    onCreate(payload);
   };
 
   return (
@@ -5670,38 +5752,73 @@ function QuickProductModal({ onClose, onCreate }) {
             onClick={() => setShowCosts(s => !s)}
             className="text-xs font-semibold text-pink-700 dark:text-pink-300 hover:underline"
           >
-            {showCosts ? '− Ocultar costos' : '+ Cargar costos ahora (opcional)'}
+            {showCosts ? '− Ocultar costo' : '+ Cargar costo ahora (opcional)'}
           </button>
           {showCosts && (
             <div>
-              <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Costos unitarios (contenido / envase / etiqueta)</label>
-              <div className="grid grid-cols-3 gap-2">
-                <input
-                  type="number"
-                  min="0"
-                  value={data.costoContenido}
-                  onChange={(e) => setData({ ...data, costoContenido: e.target.value })}
-                  placeholder="Contenido"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-                />
-                <input
-                  type="number"
-                  min="0"
-                  value={data.costoEnvase}
-                  onChange={(e) => setData({ ...data, costoEnvase: e.target.value })}
-                  placeholder="Envase"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-                />
-                <input
-                  type="number"
-                  min="0"
-                  value={data.costoEtiqueta}
-                  onChange={(e) => setData({ ...data, costoEtiqueta: e.target.value })}
-                  placeholder="Etiqueta"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-                />
+              <div className="flex gap-1 p-1 bg-gray-100 dark:bg-gray-700 rounded-lg mb-2">
+                <button
+                  type="button"
+                  onClick={() => setData({ ...data, modoCosto: 'total' })}
+                  className={`flex-1 py-1 text-[11px] rounded-md transition font-semibold ${
+                    data.modoCosto === 'total'
+                      ? 'bg-white dark:bg-gray-800 text-pink-900 dark:text-pink-300 shadow'
+                      : 'text-gray-600 dark:text-gray-400'
+                  }`}
+                >
+                  Costo total
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setData({ ...data, modoCosto: 'desglose' })}
+                  className={`flex-1 py-1 text-[11px] rounded-md transition font-semibold ${
+                    data.modoCosto === 'desglose'
+                      ? 'bg-white dark:bg-gray-800 text-pink-900 dark:text-pink-300 shadow'
+                      : 'text-gray-600 dark:text-gray-400'
+                  }`}
+                >
+                  Desglosado
+                </button>
               </div>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Si los dejás vacíos se guardan en 0 y los completás después.</p>
+              {data.modoCosto === 'total' ? (
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={data.costoTotal}
+                  onChange={(e) => setData({ ...data, costoTotal: e.target.value })}
+                  placeholder="Costo total por unidad"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                />
+              ) : (
+                <div className="grid grid-cols-3 gap-2">
+                  <input
+                    type="number"
+                    min="0"
+                    value={data.costoContenido}
+                    onChange={(e) => setData({ ...data, costoContenido: e.target.value })}
+                    placeholder="Contenido"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    value={data.costoEnvase}
+                    onChange={(e) => setData({ ...data, costoEnvase: e.target.value })}
+                    placeholder="Envase"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    value={data.costoEtiqueta}
+                    onChange={(e) => setData({ ...data, costoEtiqueta: e.target.value })}
+                    placeholder="Etiqueta"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                  />
+                </div>
+              )}
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Podés completarlo después desde el listado de productos.</p>
             </div>
           )}
           <div className="flex gap-2 pt-2">

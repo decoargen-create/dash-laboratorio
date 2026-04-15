@@ -2062,6 +2062,13 @@ function ProductosSection({ state, onAddProduct, showModal, setShowModal, calcul
     precioVenta: '',
   });
   const [expanded, setExpanded] = useState(() => new Set());
+  const [layout, setLayout] = useState(() => {
+    if (typeof window === 'undefined') return 'cards';
+    return localStorage.getItem('viora-layout-products') || 'cards';
+  });
+  useEffect(() => {
+    try { localStorage.setItem('viora-layout-products', layout); } catch {}
+  }, [layout]);
 
   const toggleExpand = (id) => {
     setExpanded(prev => {
@@ -2107,14 +2114,25 @@ function ProductosSection({ state, onAddProduct, showModal, setShowModal, calcul
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-wrap justify-between items-center gap-3">
         <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Catálogo de Productos</h2>
-        <button
-          onClick={() => setShowModal(true)}
-          className="flex items-center gap-2 bg-pink-900 text-white px-6 py-2 rounded-lg hover:bg-pink-800 transition font-semibold"
-        >
-          <Plus size={20} /> Nuevo Producto
-        </button>
+        <div className="flex items-center gap-2">
+          <LayoutSwitcher
+            value={layout}
+            onChange={setLayout}
+            options={[
+              { key: 'cards', icon: LayoutGrid, label: 'Cards' },
+              { key: 'table', icon: AlignJustify, label: 'Tabla' },
+              { key: 'compact', icon: Menu, label: 'Compacta' },
+            ]}
+          />
+          <button
+            onClick={() => setShowModal(true)}
+            className="flex items-center gap-2 bg-pink-900 text-white px-4 py-2 rounded-lg hover:bg-pink-800 transition font-semibold text-sm"
+          >
+            <Plus size={18} /> Nuevo Producto
+          </button>
+        </div>
       </div>
 
       {showModal && (
@@ -2188,6 +2206,24 @@ function ProductosSection({ state, onAddProduct, showModal, setShowModal, calcul
         </Modal>
       )}
 
+      {layout === 'table' && (
+        <ProductosTableView
+          products={state.products}
+          sales={state.sales}
+          clients={state.clients}
+          calculateMargin={calculateMargin}
+          expanded={expanded}
+          toggleExpand={toggleExpand}
+        />
+      )}
+      {layout === 'compact' && (
+        <ProductosCompactView
+          products={state.products}
+          sales={state.sales}
+          calculateMargin={calculateMargin}
+        />
+      )}
+      {layout === 'cards' && (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {state.products.map(product => {
           const unitCost = getProductUnitCost(product);
@@ -2270,6 +2306,103 @@ function ProductosSection({ state, onAddProduct, showModal, setShowModal, calcul
           );
         })}
       </div>
+      )}
+    </div>
+  );
+}
+
+// Vista tabla del catálogo de productos. Muestra los 3 costos desglosados,
+// precio venta, margen y cantidad de órdenes históricas por producto.
+function ProductosTableView({ products, sales, clients, calculateMargin, expanded, toggleExpand }) {
+  const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
+  const countOrders = (productId) => sales.filter(s => s.productoId === productId).length;
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700">
+            <tr className="text-left text-gray-700 dark:text-gray-200">
+              <th className="px-4 py-3 font-semibold">Nombre</th>
+              <th className="px-4 py-3 font-semibold">Descripción</th>
+              <th className="px-4 py-3 font-semibold text-right">Contenido</th>
+              <th className="px-4 py-3 font-semibold text-right">Envase</th>
+              <th className="px-4 py-3 font-semibold text-right">Etiqueta</th>
+              <th className="px-4 py-3 font-semibold text-right">Costo total</th>
+              <th className="px-4 py-3 font-semibold text-right">Precio venta</th>
+              <th className="px-4 py-3 font-semibold text-right">Margen</th>
+              <th className="px-4 py-3 font-semibold text-right">Órdenes</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+            {products.length === 0 && (
+              <tr><td colSpan={9} className="px-4 py-10 text-center text-gray-500 dark:text-gray-400">Todavía no hay productos cargados.</td></tr>
+            )}
+            {products.map(product => {
+              const unitCost = getProductUnitCost(product);
+              const margen = calculateMargin(unitCost, product.precioVenta);
+              const ordenes = countOrders(product.id);
+              return (
+                <tr key={product.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition">
+                  <td className="px-4 py-3 font-medium text-gray-900 dark:text-gray-100">{product.nombre}</td>
+                  <td className="px-4 py-3 text-gray-600 dark:text-gray-400 max-w-xs truncate">{product.descripcion || <span className="italic text-gray-400 dark:text-gray-500">Sin descripción</span>}</td>
+                  <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300 tabular-nums">{fmtMoney(getContenidoUnitCost(product))}</td>
+                  <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300 tabular-nums">{fmtMoney(product.costoEnvase || 0)}</td>
+                  <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300 tabular-nums">{fmtMoney(product.costoEtiqueta || 0)}</td>
+                  <td className="px-4 py-3 text-right font-semibold text-gray-900 dark:text-gray-100 tabular-nums">{fmtMoney(unitCost)}</td>
+                  <td className="px-4 py-3 text-right font-semibold text-gray-900 dark:text-gray-100 tabular-nums">{fmtMoney(product.precioVenta)}</td>
+                  <td className="px-4 py-3 text-right font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{margen}%</td>
+                  <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300 tabular-nums">{ordenes}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// Vista compacta: una línea por producto con solo lo esencial.
+// Buena para catálogos grandes donde querés scanear rápido.
+function ProductosCompactView({ products, sales, calculateMargin }) {
+  const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
+  const countOrders = (productId) => sales.filter(s => s.productoId === productId).length;
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden divide-y divide-gray-100 dark:divide-gray-700">
+      {products.length === 0 && (
+        <div className="px-4 py-10 text-center text-gray-500 dark:text-gray-400">Todavía no hay productos cargados.</div>
+      )}
+      {products.map(product => {
+        const unitCost = getProductUnitCost(product);
+        const margen = calculateMargin(unitCost, product.precioVenta);
+        const ordenes = countOrders(product.id);
+        return (
+          <div key={product.id} className="px-4 py-3 flex items-center gap-3 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition">
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{product.nombre}</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{product.descripcion || <span className="italic">Sin descripción</span>}</p>
+            </div>
+            <div className="flex items-center gap-4 text-xs tabular-nums shrink-0">
+              <div className="text-right">
+                <p className="text-[10px] uppercase text-gray-500 dark:text-gray-400">Costo</p>
+                <p className="font-semibold text-gray-700 dark:text-gray-300">{fmtMoney(unitCost)}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-[10px] uppercase text-gray-500 dark:text-gray-400">Precio</p>
+                <p className="font-semibold text-gray-900 dark:text-gray-100">{fmtMoney(product.precioVenta)}</p>
+              </div>
+              <div className="text-right min-w-[48px]">
+                <p className="text-[10px] uppercase text-gray-500 dark:text-gray-400">Margen</p>
+                <p className="font-bold text-emerald-600 dark:text-emerald-400">{margen}%</p>
+              </div>
+              <div className="text-right min-w-[52px]">
+                <p className="text-[10px] uppercase text-gray-500 dark:text-gray-400">Órdenes</p>
+                <p className="font-semibold text-gray-700 dark:text-gray-300">{ordenes}</p>
+              </div>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -2279,6 +2412,13 @@ function ClientesSection({ state, onAddClient, onUpdateClient, showModal, setSho
   const [formData, setFormData] = useState(emptyForm);
   const [editingId, setEditingId] = useState(null);
   const [expanded, setExpanded] = useState(() => new Set());
+  const [layout, setLayout] = useState(() => {
+    if (typeof window === 'undefined') return 'table';
+    return localStorage.getItem('viora-layout-clients') || 'table';
+  });
+  useEffect(() => {
+    try { localStorage.setItem('viora-layout-clients', layout); } catch {}
+  }, [layout]);
 
   const toggleExpand = (id) => {
     setExpanded(prev => {
@@ -2362,14 +2502,25 @@ function ClientesSection({ state, onAddClient, onUpdateClient, showModal, setSho
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-wrap justify-between items-center gap-3">
         <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Base de Clientes</h2>
-        <button
-          onClick={openNew}
-          className="flex items-center gap-2 bg-pink-900 text-white px-6 py-2 rounded-lg hover:bg-pink-800 transition font-semibold"
-        >
-          <Plus size={20} /> Nuevo Cliente
-        </button>
+        <div className="flex items-center gap-2">
+          <LayoutSwitcher
+            value={layout}
+            onChange={setLayout}
+            options={[
+              { key: 'table', icon: AlignJustify, label: 'Tabla' },
+              { key: 'cards', icon: LayoutGrid, label: 'Cards' },
+              { key: 'compact', icon: Menu, label: 'Compacta' },
+            ]}
+          />
+          <button
+            onClick={openNew}
+            className="flex items-center gap-2 bg-pink-900 text-white px-4 py-2 rounded-lg hover:bg-pink-800 transition font-semibold text-sm"
+          >
+            <Plus size={18} /> Nuevo Cliente
+          </button>
+        </div>
       </div>
 
       {showModal && (
@@ -2452,6 +2603,24 @@ function ClientesSection({ state, onAddClient, onUpdateClient, showModal, setSho
         </Modal>
       )}
 
+      {layout === 'cards' && (
+        <ClientesCardView
+          clients={state.clients}
+          mentors={state.mentors}
+          sales={state.sales}
+          onEdit={openEdit}
+          getMentorName={getMentorName}
+        />
+      )}
+      {layout === 'compact' && (
+        <ClientesCompactView
+          clients={state.clients}
+          sales={state.sales}
+          onEdit={openEdit}
+          getMentorName={getMentorName}
+        />
+      )}
+      {layout === 'table' && (
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -2519,6 +2688,7 @@ function ClientesSection({ state, onAddClient, onUpdateClient, showModal, setSho
           </table>
         </div>
       </div>
+      )}
     </div>
   );
 }
@@ -2846,6 +3016,111 @@ function MentorClientesSection({ currentUser, state }) {
           </table>
         </div>
       </div>
+      )}
+    </div>
+  );
+}
+
+// Vista cards de clientes: grid con avatar + datos + mini-stats de órdenes.
+function ClientesCardView({ clients, mentors, sales, onEdit, getMentorName }) {
+  const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      {clients.length === 0 && (
+        <div className="col-span-full px-4 py-10 text-center text-gray-500 dark:text-gray-400">Todavía no hay clientes.</div>
+      )}
+      {clients.map(client => {
+        const clientSales = sales.filter(s => s.clienteId === client.id);
+        const totalFacturado = clientSales.reduce((s, o) => s + (o.montoTotal || 0), 0);
+        const initial = (client.nombre || 'C').charAt(0).toUpperCase();
+        return (
+          <div key={client.id} className="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-100 dark:border-gray-700 p-4 hover:shadow-xl transition">
+            <div className="flex items-start gap-3">
+              <div className="w-11 h-11 rounded-full bg-gradient-to-br from-pink-200 to-rose-300 dark:from-pink-700 dark:to-rose-800 text-pink-900 dark:text-pink-100 font-bold flex items-center justify-center shrink-0 shadow">
+                {initial}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-bold text-gray-900 dark:text-gray-100 truncate">{client.nombre}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{client.telefono || 'Sin teléfono'}</p>
+              </div>
+              <button
+                onClick={() => onEdit(client)}
+                className="p-1.5 rounded-md text-pink-700 dark:text-pink-300 hover:bg-pink-50 dark:hover:bg-pink-900/30 transition"
+                title="Editar cliente"
+              >
+                <Edit2 size={14} />
+              </button>
+            </div>
+            <div className="mt-3 space-y-1.5 text-xs">
+              <div className="flex justify-between gap-2">
+                <span className="text-gray-500 dark:text-gray-400 shrink-0">Domicilio</span>
+                <span className="text-gray-700 dark:text-gray-300 text-right truncate">{client.domicilio || <span className="italic text-gray-400 dark:text-gray-500">sin datos</span>}</span>
+              </div>
+              <div className="flex justify-between gap-2">
+                <span className="text-gray-500 dark:text-gray-400 shrink-0">Mentor</span>
+                <span className="text-gray-700 dark:text-gray-300 text-right truncate">{getMentorName(client.mentorId)}</span>
+              </div>
+              <div className="flex justify-between gap-2">
+                <span className="text-gray-500 dark:text-gray-400 shrink-0">Desde</span>
+                <span className="text-gray-700 dark:text-gray-300 text-right">{client.fechaAlta}</span>
+              </div>
+            </div>
+            <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700 grid grid-cols-3 gap-2 text-center">
+              <div>
+                <p className="text-[10px] uppercase text-gray-500 dark:text-gray-400">Órdenes</p>
+                <p className="font-bold text-gray-900 dark:text-gray-100">{clientSales.length || (client.totalCompras ?? 0)}</p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase text-gray-500 dark:text-gray-400">Unidades</p>
+                <p className="font-bold text-gray-900 dark:text-gray-100 tabular-nums">{(client.unidadesProducidas ?? 0).toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase text-gray-500 dark:text-gray-400">Facturado</p>
+                <p className="font-bold text-emerald-600 dark:text-emerald-400 tabular-nums text-xs">{fmtMoney(totalFacturado)}</p>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// Vista compacta de clientes: una línea por cliente con lo esencial.
+function ClientesCompactView({ clients, sales, onEdit, getMentorName }) {
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden divide-y divide-gray-100 dark:divide-gray-700">
+      {clients.length === 0 && (
+        <div className="px-4 py-10 text-center text-gray-500 dark:text-gray-400">Todavía no hay clientes.</div>
+      )}
+      {clients.map(client => {
+        const countOrders = sales.filter(s => s.clienteId === client.id).length;
+        const initial = (client.nombre || 'C').charAt(0).toUpperCase();
+        return (
+          <div key={client.id} className="px-4 py-2.5 flex items-center gap-3 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-pink-200 to-rose-300 dark:from-pink-700 dark:to-rose-800 text-pink-900 dark:text-pink-100 text-xs font-bold flex items-center justify-center shrink-0">
+              {initial}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{client.nombre}</p>
+              <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate">
+                {client.telefono || '—'} · {client.domicilio || 'Sin domicilio'} · {getMentorName(client.mentorId)}
+              </p>
+            </div>
+            <div className="text-right shrink-0">
+              <p className="text-xs font-bold text-gray-900 dark:text-gray-100">{countOrders || (client.totalCompras ?? 0)} órd.</p>
+              <p className="text-[10px] text-gray-500 dark:text-gray-400">{(client.unidadesProducidas ?? 0).toLocaleString()} u.</p>
+            </div>
+            <button
+              onClick={() => onEdit(client)}
+              className="p-1.5 rounded-md text-pink-700 dark:text-pink-300 hover:bg-pink-50 dark:hover:bg-pink-900/30 transition"
+              title="Editar cliente"
+            >
+              <Edit2 size={12} />
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
 }

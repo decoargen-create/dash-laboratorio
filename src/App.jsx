@@ -41,11 +41,11 @@ export const ORDER_STATE_STYLES = {
 // Sample data
 const INITIAL_STATE = {
   products: [
-    { id: 1, nombre: 'Crema Hidratante', descripcion: 'Crema hidratante intensiva', costoContenido: 70, costoEnvase: 35, costoEtiqueta: 15, precioVenta: 450, stock: 15 },
-    { id: 2, nombre: 'Sérum Vitamina C', descripcion: 'Sérum antioxidante', costoContenido: 110, costoEnvase: 50, costoEtiqueta: 20, precioVenta: 650, stock: 8 },
-    { id: 3, nombre: 'Contorno de Ojos', descripcion: 'Contorno iluminador', costoContenido: 85, costoEnvase: 45, costoEtiqueta: 20, precioVenta: 550, stock: 12 },
-    { id: 4, nombre: 'Limpiador Facial', descripcion: 'Limpiador suave', costoContenido: 50, costoEnvase: 30, costoEtiqueta: 10, precioVenta: 320, stock: 20 },
-    { id: 5, nombre: 'Mascarilla Nutritiva', descripcion: 'Mascarilla reparadora', costoContenido: 65, costoEnvase: 30, costoEtiqueta: 15, precioVenta: 420, stock: 4 },
+    { id: 1, nombre: 'Crema Hidratante', descripcion: 'Crema hidratante intensiva', costoContenido: 70, costoEnvase: 35, costoEtiqueta: 15, precioVenta: 450 },
+    { id: 2, nombre: 'Sérum Vitamina C', descripcion: 'Sérum antioxidante', costoContenido: 110, costoEnvase: 50, costoEtiqueta: 20, precioVenta: 650 },
+    { id: 3, nombre: 'Contorno de Ojos', descripcion: 'Contorno iluminador', costoContenido: 85, costoEnvase: 45, costoEtiqueta: 20, precioVenta: 550 },
+    { id: 4, nombre: 'Limpiador Facial', descripcion: 'Limpiador suave', costoContenido: 50, costoEnvase: 30, costoEtiqueta: 10, precioVenta: 320 },
+    { id: 5, nombre: 'Mascarilla Nutritiva', descripcion: 'Mascarilla reparadora', costoContenido: 65, costoEnvase: 30, costoEtiqueta: 15, precioVenta: 420 },
   ],
   clients: [
     { id: 1, nombre: 'Martina González', telefono: '11 2345-6789', domicilio: 'Av. Corrientes 1234, CABA', mentorId: 1, fechaAlta: '2024-01-15', totalCompras: 3, unidadesProducidas: 350 },
@@ -93,11 +93,6 @@ function appReducer(state, action) {
       };
     case 'ADD_PRODUCT':
       return { ...state, products: [...state.products, action.payload] };
-    case 'UPDATE_STOCK':
-      return {
-        ...state,
-        products: state.products.map(p => p.id === action.payload.productId ? { ...p, stock: p.stock - action.payload.cantidad } : p)
-      };
     case 'PAY_COMMISSIONS':
       return {
         ...state,
@@ -238,7 +233,6 @@ export default function DASHLaboratorio() {
       costoContenido: 0,
       costoEnvase: 0,
       costoEtiqueta: 0,
-      stock: 0,
       ...productData,
     };
     dispatch({ type: 'ADD_PRODUCT', payload: newProduct });
@@ -277,8 +271,6 @@ export default function DASHLaboratorio() {
       .reduce((sum, s) => sum + (s.montoTotal * 0.5), 0);
   };
 
-  const getLowStockCount = () => state.products.filter(p => p.stock < 5).length;
-
   const getActiveClients = () => state.clients.length;
 
   const getMentorStats = (mentorId) => {
@@ -311,7 +303,6 @@ export default function DASHLaboratorio() {
               <NavItem icon={TrendingUp} label="Ventas" section="ventas" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={Package} label="Productos" section="productos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={Users} label="Clientes" section="clientes" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={AlertCircle} label="Stock" section="stock" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={CreditCard} label="Comisiones" section="comisiones" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={UserCheck} label="Mentores" section="mentores" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
             </>
@@ -363,11 +354,10 @@ export default function DASHLaboratorio() {
 
         <div className="p-8">
           {/* Admin Views */}
-          {currentUser.role === 'admin' && currentSection === 'inicio' && <InicioSection state={state} dispatch={dispatch} calculateMargin={calculateMargin} getMonthlySalesData={getMonthlySalesData} getCurrentMonthSales={getCurrentMonthSales} getPendingCommissions={getPendingCommissions} getLowStockCount={getLowStockCount} getActiveClients={getActiveClients} />}
+          {currentUser.role === 'admin' && currentSection === 'inicio' && <InicioSection state={state} dispatch={dispatch} calculateMargin={calculateMargin} getMonthlySalesData={getMonthlySalesData} getCurrentMonthSales={getCurrentMonthSales} getPendingCommissions={getPendingCommissions} getActiveClients={getActiveClients} />}
           {currentUser.role === 'admin' && currentSection === 'ventas' && <VentasSection state={state} onAddSale={handleAddSale} onQuickAddClient={createClient} onQuickAddProduct={createProduct} showModal={showNewSaleModal} setShowModal={setShowNewSaleModal} />}
           {currentUser.role === 'admin' && currentSection === 'productos' && <ProductosSection state={state} onAddProduct={handleAddProduct} showModal={showNewProductModal} setShowModal={setShowNewProductModal} calculateMargin={calculateMargin} />}
           {currentUser.role === 'admin' && currentSection === 'clientes' && <ClientesSection state={state} onAddClient={handleAddClient} onUpdateClient={handleUpdateClient} showModal={showNewClientModal} setShowModal={setShowNewClientModal} />}
-          {currentUser.role === 'admin' && currentSection === 'stock' && <StockSection state={state} />}
           {currentUser.role === 'admin' && currentSection === 'comisiones' && <ComisionesSection state={state} dispatch={dispatch} getMentorStats={getMentorStats} filterMentor={filterMentor} setFilterMentor={setFilterMentor} />}
           {currentUser.role === 'admin' && currentSection === 'mentores' && <MentoresSection state={state} getMentorStats={getMentorStats} />}
 
@@ -493,7 +483,7 @@ function LoginScreen({ onLogin, darkMode, toggleDarkMode }) {
   );
 }
 
-function InicioSection({ state, dispatch, getCurrentMonthSales, getPendingCommissions, getLowStockCount, getActiveClients, getMonthlySalesData }) {
+function InicioSection({ state, dispatch, getCurrentMonthSales, getPendingCommissions, getActiveClients, getMonthlySalesData }) {
   const monthlySales = getMonthlySalesData();
   const currentMonthSales = getCurrentMonthSales();
   const pendingCommissions = getPendingCommissions();
@@ -884,7 +874,7 @@ function ProductosSection({ state, onAddProduct, showModal, setShowModal, calcul
   const [formData, setFormData] = useState({
     nombre: '', descripcion: '',
     costoContenido: '', costoEnvase: '', costoEtiqueta: '',
-    precioVenta: '', stock: '',
+    precioVenta: '',
   });
   const [expanded, setExpanded] = useState(() => new Set());
 
@@ -926,9 +916,8 @@ function ProductosSection({ state, onAddProduct, showModal, setShowModal, calcul
       costoEnvase: parseInt(formData.costoEnvase) || 0,
       costoEtiqueta: parseInt(formData.costoEtiqueta) || 0,
       precioVenta: parseInt(formData.precioVenta) || 0,
-      stock: parseInt(formData.stock) || 0,
     });
-    setFormData({ nombre: '', descripcion: '', costoContenido: '', costoEnvase: '', costoEtiqueta: '', precioVenta: '', stock: '' });
+    setFormData({ nombre: '', descripcion: '', costoContenido: '', costoEnvase: '', costoEtiqueta: '', precioVenta: '' });
   };
 
   return (
@@ -1337,46 +1326,6 @@ function ClientesSection({ state, onAddClient, onUpdateClient, showModal, setSho
             </tbody>
           </table>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function StockSection({ state }) {
-  const getStockStatus = (stock) => {
-    if (stock > 10) return { color: 'bg-green-100 dark:bg-green-900/30 border-green-300 dark:border-green-700', badge: 'bg-green-500', text: 'En Stock' };
-    if (stock >= 5) return { color: 'bg-yellow-100 dark:bg-yellow-900/30 border-yellow-300 dark:border-yellow-700', badge: 'bg-yellow-500', text: 'Stock Bajo' };
-    return { color: 'bg-red-100 dark:bg-red-900/30 border-red-300 dark:border-red-700', badge: 'bg-red-500', text: 'Crítico' };
-  };
-
-  return (
-    <div className="space-y-6">
-      <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Control de Stock</h2>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {state.products.map(product => {
-          const status = getStockStatus(product.stock);
-          return (
-            <div key={product.id} className={`border-2 rounded-xl p-6 ${status.color} hover:shadow-lg transition`}>
-              <div className="flex items-start justify-between mb-4">
-                <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">{product.nombre}</h3>
-                <span className={`${status.badge} text-white px-3 py-1 rounded-full text-xs font-semibold`}>
-                  {status.text}
-                </span>
-              </div>
-              <div className="text-center">
-                <p className="text-4xl font-bold text-gray-900 dark:text-gray-100">{product.stock}</p>
-                <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">unidades disponibles</p>
-              </div>
-              <div className="mt-4 w-full bg-gray-300 dark:bg-gray-600 rounded-full h-2 overflow-hidden">
-                <div
-                  className={`h-full transition-all ${status.badge}`}
-                  style={{ width: `${Math.min((product.stock / 20) * 100, 100)}%` }}
-                />
-              </div>
-            </div>
-          );
-        })}
       </div>
     </div>
   );

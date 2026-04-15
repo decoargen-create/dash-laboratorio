@@ -380,8 +380,43 @@ export function getOrderPayments(order, product, mentor) {
   };
 }
 
+// Clave única del state persistido. Si cambia la forma del state en el
+// futuro, bumpear el número acá invalida la cache y se recrea desde
+// INITIAL_STATE.
+const STATE_STORAGE_KEY = 'viora-state-v1';
+
+function loadPersistedState() {
+  if (typeof window === 'undefined') return INITIAL_STATE;
+  try {
+    const stored = localStorage.getItem(STATE_STORAGE_KEY);
+    if (!stored) return INITIAL_STATE;
+    const parsed = JSON.parse(stored);
+    // Validación mínima de forma — si falta algún array clave, arranca de cero.
+    if (!parsed || typeof parsed !== 'object') return INITIAL_STATE;
+    return {
+      products: Array.isArray(parsed.products) ? parsed.products : INITIAL_STATE.products,
+      clients: Array.isArray(parsed.clients) ? parsed.clients : INITIAL_STATE.clients,
+      mentors: Array.isArray(parsed.mentors) ? parsed.mentors : INITIAL_STATE.mentors,
+      sales: Array.isArray(parsed.sales) ? parsed.sales : INITIAL_STATE.sales,
+    };
+  } catch {
+    return INITIAL_STATE;
+  }
+}
+
 function AppShell({ onExit }) {
-  const [state, dispatch] = useReducer(appReducer, INITIAL_STATE);
+  const [state, dispatch] = useReducer(appReducer, undefined, loadPersistedState);
+
+  // Persistimos el state en localStorage cada vez que cambia. Si falla
+  // (quota llena, modo privado), silenciamos el error — no queremos
+  // que una falla de persistencia rompa la app.
+  useEffect(() => {
+    try {
+      localStorage.setItem(STATE_STORAGE_KEY, JSON.stringify(state));
+    } catch (err) {
+      console.warn('[persist] no pude guardar state', err);
+    }
+  }, [state]);
   const [currentUser, setCurrentUser] = useState(null);
   const [currentSection, setCurrentSection] = useState('inicio');
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -5346,6 +5381,19 @@ function UserMenu({ currentUser, sidebarOpen, state, onLogout }) {
             >
               <Edit2 size={12} />
               Cambiar mi nombre de display
+            </button>
+            <button
+              onClick={() => {
+                if (window.confirm('¿Borrar todos los datos cargados y volver al estado de demo? Esta acción no se puede deshacer.')) {
+                  try { localStorage.removeItem('viora-state-v1'); } catch {}
+                  window.location.reload();
+                }
+              }}
+              className="w-full mt-2 flex items-center gap-2 text-xs text-white/50 hover:text-red-300 transition"
+              title="Borra todas las órdenes, clientes, productos y pagos cargados"
+            >
+              <Trash2 size={12} />
+              Resetear datos a demo
             </button>
           </div>
 

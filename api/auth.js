@@ -144,9 +144,26 @@ export default async function handler(req, res) {
     }
     const users = parseUsers(process.env.AUTH_USERS);
     if (users.length === 0) {
-      return respondJSON(res, 500, {
-        error: 'AUTH_USERS no está configurada. Configurá los usuarios en las env vars.',
-      });
+      // Distintos mensajes para diagnosticar mejor en producción.
+      const raw = process.env.AUTH_USERS;
+      let detail;
+      if (raw == null || raw === '') {
+        detail = 'AUTH_USERS no está configurada en las env vars (redeployá después de agregarla).';
+      } else {
+        try {
+          const parsed = JSON.parse(raw);
+          if (!Array.isArray(parsed)) {
+            detail = 'AUTH_USERS existe pero no es un array JSON. Debe empezar con [ y terminar con ].';
+          } else if (parsed.length === 0) {
+            detail = 'AUTH_USERS es un array vacío. Agregá al menos un usuario.';
+          } else {
+            detail = `AUTH_USERS existe con ${parsed.length} entradas pero ninguna válida. Cada usuario necesita los campos "u" (username) y "h" (hash) como strings.`;
+          }
+        } catch (err) {
+          detail = `AUTH_USERS no es JSON válido: ${err.message}. Revisá que no tenga saltos de línea ni comillas extras.`;
+        }
+      }
+      return respondJSON(res, 500, { error: detail });
     }
     const user = users.find(u => u.u === username);
     // Siempre hacer el verify (aunque no exista el user) para evitar timing attacks

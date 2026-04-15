@@ -1912,7 +1912,7 @@ function OrdersList({ state, dispatch, orders }) {
       {layout === 'table' && (
       <div className="overflow-x-auto orders-table-scroll">
         <table className="w-full text-xs md:text-sm orders-compact-table">
-          <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700">
+          <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10">
             <tr className="text-left text-gray-700 dark:text-gray-200">
               <th className="px-2 py-3 w-8"></th>
               {isColVisible('fecha') && <th className="px-4 py-3 font-semibold" title="Fecha de creación de la orden">Fecha</th>}
@@ -2748,7 +2748,7 @@ function VentasSection({ state, onAddSale, onQuickAddClient, onQuickAddProduct, 
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700">
+            <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10">
               <tr>
                 <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Fecha</th>
                 <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Cliente</th>
@@ -3155,7 +3155,7 @@ function ProductosTableView({ products, sales, clients, calculateMargin, expande
     <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700">
+          <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10">
             <tr className="text-left text-gray-700 dark:text-gray-200">
               <th className="px-4 py-3 font-semibold">Nombre</th>
               <th className="px-4 py-3 font-semibold">Descripción</th>
@@ -3459,7 +3459,7 @@ function ClientesSection({ state, onAddClient, onUpdateClient, showModal, setSho
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700">
+            <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10">
               <tr>
                 <th className="px-2 py-3 w-8"></th>
                 <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Nombre</th>
@@ -4358,7 +4358,7 @@ function EquipoOrdenesView({ state, mentorId, compact = false }) {
       )}
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700">
+          <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10">
             <tr className="text-left text-gray-700 dark:text-gray-200">
               <th className="px-4 py-3 font-semibold">Fecha</th>
               <th className="px-4 py-3 font-semibold">Cliente</th>
@@ -4470,7 +4470,7 @@ function MentorResumenSection({ currentUser, state, getMentorStats }) {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="text-left text-gray-600 dark:text-gray-300 border-b border-gray-200 dark:border-gray-700">
+              <thead className="text-left text-gray-600 dark:text-gray-300 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10 bg-white dark:bg-gray-800">
                 <tr>
                   <th className="px-3 py-2 font-semibold">Fecha</th>
                   <th className="px-3 py-2 font-semibold text-right">Monto</th>
@@ -4529,7 +4529,7 @@ function MentorComisionesSection({ currentUser, state, filterMonth, setFilterMon
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700">
+            <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10">
               <tr>
                 <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Fecha</th>
                 <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Cliente</th>
@@ -4568,7 +4568,7 @@ function MentorClientesSection({ currentUser, state }) {
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700">
+            <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10">
               <tr>
                 <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Nombre</th>
                 <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Teléfono</th>
@@ -4730,7 +4730,7 @@ function ClientDetailPanel({ stats, products }) {
       ) : (
         <div className="overflow-x-auto bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
           <table className="w-full text-xs">
-            <thead className="bg-gray-50 dark:bg-gray-700/60">
+            <thead className="bg-gray-50 dark:bg-gray-700/60 sticky top-0 z-10">
               <tr className="text-left text-gray-600 dark:text-gray-300">
                 <th className="px-3 py-2 font-semibold">Fecha</th>
                 <th className="px-3 py-2 font-semibold">Producto</th>
@@ -5598,7 +5598,7 @@ function CobrosPanel({ order, summary, onChange }) {
 
       <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
         <table className="w-full text-xs">
-          <thead className="bg-gray-50 dark:bg-gray-700/60">
+          <thead className="bg-gray-50 dark:bg-gray-700/60 sticky top-0 z-10">
             <tr className="text-left text-gray-600 dark:text-gray-300">
               <th className="px-3 py-2 font-semibold w-32">Concepto</th>
               <th className="px-3 py-2 font-semibold text-right">Monto</th>

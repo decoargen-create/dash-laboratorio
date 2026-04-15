@@ -497,6 +497,28 @@ function AppShell({ onExit }) {
   const [cmdOpen, setCmdOpen] = useState(false);
   const [toasts, setToasts] = useState([]);
 
+  // Analytics IA: el state vive en el shell para que los reportes sigan
+  // corriendo aunque el usuario navegue a otra sección.
+  const [analyticsState, setAnalyticsState] = useState({
+    report: null, loading: false, error: '', lastFetch: 0,
+  });
+  const fetchAnalytics = async (snapshot) => {
+    setAnalyticsState(s => ({ ...s, loading: true, error: '' }));
+    try {
+      const res = await fetch('/api/analytics', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ snapshot }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      setAnalyticsState({ report: data, loading: false, error: '', lastFetch: Date.now() });
+      addToast({ type: 'success', message: 'Reporte de IA listo' });
+    } catch (err) {
+      setAnalyticsState(s => ({ ...s, loading: false, error: err.message || 'No pude generar el reporte.' }));
+    }
+  };
+
   const addToast = (toast) => {
     const id = Date.now() + Math.random();
     setToasts(prev => [...prev, { id, ...toast }]);
@@ -980,6 +1002,7 @@ function AppShell({ onExit }) {
           onOpenCommand={() => setCmdOpen(true)}
           onOpenMobileMenu={() => setMobileMenuOpen(true)}
           notificationsSnapshot={currentUser.role === 'admin' ? buildPanelChatContext(state, currentUser) : null}
+          bgTasks={analyticsState.loading ? ['Generando reporte IA…'] : []}
         />
 
         <div key={currentSection} className="p-4 md:p-8 animate-fade-in-up">
@@ -990,7 +1013,7 @@ function AppShell({ onExit }) {
           {currentUser.role === 'admin' && currentSection === 'clientes' && <ClientesSection state={state} onAddClient={handleAddClient} onUpdateClient={handleUpdateClient} showModal={showNewClientModal} setShowModal={setShowNewClientModal} />}
           {currentUser.role === 'admin' && currentSection === 'comisiones' && <ComisionesSection state={state} dispatch={dispatch} onUpdateMentor={handleUpdateMentor} getMentorStats={getMentorStats} filterMentor={filterMentor} setFilterMentor={setFilterMentor} />}
           {currentUser.role === 'admin' && currentSection === 'mentores' && <MentoresSection state={state} getMentorStats={getMentorStats} />}
-          {currentUser.role === 'admin' && currentSection === 'analytics' && <AnalyticsSection state={state} currentUser={currentUser} />}
+          {currentUser.role === 'admin' && currentSection === 'analytics' && <AnalyticsSection state={state} currentUser={currentUser} analyticsState={analyticsState} onFetch={fetchAnalytics} />}
           {currentUser.role === 'admin' && currentSection === 'datos' && <DatosSection state={state} dispatch={dispatch} addToast={addToast} />}
 
           {/* Mentor Views */}
@@ -4015,11 +4038,10 @@ function EntityDataCard({ entity, state, dispatch, addToast }) {
   );
 }
 
-function AnalyticsSection({ state, currentUser }) {
-  const [report, setReport] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [lastFetch, setLastFetch] = useState(0);
+function AnalyticsSection({ state, currentUser, analyticsState, onFetch }) {
+  // El estado vive en el AppShell para que el reporte siga generándose
+  // aunque el usuario navegue a otra sección.
+  const { report, loading, error, lastFetch } = analyticsState;
 
   // Snapshot enriquecido para analytics (incluye más histórico que el del chatbot)
   const snapshot = {
@@ -4050,24 +4072,7 @@ function AnalyticsSection({ state, currentUser }) {
     }),
   };
 
-  const fetchReport = async () => {
-    setLoading(true); setError('');
-    try {
-      const res = await fetch('/api/analytics', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ snapshot }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
-      setReport(data);
-      setLastFetch(Date.now());
-    } catch (err) {
-      setError(err.message || 'No pude generar el reporte.');
-    } finally {
-      setLoading(false);
-    }
-  };
+  const fetchReport = () => onFetch?.(snapshot);
 
   return (
     <div className="space-y-6">
@@ -6109,7 +6114,8 @@ function QuickProductModal({ onClose, onCreate }) {
 
 // Utility Components
 function Modal({ title, onClose, children }) {
-  // Cerrar con Escape
+  // Cerrar con Escape. Click afuera NO cierra — evita perder datos por un
+  // click accidental. Para cerrar hay que usar el botón X o apretar Esc.
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose?.(); };
     window.addEventListener('keydown', onKey);
@@ -6119,11 +6125,9 @@ function Modal({ title, onClose, children }) {
   return (
     <div
       className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fade-in"
-      onClick={onClose}
     >
       <div aria-hidden="true" className="absolute inset-0 bg-black/60 backdrop-blur-md" />
       <div
-        onClick={(e) => e.stopPropagation()}
         className="relative bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl p-5 sm:p-8 w-full max-w-md max-h-[90vh] overflow-y-auto border border-gray-100 dark:border-gray-700 animate-scale-in"
       >
         <div className="flex justify-between items-center mb-5 sm:mb-6">
@@ -6587,7 +6591,7 @@ function AlertItem({ alerta }) {
   );
 }
 
-function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, onOpenCommand, onOpenMobileMenu, notificationsSnapshot }) {
+function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, onOpenCommand, onOpenMobileMenu, notificationsSnapshot, bgTasks = [] }) {
   const [scrolled, setScrolled] = useState(false);
   const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform);
 
@@ -6644,6 +6648,15 @@ function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, onOpenCommand
         >
           <Search size={18} />
         </button>
+        {bgTasks.length > 0 && (
+          <div
+            className="hidden sm:inline-flex items-center gap-2 px-3 py-1.5 text-[11px] rounded-lg bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800/50 text-amber-800 dark:text-amber-200 animate-pulse"
+            title={bgTasks.join(', ')}
+          >
+            <Sparkles size={12} className="animate-spin" />
+            <span>{bgTasks[0]}{bgTasks.length > 1 ? ` +${bgTasks.length - 1}` : ''}</span>
+          </div>
+        )}
         {notificationsSnapshot && (
           <NotificationsBell snapshot={notificationsSnapshot} />
         )}

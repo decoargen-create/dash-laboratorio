@@ -14,6 +14,11 @@ import LandingPage from './LandingPage.jsx';
 import ChatbotWidget from './ChatbotWidget.jsx';
 import { generateCSV, downloadCSV, parseCSV, toNumber, toBool } from './csv.js';
 
+// Flag de build que habilita el "Acceso demo" (login sin email).
+// Default true en dev para no romper el flujo local; en producción hay que
+// setear VITE_ALLOW_DEMO=false en las env vars de Vercel para esconderlo.
+const ALLOW_DEMO = import.meta.env.VITE_ALLOW_DEMO !== 'false';
+
 // Estados del pipeline de producción de una orden
 export const ORDER_STATES = [
   'pendiente-cotizacion',
@@ -1117,14 +1122,16 @@ function LoginScreen({ onLogin, darkMode, toggleDarkMode }) {
               Ingresar con tu email
             </button>
             <p className="text-center text-[11px] text-gray-500 dark:text-gray-400">Te mandamos un link mágico al mail</p>
-            <div className="pt-3 border-t border-gray-100 dark:border-gray-700">
-              <button
-                onClick={() => setLoginMode('demo')}
-                className="w-full py-2 text-xs text-gray-600 dark:text-gray-400 hover:text-pink-700 dark:hover:text-pink-300 transition"
-              >
-                Acceso demo (sin email) →
-              </button>
-            </div>
+            {ALLOW_DEMO && (
+              <div className="pt-3 border-t border-gray-100 dark:border-gray-700">
+                <button
+                  onClick={() => setLoginMode('demo')}
+                  className="w-full py-2 text-xs text-gray-600 dark:text-gray-400 hover:text-pink-700 dark:hover:text-pink-300 transition"
+                >
+                  Acceso demo (sin email) →
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -1195,7 +1202,7 @@ function LoginScreen({ onLogin, darkMode, toggleDarkMode }) {
           </div>
         )}
 
-        {loginMode === 'demo' && (
+        {ALLOW_DEMO && loginMode === 'demo' && (
           <div className="space-y-3">
             <button
               onClick={() => { setSelectedRole('admin'); setLoginMode('admin-login'); }}
@@ -1218,7 +1225,7 @@ function LoginScreen({ onLogin, darkMode, toggleDarkMode }) {
           </div>
         )}
 
-        {loginMode === 'admin-login' && (
+        {ALLOW_DEMO && loginMode === 'admin-login' && (
           <div className="space-y-4">
             <input
               type="password"
@@ -1242,7 +1249,7 @@ function LoginScreen({ onLogin, darkMode, toggleDarkMode }) {
           </div>
         )}
 
-        {loginMode === 'mentor-select' && (
+        {ALLOW_DEMO && loginMode === 'mentor-select' && (
           <div className="space-y-4">
             <button
               onClick={() => onLogin('mentor', 'Sofia')}
@@ -1265,7 +1272,7 @@ function LoginScreen({ onLogin, darkMode, toggleDarkMode }) {
           </div>
         )}
 
-        {loginMode === 'admin-login' || loginMode === 'mentor-select' ? (
+        {ALLOW_DEMO && (loginMode === 'admin-login' || loginMode === 'mentor-select') ? (
           <div className="mt-8 p-4 bg-pink-50 dark:bg-pink-900/30 rounded-lg text-sm text-gray-700 dark:text-gray-300">
             <p className="font-semibold mb-2">Demo Credentials:</p>
             <p>Admin: password "admin"</p>

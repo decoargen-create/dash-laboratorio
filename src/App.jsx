@@ -62,8 +62,8 @@ const INITIAL_STATE = {
     { id: 8, nombre: 'Isabel Gómez', telefono: '11 3666-7788', domicilio: 'Cabildo 900, CABA', mentorId: 2, fechaAlta: '2024-02-28', totalCompras: 3, unidadesProducidas: 400 },
   ],
   mentors: [
-    { id: 1, nombre: 'Sofia', contacto: '11 9876-5432', fechaInicio: '2023-12-01', clientesAsignados: 4, porcentajeComision: 50 },
-    { id: 2, nombre: 'Mariano', contacto: '11 8765-4321', fechaInicio: '2023-12-15', clientesAsignados: 4, porcentajeComision: 50 },
+    { id: 1, nombre: 'Sofia', contacto: '11 9876-5432', fechaInicio: '2023-12-01', clientesAsignados: 4, porcentajeComision: 50, pagosRecibidos: [] },
+    { id: 2, nombre: 'Mariano', contacto: '11 8765-4321', fechaInicio: '2023-12-15', clientesAsignados: 4, porcentajeComision: 50, pagosRecibidos: [] },
   ],
   sales: [
     { id: 1, fecha: '2024-02-15', clienteId: 1, productoId: 1, cantidad: 100, montoTotal: 45000, mentorId: 1, estadoComision: 'pagada', estado: 'despachado', tieneIncidencia: false, incidenciaDetalle: '' },
@@ -244,6 +244,23 @@ export function getMentorCommission(order, product, mentor) {
 // Resumen de cobros de una orden (plata que entra del cliente).
 // Devuelve total, cobrado, saldo, cuotasPagadas y cuotasPlanificadas.
 // order.cobros es un array de { monto, fecha, nota }.
+// Balance global de un mentor: cuánto generó en comisiones (acumulado de
+// todas sus órdenes) vs cuánto ya se le pagó (suma de pagosRecibidos).
+// Devuelve también el saldo pendiente y el % cobrado.
+export function getMentorBalance(mentor, allSales, allProducts) {
+  if (!mentor) return { generado: 0, cobrado: 0, saldo: 0, porcentaje: 0, ordenes: 0 };
+  const misOrdenes = allSales.filter(o => o.mentorId === mentor.id);
+  const generado = misOrdenes.reduce((s, o) => {
+    const p = allProducts.find(pp => pp.id === o.productoId);
+    return s + getMentorCommission(o, p, mentor);
+  }, 0);
+  const pagos = Array.isArray(mentor.pagosRecibidos) ? mentor.pagosRecibidos : [];
+  const cobrado = pagos.reduce((s, p) => s + (parseFloat(p?.monto) || 0), 0);
+  const saldo = generado - cobrado;
+  const porcentaje = generado > 0 ? Math.round((cobrado / generado) * 100) : 0;
+  return { generado, cobrado, saldo, porcentaje, ordenes: misOrdenes.length, pagos };
+}
+
 export function getOrderCobrosSummary(order) {
   const total = order?.montoTotal || 0;
   const cobros = Array.isArray(order?.cobros) ? order.cobros : [];
@@ -2694,24 +2711,7 @@ function ClientesSection({ state, onAddClient, onUpdateClient, showModal, setSho
 }
 
 function ComisionesSection({ state, dispatch, onUpdateMentor, getMentorStats, filterMentor, setFilterMentor }) {
-  const [selectedMentors, setSelectedMentors] = useState([]);
-
-  const handlePayCommissions = () => {
-    const salesToPay = state.sales.filter(s => {
-      if (filterMentor && s.mentorId !== parseInt(filterMentor)) return false;
-      return s.estadoComision === 'pendiente' && (selectedMentors.length === 0 || selectedMentors.includes(s.mentorId));
-    });
-
-    if (salesToPay.length === 0) {
-      alert('No hay comisiones pendientes para liquidar');
-      return;
-    }
-
-    if (window.confirm(`¿Liquidar ${salesToPay.length} comisiones pendientes?`)) {
-      dispatch({ type: 'PAY_COMMISSIONS', payload: salesToPay.map(s => s.id) });
-      setSelectedMentors([]);
-    }
-  };
+  const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
 
   const handlePercentChange = (mentorId, value) => {
     const parsed = parseFloat(value);
@@ -2720,18 +2720,29 @@ function ComisionesSection({ state, dispatch, onUpdateMentor, getMentorStats, fi
     onUpdateMentor?.({ id: mentorId, porcentajeComision: clamped });
   };
 
+  // Manejo de pagos recibidos por mentor — reemplaza al flujo "Liquidar todo".
+  // Cada mentor tiene su propio array persistido en mentor.pagosRecibidos.
+  const updateMentorPagos = (mentorId, nuevosPagos) => {
+    onUpdateMentor?.({ id: mentorId, pagosRecibidos: nuevosPagos });
+  };
+
   const filteredMentors = state.mentors.filter(m => !filterMentor || m.id === parseInt(filterMentor));
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Gestión de Comisiones</h2>
-        <button
-          onClick={handlePayCommissions}
-          className="flex items-center gap-2 bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 transition font-semibold"
+      <div className="flex flex-wrap justify-between items-center gap-3">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Gestión de Comisiones</h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Cuánto genera cada mentor, cuánto se le pagó, cuánto le queda.</p>
+        </div>
+        <select
+          value={filterMentor}
+          onChange={(e) => setFilterMentor(e.target.value)}
+          className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
         >
-          <CreditCard size={20} /> Liquidar
-        </button>
+          <option value="">Todos los mentores</option>
+          {state.mentors.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
+        </select>
       </div>
 
       {/* Porcentaje de comisión por mentor (editable inline) */}
@@ -2775,79 +2786,163 @@ function ComisionesSection({ state, dispatch, onUpdateMentor, getMentorStats, fi
         </div>
       </div>
 
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
-        <label className="block text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3">Filtrar por Mentor</label>
-        <select
-          value={filterMentor}
-          onChange={(e) => setFilterMentor(e.target.value)}
-          className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-        >
-          <option value="">Todos</option>
-          {state.mentors.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
-        </select>
+      {/* Balance + historial de pagos por mentor */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        {filteredMentors.map(mentor => (
+          <MentorBalanceCard
+            key={mentor.id}
+            mentor={mentor}
+            balance={getMentorBalance(mentor, state.sales, state.products)}
+            onChangePagos={(next) => updateMentorPagos(mentor.id, next)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Card por mentor con balance en vivo + historial editable de pagos
+// recibidos. Reemplaza el antiguo flujo de "Liquidar" todas las comisiones
+// pendientes de una. Ahora la admin anota pagos parciales con fecha y nota.
+function MentorBalanceCard({ mentor, balance, onChangePagos }) {
+  const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
+  const pagos = Array.isArray(mentor.pagosRecibidos) ? mentor.pagosRecibidos : [];
+  const saldada = balance.saldo <= 0 && balance.generado > 0;
+
+  const updatePago = (index, patch) => {
+    const next = pagos.map((p, i) => (i === index ? { ...p, ...patch } : p));
+    onChangePagos(next);
+  };
+
+  const addPago = () => {
+    const monto = balance.saldo > 0 ? Math.round(balance.saldo) : 0;
+    onChangePagos([
+      ...pagos,
+      { monto, fecha: new Date().toISOString().split('T')[0], nota: '' },
+    ]);
+  };
+
+  const removePago = (index) => {
+    onChangePagos(pagos.filter((_, i) => i !== index));
+  };
+
+  const saldarTodo = () => {
+    if (balance.saldo <= 0) return;
+    onChangePagos([
+      ...pagos,
+      { monto: Math.round(balance.saldo), fecha: new Date().toISOString().split('T')[0], nota: 'Saldo total' },
+    ]);
+  };
+
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 space-y-4">
+      <div className="flex items-start gap-3">
+        <div className="w-12 h-12 rounded-full bg-gradient-to-br from-amber-200 to-amber-400 text-[#4a0f22] font-bold text-lg flex items-center justify-center shrink-0 shadow">
+          {(mentor.nombre || 'M').charAt(0).toUpperCase()}
+        </div>
+        <div className="flex-1 min-w-0">
+          <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100">{mentor.nombre}</h3>
+          <p className="text-xs text-gray-500 dark:text-gray-400">{balance.ordenes} {balance.ordenes === 1 ? 'orden referida' : 'órdenes referidas'} · comisión {mentor.porcentajeComision ?? 50}%</p>
+        </div>
+        {saldada && (
+          <span className="text-xs font-bold px-2 py-1 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">SALDADO ✓</span>
+        )}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {filteredMentors.map(mentor => {
-          const stats = getMentorStats(mentor.id);
-          return (
-            <div key={mentor.id} className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
-              <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-4">{mentor.nombre}</h3>
-              <div className="space-y-3 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-gray-600 dark:text-gray-400">Ventas Totales:</span>
-                  <span className="font-semibold text-gray-900 dark:text-gray-100">${stats.totalSales.toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600 dark:text-gray-400">Comisión Generada:</span>
-                  <span className="font-semibold text-gray-900 dark:text-gray-100">${stats.totalCommission.toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600 dark:text-gray-400">Comisión Pagada:</span>
-                  <span className="font-semibold text-green-600">${stats.paidCommission.toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between border-t border-gray-200 dark:border-gray-700 pt-3">
-                  <span className="text-gray-600 dark:text-gray-400 font-semibold">Comisión Pendiente:</span>
-                  <span className="font-bold text-amber-600">${stats.pendingCommission.toLocaleString()}</span>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
-        <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-4">Detalle de Ventas y Comisiones</h3>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700">
-              <tr>
-                <th className="px-4 py-2 text-left font-semibold text-gray-900 dark:text-gray-100">Fecha</th>
-                <th className="px-4 py-2 text-left font-semibold text-gray-900 dark:text-gray-100">Mentor</th>
-                <th className="px-4 py-2 text-left font-semibold text-gray-900 dark:text-gray-100">Monto Venta</th>
-                <th className="px-4 py-2 text-left font-semibold text-gray-900 dark:text-gray-100">Comisión (50%)</th>
-                <th className="px-4 py-2 text-left font-semibold text-gray-900 dark:text-gray-100">Estado</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-              {state.sales
-                .filter(s => !filterMentor || s.mentorId === parseInt(filterMentor))
-                .map(sale => {
-                  const mentor = state.mentors.find(m => m.id === sale.mentorId);
-                  return (
-                    <tr key={sale.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
-                      <td className="px-4 py-2 text-gray-900 dark:text-gray-100">{sale.fecha}</td>
-                      <td className="px-4 py-2 text-gray-900 dark:text-gray-100">{mentor?.nombre}</td>
-                      <td className="px-4 py-2 text-gray-900 dark:text-gray-100">${sale.montoTotal.toLocaleString()}</td>
-                      <td className="px-4 py-2 font-semibold text-gray-900 dark:text-gray-100">${(sale.montoTotal * 0.5).toLocaleString()}</td>
-                      <td className="px-4 py-2"><Badge text={sale.estadoComision} type={sale.estadoComision === 'pagada' ? 'success' : 'warning'} /></td>
-                    </tr>
-                  );
-                })}
-            </tbody>
-          </table>
+      {/* 3 cards de balance */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="bg-gray-50 dark:bg-gray-900/40 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
+          <p className="text-[10px] uppercase tracking-wider text-gray-500 dark:text-gray-400">Generado</p>
+          <p className="text-lg font-bold text-gray-900 dark:text-gray-100 tabular-nums">{fmtMoney(balance.generado)}</p>
+        </div>
+        <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-3 border border-emerald-200 dark:border-emerald-800">
+          <p className="text-[10px] uppercase tracking-wider text-emerald-700 dark:text-emerald-300">Pagado</p>
+          <p className="text-lg font-bold text-emerald-700 dark:text-emerald-300 tabular-nums">{fmtMoney(balance.cobrado)}</p>
+        </div>
+        <div className={`rounded-lg p-3 border ${saldada ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800' : 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800'}`}>
+          <p className={`text-[10px] uppercase tracking-wider ${saldada ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}`}>Le queda</p>
+          <p className={`text-lg font-bold tabular-nums ${saldada ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}`}>
+            {saldada ? '—' : fmtMoney(balance.saldo)}
+          </p>
         </div>
       </div>
+
+      {/* Progress */}
+      <div className="w-full h-2 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+        <div
+          className="h-full bg-gradient-to-r from-emerald-400 to-emerald-600 transition-all duration-500"
+          style={{ width: `${Math.min(100, balance.porcentaje)}%` }}
+        />
+      </div>
+      <p className="text-[11px] text-center text-gray-500 dark:text-gray-400">{balance.porcentaje}% pagado</p>
+
+      {/* Historial de pagos */}
+      <div className="bg-gray-50/60 dark:bg-gray-900/40 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+        <div className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+          <span>Historial de pagos {pagos.length > 0 && `(${pagos.length})`}</span>
+          {balance.saldo > 0 && pagos.length > 0 && (
+            <button
+              type="button"
+              onClick={saldarTodo}
+              className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-300 hover:underline normal-case tracking-normal"
+            >
+              Saldar total
+            </button>
+          )}
+        </div>
+        {pagos.length === 0 ? (
+          <p className="px-3 py-4 text-xs text-gray-500 dark:text-gray-400 italic text-center">Sin pagos registrados. Tocá "Registrar pago" para anotar el primero.</p>
+        ) : (
+          <div className="divide-y divide-gray-200 dark:divide-gray-700">
+            {pagos.map((pago, i) => (
+              <div key={i} className="px-3 py-2 flex items-center gap-2">
+                <div className="w-7 h-7 rounded-full bg-emerald-100 dark:bg-emerald-900/40 flex items-center justify-center shrink-0">
+                  <Check size={12} className="text-emerald-700 dark:text-emerald-300" />
+                </div>
+                <div className="relative w-28 shrink-0">
+                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">$</span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={pago.monto ?? ''}
+                    onChange={(e) => updatePago(i, { monto: parseFloat(e.target.value) || 0 })}
+                    className="w-full pl-5 pr-2 py-1 text-xs text-right border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500 tabular-nums"
+                  />
+                </div>
+                <input
+                  type="date"
+                  value={pago.fecha || ''}
+                  onChange={(e) => updatePago(i, { fecha: e.target.value })}
+                  className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                />
+                <input
+                  type="text"
+                  value={pago.nota || ''}
+                  onChange={(e) => updatePago(i, { nota: e.target.value })}
+                  placeholder="transfer, efectivo..."
+                  className="flex-1 min-w-0 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => removePago(i)}
+                  className="p-1 rounded text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 transition"
+                  title="Eliminar este pago"
+                >
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <button
+        type="button"
+        onClick={addPago}
+        className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-semibold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition shadow"
+      >
+        <Plus size={16} /> Registrar pago
+      </button>
     </div>
   );
 }
@@ -2899,26 +2994,81 @@ function MentoresSection({ state, getMentorStats }) {
 
 // Mentor Views
 function MentorResumenSection({ currentUser, state, getMentorStats }) {
-  const stats = getMentorStats(currentUser.id);
-  const totalGanado = stats.totalCommission;
-  const pendiente = stats.pendingCommission;
-  const pagado = stats.paidCommission;
-  const mesActualSales = state.sales
-    .filter(s => s.mentorId === currentUser.id && s.fecha.startsWith(new Date().toISOString().substring(0, 7)))
-    .reduce((sum, s) => sum + (s.montoTotal * 0.5), 0);
+  const mentor = state.mentors.find(m => m.id === currentUser.id);
+  // Balance en vivo calculado sobre TODAS las órdenes del mentor y sus
+  // pagos recibidos. Se actualiza al segundo cada vez que la admin agrega
+  // un pago desde la sección de Comisiones o una orden nueva.
+  const balance = mentor ? getMentorBalance(mentor, state.sales, state.products) : { generado: 0, cobrado: 0, saldo: 0, ordenes: 0, porcentaje: 0, pagos: [] };
+  const mesActual = state.sales
+    .filter(s => s.mentorId === currentUser.id && (s.fecha || '').startsWith(new Date().toISOString().substring(0, 7)))
+    .reduce((sum, s) => {
+      const p = state.products.find(pp => pp.id === s.productoId);
+      return sum + getMentorCommission(s, p, mentor);
+    }, 0);
+
+  const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
 
   return (
     <div className="space-y-8">
       <div className="text-center mb-8 p-6 bg-gradient-to-r from-pink-100 to-rose-100 dark:from-pink-900/40 dark:to-rose-900/40 rounded-xl">
-        <h2 className="text-3xl font-bold text-pink-900 dark:text-pink-200">Bienvenido, {currentUser.name}</h2>
-        <p className="text-gray-600 dark:text-gray-400 mt-2">Panel de mentores - Vista de lectura</p>
+        <h2 className="text-3xl font-bold text-pink-900 dark:text-pink-200">Hola, {currentUser.name}</h2>
+        <p className="text-gray-600 dark:text-gray-400 mt-2">Tu resumen de comisiones — actualizado en vivo.</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <StatCard icon={DollarSign} label="Ganado Total" value={`$${totalGanado.toLocaleString()}`} color="from-green-500 to-emerald-500" />
-        <StatCard icon={AlertCircle} label="Pendiente de Cobro" value={`$${pendiente.toLocaleString()}`} color="from-amber-500 to-orange-500" />
-        <StatCard icon={CreditCard} label="Pagado" value={`$${pagado.toLocaleString()}`} color="from-blue-500 to-cyan-500" />
-        <StatCard icon={TrendingUp} label="Mes Actual" value={`$${mesActualSales.toLocaleString()}`} color="from-purple-500 to-pink-500" />
+        <StatCard icon={DollarSign} label="Generado total" value={`$${balance.generado.toLocaleString()}`} color="from-emerald-500 to-teal-500" delay={0} />
+        <StatCard icon={CreditCard} label="Ya cobraste" value={`$${balance.cobrado.toLocaleString()}`} color="from-blue-500 to-cyan-500" delay={80} />
+        <StatCard icon={AlertCircle} label="Te queda cobrar" value={`$${Math.max(0, balance.saldo).toLocaleString()}`} color="from-amber-500 to-orange-500" delay={160} />
+        <StatCard icon={TrendingUp} label="Este mes" value={`$${mesActual.toLocaleString()}`} color="from-purple-500 to-pink-500" delay={240} />
+      </div>
+
+      {/* Progress bar */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Progreso de cobros</h3>
+          <span className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">{balance.porcentaje}% cobrado</span>
+        </div>
+        <div className="w-full h-3 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+          <div
+            className="h-full bg-gradient-to-r from-emerald-400 to-emerald-600 transition-all duration-500"
+            style={{ width: `${Math.min(100, balance.porcentaje)}%` }}
+          />
+        </div>
+        <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+          {balance.ordenes} {balance.ordenes === 1 ? 'orden referida' : 'órdenes referidas'} · porcentaje de comisión: {mentor?.porcentajeComision ?? 50}% del profit
+        </p>
+      </div>
+
+      {/* Historial de pagos recibidos (read-only para el mentor) */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
+        <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-4">Historial de pagos recibidos</h3>
+        {balance.pagos.length === 0 ? (
+          <p className="text-sm text-gray-500 dark:text-gray-400 italic text-center py-6">Todavía no tenés pagos registrados. Consultá con la admin.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-left text-gray-600 dark:text-gray-300 border-b border-gray-200 dark:border-gray-700">
+                <tr>
+                  <th className="px-3 py-2 font-semibold">Fecha</th>
+                  <th className="px-3 py-2 font-semibold text-right">Monto</th>
+                  <th className="px-3 py-2 font-semibold">Nota</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                {balance.pagos
+                  .slice()
+                  .sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''))
+                  .map((p, i) => (
+                    <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                      <td className="px-3 py-2 text-gray-900 dark:text-gray-100 whitespace-nowrap">{p.fecha || '—'}</td>
+                      <td className="px-3 py-2 text-right font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums">{fmtMoney(p.monto)}</td>
+                      <td className="px-3 py-2 text-gray-700 dark:text-gray-300">{p.nota || <span className="italic text-gray-400 dark:text-gray-500">—</span>}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

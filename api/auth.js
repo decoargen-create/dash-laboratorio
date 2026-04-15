@@ -179,6 +179,27 @@ export default async function handler(req, res) {
     if (!payload || payload.purpose !== 'session') {
       return respondJSON(res, 401, { error: 'Sesión inválida o expirada' });
     }
+    // Doble check: además de validar la firma, para sessions de user+pass
+    // verificamos que el username siga existiendo en AUTH_USERS. Así si el
+    // admin borra un user, su sesión se invalida automáticamente sin tener
+    // que rotar AUTH_SECRET (que reventaría a todos los usuarios activos).
+    if (payload.username) {
+      const users = parseUsers(process.env.AUTH_USERS);
+      const stillExists = users.some(u => u.u === payload.username);
+      if (!stillExists) {
+        return respondJSON(res, 401, { error: 'Usuario ya no está habilitado' });
+      }
+    }
+    // Para sessions de magic link (usan email y no username), chequeamos que
+    // el email siga en AUTH_ALLOWED_EMAILS. Si la whitelist está vacía
+    // (típico cuando se pasó 100% al sistema user+pass), la sesión vieja
+    // se invalida para forzar re-login con el nuevo flujo.
+    if (payload.email && !payload.username) {
+      const allowed = parseList(process.env.AUTH_ALLOWED_EMAILS);
+      if (allowed.length === 0 || !allowed.includes(payload.email.toLowerCase())) {
+        return respondJSON(res, 401, { error: 'Email ya no está autorizado' });
+      }
+    }
     return respondJSON(res, 200, {
       ok: true,
       user: {

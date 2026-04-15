@@ -98,6 +98,14 @@ function appReducer(state, action) {
         ...state,
         mentors: state.mentors.map(m => m.id === action.payload.id ? { ...m, ...action.payload } : m)
       };
+    case 'UPDATE_PRODUCT': {
+      // payload: { id, patch: {...} }
+      const { id, patch } = action.payload;
+      return {
+        ...state,
+        products: state.products.map(p => p.id === id ? { ...p, ...patch } : p)
+      };
+    }
     case 'ADD_PRODUCT':
       return { ...state, products: [...state.products, action.payload] };
     case 'PAY_COMMISSIONS':
@@ -161,16 +169,30 @@ export function getOrderEffectiveUnit(order, product) {
     ? (order.montoTotal / cantidad)
     : (product?.precioVenta || 0);
   return {
-    costoContenido: ov.contenido != null ? ov.contenido : (product?.costoContenido || 0),
+    // Si la orden pisó el costo de contenido (override por orden), ese gana.
+    // Si no, usamos el costo calculado por la fórmula del producto
+    // (que cae a costoContenido plano si no hay fórmula).
+    costoContenido: ov.contenido != null ? ov.contenido : getContenidoUnitCost(product),
     costoEnvase:    ov.envase    != null ? ov.envase    : (product?.costoEnvase    || 0),
     costoEtiqueta:  ov.etiqueta  != null ? ov.etiqueta  : (product?.costoEtiqueta  || 0),
     precioVenta:    precioVentaUnit,
   };
 }
 
+// Costo unitario del contenido. Si el producto tiene fórmula (lista de
+// ingredientes con { nombre, costo }), se usa la suma de esos costos.
+// Si no hay fórmula, cae al campo plano costoContenido.
+export function getContenidoUnitCost(product) {
+  if (!product) return 0;
+  if (Array.isArray(product.formula) && product.formula.length > 0) {
+    return product.formula.reduce((s, i) => s + (parseFloat(i?.costo) || 0), 0);
+  }
+  return product.costoContenido || 0;
+}
+
 export function getProductUnitCost(product) {
   if (!product) return 0;
-  return (product.costoContenido || 0) + (product.costoEnvase || 0) + (product.costoEtiqueta || 0);
+  return getContenidoUnitCost(product) + (product.costoEnvase || 0) + (product.costoEtiqueta || 0);
 }
 
 export function getOrderCosts(order, product) {
@@ -1066,20 +1088,22 @@ function OrdersList({ state, dispatch, orders }) {
               <th className="px-4 py-3 font-semibold">Fecha</th>
               <th className="px-4 py-3 font-semibold">Cliente</th>
               <th className="px-4 py-3 font-semibold">Producto</th>
+              <th className="px-4 py-3 font-semibold">Mentor</th>
               <th className="px-4 py-3 font-semibold text-right">Cant.</th>
-              <th className="px-4 py-3 font-semibold text-right">Contenido</th>
+              <th className="px-4 py-3 font-semibold text-right">Fórmula</th>
               <th className="px-4 py-3 font-semibold text-right">Envase</th>
               <th className="px-4 py-3 font-semibold text-right">Etiqueta</th>
               <th className="px-4 py-3 font-semibold text-right">Precio venta</th>
               <th className="px-4 py-3 font-semibold text-right">Com. Mentor</th>
               <th className="px-4 py-3 font-semibold text-right">Profit</th>
               <th className="px-4 py-3 font-semibold">Estado</th>
+              <th className="px-4 py-3 font-semibold text-center">Cobro</th>
               <th className="px-4 py-3 font-semibold">Incidencia</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
             {ordersToRender.length === 0 && (
-              <tr><td colSpan={13} className="px-4 py-10 text-center text-gray-500 dark:text-gray-400">No hay órdenes que coincidan con los filtros.</td></tr>
+              <tr><td colSpan={15} className="px-4 py-10 text-center text-gray-500 dark:text-gray-400">No hay órdenes que coincidan con los filtros.</td></tr>
             )}
             {ordersToRender.map(order => {
               const product = getProduct(order.productoId);
@@ -1098,6 +1122,8 @@ function OrdersList({ state, dispatch, orders }) {
               const isOpen = expanded.has(order.id);
               const payments = isOpen ? getOrderPayments(order, product, mentor) : null;
               const cobrosSummary = isOpen ? getOrderCobrosSummary(order) : null;
+              // Resumen siempre para mostrar la celda compacta de Cobro
+              const cobrosQuick = getOrderCobrosSummary(order);
               return (
                 <React.Fragment key={order.id}>
                 <tr className={`transition ${order.tieneIncidencia ? 'bg-red-50/40 dark:bg-red-900/10' : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}>
@@ -1114,6 +1140,18 @@ function OrdersList({ state, dispatch, orders }) {
                   <td className="px-4 py-3 text-gray-900 dark:text-gray-100 whitespace-nowrap">{order.fecha}</td>
                   <td className="px-4 py-3 text-gray-900 dark:text-gray-100">{getClientName(order.clienteId)}</td>
                   <td className="px-4 py-3 text-gray-900 dark:text-gray-100">{product?.nombre || '-'}</td>
+                  <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
+                    {hasMentor ? (
+                      <div className="inline-flex items-center gap-1.5">
+                        <span className="w-6 h-6 rounded-full bg-gradient-to-br from-amber-200 to-amber-400 text-[#4a0f22] font-bold text-[10px] flex items-center justify-center">
+                          {(mentor?.nombre || 'M').charAt(0).toUpperCase()}
+                        </span>
+                        <span className="text-sm">{mentor?.nombre}</span>
+                      </div>
+                    ) : (
+                      <span className="text-gray-400 dark:text-gray-500 text-xs">—</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-right text-gray-900 dark:text-gray-100">
                     <EditableCell
                       value={order.cantidad}
@@ -1123,10 +1161,13 @@ function OrdersList({ state, dispatch, orders }) {
                     />
                   </td>
                   <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300">
-                    <EditableCell
-                      value={isTotal ? costs.contenidoTotal : costs.contenidoUnit}
-                      onSave={(v) => handleCostEdit(order, 'contenido', v, isTotal)}
-                      prefix="$"
+                    <FormulaCell
+                      product={product}
+                      displayValue={isTotal ? costs.contenidoTotal : costs.contenidoUnit}
+                      isTotal={isTotal}
+                      cantidad={order.cantidad || 1}
+                      onUpdateProduct={(patch) => dispatch({ type: 'UPDATE_PRODUCT', payload: { id: product?.id, patch } })}
+                      onOverrideTotal={(v) => handleCostEdit(order, 'contenido', v, isTotal)}
                     />
                   </td>
                   <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300">
@@ -1165,6 +1206,12 @@ function OrdersList({ state, dispatch, orders }) {
                       ))}
                     </select>
                   </td>
+                  <td className="px-4 py-3">
+                    <CobroMiniCell
+                      summary={cobrosQuick}
+                      onClick={() => toggleExpand(order.id)}
+                    />
+                  </td>
                   <td className="px-4 py-3 min-w-[220px]">
                     <div className="flex items-start gap-2">
                       <input
@@ -1186,7 +1233,7 @@ function OrdersList({ state, dispatch, orders }) {
                 </tr>
                 {isOpen && payments && cobrosSummary && (
                   <tr className="bg-gray-50 dark:bg-gray-900/40">
-                    <td colSpan={13} className="px-6 py-4 space-y-6">
+                    <td colSpan={15} className="px-6 py-4 space-y-6">
                       <CobrosPanel
                         order={order}
                         summary={cobrosSummary}
@@ -2372,6 +2419,176 @@ function ClientDetailPanel({ stats, products }) {
 //   prefix, suffix: texto decorativo (ej. '$')
 //   align: 'left' | 'right'
 //   disabled: si true, no edita
+// Celda para el costo de Contenido (la "fórmula") con un popover de ingredientes.
+// Muestra el monto como texto + un ícono (+/lupa) que al click abre un popover
+// donde se pueden agregar/editar/eliminar ingredientes con su costo unitario.
+// Si el producto no tiene formula[], muestra costoContenido plano y permite
+// empezar a armar la fórmula desde ahí.
+function FormulaCell({ product, displayValue, isTotal, cantidad, onUpdateProduct, onOverrideTotal }) {
+  const [open, setOpen] = useState(false);
+  const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
+  const hasFormula = Array.isArray(product?.formula) && product.formula.length > 0;
+
+  // Cerrar al click fuera
+  const popoverRef = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target)) setOpen(false);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDocClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const formula = product?.formula || [];
+  const unitSum = formula.reduce((s, i) => s + (parseFloat(i?.costo) || 0), 0);
+
+  const updateFormula = (nextFormula) => {
+    onUpdateProduct?.({ formula: nextFormula });
+  };
+
+  const updateItem = (idx, patch) => {
+    const next = formula.map((it, i) => (i === idx ? { ...it, ...patch } : it));
+    updateFormula(next);
+  };
+  const addItem = () => {
+    updateFormula([...formula, { nombre: '', costo: 0 }]);
+  };
+  const removeItem = (idx) => {
+    updateFormula(formula.filter((_, i) => i !== idx));
+  };
+
+  return (
+    <div className="relative inline-block">
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        className={`group inline-flex items-center gap-1 px-2 py-0.5 rounded hover:bg-pink-50 dark:hover:bg-pink-900/20 transition ${hasFormula ? 'text-gray-900 dark:text-gray-100 font-medium' : 'text-gray-700 dark:text-gray-300'}`}
+        title={hasFormula ? 'Ver / editar fórmula' : 'Armar fórmula'}
+      >
+        <span>{fmtMoney(displayValue)}</span>
+        <ChevronDown size={12} className={`transition-transform text-gray-400 dark:text-gray-500 ${open ? 'rotate-180 text-pink-600 dark:text-pink-400' : 'group-hover:text-pink-600 dark:group-hover:text-pink-400'}`} />
+        {hasFormula && (
+          <span className="text-[9px] font-bold px-1 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300">
+            {formula.length}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div
+          ref={popoverRef}
+          className="absolute right-0 mt-1 z-40 w-80 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 p-3 animate-scale-in"
+          style={{ transformOrigin: 'top right' }}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <div>
+              <p className="text-xs font-bold text-gray-900 dark:text-gray-100">Fórmula de {product?.nombre || 'producto'}</p>
+              <p className="text-[10px] text-gray-500 dark:text-gray-400">Costo unitario: <span className="font-semibold text-gray-700 dark:text-gray-200">{fmtMoney(unitSum)}</span></p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400"
+              aria-label="Cerrar"
+            >
+              <X size={14} />
+            </button>
+          </div>
+
+          <div className="max-h-[40vh] overflow-y-auto space-y-1.5 py-1">
+            {formula.length === 0 && !hasFormula && (
+              <p className="text-[11px] text-gray-500 dark:text-gray-400 italic text-center py-3">
+                Sin fórmula cargada. Agregá ingredientes para armar el costo de contenido.
+              </p>
+            )}
+            {formula.map((it, idx) => (
+              <div key={idx} className="flex items-center gap-1.5">
+                <input
+                  type="text"
+                  value={it.nombre || ''}
+                  onChange={(e) => updateItem(idx, { nombre: e.target.value })}
+                  placeholder="Ingrediente"
+                  className="flex-1 min-w-0 px-2 py-1 text-xs border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-pink-500"
+                />
+                <div className="relative shrink-0">
+                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">$</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={it.costo ?? 0}
+                    onChange={(e) => updateItem(idx, { costo: parseFloat(e.target.value) || 0 })}
+                    className="w-24 pl-5 pr-1.5 py-1 text-xs text-right border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-pink-500 tabular-nums"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeItem(idx)}
+                  className="p-1 rounded text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 shrink-0"
+                  title="Eliminar ingrediente"
+                >
+                  <Trash2 size={11} />
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <div className="pt-2 mt-2 border-t border-gray-100 dark:border-gray-700 flex items-center justify-between">
+            <button
+              type="button"
+              onClick={addItem}
+              className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold rounded-md text-pink-700 dark:text-pink-300 hover:bg-pink-50 dark:hover:bg-pink-900/20"
+            >
+              <Plus size={12} /> Ingrediente
+            </button>
+            <div className="text-[10px] text-right">
+              <div className="text-gray-500 dark:text-gray-400">Total {isTotal ? `(×${cantidad})` : 'unitario'}:</div>
+              <div className="font-bold text-gray-900 dark:text-gray-100">{fmtMoney(isTotal ? unitSum * cantidad : unitSum)}</div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Celda compacta que muestra el estado de cobro de la orden (total/cobrado/saldo)
+// con una mini-barra de progreso. Click expande la orden para editar cobros.
+function CobroMiniCell({ summary, onClick }) {
+  if (!summary) return null;
+  const { total, cobrado, saldo, porcentaje } = summary;
+  const saldada = saldo <= 0 && total > 0;
+  const labelColor = saldada
+    ? 'text-emerald-600 dark:text-emerald-400'
+    : cobrado > 0
+      ? 'text-amber-600 dark:text-amber-400'
+      : 'text-gray-500 dark:text-gray-500';
+  const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="group w-full flex flex-col items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700/50 transition"
+      title={`Cobrado: ${fmtMoney(cobrado)} / Total: ${fmtMoney(total)}`}
+    >
+      <div className={`text-[11px] font-bold tabular-nums ${labelColor}`}>
+        {saldada ? 'Saldada' : (cobrado > 0 ? `${porcentaje}%` : 'Pendiente')}
+      </div>
+      <div className="w-full h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+        <div
+          className={`h-full transition-all duration-500 ${saldada ? 'bg-emerald-500' : 'bg-gradient-to-r from-amber-400 to-emerald-500'}`}
+          style={{ width: `${Math.min(100, porcentaje)}%` }}
+        />
+      </div>
+    </button>
+  );
+}
+
 function EditableCell({ value, onSave, className = '', prefix = '', suffix = '', align = 'right', disabled = false, placeholder = '—', title = 'Doble click para editar' }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');

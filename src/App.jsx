@@ -2701,6 +2701,38 @@ function CobrosPanel({ order, summary, onChange }) {
   const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
   const cobros = summary.cobros;
   const { total, cobrado, saldo, porcentaje, cuotasPlanificadas, cuotasPagadas } = summary;
+  // Vista detalle: por defecto colapsado para que el panel se sienta simple.
+  // Sólo se expande si el usuario lo pide explícitamente.
+  const [showDetalle, setShowDetalle] = useState(false);
+
+  // Atajo rápido: si el usuario cambia directo el total cobrado, consolidamos
+  // el cambio en el primer cobro (ajustamos el monto) o agregamos uno si no
+  // había ninguno. Sirve para el 90% de los casos donde el cliente abonó una
+  // seña y el resto después.
+  const setCobradoTotalQuick = (nuevoCobrado) => {
+    const clean = Math.max(0, parseFloat(nuevoCobrado) || 0);
+    // Si no hay cobros → creamos uno con ese monto
+    if (!cobros || cobros.length === 0) {
+      onChange({ cobros: [{
+        concepto: clean >= total ? 'Pago único' : 'Seña',
+        monto: clean,
+        fecha: new Date().toISOString().split('T')[0],
+        nota: '',
+      }] });
+      return;
+    }
+    // Si hay 1 solo cobro → actualizamos su monto
+    if (cobros.length === 1) {
+      onChange({ cobros: [{ ...cobros[0], monto: clean }] });
+      return;
+    }
+    // Si hay varios → ajustamos el último para que la suma cierre
+    const sinUltimo = cobros.slice(0, -1).reduce((s, c) => s + (parseFloat(c.monto) || 0), 0);
+    const diffUltimo = Math.max(0, clean - sinUltimo);
+    const next = [...cobros];
+    next[next.length - 1] = { ...next[next.length - 1], monto: diffUltimo };
+    onChange({ cobros: next });
+  };
 
   // Sugiere un concepto inteligente según la posición y el plan pactado.
   // - 1 solo pago acordado → "Pago único"
@@ -2763,44 +2795,35 @@ function CobrosPanel({ order, summary, onChange }) {
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap gap-2 items-center justify-between">
-        <div>
-          <h4 className="text-sm font-bold text-gray-900 dark:text-gray-100">Cobros del cliente</h4>
-          <p className="text-xs text-gray-500 dark:text-gray-400">Seña, adelantos y saldo que entran del cliente por esta orden.</p>
-        </div>
-        <div className="flex items-center gap-2 text-xs">
-          <label className="text-gray-500 dark:text-gray-400">Pagos acordados:</label>
-          <input
-            type="number"
-            min="0"
-            value={cuotasPlanificadas || ''}
-            onChange={(e) => setPlan(e.target.value)}
-            placeholder="0"
-            className="w-16 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-pink-500"
-            title="Cuántos pagos acordaste con el cliente (ej. 2 = seña + saldo). 0 = sin plan definido."
-          />
-          <span className="text-gray-500 dark:text-gray-400">{cuotasPlanificadas > 0 ? (cuotasPlanificadas === 1 ? 'pago' : 'pagos') : 'sin plan'}</span>
-        </div>
+      <div>
+        <h4 className="text-sm font-bold text-gray-900 dark:text-gray-100">Cobros del cliente</h4>
+        <p className="text-xs text-gray-500 dark:text-gray-400">Cuánto abonó y cuánto falta.</p>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      {/* Vista simple: 3 números grandes (Total / Cobrado editable / Falta abonar) */}
+      <div className="grid grid-cols-3 gap-3">
         <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
-          <p className="text-[10px] uppercase text-gray-500 dark:text-gray-400">Total venta</p>
-          <p className="font-bold text-gray-900 dark:text-gray-100">{fmtMoney(total)}</p>
+          <p className="text-[10px] uppercase tracking-wider text-gray-500 dark:text-gray-400">Total venta</p>
+          <p className="text-lg font-bold text-gray-900 dark:text-gray-100 tabular-nums">{fmtMoney(total)}</p>
         </div>
         <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-3 border border-emerald-200 dark:border-emerald-800">
-          <p className="text-[10px] uppercase text-emerald-700 dark:text-emerald-300">Cobrado</p>
-          <p className="font-bold text-emerald-700 dark:text-emerald-300">{fmtMoney(cobrado)}</p>
+          <p className="text-[10px] uppercase tracking-wider text-emerald-700 dark:text-emerald-300">Cobrado</p>
+          <div className="flex items-baseline gap-0.5">
+            <span className="text-lg font-bold text-emerald-700 dark:text-emerald-300">$</span>
+            <input
+              type="number"
+              min="0"
+              value={cobrado || ''}
+              onChange={(e) => setCobradoTotalQuick(e.target.value)}
+              placeholder="0"
+              className="flex-1 min-w-0 bg-transparent text-lg font-bold text-emerald-700 dark:text-emerald-300 tabular-nums focus:outline-none focus:ring-1 focus:ring-emerald-500 rounded px-0.5"
+              title="Cuánto te abonó el cliente en total hasta ahora"
+            />
+          </div>
         </div>
         <div className={`rounded-lg p-3 border ${saldada ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800' : 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800'}`}>
-          <p className={`text-[10px] uppercase ${saldada ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}`}>Saldo</p>
-          <p className={`font-bold ${saldada ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}`}>{saldada ? 'Saldada' : fmtMoney(saldo)}</p>
-        </div>
-        <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
-          <p className="text-[10px] uppercase text-gray-500 dark:text-gray-400">Pagos</p>
-          <p className="font-bold text-gray-900 dark:text-gray-100">
-            {cuotasPagadas}{cuotasPlanificadas > 0 ? ` / ${cuotasPlanificadas}` : ''}
-          </p>
+          <p className={`text-[10px] uppercase tracking-wider ${saldada ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}`}>Falta abonar</p>
+          <p className={`text-lg font-bold tabular-nums ${saldada ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}`}>{saldada ? 'Saldada ✓' : fmtMoney(saldo)}</p>
         </div>
       </div>
 
@@ -2810,6 +2833,32 @@ function CobrosPanel({ order, summary, onChange }) {
           className="h-full bg-gradient-to-r from-emerald-400 to-emerald-600 transition-all"
           style={{ width: `${Math.min(100, porcentaje)}%` }}
         />
+      </div>
+
+      {/* Toggle para ver el detalle de pagos (seña + adelantos + saldo discriminados) */}
+      <button
+        type="button"
+        onClick={() => setShowDetalle(v => !v)}
+        className="inline-flex items-center gap-1 text-[11px] font-semibold text-gray-500 dark:text-gray-400 hover:text-emerald-700 dark:hover:text-emerald-300 transition"
+      >
+        {showDetalle ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        {showDetalle ? 'Ocultar detalle' : `Ver detalle de pagos${cobros.length > 0 ? ` (${cobros.length})` : ''}`}
+      </button>
+
+      {!showDetalle ? null : (
+      <>
+      <div className="flex items-center gap-2 text-xs pt-2">
+        <label className="text-gray-500 dark:text-gray-400">Pagos acordados:</label>
+        <input
+          type="number"
+          min="0"
+          value={cuotasPlanificadas || ''}
+          onChange={(e) => setPlan(e.target.value)}
+          placeholder="0"
+          className="w-16 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-pink-500"
+          title="Cuántos pagos acordaste con el cliente (ej. 2 = seña + saldo). 0 = sin plan definido."
+        />
+        <span className="text-gray-500 dark:text-gray-400">{cuotasPlanificadas > 0 ? (cuotasPlanificadas === 1 ? 'pago' : 'pagos') : 'sin plan'}</span>
       </div>
 
       <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
@@ -2889,6 +2938,8 @@ function CobrosPanel({ order, summary, onChange }) {
       >
         <Plus size={14} /> Registrar cobro
       </button>
+      </>
+      )}
     </div>
   );
 }

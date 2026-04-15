@@ -2730,13 +2730,32 @@ function CobrosPanel({ order, summary, onChange }) {
   const cobros = summary.cobros;
   const { total, cobrado, saldo, porcentaje, cuotasPlanificadas, cuotasPagadas } = summary;
 
+  // Sugiere un concepto inteligente según la posición y el plan pactado.
+  // - 1 solo pago acordado → "Pago único"
+  // - Primer pago → "Seña"
+  // - Último pago del plan → "Saldo"
+  // - Los del medio → "Adelanto N"
+  // - Si no hay plan, se deja en blanco y el usuario escribe lo que quiera.
+  const sugerirConcepto = (index, totalPagosPrevios) => {
+    const pos = index + 1; // 1-indexed
+    if (cuotasPlanificadas === 1) return 'Pago único';
+    if (cuotasPlanificadas > 1) {
+      if (pos === 1) return 'Seña';
+      if (pos === cuotasPlanificadas) return 'Saldo';
+      return `Adelanto ${pos - 1}`;
+    }
+    // Sin plan: seña para el primero, saldo si coincide que salda todo
+    if (totalPagosPrevios === 0) return 'Seña';
+    return '';
+  };
+
   const updateCobro = (index, patch) => {
     const next = cobros.map((c, i) => (i === index ? { ...c, ...patch } : c));
     onChange({ cobros: next });
   };
 
   const addCobro = () => {
-    // Sugerimos como monto: saldo / (cuotas planificadas - pagadas) si hay plan,
+    // Sugerimos como monto: saldo / (pagos planificados - pagados) si hay plan,
     // o el saldo completo si no.
     let sugerido = saldo;
     if (cuotasPlanificadas > 0) {
@@ -2744,6 +2763,7 @@ function CobrosPanel({ order, summary, onChange }) {
       sugerido = saldo / faltan;
     }
     const nuevo = {
+      concepto: sugerirConcepto(cobros.length, cobros.length),
       monto: sugerido > 0 ? Math.round(sugerido) : 0,
       fecha: new Date().toISOString().split('T')[0],
       nota: '',
@@ -2762,15 +2782,22 @@ function CobrosPanel({ order, summary, onChange }) {
 
   const saldada = saldo <= 0 && total > 0;
 
+  // Para cada cobro calculamos el concepto efectivo: si el usuario lo escribió
+  // en concepto, usa eso; si no, cae al sugerido por posición.
+  const displayConcepto = (cobro, i) => {
+    if (cobro.concepto && cobro.concepto.trim()) return cobro.concepto;
+    return sugerirConcepto(i, i);
+  };
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap gap-2 items-center justify-between">
         <div>
           <h4 className="text-sm font-bold text-gray-900 dark:text-gray-100">Cobros del cliente</h4>
-          <p className="text-xs text-gray-500 dark:text-gray-400">Plata que entra del cliente por esta orden.</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Seña, adelantos y saldo que entran del cliente por esta orden.</p>
         </div>
         <div className="flex items-center gap-2 text-xs">
-          <label className="text-gray-500 dark:text-gray-400">Plan:</label>
+          <label className="text-gray-500 dark:text-gray-400">Pagos acordados:</label>
           <input
             type="number"
             min="0"
@@ -2778,9 +2805,9 @@ function CobrosPanel({ order, summary, onChange }) {
             onChange={(e) => setPlan(e.target.value)}
             placeholder="0"
             className="w-16 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-pink-500"
-            title="Cuántas cuotas acordaste con el cliente (0 = sin plan)"
+            title="Cuántos pagos acordaste con el cliente (ej. 2 = seña + saldo). 0 = sin plan definido."
           />
-          <span className="text-gray-500 dark:text-gray-400">{cuotasPlanificadas > 0 ? `cuotas` : 'sin plan'}</span>
+          <span className="text-gray-500 dark:text-gray-400">{cuotasPlanificadas > 0 ? (cuotasPlanificadas === 1 ? 'pago' : 'pagos') : 'sin plan'}</span>
         </div>
       </div>
 
@@ -2798,7 +2825,7 @@ function CobrosPanel({ order, summary, onChange }) {
           <p className={`font-bold ${saldada ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}`}>{saldada ? 'Saldada' : fmtMoney(saldo)}</p>
         </div>
         <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
-          <p className="text-[10px] uppercase text-gray-500 dark:text-gray-400">Cuotas</p>
+          <p className="text-[10px] uppercase text-gray-500 dark:text-gray-400">Pagos</p>
           <p className="font-bold text-gray-900 dark:text-gray-100">
             {cuotasPagadas}{cuotasPlanificadas > 0 ? ` / ${cuotasPlanificadas}` : ''}
           </p>
@@ -2817,7 +2844,7 @@ function CobrosPanel({ order, summary, onChange }) {
         <table className="w-full text-xs">
           <thead className="bg-gray-50 dark:bg-gray-700/60">
             <tr className="text-left text-gray-600 dark:text-gray-300">
-              <th className="px-3 py-2 font-semibold w-12">Cuota</th>
+              <th className="px-3 py-2 font-semibold w-32">Concepto</th>
               <th className="px-3 py-2 font-semibold text-right">Monto</th>
               <th className="px-3 py-2 font-semibold">Fecha</th>
               <th className="px-3 py-2 font-semibold">Nota</th>
@@ -2826,12 +2853,19 @@ function CobrosPanel({ order, summary, onChange }) {
           </thead>
           <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
             {cobros.length === 0 && (
-              <tr><td colSpan={5} className="px-3 py-4 text-center text-gray-500 dark:text-gray-400 italic">Sin cobros registrados.</td></tr>
+              <tr><td colSpan={5} className="px-3 py-4 text-center text-gray-500 dark:text-gray-400 italic">Sin cobros registrados. Tocá “Registrar cobro” para empezar.</td></tr>
             )}
             {cobros.map((cobro, i) => (
               <tr key={i}>
-                <td className="px-3 py-2 text-gray-700 dark:text-gray-300 font-semibold">
-                  {i + 1}{cuotasPlanificadas > 0 ? ` / ${cuotasPlanificadas}` : ''}
+                <td className="px-3 py-2">
+                  <input
+                    type="text"
+                    value={cobro.concepto ?? ''}
+                    onChange={(e) => updateCobro(i, { concepto: e.target.value })}
+                    placeholder={sugerirConcepto(i, i) || `Pago ${i + 1}`}
+                    className="w-full px-2 py-1 text-xs font-semibold text-gray-900 dark:text-gray-100 border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    title="Seña, Adelanto, Saldo, o lo que quieras poner"
+                  />
                 </td>
                 <td className="px-3 py-2 text-right">
                   <input
@@ -2856,7 +2890,7 @@ function CobrosPanel({ order, summary, onChange }) {
                     type="text"
                     value={cobro.nota || ''}
                     onChange={(e) => updateCobro(i, { nota: e.target.value })}
-                    placeholder="ej: seña, transfer..."
+                    placeholder="transfer, efectivo, MP..."
                     className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500"
                   />
                 </td>

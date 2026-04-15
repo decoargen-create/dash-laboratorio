@@ -1,4 +1,4 @@
-import React, { useState, useReducer, useEffect } from 'react';
+import React, { useState, useReducer, useEffect, useMemo } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   LineChart, Line, PieChart, Pie, Cell
@@ -6,7 +6,7 @@ import {
 import {
   Menu, LogOut, Home, ShoppingCart, Package, Users, AlertCircle, CreditCard,
   UserCheck, TrendingUp, Plus, Filter, Eye, Edit2, Trash2, Calendar, DollarSign,
-  Moon, Sun, ChevronDown, ChevronRight
+  Moon, Sun, ChevronDown, ChevronRight, Search, X
 } from 'lucide-react';
 
 // Estados del pipeline de producción de una orden
@@ -403,7 +403,7 @@ export default function DASHLaboratorio() {
 
         <div className="p-8">
           {/* Admin Views */}
-          {currentUser.role === 'admin' && currentSection === 'inicio' && <InicioSection state={state} dispatch={dispatch} calculateMargin={calculateMargin} getMonthlySalesData={getMonthlySalesData} getCurrentMonthSales={getCurrentMonthSales} getPendingCommissions={getPendingCommissions} getActiveClients={getActiveClients} />}
+          {currentUser.role === 'admin' && currentSection === 'inicio' && <InicioSection state={state} dispatch={dispatch} />}
           {currentUser.role === 'admin' && currentSection === 'ventas' && <VentasSection state={state} onAddSale={handleAddSale} onQuickAddClient={createClient} onQuickAddProduct={createProduct} showModal={showNewSaleModal} setShowModal={setShowNewSaleModal} />}
           {currentUser.role === 'admin' && currentSection === 'productos' && <ProductosSection state={state} onAddProduct={handleAddProduct} showModal={showNewProductModal} setShowModal={setShowNewProductModal} calculateMargin={calculateMargin} />}
           {currentUser.role === 'admin' && currentSection === 'clientes' && <ClientesSection state={state} onAddClient={handleAddClient} onUpdateClient={handleUpdateClient} showModal={showNewClientModal} setShowModal={setShowNewClientModal} />}
@@ -532,20 +532,50 @@ function LoginScreen({ onLogin, darkMode, toggleDarkMode }) {
   );
 }
 
-function InicioSection({ state, dispatch, getCurrentMonthSales, getPendingCommissions, getActiveClients, getMonthlySalesData }) {
-  const monthlySales = getMonthlySalesData();
-  const currentMonthSales = getCurrentMonthSales();
-  const pendingCommissions = getPendingCommissions();
-  const activeClients = getActiveClients();
+function InicioSection({ state, dispatch }) {
+  const [filters, setFilters] = useState({
+    dateFrom: '',
+    dateTo: '',
+    states: new Set(), // vacío = todos
+    onlyIncidencia: false,
+    search: '',
+  });
 
-  // Totales del listado
-  const totalProfit = state.sales.reduce((acc, order) => {
+  // Órdenes filtradas según el estado actual de los filtros
+  const filteredOrders = useMemo(() => {
+    const q = filters.search.trim().toLowerCase();
+    return state.sales.filter(order => {
+      if (filters.dateFrom && (order.fecha || '') < filters.dateFrom) return false;
+      if (filters.dateTo && (order.fecha || '') > filters.dateTo) return false;
+      if (filters.states.size > 0 && !filters.states.has(order.estado || 'pendiente-cotizacion')) return false;
+      if (filters.onlyIncidencia && !order.tieneIncidencia) return false;
+      if (q) {
+        const client = state.clients.find(c => c.id === order.clienteId);
+        const product = state.products.find(p => p.id === order.productoId);
+        const mentor = state.mentors.find(m => m.id === order.mentorId);
+        const haystack = [
+          client?.nombre, client?.telefono, client?.domicilio,
+          product?.nombre, product?.descripcion,
+          mentor?.nombre,
+          order.fecha, order.incidenciaDetalle,
+          ORDER_STATE_LABELS[order.estado || 'pendiente-cotizacion'],
+        ].filter(Boolean).join(' ').toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [state.sales, state.clients, state.products, state.mentors, filters]);
+
+  // Stats del período (reflejan el filtro)
+  const ventasPeriodo = filteredOrders.reduce((s, o) => s + (o.montoTotal || 0), 0);
+  const totalProfit = filteredOrders.reduce((acc, order) => {
     const product = state.products.find(p => p.id === order.productoId);
     return acc + getOrderProfit(order, product);
   }, 0);
-  const ordersConIncidencia = state.sales.filter(s => s.tieneIncidencia).length;
-  // Total de pagos pendientes a proveedores (contenido + envase + etiqueta, sin mentor)
-  const totalPagosProveedoresPendientes = state.sales.reduce((acc, order) => {
+  const pendingCommissionsPeriodo = filteredOrders
+    .filter(o => o.mentorId && o.estadoComision !== 'pagada')
+    .reduce((s, o) => s + getMentorCommission(o), 0);
+  const totalPagosProveedoresPendientes = filteredOrders.reduce((acc, order) => {
     const product = state.products.find(p => p.id === order.productoId);
     const pagos = getOrderPayments(order, product);
     return acc
@@ -553,41 +583,195 @@ function InicioSection({ state, dispatch, getCurrentMonthSales, getPendingCommis
       + (pagos.envase.estado === 'pendiente' ? (pagos.envase.monto || 0) : 0)
       + (pagos.etiqueta.estado === 'pendiente' ? (pagos.etiqueta.monto || 0) : 0);
   }, 0);
+  const ordersConIncidencia = filteredOrders.filter(s => s.tieneIncidencia).length;
+
+  // Serie mensual del chart también respeta el filtro
+  const monthlyChart = useMemo(() => {
+    const months = {};
+    filteredOrders.forEach(o => {
+      const m = (o.fecha || '').substring(0, 7);
+      if (!m) return;
+      months[m] = (months[m] || 0) + (o.montoTotal || 0);
+    });
+    return Object.entries(months)
+      .sort()
+      .map(([m, total]) => ({
+        month: new Date(m + '-01').toLocaleDateString('es-ES', { month: 'short', year: '2-digit' }),
+        total,
+      }));
+  }, [filteredOrders]);
 
   return (
     <div className="space-y-8">
       <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
-        <StatCard icon={DollarSign} label="Ventas del Mes" value={`$${currentMonthSales.toLocaleString()}`} color="from-pink-500 to-rose-500" />
-        <StatCard icon={TrendingUp} label="Profit Total" value={`$${totalProfit.toLocaleString()}`} color="from-emerald-500 to-teal-500" />
-        <StatCard icon={CreditCard} label="Comisiones Pendientes" value={`$${pendingCommissions.toLocaleString()}`} color="from-amber-500 to-orange-500" />
+        <StatCard icon={DollarSign} label="Ventas del Período" value={`$${Math.round(ventasPeriodo).toLocaleString()}`} color="from-pink-500 to-rose-500" />
+        <StatCard icon={TrendingUp} label="Profit del Período" value={`$${Math.round(totalProfit).toLocaleString()}`} color="from-emerald-500 to-teal-500" />
+        <StatCard icon={CreditCard} label="Comisiones Pendientes" value={`$${Math.round(pendingCommissionsPeriodo).toLocaleString()}`} color="from-amber-500 to-orange-500" />
         <StatCard icon={Package} label="A pagar Proveedores" value={`$${Math.round(totalPagosProveedoresPendientes).toLocaleString()}`} color="from-sky-500 to-blue-500" />
         <StatCard icon={AlertCircle} label="Incidencias" value={ordersConIncidencia} color="from-red-500 to-pink-500" />
       </div>
 
-      <OrdersList state={state} dispatch={dispatch} />
+      <FilterBar filters={filters} onChange={setFilters} totalShown={filteredOrders.length} totalAll={state.sales.length} />
+
+      <OrdersList orders={filteredOrders} state={state} dispatch={dispatch} />
 
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
-        <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-6">Ventas Últimos 6 Meses</h3>
-        <ResponsiveContainer width="100%" height={300}>
-          <LineChart data={monthlySales}>
-            <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200 dark:stroke-gray-700" />
-            <XAxis dataKey="month" />
-            <YAxis />
-            <Tooltip />
-            <Legend />
-            <Line type="monotone" dataKey="total" stroke="#be185d" strokeWidth={3} name="Total Ventas ($)" />
-          </LineChart>
-        </ResponsiveContainer>
+        <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-6">Ventas por mes (período seleccionado)</h3>
+        {monthlyChart.length === 0 ? (
+          <p className="text-sm text-gray-500 dark:text-gray-400 italic text-center py-8">No hay datos para el rango y filtros actuales.</p>
+        ) : (
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={monthlyChart}>
+              <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200 dark:stroke-gray-700" />
+              <XAxis dataKey="month" />
+              <YAxis />
+              <Tooltip />
+              <Legend />
+              <Line type="monotone" dataKey="total" stroke="#be185d" strokeWidth={3} name="Total Ventas ($)" />
+            </LineChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Barra de filtros del dashboard: búsqueda, rango de fechas con presets,
+// estados múltiples del pipeline y toggle "sólo con incidencia".
+function FilterBar({ filters, onChange, totalShown, totalAll }) {
+  const update = (patch) => onChange({ ...filters, ...patch });
+
+  const toggleState = (key) => {
+    const next = new Set(filters.states);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    update({ states: next });
+  };
+
+  const applyPreset = (preset) => {
+    const today = new Date();
+    const fmt = (d) => d.toISOString().split('T')[0];
+    const todayStr = fmt(today);
+    if (preset === 'all') { update({ dateFrom: '', dateTo: '' }); return; }
+    const d = new Date(today);
+    if (preset === '30') { d.setDate(d.getDate() - 30); update({ dateFrom: fmt(d), dateTo: todayStr }); return; }
+    if (preset === '90') { d.setDate(d.getDate() - 90); update({ dateFrom: fmt(d), dateTo: todayStr }); return; }
+    if (preset === 'thisMonth') { const s = new Date(today.getFullYear(), today.getMonth(), 1); update({ dateFrom: fmt(s), dateTo: todayStr }); return; }
+    if (preset === 'thisYear') { const s = new Date(today.getFullYear(), 0, 1); update({ dateFrom: fmt(s), dateTo: todayStr }); return; }
+  };
+
+  const clearAll = () => onChange({
+    dateFrom: '', dateTo: '', states: new Set(), onlyIncidencia: false, search: '',
+  });
+
+  const anyActive = filters.dateFrom || filters.dateTo || filters.states.size > 0 || filters.onlyIncidencia || filters.search;
+
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-5 space-y-4">
+      <div className="flex flex-col lg:flex-row lg:items-center gap-3">
+        <div className="relative flex-1">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            type="text"
+            value={filters.search}
+            onChange={(e) => update({ search: e.target.value })}
+            placeholder="Buscar por cliente, producto, mentor, estado..."
+            className="w-full pl-9 pr-9 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+          />
+          {filters.search && (
+            <button
+              onClick={() => update({ search: '' })}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+              title="Limpiar búsqueda"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="date"
+            value={filters.dateFrom}
+            onChange={(e) => update({ dateFrom: e.target.value })}
+            className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            title="Desde"
+          />
+          <span className="text-gray-500 dark:text-gray-400 text-sm">→</span>
+          <input
+            type="date"
+            value={filters.dateTo}
+            onChange={(e) => update({ dateTo: e.target.value })}
+            className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            title="Hasta"
+          />
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2 items-center">
+        <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mr-1">Rango:</span>
+        {[
+          { k: '30', label: 'Últ. 30 días' },
+          { k: '90', label: 'Últ. 90 días' },
+          { k: 'thisMonth', label: 'Este mes' },
+          { k: 'thisYear', label: 'Este año' },
+          { k: 'all', label: 'Todo' },
+        ].map(p => (
+          <button
+            key={p.k}
+            onClick={() => applyPreset(p.k)}
+            className="px-3 py-1 text-xs rounded-full border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition"
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap gap-2 items-center">
+        <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mr-1">Estado:</span>
+        {ORDER_STATES.map(s => {
+          const active = filters.states.has(s);
+          return (
+            <button
+              key={s}
+              onClick={() => toggleState(s)}
+              className={`px-3 py-1 text-xs font-semibold rounded-full transition border ${
+                active
+                  ? `${ORDER_STATE_STYLES[s]} border-transparent ring-2 ring-pink-500`
+                  : `${ORDER_STATE_STYLES[s]} border-transparent opacity-50 hover:opacity-100`
+              }`}
+            >
+              {ORDER_STATE_LABELS[s]}
+            </button>
+          );
+        })}
+        <label className="inline-flex items-center gap-2 ml-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={filters.onlyIncidencia}
+            onChange={(e) => update({ onlyIncidencia: e.target.checked })}
+            className="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-red-600 focus:ring-red-500"
+          />
+          <span className="text-xs font-semibold text-red-700 dark:text-red-300">Sólo con incidencia</span>
+        </label>
+      </div>
+
+      <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 pt-1 border-t border-gray-100 dark:border-gray-700">
+        <span>Mostrando <span className="font-bold text-gray-900 dark:text-gray-100">{totalShown}</span> de {totalAll} órdenes</span>
+        {anyActive && (
+          <button onClick={clearAll} className="text-pink-700 dark:text-pink-300 hover:underline font-semibold">
+            Limpiar filtros
+          </button>
+        )}
       </div>
     </div>
   );
 }
 
 // Listado de órdenes con toggle total/unidad, edición de estado e incidencia
-function OrdersList({ state, dispatch }) {
+function OrdersList({ state, dispatch, orders }) {
   const [viewMode, setViewMode] = useState('total'); // 'total' | 'unidad'
   const [incidenciaDraft, setIncidenciaDraft] = useState({}); // { [orderId]: texto }
   const [expanded, setExpanded] = useState(() => new Set());
+  const ordersToRender = orders ?? state.sales;
 
   const toggleExpand = (id) => {
     setExpanded(prev => {
@@ -679,10 +863,10 @@ function OrdersList({ state, dispatch }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-            {state.sales.length === 0 && (
-              <tr><td colSpan={13} className="px-4 py-10 text-center text-gray-500 dark:text-gray-400">Todavía no hay órdenes cargadas.</td></tr>
+            {ordersToRender.length === 0 && (
+              <tr><td colSpan={13} className="px-4 py-10 text-center text-gray-500 dark:text-gray-400">No hay órdenes que coincidan con los filtros.</td></tr>
             )}
-            {state.sales.map(order => {
+            {ordersToRender.map(order => {
               const product = getProduct(order.productoId);
               const costs = getOrderCosts(order, product);
               const profitTotal = getOrderProfit(order, product);

@@ -170,6 +170,26 @@ export function getOrderEffectiveUnit(order, product) {
   const precioVentaUnit = order?.montoTotal != null && cantidad > 0
     ? (order.montoTotal / cantidad)
     : (product?.precioVenta || 0);
+
+  // Modo "sin discriminar": si la orden tiene costoSinDesglosar (override
+  // por orden) o el producto lo tiene como default, ese único número
+  // pisa el desglose contenido/envase/etiqueta. Útil cuando el proveedor
+  // pasa el costo final con todo y no tenemos breakdown.
+  const flatOrder = order?.costoSinDesglosar;
+  const flatProduct = product?.costoSinDesglosar;
+  const flat = flatOrder != null && flatOrder !== ''
+    ? parseFloat(flatOrder)
+    : (flatProduct != null && flatProduct !== '' ? parseFloat(flatProduct) : null);
+  if (flat != null && !Number.isNaN(flat) && flat >= 0) {
+    return {
+      costoContenido: flat,
+      costoEnvase: 0,
+      costoEtiqueta: 0,
+      precioVenta: precioVentaUnit,
+      isFlat: true,
+    };
+  }
+
   return {
     // Si la orden pisó el costo de contenido (override por orden), ese gana.
     // Si no, usamos el costo calculado por la fórmula del producto
@@ -178,6 +198,7 @@ export function getOrderEffectiveUnit(order, product) {
     costoEnvase:    ov.envase    != null ? ov.envase    : (product?.costoEnvase    || 0),
     costoEtiqueta:  ov.etiqueta  != null ? ov.etiqueta  : (product?.costoEtiqueta  || 0),
     precioVenta:    precioVentaUnit,
+    isFlat: false,
   };
 }
 
@@ -1359,11 +1380,9 @@ function OrdersList({ state, dispatch, orders }) {
               <th className="px-4 py-3 font-semibold">Producto</th>
               <th className="px-4 py-3 font-semibold">Mentor</th>
               <th className="px-4 py-3 font-semibold text-right">Cant.</th>
-              <th className="px-4 py-3 font-semibold text-right">Fórmula</th>
-              <th className="px-4 py-3 font-semibold text-right">Envase</th>
-              <th className="px-4 py-3 font-semibold text-right">Etiqueta</th>
+              <th className="px-4 py-3 font-semibold text-right">Costo</th>
               <th className="px-4 py-3 font-semibold text-right">Precio venta</th>
-              <th className="px-4 py-3 font-semibold text-right">Com. Mentor</th>
+              <th className="px-4 py-3 font-semibold text-right">Com. Equipo</th>
               <th className="px-4 py-3 font-semibold text-right">Profit</th>
               <th className="px-4 py-3 font-semibold">Estado</th>
               <th className="px-4 py-3 font-semibold text-center">Cobro</th>
@@ -1372,7 +1391,7 @@ function OrdersList({ state, dispatch, orders }) {
           </thead>
           <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
             {ordersToRender.length === 0 && (
-              <tr><td colSpan={15} className="px-4 py-10 text-center text-gray-500 dark:text-gray-400">No hay órdenes que coincidan con los filtros.</td></tr>
+              <tr><td colSpan={13} className="px-4 py-10 text-center text-gray-500 dark:text-gray-400">No hay órdenes que coincidan con los filtros.</td></tr>
             )}
             {ordersToRender.map(order => {
               const product = getProduct(order.productoId);
@@ -1430,27 +1449,17 @@ function OrdersList({ state, dispatch, orders }) {
                     />
                   </td>
                   <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300">
-                    <FormulaCell
+                    <CostBreakdownCell
+                      order={order}
                       product={product}
-                      displayValue={isTotal ? costs.contenidoTotal : costs.contenidoUnit}
+                      costs={costs}
                       isTotal={isTotal}
-                      cantidad={order.cantidad || 1}
                       onUpdateProduct={(patch) => dispatch({ type: 'UPDATE_PRODUCT', payload: { id: product?.id, patch } })}
-                      onOverrideTotal={(v) => handleCostEdit(order, 'contenido', v, isTotal)}
-                    />
-                  </td>
-                  <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300">
-                    <EditableCell
-                      value={isTotal ? costs.envaseTotal : costs.envaseUnit}
-                      onSave={(v) => handleCostEdit(order, 'envase', v, isTotal)}
-                      prefix="$"
-                    />
-                  </td>
-                  <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300">
-                    <EditableCell
-                      value={isTotal ? costs.etiquetaTotal : costs.etiquetaUnit}
-                      onSave={(v) => handleCostEdit(order, 'etiqueta', v, isTotal)}
-                      prefix="$"
+                      onOverrideContenido={(v) => handleCostEdit(order, 'contenido', v, isTotal)}
+                      onOverrideEnvase={(v) => handleCostEdit(order, 'envase', v, isTotal)}
+                      onOverrideEtiqueta={(v) => handleCostEdit(order, 'etiqueta', v, isTotal)}
+                      onSetFlat={(v) => dispatch({ type: 'UPDATE_ORDER', payload: { id: order.id, patch: { costoSinDesglosar: v } } })}
+                      onClearFlat={() => dispatch({ type: 'UPDATE_ORDER', payload: { id: order.id, patch: { costoSinDesglosar: null } } })}
                     />
                   </td>
                   <td className="px-4 py-3 text-right font-semibold text-gray-900 dark:text-gray-100">
@@ -1502,7 +1511,7 @@ function OrdersList({ state, dispatch, orders }) {
                 </tr>
                 {isOpen && payments && cobrosSummary && (
                   <tr className="bg-gray-50 dark:bg-gray-900/40">
-                    <td colSpan={15} className="px-6 py-4 space-y-6">
+                    <td colSpan={13} className="px-6 py-4 space-y-6">
                       <CobrosPanel
                         order={order}
                         summary={cobrosSummary}
@@ -3535,6 +3544,260 @@ function ClientDetailPanel({ stats, products }) {
 // donde se pueden agregar/editar/eliminar ingredientes con su costo unitario.
 // Si el producto no tiene formula[], muestra costoContenido plano y permite
 // empezar a armar la fórmula desde ahí.
+// Celda unificada de costo de orden. Reemplaza las 3 columnas separadas
+// (Fórmula / Envase / Etiqueta) por una sola "Costo" que abre un popover
+// con 2 modos:
+//   1) Desglosado: edita fórmula + envase + etiqueta por separado
+//   2) Sin discriminar: un único monto plano (cuando el proveedor pasó
+//      el costo final con todo y no tenemos breakdown).
+// El toggle entre modos es por orden — cada orden puede decidir.
+function CostBreakdownCell({ order, product, costs, isTotal, onUpdateProduct, onOverrideContenido, onOverrideEnvase, onOverrideEtiqueta, onSetFlat, onClearFlat }) {
+  const [open, setOpen] = useState(false);
+  const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
+  const popoverRef = useRef(null);
+
+  const isFlat = order?.costoSinDesglosar != null && order.costoSinDesglosar !== '';
+  const cantidad = order?.cantidad || 1;
+
+  // Total mostrado en la celda (suma de los 3 costos, o el flat si está activo)
+  const totalShown = isTotal ? costs.costoTotal : costs.costoUnit;
+
+  // Cierre por click fuera + Escape
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target)) setOpen(false);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const switchToDesglose = () => onClearFlat();
+  const switchToFlat = () => {
+    // Si pasamos a flat, sembramos el valor con el total actual del desglose
+    onSetFlat(costs.costoUnit || 0);
+  };
+
+  return (
+    <div className="relative inline-block">
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        className={`group inline-flex items-center gap-1 px-2 py-0.5 rounded hover:bg-pink-50 dark:hover:bg-pink-900/20 transition ${isFlat ? 'text-amber-700 dark:text-amber-300 font-medium' : 'text-gray-700 dark:text-gray-300'}`}
+        title={isFlat ? 'Costo sin discriminar — click para ver/editar' : 'Click para ver el desglose'}
+      >
+        <span>{fmtMoney(totalShown)}</span>
+        <ChevronDown size={12} className={`transition-transform text-gray-400 dark:text-gray-500 ${open ? 'rotate-180 text-pink-600 dark:text-pink-400' : 'group-hover:text-pink-600 dark:group-hover:text-pink-400'}`} />
+        {isFlat && (
+          <span className="text-[9px] font-bold px-1 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300">flat</span>
+        )}
+      </button>
+      {open && (
+        <div
+          ref={popoverRef}
+          className="absolute right-0 mt-1 z-40 w-80 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 p-3 animate-scale-in"
+          style={{ transformOrigin: 'top right' }}
+        >
+          {/* Header con toggle de modo */}
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <p className="text-xs font-bold text-gray-900 dark:text-gray-100">Costo de la orden</p>
+              <p className="text-[10px] text-gray-500 dark:text-gray-400">Total {isTotal ? `(×${cantidad})` : 'unitario'}: <span className="font-semibold text-gray-700 dark:text-gray-200">{fmtMoney(totalShown)}</span></p>
+            </div>
+            <button onClick={() => setOpen(false)} className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400" aria-label="Cerrar">
+              <X size={14} />
+            </button>
+          </div>
+
+          {/* Toggle desglosado vs sin discriminar */}
+          <div className="inline-flex w-full rounded-md border border-gray-200 dark:border-gray-700 p-0.5 bg-gray-50 dark:bg-gray-900 mb-3">
+            <button
+              type="button"
+              onClick={switchToDesglose}
+              className={`flex-1 px-2 py-1 text-[10px] font-semibold rounded transition ${!isFlat ? 'bg-pink-600 text-white shadow' : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100'}`}
+              title="Editar fórmula, envase y etiqueta por separado"
+            >
+              Desglosado
+            </button>
+            <button
+              type="button"
+              onClick={switchToFlat}
+              className={`flex-1 px-2 py-1 text-[10px] font-semibold rounded transition ${isFlat ? 'bg-amber-600 text-white shadow' : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100'}`}
+              title="El proveedor te pasó el costo final con todo, sin detalle"
+            >
+              Sin discriminar
+            </button>
+          </div>
+
+          {/* Contenido según modo */}
+          {isFlat ? (
+            <FlatCostEditor
+              valueUnit={parseFloat(order.costoSinDesglosar) || 0}
+              cantidad={cantidad}
+              isTotal={isTotal}
+              onChange={(v) => onSetFlat(v)}
+            />
+          ) : (
+            <DesgloseEditor
+              order={order}
+              product={product}
+              costs={costs}
+              isTotal={isTotal}
+              onUpdateProduct={onUpdateProduct}
+              onOverrideContenido={onOverrideContenido}
+              onOverrideEnvase={onOverrideEnvase}
+              onOverrideEtiqueta={onOverrideEtiqueta}
+            />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Editor del modo "sin discriminar": un único input con el costo total
+// unitario. El valor que se guarda es siempre unitario; si el toggle del
+// listado está en modo Total, se convierte al guardar.
+function FlatCostEditor({ valueUnit, cantidad, isTotal, onChange }) {
+  const [draft, setDraft] = useState(String(valueUnit || 0));
+  useEffect(() => { setDraft(String(valueUnit || 0)); }, [valueUnit]);
+
+  const commit = (raw) => {
+    const v = parseFloat(raw);
+    if (Number.isNaN(v)) return;
+    // Si estamos en modo Total, dividimos por cantidad para guardar unitario
+    onChange(isTotal ? v / cantidad : v);
+  };
+
+  const display = isTotal ? valueUnit * cantidad : valueUnit;
+
+  return (
+    <div>
+      <label className="block text-[10px] uppercase text-gray-500 dark:text-gray-400 mb-1">
+        Costo {isTotal ? 'total' : 'unitario'} sin desglosar
+      </label>
+      <div className="relative">
+        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs">$</span>
+        <input
+          type="number"
+          min="0"
+          step="any"
+          value={draft}
+          onChange={(e) => { setDraft(e.target.value); commit(e.target.value); }}
+          className="w-full pl-6 pr-2 py-2 text-sm font-semibold text-right border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 text-gray-900 dark:text-gray-100 rounded-md focus:outline-none focus:ring-2 focus:ring-amber-500 tabular-nums"
+        />
+      </div>
+      <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-2 leading-tight">
+        Usá esto cuando el proveedor te pasa el precio final con todo (envase + etiqueta + contenido) sin detalle.
+        El cálculo del profit usa este número como costo total.
+      </p>
+      {!isTotal && (
+        <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1">Total ×{cantidad}: <span className="font-semibold">${Math.round(display).toLocaleString()}</span></p>
+      )}
+    </div>
+  );
+}
+
+// Editor del modo "desglosado": ingredientes (fórmula del producto) +
+// envase + etiqueta. Refactor de lo que era FormulaCell pero unificado
+// para los 3 rubros.
+function DesgloseEditor({ order, product, costs, isTotal, onUpdateProduct, onOverrideContenido, onOverrideEnvase, onOverrideEtiqueta }) {
+  const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
+  const cantidad = order?.cantidad || 1;
+  const formula = product?.formula || [];
+  const hasFormula = formula.length > 0;
+  const unitFormula = formula.reduce((s, i) => s + (parseFloat(i?.costo) || 0), 0);
+
+  const updateFormula = (nextFormula) => {
+    onUpdateProduct?.({ formula: nextFormula });
+  };
+  const updateItem = (idx, patch) => updateFormula(formula.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
+  const addItem = () => updateFormula([...formula, { nombre: '', costo: 0 }]);
+  const removeItem = (idx) => updateFormula(formula.filter((_, i) => i !== idx));
+
+  return (
+    <div className="space-y-3">
+      {/* Fórmula / contenido */}
+      <div>
+        <div className="flex items-center justify-between mb-1.5">
+          <p className="text-[10px] uppercase font-semibold text-gray-500 dark:text-gray-400">Fórmula (contenido)</p>
+          <span className="text-[10px] tabular-nums text-gray-700 dark:text-gray-300 font-semibold">{fmtMoney(isTotal ? unitFormula * cantidad : unitFormula)}</span>
+        </div>
+        <div className="space-y-1">
+          {formula.length === 0 && (
+            <p className="text-[11px] text-gray-500 dark:text-gray-400 italic px-1">Sin ingredientes. Tocá '+ Ingrediente' o usá el modo 'Sin discriminar'.</p>
+          )}
+          {formula.map((it, idx) => (
+            <div key={idx} className="flex items-center gap-1.5">
+              <input
+                type="text"
+                value={it.nombre || ''}
+                onChange={(e) => updateItem(idx, { nombre: e.target.value })}
+                placeholder="Ingrediente"
+                className="flex-1 min-w-0 px-2 py-1 text-xs border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-pink-500"
+              />
+              <div className="relative shrink-0">
+                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">$</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={it.costo ?? 0}
+                  onChange={(e) => updateItem(idx, { costo: parseFloat(e.target.value) || 0 })}
+                  className="w-20 pl-5 pr-1.5 py-1 text-xs text-right border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-pink-500 tabular-nums"
+                />
+              </div>
+              <button type="button" onClick={() => removeItem(idx)} className="p-1 rounded text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 shrink-0" title="Eliminar ingrediente">
+                <Trash2 size={10} />
+              </button>
+            </div>
+          ))}
+        </div>
+        <button type="button" onClick={addItem} className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold text-pink-700 dark:text-pink-300 hover:bg-pink-50 dark:hover:bg-pink-900/20 rounded">
+          <Plus size={10} /> Ingrediente
+        </button>
+      </div>
+
+      {/* Envase y Etiqueta */}
+      <div className="grid grid-cols-2 gap-2 pt-2 border-t border-gray-100 dark:border-gray-700">
+        <div>
+          <label className="block text-[10px] uppercase font-semibold text-gray-500 dark:text-gray-400 mb-1">Envase / Pote</label>
+          <div className="relative">
+            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">$</span>
+            <input
+              type="number"
+              min="0"
+              step="any"
+              value={isTotal ? costs.envaseTotal : costs.envaseUnit}
+              onChange={(e) => onOverrideEnvase(parseFloat(e.target.value) || 0)}
+              className="w-full pl-5 pr-2 py-1 text-xs text-right border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-pink-500 tabular-nums"
+            />
+          </div>
+        </div>
+        <div>
+          <label className="block text-[10px] uppercase font-semibold text-gray-500 dark:text-gray-400 mb-1">Etiqueta</label>
+          <div className="relative">
+            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">$</span>
+            <input
+              type="number"
+              min="0"
+              step="any"
+              value={isTotal ? costs.etiquetaTotal : costs.etiquetaUnit}
+              onChange={(e) => onOverrideEtiqueta(parseFloat(e.target.value) || 0)}
+              className="w-full pl-5 pr-2 py-1 text-xs text-right border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-pink-500 tabular-nums"
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function FormulaCell({ product, displayValue, isTotal, cantidad, onUpdateProduct, onOverrideTotal }) {
   const [open, setOpen] = useState(false);
   const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;

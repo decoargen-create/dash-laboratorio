@@ -3548,6 +3548,13 @@ function UserMenu({ currentUser, sidebarOpen, state, onLogout }) {
     return acc + pend;
   }, 0);
 
+  // Profit acumulado: (precio venta - costos unitarios) × cantidad, por orden.
+  // No descuenta comisión del mentor (ese es profit del mentor, no del lab).
+  const profitTotal = sales.reduce((acc, o) => {
+    const product = products.find(p => p.id === o.productoId);
+    return acc + getOrderProfit(o, product);
+  }, 0);
+
   // Línea motivacional según la situación
   const moodLine = incidencias > 0
     ? `Hay ${incidencias} ${incidencias === 1 ? 'incidencia' : 'incidencias'} sin resolver — ojo ahí.`
@@ -3646,9 +3653,10 @@ function UserMenu({ currentUser, sidebarOpen, state, onLogout }) {
             <p className="text-xs text-white/70 mt-3 leading-snug">{moodLine}</p>
           </div>
 
-          {/* Mini-stats: los 3 números que más le importan a la admin día a día */}
-          <div className="grid grid-cols-3 gap-px bg-white/5">
+          {/* Mini-stats: los números que más le importan a la admin día a día */}
+          <div className="grid grid-cols-2 gap-px bg-white/5">
             <StatMini label="Activas" value={ordenesActivas} accent={incidencias > 0 ? 'amber' : 'neutral'} />
+            <StatMini label="Profit" value={fmtMoney(profitTotal)} accent="emerald" small />
             <StatMini label="A cobrar" value={fmtMoney(aCobrar)} accent="emerald" small />
             <StatMini label="A pagar" value={fmtMoney(aPagar)} accent={aPagar > 0 ? 'red' : 'neutral'} small />
           </div>

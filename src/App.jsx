@@ -254,6 +254,62 @@ export function getOrderCobrosSummary(order) {
   return { total, cobrado, saldo, cuotasPagadas, cuotasPlanificadas, porcentaje, cobros };
 }
 
+// Pool de frases motivadoras pensadas para el día a día de una admin que
+// gestiona un laboratorio artesanal de cosmética: detalle, paciencia, marcas
+// chicas, cuidado del cliente, consistencia. Rotan por día del año.
+export const DAILY_QUOTES = [
+  'Cuidar los detalles es respetar a quien los va a usar.',
+  'Una fórmula es un acto de cuidado.',
+  'Hacer bien las cosas pequeñas es hacer grandes las grandes.',
+  'Lo artesanal no se apura.',
+  'El margen más grande está en la calidad.',
+  'Un cliente feliz vuelve — y trae otro.',
+  'Producir con cariño es producir con visión.',
+  'Cada pote es una oportunidad.',
+  'La paciencia da intereses.',
+  'La mejor receta: lo justo de cada ingrediente.',
+  'Vender es fácil. Fidelizar es el arte.',
+  'La belleza está en los procesos, no en el apuro.',
+  'Lo que se mide, se mejora.',
+  'Primero calidad, después volumen — nunca al revés.',
+  'Un buen laboratorio se mide en sus repeticiones.',
+  'El detalle es lo que deja huella.',
+  'Lo simple, bien hecho, siempre gana.',
+  'Hoy es el único día que podemos hacer mejor que ayer.',
+  'Las marcas chicas empiezan con fórmulas bien pensadas.',
+  'Los clientes confían donde sienten el cuidado.',
+  'La consistencia es un superpoder.',
+  'Rápido y bien: dos palabras que pueden convivir.',
+  'Las cosas hechas con amor escalan diferente.',
+  'Un número bien cargado salva una decisión después.',
+  'Lotes chicos, ideas grandes.',
+  'La disciplina es la forma silenciosa de amar lo que hacés.',
+  'El margen viene del orden.',
+  'Poner un límite hoy es respetar tu trabajo mañana.',
+  'No hay detalle chico cuando va con tu marca.',
+  'Tus clientes eligen tu marca por lo que no se ve.',
+  'Un día a la vez. Una orden a la vez.',
+  'Lo bueno lleva tiempo — y esa es su garantía.',
+  'La calidad es la mejor propaganda.',
+  'Cuidá al cliente como si fuera el primero.',
+  'El mejor anuncio es un producto que funciona.',
+  'La paciencia también es una habilidad.',
+  'Lo hecho a conciencia se nota.',
+  'Cada fórmula es una historia.',
+  'El lujo está en el detalle.',
+  'La constancia vence lo que la inspiración no alcanza.',
+];
+
+// Devuelve la frase del día. Usa el día del año como índice para que sea
+// consistente durante todo el día y rote cada 24h.
+export function getDailyQuote(date = new Date()) {
+  const start = new Date(date.getFullYear(), 0, 0);
+  const diff = date - start;
+  const oneDay = 1000 * 60 * 60 * 24;
+  const dayOfYear = Math.floor(diff / oneDay);
+  return DAILY_QUOTES[dayOfYear % DAILY_QUOTES.length];
+}
+
 // Rubros de pago por orden. "envase" se muestra como "Envase / Pote" en la UI
 // porque son lo mismo según el flujo del laboratorio.
 export const PAYMENT_RUBROS = ['contenido', 'envase', 'etiqueta', 'mentor'];
@@ -837,6 +893,7 @@ function InicioSection({ state, dispatch }) {
 
   return (
     <div className="space-y-8">
+      <DailyQuoteBanner />
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         <StatCard icon={DollarSign} label="Ventas del Período" value={`$${Math.round(ventasPeriodo).toLocaleString()}`} color="from-pink-500 to-rose-500" delay={0} />
         <StatCard icon={TrendingUp} label="Profit del Período" value={`$${Math.round(totalProfit).toLocaleString()}`} color="from-emerald-500 to-teal-500" delay={80} />
@@ -1303,6 +1360,46 @@ function OrdersList({ state, dispatch, orders }) {
             })}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+// Banner con frase del día y saludo — algo cálido arriba del dashboard.
+// La frase rota una vez por día (usando día del año como semilla).
+function DailyQuoteBanner() {
+  const now = new Date();
+  const hour = now.getHours();
+  const saludo = hour < 6 ? 'Buena madrugada'
+    : hour < 12 ? 'Buen día'
+    : hour < 20 ? 'Buenas tardes'
+    : 'Buenas noches';
+  const fecha = now.toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' });
+  const frase = getDailyQuote(now);
+
+  return (
+    <div className="relative overflow-hidden rounded-2xl border border-amber-200/50 dark:border-amber-700/30 bg-gradient-to-r from-rose-50 via-amber-50 to-rose-50 dark:from-gray-900 dark:via-gray-800/50 dark:to-gray-900 p-5 animate-fade-in-up">
+      {/* Decoración dorada sutil */}
+      <div
+        aria-hidden="true"
+        className="absolute -right-12 -top-12 w-40 h-40 rounded-full bg-gradient-to-br from-amber-200/40 to-rose-200/20 dark:from-amber-500/10 dark:to-rose-500/10 blur-2xl"
+      />
+      <div
+        aria-hidden="true"
+        className="absolute -left-16 -bottom-16 w-48 h-48 rounded-full bg-gradient-to-tr from-rose-200/30 to-amber-100/20 dark:from-rose-500/10 dark:to-amber-500/5 blur-2xl"
+      />
+      <div className="relative flex items-start gap-4">
+        <div className="shrink-0 w-10 h-10 rounded-full bg-gradient-to-br from-amber-300 to-amber-500 text-[#4a0f22] flex items-center justify-center shadow">
+          <Sparkles size={18} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-[11px] uppercase tracking-widest text-amber-700 dark:text-amber-300 font-semibold">
+            {saludo} · <span className="capitalize">{fecha}</span>
+          </p>
+          <p className="mt-1 text-lg md:text-xl font-light italic text-gray-800 dark:text-gray-100 leading-snug" style={{ fontFamily: "'Allura', 'Brush Script MT', cursive" }}>
+            “{frase}”
+          </p>
+        </div>
       </div>
     </div>
   );

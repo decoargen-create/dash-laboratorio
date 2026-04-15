@@ -1,8 +1,8 @@
 {
-  "name": "dash-laboratorio",
+  "name": "laboratorio-viora",
   "private": true,
   "version": "1.0.0",
-  "description": "Dashboard para gestion de ventas, comisiones y stock - Laboratorio de cosmetica",
+  "description": "Laboratorio Viora - Panel de gestion de ordenes, produccion, comisiones y pagos",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.89.0",
     "lucide-react": "^0.383.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -21,7 +22,9 @@
     "@vitejs/plugin-react": "^4.3.1",
     "autoprefixer": "^10.4.19",
     "postcss": "^8.4.38",
+    "sharp": "^0.34.5",
     "tailwindcss": "^3.4.4",
-    "vite": "^5.3.1"
+    "vite": "^5.3.1",
+    "vite-plugin-pwa": "^1.2.0"
   }
 }

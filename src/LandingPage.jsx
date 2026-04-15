@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowRight, Package2, Clock, Sparkles, Moon, Sun, MessageCircle } from 'lucide-react';
+import { ArrowRight, Droplet, Beaker, FlaskConical, Pipette, Clock, FileText, Truck, Moon, Sun, MessageCircle } from 'lucide-react';
 import { VioraLogo, VioraMark } from './logo.jsx';
 import ChatbotWidget from './ChatbotWidget.jsx';
 
@@ -111,9 +111,8 @@ export default function LandingPage({ onAccess }) {
         </div>
       </nav>
 
-      {/* Hero */}
-      <section className="pt-40 pb-24 px-6 relative overflow-hidden">
-        {/* Decoración dorada sutil de fondo */}
+      {/* Hero — más sobrio, menos vende-humo */}
+      <section className="pt-40 pb-20 px-6 relative overflow-hidden">
         <div
           aria-hidden="true"
           className="absolute -top-32 -right-32 w-96 h-96 rounded-full bg-gradient-to-br from-amber-200/30 to-rose-200/20 dark:from-amber-500/10 dark:to-rose-500/10 blur-3xl"
@@ -133,9 +132,9 @@ export default function LandingPage({ onAccess }) {
             </div>
           </FadeIn>
           <FadeIn delay={120}>
-            <p className="text-lg md:text-xl text-gray-600 dark:text-gray-300 max-w-2xl mx-auto leading-relaxed">
-              Laboratorio cosmético para marcas que quieren producir
-              <span className="text-amber-700 dark:text-amber-300 font-medium"> bien, a tiempo y sin sorpresas</span>.
+            <p className="text-base md:text-lg text-gray-600 dark:text-gray-300 max-w-2xl mx-auto leading-relaxed">
+              Laboratorio cosmético argentino. Producimos cremas, sérums, aceites
+              y goteros bajo marca propia, con tiradas chicas y plazos cortos.
             </p>
           </FadeIn>
           <FadeIn delay={240}>
@@ -147,100 +146,204 @@ export default function LandingPage({ onAccess }) {
                 className="group inline-flex items-center gap-2 px-6 py-3 rounded-full bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 font-semibold text-sm hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300"
               >
                 <MessageCircle size={16} />
-                Contactar por WhatsApp
+                Pedir cotización
                 <ArrowRight size={16} className="group-hover:translate-x-0.5 transition-transform" />
               </a>
               <a
-                href="#highlights"
+                href="#productos"
                 className="inline-flex items-center gap-2 px-6 py-3 rounded-full border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 font-semibold text-sm hover:border-gray-900 dark:hover:border-gray-300 hover:-translate-y-0.5 transition-all duration-300"
               >
-                Ver cómo trabajamos
+                Qué fabricamos
               </a>
             </div>
           </FadeIn>
         </div>
       </section>
 
-      {/* Highlights */}
-      <section id="highlights" className="py-20 px-6">
-        <div className="max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-6">
+      {/* Datos clave — números concretos, sin floreo */}
+      <section id="highlights" className="pb-16 px-6">
+        <div className="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-4">
           <FadeIn delay={0}>
-            <HighlightCard
-              icon={Package2}
-              title="Mínimo 100 unidades"
-              body="Arrancá con tiradas chicas. Ideal para probar una línea, un aroma nuevo o una marca propia sin riesgo."
+            <DataCard
+              kpi="100"
+              unit="unidades"
+              label="Mínimo de producción"
+              detail="Por producto y por lote. Sirve para validar una marca o repetir clásicos."
             />
           </FadeIn>
           <FadeIn delay={120}>
-            <HighlightCard
-              icon={Clock}
-              title="Entrega en 7 a 10 días"
-              body="Desde que aprobás la cotización hasta que despachamos. Sin listas de espera ni fechas eternas."
+            <DataCard
+              kpi="5–9"
+              unit="días hábiles"
+              label="Despacho"
+              detail="Desde la aprobación de la cotización hasta la entrega del lote."
             />
           </FadeIn>
           <FadeIn delay={240}>
-            <HighlightCard
-              icon={Sparkles}
-              title="Costos accesibles"
-              body="Precios pensados para que el número cierre desde la primera producción. Cotizamos todo al detalle."
+            <DataCard
+              kpi="<24"
+              unit="horas"
+              label="Cotización"
+              detail="Te respondemos con costos detallados al día siguiente hábil."
             />
           </FadeIn>
         </div>
       </section>
 
-      {/* Cómo funciona */}
-      <section className="py-20 px-6 border-t border-rose-100/50 dark:border-gray-800/50">
-        <div className="max-w-4xl mx-auto">
+      {/* Productos — qué fabricamos */}
+      <section id="productos" className="py-20 px-6 border-t border-rose-100/50 dark:border-gray-800/50">
+        <div className="max-w-5xl mx-auto">
           <FadeIn>
-            <p className="text-xs tracking-[0.3em] uppercase text-amber-700 dark:text-amber-300 mb-3 text-center">Flujo</p>
-            <h2 className="text-3xl md:text-4xl font-light text-center mb-14" style={{ fontFamily: "'Allura', 'Brush Script MT', cursive" }}>
-              De tu idea al despacho
+            <p className="text-xs tracking-[0.3em] uppercase text-amber-700 dark:text-amber-300 mb-3 text-center">Catálogo</p>
+            <h2 className="text-3xl md:text-4xl font-light text-center mb-3 text-gray-900 dark:text-gray-100">
+              Qué fabricamos
             </h2>
+            <p className="text-center text-gray-600 dark:text-gray-400 max-w-2xl mx-auto mb-12">
+              Trabajamos con cuatro líneas. Cada producto se desarrolla bajo tu fórmula,
+              o adaptamos una de nuestras bases.
+            </p>
           </FadeIn>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-            {[
-              { n: '01', t: 'Contacto', d: 'Nos escribís contándonos qué producto querés producir.' },
-              { n: '02', t: 'Cotización', d: 'Pasamos el detalle de costos por contenido, envase y etiqueta.' },
-              { n: '03', t: 'Producción', d: 'Una vez abonado, el lote entra al laboratorio.' },
-              { n: '04', t: 'Despacho', d: 'Te entregamos las unidades listas en 7 a 10 días.' },
-            ].map((step, i) => (
-              <FadeIn key={step.n} delay={i * 120}>
-                <div className="relative p-5 rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 hover:shadow-lg hover:-translate-y-1 transition-all duration-300">
-                  <span className="text-xs font-bold tracking-widest text-amber-600 dark:text-amber-400">{step.n}</span>
-                  <h3 className="mt-2 text-lg font-semibold text-gray-900 dark:text-gray-100">{step.t}</h3>
-                  <p className="mt-1 text-sm text-gray-600 dark:text-gray-400 leading-relaxed">{step.d}</p>
-                </div>
-              </FadeIn>
-            ))}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <FadeIn delay={0}>
+              <ProductCard
+                icon={Beaker}
+                title="Cremas"
+                description="Faciales y corporales. Hidratantes, nutritivas, anti-edad, exfoliantes."
+              />
+            </FadeIn>
+            <FadeIn delay={100}>
+              <ProductCard
+                icon={Pipette}
+                title="Sérums"
+                description="Activos concentrados: vitamina C, ácido hialurónico, niacinamida, retinol."
+              />
+            </FadeIn>
+            <FadeIn delay={200}>
+              <ProductCard
+                icon={Droplet}
+                title="Aceites"
+                description="Capilares, faciales y corporales. Bases con activos vegetales."
+              />
+            </FadeIn>
+            <FadeIn delay={300}>
+              <ProductCard
+                icon={FlaskConical}
+                title="Goteros"
+                description="Tinturas, esencias y formulaciones líquidas en envase con cuentagotas."
+              />
+            </FadeIn>
           </div>
         </div>
       </section>
 
-      {/* CTA final */}
-      <section className="py-24 px-6">
-        <FadeIn>
-          <div className="max-w-3xl mx-auto text-center">
-            <h2 className="text-3xl md:text-5xl font-light text-gray-900 dark:text-gray-100 leading-tight">
-              ¿Tenés una idea en la cabeza?
+      {/* Cómo funciona — 4 pasos sobrios */}
+      <section className="py-20 px-6 border-t border-rose-100/50 dark:border-gray-800/50">
+        <div className="max-w-4xl mx-auto">
+          <FadeIn>
+            <p className="text-xs tracking-[0.3em] uppercase text-amber-700 dark:text-amber-300 mb-3 text-center">Proceso</p>
+            <h2 className="text-3xl md:text-4xl font-light text-center mb-12 text-gray-900 dark:text-gray-100">
+              Cómo trabajamos
             </h2>
-            <p className="mt-4 text-gray-600 dark:text-gray-400 text-lg">
-              Mandanos un mensaje y te cotizamos en el día.
+          </FadeIn>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            {[
+              {
+                n: '01',
+                icon: MessageCircle,
+                t: 'Contacto',
+                d: 'Nos contás qué producto querés desarrollar y la cantidad estimada.',
+              },
+              {
+                n: '02',
+                icon: FileText,
+                t: 'Cotización',
+                d: 'En menos de 24 hs te enviamos los costos desglosados por contenido, envase y etiqueta.',
+              },
+              {
+                n: '03',
+                icon: FlaskConical,
+                t: 'Producción',
+                d: 'Una vez confirmado el pago, el lote entra al laboratorio.',
+              },
+              {
+                n: '04',
+                icon: Truck,
+                t: 'Despacho',
+                d: 'Entregamos el lote en 5 a 9 días hábiles desde la aprobación.',
+              },
+            ].map((step, i) => {
+              const Icon = step.icon;
+              return (
+              <FadeIn key={step.n} delay={i * 100}>
+                <div className="relative h-full p-5 rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 hover:shadow-lg hover:-translate-y-1 transition-all duration-300">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-xs font-bold tracking-widest text-amber-600 dark:text-amber-400">{step.n}</span>
+                    <Icon size={16} className="text-gray-400 dark:text-gray-500" />
+                  </div>
+                  <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">{step.t}</h3>
+                  <p className="mt-1.5 text-sm text-gray-600 dark:text-gray-400 leading-relaxed">{step.d}</p>
+                </div>
+              </FadeIn>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      {/* Detalle técnico — sobrio y honesto */}
+      <section className="py-16 px-6 border-t border-rose-100/50 dark:border-gray-800/50">
+        <div className="max-w-3xl mx-auto">
+          <FadeIn>
+            <h2 className="text-2xl md:text-3xl font-light text-gray-900 dark:text-gray-100 mb-6">
+              Lo que vas a recibir
+            </h2>
+            <ul className="space-y-3 text-gray-700 dark:text-gray-300">
+              <li className="flex items-start gap-3">
+                <span className="mt-1.5 w-1 h-1 rounded-full bg-amber-500 shrink-0" />
+                <span>Cotización detallada con los costos de contenido, envase y etiqueta por separado.</span>
+              </li>
+              <li className="flex items-start gap-3">
+                <span className="mt-1.5 w-1 h-1 rounded-full bg-amber-500 shrink-0" />
+                <span>Lote completo terminado: producto envasado, etiquetado y listo para vender.</span>
+              </li>
+              <li className="flex items-start gap-3">
+                <span className="mt-1.5 w-1 h-1 rounded-full bg-amber-500 shrink-0" />
+                <span>Seguimiento del estado de la orden por WhatsApp en cada etapa.</span>
+              </li>
+              <li className="flex items-start gap-3">
+                <span className="mt-1.5 w-1 h-1 rounded-full bg-amber-500 shrink-0" />
+                <span>Posibilidad de adaptar fórmulas existentes o trabajar con la tuya propia.</span>
+              </li>
+            </ul>
+          </FadeIn>
+        </div>
+      </section>
+
+      {/* CTA final — directo */}
+      <section className="py-20 px-6 border-t border-rose-100/50 dark:border-gray-800/50">
+        <FadeIn>
+          <div className="max-w-2xl mx-auto text-center">
+            <h2 className="text-2xl md:text-3xl font-light text-gray-900 dark:text-gray-100 leading-tight">
+              ¿Tenés un producto en mente?
+            </h2>
+            <p className="mt-3 text-gray-600 dark:text-gray-400">
+              Escribinos al WhatsApp con el detalle (qué producto, cantidad estimada, envase) y te respondemos con la cotización en menos de 24 hs hábiles.
             </p>
             <a
               href={WHATSAPP_URL}
               target="_blank"
               rel="noreferrer"
-              className="mt-8 inline-flex items-center gap-2 px-8 py-4 rounded-full bg-gradient-to-r from-amber-600 to-amber-700 text-white font-semibold hover:shadow-2xl hover:-translate-y-0.5 transition-all duration-300"
+              className="mt-8 inline-flex items-center gap-2 px-7 py-3.5 rounded-full bg-gradient-to-r from-amber-600 to-amber-700 text-white font-semibold text-sm hover:shadow-2xl hover:-translate-y-0.5 transition-all duration-300"
             >
-              <MessageCircle size={18} />
-              Escribinos al WhatsApp
+              <MessageCircle size={16} />
+              {WHATSAPP_DISPLAY}
             </a>
           </div>
         </FadeIn>
       </section>
 
       {/* Footer */}
-      <footer className="py-10 px-6 border-t border-rose-100/50 dark:border-gray-800/50">
+      <footer className="py-8 px-6 border-t border-rose-100/50 dark:border-gray-800/50">
         <div className="max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-gray-500 dark:text-gray-400">
           <div className="flex items-center gap-2">
             <VioraMark size={28} />
@@ -267,20 +370,30 @@ export default function LandingPage({ onAccess }) {
   );
 }
 
-function HighlightCard({ icon: Icon, title, body }) {
+// Card de KPI: número grande + unidad chica + label + detalle.
+// Pensado para los datos concretos del laboratorio (mínimos, plazos).
+function DataCard({ kpi, unit, label, detail }) {
   return (
-    <div className="group h-full p-6 rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 relative overflow-hidden">
-      <div
-        aria-hidden="true"
-        className="absolute -top-10 -right-10 w-28 h-28 rounded-full bg-gradient-to-br from-amber-200/40 to-rose-200/20 dark:from-amber-500/10 dark:to-rose-500/10 blur-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"
-      />
-      <div className="relative">
-        <div className="inline-flex items-center justify-center w-11 h-11 rounded-xl bg-gradient-to-br from-amber-100 to-amber-200 dark:from-amber-900/40 dark:to-amber-800/40 text-amber-800 dark:text-amber-300 mb-4">
-          <Icon size={20} />
-        </div>
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">{title}</h3>
-        <p className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed">{body}</p>
+    <div className="h-full p-6 rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300">
+      <div className="flex items-baseline gap-1.5">
+        <span className="text-4xl md:text-5xl font-light text-gray-900 dark:text-gray-100 tracking-tight">{kpi}</span>
+        <span className="text-sm font-medium text-gray-500 dark:text-gray-400">{unit}</span>
       </div>
+      <p className="mt-2 text-xs uppercase tracking-widest font-semibold text-amber-700 dark:text-amber-300">{label}</p>
+      <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 leading-relaxed">{detail}</p>
+    </div>
+  );
+}
+
+// Card de producto: ícono pequeño + título + descripción técnica corta.
+function ProductCard({ icon: Icon, title, description }) {
+  return (
+    <div className="group h-full p-5 rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 hover:shadow-lg hover:-translate-y-1 transition-all duration-300">
+      <div className="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-gradient-to-br from-amber-100 to-amber-200 dark:from-amber-900/40 dark:to-amber-800/40 text-amber-800 dark:text-amber-300 mb-3 group-hover:scale-110 transition-transform">
+        <Icon size={18} />
+      </div>
+      <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-1.5">{title}</h3>
+      <p className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">{description}</p>
     </div>
   );
 }

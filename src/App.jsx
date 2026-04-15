@@ -1420,8 +1420,8 @@ function OrdersList({ state, dispatch, orders }) {
         />
       )}
       {layout === 'table' && (
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+      <div className="overflow-x-auto orders-table-scroll">
+        <table className="w-full text-xs md:text-sm orders-compact-table">
           <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700">
             <tr className="text-left text-gray-700 dark:text-gray-200">
               <th className="px-2 py-3 w-8"></th>
@@ -1557,7 +1557,7 @@ function OrdersList({ state, dispatch, orders }) {
                     </td>
                   )}
                   {isColVisible('incidencia') && (
-                    <td className="px-4 py-3 min-w-[220px]">
+                    <td className="px-3 py-2 min-w-[180px]">
                       <div className="flex items-start gap-2">
                         <input
                           type="checkbox"

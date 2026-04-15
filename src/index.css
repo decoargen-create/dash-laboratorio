@@ -39,3 +39,38 @@ body {
 .float-y-slow {
   animation: float-y 9s ease-in-out infinite;
 }
+
+/* Tabla compacta del listado de órdenes — celdas con padding reducido para
+   meter más columnas sin scroll horizontal. En md+ vuelve a un padding más
+   cómodo. */
+.orders-compact-table th,
+.orders-compact-table td {
+  padding-left: 0.625rem;   /* 10px */
+  padding-right: 0.625rem;
+  padding-top: 0.5rem;      /* 8px */
+  padding-bottom: 0.5rem;
+}
+@media (min-width: 768px) {
+  .orders-compact-table th,
+  .orders-compact-table td {
+    padding-left: 0.875rem;  /* 14px */
+    padding-right: 0.875rem;
+    padding-top: 0.625rem;
+    padding-bottom: 0.625rem;
+  }
+}
+
+/* Sombra lateral en el contenedor scrolleable cuando hay overflow horizontal,
+   para indicar visualmente que se puede scrollear hacia los costados. */
+.orders-table-scroll {
+  background:
+    /* gradiente izquierdo (sombra que aparece cuando scrolleamos a la derecha) */
+    linear-gradient(to right, rgba(0,0,0,0.08), rgba(0,0,0,0)) left center / 12px 100% no-repeat,
+    /* gradiente derecho (sombra que indica que hay más a la derecha) */
+    linear-gradient(to left, rgba(0,0,0,0.08), rgba(0,0,0,0)) right center / 12px 100% no-repeat;
+}
+.dark .orders-table-scroll {
+  background:
+    linear-gradient(to right, rgba(255,255,255,0.06), rgba(0,0,0,0)) left center / 12px 100% no-repeat,
+    linear-gradient(to left, rgba(255,255,255,0.06), rgba(0,0,0,0)) right center / 12px 100% no-repeat;
+}

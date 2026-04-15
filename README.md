@@ -55,6 +55,7 @@ Copiar `.env.example` a `.env` y completar:
 | `APP_URL` | Opcional | URL pública del sitio para el link del email. Si no se setea, se usa el Origin |
 | `RESEND_API_KEY` | Opcional | API key de Resend para enviar los emails. Sin ella, `api/auth` devuelve el link en la response (sólo dev/setup) |
 | `AUTH_FROM` | Opcional | "From" de los emails. Default: `onboarding@resend.dev` |
+| `VITE_ALLOW_DEMO` | Opcional | Poné `false` en producción para esconder el acceso demo (password "admin" / selector Sofia-Mariano). Default: habilitado en dev |
 
 El archivo `.env` está en `.gitignore` así que nunca se sube al repo.
 

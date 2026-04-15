@@ -1,4 +1,4 @@
-import React, { useState, useReducer, useEffect, useMemo } from 'react';
+import React, { useState, useReducer, useEffect, useMemo, useRef } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   LineChart, Line, PieChart, Pie, Cell
@@ -130,28 +130,56 @@ function appReducer(state, action) {
         })
       };
     }
+    case 'UPDATE_ORDER': {
+      // Acción genérica: patchea cualquier campo de una orden por id.
+      // payload: { id, patch: {...} }
+      return {
+        ...state,
+        sales: state.sales.map(s => s.id === action.payload.id ? { ...s, ...action.payload.patch } : s)
+      };
+    }
     default:
       return state;
   }
 }
 
 // Helpers de cálculo de costos y profit
+
+// Devuelve los valores UNITARIOS efectivos de una orden. Si la orden tiene
+// costsOverride, esos valores ganan; si no, caen a los del producto base.
+// El precio de venta unitario se deriva de montoTotal/cantidad si hay montoTotal
+// (porque ese es el precio realmente cobrado/cotizado), y fallback al producto.
+export function getOrderEffectiveUnit(order, product) {
+  const ov = order?.costsOverride || {};
+  const cantidad = order?.cantidad || 1;
+  const precioVentaUnit = order?.montoTotal != null && cantidad > 0
+    ? (order.montoTotal / cantidad)
+    : (product?.precioVenta || 0);
+  return {
+    costoContenido: ov.contenido != null ? ov.contenido : (product?.costoContenido || 0),
+    costoEnvase:    ov.envase    != null ? ov.envase    : (product?.costoEnvase    || 0),
+    costoEtiqueta:  ov.etiqueta  != null ? ov.etiqueta  : (product?.costoEtiqueta  || 0),
+    precioVenta:    precioVentaUnit,
+  };
+}
+
 export function getProductUnitCost(product) {
   if (!product) return 0;
   return (product.costoContenido || 0) + (product.costoEnvase || 0) + (product.costoEtiqueta || 0);
 }
 
 export function getOrderCosts(order, product) {
-  const unit = getProductUnitCost(product);
-  const cantidad = order.cantidad || 0;
+  const eff = getOrderEffectiveUnit(order, product);
+  const unit = eff.costoContenido + eff.costoEnvase + eff.costoEtiqueta;
+  const cantidad = order?.cantidad || 0;
   return {
-    contenidoUnit: product?.costoContenido || 0,
-    envaseUnit: product?.costoEnvase || 0,
-    etiquetaUnit: product?.costoEtiqueta || 0,
+    contenidoUnit: eff.costoContenido,
+    envaseUnit: eff.costoEnvase,
+    etiquetaUnit: eff.costoEtiqueta,
     costoUnit: unit,
-    contenidoTotal: (product?.costoContenido || 0) * cantidad,
-    envaseTotal: (product?.costoEnvase || 0) * cantidad,
-    etiquetaTotal: (product?.costoEtiqueta || 0) * cantidad,
+    contenidoTotal: eff.costoContenido * cantidad,
+    envaseTotal: eff.costoEnvase * cantidad,
+    etiquetaTotal: eff.costoEtiqueta * cantidad,
     costoTotal: unit * cantidad,
   };
 }
@@ -159,14 +187,29 @@ export function getOrderCosts(order, product) {
 export function getOrderProfit(order, product) {
   // Profit del laboratorio = (precioVenta - costos) * cantidad.
   // La comisión del mentor NO se descuenta acá porque es profit del mentor.
-  const unitCost = getProductUnitCost(product);
-  const precioVenta = product?.precioVenta || 0;
-  const cantidad = order.cantidad || 0;
-  return (precioVenta - unitCost) * cantidad;
+  // Usamos los valores efectivos (respetando overrides por orden).
+  const eff = getOrderEffectiveUnit(order, product);
+  const unitCost = eff.costoContenido + eff.costoEnvase + eff.costoEtiqueta;
+  const cantidad = order?.cantidad || 0;
+  return (eff.precioVenta - unitCost) * cantidad;
 }
 
 export function getMentorCommission(order) {
   return (order.montoTotal || 0) * 0.5;
+}
+
+// Resumen de cobros de una orden (plata que entra del cliente).
+// Devuelve total, cobrado, saldo, cuotasPagadas y cuotasPlanificadas.
+// order.cobros es un array de { monto, fecha, nota }.
+export function getOrderCobrosSummary(order) {
+  const total = order?.montoTotal || 0;
+  const cobros = Array.isArray(order?.cobros) ? order.cobros : [];
+  const cobrado = cobros.reduce((s, c) => s + (parseFloat(c?.monto) || 0), 0);
+  const saldo = total - cobrado;
+  const cuotasPagadas = cobros.length;
+  const cuotasPlanificadas = order?.cuotasPlanificadas || 0;
+  const porcentaje = total > 0 ? Math.round((cobrado / total) * 100) : 0;
+  return { total, cobrado, saldo, cuotasPagadas, cuotasPlanificadas, porcentaje, cobros };
 }
 
 // Rubros de pago por orden. "envase" se muestra como "Envase / Pote" en la UI
@@ -794,6 +837,46 @@ function OrdersList({ state, dispatch, orders }) {
     dispatch({ type: 'UPDATE_ORDER_PAYMENT', payload: { orderId, rubro, data } });
   };
 
+  // Edición inline de una columna de costo. Guarda el valor UNITARIO en
+  // order.costsOverride.{key} aunque el usuario haya escrito un total.
+  const handleCostEdit = (order, key, newValue, isTotal) => {
+    const cantidad = order.cantidad || 1;
+    const unitValue = isTotal ? (newValue / cantidad) : newValue;
+    const existing = order.costsOverride || {};
+    dispatch({
+      type: 'UPDATE_ORDER',
+      payload: {
+        id: order.id,
+        patch: { costsOverride: { ...existing, [key]: unitValue } },
+      },
+    });
+  };
+
+  // Edición inline de precio de venta: actualiza montoTotal de la orden.
+  // Si el usuario edita en modo unidad, se multiplica por la cantidad.
+  const handlePriceEdit = (order, newValue, isTotal) => {
+    const cantidad = order.cantidad || 1;
+    const newMonto = isTotal ? newValue : newValue * cantidad;
+    dispatch({ type: 'UPDATE_ORDER', payload: { id: order.id, patch: { montoTotal: newMonto } } });
+  };
+
+  // Edición inline de cantidad: cambia order.cantidad y re-escala montoTotal
+  // asumiendo que se mantiene el precio unitario actual (montoTotal / cantidad anterior).
+  const handleCantidadEdit = (order, newQty) => {
+    const qty = Math.max(1, Math.round(newQty));
+    const prevQty = order.cantidad || 1;
+    const unitPrice = prevQty > 0 ? (order.montoTotal || 0) / prevQty : 0;
+    dispatch({
+      type: 'UPDATE_ORDER',
+      payload: { id: order.id, patch: { cantidad: qty, montoTotal: Math.round(unitPrice * qty) } },
+    });
+  };
+
+  // Cobros del cliente: se reemplaza el array completo y el plan de cuotas.
+  const handleCobrosChange = (order, patch) => {
+    dispatch({ type: 'UPDATE_ORDER', payload: { id: order.id, patch } });
+  };
+
   const handleToggleIncidencia = (order) => {
     const enabling = !order.tieneIncidencia;
     dispatch({
@@ -885,6 +968,7 @@ function OrdersList({ state, dispatch, orders }) {
               const isTotal = viewMode === 'total';
               const isOpen = expanded.has(order.id);
               const payments = isOpen ? getOrderPayments(order, product) : null;
+              const cobrosSummary = isOpen ? getOrderCobrosSummary(order) : null;
               return (
                 <React.Fragment key={order.id}>
                 <tr className={`transition ${order.tieneIncidencia ? 'bg-red-50/40 dark:bg-red-900/10' : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}>
@@ -901,11 +985,42 @@ function OrdersList({ state, dispatch, orders }) {
                   <td className="px-4 py-3 text-gray-900 dark:text-gray-100 whitespace-nowrap">{order.fecha}</td>
                   <td className="px-4 py-3 text-gray-900 dark:text-gray-100">{getClientName(order.clienteId)}</td>
                   <td className="px-4 py-3 text-gray-900 dark:text-gray-100">{product?.nombre || '-'}</td>
-                  <td className="px-4 py-3 text-right text-gray-900 dark:text-gray-100">{order.cantidad}</td>
-                  <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300">{fmtMoney(isTotal ? costs.contenidoTotal : costs.contenidoUnit)}</td>
-                  <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300">{fmtMoney(isTotal ? costs.envaseTotal : costs.envaseUnit)}</td>
-                  <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300">{fmtMoney(isTotal ? costs.etiquetaTotal : costs.etiquetaUnit)}</td>
-                  <td className="px-4 py-3 text-right font-semibold text-gray-900 dark:text-gray-100">{fmtMoney(isTotal ? precioVentaTotal : precioVentaUnit)}</td>
+                  <td className="px-4 py-3 text-right text-gray-900 dark:text-gray-100">
+                    <EditableCell
+                      value={order.cantidad}
+                      onSave={(v) => handleCantidadEdit(order, v)}
+                      prefix=""
+                      title="Doble click para editar cantidad"
+                    />
+                  </td>
+                  <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300">
+                    <EditableCell
+                      value={isTotal ? costs.contenidoTotal : costs.contenidoUnit}
+                      onSave={(v) => handleCostEdit(order, 'contenido', v, isTotal)}
+                      prefix="$"
+                    />
+                  </td>
+                  <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300">
+                    <EditableCell
+                      value={isTotal ? costs.envaseTotal : costs.envaseUnit}
+                      onSave={(v) => handleCostEdit(order, 'envase', v, isTotal)}
+                      prefix="$"
+                    />
+                  </td>
+                  <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300">
+                    <EditableCell
+                      value={isTotal ? costs.etiquetaTotal : costs.etiquetaUnit}
+                      onSave={(v) => handleCostEdit(order, 'etiqueta', v, isTotal)}
+                      prefix="$"
+                    />
+                  </td>
+                  <td className="px-4 py-3 text-right font-semibold text-gray-900 dark:text-gray-100">
+                    <EditableCell
+                      value={isTotal ? precioVentaTotal : precioVentaUnit}
+                      onSave={(v) => handlePriceEdit(order, v, isTotal)}
+                      prefix="$"
+                    />
+                  </td>
                   <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300">
                     {hasMentor ? fmtMoney(isTotal ? commissionTotal : commissionUnit) : <span className="text-gray-400 dark:text-gray-500">—</span>}
                   </td>
@@ -940,15 +1055,22 @@ function OrdersList({ state, dispatch, orders }) {
                     </div>
                   </td>
                 </tr>
-                {isOpen && payments && (
+                {isOpen && payments && cobrosSummary && (
                   <tr className="bg-gray-50 dark:bg-gray-900/40">
-                    <td colSpan={13} className="px-6 py-4">
-                      <PaymentsPanel
+                    <td colSpan={13} className="px-6 py-4 space-y-6">
+                      <CobrosPanel
                         order={order}
-                        payments={payments}
-                        mentorNombre={hasMentor ? getMentorName(mentorId) : null}
-                        onChange={(rubro, data) => handlePaymentChange(order.id, rubro, data)}
+                        summary={cobrosSummary}
+                        onChange={(patch) => handleCobrosChange(order, patch)}
                       />
+                      <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+                        <PaymentsPanel
+                          order={order}
+                          payments={payments}
+                          mentorNombre={hasMentor ? getMentorName(mentorId) : null}
+                          onChange={(rubro, data) => handlePaymentChange(order.id, rubro, data)}
+                        />
+                      </div>
                     </td>
                   </tr>
                 )}
@@ -1976,6 +2098,237 @@ function ClientDetailPanel({ stats, products }) {
 // Panel de pagos que se abre dentro de una orden del dashboard. Muestra 4 rubros
 // (contenido / envase-pote / etiqueta / mentor) con estado, monto, fecha, proveedor
 // y nota editables. El cambio en cualquier campo dispatchea UPDATE_ORDER_PAYMENT.
+// Celda editable inline: doble-click → se convierte en input numérico.
+// Enter/Tab/blur confirma con onSave(number); Esc cancela.
+// Props:
+//   value: número actual
+//   onSave: (nuevoValor: number) => void
+//   className: clases extra para el modo display
+//   prefix, suffix: texto decorativo (ej. '$')
+//   align: 'left' | 'right'
+//   disabled: si true, no edita
+function EditableCell({ value, onSave, className = '', prefix = '', suffix = '', align = 'right', disabled = false, placeholder = '—', title = 'Doble click para editar' }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (editing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [editing]);
+
+  const start = () => {
+    if (disabled) return;
+    setDraft(value == null ? '' : String(Math.round(value * 100) / 100));
+    setEditing(true);
+  };
+
+  const commit = () => {
+    const parsed = parseFloat(draft);
+    if (!Number.isNaN(parsed) && parsed !== value) {
+      onSave(parsed);
+    }
+    setEditing(false);
+  };
+
+  const cancel = () => setEditing(false);
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        type="number"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); commit(); }
+          if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+        }}
+        className={`w-24 px-1 py-0.5 text-xs border border-pink-500 dark:border-pink-400 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded focus:outline-none text-${align}`}
+        step="any"
+      />
+    );
+  }
+
+  const formatted = value == null ? placeholder : Math.round(value).toLocaleString();
+  return (
+    <span
+      onDoubleClick={start}
+      title={disabled ? undefined : title}
+      className={`${disabled ? '' : 'cursor-text hover:bg-pink-50 dark:hover:bg-pink-900/20 rounded px-1'} ${className}`}
+    >
+      {prefix}{formatted}{suffix}
+    </span>
+  );
+}
+
+// Panel de cobros del cliente: plan de cuotas, lista de cobros recibidos,
+// cálculo automático de saldo pendiente. Plata que ENTRA del cliente.
+function CobrosPanel({ order, summary, onChange }) {
+  const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
+  const cobros = summary.cobros;
+  const { total, cobrado, saldo, porcentaje, cuotasPlanificadas, cuotasPagadas } = summary;
+
+  const updateCobro = (index, patch) => {
+    const next = cobros.map((c, i) => (i === index ? { ...c, ...patch } : c));
+    onChange({ cobros: next });
+  };
+
+  const addCobro = () => {
+    // Sugerimos como monto: saldo / (cuotas planificadas - pagadas) si hay plan,
+    // o el saldo completo si no.
+    let sugerido = saldo;
+    if (cuotasPlanificadas > 0) {
+      const faltan = Math.max(1, cuotasPlanificadas - cuotasPagadas);
+      sugerido = saldo / faltan;
+    }
+    const nuevo = {
+      monto: sugerido > 0 ? Math.round(sugerido) : 0,
+      fecha: new Date().toISOString().split('T')[0],
+      nota: '',
+    };
+    onChange({ cobros: [...cobros, nuevo] });
+  };
+
+  const removeCobro = (index) => {
+    onChange({ cobros: cobros.filter((_, i) => i !== index) });
+  };
+
+  const setPlan = (n) => {
+    const parsed = parseInt(n);
+    onChange({ cuotasPlanificadas: Number.isNaN(parsed) ? 0 : Math.max(0, parsed) });
+  };
+
+  const saldada = saldo <= 0 && total > 0;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap gap-2 items-center justify-between">
+        <div>
+          <h4 className="text-sm font-bold text-gray-900 dark:text-gray-100">Cobros del cliente</h4>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Plata que entra del cliente por esta orden.</p>
+        </div>
+        <div className="flex items-center gap-2 text-xs">
+          <label className="text-gray-500 dark:text-gray-400">Plan:</label>
+          <input
+            type="number"
+            min="0"
+            value={cuotasPlanificadas || ''}
+            onChange={(e) => setPlan(e.target.value)}
+            placeholder="0"
+            className="w-16 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-pink-500"
+            title="Cuántas cuotas acordaste con el cliente (0 = sin plan)"
+          />
+          <span className="text-gray-500 dark:text-gray-400">{cuotasPlanificadas > 0 ? `cuotas` : 'sin plan'}</span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
+          <p className="text-[10px] uppercase text-gray-500 dark:text-gray-400">Total venta</p>
+          <p className="font-bold text-gray-900 dark:text-gray-100">{fmtMoney(total)}</p>
+        </div>
+        <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-3 border border-emerald-200 dark:border-emerald-800">
+          <p className="text-[10px] uppercase text-emerald-700 dark:text-emerald-300">Cobrado</p>
+          <p className="font-bold text-emerald-700 dark:text-emerald-300">{fmtMoney(cobrado)}</p>
+        </div>
+        <div className={`rounded-lg p-3 border ${saldada ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800' : 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800'}`}>
+          <p className={`text-[10px] uppercase ${saldada ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}`}>Saldo</p>
+          <p className={`font-bold ${saldada ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}`}>{saldada ? 'Saldada' : fmtMoney(saldo)}</p>
+        </div>
+        <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
+          <p className="text-[10px] uppercase text-gray-500 dark:text-gray-400">Cuotas</p>
+          <p className="font-bold text-gray-900 dark:text-gray-100">
+            {cuotasPagadas}{cuotasPlanificadas > 0 ? ` / ${cuotasPlanificadas}` : ''}
+          </p>
+        </div>
+      </div>
+
+      {/* Barra de progreso */}
+      <div className="w-full h-2 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+        <div
+          className="h-full bg-gradient-to-r from-emerald-400 to-emerald-600 transition-all"
+          style={{ width: `${Math.min(100, porcentaje)}%` }}
+        />
+      </div>
+
+      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+        <table className="w-full text-xs">
+          <thead className="bg-gray-50 dark:bg-gray-700/60">
+            <tr className="text-left text-gray-600 dark:text-gray-300">
+              <th className="px-3 py-2 font-semibold w-12">Cuota</th>
+              <th className="px-3 py-2 font-semibold text-right">Monto</th>
+              <th className="px-3 py-2 font-semibold">Fecha</th>
+              <th className="px-3 py-2 font-semibold">Nota</th>
+              <th className="px-3 py-2 w-8"></th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+            {cobros.length === 0 && (
+              <tr><td colSpan={5} className="px-3 py-4 text-center text-gray-500 dark:text-gray-400 italic">Sin cobros registrados.</td></tr>
+            )}
+            {cobros.map((cobro, i) => (
+              <tr key={i}>
+                <td className="px-3 py-2 text-gray-700 dark:text-gray-300 font-semibold">
+                  {i + 1}{cuotasPlanificadas > 0 ? ` / ${cuotasPlanificadas}` : ''}
+                </td>
+                <td className="px-3 py-2 text-right">
+                  <input
+                    type="number"
+                    min="0"
+                    value={cobro.monto ?? ''}
+                    onChange={(e) => updateCobro(i, { monto: parseFloat(e.target.value) || 0 })}
+                    placeholder="0"
+                    className="w-28 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500 text-right"
+                  />
+                </td>
+                <td className="px-3 py-2">
+                  <input
+                    type="date"
+                    value={cobro.fecha || ''}
+                    onChange={(e) => updateCobro(i, { fecha: e.target.value })}
+                    className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                </td>
+                <td className="px-3 py-2">
+                  <input
+                    type="text"
+                    value={cobro.nota || ''}
+                    onChange={(e) => updateCobro(i, { nota: e.target.value })}
+                    placeholder="ej: seña, transfer..."
+                    className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                </td>
+                <td className="px-3 py-2 text-center">
+                  <button
+                    type="button"
+                    onClick={() => removeCobro(i)}
+                    className="p-1 rounded text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 transition"
+                    title="Eliminar este cobro"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <button
+        type="button"
+        onClick={addCobro}
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md border border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition"
+      >
+        <Plus size={14} /> Registrar cobro
+      </button>
+    </div>
+  );
+}
+
 function PaymentsPanel({ order, payments, mentorNombre, onChange }) {
   const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
   const totalPagado = Object.values(payments)

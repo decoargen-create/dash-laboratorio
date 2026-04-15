@@ -12,6 +12,7 @@ import {
 import { VioraLogo, VioraMark } from './logo.jsx';
 import LandingPage from './LandingPage.jsx';
 import ChatbotWidget from './ChatbotWidget.jsx';
+import { generateCSV, downloadCSV, parseCSV, toNumber, toBool } from './csv.js';
 
 // Estados del pipeline de producción de una orden
 export const ORDER_STATES = [
@@ -144,6 +145,27 @@ function appReducer(state, action) {
           return updated;
         })
       };
+    }
+    case 'BULK_REPLACE': {
+      // payload: { entity: 'products' | 'clients' | 'mentors' | 'sales', data: [...] }
+      // Reemplaza el array completo de una entidad. Usado por el import CSV
+      // cuando el user elige 'Reemplazar todo'.
+      const { entity, data } = action.payload;
+      if (!['products', 'clients', 'mentors', 'sales'].includes(entity)) return state;
+      return { ...state, [entity]: Array.isArray(data) ? data : [] };
+    }
+    case 'BULK_MERGE': {
+      // payload: { entity, data } — agrega las filas nuevas al array existente
+      // (concatenando). Usado por el import cuando el user elige 'Agregar al final'.
+      const { entity, data } = action.payload;
+      if (!['products', 'clients', 'mentors', 'sales'].includes(entity)) return state;
+      const existing = state[entity] || [];
+      const maxId = existing.reduce((m, it) => Math.max(m, it.id || 0), 0);
+      const reIdd = (Array.isArray(data) ? data : []).map((row, i) => ({
+        ...row,
+        id: maxId + i + 1,
+      }));
+      return { ...state, [entity]: [...existing, ...reIdd] };
     }
     case 'UPDATE_ORDER': {
       // Acción genérica: patchea cualquier campo de una orden por id.
@@ -652,6 +674,7 @@ function AppShell({ onExit }) {
               <NavItem icon={CreditCard} label="Comisiones" section="comisiones" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={UserCheck} label="Equipo" section="mentores" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={Sparkles} label="Analytics IA" section="analytics" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              <NavItem icon={Package} label="Datos" section="datos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
             </>
           ) : (
             <>
@@ -696,6 +719,7 @@ function AppShell({ onExit }) {
           {currentUser.role === 'admin' && currentSection === 'comisiones' && <ComisionesSection state={state} dispatch={dispatch} onUpdateMentor={handleUpdateMentor} getMentorStats={getMentorStats} filterMentor={filterMentor} setFilterMentor={setFilterMentor} />}
           {currentUser.role === 'admin' && currentSection === 'mentores' && <MentoresSection state={state} getMentorStats={getMentorStats} />}
           {currentUser.role === 'admin' && currentSection === 'analytics' && <AnalyticsSection state={state} currentUser={currentUser} />}
+          {currentUser.role === 'admin' && currentSection === 'datos' && <DatosSection state={state} dispatch={dispatch} addToast={addToast} />}
 
           {/* Mentor Views */}
           {currentUser.role === 'mentor' && currentSection === 'inicio' && <EquipoInicioSection currentUser={currentUser} state={state} />}
@@ -3175,6 +3199,275 @@ function MentorBalanceCard({ mentor, balance, onChangePagos }) {
 // del negocio a Claude y devuelve un reporte estructurado con: resumen
 // ejecutivo, tiempos de entrega por nicho, fortalezas, debilidades y
 // recomendaciones accionables.
+// Sección de gestión de datos: export/import CSV por entidad. Sirve para
+// sacar una copia de seguridad, pasar datos a Excel, o migrar desde otro
+// sistema importando CSV con el formato esperado.
+function DatosSection({ state, dispatch, addToast }) {
+  // Definición de las 4 entidades y cómo se serializan/deserializan.
+  // Si en el futuro cambia el schema de una entidad, hay que actualizar
+  // acá las columnas y el parser.
+  const ENTITIES = [
+    {
+      key: 'products',
+      label: 'Productos',
+      icon: Package,
+      columns: [
+        { key: 'id', label: 'id' },
+        { key: 'nombre', label: 'nombre' },
+        { key: 'descripcion', label: 'descripcion' },
+        { key: 'costoContenido', label: 'costoContenido' },
+        { key: 'costoEnvase', label: 'costoEnvase' },
+        { key: 'costoEtiqueta', label: 'costoEtiqueta' },
+        { key: 'precioVenta', label: 'precioVenta' },
+        { key: 'costoSinDesglosar', label: 'costoSinDesglosar' },
+        { key: 'formula', label: 'formula', serialize: (p) => JSON.stringify(p.formula || []) },
+      ],
+      parseRow: (row) => ({
+        nombre: row.nombre || '',
+        descripcion: row.descripcion || '',
+        costoContenido: toNumber(row.costoContenido),
+        costoEnvase: toNumber(row.costoEnvase),
+        costoEtiqueta: toNumber(row.costoEtiqueta),
+        precioVenta: toNumber(row.precioVenta),
+        costoSinDesglosar: row.costoSinDesglosar ? toNumber(row.costoSinDesglosar) : null,
+        formula: (() => { try { return JSON.parse(row.formula || '[]'); } catch { return []; } })(),
+      }),
+    },
+    {
+      key: 'clients',
+      label: 'Clientes',
+      icon: Users,
+      columns: [
+        { key: 'id', label: 'id' },
+        { key: 'nombre', label: 'nombre' },
+        { key: 'telefono', label: 'telefono' },
+        { key: 'domicilio', label: 'domicilio' },
+        { key: 'mentorId', label: 'mentorId' },
+        { key: 'fechaAlta', label: 'fechaAlta' },
+        { key: 'totalCompras', label: 'totalCompras' },
+        { key: 'unidadesProducidas', label: 'unidadesProducidas' },
+      ],
+      parseRow: (row) => ({
+        nombre: row.nombre || '',
+        telefono: row.telefono || '',
+        domicilio: row.domicilio || '',
+        mentorId: row.mentorId ? toNumber(row.mentorId) : null,
+        fechaAlta: row.fechaAlta || new Date().toISOString().split('T')[0],
+        totalCompras: toNumber(row.totalCompras),
+        unidadesProducidas: toNumber(row.unidadesProducidas),
+      }),
+    },
+    {
+      key: 'mentors',
+      label: 'Equipo',
+      icon: UserCheck,
+      columns: [
+        { key: 'id', label: 'id' },
+        { key: 'nombre', label: 'nombre' },
+        { key: 'contacto', label: 'contacto' },
+        { key: 'fechaInicio', label: 'fechaInicio' },
+        { key: 'porcentajeComision', label: 'porcentajeComision' },
+        { key: 'pagosRecibidos', label: 'pagosRecibidos', serialize: (m) => JSON.stringify(m.pagosRecibidos || []) },
+      ],
+      parseRow: (row) => ({
+        nombre: row.nombre || '',
+        contacto: row.contacto || '',
+        fechaInicio: row.fechaInicio || new Date().toISOString().split('T')[0],
+        porcentajeComision: row.porcentajeComision ? toNumber(row.porcentajeComision) : 50,
+        pagosRecibidos: (() => { try { return JSON.parse(row.pagosRecibidos || '[]'); } catch { return []; } })(),
+      }),
+    },
+    {
+      key: 'sales',
+      label: 'Órdenes',
+      icon: TrendingUp,
+      columns: [
+        { key: 'id', label: 'id' },
+        { key: 'fecha', label: 'fecha' },
+        { key: 'clienteId', label: 'clienteId' },
+        { key: 'productoId', label: 'productoId' },
+        { key: 'cantidad', label: 'cantidad' },
+        { key: 'montoTotal', label: 'montoTotal' },
+        { key: 'mentorId', label: 'mentorId' },
+        { key: 'estado', label: 'estado' },
+        { key: 'tieneIncidencia', label: 'tieneIncidencia' },
+        { key: 'incidenciaDetalle', label: 'incidenciaDetalle' },
+        { key: 'mentorPresupuesto', label: 'mentorPresupuesto' },
+        { key: 'cuotasPlanificadas', label: 'cuotasPlanificadas' },
+        { key: 'cobros', label: 'cobros', serialize: (s) => JSON.stringify(s.cobros || []) },
+        { key: 'pagos', label: 'pagos', serialize: (s) => JSON.stringify(s.pagos || {}) },
+        { key: 'costsOverride', label: 'costsOverride', serialize: (s) => JSON.stringify(s.costsOverride || {}) },
+        { key: 'costoSinDesglosar', label: 'costoSinDesglosar' },
+        { key: 'estadoComision', label: 'estadoComision' },
+      ],
+      parseRow: (row) => ({
+        fecha: row.fecha || new Date().toISOString().split('T')[0],
+        clienteId: toNumber(row.clienteId),
+        productoId: toNumber(row.productoId),
+        cantidad: toNumber(row.cantidad, 1),
+        montoTotal: toNumber(row.montoTotal),
+        mentorId: row.mentorId ? toNumber(row.mentorId) : null,
+        estado: row.estado || 'pendiente-cotizacion',
+        tieneIncidencia: toBool(row.tieneIncidencia),
+        incidenciaDetalle: row.incidenciaDetalle || '',
+        mentorPresupuesto: row.mentorPresupuesto ? toNumber(row.mentorPresupuesto) : null,
+        cuotasPlanificadas: row.cuotasPlanificadas ? toNumber(row.cuotasPlanificadas) : 0,
+        cobros: (() => { try { return JSON.parse(row.cobros || '[]'); } catch { return []; } })(),
+        pagos: (() => { try { return JSON.parse(row.pagos || '{}'); } catch { return {}; } })(),
+        costsOverride: (() => { try { return JSON.parse(row.costsOverride || '{}'); } catch { return {}; } })(),
+        costoSinDesglosar: row.costoSinDesglosar ? toNumber(row.costoSinDesglosar) : null,
+        estadoComision: row.estadoComision || 'pendiente',
+      }),
+    },
+  ];
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Datos</h2>
+        <p className="text-sm text-gray-500 dark:text-gray-400">Exportar e importar datos en formato CSV. Sirve para backup o migración.</p>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {ENTITIES.map(ent => (
+          <EntityDataCard key={ent.key} entity={ent} state={state} dispatch={dispatch} addToast={addToast} />
+        ))}
+      </div>
+
+      {/* Bonus: Export de TODO de una (zip conceptual: todos los CSV juntos en 1 archivo) */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
+        <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-2">Backup completo</h3>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Exportá todos los datos en un solo archivo JSON. Ideal para guardar o mover a otra máquina.</p>
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => {
+              const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json;charset=utf-8;' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `viora-backup-${new Date().toISOString().split('T')[0]}.json`;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL.revokeObjectURL(url);
+              addToast?.({ type: 'success', message: 'Backup generado' });
+            }}
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg bg-pink-900 text-white hover:bg-pink-800 transition"
+          >
+            <Package size={16} /> Exportar backup completo (JSON)
+          </button>
+          <label className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg border border-pink-900 text-pink-900 dark:text-pink-300 dark:border-pink-500 hover:bg-pink-50 dark:hover:bg-pink-900/30 transition cursor-pointer">
+            <Package size={16} /> Restaurar desde backup
+            <input
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                  try {
+                    const parsed = JSON.parse(ev.target.result);
+                    if (!parsed || typeof parsed !== 'object') throw new Error('JSON inválido');
+                    if (!window.confirm('¿Restaurar desde backup? Se reemplazarán todos los datos actuales.')) return;
+                    ['products', 'clients', 'mentors', 'sales'].forEach(key => {
+                      if (Array.isArray(parsed[key])) {
+                        dispatch({ type: 'BULK_REPLACE', payload: { entity: key, data: parsed[key] } });
+                      }
+                    });
+                    addToast?.({ type: 'success', message: 'Backup restaurado' });
+                  } catch (err) {
+                    addToast?.({ type: 'error', message: `Error: ${err.message}` });
+                  }
+                };
+                reader.readAsText(file);
+                e.target.value = '';
+              }}
+            />
+          </label>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Card individual de export/import para una entidad específica.
+function EntityDataCard({ entity, state, dispatch, addToast }) {
+  const data = state[entity.key] || [];
+  const Icon = entity.icon;
+
+  const handleExport = () => {
+    const csv = generateCSV(data, entity.columns);
+    const filename = `viora-${entity.key}-${new Date().toISOString().split('T')[0]}.csv`;
+    downloadCSV(filename, csv);
+    addToast?.({ type: 'success', message: `${entity.label} exportados (${data.length} filas)` });
+  };
+
+  const handleImport = (mode) => (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const text = ev.target.result;
+        const parsed = parseCSV(text);
+        if (parsed.rows.length === 0) throw new Error('El archivo no tiene filas');
+        const items = parsed.rows.map(entity.parseRow).filter(x => x.nombre || x.fecha || x.clienteId); // filtra vacíos
+
+        if (mode === 'replace') {
+          if (!window.confirm(`¿Reemplazar los ${data.length} ${entity.label.toLowerCase()} actuales por ${items.length} del CSV?`)) return;
+          // Re-IDdamos desde 1
+          const reIdd = items.map((it, i) => ({ ...it, id: i + 1 }));
+          dispatch({ type: 'BULK_REPLACE', payload: { entity: entity.key, data: reIdd } });
+          addToast?.({ type: 'success', message: `${items.length} ${entity.label.toLowerCase()} importados (reemplazo)` });
+        } else {
+          dispatch({ type: 'BULK_MERGE', payload: { entity: entity.key, data: items } });
+          addToast?.({ type: 'success', message: `${items.length} ${entity.label.toLowerCase()} agregados` });
+        }
+      } catch (err) {
+        addToast?.({ type: 'error', message: `Error: ${err.message}` });
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-5">
+      <div className="flex items-start justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-pink-100 dark:bg-pink-900/40 text-pink-700 dark:text-pink-300 flex items-center justify-center">
+            <Icon size={18} />
+          </div>
+          <div>
+            <p className="text-base font-bold text-gray-900 dark:text-gray-100">{entity.label}</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">{data.length} {data.length === 1 ? 'fila' : 'filas'}</p>
+          </div>
+        </div>
+      </div>
+      <div className="space-y-2">
+        <button
+          onClick={handleExport}
+          disabled={data.length === 0}
+          className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 text-xs font-semibold rounded-md bg-emerald-600 text-white hover:bg-emerald-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Exportar CSV
+        </button>
+        <div className="grid grid-cols-2 gap-2">
+          <label className="inline-flex items-center justify-center gap-1.5 px-2 py-2 text-[11px] font-semibold rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition cursor-pointer" title="Agrega las filas del CSV al final del dataset actual">
+            + Agregar
+            <input type="file" accept=".csv,text/csv" className="hidden" onChange={handleImport('merge')} />
+          </label>
+          <label className="inline-flex items-center justify-center gap-1.5 px-2 py-2 text-[11px] font-semibold rounded-md border border-amber-600 text-amber-700 dark:text-amber-300 dark:border-amber-500 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition cursor-pointer" title="Reemplaza TODO el dataset por las filas del CSV">
+            ↻ Reemplazar
+            <input type="file" accept=".csv,text/csv" className="hidden" onChange={handleImport('replace')} />
+          </label>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AnalyticsSection({ state, currentUser }) {
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -5157,6 +5450,7 @@ function getSectionTitle(user, section) {
     comisiones: 'Comisiones',
     mentores: 'Equipo',
     analytics: 'Analytics con IA',
+    datos: 'Datos (Export / Import)',
   };
   const mentor = {
     inicio: 'Inicio',

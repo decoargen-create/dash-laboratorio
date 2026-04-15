@@ -1,19 +1,24 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { MessageSquare, X, Send, Sparkles, Loader2 } from 'lucide-react';
+import { MessageSquare, X, Send, Sparkles, Loader2, Zap, CheckCircle2, AlertTriangle } from 'lucide-react';
 
 // Widget flotante de chatbot que habla con Claude vía /api/chat.
 // - `mode`: 'panel' | 'landing' → cambia el tono y el contexto del system prompt.
 // - `context`: snapshot de datos para enriquecer las respuestas (en modo panel).
+// - `onExecuteTool`: opcional. Si se pasa, habilita tool-use: cuando Claude
+//    responde con un pedido de tool, el widget ejecuta la función con (name, input)
+//    y reenvía el resultado al backend para que Claude continúe la conversación.
 // - Streaming vía SSE: los tokens aparecen en tiempo real sin spinners.
 // - Maneja errores de red y falta de API key con mensajes claros.
-export default function ChatbotWidget({ mode = 'panel', context = null, accent = 'rose' }) {
+export default function ChatbotWidget({ mode = 'panel', context = null, accent = 'rose', onExecuteTool = null }) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState(() => ([
     {
       role: 'assistant',
       content: mode === 'landing'
         ? '¡Hola! Soy el asistente de Laboratorio Viora. Preguntame sobre tiempos, mínimos o cómo empezar a producir tu marca.'
-        : '¡Hola! Soy tu asistente. Preguntame lo que necesites sobre las órdenes, clientes, productos o cómo usar el panel.',
+        : onExecuteTool
+          ? '¡Hola! Además de contestar preguntas sobre tus datos, puedo ejecutar acciones: crear clientes, productos, órdenes, cambiar estados, registrar cobros o marcar incidencias. Pedímelo con naturalidad.'
+          : '¡Hola! Soy tu asistente. Preguntame lo que necesites sobre las órdenes, clientes, productos o cómo usar el panel.',
     },
   ]));
   const [input, setInput] = useState('');
@@ -41,35 +46,49 @@ export default function ChatbotWidget({ mode = 'panel', context = null, accent =
         '¿Cuál es el mínimo de unidades?',
         '¿Qué productos puedo fabricar?',
       ]
-    : [
-        '¿Cuántas órdenes pendientes tengo?',
-        '¿Cuál fue el profit del período?',
-        '¿Cómo creo un nuevo cliente?',
-      ];
+    : onExecuteTool
+      ? [
+          '¿Cuántas órdenes pendientes tengo?',
+          'Creá una orden de 100 unidades de Crema Hidratante para Martina',
+          'Marcá la orden #5 como despachada',
+        ]
+      : [
+          '¿Cuántas órdenes pendientes tengo?',
+          '¿Cuál fue el profit del período?',
+          '¿Cómo creo un nuevo cliente?',
+        ];
 
-  const send = async (overrideText) => {
-    const text = (overrideText ?? input).trim();
-    if (!text || streaming) return;
-
-    setError('');
-    const userMsg = { role: 'user', content: text };
-    const nextMessages = [...messages, userMsg];
-    setMessages(nextMessages);
-    setInput('');
-    setStreaming(true);
-
-    // Mensaje del asistente vacío que se va llenando con los chunks
-    setMessages(m => [...m, { role: 'assistant', content: '' }]);
+  // Hace una request al backend con el array de messages actual. Stremea
+  // texto y al final, si vino un tool_use_request, ejecuta las tools y
+  // se llama a sí misma recursivamente con los tool_result adjuntos.
+  // Limite de profundidad = 5 para cortar loops accidentales.
+  const callBackend = async (currentMessages, depth = 0) => {
+    if (depth > 5) {
+      setError('El asistente entró en un loop de tools, corté la conversación.');
+      return;
+    }
 
     const controller = new AbortController();
     abortRef.current = controller;
+
+    // Empujamos un mensaje vacío del asistente que se va llenando con chunks.
+    // Si después llega tool_use, ese mensaje va a contener también blocks de tool_use.
+    let assistantIdx = -1;
+    setMessages(m => {
+      const copy = [...m, { role: 'assistant', content: '' }];
+      assistantIdx = copy.length - 1;
+      return copy;
+    });
+
+    let assistantText = '';
+    let toolUseRequest = null; // { assistantContent, toolUses }
 
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: nextMessages.map(m => ({ role: m.role, content: m.content })),
+          messages: currentMessages.map(m => ({ role: m.role, content: m.content })),
           mode,
           context,
         }),
@@ -84,7 +103,6 @@ export default function ChatbotWidget({ mode = 'panel', context = null, accent =
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buf = '';
-      let assistantContent = '';
 
       while (true) {
         const { done, value } = await reader.read();
@@ -99,12 +117,18 @@ export default function ChatbotWidget({ mode = 'panel', context = null, accent =
           try {
             const parsed = JSON.parse(payload);
             if (parsed.type === 'chunk') {
-              assistantContent += parsed.text;
+              assistantText += parsed.text;
               setMessages(m => {
                 const copy = [...m];
-                copy[copy.length - 1] = { role: 'assistant', content: assistantContent };
+                const last = copy[copy.length - 1];
+                if (last && last.role === 'assistant') {
+                  copy[copy.length - 1] = { ...last, content: assistantText };
+                }
                 return copy;
               });
+            } else if (parsed.type === 'tool_use_request') {
+              // Guardamos para procesar después de cerrar el stream.
+              toolUseRequest = parsed;
             } else if (parsed.type === 'error') {
               throw new Error(parsed.error);
             }
@@ -117,13 +141,87 @@ export default function ChatbotWidget({ mode = 'panel', context = null, accent =
     } catch (err) {
       if (err.name !== 'AbortError') {
         setError(err.message || 'No pude conectar con el asistente.');
-        // Sacamos el mensaje del asistente vacío
-        setMessages(m => m.filter((_, i) => !(i === m.length - 1 && m[i].role === 'assistant' && !m[i].content)));
+        // Sacamos el mensaje del asistente vacío si no hubo texto
+        setMessages(m => {
+          if (!assistantText && m.length > 0 && m[m.length - 1].role === 'assistant' && !m[m.length - 1].content) {
+            return m.slice(0, -1);
+          }
+          return m;
+        });
       }
-    } finally {
       setStreaming(false);
       abortRef.current = null;
+      return;
     }
+
+    // Si hay tool_use pendientes y tenemos ejecutor → procesamos y seguimos.
+    if (toolUseRequest && typeof onExecuteTool === 'function' && Array.isArray(toolUseRequest.toolUses) && toolUseRequest.toolUses.length > 0) {
+      // Reemplazamos el mensaje vacío del asistente por uno con tool_use blocks
+      // + texto previo (que viene en assistantContent).
+      const assistantFullContent = toolUseRequest.assistantContent;
+
+      // Ejecutamos cada tool y juntamos los resultados.
+      const toolResults = [];
+      const executed = [];
+      for (const t of toolUseRequest.toolUses) {
+        let result;
+        try {
+          result = onExecuteTool(t.name, t.input);
+        } catch (err) {
+          result = { ok: false, error: err?.message || 'Error al ejecutar' };
+        }
+        executed.push({ id: t.id, name: t.name, input: t.input, result });
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: t.id,
+          content: JSON.stringify(result ?? { ok: false, error: 'Sin resultado' }),
+          is_error: result && result.ok === false,
+        });
+      }
+
+      // Construimos los dos mensajes que tienen que ir en la próxima request:
+      // 1) assistant con el content completo (texto + tool_use blocks)
+      // 2) user con los tool_result blocks
+      const assistantMsg = {
+        role: 'assistant',
+        content: assistantFullContent,
+        // Metadata de UI para rendering (no se manda al backend)
+        _toolUses: executed,
+      };
+      const userToolMsg = {
+        role: 'user',
+        content: toolResults,
+        _toolResults: executed,
+      };
+
+      // Pisamos el mensaje asistente vacío por el que tiene tool_use, y
+      // agregamos el user con los tool_result. Computamos nextMessages de
+      // forma determinística a partir de `currentMessages` (lo que le pasamos
+      // al backend en esta iteración) para no depender de timings de setState.
+      const nextMessages = [...currentMessages, assistantMsg, userToolMsg];
+      setMessages(nextMessages);
+
+      await callBackend(nextMessages, depth + 1);
+      return;
+    }
+
+    // Sin tool_use → terminó la conversación, dejamos el texto final.
+    setStreaming(false);
+    abortRef.current = null;
+  };
+
+  const send = async (overrideText) => {
+    const text = (overrideText ?? input).trim();
+    if (!text || streaming) return;
+
+    setError('');
+    const userMsg = { role: 'user', content: text };
+    const nextMessages = [...messages, userMsg];
+    setMessages(nextMessages);
+    setInput('');
+    setStreaming(true);
+
+    await callBackend(nextMessages, 0);
   };
 
   const stop = () => {
@@ -173,7 +271,7 @@ export default function ChatbotWidget({ mode = 'panel', context = null, accent =
               <p className="text-sm font-bold text-gray-900 dark:text-gray-100">Asistente Viora</p>
               <p className="text-[11px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                En línea · powered by Claude
+                En línea · powered by Claude{onExecuteTool ? ' · con acciones' : ''}
               </p>
             </div>
             <button
@@ -188,7 +286,11 @@ export default function ChatbotWidget({ mode = 'panel', context = null, accent =
           {/* Mensajes */}
           <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
             {messages.map((m, i) => (
-              <MessageBubble key={i} role={m.role} content={m.content} streaming={streaming && i === messages.length - 1 && m.role === 'assistant'} />
+              <MessageBubble
+                key={i}
+                message={m}
+                streaming={streaming && i === messages.length - 1 && m.role === 'assistant'}
+              />
             ))}
             {error && (
               <div className="px-3 py-2 rounded-lg bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-xs">
@@ -253,22 +355,97 @@ export default function ChatbotWidget({ mode = 'panel', context = null, accent =
   );
 }
 
-function MessageBubble({ role, content, streaming }) {
+// Extrae el texto visible de un mensaje cuyo content puede ser string o array
+// de blocks (text, tool_use, tool_result). Ignora tool_use/tool_result:
+// esos se renderizan aparte como tarjetas.
+function extractText(content) {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content.filter(b => b.type === 'text').map(b => b.text).join('');
+}
+
+function MessageBubble({ message, streaming }) {
+  const { role, _toolUses, _toolResults } = message;
+  const text = extractText(message.content);
   const isUser = role === 'user';
+
+  // Mensaje de user que sólo contiene tool_result (no lo mostramos como bubble
+  // porque ya lo vamos a mostrar como tarjeta debajo del assistant).
+  const isOnlyToolResult = isUser && Array.isArray(message.content) && message.content.every(b => b.type === 'tool_result');
+  if (isOnlyToolResult) return null;
+
   return (
-    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} animate-fade-in-up`}>
-      <div
-        className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${
-          isUser
-            ? 'bg-gradient-to-br from-pink-600 to-rose-500 text-white rounded-br-sm shadow-md'
-            : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-bl-sm'
-        }`}
-      >
-        {content || (streaming && <TypingDots />)}
-        {streaming && content && <span className="inline-block w-1.5 h-3.5 ml-0.5 bg-current align-middle animate-pulse" />}
+    <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} gap-1.5 animate-fade-in-up`}>
+      {(text || streaming) && (
+        <div
+          className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap ${
+            isUser
+              ? 'bg-gradient-to-br from-pink-600 to-rose-500 text-white rounded-br-sm shadow-md'
+              : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-bl-sm'
+          }`}
+        >
+          {text || (streaming && <TypingDots />)}
+          {streaming && text && <span className="inline-block w-1.5 h-3.5 ml-0.5 bg-current align-middle animate-pulse" />}
+        </div>
+      )}
+      {/* Tarjetas con tools ejecutadas (si el assistant llamó tools) */}
+      {Array.isArray(_toolUses) && _toolUses.length > 0 && (
+        <div className="max-w-[95%] space-y-1.5">
+          {_toolUses.map(t => (
+            <ToolCard key={t.id} tool={t} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ToolCard({ tool }) {
+  const ok = tool.result?.ok !== false;
+  const Icon = ok ? CheckCircle2 : AlertTriangle;
+  const colorClass = ok
+    ? 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-800/50 dark:bg-emerald-900/20 dark:text-emerald-200'
+    : 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800/50 dark:bg-amber-900/20 dark:text-amber-200';
+
+  const summary = ok
+    ? summarizeToolResult(tool.name, tool.input, tool.result)
+    : (tool.result?.error || 'Error al ejecutar');
+
+  return (
+    <div className={`rounded-xl border px-2.5 py-1.5 text-[11px] flex items-start gap-2 ${colorClass}`}>
+      <Zap size={12} className="mt-0.5 shrink-0" />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1 font-semibold">
+          <Icon size={11} />
+          <span>{tool.name}</span>
+        </div>
+        <div className="opacity-80 break-words">{summary}</div>
       </div>
     </div>
   );
+}
+
+// Resume para el usuario lo que hizo cada tool. No pretende ser exhaustivo,
+// apunta a ser legible en una línea.
+function summarizeToolResult(name, input, result) {
+  switch (name) {
+    case 'crear_cliente':
+      return `Cliente creado: ${result?.cliente?.nombre || input?.nombre} (#${result?.cliente?.id ?? '?'})`;
+    case 'crear_producto':
+      return `Producto creado: ${result?.producto?.nombre || input?.nombre} ($${result?.producto?.precioVenta ?? '?'})`;
+    case 'crear_orden':
+      return `Orden #${result?.orden?.id ?? '?'}: ${result?.orden?.cantidad ?? input?.cantidad}u de ${result?.orden?.producto || ''} para ${result?.orden?.cliente || ''}`;
+    case 'cambiar_estado_orden':
+      return `Orden #${input?.orderId} → ${input?.estado}`;
+    case 'marcar_incidencia':
+      return input?.tieneIncidencia
+        ? `Incidencia marcada en #${input?.orderId}${input?.incidenciaDetalle ? `: ${input.incidenciaDetalle}` : ''}`
+        : `Incidencia resuelta en #${input?.orderId}`;
+    case 'registrar_cobro':
+      return `Cobro ${input?.rubro} en #${input?.orderId} → ${input?.estado}${input?.monto != null ? ` ($${input.monto})` : ''}`;
+    default:
+      return JSON.stringify(input);
+  }
 }
 
 function TypingDots() {

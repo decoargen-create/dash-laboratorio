@@ -565,6 +565,123 @@ function AppShell({ onExit }) {
     setShowNewProductModal(false);
   };
 
+  // Ejecutor de tools del chatbot. Claude pide acciones por nombre + input;
+  // acá mapeamos cada tool a la reducer action correspondiente y devolvemos
+  // un resultado legible que el widget reenvía al backend como tool_result.
+  // Todos los casos validan input mínimo y devuelven { ok, ... } o { ok:false, error }.
+  const executeChatbotTool = (name, input) => {
+    try {
+      switch (name) {
+        case 'crear_cliente': {
+          if (!input?.nombre) return { ok: false, error: 'Falta el nombre' };
+          const cli = createClient({
+            nombre: input.nombre,
+            telefono: input.telefono || '',
+            domicilio: input.domicilio || '',
+            mentorId: input.mentorId != null ? input.mentorId : null,
+          });
+          return { ok: true, cliente: { id: cli.id, nombre: cli.nombre } };
+        }
+        case 'crear_producto': {
+          if (!input?.nombre) return { ok: false, error: 'Falta el nombre' };
+          if (input.precioVenta == null) return { ok: false, error: 'Falta precioVenta' };
+          const p = createProduct({
+            nombre: input.nombre,
+            descripcion: input.descripcion || '',
+            costoContenido: Number(input.costoContenido) || 0,
+            costoEnvase: Number(input.costoEnvase) || 0,
+            costoEtiqueta: Number(input.costoEtiqueta) || 0,
+            precioVenta: Number(input.precioVenta) || 0,
+          });
+          return { ok: true, producto: { id: p.id, nombre: p.nombre, precioVenta: p.precioVenta } };
+        }
+        case 'crear_orden': {
+          const { clienteId, productoId, cantidad, montoTotal } = input || {};
+          if (clienteId == null || productoId == null || cantidad == null || montoTotal == null) {
+            return { ok: false, error: 'Faltan campos obligatorios (clienteId, productoId, cantidad, montoTotal)' };
+          }
+          const cliente = state.clients.find(c => c.id === clienteId);
+          const producto = state.products.find(p => p.id === productoId);
+          if (!cliente) return { ok: false, error: `No existe cliente con id ${clienteId}` };
+          if (!producto) return { ok: false, error: `No existe producto con id ${productoId}` };
+          const maxId = state.sales.reduce((m, s) => Math.max(m, s.id), 0);
+          const fallbackMentor = input.mentorId != null ? input.mentorId : (cliente.mentorId ?? null);
+          const newSale = {
+            id: maxId + 1,
+            fecha: input.fecha || new Date().toISOString().split('T')[0],
+            clienteId,
+            productoId,
+            cantidad: Number(cantidad),
+            montoTotal: Number(montoTotal),
+            mentorId: fallbackMentor,
+            estado: input.estado || 'pendiente-cotizacion',
+            estadoComision: 'pendiente',
+            tieneIncidencia: false,
+            incidenciaDetalle: '',
+          };
+          dispatch({ type: 'ADD_SALE', payload: newSale });
+          addToast({ type: 'success', message: `Orden #${newSale.id} creada por el chatbot` });
+          return {
+            ok: true,
+            orden: {
+              id: newSale.id,
+              cliente: cliente.nombre,
+              producto: producto.nombre,
+              cantidad: newSale.cantidad,
+              montoTotal: newSale.montoTotal,
+              estado: newSale.estado,
+            },
+          };
+        }
+        case 'cambiar_estado_orden': {
+          const { orderId, estado } = input || {};
+          if (orderId == null || !estado) return { ok: false, error: 'Faltan orderId o estado' };
+          if (!ORDER_STATES.includes(estado)) return { ok: false, error: `Estado inválido: ${estado}` };
+          const exists = state.sales.some(s => s.id === orderId);
+          if (!exists) return { ok: false, error: `No existe orden #${orderId}` };
+          dispatch({ type: 'UPDATE_ORDER_STATE', payload: { orderId, estado } });
+          addToast({ type: 'success', message: `Orden #${orderId} → ${ORDER_STATE_LABELS[estado]}` });
+          return { ok: true, orderId, nuevoEstado: estado };
+        }
+        case 'marcar_incidencia': {
+          const { orderId, tieneIncidencia, incidenciaDetalle } = input || {};
+          if (orderId == null || tieneIncidencia == null) return { ok: false, error: 'Faltan orderId o tieneIncidencia' };
+          const exists = state.sales.some(s => s.id === orderId);
+          if (!exists) return { ok: false, error: `No existe orden #${orderId}` };
+          dispatch({
+            type: 'UPDATE_ORDER_INCIDENCIA',
+            payload: {
+              orderId,
+              tieneIncidencia: !!tieneIncidencia,
+              incidenciaDetalle: tieneIncidencia ? (incidenciaDetalle || '') : '',
+            },
+          });
+          addToast({ type: tieneIncidencia ? 'warning' : 'success', message: tieneIncidencia ? `Orden #${orderId} marcada con incidencia` : `Incidencia de orden #${orderId} resuelta` });
+          return { ok: true, orderId, tieneIncidencia: !!tieneIncidencia };
+        }
+        case 'registrar_cobro': {
+          const { orderId, rubro, estado, monto, fecha } = input || {};
+          if (orderId == null || !rubro || !estado) return { ok: false, error: 'Faltan orderId, rubro o estado' };
+          const RUBROS = ['cliente', 'mentor', 'contenido', 'envase', 'etiqueta'];
+          if (!RUBROS.includes(rubro)) return { ok: false, error: `Rubro inválido: ${rubro}` };
+          if (!['pagado', 'pendiente'].includes(estado)) return { ok: false, error: `Estado inválido: ${estado}` };
+          const exists = state.sales.some(s => s.id === orderId);
+          if (!exists) return { ok: false, error: `No existe orden #${orderId}` };
+          const data = { estado };
+          if (monto != null) data.monto = Number(monto);
+          if (fecha) data.fecha = fecha;
+          dispatch({ type: 'UPDATE_ORDER_PAYMENT', payload: { orderId, rubro, data } });
+          addToast({ type: 'success', message: `Cobro ${rubro} de #${orderId} → ${estado}` });
+          return { ok: true, orderId, rubro, estado };
+        }
+        default:
+          return { ok: false, error: `Tool desconocida: ${name}` };
+      }
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Error ejecutando la tool' };
+    }
+  };
+
   const calculateMargin = (costo, precio) => {
     if (!precio || precio <= 0) return 0;
     return Math.round(((precio - costo) / precio) * 100);
@@ -747,10 +864,12 @@ function AppShell({ onExit }) {
       {/* Toast container */}
       <ToastContainer toasts={toasts} />
 
-      {/* Chatbot con contexto del negocio */}
+      {/* Chatbot con contexto del negocio.
+          Sólo admin tiene tool-use (crear/editar); equipo usa el chat en modo consulta. */}
       <ChatbotWidget
         mode="panel"
         context={buildPanelChatContext(state, currentUser)}
+        onExecuteTool={currentUser.role === 'admin' ? executeChatbotTool : null}
       />
     </div>
   );
@@ -789,14 +908,17 @@ function buildPanelChatContext(state, currentUser) {
   }, 0);
   const incidencias = state.sales.filter(s => s.tieneIncidencia).length;
 
+  // Mandamos las últimas 8 para que el chatbot pueda referenciarlas por id
+  // al ejecutar tools (cambiar estado, registrar cobro, etc).
   const ultimasOrdenes = state.sales
     .slice()
     .sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''))
-    .slice(0, 5)
+    .slice(0, 8)
     .map(o => {
       const cliente = state.clients.find(c => c.id === o.clienteId);
       const producto = state.products.find(p => p.id === o.productoId);
       return {
+        id: o.id,
         fecha: o.fecha,
         cliente: cliente?.nombre || '-',
         producto: producto?.nombre || '-',
@@ -819,9 +941,11 @@ function buildPanelChatContext(state, currentUser) {
     },
     ordenesPorEstado,
     ultimasOrdenes,
-    clientes: state.clients.map(c => ({ nombre: c.nombre, telefono: c.telefono, domicilio: c.domicilio })),
-    productos: state.products.map(p => ({ nombre: p.nombre, precio: p.precioVenta })),
-    mentores: state.mentors.map(m => ({ nombre: m.nombre, porcentaje: m.porcentajeComision ?? 50 })),
+    // Incluimos id en clientes/productos/mentores para que Claude pueda
+    // armar correctamente los tool calls (crear_orden, registrar_cobro, etc).
+    clientes: state.clients.map(c => ({ id: c.id, nombre: c.nombre, telefono: c.telefono, domicilio: c.domicilio })),
+    productos: state.products.map(p => ({ id: p.id, nombre: p.nombre, precio: p.precioVenta })),
+    mentores: state.mentors.map(m => ({ id: m.id, nombre: m.nombre, porcentaje: m.porcentajeComision ?? 50 })),
   };
 }
 

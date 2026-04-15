@@ -2,6 +2,14 @@
 // Usa el SDK oficial de Anthropic, hace streaming vía SSE al cliente y
 // aprovecha prompt caching sobre la parte estática del system prompt
 // y el contexto del negocio para bajar costos en conversaciones largas.
+//
+// Soporta TOOL-USE en modo panel: Claude puede pedir ejecutar acciones
+// (crear cliente, crear orden, cambiar estado, registrar cobro, etc.).
+// Como la fuente de verdad vive en el front (useReducer + localStorage),
+// la ejecución real la hace el front: el backend sólo emite los tool_use
+// por SSE, el front los ejecuta con dispatch y reenvía la conversación
+// con los tool_result adjuntos. Este handler itera hasta que Claude
+// devuelva una respuesta final sin tool_use pendiente.
 import Anthropic from '@anthropic-ai/sdk';
 
 // Instrucciones base del asistente. Esta parte cambia rara vez así que vive
@@ -16,14 +24,122 @@ Dependiendo del contexto que te lleguen en el mensaje (modo panel o modo landing
 podés:
 - En la LANDING: contestar preguntas comerciales (tiempos, mínimos, contacto,
   proceso). Si no tenés la respuesta exacta, invitá a escribir por WhatsApp al
-  +54 9 2236 87-7663.
+  +54 9 2236 87-7663. En landing NO tenés herramientas para ejecutar acciones.
 - En el PANEL: responder preguntas sobre los datos concretos del laboratorio
   (órdenes, clientes, productos, comisiones, profit, pagos), y explicar cómo
   usar la plataforma. Si te preguntan algo que no podés calcular con el
   contexto, decilo con honestidad.
+- En el PANEL, cuando el usuario (rol admin) te pida hacer algo concreto
+  (crear cliente, crear producto, crear orden, cambiar estado de una orden,
+  registrar un cobro, marcar una incidencia) usá las tools disponibles.
+  IMPORTANTE: confirmá los datos clave antes de ejecutar acciones que crean
+  o modifican información, sobre todo si detectás ambigüedad. Si falta info
+  (ej. qué cliente, qué producto), preguntá antes de llamar la tool.
+  Después de ejecutar una tool, contale al usuario en una frase qué pasó.
 
 Formato: usá listas cortas con viñetas sólo cuando realmente suman. Prefierí
 respuestas de 1 a 3 oraciones. No inventes números.`;
+
+// Definición de tools disponibles en modo panel para rol admin.
+// Los enums de estado se mantienen sincronizados con src/App.jsx (ORDER_STATES).
+const ORDER_STATES = [
+  'pendiente-cotizacion',
+  'cotizado',
+  'abonado',
+  'en-produccion',
+  'listo-enviar',
+  'despachado',
+];
+
+const PANEL_TOOLS = [
+  {
+    name: 'crear_cliente',
+    description: 'Crea un cliente nuevo en el laboratorio. Devuelve el cliente creado con su id. Requiere al menos el nombre. Si el usuario no indica mentor, dejalo sin asignar (no inventes un mentorId).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        nombre: { type: 'string', description: 'Nombre completo del cliente' },
+        telefono: { type: 'string', description: 'Teléfono (ej. "11 2345-6789")' },
+        domicilio: { type: 'string', description: 'Dirección del cliente' },
+        mentorId: { type: 'integer', description: 'ID del mentor/socio asignado (opcional)' },
+      },
+      required: ['nombre'],
+    },
+  },
+  {
+    name: 'crear_producto',
+    description: 'Crea un producto nuevo (crema, sérum, aceite, gotero, etc.). Todos los costos son UNITARIOS en pesos. Requiere nombre y precio de venta.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        nombre: { type: 'string' },
+        descripcion: { type: 'string' },
+        costoContenido: { type: 'number', description: 'Costo unitario del contenido/fórmula' },
+        costoEnvase: { type: 'number', description: 'Costo unitario del envase' },
+        costoEtiqueta: { type: 'number', description: 'Costo unitario de la etiqueta' },
+        precioVenta: { type: 'number', description: 'Precio de venta unitario' },
+      },
+      required: ['nombre', 'precioVenta'],
+    },
+  },
+  {
+    name: 'crear_orden',
+    description: 'Crea una orden nueva. Los IDs de cliente y producto tenés que conocerlos del contexto; si no los sabés, preguntá antes de llamar la tool. montoTotal es la cotización completa (precio × cantidad). Si el usuario no especifica fecha, omitila y se usa la de hoy.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        clienteId: { type: 'integer' },
+        productoId: { type: 'integer' },
+        cantidad: { type: 'integer', description: 'Cantidad de unidades (mínimo 100)' },
+        montoTotal: { type: 'number', description: 'Monto total de la cotización en pesos' },
+        mentorId: { type: 'integer', description: 'ID del mentor responsable (opcional, default: el del cliente)' },
+        fecha: { type: 'string', description: 'YYYY-MM-DD (opcional, default hoy)' },
+        estado: { type: 'string', enum: ORDER_STATES, description: 'Estado inicial (default: pendiente-cotizacion)' },
+      },
+      required: ['clienteId', 'productoId', 'cantidad', 'montoTotal'],
+    },
+  },
+  {
+    name: 'cambiar_estado_orden',
+    description: 'Cambia el estado de una orden existente en el pipeline de producción.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        orderId: { type: 'integer' },
+        estado: { type: 'string', enum: ORDER_STATES },
+      },
+      required: ['orderId', 'estado'],
+    },
+  },
+  {
+    name: 'marcar_incidencia',
+    description: 'Marca o desmarca una incidencia en una orden (ej. demora de proveedor, problema con envase). Útil para que el admin pueda hacer seguimiento desde el centro de notificaciones.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        orderId: { type: 'integer' },
+        tieneIncidencia: { type: 'boolean' },
+        incidenciaDetalle: { type: 'string', description: 'Descripción breve de la incidencia (si tieneIncidencia=true)' },
+      },
+      required: ['orderId', 'tieneIncidencia'],
+    },
+  },
+  {
+    name: 'registrar_cobro',
+    description: 'Registra un pago/cobro en un rubro de una orden. Rubros: "cliente" (lo que paga el cliente al laboratorio), "mentor" (comisión al socio/mentor), "contenido"/"envase"/"etiqueta" (pagos a proveedores). Usá estado "pagado" cuando ya se concretó, "pendiente" para revertir.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        orderId: { type: 'integer' },
+        rubro: { type: 'string', enum: ['cliente', 'mentor', 'contenido', 'envase', 'etiqueta'] },
+        estado: { type: 'string', enum: ['pagado', 'pendiente'] },
+        monto: { type: 'number', description: 'Monto del cobro (opcional, si ya existe se preserva)' },
+        fecha: { type: 'string', description: 'YYYY-MM-DD (opcional)' },
+      },
+      required: ['orderId', 'rubro', 'estado'],
+    },
+  },
+];
 
 // Construye el bloque de contexto de la conversación a partir de los datos
 // que manda el front. La idea es ser compacto y útil, no dumpear todo.
@@ -71,19 +187,20 @@ function buildContextBlock(mode, context) {
       Object.entries(context.ordenesPorEstado).forEach(([k, v]) => lines.push(`  * ${k}: ${v}`));
     }
     if (Array.isArray(context.ultimasOrdenes) && context.ultimasOrdenes.length) {
-      lines.push('- Últimas 5 órdenes:');
-      context.ultimasOrdenes.slice(0, 5).forEach(o => {
-        lines.push(`  * ${o.fecha} — ${o.cliente} — ${o.producto} — ${o.cantidad}u — $${Math.round(o.monto).toLocaleString('es-AR')} — ${o.estado}${o.incidencia ? ' (⚠ incidencia)' : ''}`);
+      lines.push('- Últimas órdenes (ID — fecha — cliente — producto — cantidad — monto — estado):');
+      context.ultimasOrdenes.slice(0, 8).forEach(o => {
+        lines.push(`  * #${o.id} — ${o.fecha} — ${o.cliente} — ${o.producto} — ${o.cantidad}u — $${Math.round(o.monto).toLocaleString('es-AR')} — ${o.estado}${o.incidencia ? ' (⚠ incidencia)' : ''}`);
       });
     }
     if (Array.isArray(context.clientes)) {
-      lines.push(`- Clientes registrados (${context.clientes.length}): ${context.clientes.slice(0, 10).map(c => c.nombre).join(', ')}${context.clientes.length > 10 ? '…' : ''}`);
+      const detalle = context.clientes.slice(0, 20).map(c => `#${c.id} ${c.nombre}`).join(', ');
+      lines.push(`- Clientes (${context.clientes.length}): ${detalle}${context.clientes.length > 20 ? '…' : ''}`);
     }
     if (Array.isArray(context.productos)) {
-      lines.push(`- Productos (${context.productos.length}): ${context.productos.map(p => `${p.nombre} ($${p.precio})`).join(', ')}`);
+      lines.push(`- Productos: ${context.productos.map(p => `#${p.id} ${p.nombre} ($${p.precio})`).join(', ')}`);
     }
     if (Array.isArray(context.mentores)) {
-      lines.push(`- Mentores: ${context.mentores.map(m => `${m.nombre} (${m.porcentaje}%)`).join(', ')}`);
+      lines.push(`- Mentores/socios: ${context.mentores.map(m => `#${m.id} ${m.nombre} (${m.porcentaje}%)`).join(', ')}`);
     }
     return lines.join('\n');
   }
@@ -101,6 +218,18 @@ async function readBody(req) {
     req.on('data', (chunk) => { data += chunk; });
     req.on('end', () => { try { resolve(JSON.parse(data || '{}')); } catch { resolve({}); } });
   });
+}
+
+// Dado un array de messages mixto (strings o blocks), lo normaliza al formato
+// que espera la API de Anthropic. Si content es string → lo envuelve en [{type:'text'}].
+// Si ya es array → lo pasa tal cual (asume blocks válidos: text, tool_use, tool_result).
+function normalizeMessages(messages) {
+  return messages.map(m => ({
+    role: m.role,
+    content: typeof m.content === 'string'
+      ? [{ type: 'text', text: m.content }]
+      : m.content,
+  }));
 }
 
 export default async function handler(req, res) {
@@ -143,6 +272,11 @@ export default async function handler(req, res) {
     { type: 'text', text: contextBlock, cache_control: { type: 'ephemeral' } },
   ];
 
+  // Habilitamos tools sólo en modo panel y si el usuario es admin. El rol
+  // 'equipo' es read-only, y en landing no tiene sentido ejecutar acciones.
+  const isAdmin = mode === 'panel' && context?.usuario?.role === 'admin';
+  const tools = isAdmin ? PANEL_TOOLS : undefined;
+
   try {
     res.statusCode = 200;
     res.setHeader('Content-Type', 'text/event-stream');
@@ -154,14 +288,31 @@ export default async function handler(req, res) {
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 1024,
       system,
-      messages: messages.map(m => ({ role: m.role, content: m.content })),
+      tools,
+      messages: normalizeMessages(messages),
     });
 
+    // Stream de texto token-a-token al front.
     for await (const event of stream) {
       if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
         res.write(`data: ${JSON.stringify({ type: 'chunk', text: event.delta.text })}\n\n`);
       }
     }
+
+    // Al terminar el stream, revisamos el mensaje final. Si hay tool_use,
+    // avisamos al front para que ejecute las tools y reenvíe la conversación
+    // con los tool_result adjuntos. Si no, mandamos [DONE].
+    const finalMessage = await stream.finalMessage();
+    const toolUses = (finalMessage.content || []).filter(b => b.type === 'tool_use');
+
+    if (toolUses.length > 0) {
+      res.write(`data: ${JSON.stringify({
+        type: 'tool_use_request',
+        assistantContent: finalMessage.content, // blocks: text + tool_use
+        toolUses: toolUses.map(t => ({ id: t.id, name: t.name, input: t.input })),
+      })}\n\n`);
+    }
+
     res.write('data: [DONE]\n\n');
     res.end();
   } catch (err) {

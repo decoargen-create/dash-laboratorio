@@ -1,5 +1,6 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
+import { VitePWA } from 'vite-plugin-pwa'
 import fs from 'node:fs'
 import path from 'node:path'
 
@@ -62,6 +63,53 @@ function safeJSON(str) {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   return {
-    plugins: [react(), apiDevPlugin(env)],
+    plugins: [
+      react(),
+      apiDevPlugin(env),
+      VitePWA({
+        registerType: 'autoUpdate',
+        // Excluimos /api/* del service worker para que los endpoints siempre
+        // vayan a la red (no tiene sentido cachear respuestas de Claude).
+        workbox: {
+          navigateFallbackDenylist: [/^\/api\//],
+          runtimeCaching: [
+            {
+              urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
+              handler: 'CacheFirst',
+              options: {
+                cacheName: 'google-fonts-cache',
+                expiration: { maxEntries: 10, maxAgeSeconds: 60 * 60 * 24 * 365 },
+                cacheableResponse: { statuses: [0, 200] },
+              },
+            },
+            {
+              urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
+              handler: 'CacheFirst',
+              options: {
+                cacheName: 'gstatic-fonts-cache',
+                expiration: { maxEntries: 10, maxAgeSeconds: 60 * 60 * 24 * 365 },
+                cacheableResponse: { statuses: [0, 200] },
+              },
+            },
+          ],
+        },
+        manifest: {
+          name: 'Laboratorio Viora',
+          short_name: 'Viora',
+          description: 'Panel de gestión del Laboratorio Viora — órdenes, clientes, producción, comisiones y pagos.',
+          theme_color: '#4a0f22',
+          background_color: '#0d0d0d',
+          display: 'standalone',
+          orientation: 'portrait-primary',
+          lang: 'es-AR',
+          start_url: '/acceso',
+          icons: [
+            { src: '/viora-favicon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
+            { src: '/viora-pwa-192.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
+            { src: '/viora-pwa-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
+          ],
+        },
+      }),
+    ],
   }
 })

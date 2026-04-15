@@ -490,6 +490,73 @@ function AppShell({ onExit }) {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  // Bootstrap de sesión al montar:
+  // 1. Si en la URL viene ?token=... (callback del magic link), canjeamos
+  //    por un session token y logueamos al usuario.
+  // 2. Si no, chequeamos localStorage para ver si hay session previa válida.
+  // Usa /api/auth que vive en api/auth.js (Vercel serverless + middleware dev).
+  useEffect(() => {
+    let cancelled = false;
+    const url = new URL(window.location.href);
+    const linkToken = url.searchParams.get('token');
+    const storedSession = localStorage.getItem('viora-session');
+
+    const clearTokenFromUrl = () => {
+      url.searchParams.delete('token');
+      window.history.replaceState({}, '', url.pathname + (url.search || '') + url.hash);
+    };
+
+    (async () => {
+      try {
+        if (linkToken) {
+          const resp = await fetch('/api/auth', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'verify', token: linkToken }),
+          });
+          clearTokenFromUrl();
+          if (!resp.ok) {
+            addToast({ type: 'error', message: 'El link de acceso es inválido o expiró', duration: 6000 });
+            return;
+          }
+          const data = await resp.json();
+          if (data?.ok && data.session && data.user) {
+            localStorage.setItem('viora-session', data.session);
+            if (!cancelled) {
+              setCurrentUser({ role: data.user.role, name: data.user.name, email: data.user.email, id: data.user.role === 'admin' ? 'admin' : data.user.email });
+              setCurrentSection('inicio');
+              addToast({ type: 'success', message: `Bienvenido, ${data.user.name}` });
+            }
+            return;
+          }
+        }
+        if (storedSession) {
+          const resp = await fetch('/api/auth', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'me', session: storedSession }),
+          });
+          if (!resp.ok) {
+            localStorage.removeItem('viora-session');
+            return;
+          }
+          const data = await resp.json();
+          if (data?.ok && data.user && !cancelled) {
+            setCurrentUser({ role: data.user.role, name: data.user.name, email: data.user.email, id: data.user.role === 'admin' ? 'admin' : data.user.email });
+            setCurrentSection('inicio');
+          }
+        }
+      } catch (err) {
+        // Si /api/auth no está configurado (sin AUTH_SECRET), ignoramos
+        // silenciosamente y dejamos que use el login demo.
+        console.warn('[auth] bootstrap falló:', err?.message || err);
+      }
+    })();
+
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Handlers
   const handleLogin = (role, name) => {
     setCurrentUser({ role, name, id: role === 'admin' ? 'admin' : (name === 'Sofia' ? 1 : 2) });
@@ -497,6 +564,8 @@ function AppShell({ onExit }) {
   };
 
   const handleLogout = () => {
+    // Limpiamos la sesión de magic link también, por si el user vino por ahí.
+    localStorage.removeItem('viora-session');
     setCurrentUser(null);
     setCurrentSection('inicio');
     // Al cerrar sesión, volvemos a la landing pública si el parent lo soporta.
@@ -728,7 +797,14 @@ function AppShell({ onExit }) {
   }, [currentSection]);
 
   if (!currentUser) {
-    return <LoginScreen onLogin={handleLogin} darkMode={darkMode} toggleDarkMode={toggleDarkMode} />;
+    // Renderizamos también el ToastContainer para que los avisos del
+    // bootstrap de auth (link inválido, link enviado) sean visibles.
+    return (
+      <>
+        <LoginScreen onLogin={handleLogin} darkMode={darkMode} toggleDarkMode={toggleDarkMode} />
+        <ToastContainer toasts={toasts} />
+      </>
+    );
   }
 
   // En mobile el sidebar es siempre "abierto" cuando se muestra (no tiene
@@ -981,9 +1057,40 @@ function NavItem({ icon: Icon, label, section, currentSection, onSelect, sidebar
 }
 
 function LoginScreen({ onLogin, darkMode, toggleDarkMode }) {
+  // loginMode: 'select' | 'email' | 'email-sent' | 'demo' | 'admin-login' | 'mentor-select'
   const [loginMode, setLoginMode] = useState('select');
   const [selectedRole, setSelectedRole] = useState(null);
   const [adminPassword, setAdminPassword] = useState('');
+  const [email, setEmail] = useState('');
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState('');
+  const [sendResult, setSendResult] = useState(null); // { emailSent, devLink? }
+
+  const sendMagicLink = async () => {
+    setSendError('');
+    const trimmed = email.trim();
+    if (!trimmed) { setSendError('Ingresá tu email'); return; }
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(trimmed)) { setSendError('Email con formato inválido'); return; }
+    setSending(true);
+    try {
+      const resp = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'send', email: trimmed }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        setSendError(data?.error || `Error ${resp.status}`);
+      } else {
+        setSendResult({ emailSent: !!data.emailSent, devLink: data.devLink, hidden: !!data.hidden });
+        setLoginMode('email-sent');
+      }
+    } catch (err) {
+      setSendError('No pude conectar con el servidor. ¿AUTH_SECRET configurado?');
+    } finally {
+      setSending(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-pink-50 to-rose-50 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center p-4 relative">
@@ -1002,18 +1109,111 @@ function LoginScreen({ onLogin, darkMode, toggleDarkMode }) {
         </div>
 
         {loginMode === 'select' && (
+          <div className="space-y-3">
+            <button
+              onClick={() => setLoginMode('email')}
+              className="w-full py-3 px-4 bg-gradient-to-r from-pink-900 to-rose-700 text-white rounded-lg hover:shadow-lg transition font-semibold"
+            >
+              Ingresar con tu email
+            </button>
+            <p className="text-center text-[11px] text-gray-500 dark:text-gray-400">Te mandamos un link mágico al mail</p>
+            <div className="pt-3 border-t border-gray-100 dark:border-gray-700">
+              <button
+                onClick={() => setLoginMode('demo')}
+                className="w-full py-2 text-xs text-gray-600 dark:text-gray-400 hover:text-pink-700 dark:hover:text-pink-300 transition"
+              >
+                Acceso demo (sin email) →
+              </button>
+            </div>
+          </div>
+        )}
+
+        {loginMode === 'email' && (
+          <div className="space-y-3">
+            <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300">Tu email</label>
+            <input
+              type="email"
+              autoFocus
+              placeholder="nombre@ejemplo.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') sendMagicLink(); }}
+              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            />
+            {sendError && <p className="text-xs text-red-600 dark:text-red-400">{sendError}</p>}
+            <button
+              onClick={sendMagicLink}
+              disabled={sending}
+              className="w-full py-2 bg-pink-900 dark:bg-pink-700 text-white rounded-lg hover:bg-pink-800 dark:hover:bg-pink-600 transition disabled:opacity-60"
+            >
+              {sending ? 'Enviando…' : 'Enviarme el link'}
+            </button>
+            <button
+              onClick={() => setLoginMode('select')}
+              className="w-full py-2 text-pink-900 dark:text-pink-300 border border-pink-900 dark:border-pink-300 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition text-sm"
+            >
+              Volver
+            </button>
+          </div>
+        )}
+
+        {loginMode === 'email-sent' && (
           <div className="space-y-4">
+            <div className="p-4 bg-emerald-50 dark:bg-emerald-900/30 rounded-lg">
+              {sendResult?.hidden ? (
+                <>
+                  <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">Si el email está autorizado, vas a recibir un link de acceso en pocos segundos.</p>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">El link expira en 15 minutos.</p>
+                </>
+              ) : sendResult?.emailSent ? (
+                <>
+                  <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">Listo, te mandamos el link a <span className="font-mono">{email}</span>.</p>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">Revisá tu bandeja (y el spam). El link expira en 15 minutos.</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">Modo setup: no hay proveedor de email configurado.</p>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 mt-2">Usá este link para entrar ahora (expira en 15 minutos):</p>
+                  {sendResult?.devLink && (
+                    <a
+                      href={sendResult.devLink}
+                      className="block mt-2 px-3 py-2 bg-white dark:bg-gray-800 rounded border border-emerald-300 dark:border-emerald-700 text-[11px] font-mono text-emerald-900 dark:text-emerald-200 break-all hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition"
+                    >
+                      {sendResult.devLink}
+                    </a>
+                  )}
+                  <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-2">Para producción configurá <span className="font-mono">RESEND_API_KEY</span>.</p>
+                </>
+              )}
+            </div>
+            <button
+              onClick={() => { setLoginMode('select'); setSendResult(null); setEmail(''); }}
+              className="w-full py-2 text-pink-900 dark:text-pink-300 border border-pink-900 dark:border-pink-300 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition text-sm"
+            >
+              Volver
+            </button>
+          </div>
+        )}
+
+        {loginMode === 'demo' && (
+          <div className="space-y-3">
             <button
               onClick={() => { setSelectedRole('admin'); setLoginMode('admin-login'); }}
               className="w-full py-3 px-4 bg-gradient-to-r from-pink-900 to-rose-700 text-white rounded-lg hover:shadow-lg transition font-semibold"
             >
-              Administrador
+              Administrador (demo)
             </button>
             <button
               onClick={() => { setSelectedRole('mentor'); setLoginMode('mentor-select'); }}
               className="w-full py-3 px-4 bg-gradient-to-r from-pink-600 to-rose-500 text-white rounded-lg hover:shadow-lg transition font-semibold"
             >
-              Equipo
+              Equipo (demo)
+            </button>
+            <button
+              onClick={() => setLoginMode('select')}
+              className="w-full py-2 text-pink-900 dark:text-pink-300 border border-pink-900 dark:border-pink-300 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition text-sm"
+            >
+              Volver
             </button>
           </div>
         )}
@@ -1034,7 +1234,7 @@ function LoginScreen({ onLogin, darkMode, toggleDarkMode }) {
               Ingresar
             </button>
             <button
-              onClick={() => setLoginMode('select')}
+              onClick={() => setLoginMode('demo')}
               className="w-full py-2 text-pink-900 dark:text-pink-300 border border-pink-900 dark:border-pink-300 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition"
             >
               Volver
@@ -1057,7 +1257,7 @@ function LoginScreen({ onLogin, darkMode, toggleDarkMode }) {
               Mariano
             </button>
             <button
-              onClick={() => setLoginMode('select')}
+              onClick={() => setLoginMode('demo')}
               className="w-full py-2 text-pink-900 dark:text-pink-300 border border-pink-900 dark:border-pink-300 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition"
             >
               Volver
@@ -1065,11 +1265,13 @@ function LoginScreen({ onLogin, darkMode, toggleDarkMode }) {
           </div>
         )}
 
-        <div className="mt-8 p-4 bg-pink-50 dark:bg-pink-900/30 rounded-lg text-sm text-gray-700 dark:text-gray-300">
-          <p className="font-semibold mb-2">Demo Credentials:</p>
-          <p>Admin: password "admin"</p>
-          <p>Mentors: Sofia / Mariano</p>
-        </div>
+        {loginMode === 'admin-login' || loginMode === 'mentor-select' ? (
+          <div className="mt-8 p-4 bg-pink-50 dark:bg-pink-900/30 rounded-lg text-sm text-gray-700 dark:text-gray-300">
+            <p className="font-semibold mb-2">Demo Credentials:</p>
+            <p>Admin: password "admin"</p>
+            <p>Mentors: Sofia / Mariano</p>
+          </div>
+        ) : null}
       </div>
     </div>
   );

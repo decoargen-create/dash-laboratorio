@@ -75,13 +75,27 @@ Cada variante:
 
 Si no hay variantes claras, devolvé variantes: []. NO inventes variantes.
 
+=== EVALUACIÓN DE LA IMAGEN ===
+Evaluá también si la imagen principal del producto (og:image, o lo que detectes en el HTML) va a ser difícil de procesar con un modelo de remoción de fondo. Marcala como riesgosa si sospechás alguno de estos casos (leyendo descripción, alt text, y contexto del HTML):
+
+- Tiene PERSONAS o manos sosteniendo el producto (el modelo puede recortar a la persona también).
+- Es una ESCENA compleja (producto en ambiente, sobre una mesa con objetos, en un contexto de uso).
+- Tiene TEXTO superpuesto grande (banners de descuento, logos, marca de agua).
+- El producto está CORTADO por los bordes de la imagen.
+- El producto se fusiona con el fondo (colores similares, baja contraste).
+- Es un FOTOMONTAJE o collage de varios productos.
+
+Si la imagen parece ser un producto limpio sobre fondo uniforme (blanco, gris, degradé suave), imagenRiesgosa: false.
+
 === SALIDA ===
 Devolvé JSON ESTRICTO:
 {
   "sku": "PF-XX-KEYWORDS",
-  "nombreLimpio": "Nombre técnico y descriptivo del producto detectado en la página. Si el título que te llegó era el nombre de la tienda, reemplazalo acá por el real.",
+  "nombreLimpio": "Nombre técnico y descriptivo del producto detectado en la página.",
   "tituloOriginalEraDeTienda": true,
-  "variantes": [ { "tipo": "color", "valor": "Rojo" } ]
+  "variantes": [ { "tipo": "color", "valor": "Rojo" } ],
+  "imagenRiesgosa": false,
+  "imagenRiesgosaMotivo": "si imagenRiesgosa es true, explicalo en máx 80 chars (ej: 'persona sosteniendo el producto', 'escena con varios objetos', 'texto superpuesto')"
 }
 NO markdown. SOLO el JSON puro.`;
 
@@ -233,6 +247,8 @@ async function scrapeSingleProduct(url, clienteNombre, apiKey, customInstruction
   let nombreLimpio = titulo;
   let variantes = [];
   let tituloOriginalEraDeTienda = false;
+  let imagenRiesgosa = false;
+  let imagenRiesgosaMotivo = null;
 
   if (apiKey) {
     try {
@@ -259,6 +275,8 @@ Generá el JSON con sku, nombreLimpio (técnico y real, no el de la tienda) y va
       if (parsed.sku) sku = parsed.sku;
       if (parsed.nombreLimpio) nombreLimpio = parsed.nombreLimpio;
       if (typeof parsed.tituloOriginalEraDeTienda === 'boolean') tituloOriginalEraDeTienda = parsed.tituloOriginalEraDeTienda;
+      if (typeof parsed.imagenRiesgosa === 'boolean') imagenRiesgosa = parsed.imagenRiesgosa;
+      if (typeof parsed.imagenRiesgosaMotivo === 'string') imagenRiesgosaMotivo = parsed.imagenRiesgosaMotivo.slice(0, 80);
       if (Array.isArray(parsed.variantes)) {
         variantes = parsed.variantes
           .filter(v => v && typeof v.valor === 'string' && v.valor.trim())
@@ -297,6 +315,8 @@ Generá el JSON con sku, nombreLimpio (técnico y real, no el de la tienda) y va
       tituloOriginalEraDeTienda,
       imagen: imagenDataUrl,
       imagenUrl: ogImage || null,
+      imagenRiesgosa,
+      imagenRiesgosaMotivo,
       sku,
       variantes,
       descripcion: ogDesc || null,

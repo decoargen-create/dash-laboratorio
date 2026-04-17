@@ -19,7 +19,7 @@ import {
   Plus, Trash2, Download, Upload, Edit2, Package, Image as ImageIcon,
   Save, X, Check, Sparkles, Link as LinkIcon, Loader2, ChevronDown, UserPlus,
   List as ListIcon, LayoutGrid, ExternalLink, AlertTriangle, RefreshCw,
-  Settings, Wand2, RotateCcw,
+  Settings, Wand2, RotateCcw, Truck, PencilLine,
 } from 'lucide-react';
 
 const STORAGE_KEY_BOCETOS = 'viora-bocetos-v1';
@@ -43,6 +43,16 @@ const DEFAULT_AI_CONFIG = {
   instructions: '',
   autoNormalizeImage: true,   // padding blanco automático
   autoRemoveBackground: false, // bg removal automático (lento, alto costo de CPU)
+};
+
+// Datos de envío por default (Andreani / Correo Argentino necesitan esto).
+// Se cargan ocultos en cada boceto; el user los puede editar por item desde
+// el accordion "Datos de envío".
+const DEFAULT_SHIPPING = {
+  peso: 0.010,            // kg
+  largo: 10,              // cm
+  ancho: 10,              // cm
+  alto: 10,               // cm
 };
 
 // Clientes de ejemplo para arrancar con algo cargado. Si el user ya tiene
@@ -223,7 +233,7 @@ export default function BocetosSection({ addToast }) {
   const handleDeleteCliente = (id) => {
     const cli = clientes.find(c => c.id === id);
     if (!cli) return;
-    if (!window.confirm(`¿Borrar el cliente "${cli.nombre}"? Los bocetos no se borran, pero pierden la referencia.`)) return;
+    if (!window.confirm(`¿Borrar el cliente "${cli.nombre}"? Los productos no se borran, pero pierden la referencia.`)) return;
     setClientes(prev => prev.filter(c => c.id !== id));
     if (clienteId === id) {
       setClienteId(clientes.find(c => c.id !== id)?.id ?? null);
@@ -266,21 +276,30 @@ export default function BocetosSection({ addToast }) {
         nombre: p.nombre || '',
         nombreOriginal: p.nombreOriginal || '',
         tituloOriginalEraDeTienda: !!p.tituloOriginalEraDeTienda,
+        imagenRiesgosa: !!p.imagenRiesgosa,
+        imagenRiesgosaMotivo: p.imagenRiesgosaMotivo || null,
         sku: p.sku || '',
         imagen: p.imagen || '',
         url: p.url || '',
         variantes: Array.isArray(p.variantes) ? p.variantes : [],
+        // Datos de envío por default (Andreani / Correo Argentino los pide).
+        peso: DEFAULT_SHIPPING.peso,
+        largo: DEFAULT_SHIPPING.largo,
+        ancho: DEFAULT_SHIPPING.ancho,
+        alto: DEFAULT_SHIPPING.alto,
         _normalized: false,
       }));
 
       // Auto-procesar imágenes según config:
       //   1) Si hay autoRemoveBackground → bg removal (incluye whitening).
       //   2) Si sólo hay autoNormalizeImage → padding blanco sin removal.
-      // Si ninguna, dejamos la imagen tal como vino.
+      // Si la IA marcó la imagen como riesgosa, skipeamos el bg removal
+      // automático (mejor que el user la reemplace manual a que quede mal).
+      // El padding blanco sí se aplica igual.
       for (const n of nuevos) {
         if (!n.imagen) continue;
         try {
-          if (aiConfig.autoRemoveBackground) {
+          if (aiConfig.autoRemoveBackground && !n.imagenRiesgosa) {
             n.imagen = await removeBackgroundAndWhiten(n.imagen);
             n._normalized = true;
             n._bgRemoved = true;
@@ -302,6 +321,31 @@ export default function BocetosSection({ addToast }) {
     } finally {
       setScraping(false);
     }
+  };
+
+  // ---------- Crear manual ----------
+
+  const handleCreateManual = () => {
+    if (!clienteSeleccionado) { addToast?.({ type: 'error', message: 'Elegí un cliente primero' }); return; }
+    const nuevo = {
+      _tempId: Date.now() + Math.random(),
+      _status: 'pending',
+      _manual: true,
+      clienteId: clienteSeleccionado.id,
+      clienteNombre: clienteSeleccionado.nombre,
+      nombre: '',
+      sku: '',
+      imagen: '',
+      url: '',
+      variantes: [],
+      peso: DEFAULT_SHIPPING.peso,
+      largo: DEFAULT_SHIPPING.largo,
+      ancho: DEFAULT_SHIPPING.ancho,
+      alto: DEFAULT_SHIPPING.alto,
+      _normalized: false,
+    };
+    setPending(prev => [nuevo, ...prev]);
+    addToast?.({ type: 'success', message: 'Producto manual creado — completá los datos' });
   };
 
   // ---------- Pending review ----------
@@ -328,11 +372,16 @@ export default function BocetosSection({ addToast }) {
       cliente: p.clienteNombre,
       url: p.url || '',
       variantes: p.variantes || [],
+      peso: typeof p.peso === 'number' ? p.peso : DEFAULT_SHIPPING.peso,
+      largo: typeof p.largo === 'number' ? p.largo : DEFAULT_SHIPPING.largo,
+      ancho: typeof p.ancho === 'number' ? p.ancho : DEFAULT_SHIPPING.ancho,
+      alto: typeof p.alto === 'number' ? p.alto : DEFAULT_SHIPPING.alto,
+      manual: !!p._manual,
       createdAt: new Date().toISOString(),
     };
     setBocetos(prev => [boceto, ...prev]);
     removePending(p._tempId);
-    addToast?.({ type: 'success', message: `"${boceto.nombre}" aprobado` });
+    addToast?.({ type: 'success', message: `"${boceto.nombre}" cargado` });
   };
 
   const handleApproveAll = () => {
@@ -350,12 +399,17 @@ export default function BocetosSection({ addToast }) {
       cliente: p.clienteNombre,
       url: p.url || '',
       variantes: p.variantes || [],
+      peso: typeof p.peso === 'number' ? p.peso : DEFAULT_SHIPPING.peso,
+      largo: typeof p.largo === 'number' ? p.largo : DEFAULT_SHIPPING.largo,
+      ancho: typeof p.ancho === 'number' ? p.ancho : DEFAULT_SHIPPING.ancho,
+      alto: typeof p.alto === 'number' ? p.alto : DEFAULT_SHIPPING.alto,
+      manual: !!p._manual,
       createdAt: new Date().toISOString(),
     }));
     const validIds = new Set(validos.map(p => p._tempId));
     setBocetos(prev => [...nuevos, ...prev]);
     setPending(prev => prev.filter(p => !validIds.has(p._tempId)));
-    addToast?.({ type: 'success', message: `${nuevos.length} boceto(s) aprobados` });
+    addToast?.({ type: 'success', message: `${nuevos.length} producto(s) cargados` });
   };
 
   const handleReplaceImage = async (tempId, file) => {
@@ -408,7 +462,7 @@ export default function BocetosSection({ addToast }) {
   // ---------- Export / Import ----------
 
   const handleExportAll = () => {
-    if (bocetos.length === 0) { addToast?.({ type: 'error', message: 'No hay bocetos para exportar' }); return; }
+    if (bocetos.length === 0) { addToast?.({ type: 'error', message: 'No hay productos para exportar' }); return; }
     const stamp = new Date().toISOString().split('T')[0];
     downloadJSON({
       version: 2,
@@ -417,7 +471,7 @@ export default function BocetosSection({ addToast }) {
       clientes,
       bocetos,
     }, `bocetos-senydrop-${stamp}.json`);
-    addToast?.({ type: 'success', message: `${bocetos.length} boceto(s) exportados` });
+    addToast?.({ type: 'success', message: `${bocetos.length} producto(s) exportados` });
   };
 
   const handleImport = async (e) => {
@@ -437,7 +491,7 @@ export default function BocetosSection({ addToast }) {
           return [...prev, ...nuevos];
         });
       }
-      addToast?.({ type: 'success', message: `${items.length} boceto(s) importados` });
+      addToast?.({ type: 'success', message: `${items.length} producto(s) importados` });
     } catch (err) {
       addToast?.({ type: 'error', message: `Error importando: ${err.message}` });
     }
@@ -457,7 +511,7 @@ export default function BocetosSection({ addToast }) {
             <Package size={20} className="text-gray-900" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-gray-900">Bocetos Senydrop</h1>
+            <h1 className="text-xl font-bold text-gray-900">Productos Senydrop</h1>
             <p className="text-xs text-gray-500">Importá productos de Tiendanube/Shopify y armá el catálogo que llevás a senydrop.com</p>
           </div>
         </div>
@@ -614,7 +668,16 @@ export default function BocetosSection({ addToast }) {
             </div>
           )}
 
-          <div className="mt-4 flex justify-end">
+          <div className="mt-4 flex justify-between items-center flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={handleCreateManual}
+              disabled={!clienteSeleccionado}
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 shadow-sm transition disabled:opacity-40 disabled:cursor-not-allowed"
+              title="Crear un producto vacío para completar manualmente"
+            >
+              <PencilLine size={16} /> Crear manual
+            </button>
             <button
               type="button"
               onClick={handleScrape}
@@ -698,12 +761,12 @@ export default function BocetosSection({ addToast }) {
         {/* Guardados */}
         <div>
           <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wide mb-3">
-            Bocetos aprobados ({bocetos.length})
+            Productos cargados ({bocetos.length})
           </h2>
           {bocetos.length === 0 ? (
             <div className="bg-white rounded-xl border-2 border-dashed border-gray-200 p-12 text-center">
               <ImageIcon size={32} className="mx-auto text-gray-300 mb-2" />
-              <p className="text-sm text-gray-500">Todavía no hay bocetos aprobados.</p>
+              <p className="text-sm text-gray-500">Todavía no hay productos cargados.</p>
               <p className="text-xs text-gray-400 mt-1">Importá productos arriba y aprobalos cuando revises los datos.</p>
             </div>
           ) : (
@@ -887,6 +950,7 @@ function AiConfigModal({ value, onChange, onClose }) {
 
 function PendingItem({ item, layout, onChange, onApprove, onDiscard, onReplaceImage, onNormalize, onRemoveBg }) {
   const fileRef = useRef(null);
+  const [showShipping, setShowShipping] = useState(false);
   const missing = !item.nombre.trim() || !item.sku.trim();
   const processing = !!item._bgRemoving;
 
@@ -953,6 +1017,18 @@ function PendingItem({ item, layout, onChange, onApprove, onDiscard, onReplaceIm
 
       {/* Campos */}
       <div className="flex-1 min-w-0 space-y-2">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {item._manual && (
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold bg-gray-100 text-gray-700 rounded">
+              <PencilLine size={10} /> Manual
+            </span>
+          )}
+          {item.imagenRiesgosa && (
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold bg-amber-100 text-amber-800 rounded border border-amber-300" title={item.imagenRiesgosaMotivo || ''}>
+              <AlertTriangle size={10} /> Revisar foto: {item.imagenRiesgosaMotivo || 'posible problema'}
+            </span>
+          )}
+        </div>
         <div>
           <div className="flex items-center justify-between mb-0.5">
             <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider">Nombre</label>
@@ -998,6 +1074,65 @@ function PendingItem({ item, layout, onChange, onApprove, onDiscard, onReplaceIm
             </div>
           </div>
         )}
+        {/* Datos de envío (colapsable) — Andreani / Correo Argentino los piden */}
+        <div className="border-t border-dashed border-gray-200 pt-2">
+          <button
+            type="button"
+            onClick={() => setShowShipping(s => !s)}
+            className="inline-flex items-center gap-1 text-[10px] font-bold text-gray-500 hover:text-gray-700 uppercase tracking-wider transition"
+          >
+            <Truck size={11} /> Datos de envío
+            <ChevronDown size={11} className={`transition-transform ${showShipping ? 'rotate-180' : ''}`} />
+          </button>
+          {showShipping && (
+            <div className="mt-2 grid grid-cols-4 gap-2">
+              <div>
+                <label className="block text-[9px] font-semibold text-gray-500 uppercase mb-0.5">Peso (kg)</label>
+                <input
+                  type="number"
+                  step="0.001"
+                  min="0"
+                  value={item.peso ?? DEFAULT_SHIPPING.peso}
+                  onChange={(e) => onChange({ peso: parseFloat(e.target.value) || 0 })}
+                  className="w-full px-2 py-1 bg-white border border-gray-300 rounded text-xs text-gray-900 focus:outline-none focus:ring-1 focus:ring-[#FFD33D]"
+                />
+              </div>
+              <div>
+                <label className="block text-[9px] font-semibold text-gray-500 uppercase mb-0.5">Largo (cm)</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={item.largo ?? DEFAULT_SHIPPING.largo}
+                  onChange={(e) => onChange({ largo: parseFloat(e.target.value) || 0 })}
+                  className="w-full px-2 py-1 bg-white border border-gray-300 rounded text-xs text-gray-900 focus:outline-none focus:ring-1 focus:ring-[#FFD33D]"
+                />
+              </div>
+              <div>
+                <label className="block text-[9px] font-semibold text-gray-500 uppercase mb-0.5">Ancho (cm)</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={item.ancho ?? DEFAULT_SHIPPING.ancho}
+                  onChange={(e) => onChange({ ancho: parseFloat(e.target.value) || 0 })}
+                  className="w-full px-2 py-1 bg-white border border-gray-300 rounded text-xs text-gray-900 focus:outline-none focus:ring-1 focus:ring-[#FFD33D]"
+                />
+              </div>
+              <div>
+                <label className="block text-[9px] font-semibold text-gray-500 uppercase mb-0.5">Alto (cm)</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={item.alto ?? DEFAULT_SHIPPING.alto}
+                  onChange={(e) => onChange({ alto: parseFloat(e.target.value) || 0 })}
+                  className="w-full px-2 py-1 bg-white border border-gray-300 rounded text-xs text-gray-900 focus:outline-none focus:ring-1 focus:ring-[#FFD33D]"
+                />
+              </div>
+            </div>
+          )}
+        </div>
         {missing && (
           <div className="flex items-center gap-1 text-[11px] text-amber-700">
             <AlertTriangle size={12} /> Nombre y SKU son obligatorios

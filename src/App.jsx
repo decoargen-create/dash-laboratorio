@@ -1065,7 +1065,7 @@ function AppShell({ onExit }) {
               <NavItem icon={CreditCard} label="Comisiones" section="comisiones" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={Sparkles} label="Analytics IA" section="analytics" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={Bot} label="Agentes IA" section="agentes" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={FileText} label="Bocetos Senydrop" section="bocetos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              <NavItem icon={FileText} label="Productos Senydrop" section="bocetos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={Package} label="Datos" section="datos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
             </>
           ) : (
@@ -7316,7 +7316,7 @@ function getSectionTitle(user, section) {
     mentores: 'Comisiones y Partners', // fallback: sección vieja cae al mismo lugar
     analytics: 'Analytics con IA',
     agentes: 'Agentes IA',
-    bocetos: 'Bocetos Senydrop',
+    bocetos: 'Productos Senydrop',
     datos: 'Datos (Export / Import)',
   };
   const mentor = {

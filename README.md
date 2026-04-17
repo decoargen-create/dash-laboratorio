@@ -1,16 +1,16 @@
 # Laboratorio Viora
 
-Panel interno para la gestión del laboratorio: órdenes de producción, clientes, productos, comisiones de mentores y pagos a proveedores.
+Panel interno para la gestión del laboratorio: órdenes de producción, clientes, productos, comisiones de partners y pagos a proveedores.
 
 ## Características
 
 - **Dashboard** con resumen por período, listado editable de órdenes, filtros por fecha, estado, búsqueda libre y toggle de incidencias.
 - **Pipeline de estados**: Pendiente Cotización → Cotizado → Abonado → En Producción → Listo para enviar → Despachado.
-- **Panel de pagos por orden**: cuatro rubros editables (contenido, envase/pote, etiqueta, comisión mentor) con estado, monto, fecha, proveedor y nota.
+- **Panel de pagos por orden**: cuatro rubros editables (contenido, envase/pote, etiqueta, comisión partner) con estado, monto, fecha, proveedor y nota.
 - **Panel de cobros del cliente** con plan de cuotas y progreso.
-- **CRM de clientes** con teléfono, domicilio de despacho, asignación de mentor y paneles expandibles con su historial de órdenes.
+- **CRM de clientes** con teléfono, domicilio de despacho, asignación de partner y paneles expandibles con su historial de órdenes.
 - **Catálogo de productos** con 3 costos por unidad + fórmula de ingredientes editable vía popover.
-- **Sección Mentores** con ventas referidas y **porcentaje de comisión configurable** por mentor.
+- **Sección Partners** con ventas referidas y **porcentaje de comisión configurable** por partner.
 - **Comisiones** calculadas sobre el profit (no sobre el monto total).
 - **Modo oscuro** con persistencia en `localStorage`.
 - **Mini-forms** para crear clientes y productos al vuelo desde el registro de una venta.
@@ -75,13 +75,13 @@ Flujo principal de login. No requiere email.
 2. Pegalos en `AUTH_USERS` como JSON en una sola línea:
 
    ```
-   AUTH_USERS=[{"u":"admin","n":"Administrador","r":"admin","h":"2a5e...$f91a..."},{"u":"sofia","n":"Sofia","r":"mentor","h":"3b6f...$e82b..."}]
+   AUTH_USERS=[{"u":"admin","n":"Administrador","r":"admin","h":"2a5e...$f91a..."},{"u":"sofia","n":"Sofia","r":"partner","h":"3b6f...$e82b..."}]
    ```
 
    Campos por usuario:
    - `u`: username (se compara lowercase)
    - `n`: nombre display
-   - `r`: `"admin"` o `"mentor"`
+   - `r`: `"admin"` o `"partner"`
    - `h`: hash PBKDF2-SHA256 (`saltHex$hashHex`)
 
 3. En Vercel, pegá el JSON entero en una sola env var.
@@ -130,7 +130,7 @@ Todos usan el SDK oficial `@anthropic-ai/sdk` y prompt caching para bajar costos
 
 El panel y la landing incluyen un widget flotante. En modo **landing** responde preguntas comerciales. En modo **panel**:
 
-- Recibe un snapshot del negocio (métricas, órdenes recientes, clientes, productos, mentores con sus IDs) para contestar con datos reales.
+- Recibe un snapshot del negocio (métricas, órdenes recientes, clientes, productos, partners con sus IDs) para contestar con datos reales.
 - Si el usuario es **admin**, habilita 6 tools para ejecutar acciones: `crear_cliente`, `crear_producto`, `crear_orden`, `cambiar_estado_orden`, `marcar_incidencia`, `registrar_cobro`. La ejecución real pasa por el reducer del front (fuente de verdad), el backend sólo orquesta.
 - Para rol **equipo**: el chat es sólo consulta (sin tools).
 
@@ -142,7 +142,7 @@ La app arranca directamente en `/acceso` cuando se abre como PWA (configurado en
 
 ## Datos y persistencia
 
-Todo el estado (products, clients, mentors, sales) vive en `localStorage` del navegador bajo la key `viora-state-v1`. Hay botones de export/import CSV por entidad en la sección **Datos**, y un botón de backup/restore JSON completo.
+Todo el estado (products, clients, partners, sales) vive en `localStorage` del navegador bajo la key `viora-state-v1`. Hay botones de export/import CSV por entidad en la sección **Datos**, y un botón de backup/restore JSON completo.
 
 Para resetear a los datos de demo: menú de usuario (abajo a la izquierda) → "Reset demo data".
 

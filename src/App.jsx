@@ -123,8 +123,8 @@ function appReducer(state, action) {
     case 'ADD_MENTOR':
       return { ...state, mentors: [...state.mentors, action.payload] };
     case 'REMOVE_MENTOR':
-      // Al borrar un mentor, lo desasignamos de las órdenes/clientes para
-      // no dejar referencias colgadas (mentorId a un mentor que no existe).
+      // Al borrar un partner, lo desasignamos de las órdenes/clientes para
+      // no dejar referencias colgadas (mentorId a un partner que no existe).
       return {
         ...state,
         mentors: state.mentors.filter(m => m.id !== action.payload.id),
@@ -298,7 +298,7 @@ export function getOrderCosts(order, product) {
 
 export function getOrderProfit(order, product) {
   // Profit CRUDO sobre el costo INTERNO real.
-  // Este es el "profit antes de descontar comisión del mentor".
+  // Este es el "profit antes de descontar comisión del partner".
   // Para el profit real que queda para el lab, usar getLabRealProfit.
   const eff = getOrderEffectiveUnit(order, product);
   const unitCost = eff.costoContenido + eff.costoEnvase + eff.costoEtiqueta;
@@ -306,7 +306,7 @@ export function getOrderProfit(order, product) {
   return (eff.precioVenta - unitCost) * cantidad;
 }
 
-// Costo INFORMADO al mentor/cliente (por unidad). Puede ser distinto al
+// Costo INFORMADO al partner/cliente (por unidad). Puede ser distinto al
 // costo real cuando el lab no quiere que el mentor vea el costo verdadero.
 //
 // Prioridad:
@@ -330,7 +330,7 @@ export function getInformedCostUnit(order, product) {
 }
 
 // Profit SOBRE EL COSTO INFORMADO (el que "ve" el mentor).
-// Base para calcular la comisión del mentor: es justo que ellos cobren
+// Base para calcular la comisión del partner: es justo que ellos cobren
 // sobre lo que ellos creen que cuesta, no sobre lo que realmente cuesta.
 export function getOrderInformedProfit(order, product) {
   const eff = getOrderEffectiveUnit(order, product);
@@ -350,7 +350,7 @@ export function getLabRealProfit(order, product, mentor) {
   return profitInterno - mentorCommission;
 }
 
-// Comisión del mentor = porcentaje × profit INFORMADO (sobre costoInformado).
+// Comisión del partner = porcentaje × profit INFORMADO (sobre costoInformado).
 // Prioridad:
 //  1. Si la orden tiene un presupuesto fijo asignado (order.mentorPresupuesto), ese gana.
 //  2. Si se pasa mentor y product, usa mentor.porcentajeComision (default 50)
@@ -371,7 +371,7 @@ export function getMentorCommission(order, product, mentor) {
 // Resumen de cobros de una orden (plata que entra del cliente).
 // Devuelve total, cobrado, saldo, cuotasPagadas y cuotasPlanificadas.
 // order.cobros es un array de { monto, fecha, nota }.
-// Balance global de un mentor: cuánto generó en comisiones (acumulado de
+// Balance global de un partner: cuánto generó en comisiones (acumulado de
 // todas sus órdenes) vs cuánto ya se le pagó (suma de pagosRecibidos).
 // Devuelve también el saldo pendiente y el % cobrado.
 export function getMentorBalance(mentor, allSales, allProducts) {
@@ -463,7 +463,7 @@ export const PAYMENT_RUBRO_LABELS = {
   contenido: 'Contenido',
   envase: 'Envase / Pote',
   etiqueta: 'Etiqueta',
-  mentor: 'Comisión equipo',
+  mentor: 'Comisión partner',
 };
 
 // Devuelve los 4 rubros de pago de una orden con valores calculados por defecto.
@@ -684,7 +684,7 @@ function AppShell({ onExit }) {
           }
           if (!cancelled) {
             const u = data.user;
-            // Matcheamos id del mentor por nombre si aplica
+            // Matcheamos id del partner por nombre si aplica
             let id = u.username || u.email || u.name;
             if (u.role === 'admin') {
               id = 'admin';
@@ -800,7 +800,7 @@ function AppShell({ onExit }) {
       ...mentorData,
     };
     dispatch({ type: 'ADD_MENTOR', payload: newMentor });
-    addToast({ type: 'success', message: `Mentor "${newMentor.nombre}" creado` });
+    addToast({ type: 'success', message: `Partner "${newMentor.nombre}" creado` });
     return newMentor;
   };
 
@@ -808,7 +808,7 @@ function AppShell({ onExit }) {
     const mentor = state.mentors.find(m => m.id === id);
     if (!mentor) return;
     dispatch({ type: 'REMOVE_MENTOR', payload: { id } });
-    addToast({ type: 'warning', message: `Mentor "${mentor.nombre}" eliminado` });
+    addToast({ type: 'warning', message: `Partner "${mentor.nombre}" eliminado` });
   };
 
   const createProduct = (productData) => {
@@ -1661,7 +1661,7 @@ function InicioSection({ state, dispatch, onAddSale, onQuickAddClient, onQuickAd
           color="from-amber-500 to-orange-500"
           delay={160}
           active={filters.focus === 'comisionesPendientes'}
-          tooltip="Click para filtrar: solo órdenes con comisión del mentor pendiente"
+          tooltip="Click para filtrar: solo órdenes con comisión del partner pendiente"
           onClick={() => setFilters(f => ({ ...f, focus: f.focus === 'comisionesPendientes' ? null : 'comisionesPendientes' }))}
         />
         <StatCard
@@ -1739,7 +1739,7 @@ function FilterBar({ filters, onChange, totalShown, totalAll }) {
             type="text"
             value={filters.search}
             onChange={(e) => update({ search: e.target.value })}
-            placeholder="Buscar por cliente, producto, mentor, estado..."
+            placeholder="Buscar por cliente, producto, partner, estado..."
             className="w-full pl-9 pr-9 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
           />
           {filters.search && (
@@ -1846,7 +1846,7 @@ const ORDERS_COLUMNS = [
   { key: 'cantidad',  label: 'Cant.',     default: true,  required: false },
   { key: 'costo',     label: 'Costo',     default: true,  required: false },
   { key: 'precio',    label: 'Precio venta', default: true, required: false },
-  { key: 'comision',  label: 'Com. equipo', default: true, required: false },
+  { key: 'comision',  label: 'Com. partner', default: true, required: false },
   { key: 'profit',    label: 'Profit',    default: true,  required: false },
   { key: 'estado',    label: 'Estado',    default: true,  required: false },
   { key: 'cobro',     label: 'Cobro',     default: true,  required: false },
@@ -2055,12 +2055,12 @@ function OrdersList({ state, dispatch, orders, onEditOrder }) {
               {isColVisible('fecha') && <th className="px-4 py-3 font-semibold" title="Fecha de creación de la orden">Fecha</th>}
               {isColVisible('cliente') && <th className="px-4 py-3 font-semibold" title="Cliente que solicitó la orden">Cliente</th>}
               {isColVisible('producto') && <th className="px-4 py-3 font-semibold" title="Producto producido">Producto</th>}
-              {isColVisible('mentor') && <th className="px-4 py-3 font-semibold" title="Persona del equipo que refirió al cliente (opcional)">Equipo</th>}
+              {isColVisible('mentor') && <th className="px-4 py-3 font-semibold" title="Persona del partner que refirió al cliente (opcional)">Equipo</th>}
               {isColVisible('cantidad') && <th className="px-4 py-3 font-semibold text-right" title="Unidades a producir. Doble click en la celda para editar.">Cant.</th>}
               {isColVisible('costo') && <th className="px-4 py-3 font-semibold text-right" title="Costo total: contenido + envase + etiqueta. Click en la celda para ver el desglose o cambiar a modo 'sin discriminar'.">Costo</th>}
               {isColVisible('precio') && <th className="px-4 py-3 font-semibold text-right" title="Precio cobrado al cliente. Doble click en la celda para editar.">Precio venta</th>}
-              {isColVisible('comision') && <th className="px-4 py-3 font-semibold text-right" title="Comisión que se le paga al equipo (% del profit, configurable en Comisiones)">Com. equipo</th>}
-              {isColVisible('profit') && <th className="px-4 py-3 font-semibold text-right" title="Profit del laboratorio = precio venta − costo. NO descuenta la comisión del equipo.">Profit</th>}
+              {isColVisible('comision') && <th className="px-4 py-3 font-semibold text-right" title="Comisión que se le paga al equipo (% del profit, configurable en Comisiones)">Com. partner</th>}
+              {isColVisible('profit') && <th className="px-4 py-3 font-semibold text-right" title="Profit del laboratorio = precio venta − costo. NO descuenta la comisión del partner.">Profit</th>}
               {isColVisible('estado') && <th className="px-4 py-3 font-semibold" title="Estado del pipeline: Pendiente cotización → Cotizado → Abonado → En producción → Listo para enviar → Despachado">Estado</th>}
               {isColVisible('cobro') && <th className="px-4 py-3 font-semibold text-center" title="Progreso de cobro al cliente. Click para ver detalle o registrar pagos.">Cobro</th>}
               {isColVisible('incidencia') && <th className="px-4 py-3 font-semibold" title="Marcá esta orden con incidencia si hay alguna demora o problema.">Incidencia</th>}
@@ -2661,7 +2661,7 @@ function NewSaleModal({ state, onAddSale, onQuickAddClient, onQuickAddProduct, o
   const [showClientQuickModal, setShowClientQuickModal] = useState(false);
   const [showProductQuickModal, setShowProductQuickModal] = useState(false);
 
-  // Cálculos derivados para sugerir el presupuesto del mentor al cargar la venta.
+  // Cálculos derivados para sugerir el presupuesto del partner al cargar la venta.
   const productoSel = state.products.find(p => p.id === parseInt(formData.productoId));
   const cantidadNum = parseInt(formData.cantidad) || 0;
   const profitSugerido = productoSel ? (productoSel.precioVenta - getProductUnitCost(productoSel)) * cantidadNum : 0;
@@ -2812,7 +2812,7 @@ function NewSaleFormContent({ state, formData, setFormData, handleSubmit, mentor
       </div>
 
       <div>
-        <FormLabel tip="Si hay mentor, cobrará comisión sobre el profit (%) o el presupuesto fijo que pongas abajo.">Mentor asignado</FormLabel>
+        <FormLabel tip="Si hay partner, cobrará comisión sobre el profit (%) o el presupuesto fijo que pongas abajo.">Partner asignado</FormLabel>
         <select
           value={formData.mentorId}
           onChange={(e) => { setFormData({ ...formData, mentorId: e.target.value }); setPresupuestoTouched(false); }}
@@ -2825,8 +2825,8 @@ function NewSaleFormContent({ state, formData, setFormData, handleSubmit, mentor
 
       {formData.mentorId && (
         <div>
-          <FormLabel tip="Monto FIJO que se paga al mentor por esta orden. Si lo dejás vacío, usa el % configurado en Comisiones.">
-            Presupuesto para el mentor
+          <FormLabel tip="Monto FIJO que se paga al partner por esta orden. Si lo dejás vacío, usa el % configurado en Comisiones.">
+            Presupuesto para el partner
             <span className="ml-1 text-gray-400 dark:text-gray-500 font-normal">
               · sugerido ${mentorSugerido.toLocaleString()}
             </span>
@@ -2854,7 +2854,7 @@ function NewSaleFormContent({ state, formData, setFormData, handleSubmit, mentor
               </button>
             )}
           </div>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Este será el monto fijo que se le paga al mentor por esta orden.</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Este será el monto fijo que se le paga al partner por esta orden.</p>
         </div>
       )}
 
@@ -3084,7 +3084,7 @@ function EditOrderModal({ order, state, onSave, onClose }) {
         </div>
 
         <div>
-          <FormLabel>Mentor asignado</FormLabel>
+          <FormLabel>Partner asignado</FormLabel>
           <select
             value={formData.mentorId}
             onChange={(e) => setFormData({ ...formData, mentorId: e.target.value })}
@@ -3097,7 +3097,7 @@ function EditOrderModal({ order, state, onSave, onClose }) {
 
         {formData.mentorId && (
           <div>
-            <FormLabel tip="Monto FIJO que se paga al mentor por esta orden.">Presupuesto para el mentor</FormLabel>
+            <FormLabel tip="Monto FIJO que se paga al partner por esta orden.">Presupuesto para el partner</FormLabel>
             <div className="relative">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 text-sm">$</span>
               <input
@@ -3105,7 +3105,7 @@ function EditOrderModal({ order, state, onSave, onClose }) {
                 min="0"
                 value={formData.mentorPresupuesto}
                 onChange={(e) => setFormData({ ...formData, mentorPresupuesto: e.target.value })}
-                placeholder="Vacío = usa % del mentor"
+                placeholder="Vacío = usa % del partner"
                 className="w-full pl-6 pr-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
               />
             </div>
@@ -3187,7 +3187,7 @@ function VentasSection({ state, onAddSale, onQuickAddClient, onQuickAddProduct, 
 function ProductosSection({ state, onAddProduct, showModal, setShowModal, calculateMargin }) {
   // modoCosto: 'total' (un único número) | 'desglose' (contenido/envase/etiqueta).
   // La mayoría de los casos usa 'total' porque el proveedor entrega todo junto.
-  // costoInformado es lo que le informamos al mentor (puede ser distinto al real).
+  // costoInformado es lo que le informamos al partner (puede ser distinto al real).
   const [formData, setFormData] = useState({
     nombre: '', descripcion: '',
     modoCosto: 'total',
@@ -3396,7 +3396,7 @@ function ProductosSection({ state, onAddProduct, showModal, setShowModal, calcul
               )}
             </div>
 
-            {/* Costo informado al mentor (opcional). Si está seteado, el mentor
+            {/* Costo informado al partner (opcional). Si está seteado, el mentor
                 ve ESTE valor en lugar del costo real y su comisión se calcula
                 sobre (precio - costoInformado). */}
             <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50">
@@ -3410,7 +3410,7 @@ function ProductosSection({ state, onAddProduct, showModal, setShowModal, calcul
                 <div className="flex-1">
                   <span className="text-xs font-semibold text-amber-900 dark:text-amber-200">Costo informado distinto al real</span>
                   <p className="text-[11px] text-amber-800 dark:text-amber-300/80 mt-0.5">
-                    Lo que el mentor ve como "costo del producto". La comisión del mentor se calcula sobre este valor, no sobre el costo real.
+                    Lo que el mentor ve como "costo del producto". La comisión del partner se calcula sobre este valor, no sobre el costo real.
                   </p>
                 </div>
               </label>
@@ -3816,7 +3816,7 @@ function ClientesSection({ state, onAddClient, onUpdateClient, showModal, setSho
               />
             </div>
             <div>
-              <FormLabel tip="Mentor que refirió al cliente. Cobrará comisión sobre sus ventas según el % configurado en Comisiones.">Mentor asignado</FormLabel>
+              <FormLabel tip="Partner que refirió al cliente. Cobrará comisión sobre sus ventas según el % configurado en Comisiones.">Partner asignado</FormLabel>
               <select
                 value={formData.mentorId}
                 onChange={(e) => setFormData({ ...formData, mentorId: e.target.value })}
@@ -4002,7 +4002,7 @@ function ComisionesSection({ state, dispatch, onUpdateMentor, onAddMentor, onRem
     <div className="space-y-6">
       <div className="flex flex-wrap justify-between items-center gap-3">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Comisiones y Mentores</h2>
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Comisiones y Partners</h2>
           <p className="text-sm text-gray-500 dark:text-gray-400">Gestioná los mentores, sus porcentajes y los pagos recibidos.</p>
         </div>
         <div className="flex items-center gap-2">
@@ -4011,7 +4011,7 @@ function ComisionesSection({ state, dispatch, onUpdateMentor, onAddMentor, onRem
             onChange={(e) => setFilterMentor(e.target.value)}
             className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
           >
-            <option value="">Todos los mentores</option>
+            <option value="">Todos los partners</option>
             {state.mentors.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
           </select>
           {onAddMentor && (
@@ -4019,7 +4019,7 @@ function ComisionesSection({ state, dispatch, onUpdateMentor, onAddMentor, onRem
               onClick={() => setShowNewMentorModal(true)}
               className="inline-flex items-center gap-2 bg-pink-900 text-white px-4 py-2 rounded-lg hover:bg-pink-800 transition font-semibold text-sm"
             >
-              <Plus size={16} /> Nuevo mentor
+              <Plus size={16} /> Nuevo partner
             </button>
           )}
         </div>
@@ -4034,11 +4034,11 @@ function ComisionesSection({ state, dispatch, onUpdateMentor, onAddMentor, onRem
 
       {confirmDelete != null && (
         <Modal
-          title="¿Eliminar mentor?"
+          title="¿Eliminar partner?"
           onClose={() => setConfirmDelete(null)}
         >
           <div className="space-y-4 text-sm text-gray-700 dark:text-gray-200">
-            <p>Esta acción elimina al mentor y desasigna sus órdenes y clientes. Los pagos registrados a este mentor se pierden.</p>
+            <p>Esta acción elimina al partner y desasigna sus órdenes y clientes. Los pagos registrados a este partner se pierden.</p>
             <p className="text-xs text-gray-500 dark:text-gray-400">Si solo querés pausarlo, cambiá su % de comisión a 0 en vez de eliminarlo.</p>
             <div className="flex gap-2 pt-2">
               <button
@@ -4061,13 +4061,13 @@ function ComisionesSection({ state, dispatch, onUpdateMentor, onAddMentor, onRem
       {state.mentors.length === 0 && (
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-12 text-center border border-dashed border-gray-300 dark:border-gray-700">
           <UserCheck size={36} className="mx-auto mb-3 text-gray-400" />
-          <h3 className="text-base font-bold text-gray-900 dark:text-gray-100 mb-1">No hay mentores todavía</h3>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Agregá el primer mentor para empezar a referir órdenes y pagar comisiones.</p>
+          <h3 className="text-base font-bold text-gray-900 dark:text-gray-100 mb-1">No hay partners todavía</h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Agregá el primer partner para empezar a referir órdenes y cobrar comisiones.</p>
           <button
             onClick={() => setShowNewMentorModal(true)}
             className="inline-flex items-center gap-2 bg-pink-900 text-white px-4 py-2 rounded-lg hover:bg-pink-800 transition font-semibold text-sm"
           >
-            <Plus size={16} /> Nuevo mentor
+            <Plus size={16} /> Nuevo partner
           </button>
         </div>
       )}
@@ -4077,7 +4077,7 @@ function ComisionesSection({ state, dispatch, onUpdateMentor, onAddMentor, onRem
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
         <div className="flex items-start justify-between mb-4">
           <div>
-            <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Mentores</h3>
+            <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Partners</h3>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">El % de comisión se aplica sobre el <span className="font-semibold">profit informado</span> de cada orden.</p>
           </div>
         </div>
@@ -4115,14 +4115,14 @@ function ComisionesSection({ state, dispatch, onUpdateMentor, onAddMentor, onRem
                       onClick={() => generateInviteLink(mentor)}
                       disabled={inviteLoading === mentor.id}
                       className="px-2 py-1 rounded text-[10px] font-semibold bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-200 dark:hover:bg-emerald-900/50 transition"
-                      title="Generar link de acceso para este mentor"
+                      title="Generar link de acceso para este partner"
                     >
                       {inviteLoading === mentor.id ? '...' : '🔗 Link de acceso'}
                     </button>
                     <button
                       onClick={() => setConfirmDelete(mentor.id)}
                       className="opacity-0 group-hover:opacity-100 p-1 rounded text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition"
-                      title="Eliminar mentor"
+                      title="Eliminar partner"
                     >
                       <Trash2 size={14} />
                     </button>
@@ -4808,10 +4808,10 @@ function AnalyticsSection({ state, currentUser, analyticsState, onFetch }) {
   );
 }
 
-function MentoresSection({ state, getMentorStats }) {
+function PartnersSection({ state, getMentorStats }) {
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Perfiles de Mentores</h2>
+      <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Perfiles de Partners</h2>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {state.mentors.map(mentor => {
@@ -4991,7 +4991,7 @@ function EquipoOrdenesView({ state, mentorId, compact = false }) {
 
 function MentorResumenSection({ currentUser, state, getMentorStats }) {
   const mentor = state.mentors.find(m => m.id === currentUser.id);
-  // Balance en vivo calculado sobre TODAS las órdenes del mentor y sus
+  // Balance en vivo calculado sobre TODAS las órdenes del partner y sus
   // pagos recibidos. Se actualiza al segundo cada vez que la admin agrega
   // un pago desde la sección de Comisiones o una orden nueva.
   const balance = mentor ? getMentorBalance(mentor, state.sales, state.products) : { generado: 0, cobrado: 0, saldo: 0, ordenes: 0, porcentaje: 0, pagos: [] };
@@ -5035,7 +5035,7 @@ function MentorResumenSection({ currentUser, state, getMentorStats }) {
         </p>
       </div>
 
-      {/* Historial de pagos recibidos (read-only para el mentor) */}
+      {/* Historial de pagos recibidos (read-only para el partner) */}
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
         <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-4">Historial de pagos recibidos</h3>
         {balance.pagos.length === 0 ? (
@@ -6324,13 +6324,13 @@ function PaymentsPanel({ order, payments, mentorNombre, onChange }) {
           />
         ))}
 
-        {/* Comisión del mentor — siempre se muestra si hay mentor asignado */}
+        {/* Comisión del partner — siempre se muestra si hay mentor asignado */}
         <PaymentCard
           label={rubroMentor.label}
           data={payments.mentor || {}}
           onChange={(patch) => onChange('mentor', patch)}
           disabled={!order.mentorId}
-          disabledLabel="sin mentor"
+          disabledLabel="sin partner"
           variant="mentor"
         />
       </div>
@@ -6395,7 +6395,7 @@ function PaymentCard({ label, data, onChange, disabled = false, disabledLabel = 
   );
 }
 
-// Modal para crear un mentor nuevo desde la sección de Comisiones.
+// Modal para crear un partner nuevo desde la sección de Comisiones.
 function NewMentorModal({ onClose, onCreate }) {
   const [data, setData] = useState({ nombre: '', contacto: '', porcentajeComision: 50 });
   const handleSubmit = (e) => {
@@ -6408,7 +6408,7 @@ function NewMentorModal({ onClose, onCreate }) {
     });
   };
   return (
-    <Modal title="Nuevo mentor" onClose={onClose}>
+    <Modal title="Nuevo partner" onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <FormLabel required>Nombre</FormLabel>
@@ -6417,7 +6417,7 @@ function NewMentorModal({ onClose, onCreate }) {
             autoFocus
             value={data.nombre}
             onChange={(e) => setData({ ...data, nombre: e.target.value })}
-            placeholder="Nombre del mentor"
+            placeholder="Nombre del partner"
             className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
             required
           />
@@ -6516,7 +6516,7 @@ function QuickClientModal({ mentors, onClose, onCreate }) {
             />
           </div>
           <div>
-            <FormLabel tip="Si el cliente vino referido por un mentor, asignalo para que se calcule su comisión sobre las ventas.">Mentor asignado</FormLabel>
+            <FormLabel tip="Si el cliente vino referido por un partner, asignalo para que se calcule su comisión sobre las ventas.">Partner asignado</FormLabel>
             <select
               value={data.mentorId}
               onChange={(e) => setData({ ...data, mentorId: e.target.value })}
@@ -6793,8 +6793,8 @@ function getSectionTitle(user, section) {
     ventas: 'Ventas',
     productos: 'Productos',
     clientes: 'Clientes',
-    comisiones: 'Comisiones y Mentores',
-    mentores: 'Comisiones y Mentores', // fallback: sección vieja cae al mismo lugar
+    comisiones: 'Comisiones y Partners',
+    mentores: 'Comisiones y Partners', // fallback: sección vieja cae al mismo lugar
     analytics: 'Analytics con IA',
     datos: 'Datos (Export / Import)',
   };
@@ -6901,7 +6901,7 @@ function UserMenu({ currentUser, sidebarOpen, state, onLogout }) {
   }, 0);
 
   // Profit acumulado: (precio venta - costos unitarios) × cantidad, por orden.
-  // No descuenta comisión del mentor (ese es profit del mentor, no del lab).
+  // No descuenta comisión del partner (ese es profit del partner, no del lab).
   const profitTotal = sales.reduce((acc, o) => {
     const product = products.find(p => p.id === o.productoId);
     return acc + getOrderProfit(o, product);
@@ -7357,7 +7357,7 @@ function CommandPalette({ state, currentUser, onClose, onNavigate, onNewSale, on
       { id: 'go-inicio', group: 'Ir a', label: 'Dashboard / Inicio', icon: Home, shortcut: 'G I', run: () => onNavigate('inicio') },
       { id: 'go-productos', group: 'Ir a', label: 'Productos', icon: Package, shortcut: 'G P', run: () => onNavigate('productos') },
       { id: 'go-clientes', group: 'Ir a', label: 'Clientes', icon: Users, shortcut: 'G C', run: () => onNavigate('clientes') },
-      { id: 'go-comisiones', group: 'Ir a', label: 'Comisiones y Mentores', icon: CreditCard, shortcut: 'G $', run: () => onNavigate('comisiones') },
+      { id: 'go-comisiones', group: 'Ir a', label: 'Comisiones y Partners', icon: CreditCard, shortcut: 'G $', run: () => onNavigate('comisiones') },
       { id: 'new-sale', group: 'Acciones', label: 'Nueva venta', icon: Plus, shortcut: 'N V', run: onNewSale },
       { id: 'new-client', group: 'Acciones', label: 'Nuevo cliente', icon: Plus, shortcut: 'N C', run: onNewClient },
       { id: 'new-product', group: 'Acciones', label: 'Nuevo producto', icon: Plus, shortcut: 'N P', run: onNewProduct },

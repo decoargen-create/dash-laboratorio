@@ -61,7 +61,7 @@ const PANEL_TOOLS = [
         nombre: { type: 'string', description: 'Nombre completo del cliente' },
         telefono: { type: 'string', description: 'Teléfono (ej. "11 2345-6789")' },
         domicilio: { type: 'string', description: 'Dirección del cliente' },
-        mentorId: { type: 'integer', description: 'ID del mentor/socio asignado (opcional)' },
+        mentorId: { type: 'integer', description: 'ID del partner/socio asignado (opcional)' },
       },
       required: ['nombre'],
     },
@@ -92,7 +92,7 @@ const PANEL_TOOLS = [
         productoId: { type: 'integer' },
         cantidad: { type: 'integer', description: 'Cantidad de unidades (mínimo 100)' },
         montoTotal: { type: 'number', description: 'Monto total de la cotización en pesos' },
-        mentorId: { type: 'integer', description: 'ID del mentor responsable (opcional, default: el del cliente)' },
+        mentorId: { type: 'integer', description: 'ID del partner responsable (opcional, default: el del cliente)' },
         fecha: { type: 'string', description: 'YYYY-MM-DD (opcional, default hoy)' },
         estado: { type: 'string', enum: ORDER_STATES, description: 'Estado inicial (default: pendiente-cotizacion)' },
       },
@@ -199,8 +199,8 @@ function buildContextBlock(mode, context) {
     if (Array.isArray(context.productos)) {
       lines.push(`- Productos: ${context.productos.map(p => `#${p.id} ${p.nombre} ($${p.precio})`).join(', ')}`);
     }
-    if (Array.isArray(context.mentores)) {
-      lines.push(`- Mentores/socios: ${context.mentores.map(m => `#${m.id} ${m.nombre} (${m.porcentaje}%)`).join(', ')}`);
+    if (Array.isArray(context.partners)) {
+      lines.push(`- Partners/socios: ${context.partners.map(m => `#${m.id} ${m.nombre} (${m.porcentaje}%)`).join(', ')}`);
     }
     return lines.join('\n');
   }

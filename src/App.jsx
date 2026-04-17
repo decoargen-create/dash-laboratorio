@@ -352,10 +352,9 @@ export function getLabRealProfit(order, product, mentor) {
 
 // Comisión del partner = porcentaje × profit INFORMADO (sobre costoInformado).
 // Prioridad:
-//  1. Si la orden tiene un presupuesto fijo asignado (order.mentorPresupuesto), ese gana.
-//  2. Si se pasa mentor y product, usa mentor.porcentajeComision (default 50)
+//  1. Si se pasa mentor y product, usa mentor.porcentajeComision (default 50)
 //     × profit informado (sobre costoInformado del producto/orden).
-//  3. Sin mentor/product, último fallback: 50% del montoTotal.
+//  2. Sin mentor/product, último fallback: 50% del montoTotal.
 export function getMentorCommission(order, product, mentor) {
   if (product) {
     const profit = getOrderInformedProfit(order, product);
@@ -2723,7 +2722,7 @@ function NewSaleModal({ state, onAddSale, onQuickAddClient, onQuickAddProduct, o
       clienteId: String(newClient.id),
       mentorId: newClient.mentorId ? String(newClient.mentorId) : prev.mentorId,
     }));
-    setPresupuestoTouched(false);
+    setCostoTouched(false);
     setShowClientQuickModal(false);
   };
 
@@ -2989,6 +2988,10 @@ function QuickConsultaModal({ state, onSubmit, onQuickAddClient, onClose }) {
 
 // Modal para editar una orden existente.
 function EditOrderModal({ order, state, onSave, onClose }) {
+  const cantidadOrden = order.cantidad || 1;
+  const costoInfGuardadoTotal = order.costoInformado != null
+    ? Math.round(order.costoInformado * cantidadOrden)
+    : '';
   const [formData, setFormData] = useState({
     fecha: order.fecha || '',
     clienteId: String(order.clienteId || ''),
@@ -2997,20 +3000,24 @@ function EditOrderModal({ order, state, onSave, onClose }) {
     montoTotal: order.montoTotal || 0,
     mentorId: order.mentorId ? String(order.mentorId) : '',
     estado: order.estado || 'consulta-recibida',
-    mentorPresupuesto: order.mentorPresupuesto != null ? String(order.mentorPresupuesto) : '',
+    costoInformado: costoInfGuardadoTotal !== '' ? String(costoInfGuardadoTotal) : '',
   });
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    const cant = parseInt(formData.cantidad) || 1;
     const patch = {
       fecha: formData.fecha,
       clienteId: parseInt(formData.clienteId) || order.clienteId,
       productoId: parseInt(formData.productoId) || order.productoId,
-      cantidad: parseInt(formData.cantidad) || 0,
+      cantidad: cant,
       montoTotal: parseFloat(formData.montoTotal) || 0,
       mentorId: formData.mentorId ? parseInt(formData.mentorId) : null,
       estado: formData.estado,
-      mentorPresupuesto: formData.mentorPresupuesto !== '' ? parseFloat(formData.mentorPresupuesto) : null,
+      // Guardamos costoInformado POR UNIDAD (consistente con NewSaleModal).
+      costoInformado: formData.mentorId && formData.costoInformado !== ''
+        ? parseFloat(formData.costoInformado) / cant
+        : null,
     };
     onSave(patch);
   };
@@ -3102,15 +3109,15 @@ function EditOrderModal({ order, state, onSave, onClose }) {
 
         {formData.mentorId && (
           <div>
-            <FormLabel tip="Monto FIJO que se paga al partner por esta orden.">Presupuesto para el partner</FormLabel>
+            <FormLabel tip="Costo total (todas las unidades) que se le informa al partner. Su comisión se calcula sobre (monto total − costo informado) × %.">Costo informado al partner</FormLabel>
             <div className="relative">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 text-sm">$</span>
               <input
                 type="number"
                 min="0"
-                value={formData.mentorPresupuesto}
-                onChange={(e) => setFormData({ ...formData, mentorPresupuesto: e.target.value })}
-                placeholder="Vacío = usa % del partner"
+                value={formData.costoInformado}
+                onChange={(e) => setFormData({ ...formData, costoInformado: e.target.value })}
+                placeholder="Vacío = usa el costo informado del producto"
                 className="w-full pl-6 pr-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
               />
             </div>
@@ -4438,7 +4445,7 @@ function DatosSection({ state, dispatch, addToast }) {
         { key: 'estado', label: 'estado' },
         { key: 'tieneIncidencia', label: 'tieneIncidencia' },
         { key: 'incidenciaDetalle', label: 'incidenciaDetalle' },
-        { key: 'mentorPresupuesto', label: 'mentorPresupuesto' },
+        { key: 'costoInformado', label: 'costoInformado' },
         { key: 'cuotasPlanificadas', label: 'cuotasPlanificadas' },
         { key: 'cobros', label: 'cobros', serialize: (s) => JSON.stringify(s.cobros || []) },
         { key: 'pagos', label: 'pagos', serialize: (s) => JSON.stringify(s.pagos || {}) },
@@ -4457,7 +4464,7 @@ function DatosSection({ state, dispatch, addToast }) {
         estado: row.estado || 'consulta-recibida',
         tieneIncidencia: toBool(row.tieneIncidencia),
         incidenciaDetalle: row.incidenciaDetalle || '',
-        mentorPresupuesto: row.mentorPresupuesto ? toNumber(row.mentorPresupuesto) : null,
+        costoInformado: row.costoInformado ? toNumber(row.costoInformado) : null,
         cuotasPlanificadas: row.cuotasPlanificadas ? toNumber(row.cuotasPlanificadas) : 0,
         cobros: (() => { try { return JSON.parse(row.cobros || '[]'); } catch { return []; } })(),
         pagos: (() => { try { return JSON.parse(row.pagos || '{}'); } catch { return {}; } })(),
@@ -6505,6 +6512,13 @@ function NewMentorModal({ onClose, onCreate }) {
 function QuickClientModal({ mentors, onClose, onCreate }) {
   const [data, setData] = useState({ nombre: '', telefono: '', mentorId: '', domicilio: '' });
 
+  // ESC para volver al form de orden sin perder lo tipeado.
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose?.(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   const handleSubmit = (e) => {
     e.preventDefault();
     onCreate({
@@ -6523,7 +6537,7 @@ function QuickClientModal({ mentors, onClose, onCreate }) {
           <button
             onClick={onClose}
             className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition"
-            title="Cancelar"
+            title="Volver al formulario"
           >
             ×
           </button>
@@ -6579,7 +6593,7 @@ function QuickClientModal({ mentors, onClose, onCreate }) {
               onClick={onClose}
               className="flex-1 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition font-semibold"
             >
-              Cancelar
+              Volver
             </button>
             <button
               type="submit"
@@ -6605,6 +6619,12 @@ function QuickProductModal({ onClose, onCreate }) {
     costoContenido: '', costoEnvase: '', costoEtiqueta: '',
   });
   const [showCosts, setShowCosts] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose?.(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -6635,7 +6655,7 @@ function QuickProductModal({ onClose, onCreate }) {
           <button
             onClick={onClose}
             className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition"
-            title="Cancelar"
+            title="Volver al formulario"
           >
             ×
           </button>
@@ -6755,7 +6775,7 @@ function QuickProductModal({ onClose, onCreate }) {
               onClick={onClose}
               className="flex-1 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition font-semibold"
             >
-              Cancelar
+              Volver
             </button>
             <button
               type="submit"

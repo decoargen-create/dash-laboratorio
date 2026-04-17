@@ -51,7 +51,7 @@ REGLAS:
 - Palabras clave: 2 a 4 palabras del nombre, SIN conectores ("de", "para", "y", "al", "con", "sin", "la", "el", "los", "las", "un", "una", "del"), SIN marketing ("Premium", "Pro", "Plus", "Original", "Control"), SIN unidades genéricas ("unidades", "pack").
 - Singularizá sustantivos obvios: "Alicates" → "ALICATE", "Paños" → "PAÑOS", "Productos" → "PRODUCTO".
 - Truncá palabras muy largas a 6-7 letras: "MICROFIBRA" → "MICROF", "ORGANIZADOR" → "ORGANIZ".
-- Mantené multiplicadores: "x3", "x8" → al FINAL, uppercase: "-X3", "-X8".
+- Multiplicadores "x3", "x8" SOLO se meten en el nombre/SKU si son IDENTIDAD del producto (siempre se vende así, no hay opción de comprar 1). Si hay un selector "1u / 2u / 3u" en la página, son OFERTAS → el nombre queda singular y los x2/x3/xN van como VARIANTES (ver más abajo).
 - Todo uppercase. Sin tildes excepto Ñ. Separador: guion medio (-). Longitud 20-40 chars.
 
 EJEMPLOS DE SKU:
@@ -70,8 +70,28 @@ Buscá en el HTML los selectores, opciones o listas que indiquen variantes:
 - Tiendanube: ns.product.variants, data-variant
 
 Cada variante:
-- tipo: "color" | "talle" | "medida" | "sabor" | "material" | "modelo" | "otro"
-- valor: texto visible (ej: "Rojo", "XL", "500ml")
+- tipo: "color" | "talle" | "medida" | "sabor" | "material" | "modelo" | "oferta" | "otro"
+- valor: texto visible (ej: "Rojo", "XL", "500ml", "Pack x3", "1 unidad")
+
+=== CASO ESPECIAL: OFERTAS POR CANTIDAD / COMBOS ===
+Muchas tiendas de cosmética/suplementos venden el producto con varias opciones de cantidad:
+  - "1 unidad", "Pack x2 (20% off)", "Pack x3 (30% off)"
+  - "Combo", "Oferta", "Llevá más, pagá menos"
+
+Detectá estos selectores en el HTML (es <select>, radios, o botones con opciones de cantidad). CUANDO EXISTEN:
+  - El nombre del producto BASE es SINGULAR (sin x3 ni nada).
+  - Cada opción de cantidad va como variante: { tipo: "oferta", valor: "1 unidad" | "Pack x3" | etc. }
+  - El SKU se genera con el nombre base, SIN -X3.
+
+Ejemplo: Landing de "Serum x3" con selector [1u / 2u / 3u]:
+  - nombreLimpio: "Serum Anticaída Skinfinity" (sin x3)
+  - sku: "PF-SI-SERUM-ANTICAIDA" (sin -X3)
+  - variantes: [{tipo:"oferta", valor:"1 unidad"}, {tipo:"oferta", valor:"Pack x2"}, {tipo:"oferta", valor:"Pack x3"}]
+
+Ejemplo opuesto: "Paños Microfibra x3" SIN selector de cantidad (siempre se venden de a 3):
+  - nombreLimpio: "Paños Microfibra x3"
+  - sku: "PF-AS-PAÑOS-MICROF-X3"
+  - variantes: []
 
 Si no hay variantes claras, devolvé variantes: []. NO inventes variantes.
 
@@ -239,6 +259,7 @@ function variantesFromShopifyOptions(options) {
       : tipoRaw.includes('sabor') || tipoRaw.includes('flavor') ? 'sabor'
       : tipoRaw.includes('material') ? 'material'
       : tipoRaw.includes('modelo') || tipoRaw.includes('model') ? 'modelo'
+      : tipoRaw.includes('oferta') || tipoRaw.includes('cantidad') || tipoRaw.includes('combo') || tipoRaw.includes('pack') || tipoRaw.includes('unidad') ? 'oferta'
       : 'otro';
     for (const v of (opt.values || [])) {
       const valor = String(v).trim();

@@ -19,7 +19,7 @@ import {
   Plus, Trash2, Download, Upload, Edit2, Package, Image as ImageIcon,
   Save, X, Check, Sparkles, Link as LinkIcon, Loader2, ChevronDown, UserPlus,
   List as ListIcon, LayoutGrid, ExternalLink, AlertTriangle, RefreshCw,
-  Settings, Wand2, RotateCcw, Truck, PencilLine,
+  Settings, Wand2, RotateCcw, Truck, PencilLine, Eraser, ClipboardPaste,
 } from 'lucide-react';
 
 const STORAGE_KEY_BOCETOS = 'viora-bocetos-v1';
@@ -478,6 +478,75 @@ export default function BocetosSection({ addToast }) {
     addToast?.({ type: 'success', message: 'Imagen original restaurada' });
   };
 
+  // Abre la imagen en cleanup.pictures (gratis, sin cuenta). Le bajamos el
+  // archivo al user y le abrimos la web aparte — ellos la arrastran al editor,
+  // borran el texto con el pincel, descargan el resultado y lo pegan acá con
+  // Ctrl+V (o botón Cambiar). Ver handlePasteFromClipboard más abajo.
+  const handleEditExternal = async (tempId) => {
+    const item = pending.find(p => p._tempId === tempId);
+    if (!item?.imagen) return;
+    try {
+      // Descargamos la imagen ACTUAL (la que ven en el card) para que la
+      // puedan editar en cleanup.pictures.
+      const response = await fetch(item.imagen);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${item.sku || 'producto'}-editar.${(blob.type || 'image/png').split('/')[1] || 'png'}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      // Abrimos cleanup.pictures en una pestaña nueva.
+      window.open('https://cleanup.pictures/', '_blank', 'noopener,noreferrer');
+      addToast?.({ type: 'info', message: 'Imagen descargada. Subila a cleanup.pictures, editá y pegala acá con Ctrl+V.' });
+    } catch (err) {
+      addToast?.({ type: 'error', message: `Error preparando edición: ${err.message}` });
+    }
+  };
+
+  // Paste-from-clipboard global en la sección de pendientes: si el user copia
+  // una imagen (desde cleanup.pictures u otro editor) y la pega con Ctrl+V
+  // mientras tiene un card seleccionado, la carga directo. Simplifica el
+  // flujo "editar afuera → volver".
+  const [activePasteTempId, setActivePasteTempId] = useState(null);
+
+  useEffect(() => {
+    if (!activePasteTempId) return;
+    const onPaste = async (e) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const it of items) {
+        if (it.type.startsWith('image/')) {
+          const file = it.getAsFile();
+          if (!file) continue;
+          e.preventDefault();
+          try {
+            const original = await fileToDataURL(file);
+            let imagen = original;
+            if (aiConfig.autoNormalizeImage) {
+              try { imagen = await normalizeToWhiteBg(imagen); } catch {}
+            }
+            updatePending(activePasteTempId, {
+              imagen,
+              _imagenOriginal: original,
+              _normalized: aiConfig.autoNormalizeImage,
+              _bgRemoved: false,
+            });
+            addToast?.({ type: 'success', message: 'Imagen pegada desde el portapapeles' });
+            setActivePasteTempId(null);
+          } catch (err) {
+            addToast?.({ type: 'error', message: err.message });
+          }
+          return;
+        }
+      }
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [activePasteTempId, aiConfig.autoNormalizeImage]);
+
   // ---------- Guardados CRUD ----------
 
   const handleDeleteSaved = (id) => {
@@ -781,6 +850,9 @@ export default function BocetosSection({ addToast }) {
                   onNormalize={() => handleNormalizeImage(p._tempId)}
                   onRemoveBg={() => handleRemoveBackground(p._tempId)}
                   onRestoreOriginal={() => handleRestoreOriginal(p._tempId)}
+                  onEditExternal={() => handleEditExternal(p._tempId)}
+                  pasteActive={activePasteTempId === p._tempId}
+                  onTogglePaste={() => setActivePasteTempId(cur => cur === p._tempId ? null : p._tempId)}
                 />
               ))}
             </div>
@@ -977,7 +1049,7 @@ function AiConfigModal({ value, onChange, onClose }) {
 
 // ---------- Pending item (inline editor) ----------
 
-function PendingItem({ item, layout, onChange, onApprove, onDiscard, onReplaceImage, onNormalize, onRemoveBg, onRestoreOriginal }) {
+function PendingItem({ item, layout, onChange, onApprove, onDiscard, onReplaceImage, onNormalize, onRemoveBg, onRestoreOriginal, onEditExternal, pasteActive, onTogglePaste }) {
   const fileRef = useRef(null);
   const [showShipping, setShowShipping] = useState(false);
   const missing = !item.nombre.trim() || !item.sku.trim();
@@ -1069,6 +1141,27 @@ function PendingItem({ item, layout, onChange, onApprove, onDiscard, onReplaceIm
             </span>
           )}
         </div>
+        {item.imagenRiesgosa && item.imagen && (
+          <div className="flex items-center gap-1.5 -mt-1 mb-1 flex-wrap">
+            <button
+              type="button"
+              onClick={onEditExternal}
+              className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold text-amber-800 bg-amber-50 border border-amber-300 rounded hover:bg-amber-100 transition"
+              title="Descarga la imagen y abre cleanup.pictures para editarla"
+            >
+              <Eraser size={10} /> Editar en Cleanup
+              <ExternalLink size={9} />
+            </button>
+            <button
+              type="button"
+              onClick={onTogglePaste}
+              className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold rounded transition ${pasteActive ? 'bg-emerald-600 text-white border border-emerald-700' : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'}`}
+              title="Activá esto y después pegá la imagen editada con Ctrl+V"
+            >
+              <ClipboardPaste size={10} /> {pasteActive ? 'Listo para Ctrl+V' : 'Pegar editada'}
+            </button>
+          </div>
+        )}
         <div>
           <div className="flex items-center justify-between mb-0.5">
             <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider">Nombre</label>

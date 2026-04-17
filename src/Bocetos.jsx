@@ -14,7 +14,7 @@
 // sienta que está maquetando directamente sobre senydrop.com.
 
 import React, { useEffect, useState, useRef } from 'react';
-import { Plus, Trash2, Download, Upload, Edit2, Package, Image as ImageIcon, Save, X, Check } from 'lucide-react';
+import { Plus, Trash2, Download, Upload, Edit2, Package, Image as ImageIcon, Save, X, Check, Sparkles, Link as LinkIcon, Loader2 } from 'lucide-react';
 
 const STORAGE_KEY = 'viora-bocetos-v1';
 const MAX_IMG_BYTES = 1024 * 1024; // 1MB — localStorage tiene ~5MB total.
@@ -58,19 +58,62 @@ function downloadJSON(data, filename) {
   URL.revokeObjectURL(url);
 }
 
+const LAST_PROVEEDOR_KEY = 'viora-bocetos-last-proveedor';
+
 export default function BocetosSection({ addToast }) {
   const [bocetos, setBocetos] = useState(() => loadBocetos());
   const [editingId, setEditingId] = useState(null);
-  const [form, setForm] = useState({ nombre: '', sku: '', imagen: '' });
+  const [form, setForm] = useState({ nombre: '', sku: '', imagen: '', proveedor: '', url: '', variantes: [] });
+  const [scraping, setScraping] = useState(false);
   const fileInputRef = useRef(null);
   const importInputRef = useRef(null);
+
+  // Recordamos el último proveedor usado — en general se cargan varios productos
+  // seguidos del mismo, así que no hace falta retipearlo.
+  useEffect(() => {
+    try {
+      const last = localStorage.getItem(LAST_PROVEEDOR_KEY);
+      if (last) setForm(prev => ({ ...prev, proveedor: last }));
+    } catch {}
+  }, []);
 
   useEffect(() => { saveBocetos(bocetos); }, [bocetos]);
 
   const resetForm = () => {
-    setForm({ nombre: '', sku: '', imagen: '' });
+    setForm(prev => ({ nombre: '', sku: '', imagen: '', proveedor: prev.proveedor, url: '', variantes: [] }));
     setEditingId(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleScrape = async () => {
+    const url = form.url.trim();
+    const proveedor = form.proveedor.trim();
+    if (!url) { addToast?.({ type: 'error', message: 'Pegá la URL del producto' }); return; }
+    if (!proveedor) { addToast?.({ type: 'error', message: 'Cargá primero el nombre del proveedor' }); return; }
+    setScraping(true);
+    try {
+      const resp = await fetch('/api/scrape-product', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, proveedorNombre: proveedor }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `Error ${resp.status}`);
+      setForm(prev => ({
+        ...prev,
+        nombre: data.nombre || prev.nombre,
+        sku: data.sku || prev.sku,
+        imagen: data.imagen || prev.imagen,
+        variantes: Array.isArray(data.variantes) ? data.variantes : prev.variantes,
+      }));
+      try { localStorage.setItem(LAST_PROVEEDOR_KEY, proveedor); } catch {}
+      const msg = `Cargado: ${data.nombre}` + (data.variantes?.length ? ` · ${data.variantes.length} variante(s)` : '');
+      addToast?.({ type: 'success', message: msg });
+    } catch (err) {
+      addToast?.({ type: 'error', message: err.message });
+    } finally {
+      setScraping(false);
+    }
   };
 
   const handleImageChange = async (e) => {
@@ -93,25 +136,38 @@ export default function BocetosSection({ addToast }) {
       addToast?.({ type: 'error', message: 'Nombre y SKU son obligatorios' });
       return;
     }
+    const proveedor = form.proveedor.trim();
+    const url = form.url.trim();
+    const variantes = Array.isArray(form.variantes) ? form.variantes : [];
     if (editingId) {
-      setBocetos(prev => prev.map(b => b.id === editingId ? { ...b, nombre, sku, imagen: form.imagen, updatedAt: new Date().toISOString() } : b));
+      setBocetos(prev => prev.map(b => b.id === editingId ? { ...b, nombre, sku, proveedor, url, variantes, imagen: form.imagen, updatedAt: new Date().toISOString() } : b));
       addToast?.({ type: 'success', message: `Boceto "${nombre}" actualizado` });
     } else {
       const newBoceto = {
         id: Date.now(),
-        nombre, sku,
+        nombre, sku, proveedor, url, variantes,
         imagen: form.imagen,
         createdAt: new Date().toISOString(),
       };
       setBocetos(prev => [newBoceto, ...prev]);
       addToast?.({ type: 'success', message: `Boceto "${nombre}" guardado` });
     }
+    if (proveedor) {
+      try { localStorage.setItem(LAST_PROVEEDOR_KEY, proveedor); } catch {}
+    }
     resetForm();
   };
 
   const handleEdit = (boceto) => {
     setEditingId(boceto.id);
-    setForm({ nombre: boceto.nombre, sku: boceto.sku, imagen: boceto.imagen || '' });
+    setForm({
+      nombre: boceto.nombre,
+      sku: boceto.sku,
+      imagen: boceto.imagen || '',
+      proveedor: boceto.proveedor || form.proveedor,
+      url: boceto.url || '',
+      variantes: Array.isArray(boceto.variantes) ? boceto.variantes : [],
+    });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -188,6 +244,62 @@ export default function BocetosSection({ addToast }) {
           </div>
 
           <form onSubmit={handleSubmit}>
+            {/* Card nueva: Auto-completar con IA desde URL + proveedor */}
+            <div className="bg-gradient-to-br from-[#FFFBEA] to-white rounded-lg border-2 border-[#FFD33D] p-5 mb-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Sparkles size={18} className="text-[#d97706]" />
+                <h2 className="text-base font-bold text-gray-900">Auto-completar con IA</h2>
+              </div>
+              <p className="text-xs text-gray-600 mb-4">Pegá el link del producto (Tiendanube, Shopify o landing pública) y el nombre del proveedor. La IA baja la foto, detecta el nombre y genera el SKU siguiendo tu nomenclatura.</p>
+              <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 mb-3">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1.5">
+                    Proveedor <span className="text-[#d97706]">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={form.proveedor}
+                    onChange={(e) => setForm({ ...form, proveedor: e.target.value })}
+                    placeholder="Agustin Samara"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-[#FFD33D] focus:border-[#FFD33D] transition"
+                  />
+                </div>
+                <div className="hidden sm:block">
+                  <label className="block text-sm font-semibold text-gray-700 mb-1.5">Iniciales</label>
+                  <div className="px-3 py-2 bg-gray-900 text-[#FFD33D] rounded-md text-sm font-mono font-bold tracking-wider w-20 text-center">
+                    {form.proveedor.trim() ? form.proveedor.trim().split(/\s+/).filter(Boolean).slice(0,2).map(p => p[0]).join('').toUpperCase().slice(0,2) || '—' : '—'}
+                  </div>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1.5">Link del producto</label>
+                <div className="flex gap-2">
+                  <div className="flex-1 relative">
+                    <LinkIcon size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input
+                      type="url"
+                      value={form.url}
+                      onChange={(e) => setForm({ ...form, url: e.target.value })}
+                      placeholder="https://tienda.com.ar/productos/..."
+                      className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-md text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-[#FFD33D] focus:border-[#FFD33D] transition"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleScrape}
+                    disabled={scraping || !form.url.trim() || !form.proveedor.trim()}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-gray-900 bg-[#FFD33D] rounded-md hover:bg-[#f5c518] transition disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+                  >
+                    {scraping ? (
+                      <><Loader2 size={14} className="animate-spin" /> Leyendo…</>
+                    ) : (
+                      <><Sparkles size={14} /> Auto-completar</>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+
             <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
               <h2 className="text-base font-bold text-gray-900">Nombre y SKU</h2>
               <div>
@@ -245,6 +357,66 @@ export default function BocetosSection({ addToast }) {
               <p className="text-xs text-gray-500 mt-2">Máximo 1MB. PNG, JPG o WebP.</p>
             </div>
 
+            {/* Variantes detectadas por IA (editables) */}
+            <div className="bg-white rounded-lg border border-gray-200 p-5 mt-4">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-base font-bold text-gray-900">Variantes</h2>
+                <button
+                  type="button"
+                  onClick={() => setForm(prev => ({ ...prev, variantes: [...(prev.variantes || []), { tipo: 'color', valor: '' }] }))}
+                  className="inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold text-gray-700 border border-gray-300 rounded hover:bg-gray-50 transition"
+                >
+                  <Plus size={12} /> Agregar
+                </button>
+              </div>
+              {(form.variantes || []).length === 0 ? (
+                <p className="text-xs text-gray-400 italic">Sin variantes. La IA va a buscarlas cuando auto-completes desde una URL (colores, talles, medidas, etc).</p>
+              ) : (
+                <div className="space-y-2">
+                  {form.variantes.map((v, idx) => (
+                    <div key={idx} className="flex gap-2">
+                      <select
+                        value={v.tipo}
+                        onChange={(e) => {
+                          const next = [...form.variantes];
+                          next[idx] = { ...next[idx], tipo: e.target.value };
+                          setForm({ ...form, variantes: next });
+                        }}
+                        className="px-2 py-1.5 border border-gray-300 rounded-md text-xs text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-[#FFD33D] focus:border-[#FFD33D]"
+                      >
+                        <option value="color">Color</option>
+                        <option value="talle">Talle</option>
+                        <option value="medida">Medida</option>
+                        <option value="sabor">Sabor</option>
+                        <option value="material">Material</option>
+                        <option value="modelo">Modelo</option>
+                        <option value="otro">Otro</option>
+                      </select>
+                      <input
+                        type="text"
+                        value={v.valor}
+                        onChange={(e) => {
+                          const next = [...form.variantes];
+                          next[idx] = { ...next[idx], valor: e.target.value };
+                          setForm({ ...form, variantes: next });
+                        }}
+                        placeholder="Ej: Rojo"
+                        className="flex-1 px-3 py-1.5 border border-gray-300 rounded-md text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#FFD33D] focus:border-[#FFD33D]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setForm({ ...form, variantes: form.variantes.filter((_, i) => i !== idx) })}
+                        className="px-2 text-gray-400 hover:text-red-600 transition"
+                        aria-label="Quitar variante"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <div className="mt-6 flex items-center gap-3 justify-end">
               {editingId && (
                 <button
@@ -289,6 +461,16 @@ export default function BocetosSection({ addToast }) {
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold text-sm text-gray-900 truncate">{b.nombre}</p>
                     <p className="text-xs text-gray-500 font-mono truncate mt-0.5">{b.sku}</p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      {b.proveedor && (
+                        <p className="text-[11px] text-[#d97706] truncate">{b.proveedor}</p>
+                      )}
+                      {Array.isArray(b.variantes) && b.variantes.length > 0 && (
+                        <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-semibold bg-gray-100 text-gray-700 rounded">
+                          {b.variantes.length} var.
+                        </span>
+                      )}
+                    </div>
                     <div className="flex items-center gap-1 mt-2">
                       <button
                         onClick={() => handleEdit(b)}
@@ -296,6 +478,17 @@ export default function BocetosSection({ addToast }) {
                       >
                         <Edit2 size={12} /> Editar
                       </button>
+                      {b.url && (
+                        <a
+                          href={b.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 px-2 py-1 text-xs text-gray-500 hover:text-[#d97706] hover:bg-[#FFFBEA] rounded transition"
+                          title={b.url}
+                        >
+                          <LinkIcon size={12} /> Link
+                        </a>
+                      )}
                       <button
                         onClick={() => handleDelete(b)}
                         className="inline-flex items-center gap-1 px-2 py-1 text-xs text-gray-500 hover:text-red-600 hover:bg-red-50 rounded transition"

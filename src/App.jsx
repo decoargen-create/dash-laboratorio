@@ -357,9 +357,6 @@ export function getLabRealProfit(order, product, mentor) {
 //     × profit informado (sobre costoInformado del producto/orden).
 //  3. Sin mentor/product, último fallback: 50% del montoTotal.
 export function getMentorCommission(order, product, mentor) {
-  if (order?.mentorPresupuesto != null && order.mentorPresupuesto !== '') {
-    return parseFloat(order.mentorPresupuesto) || 0;
-  }
   if (product) {
     const profit = getOrderInformedProfit(order, product);
     const pct = mentor?.porcentajeComision != null ? Number(mentor.porcentajeComision) : 50;

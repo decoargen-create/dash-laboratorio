@@ -41,7 +41,8 @@ Escribí acá tus instrucciones y la IA las va a respetar al scrapear.`;
 
 const DEFAULT_AI_CONFIG = {
   instructions: '',
-  autoNormalizeImage: true, // aplicar normalización fondo-blanco automáticamente al traer productos
+  autoNormalizeImage: true,   // padding blanco automático
+  autoRemoveBackground: false, // bg removal automático (lento, alto costo de CPU)
 };
 
 // Clientes de ejemplo para arrancar con algo cargado. Si el user ya tiene
@@ -92,11 +93,39 @@ function downloadJSON(data, filename) {
   URL.revokeObjectURL(url);
 }
 
+// Remueve el fondo de una imagen usando @imgly/background-removal (corre 100%
+// client-side en WebGL/WASM con ONNX Runtime). La primera vez descarga ~30MB
+// de modelo y los cachea en el browser, después es casi instantáneo.
+// Devuelve un dataURL con fondo blanco (alpha compuesto sobre blanco).
+async function removeBackgroundAndWhiten(dataUrl) {
+  if (!dataUrl) throw new Error('Sin imagen');
+  // Dynamic import para no meter la librería (~30MB) en el bundle inicial.
+  const { removeBackground } = await import('@imgly/background-removal');
+
+  // La librería acepta Blob, URL o dataURL. Pasamos el dataURL directo.
+  // Usamos model 'medium' (balance de velocidad/calidad, ~44MB). 'small' es
+  // más rápido pero pierde detalle en productos complejos.
+  const blob = await removeBackground(dataUrl, {
+    model: 'medium',
+    output: { format: 'image/png', quality: 0.9 },
+  });
+
+  // blob ahora es PNG con transparencia. Lo componemos sobre fondo blanco
+  // en un canvas cuadrado (reusa la lógica de normalización).
+  const transparentUrl = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+  return normalizeToWhiteBg(transparentUrl);
+}
+
 // Normaliza una imagen (dataURL) a un cuadrado 1000x1000 con fondo blanco:
 // carga la imagen, la encaja centrada preservando proporciones y rellena lo
-// que falta con blanco. No REMUEVE el fondo original — eso requeriría un
-// modelo de segmentación y un servicio externo. Pero sí empareja todas las
-// imágenes al mismo formato cuadrado para el catálogo de Senydrop.
+// que falta con blanco. No REMUEVE el fondo original — para eso está
+// removeBackgroundAndWhiten. Esta función sirve para imágenes que ya tienen
+// fondo blanco pero no son cuadradas.
 function normalizeToWhiteBg(dataUrl) {
   return new Promise((resolve, reject) => {
     if (!dataUrl) return reject(new Error('Sin imagen'));
@@ -244,13 +273,22 @@ export default function BocetosSection({ addToast }) {
         _normalized: false,
       }));
 
-      // Auto-normalizar imágenes si el user lo tiene activado en AI config.
-      if (aiConfig.autoNormalizeImage) {
-        for (const n of nuevos) {
-          if (!n.imagen) continue;
-          try { n.imagen = await normalizeToWhiteBg(n.imagen); n._normalized = true; }
-          catch { /* si falla una, seguimos */ }
-        }
+      // Auto-procesar imágenes según config:
+      //   1) Si hay autoRemoveBackground → bg removal (incluye whitening).
+      //   2) Si sólo hay autoNormalizeImage → padding blanco sin removal.
+      // Si ninguna, dejamos la imagen tal como vino.
+      for (const n of nuevos) {
+        if (!n.imagen) continue;
+        try {
+          if (aiConfig.autoRemoveBackground) {
+            n.imagen = await removeBackgroundAndWhiten(n.imagen);
+            n._normalized = true;
+            n._bgRemoved = true;
+          } else if (aiConfig.autoNormalizeImage) {
+            n.imagen = await normalizeToWhiteBg(n.imagen);
+            n._normalized = true;
+          }
+        } catch { /* si falla una, seguimos */ }
       }
 
       setPending(prev => [...nuevos, ...prev]);
@@ -341,6 +379,20 @@ export default function BocetosSection({ addToast }) {
       addToast?.({ type: 'success', message: 'Imagen normalizada a fondo blanco' });
     } catch (err) {
       addToast?.({ type: 'error', message: err.message || 'No se pudo normalizar' });
+    }
+  };
+
+  const handleRemoveBackground = async (tempId) => {
+    const item = pending.find(p => p._tempId === tempId);
+    if (!item?.imagen) { addToast?.({ type: 'error', message: 'Este pendiente no tiene imagen' }); return; }
+    updatePending(tempId, { _bgRemoving: true });
+    try {
+      const clean = await removeBackgroundAndWhiten(item.imagen);
+      updatePending(tempId, { imagen: clean, _normalized: true, _bgRemoved: true, _bgRemoving: false });
+      addToast?.({ type: 'success', message: 'Fondo removido correctamente' });
+    } catch (err) {
+      updatePending(tempId, { _bgRemoving: false });
+      addToast?.({ type: 'error', message: `No se pudo remover el fondo: ${err.message}` });
     }
   };
 
@@ -636,6 +688,7 @@ export default function BocetosSection({ addToast }) {
                   onDiscard={() => removePending(p._tempId)}
                   onReplaceImage={(file) => handleReplaceImage(p._tempId, file)}
                   onNormalize={() => handleNormalizeImage(p._tempId)}
+                  onRemoveBg={() => handleRemoveBackground(p._tempId)}
                 />
               ))}
             </div>
@@ -778,17 +831,34 @@ function AiConfigModal({ value, onChange, onClose }) {
             </p>
           </div>
 
-          <div className="border-t border-gray-200 pt-4">
+          <div className="border-t border-gray-200 pt-4 space-y-4">
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={draft.autoRemoveBackground}
+                onChange={(e) => setDraft({ ...draft, autoRemoveBackground: e.target.checked })}
+                className="mt-0.5 w-4 h-4 rounded border-gray-300 text-[#FFD33D] focus:ring-[#FFD33D]"
+              />
+              <div>
+                <p className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                  Remover fondo con IA automáticamente
+                  <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-bold bg-[#FFD33D] text-gray-900 rounded">NUEVO</span>
+                </p>
+                <p className="text-xs text-gray-500 mt-0.5">Usa un modelo de segmentación que corre 100% en tu navegador (gratis, privado). La primera vez descarga ~30MB de modelo; después es casi instantáneo. Remueve fondos con texto, colores, escenas y deja el producto sobre un cuadrado blanco 1000×1000. Tarda 2-8 segundos por imagen.</p>
+              </div>
+            </label>
+
             <label className="flex items-start gap-3 cursor-pointer">
               <input
                 type="checkbox"
                 checked={draft.autoNormalizeImage}
                 onChange={(e) => setDraft({ ...draft, autoNormalizeImage: e.target.checked })}
-                className="mt-0.5 w-4 h-4 rounded border-gray-300 text-[#FFD33D] focus:ring-[#FFD33D]"
+                disabled={draft.autoRemoveBackground}
+                className="mt-0.5 w-4 h-4 rounded border-gray-300 text-[#FFD33D] focus:ring-[#FFD33D] disabled:opacity-40"
               />
-              <div>
-                <p className="text-sm font-semibold text-gray-900">Normalizar imágenes a fondo blanco automáticamente</p>
-                <p className="text-xs text-gray-500 mt-0.5">Cuando traigo productos o reemplazás una foto, la imagen se centra en un cuadrado 1000×1000 con padding blanco. Todas las fotos quedan del mismo tamaño para el catálogo. (No remueve fondos originales — para eso usá remove.bg o subila ya procesada.)</p>
+              <div className={draft.autoRemoveBackground ? 'opacity-40' : ''}>
+                <p className="text-sm font-semibold text-gray-900">Normalizar tamaño a cuadrado blanco</p>
+                <p className="text-xs text-gray-500 mt-0.5">Sólo centra y agranda la imagen sin tocar el fondo. Útil si las fotos YA tienen fondo blanco. Se ignora si está activado "Remover fondo con IA" (esa opción ya lo hace).</p>
               </div>
             </label>
           </div>
@@ -815,27 +885,36 @@ function AiConfigModal({ value, onChange, onClose }) {
 
 // ---------- Pending item (inline editor) ----------
 
-function PendingItem({ item, layout, onChange, onApprove, onDiscard, onReplaceImage, onNormalize }) {
+function PendingItem({ item, layout, onChange, onApprove, onDiscard, onReplaceImage, onNormalize, onRemoveBg }) {
   const fileRef = useRef(null);
   const missing = !item.nombre.trim() || !item.sku.trim();
+  const processing = !!item._bgRemoving;
 
   const content = (
     <div className="flex gap-4">
       {/* Imagen */}
       <div className="shrink-0 flex flex-col items-center gap-1.5">
-        <div className={`w-24 h-24 rounded-lg bg-white border overflow-hidden flex items-center justify-center relative group ${item._normalized ? 'border-emerald-300' : 'border-gray-200'}`}>
+        <div className={`w-24 h-24 rounded-lg bg-white border overflow-hidden flex items-center justify-center relative group ${item._bgRemoved ? 'border-emerald-400' : item._normalized ? 'border-emerald-300' : 'border-gray-200'}`}>
           {item.imagen ? (
             <img src={item.imagen} alt={item.nombre} className="w-full h-full object-contain" />
           ) : (
             <ImageIcon size={28} className="text-gray-300" />
           )}
-          <button
-            type="button"
-            onClick={() => fileRef.current?.click()}
-            className="absolute inset-0 bg-black/50 text-white text-[11px] font-semibold opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-1"
-          >
-            <RefreshCw size={12} /> Cambiar
-          </button>
+          {processing && (
+            <div className="absolute inset-0 bg-white/80 flex flex-col items-center justify-center gap-1">
+              <Loader2 size={18} className="animate-spin text-[#d97706]" />
+              <span className="text-[9px] font-bold text-gray-700">Procesando…</span>
+            </div>
+          )}
+          {!processing && (
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              className="absolute inset-0 bg-black/50 text-white text-[11px] font-semibold opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-1"
+            >
+              <RefreshCw size={12} /> Cambiar
+            </button>
+          )}
           <input
             ref={fileRef}
             type="file"
@@ -848,15 +927,27 @@ function PendingItem({ item, layout, onChange, onApprove, onDiscard, onReplaceIm
             className="hidden"
           />
         </div>
-        {item.imagen && (
-          <button
-            type="button"
-            onClick={onNormalize}
-            className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold rounded transition ${item._normalized ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'}`}
-            title="Centrar imagen en cuadrado 1000x1000 con fondo blanco"
-          >
-            <Wand2 size={10} /> {item._normalized ? 'Fondo blanco ✓' : 'Normalizar'}
-          </button>
+        {item.imagen && !processing && (
+          <div className="flex flex-col items-stretch gap-1 w-24">
+            <button
+              type="button"
+              onClick={onRemoveBg}
+              className={`inline-flex items-center justify-center gap-1 px-2 py-0.5 text-[10px] font-semibold rounded transition ${item._bgRemoved ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-[#FFD33D] text-gray-900 border border-[#f5c518] hover:bg-[#f5c518]'}`}
+              title="Remover el fondo con IA y dejar el producto sobre blanco"
+            >
+              <Sparkles size={10} /> {item._bgRemoved ? 'Sin fondo ✓' : 'Remover fondo'}
+            </button>
+            {!item._bgRemoved && (
+              <button
+                type="button"
+                onClick={onNormalize}
+                className={`inline-flex items-center justify-center gap-1 px-2 py-0.5 text-[10px] font-semibold rounded transition ${item._normalized ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'}`}
+                title="Centrar imagen en cuadrado con padding blanco (sin tocar fondo)"
+              >
+                <Wand2 size={10} /> {item._normalized ? 'Cuadrada ✓' : 'Cuadrar'}
+              </button>
+            )}
+          </div>
         )}
       </div>
 

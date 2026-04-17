@@ -72,6 +72,11 @@ export default defineConfig(({ mode }) => {
         // vayan a la red (no tiene sentido cachear respuestas de Claude).
         workbox: {
           navigateFallbackDenylist: [/^\/api\//],
+          // Los WASM y modelos de @imgly/background-removal son gigantes y se
+          // cargan bajo demanda (dynamic import + fetch a CDN) — no tiene
+          // sentido meterlos en el precache del PWA.
+          globIgnores: ['**/ort-wasm-*.wasm'],
+          maximumFileSizeToCacheInBytes: 4 * 1024 * 1024, // 4 MiB de margen
           runtimeCaching: [
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,

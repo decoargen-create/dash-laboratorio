@@ -16,7 +16,7 @@
 
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import {
-  Plus, Trash2, Download, Upload, Edit2, Package, Image as ImageIcon,
+  Plus, Trash2, Download, Upload, Package, Image as ImageIcon,
   Save, X, Check, Sparkles, Link as LinkIcon, Loader2, ChevronDown, UserPlus,
   List as ListIcon, LayoutGrid, ExternalLink, AlertTriangle, RefreshCw,
   Settings, Wand2, RotateCcw, Truck, PencilLine, Eraser, ClipboardPaste,
@@ -1098,7 +1098,7 @@ export default function BocetosSection({ addToast }) {
                 </div>
                 <button
                   type="button"
-                  onClick={() => { setPending([]); setReport(null); }}
+                  onClick={() => { setPending([]); setReport(null); setLearnedHistory([]); }}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition"
                 >
                   <X size={12} /> Descartar todos

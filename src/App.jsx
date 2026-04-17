@@ -1862,7 +1862,13 @@ function OrdersList({ state, dispatch, orders, onEditOrder }) {
     if (typeof window === 'undefined') return new Set(ORDERS_DEFAULT_VISIBLE);
     try {
       const stored = localStorage.getItem('viora-cols-orders');
-      if (stored) return new Set(JSON.parse(stored));
+      if (stored) {
+        const savedSet = new Set(JSON.parse(stored));
+        // Merge: si hay columnas nuevas con default=true que no estaban
+        // en el set guardado, agregarlas automáticamente.
+        ORDERS_DEFAULT_VISIBLE.forEach(k => savedSet.add(k));
+        return savedSet;
+      }
     } catch {}
     return new Set(ORDERS_DEFAULT_VISIBLE);
   });

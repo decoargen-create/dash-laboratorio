@@ -158,18 +158,20 @@ function respondJSON(res, status, payload) {
 export default async function handler(req, res) {
   if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return respondJSON(res, 500, { error: 'ANTHROPIC_API_KEY no configurada' });
-
   const body = await readBody(req);
   const { action, snapshot, extras } = body || {};
 
+  // Validación del request primero para que el cliente sepa qué está mal
+  // aunque falte la API key (útil para dev/debug).
   if (!action || !AGENTS[action]) {
     return respondJSON(res, 400, { error: `action debe ser uno de: ${Object.keys(AGENTS).join(', ')}` });
   }
   if (!snapshot) {
     return respondJSON(res, 400, { error: 'Falta el snapshot del negocio' });
   }
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return respondJSON(res, 500, { error: 'ANTHROPIC_API_KEY no configurada' });
 
   const agent = AGENTS[action];
   const client = new Anthropic({ apiKey });

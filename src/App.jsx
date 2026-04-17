@@ -1825,6 +1825,7 @@ const ORDERS_COLUMNS = [
   { key: 'cantidad',  label: 'Cant.',     default: true,  required: false },
   { key: 'costo',     label: 'Costo',     default: true,  required: false },
   { key: 'precio',    label: 'Precio venta', default: true, required: false },
+  { key: 'costoInf',  label: 'C. Informado', default: true, required: false },
   { key: 'comision',  label: 'Com. partner', default: true, required: false },
   { key: 'profit',    label: 'Profit',    default: true,  required: false },
   { key: 'estado',    label: 'Estado',    default: true,  required: false },
@@ -2038,7 +2039,8 @@ function OrdersList({ state, dispatch, orders, onEditOrder }) {
               {isColVisible('cantidad') && <th className="px-4 py-3 font-semibold text-right" title="Unidades a producir. Doble click en la celda para editar.">Cant.</th>}
               {isColVisible('costo') && <th className="px-4 py-3 font-semibold text-right" title="Costo total: contenido + envase + etiqueta. Click en la celda para ver el desglose o cambiar a modo 'sin discriminar'.">Costo</th>}
               {isColVisible('precio') && <th className="px-4 py-3 font-semibold text-right" title="Precio cobrado al cliente. Doble click en la celda para editar.">Precio venta</th>}
-              {isColVisible('comision') && <th className="px-4 py-3 font-semibold text-right" title="Comisión que se le paga al equipo (% del profit, configurable en Comisiones)">Com. partner</th>}
+              {isColVisible('costoInf') && <th className="px-4 py-3 font-semibold text-right" title="Costo informado al partner para esta orden. Su comisión se calcula sobre (venta − este costo).">C. Informado</th>}
+              {isColVisible('comision') && <th className="px-4 py-3 font-semibold text-right" title="Comisión que se le paga al partner (% de ganancia sobre costo informado)">Com. partner</th>}
               {isColVisible('profit') && <th className="px-4 py-3 font-semibold text-right" title="Profit del laboratorio = precio venta − costo. NO descuenta la comisión del partner.">Profit</th>}
               {isColVisible('estado') && <th className="px-4 py-3 font-semibold" title="Estado del pipeline: Pendiente cotización → Cotizado → Abonado → En producción → Listo para enviar → Despachado">Estado</th>}
               {isColVisible('cobro') && <th className="px-4 py-3 font-semibold text-center" title="Progreso de cobro al cliente. Click para ver detalle o registrar pagos.">Cobro</th>}
@@ -2143,6 +2145,11 @@ function OrdersList({ state, dispatch, orders, onEditOrder }) {
                         onSave={(v) => handlePriceEdit(order, v, isTotal)}
                         prefix="$"
                       />
+                    </td>
+                  )}
+                  {isColVisible('costoInf') && (
+                    <td className="px-4 py-3 text-right text-amber-700 dark:text-amber-300 tabular-nums">
+                      {hasMentor ? fmtMoney(getInformedCostUnit(order, product) * (order.cantidad || 0)) : <span className="text-gray-400 dark:text-gray-500">—</span>}
                     </td>
                   )}
                   {isColVisible('comision') && (
@@ -2636,22 +2643,43 @@ function StatCard({ icon: Icon, label, value, color, delay = 0, onClick, active 
 // VentasSection y desde InicioSection para dejar la creación a un click
 // sin tener que navegar a otra sección.
 function NewSaleModal({ state, onAddSale, onQuickAddClient, onQuickAddProduct, onClose }) {
-  const [formData, setFormData] = useState({ clienteId: '', productoId: '', cantidad: 1, mentorId: '', mentorPresupuesto: '' });
+  const [formData, setFormData] = useState({ clienteId: '', productoId: '', cantidad: 1, mentorId: '', costoInformado: '', montoTotal: '' });
   const [showClientQuickModal, setShowClientQuickModal] = useState(false);
   const [showProductQuickModal, setShowProductQuickModal] = useState(false);
 
-  // Cálculos derivados para sugerir el presupuesto del partner al cargar la venta.
   const productoSel = state.products.find(p => p.id === parseInt(formData.productoId));
+  const mentorSel = state.mentors.find(m => m.id === parseInt(formData.mentorId));
   const cantidadNum = parseInt(formData.cantidad) || 0;
-  const profitSugerido = productoSel ? (productoSel.precioVenta - getProductUnitCost(productoSel)) * cantidadNum : 0;
-  const mentorSugerido = Math.max(0, Math.round(profitSugerido * 0.5));
 
-  const [presupuestoTouched, setPresupuestoTouched] = useState(false);
+  // Auto-calcular monto total sugerido
+  const montoSugerido = productoSel ? productoSel.precioVenta * cantidadNum : 0;
+  const montoTotal = parseFloat(formData.montoTotal) || montoSugerido;
+
+  // Auto-sugerir costo informado del producto
+  const costoInfProducto = productoSel?.costoInformado ?? productoSel?.costoSinDesglosar ?? getProductUnitCost(productoSel);
+  const costoInfSugerido = (costoInfProducto || 0) * cantidadNum;
+
+  // Cálculos de preview para el partner
+  const costoInfParsed = parseFloat(formData.costoInformado) || costoInfSugerido;
+  const gananciaInformada = Math.max(0, montoTotal - costoInfParsed);
+  const pctPartner = mentorSel?.porcentajeComision ?? 50;
+  const comisionPartner = Math.round(gananciaInformada * (pctPartner / 100));
+
+  // Auto-fill costo informado cuando cambia producto/cantidad/partner
+  const [costoTouched, setCostoTouched] = useState(false);
   useEffect(() => {
-    if (!presupuestoTouched) {
-      setFormData(prev => ({ ...prev, mentorPresupuesto: prev.mentorId ? String(mentorSugerido) : '' }));
+    if (!costoTouched && formData.mentorId) {
+      setFormData(prev => ({ ...prev, costoInformado: costoInfSugerido > 0 ? String(Math.round(costoInfSugerido)) : '' }));
     }
-  }, [formData.mentorId, formData.productoId, formData.cantidad, mentorSugerido, presupuestoTouched]);
+  }, [formData.mentorId, formData.productoId, formData.cantidad, costoInfSugerido, costoTouched]);
+
+  // Auto-fill monto total cuando cambia producto/cantidad
+  const [montoTouched, setMontoTouched] = useState(false);
+  useEffect(() => {
+    if (!montoTouched && montoSugerido > 0) {
+      setFormData(prev => ({ ...prev, montoTotal: String(montoSugerido) }));
+    }
+  }, [formData.productoId, formData.cantidad, montoSugerido, montoTouched]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -2659,19 +2687,14 @@ function NewSaleModal({ state, onAddSale, onQuickAddClient, onQuickAddProduct, o
     if (!producto) return;
     const cantidad = parseInt(formData.cantidad) || 1;
     const mentorId = formData.mentorId ? parseInt(formData.mentorId) : null;
-    const presupuestoParsed = formData.mentorPresupuesto === ''
-      ? null
-      : parseFloat(formData.mentorPresupuesto);
     const newSale = {
       fecha: new Date().toISOString().split('T')[0],
       clienteId: parseInt(formData.clienteId),
       productoId: parseInt(formData.productoId),
       cantidad,
-      montoTotal: producto.precioVenta * cantidad,
+      montoTotal: parseFloat(formData.montoTotal) || (producto.precioVenta * cantidad),
       mentorId,
-      mentorPresupuesto: mentorId && presupuestoParsed != null && !Number.isNaN(presupuestoParsed)
-        ? presupuestoParsed
-        : null,
+      costoInformado: mentorId && formData.costoInformado ? parseFloat(formData.costoInformado) / cantidad : null,
     };
     onAddSale(newSale);
   };
@@ -2701,11 +2724,16 @@ function NewSaleModal({ state, onAddSale, onQuickAddClient, onQuickAddProduct, o
           formData={formData}
           setFormData={setFormData}
           handleSubmit={handleSubmit}
-          mentorSugerido={mentorSugerido}
-          presupuestoTouched={presupuestoTouched}
-          setPresupuestoTouched={setPresupuestoTouched}
           openQuickClient={() => setShowClientQuickModal(true)}
           openQuickProduct={() => setShowProductQuickModal(true)}
+          costoTouched={costoTouched}
+          setCostoTouched={setCostoTouched}
+          montoTouched={montoTouched}
+          setMontoTouched={setMontoTouched}
+          gananciaInformada={gananciaInformada}
+          comisionPartner={comisionPartner}
+          pctPartner={pctPartner}
+          mentorSel={mentorSel}
         />
       </Modal>
 
@@ -2728,27 +2756,20 @@ function NewSaleModal({ state, onAddSale, onQuickAddClient, onQuickAddProduct, o
 }
 
 // Solo los campos del form — extraído para no duplicar el JSX.
-function NewSaleFormContent({ state, formData, setFormData, handleSubmit, mentorSugerido, presupuestoTouched, setPresupuestoTouched, openQuickClient, openQuickProduct }) {
+function NewSaleFormContent({ state, formData, setFormData, handleSubmit, openQuickClient, openQuickProduct, costoTouched, setCostoTouched, montoTouched, setMontoTouched, gananciaInformada, comisionPartner, pctPartner, mentorSel }) {
+  const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div>
         <FormLabel required>Cliente</FormLabel>
         <div className="flex gap-2">
-          <select
-            value={formData.clienteId}
-            onChange={(e) => setFormData({ ...formData, clienteId: e.target.value })}
-            className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-            required
-          >
+          <select value={formData.clienteId} onChange={(e) => setFormData({ ...formData, clienteId: e.target.value })}
+            className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500" required>
             <option value="">Seleccionar Cliente</option>
             {state.clients.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
           </select>
-          <button
-            type="button"
-            onClick={openQuickClient}
-            className="inline-flex items-center gap-1 px-3 py-2 border border-pink-600 text-pink-700 dark:text-pink-300 dark:border-pink-500 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition text-sm font-semibold whitespace-nowrap"
-            title="Crear un nuevo cliente sin salir de esta pantalla"
-          >
+          <button type="button" onClick={openQuickClient}
+            className="inline-flex items-center gap-1 px-3 py-2 border border-pink-600 text-pink-700 dark:text-pink-300 dark:border-pink-500 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition text-sm font-semibold whitespace-nowrap">
             <Plus size={16} /> Nuevo
           </button>
         </div>
@@ -2757,90 +2778,78 @@ function NewSaleFormContent({ state, formData, setFormData, handleSubmit, mentor
       <div>
         <FormLabel required>Producto</FormLabel>
         <div className="flex gap-2">
-          <select
-            value={formData.productoId}
-            onChange={(e) => setFormData({ ...formData, productoId: e.target.value })}
-            className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-            required
-          >
+          <select value={formData.productoId} onChange={(e) => setFormData({ ...formData, productoId: e.target.value })}
+            className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500" required>
             <option value="">Seleccionar Producto</option>
-            {state.products.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+            {state.products.map(p => <option key={p.id} value={p.id}>{p.nombre} — ${p.precioVenta?.toLocaleString()}/u</option>)}
           </select>
-          <button
-            type="button"
-            onClick={openQuickProduct}
-            className="inline-flex items-center gap-1 px-3 py-2 border border-pink-600 text-pink-700 dark:text-pink-300 dark:border-pink-500 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition text-sm font-semibold whitespace-nowrap"
-            title="Crear un nuevo producto sin salir de esta pantalla"
-          >
+          <button type="button" onClick={openQuickProduct}
+            className="inline-flex items-center gap-1 px-3 py-2 border border-pink-600 text-pink-700 dark:text-pink-300 dark:border-pink-500 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition text-sm font-semibold whitespace-nowrap">
             <Plus size={16} /> Nuevo
           </button>
         </div>
       </div>
 
-      <div>
-        <FormLabel required tip="Mínimo 100 unidades por producción.">Cantidad</FormLabel>
-        <input
-          type="number"
-          min="1"
-          value={formData.cantidad}
-          onChange={(e) => setFormData({ ...formData, cantidad: e.target.value })}
-          placeholder="Cantidad"
-          className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-          required
-        />
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <FormLabel required tip="Unidades a producir.">Cantidad</FormLabel>
+          <input type="number" min="1" value={formData.cantidad}
+            onChange={(e) => setFormData({ ...formData, cantidad: e.target.value })}
+            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500" required />
+        </div>
+        <div>
+          <FormLabel required tip="Total que paga el cliente (precio × cantidad). Se auto-calcula pero podés editarlo.">Monto total</FormLabel>
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+            <input type="number" min="0" value={formData.montoTotal}
+              onChange={(e) => { setFormData({ ...formData, montoTotal: e.target.value }); setMontoTouched(true); }}
+              className="w-full pl-6 pr-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500" required />
+          </div>
+        </div>
       </div>
 
       <div>
-        <FormLabel tip="Si hay partner, cobrará comisión sobre el profit (%) o el presupuesto fijo que pongas abajo.">Partner asignado</FormLabel>
-        <select
-          value={formData.mentorId}
-          onChange={(e) => { setFormData({ ...formData, mentorId: e.target.value }); setPresupuestoTouched(false); }}
-          className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-        >
-          <option value="">Sin mentor</option>
-          {state.mentors.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
+        <FormLabel tip="Si la orden fue referida por un partner, seleccionalo. Se le calcula comisión automáticamente.">Partner asignado</FormLabel>
+        <select value={formData.mentorId} onChange={(e) => { setFormData({ ...formData, mentorId: e.target.value }); setCostoTouched(false); }}
+          className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
+          <option value="">Sin partner</option>
+          {state.mentors.map(m => <option key={m.id} value={m.id}>{m.nombre} ({m.porcentajeComision ?? 50}%)</option>)}
         </select>
       </div>
 
       {formData.mentorId && (
-        <div>
-          <FormLabel tip="Monto FIJO que se paga al partner por esta orden. Si lo dejás vacío, usa el % configurado en Comisiones.">
-            Presupuesto para el partner
-            <span className="ml-1 text-gray-400 dark:text-gray-500 font-normal">
-              · sugerido ${mentorSugerido.toLocaleString()}
-            </span>
-          </FormLabel>
-          <div className="flex items-center gap-2">
-            <div className="relative flex-1">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 text-sm">$</span>
-              <input
-                type="number"
-                min="0"
-                value={formData.mentorPresupuesto}
-                onChange={(e) => { setFormData({ ...formData, mentorPresupuesto: e.target.value }); setPresupuestoTouched(true); }}
-                placeholder={String(mentorSugerido)}
-                className="w-full pl-6 pr-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-              />
+        <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 space-y-3">
+          <div>
+            <FormLabel tip="Lo que el partner cree que cuesta producir esta orden. Su comisión se calcula sobre (monto total − costo informado).">
+              Costo informado al partner (total)
+            </FormLabel>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+              <input type="number" min="0" value={formData.costoInformado}
+                onChange={(e) => { setFormData({ ...formData, costoInformado: e.target.value }); setCostoTouched(true); }}
+                placeholder="Costo que ve el partner"
+                className="w-full pl-6 pr-3 py-2 border border-amber-300 dark:border-amber-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500" />
             </div>
-            {presupuestoTouched && (
-              <button
-                type="button"
-                onClick={() => { setFormData({ ...formData, mentorPresupuesto: String(mentorSugerido) }); setPresupuestoTouched(false); }}
-                className="text-xs text-pink-700 dark:text-pink-300 hover:underline font-semibold whitespace-nowrap"
-                title="Restaurar al 50% sugerido"
-              >
-                Usar 50%
-              </button>
-            )}
           </div>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Este será el monto fijo que se le paga al partner por esta orden.</p>
+          {/* Preview del cálculo */}
+          <div className="grid grid-cols-3 gap-2 text-center text-xs">
+            <div className="p-2 rounded bg-white dark:bg-gray-800">
+              <p className="text-gray-500 dark:text-gray-400">Ganancia informada</p>
+              <p className="font-bold text-sky-600 dark:text-sky-400">{fmtMoney(gananciaInformada)}</p>
+            </div>
+            <div className="p-2 rounded bg-white dark:bg-gray-800">
+              <p className="text-gray-500 dark:text-gray-400">Comisión ({pctPartner}%)</p>
+              <p className="font-bold text-emerald-600 dark:text-emerald-400">{fmtMoney(comisionPartner)}</p>
+            </div>
+            <div className="p-2 rounded bg-white dark:bg-gray-800">
+              <p className="text-gray-500 dark:text-gray-400">El partner ve</p>
+              <p className="font-bold text-amber-600 dark:text-amber-400">{fmtMoney(comisionPartner)} para él</p>
+            </div>
+          </div>
         </div>
       )}
 
-      <button
-        type="submit"
-        className="w-full bg-pink-900 text-white py-2 rounded-lg hover:bg-pink-800 transition font-semibold"
-      >
+      <button type="submit" className="w-full bg-pink-900 text-white py-2.5 rounded-lg hover:bg-pink-800 transition font-semibold">
         Registrar Orden
       </button>
     </form>

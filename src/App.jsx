@@ -538,7 +538,12 @@ function AppShell({ onExit }) {
     }
   }, [state]);
   const [currentUser, setCurrentUser] = useState(null);
-  const [currentSection, setCurrentSection] = useState('inicio');
+  const [currentSection, setCurrentSection] = useState(() => {
+    try { return localStorage.getItem('viora-last-section') || 'inicio'; } catch { return 'inicio'; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('viora-last-section', currentSection); } catch {}
+  }, [currentSection]);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   // Estado del menú mobile (sidebar como overlay deslizante en pantallas chicas).
   // En desktop el sidebar siempre está visible (gestionado por sidebarOpen + Tailwind md:).
@@ -1253,10 +1258,12 @@ function NavItem({ icon: Icon, label, section, currentSection, onSelect, sidebar
 }
 
 function LoginScreen({ onLogin, onSessionAuth, darkMode, toggleDarkMode }) {
-  // loginMode: 'login' (user+pass, default) | 'email' | 'email-sent'
   const [loginMode, setLoginMode] = useState('login');
-  const [username, setUsername] = useState('');
+  const [username, setUsername] = useState(() => {
+    try { return localStorage.getItem('viora-last-user') || ''; } catch { return ''; }
+  });
   const [password, setPassword] = useState('');
+  const [rememberUser, setRememberUser] = useState(true);
   const [loginError, setLoginError] = useState('');
   const [loggingIn, setLoggingIn] = useState(false);
 
@@ -1284,8 +1291,12 @@ function LoginScreen({ onLogin, onSessionAuth, darkMode, toggleDarkMode }) {
         setLoginError(data?.error || 'Usuario o contraseña inválidos');
         return;
       }
-      // Guardamos la session y avisamos al parent
       localStorage.setItem('viora-session', data.session);
+      if (rememberUser) {
+        try { localStorage.setItem('viora-last-user', username.trim()); } catch {}
+      } else {
+        try { localStorage.removeItem('viora-last-user'); } catch {}
+      }
       if (typeof onSessionAuth === 'function') {
         onSessionAuth(data.user);
       } else {
@@ -1346,7 +1357,7 @@ function LoginScreen({ onLogin, onSessionAuth, darkMode, toggleDarkMode }) {
             <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300">Usuario</label>
             <input
               type="text"
-              autoFocus
+              autoFocus={!username}
               autoComplete="username"
               placeholder="usuario"
               value={username}
@@ -1357,6 +1368,7 @@ function LoginScreen({ onLogin, onSessionAuth, darkMode, toggleDarkMode }) {
             <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mt-3">Contraseña</label>
             <input
               type="password"
+              autoFocus={!!username}
               autoComplete="current-password"
               placeholder="••••••••"
               value={password}
@@ -1364,6 +1376,11 @@ function LoginScreen({ onLogin, onSessionAuth, darkMode, toggleDarkMode }) {
               onKeyDown={(e) => { if (e.key === 'Enter') doLogin(); }}
               className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
             />
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={rememberUser} onChange={(e) => setRememberUser(e.target.checked)}
+                className="h-3.5 w-3.5 rounded border-gray-300 dark:border-gray-600 text-pink-600 focus:ring-pink-500" />
+              <span className="text-[11px] text-gray-500 dark:text-gray-400">Recordar usuario</span>
+            </label>
             {loginError && <p className="text-xs text-red-600 dark:text-red-400">{loginError}</p>}
             <button
               onClick={doLogin}
@@ -1371,12 +1388,6 @@ function LoginScreen({ onLogin, onSessionAuth, darkMode, toggleDarkMode }) {
               className="w-full py-2.5 mt-2 bg-gradient-to-r from-pink-900 to-rose-700 text-white rounded-lg hover:shadow-lg transition font-semibold disabled:opacity-60"
             >
               {loggingIn ? 'Ingresando…' : 'Ingresar'}
-            </button>
-            <button
-              onClick={() => setLoginMode('email')}
-              className="w-full pt-3 text-[11px] text-gray-500 dark:text-gray-400 hover:text-pink-700 dark:hover:text-pink-300 transition border-t border-gray-100 dark:border-gray-700"
-            >
-              ¿Preferís ingresar con email? →
             </button>
           </div>
         )}

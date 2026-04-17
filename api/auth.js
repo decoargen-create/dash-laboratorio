@@ -349,11 +349,6 @@ export default async function handler(req, res) {
     const link = `${origin}/acceso?token=${encodeURIComponent(token)}`;
     return respondJSON(res, 200, { ok: true, link, username });
   }
-      ok: true,
-      session,
-      user: { email: payload.email, role: payload.role, name: resolveNameFromEmail(payload.email) },
-    });
-  }
 
   return respondJSON(res, 400, { error: 'Acción desconocida' });
 }

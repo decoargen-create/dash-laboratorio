@@ -16,8 +16,10 @@ import { generateCSV, downloadCSV, parseCSV, toNumber, toBool } from './csv.js';
 
 // Estados del pipeline de producción de una orden
 export const ORDER_STATES = [
-  'pendiente-cotizacion',
-  'cotizado',
+  'consulta-recibida',
+  'cotizacion-enviada',
+  'esperando-respuesta',
+  'aprobado',
   'abonado',
   'en-produccion',
   'listo-enviar',
@@ -25,8 +27,10 @@ export const ORDER_STATES = [
 ];
 
 export const ORDER_STATE_LABELS = {
-  'pendiente-cotizacion': 'Pendiente Cotización',
-  'cotizado': 'Cotizado',
+  'consulta-recibida': 'Consulta recibida',
+  'cotizacion-enviada': 'Cotización enviada',
+  'esperando-respuesta': 'Esperando respuesta',
+  'aprobado': 'Aprobado',
   'abonado': 'Abonado',
   'en-produccion': 'En Producción',
   'listo-enviar': 'Listo para enviar',
@@ -35,11 +39,13 @@ export const ORDER_STATE_LABELS = {
 
 // Clases tailwind para el chip de estado
 export const ORDER_STATE_STYLES = {
-  'pendiente-cotizacion': 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200',
-  'cotizado': 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300',
-  'abonado': 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300',
+  'consulta-recibida': 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200',
+  'cotizacion-enviada': 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300',
+  'esperando-respuesta': 'bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300',
+  'aprobado': 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300',
+  'abonado': 'bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300',
   'en-produccion': 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
-  'listo-enviar': 'bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300',
+  'listo-enviar': 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300',
   'despachado': 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300',
 };
 

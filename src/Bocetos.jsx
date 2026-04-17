@@ -20,6 +20,7 @@ import {
   Save, X, Check, Sparkles, Link as LinkIcon, Loader2, ChevronDown, UserPlus,
   List as ListIcon, LayoutGrid, ExternalLink, AlertTriangle, RefreshCw,
   Settings, Wand2, RotateCcw, Truck, PencilLine, Eraser, ClipboardPaste,
+  MessageSquare, Send, GraduationCap, FileCheck,
 } from 'lucide-react';
 
 const STORAGE_KEY_BOCETOS = 'viora-bocetos-v1';
@@ -258,6 +259,14 @@ export default function BocetosSection({ addToast }) {
   // antes de cerrar). Si hace falta persistir avisame.
   const [pending, setPending] = useState([]);
 
+  // Reporte del análisis que genera Claude después del scrape + historial
+  // de correcciones (lo que aprendió en esta sesión).
+  const [report, setReport] = useState(null); // { resumen, puntos, generatedAt }
+  const [reportLoading, setReportLoading] = useState(false);
+  const [refineInput, setRefineInput] = useState('');
+  const [refining, setRefining] = useState(false);
+  const [learnedHistory, setLearnedHistory] = useState([]); // [{ instruccion, explicacion, at }]
+
   // Layout del pending review.
   const [layout, setLayout] = useState('list'); // 'list' | 'grid'
 
@@ -385,6 +394,9 @@ export default function BocetosSection({ addToast }) {
       addToast?.({ type: 'success', message: msg });
       if (mode === 'batch') setUrlsText('');
       else setCollectionUrl('');
+
+      // Generamos el resumen/reporte de lo que hizo la IA (async, no bloquea).
+      requestAnalysisReport(nuevos);
     } catch (err) {
       addToast?.({ type: 'error', message: err.message || 'Error scrapeando' });
     } finally {
@@ -415,6 +427,83 @@ export default function BocetosSection({ addToast }) {
     };
     setPending(prev => [nuevo, ...prev]);
     addToast?.({ type: 'success', message: 'Producto manual creado — completá los datos' });
+  };
+
+  // ---------- Reporte + refine con IA ----------
+
+  const requestAnalysisReport = async (productos) => {
+    if (!productos?.length) return;
+    setReportLoading(true);
+    try {
+      const resp = await fetch('/api/agent-refine', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'summarize',
+          productos: productos.map(p => ({
+            nombre: p.nombre, sku: p.sku, url: p.url,
+            variantes: p.variantes, imagenRiesgosa: p.imagenRiesgosa,
+            imagenRiesgosaMotivo: p.imagenRiesgosaMotivo,
+            tituloOriginalEraDeTienda: p.tituloOriginalEraDeTienda,
+            nombreOriginal: p.nombreOriginal,
+          })),
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      setReport({ resumen: data.resumen, puntos: data.puntos || [], generatedAt: new Date().toISOString() });
+    } catch (err) {
+      // Si falla el resumen no es bloqueante — el user puede seguir laburando.
+      console.warn('Resumen falló:', err.message);
+    } finally {
+      setReportLoading(false);
+    }
+  };
+
+  const handleRefine = async () => {
+    const instruccion = refineInput.trim();
+    if (!instruccion) return;
+    if (pending.length === 0) { addToast?.({ type: 'error', message: 'No hay pendientes para corregir' }); return; }
+    setRefining(true);
+    try {
+      const resp = await fetch('/api/agent-refine', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'refine',
+          productos: pending,
+          instruccion,
+          instruccionesPrevias: aiConfig.instructions || '',
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      if (Array.isArray(data.productosActualizados)) {
+        setPending(data.productosActualizados);
+      }
+      // Si Claude destila una instrucción genérica, la sumamos a la config
+      // para que se aplique automáticamente en scrapes futuros.
+      const learned = data.instruccionAprendida?.trim();
+      if (learned) {
+        setAiConfig(prev => {
+          const prevInstr = prev.instructions || '';
+          // Evitá duplicar si ya está.
+          if (prevInstr.toLowerCase().includes(learned.toLowerCase())) return prev;
+          const joined = prevInstr ? `${prevInstr}\n- ${learned}` : `- ${learned}`;
+          return { ...prev, instructions: joined };
+        });
+      }
+      setLearnedHistory(prev => [
+        { instruccion, explicacion: data.explicacion || '', learned: learned || null, at: new Date().toISOString() },
+        ...prev,
+      ].slice(0, 20));
+      setRefineInput('');
+      addToast?.({ type: 'success', message: data.explicacion || 'Correcciones aplicadas' });
+    } catch (err) {
+      addToast?.({ type: 'error', message: `Error refinando: ${err.message}` });
+    } finally {
+      setRefining(false);
+    }
   };
 
   // ---------- Pending review ----------
@@ -894,6 +983,89 @@ export default function BocetosSection({ addToast }) {
           </div>
         </div>
 
+        {/* Reporte del análisis + chat de corrección */}
+        {pending.length > 0 && (report || reportLoading || learnedHistory.length > 0) && (
+          <div className="bg-gradient-to-br from-blue-50 to-white rounded-xl border border-blue-200 shadow-sm p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <FileCheck size={18} className="text-blue-600" />
+              <h2 className="text-base font-bold text-gray-900">Resumen del análisis</h2>
+              {reportLoading && <Loader2 size={14} className="text-blue-500 animate-spin" />}
+            </div>
+            {report && (
+              <div className="space-y-2 text-sm text-gray-800 mb-4">
+                <p>{report.resumen}</p>
+                {Array.isArray(report.puntos) && report.puntos.length > 0 && (
+                  <ul className="space-y-1 ml-0 mt-2">
+                    {report.puntos.map((p, i) => (
+                      <li key={i} className="flex items-start gap-2 text-sm text-gray-700">
+                        <span className="text-blue-500 mt-0.5">•</span>
+                        <span>{p}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+            {!report && reportLoading && (
+              <p className="text-sm text-gray-500 italic mb-4">Analizando lo que traje…</p>
+            )}
+
+            {/* Chat de corrección */}
+            <div className="border-t border-blue-200 pt-4">
+              <div className="flex items-center gap-2 mb-2">
+                <MessageSquare size={14} className="text-gray-500" />
+                <label className="text-xs font-bold text-gray-700 uppercase tracking-wider">Decile a la IA cómo corregir</label>
+              </div>
+              <form
+                onSubmit={(e) => { e.preventDefault(); handleRefine(); }}
+                className="flex gap-2"
+              >
+                <input
+                  type="text"
+                  value={refineInput}
+                  onChange={(e) => setRefineInput(e.target.value)}
+                  placeholder='Ej: "No pongas Plegable en el nombre" / "Unificá Rosa y Rosado" / "Acortá los SKUs"'
+                  disabled={refining}
+                  className="flex-1 px-3 py-2 bg-white border border-gray-300 rounded-lg text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm transition disabled:opacity-50"
+                />
+                <button
+                  type="submit"
+                  disabled={refining || !refineInput.trim()}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-white bg-blue-600 rounded-lg hover:bg-blue-700 shadow-sm transition disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {refining ? <><Loader2 size={14} className="animate-spin" /> Aplicando…</> : <><Send size={14} /> Enviar</>}
+                </button>
+              </form>
+              <p className="text-[11px] text-gray-500 mt-1.5">
+                <GraduationCap size={11} className="inline -mt-0.5" /> Las correcciones genéricas se guardan en "Configurar IA" para que se apliquen a los próximos scrapes.
+              </p>
+            </div>
+
+            {/* Historial de correcciones aprendidas */}
+            {learnedHistory.length > 0 && (
+              <div className="mt-4 pt-3 border-t border-blue-200">
+                <div className="flex items-center gap-2 mb-2">
+                  <GraduationCap size={14} className="text-emerald-600" />
+                  <label className="text-xs font-bold text-gray-700 uppercase tracking-wider">Aprendido en esta sesión ({learnedHistory.length})</label>
+                </div>
+                <div className="space-y-1.5">
+                  {learnedHistory.map((h, idx) => (
+                    <div key={idx} className="text-xs text-gray-700 bg-white/70 rounded-md px-3 py-2 border border-gray-200">
+                      <div className="font-semibold text-gray-900">"{h.instruccion}"</div>
+                      {h.explicacion && <div className="text-gray-600 mt-0.5">{h.explicacion}</div>}
+                      {h.learned && (
+                        <div className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 bg-emerald-50 text-emerald-700 rounded text-[10px] font-semibold">
+                          <Check size={9} /> Guardado para futuros scrapes
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Pending review */}
         {pending.length > 0 && (
           <div className="bg-white rounded-xl border-2 border-[#FFD33D] shadow-sm">
@@ -926,7 +1098,7 @@ export default function BocetosSection({ addToast }) {
                 </div>
                 <button
                   type="button"
-                  onClick={() => setPending([])}
+                  onClick={() => { setPending([]); setReport(null); }}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition"
                 >
                   <X size={12} /> Descartar todos

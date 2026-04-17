@@ -1,16 +1,16 @@
 # Laboratorio Viora
 
-Panel interno para la gestión del laboratorio: órdenes de producción, clientes, productos, comisiones de mentores y pagos a proveedores.
+Panel interno para la gestión del laboratorio: órdenes de producción, clientes, productos, comisiones de partners y pagos a proveedores.
 
 ## Características
 
 - **Dashboard** con resumen por período, listado editable de órdenes, filtros por fecha, estado, búsqueda libre y toggle de incidencias.
 - **Pipeline de estados**: Pendiente Cotización → Cotizado → Abonado → En Producción → Listo para enviar → Despachado.
-- **Panel de pagos por orden**: cuatro rubros editables (contenido, envase/pote, etiqueta, comisión mentor) con estado, monto, fecha, proveedor y nota.
+- **Panel de pagos por orden**: cuatro rubros editables (contenido, envase/pote, etiqueta, comisión partner) con estado, monto, fecha, proveedor y nota.
 - **Panel de cobros del cliente** con plan de cuotas y progreso.
-- **CRM de clientes** con teléfono, domicilio de despacho, asignación de mentor y paneles expandibles con su historial de órdenes.
+- **CRM de clientes** con teléfono, domicilio de despacho, asignación de partner y paneles expandibles con su historial de órdenes.
 - **Catálogo de productos** con 3 costos por unidad + fórmula de ingredientes editable vía popover.
-- **Sección Mentores** con ventas referidas y **porcentaje de comisión configurable** por mentor.
+- **Sección Partners** con ventas referidas y **porcentaje de comisión configurable** por partner.
 - **Comisiones** calculadas sobre el profit (no sobre el monto total).
 - **Modo oscuro** con persistencia en `localStorage`.
 - **Mini-forms** para crear clientes y productos al vuelo desde el registro de una venta.
@@ -49,27 +49,50 @@ Copiar `.env.example` a `.env` y completar:
 | Variable | Obligatoria | Uso |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | Sí (si querés IA) | Usada por `api/chat.js`, `api/insights.js`, `api/analytics.js` |
-| `AUTH_SECRET` | Sí (si querés login por email) | Firma los tokens de magic link y sesión. Generar con `openssl rand -hex 32` |
-| `AUTH_ADMIN_EMAILS` | Opcional | Lista CSV de emails que van a entrar como admin. El resto cae en rol 'mentor' |
-| `AUTH_ALLOWED_EMAILS` | Opcional (recomendada) | Whitelist CSV. Si queda vacía, cualquier email puede pedir magic link |
-| `APP_URL` | Opcional | URL pública del sitio para el link del email. Si no se setea, se usa el Origin |
-| `RESEND_API_KEY` | Opcional | API key de Resend para enviar los emails. Sin ella, `api/auth` devuelve el link en la response (sólo dev/setup) |
+| `AUTH_SECRET` | Sí | Firma los tokens de sesión. Generar con `openssl rand -hex 32` |
+| `AUTH_USERS` | Sí | JSON array de usuarios con sus hashes. Ver abajo. |
+| `AUTH_ADMIN_EMAILS` | Opcional | Solo si usás el flujo de magic link. CSV de emails admin |
+| `AUTH_ALLOWED_EMAILS` | Opcional | Whitelist CSV para magic link |
+| `APP_URL` | Opcional | URL pública del sitio para links en emails |
+| `RESEND_API_KEY` | Opcional | Resend para enviar los emails. Sin ella, el link se devuelve en la response |
 | `AUTH_FROM` | Opcional | "From" de los emails. Default: `onboarding@resend.dev` |
 
 El archivo `.env` está en `.gitignore` así que nunca se sube al repo.
 
-## Login con magic link
+## Login con usuario y contraseña
 
-El panel soporta login por email con magic link (sin password):
+Flujo principal de login. No requiere email.
 
-1. El usuario entra a `/acceso`, clickea "Ingresar con tu email".
-2. `api/auth` genera un token firmado (HMAC-SHA256, TTL 15 min) y lo envía por Resend al email.
-3. El link vuelve al mismo `/acceso?token=...`; el front lo canjea por una sesión firmada (TTL 7 días) que queda en `localStorage` bajo `viora-session`.
-4. En los próximos boots, el front llama `POST /api/auth` con `action: 'me'` para validar la sesión antes de mostrar el panel.
+### Configurar los usuarios
 
-El rol (admin / mentor) se resuelve server-side a partir de `AUTH_ADMIN_EMAILS`. Si `AUTH_ALLOWED_EMAILS` está seteado, los emails fuera de la lista reciben una respuesta "si está autorizado te mandamos el link" sin filtrar cuáles están adentro.
+1. Generá el hash de cada contraseña:
 
-**Acceso demo**: si no querés configurar email (ej. para trabajar local), hay un botón "Acceso demo" en la pantalla de login que deja entrar con el selector de rol tradicional (admin con password `admin`, equipo Sofia / Mariano).
+   ```bash
+   node scripts/hash-password.mjs miPasswordSegura123
+   # Output: 2a5e...$f91a...
+   ```
+
+2. Pegalos en `AUTH_USERS` como JSON en una sola línea:
+
+   ```
+   AUTH_USERS=[{"u":"admin","n":"Administrador","r":"admin","h":"2a5e...$f91a..."},{"u":"sofia","n":"Sofia","r":"partner","h":"3b6f...$e82b..."}]
+   ```
+
+   Campos por usuario:
+   - `u`: username (se compara lowercase)
+   - `n`: nombre display
+   - `r`: `"admin"` o `"partner"`
+   - `h`: hash PBKDF2-SHA256 (`saltHex$hashHex`)
+
+3. En Vercel, pegá el JSON entero en una sola env var.
+
+### Flujo
+
+El usuario entra a `/acceso`, escribe su usuario y contraseña, y clickea Ingresar. El backend valida contra `AUTH_USERS` y devuelve una sesión firmada (JWT-like HS256) que el front guarda en `localStorage` (`viora-session`). En siguientes cargas, el front valida la sesión contra `POST /api/auth` con `action: 'me'` antes de mostrar el panel.
+
+## Login con magic link (opcional, alternativo)
+
+Si además querés permitir login por email (sin password), completá `AUTH_ADMIN_EMAILS`, `AUTH_ALLOWED_EMAILS` y opcionalmente `RESEND_API_KEY`. En la pantalla de login aparece un link "¿Preferís ingresar con email?" que abre ese flujo. Sin estas env vars, el flujo de email sigue accesible pero responde con error.
 
 ## Deploy a Vercel
 
@@ -107,7 +130,7 @@ Todos usan el SDK oficial `@anthropic-ai/sdk` y prompt caching para bajar costos
 
 El panel y la landing incluyen un widget flotante. En modo **landing** responde preguntas comerciales. En modo **panel**:
 
-- Recibe un snapshot del negocio (métricas, órdenes recientes, clientes, productos, mentores con sus IDs) para contestar con datos reales.
+- Recibe un snapshot del negocio (métricas, órdenes recientes, clientes, productos, partners con sus IDs) para contestar con datos reales.
 - Si el usuario es **admin**, habilita 6 tools para ejecutar acciones: `crear_cliente`, `crear_producto`, `crear_orden`, `cambiar_estado_orden`, `marcar_incidencia`, `registrar_cobro`. La ejecución real pasa por el reducer del front (fuente de verdad), el backend sólo orquesta.
 - Para rol **equipo**: el chat es sólo consulta (sin tools).
 
@@ -119,7 +142,7 @@ La app arranca directamente en `/acceso` cuando se abre como PWA (configurado en
 
 ## Datos y persistencia
 
-Todo el estado (products, clients, mentors, sales) vive en `localStorage` del navegador bajo la key `viora-state-v1`. Hay botones de export/import CSV por entidad en la sección **Datos**, y un botón de backup/restore JSON completo.
+Todo el estado (products, clients, partners, sales) vive en `localStorage` del navegador bajo la key `viora-state-v1`. Hay botones de export/import CSV por entidad en la sección **Datos**, y un botón de backup/restore JSON completo.
 
 Para resetear a los datos de demo: menú de usuario (abajo a la izquierda) → "Reset demo data".
 

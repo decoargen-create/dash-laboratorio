@@ -7,7 +7,7 @@ import {
   Menu, LogOut, Home, ShoppingCart, Package, Users, AlertCircle, CreditCard,
   UserCheck, TrendingUp, Plus, Filter, Eye, Edit2, Trash2, Calendar, DollarSign,
   Moon, Sun, ChevronDown, ChevronRight, Search, X, Command, Check, Bell,
-  AlignJustify, LayoutGrid, Columns3
+  AlignJustify, LayoutGrid, Columns3, Sparkles
 } from 'lucide-react';
 import { VioraLogo, VioraMark } from './logo.jsx';
 import LandingPage from './LandingPage.jsx';
@@ -16,8 +16,10 @@ import { generateCSV, downloadCSV, parseCSV, toNumber, toBool } from './csv.js';
 
 // Estados del pipeline de producción de una orden
 export const ORDER_STATES = [
-  'pendiente-cotizacion',
-  'cotizado',
+  'consulta-recibida',
+  'cotizacion-enviada',
+  'esperando-respuesta',
+  'aprobado',
   'abonado',
   'en-produccion',
   'listo-enviar',
@@ -25,8 +27,10 @@ export const ORDER_STATES = [
 ];
 
 export const ORDER_STATE_LABELS = {
-  'pendiente-cotizacion': 'Pendiente Cotización',
-  'cotizado': 'Cotizado',
+  'consulta-recibida': 'Consulta recibida',
+  'cotizacion-enviada': 'Cotización enviada',
+  'esperando-respuesta': 'Esperando respuesta',
+  'aprobado': 'Aprobado',
   'abonado': 'Abonado',
   'en-produccion': 'En Producción',
   'listo-enviar': 'Listo para enviar',
@@ -35,16 +39,31 @@ export const ORDER_STATE_LABELS = {
 
 // Clases tailwind para el chip de estado
 export const ORDER_STATE_STYLES = {
-  'pendiente-cotizacion': 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200',
-  'cotizado': 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300',
-  'abonado': 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300',
+  'consulta-recibida': 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200',
+  'cotizacion-enviada': 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300',
+  'esperando-respuesta': 'bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300',
+  'aprobado': 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300',
+  'abonado': 'bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300',
   'en-produccion': 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
-  'listo-enviar': 'bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300',
+  'listo-enviar': 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300',
   'despachado': 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300',
 };
 
-// Sample data
+// Estado inicial vacío — la app arranca en cero para que cargues tu data real
+// (productos, clientes, mentores, órdenes) desde el primer uso.
+//
+// Si querés datos de demo para testear la UI, mirá DEMO_STATE abajo y usá
+// el botón "Cargar datos de demo" en el menú de usuario.
 const INITIAL_STATE = {
+  products: [],
+  clients: [],
+  mentors: [],
+  sales: [],
+};
+
+// Datos demo opcionales. No se cargan por default. Se pueden inyectar desde
+// el menú de usuario para explorar la app con data ya lista.
+const DEMO_STATE = {
   products: [
     { id: 1, nombre: 'Crema Hidratante', descripcion: 'Crema hidratante intensiva', costoContenido: 70, costoEnvase: 35, costoEtiqueta: 15, precioVenta: 450 },
     { id: 2, nombre: 'Sérum Vitamina C', descripcion: 'Sérum antioxidante', costoContenido: 110, costoEnvase: 50, costoEtiqueta: 20, precioVenta: 650 },
@@ -76,12 +95,12 @@ const INITIAL_STATE = {
     { id: 7, fecha: '2024-03-12', clienteId: 6, productoId: 2, cantidad: 150, montoTotal: 97500, mentorId: 2, estadoComision: 'pagada', estado: 'despachado', tieneIncidencia: false, incidenciaDetalle: '' },
     { id: 8, fecha: '2024-03-15', clienteId: 1, productoId: 5, cantidad: 200, montoTotal: 84000, mentorId: 1, estadoComision: 'pendiente', estado: 'listo-enviar', tieneIncidencia: false, incidenciaDetalle: '' },
     { id: 9, fecha: '2024-03-18', clienteId: 4, productoId: 3, cantidad: 100, montoTotal: 55000, mentorId: 2, estadoComision: 'pagada', estado: 'despachado', tieneIncidencia: false, incidenciaDetalle: '' },
-    { id: 10, fecha: '2024-03-22', clienteId: 7, productoId: 1, cantidad: 100, montoTotal: 45000, mentorId: 1, estadoComision: 'pendiente', estado: 'cotizado', tieneIncidencia: false, incidenciaDetalle: '' },
-    { id: 11, fecha: '2024-04-02', clienteId: 3, productoId: 2, cantidad: 100, montoTotal: 65000, mentorId: 1, estadoComision: 'pendiente', estado: 'pendiente-cotizacion', tieneIncidencia: false, incidenciaDetalle: '' },
+    { id: 10, fecha: '2024-03-22', clienteId: 7, productoId: 1, cantidad: 100, montoTotal: 45000, mentorId: 1, estadoComision: 'pendiente', estado: 'aprobado', tieneIncidencia: false, incidenciaDetalle: '' },
+    { id: 11, fecha: '2024-04-02', clienteId: 3, productoId: 2, cantidad: 100, montoTotal: 65000, mentorId: 1, estadoComision: 'pendiente', estado: 'consulta-recibida', tieneIncidencia: false, incidenciaDetalle: '' },
     { id: 12, fecha: '2024-04-05', clienteId: 6, productoId: 4, cantidad: 200, montoTotal: 64000, mentorId: 2, estadoComision: 'pendiente', estado: 'abonado', tieneIncidencia: false, incidenciaDetalle: '' },
     { id: 13, fecha: '2024-04-08', clienteId: 2, productoId: 5, cantidad: 100, montoTotal: 42000, mentorId: 2, estadoComision: 'pendiente', estado: 'en-produccion', tieneIncidencia: false, incidenciaDetalle: '' },
-    { id: 14, fecha: '2024-04-10', clienteId: 8, productoId: 3, cantidad: 150, montoTotal: 82500, mentorId: 2, estadoComision: 'pendiente', estado: 'cotizado', tieneIncidencia: false, incidenciaDetalle: '' },
-    { id: 15, fecha: '2024-04-12', clienteId: 4, productoId: 1, cantidad: 250, montoTotal: 112500, mentorId: 2, estadoComision: 'pendiente', estado: 'pendiente-cotizacion', tieneIncidencia: false, incidenciaDetalle: '' },
+    { id: 14, fecha: '2024-04-10', clienteId: 8, productoId: 3, cantidad: 150, montoTotal: 82500, mentorId: 2, estadoComision: 'pendiente', estado: 'aprobado', tieneIncidencia: false, incidenciaDetalle: '' },
+    { id: 15, fecha: '2024-04-12', clienteId: 4, productoId: 1, cantidad: 250, montoTotal: 112500, mentorId: 2, estadoComision: 'pendiente', estado: 'consulta-recibida', tieneIncidencia: false, incidenciaDetalle: '' },
   ],
 };
 
@@ -100,6 +119,17 @@ function appReducer(state, action) {
       return {
         ...state,
         mentors: state.mentors.map(m => m.id === action.payload.id ? { ...m, ...action.payload } : m)
+      };
+    case 'ADD_MENTOR':
+      return { ...state, mentors: [...state.mentors, action.payload] };
+    case 'REMOVE_MENTOR':
+      // Al borrar un partner, lo desasignamos de las órdenes/clientes para
+      // no dejar referencias colgadas (mentorId a un partner que no existe).
+      return {
+        ...state,
+        mentors: state.mentors.filter(m => m.id !== action.payload.id),
+        sales: state.sales.map(s => s.mentorId === action.payload.id ? { ...s, mentorId: null } : s),
+        clients: state.clients.map(c => c.mentorId === action.payload.id ? { ...c, mentorId: null } : c),
       };
     case 'UPDATE_PRODUCT': {
       // payload: { id, patch: {...} }
@@ -173,6 +203,16 @@ function appReducer(state, action) {
       return {
         ...state,
         sales: state.sales.map(s => s.id === action.payload.id ? { ...s, ...action.payload.patch } : s)
+      };
+    }
+    case 'ADD_ORDER_NOTE': {
+      const { orderId, nota } = action.payload;
+      return {
+        ...state,
+        sales: state.sales.map(s => s.id !== orderId ? s : {
+          ...s,
+          notas: [...(s.notas || []), { texto: nota, fecha: new Date().toISOString().split('T')[0] }],
+        }),
       };
     }
     default:
@@ -257,27 +297,68 @@ export function getOrderCosts(order, product) {
 }
 
 export function getOrderProfit(order, product) {
-  // Profit del laboratorio = (precioVenta - costos) * cantidad.
-  // La comisión del mentor NO se descuenta acá porque es profit del mentor.
-  // Usamos los valores efectivos (respetando overrides por orden).
+  // Profit CRUDO sobre el costo INTERNO real.
+  // Este es el "profit antes de descontar comisión del partner".
+  // Para el profit real que queda para el lab, usar getLabRealProfit.
   const eff = getOrderEffectiveUnit(order, product);
   const unitCost = eff.costoContenido + eff.costoEnvase + eff.costoEtiqueta;
   const cantidad = order?.cantidad || 0;
   return (eff.precioVenta - unitCost) * cantidad;
 }
 
-// Comisión del mentor = porcentaje (del mentor) × profit de la orden.
+// Costo INFORMADO al partner/cliente (por unidad). Puede ser distinto al
+// costo real cuando el lab no quiere que el mentor vea el costo verdadero.
+//
+// Prioridad:
+//   1. order.costoInformado (override por orden)
+//   2. product.costoInformado (default del producto)
+//   3. Fallback: el costo INTERNO real (compatible con productos que no
+//      tienen costo informado cargado).
+export function getInformedCostUnit(order, product) {
+  const orderOverride = order?.costoInformado;
+  if (orderOverride != null && orderOverride !== '') {
+    const n = parseFloat(orderOverride);
+    if (!Number.isNaN(n) && n >= 0) return n;
+  }
+  const prodInformed = product?.costoInformado;
+  if (prodInformed != null && prodInformed !== '') {
+    const n = parseFloat(prodInformed);
+    if (!Number.isNaN(n) && n >= 0) return n;
+  }
+  const eff = getOrderEffectiveUnit(order, product);
+  return eff.costoContenido + eff.costoEnvase + eff.costoEtiqueta;
+}
+
+// Profit SOBRE EL COSTO INFORMADO (el que "ve" el mentor).
+// Base para calcular la comisión del partner: es justo que ellos cobren
+// sobre lo que ellos creen que cuesta, no sobre lo que realmente cuesta.
+export function getOrderInformedProfit(order, product) {
+  const eff = getOrderEffectiveUnit(order, product);
+  const informedUnit = getInformedCostUnit(order, product);
+  const cantidad = order?.cantidad || 0;
+  return Math.max(0, (eff.precioVenta - informedUnit) * cantidad);
+}
+
+// Profit REAL del laboratorio (lo que nos queda en el bolsillo):
+//   profitInterno - comisiónMentor
+// donde profitInterno es sobre el costo REAL, y la comisión sale del
+// profit informado (lo que ve el mentor).
+export function getLabRealProfit(order, product, mentor) {
+  const profitInterno = getOrderProfit(order, product);
+  if (!order?.mentorId || !mentor) return profitInterno;
+  const mentorCommission = getMentorCommission(order, product, mentor);
+  return profitInterno - mentorCommission;
+}
+
+// Comisión del partner = porcentaje × profit INFORMADO (sobre costoInformado).
 // Prioridad:
 //  1. Si la orden tiene un presupuesto fijo asignado (order.mentorPresupuesto), ese gana.
-//  2. Si se pasa mentor y product, usa mentor.porcentajeComision (default 50) × profit.
-//  3. Si solo se pasa product, usa 50% del profit como fallback.
-//  4. Sin product, último fallback: 50% del montoTotal.
+//  2. Si se pasa mentor y product, usa mentor.porcentajeComision (default 50)
+//     × profit informado (sobre costoInformado del producto/orden).
+//  3. Sin mentor/product, último fallback: 50% del montoTotal.
 export function getMentorCommission(order, product, mentor) {
-  if (order?.mentorPresupuesto != null && order.mentorPresupuesto !== '') {
-    return parseFloat(order.mentorPresupuesto) || 0;
-  }
   if (product) {
-    const profit = getOrderProfit(order, product);
+    const profit = getOrderInformedProfit(order, product);
     const pct = mentor?.porcentajeComision != null ? Number(mentor.porcentajeComision) : 50;
     return Math.max(0, profit * (pct / 100));
   }
@@ -287,7 +368,7 @@ export function getMentorCommission(order, product, mentor) {
 // Resumen de cobros de una orden (plata que entra del cliente).
 // Devuelve total, cobrado, saldo, cuotasPagadas y cuotasPlanificadas.
 // order.cobros es un array de { monto, fecha, nota }.
-// Balance global de un mentor: cuánto generó en comisiones (acumulado de
+// Balance global de un partner: cuánto generó en comisiones (acumulado de
 // todas sus órdenes) vs cuánto ya se le pagó (suma de pagosRecibidos).
 // Devuelve también el saldo pendiente y el % cobrado.
 export function getMentorBalance(mentor, allSales, allProducts) {
@@ -379,7 +460,7 @@ export const PAYMENT_RUBRO_LABELS = {
   contenido: 'Contenido',
   envase: 'Envase / Pote',
   etiqueta: 'Etiqueta',
-  mentor: 'Comisión equipo',
+  mentor: 'Comisión partner',
 };
 
 // Devuelve los 4 rubros de pago de una orden con valores calculados por defecto.
@@ -405,7 +486,11 @@ export function getOrderPayments(order, product, mentor) {
 // Clave única del state persistido. Si cambia la forma del state en el
 // futuro, bumpear el número acá invalida la cache y se recrea desde
 // INITIAL_STATE.
-const STATE_STORAGE_KEY = 'viora-state-v1';
+// v2: bumpeada cuando pasamos el INITIAL_STATE a vacío (antes tenía data demo).
+// Al cambiar la key, los usuarios con data en v1 arrancan limpios tras el
+// deploy. Si tenés data importante en v1, exportala desde la sección Datos
+// antes de actualizar, o borrá manualmente viora-state-v1 de localStorage.
+const STATE_STORAGE_KEY = 'viora-state-v2';
 
 function loadPersistedState() {
   if (typeof window === 'undefined') return INITIAL_STATE;
@@ -415,11 +500,21 @@ function loadPersistedState() {
     const parsed = JSON.parse(stored);
     // Validación mínima de forma — si falta algún array clave, arranca de cero.
     if (!parsed || typeof parsed !== 'object') return INITIAL_STATE;
+    // Migrate old estado values to new pipeline stages
+    const STATE_MIGRATION = {
+      'pendiente-cotizacion': 'consulta-recibida',
+      'cotizado': 'aprobado',
+    };
+    const rawSales = Array.isArray(parsed.sales) ? parsed.sales : INITIAL_STATE.sales;
+    const migratedSales = rawSales.map(s => {
+      const migrated = STATE_MIGRATION[s.estado];
+      return migrated ? { ...s, estado: migrated } : s;
+    });
     return {
       products: Array.isArray(parsed.products) ? parsed.products : INITIAL_STATE.products,
       clients: Array.isArray(parsed.clients) ? parsed.clients : INITIAL_STATE.clients,
       mentors: Array.isArray(parsed.mentors) ? parsed.mentors : INITIAL_STATE.mentors,
-      sales: Array.isArray(parsed.sales) ? parsed.sales : INITIAL_STATE.sales,
+      sales: migratedSales,
     };
   } catch {
     return INITIAL_STATE;
@@ -440,7 +535,12 @@ function AppShell({ onExit }) {
     }
   }, [state]);
   const [currentUser, setCurrentUser] = useState(null);
-  const [currentSection, setCurrentSection] = useState('inicio');
+  const [currentSection, setCurrentSection] = useState(() => {
+    try { return localStorage.getItem('viora-last-section') || 'inicio'; } catch { return 'inicio'; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('viora-last-section', currentSection); } catch {}
+  }, [currentSection]);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   // Estado del menú mobile (sidebar como overlay deslizante en pantallas chicas).
   // En desktop el sidebar siempre está visible (gestionado por sidebarOpen + Tailwind md:).
@@ -452,6 +552,28 @@ function AppShell({ onExit }) {
   const [filterMonth, setFilterMonth] = useState('');
   const [cmdOpen, setCmdOpen] = useState(false);
   const [toasts, setToasts] = useState([]);
+
+  // Analytics IA: el state vive en el shell para que los reportes sigan
+  // corriendo aunque el usuario navegue a otra sección.
+  const [analyticsState, setAnalyticsState] = useState({
+    report: null, loading: false, error: '', lastFetch: 0,
+  });
+  const fetchAnalytics = async (snapshot) => {
+    setAnalyticsState(s => ({ ...s, loading: true, error: '' }));
+    try {
+      const res = await fetch('/api/analytics', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ snapshot }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      setAnalyticsState({ report: data, loading: false, error: '', lastFetch: Date.now() });
+      addToast({ type: 'success', message: 'Reporte de IA listo' });
+    } catch (err) {
+      setAnalyticsState(s => ({ ...s, loading: false, error: err.message || 'No pude generar el reporte.' }));
+    }
+  };
 
   const addToast = (toast) => {
     const id = Date.now() + Math.random();
@@ -509,23 +631,36 @@ function AppShell({ onExit }) {
     (async () => {
       try {
         if (linkToken) {
-          const resp = await fetch('/api/auth', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'verify', token: linkToken }),
-          });
+          let resp;
+          try {
+            resp = await fetch('/api/auth', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'verify', token: linkToken }),
+            });
+          } catch {
+            clearTokenFromUrl();
+            return; // sin red, dejar que se muestre el login
+          }
           clearTokenFromUrl();
           if (!resp.ok) {
-            addToast({ type: 'error', message: 'El link de acceso es inválido o expiró', duration: 6000 });
+            addToast?.({ type: 'error', message: 'El link de acceso es inválido o expiró', duration: 6000 });
             return;
           }
-          const data = await resp.json();
+          const data = await resp.json().catch(() => null);
           if (data?.ok && data.session && data.user) {
             localStorage.setItem('viora-session', data.session);
             if (!cancelled) {
-              setCurrentUser({ role: data.user.role, name: data.user.name, email: data.user.email, id: data.user.role === 'admin' ? 'admin' : data.user.email });
+              const u = data.user;
+              setCurrentUser({
+                role: u.role,
+                name: u.name,
+                email: u.email || null,
+                username: u.username || null,
+                id: u.role === 'admin' ? 'admin' : (u.mentorId || u.email || u.username || u.name),
+              });
               setCurrentSection('inicio');
-              addToast({ type: 'success', message: `Bienvenido, ${data.user.name}` });
+              addToast?.({ type: 'success', message: `Bienvenido, ${u.name}` });
             }
             return;
           }
@@ -537,12 +672,32 @@ function AppShell({ onExit }) {
             body: JSON.stringify({ action: 'me', session: storedSession }),
           });
           if (!resp.ok) {
+            // Sesión inválida / expirada / usuario borrado → limpiar y
+            // dejar que el LoginScreen se muestre.
             localStorage.removeItem('viora-session');
+            if (!cancelled) setCurrentUser(null);
             return;
           }
-          const data = await resp.json();
-          if (data?.ok && data.user && !cancelled) {
-            setCurrentUser({ role: data.user.role, name: data.user.name, email: data.user.email, id: data.user.role === 'admin' ? 'admin' : data.user.email });
+          const data = await resp.json().catch(() => null);
+          if (!data?.ok || !data.user) {
+            localStorage.removeItem('viora-session');
+            if (!cancelled) setCurrentUser(null);
+            return;
+          }
+          if (!cancelled) {
+            const u = data.user;
+            // Matcheamos id del partner por nombre si aplica
+            let id = u.username || u.email || u.name;
+            if (u.role === 'admin') {
+              id = 'admin';
+            }
+            setCurrentUser({
+              role: u.role,
+              name: u.name,
+              email: u.email || null,
+              username: u.username || null,
+              id,
+            });
             setCurrentSection('inicio');
           }
         }
@@ -563,6 +718,29 @@ function AppShell({ onExit }) {
     setCurrentSection('inicio');
   };
 
+  // Usado por LoginScreen después de un login exitoso contra /api/auth.
+  // Recibe el user que devuelve el backend (con username/email + name + role).
+  const handleSessionAuth = (user) => {
+    // id: si es admin usamos 'admin', si es mentor intentamos matchear con los
+    // mentores cargados por nombre (fallback al username).
+    let id = user.username || user.email || user.name;
+    if (user.role === 'admin') {
+      id = 'admin';
+    } else {
+      const matched = state.mentors.find(m => m.nombre.toLowerCase() === (user.name || '').toLowerCase());
+      if (matched) id = matched.id;
+    }
+    setCurrentUser({
+      role: user.role,
+      name: user.name,
+      email: user.email || null,
+      username: user.username || null,
+      id,
+    });
+    setCurrentSection('inicio');
+    addToast({ type: 'success', message: `Bienvenido, ${user.name}` });
+  };
+
   const handleLogout = () => {
     // Limpiamos la sesión de magic link también, por si el user vino por ahí.
     localStorage.removeItem('viora-session');
@@ -576,7 +754,7 @@ function AppShell({ onExit }) {
     const maxId = state.sales.reduce((m, s) => Math.max(m, s.id), 0);
     const newSale = {
       id: maxId + 1,
-      estado: 'pendiente-cotizacion',
+      estado: 'consulta-recibida',
       tieneIncidencia: false,
       incidenciaDetalle: '',
       estadoComision: 'pendiente',
@@ -612,6 +790,27 @@ function AppShell({ onExit }) {
 
   const handleUpdateMentor = (mentorData) => {
     dispatch({ type: 'UPDATE_MENTOR', payload: mentorData });
+  };
+
+  const handleAddMentor = (mentorData) => {
+    const maxId = state.mentors.reduce((m, x) => Math.max(m, x.id), 0);
+    const newMentor = {
+      id: maxId + 1,
+      porcentajeComision: 50,
+      pagosRecibidos: [],
+      fechaInicio: new Date().toISOString().split('T')[0],
+      ...mentorData,
+    };
+    dispatch({ type: 'ADD_MENTOR', payload: newMentor });
+    addToast({ type: 'success', message: `Partner "${newMentor.nombre}" creado` });
+    return newMentor;
+  };
+
+  const handleRemoveMentor = (id) => {
+    const mentor = state.mentors.find(m => m.id === id);
+    if (!mentor) return;
+    dispatch({ type: 'REMOVE_MENTOR', payload: { id } });
+    addToast({ type: 'warning', message: `Partner "${mentor.nombre}" eliminado` });
   };
 
   const createProduct = (productData) => {
@@ -683,7 +882,7 @@ function AppShell({ onExit }) {
             cantidad: Number(cantidad),
             montoTotal: Number(montoTotal),
             mentorId: fallbackMentor,
-            estado: input.estado || 'pendiente-cotizacion',
+            estado: input.estado || 'consulta-recibida',
             estadoComision: 'pendiente',
             tieneIncidencia: false,
             incidenciaDetalle: '',
@@ -801,7 +1000,7 @@ function AppShell({ onExit }) {
     // bootstrap de auth (link inválido, link enviado) sean visibles.
     return (
       <>
-        <LoginScreen onLogin={handleLogin} darkMode={darkMode} toggleDarkMode={toggleDarkMode} />
+        <LoginScreen onLogin={handleLogin} onSessionAuth={handleSessionAuth} darkMode={darkMode} toggleDarkMode={toggleDarkMode} />
         <ToastContainer toasts={toasts} />
       </>
     );
@@ -861,11 +1060,9 @@ function AppShell({ onExit }) {
           {currentUser.role === 'admin' ? (
             <>
               <NavItem icon={Home} label="Inicio" section="inicio" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={TrendingUp} label="Ventas" section="ventas" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={Package} label="Productos" section="productos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={Users} label="Clientes" section="clientes" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={CreditCard} label="Comisiones" section="comisiones" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={UserCheck} label="Equipo" section="mentores" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={Sparkles} label="Analytics IA" section="analytics" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={Package} label="Datos" section="datos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
             </>
@@ -901,17 +1098,18 @@ function AppShell({ onExit }) {
           onOpenCommand={() => setCmdOpen(true)}
           onOpenMobileMenu={() => setMobileMenuOpen(true)}
           notificationsSnapshot={currentUser.role === 'admin' ? buildPanelChatContext(state, currentUser) : null}
+          bgTasks={analyticsState.loading ? ['Generando reporte IA…'] : []}
         />
 
         <div key={currentSection} className="p-4 md:p-8 animate-fade-in-up">
           {/* Admin Views */}
-          {currentUser.role === 'admin' && currentSection === 'inicio' && <InicioSection state={state} dispatch={dispatch} />}
-          {currentUser.role === 'admin' && currentSection === 'ventas' && <VentasSection state={state} onAddSale={handleAddSale} onQuickAddClient={createClient} onQuickAddProduct={createProduct} showModal={showNewSaleModal} setShowModal={setShowNewSaleModal} />}
+          {currentUser.role === 'admin' && currentSection === 'inicio' && <InicioSection state={state} dispatch={dispatch} onAddSale={handleAddSale} onQuickAddClient={createClient} onQuickAddProduct={createProduct} addToast={addToast} />}
           {currentUser.role === 'admin' && currentSection === 'productos' && <ProductosSection state={state} onAddProduct={handleAddProduct} showModal={showNewProductModal} setShowModal={setShowNewProductModal} calculateMargin={calculateMargin} />}
           {currentUser.role === 'admin' && currentSection === 'clientes' && <ClientesSection state={state} onAddClient={handleAddClient} onUpdateClient={handleUpdateClient} showModal={showNewClientModal} setShowModal={setShowNewClientModal} />}
-          {currentUser.role === 'admin' && currentSection === 'comisiones' && <ComisionesSection state={state} dispatch={dispatch} onUpdateMentor={handleUpdateMentor} getMentorStats={getMentorStats} filterMentor={filterMentor} setFilterMentor={setFilterMentor} />}
-          {currentUser.role === 'admin' && currentSection === 'mentores' && <MentoresSection state={state} getMentorStats={getMentorStats} />}
-          {currentUser.role === 'admin' && currentSection === 'analytics' && <AnalyticsSection state={state} currentUser={currentUser} />}
+          {currentUser.role === 'admin' && currentSection === 'comisiones' && <ComisionesSection state={state} dispatch={dispatch} onUpdateMentor={handleUpdateMentor} onAddMentor={handleAddMentor} onRemoveMentor={handleRemoveMentor} getMentorStats={getMentorStats} filterMentor={filterMentor} setFilterMentor={setFilterMentor} />}
+          {/* La sección "Equipo" (mentores) se unificó adentro de Comisiones */}
+          {currentUser.role === 'admin' && currentSection === 'mentores' && <ComisionesSection state={state} dispatch={dispatch} onUpdateMentor={handleUpdateMentor} onAddMentor={handleAddMentor} onRemoveMentor={handleRemoveMentor} getMentorStats={getMentorStats} filterMentor={filterMentor} setFilterMentor={setFilterMentor} />}
+          {currentUser.role === 'admin' && currentSection === 'analytics' && <AnalyticsSection state={state} currentUser={currentUser} analyticsState={analyticsState} onFetch={fetchAnalytics} />}
           {currentUser.role === 'admin' && currentSection === 'datos' && <DatosSection state={state} dispatch={dispatch} addToast={addToast} />}
 
           {/* Mentor Views */}
@@ -957,7 +1155,7 @@ function AppShell({ onExit }) {
 function buildPanelChatContext(state, currentUser) {
   const ordenesPorEstado = {};
   state.sales.forEach(o => {
-    const k = ORDER_STATE_LABELS[o.estado || 'pendiente-cotizacion'] || o.estado || 'sin estado';
+    const k = ORDER_STATE_LABELS[o.estado || 'consulta-recibida'] || o.estado || 'sin estado';
     ordenesPorEstado[k] = (ordenesPorEstado[k] || 0) + 1;
   });
 
@@ -1000,7 +1198,7 @@ function buildPanelChatContext(state, currentUser) {
         producto: producto?.nombre || '-',
         cantidad: o.cantidad || 0,
         monto: o.montoTotal || 0,
-        estado: ORDER_STATE_LABELS[o.estado || 'pendiente-cotizacion'] || '-',
+        estado: ORDER_STATE_LABELS[o.estado || 'consulta-recibida'] || '-',
         incidencia: !!o.tieneIncidencia,
       };
     });
@@ -1056,15 +1254,58 @@ function NavItem({ icon: Icon, label, section, currentSection, onSelect, sidebar
   );
 }
 
-function LoginScreen({ onLogin, darkMode, toggleDarkMode }) {
-  // loginMode: 'select' | 'email' | 'email-sent' | 'demo' | 'admin-login' | 'mentor-select'
-  const [loginMode, setLoginMode] = useState('select');
-  const [selectedRole, setSelectedRole] = useState(null);
-  const [adminPassword, setAdminPassword] = useState('');
+function LoginScreen({ onLogin, onSessionAuth, darkMode, toggleDarkMode }) {
+  const [loginMode, setLoginMode] = useState('login');
+  const [username, setUsername] = useState(() => {
+    try { return localStorage.getItem('viora-last-user') || ''; } catch { return ''; }
+  });
+  const [password, setPassword] = useState('');
+  const [rememberUser, setRememberUser] = useState(true);
+  const [loginError, setLoginError] = useState('');
+  const [loggingIn, setLoggingIn] = useState(false);
+
+  // Magic link (opcional, secundario)
   const [email, setEmail] = useState('');
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState('');
-  const [sendResult, setSendResult] = useState(null); // { emailSent, devLink? }
+  const [sendResult, setSendResult] = useState(null);
+
+  const doLogin = async () => {
+    setLoginError('');
+    if (!username.trim() || !password) {
+      setLoginError('Completá usuario y contraseña');
+      return;
+    }
+    setLoggingIn(true);
+    try {
+      const resp = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'login', username: username.trim(), password }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data?.ok) {
+        setLoginError(data?.error || 'Usuario o contraseña inválidos');
+        return;
+      }
+      localStorage.setItem('viora-session', data.session);
+      if (rememberUser) {
+        try { localStorage.setItem('viora-last-user', username.trim()); } catch {}
+      } else {
+        try { localStorage.removeItem('viora-last-user'); } catch {}
+      }
+      if (typeof onSessionAuth === 'function') {
+        onSessionAuth(data.user);
+      } else {
+        // Fallback: llamar onLogin con los datos equivalentes
+        onLogin(data.user.role, data.user.name);
+      }
+    } catch (err) {
+      setLoginError('No pude conectar con el servidor.');
+    } finally {
+      setLoggingIn(false);
+    }
+  };
 
   const sendMagicLink = async () => {
     setSendError('');
@@ -1086,7 +1327,7 @@ function LoginScreen({ onLogin, darkMode, toggleDarkMode }) {
         setLoginMode('email-sent');
       }
     } catch (err) {
-      setSendError('No pude conectar con el servidor. ¿AUTH_SECRET configurado?');
+      setSendError('No pude conectar con el servidor.');
     } finally {
       setSending(false);
     }
@@ -1108,23 +1349,43 @@ function LoginScreen({ onLogin, darkMode, toggleDarkMode }) {
           <p className="text-gray-600 dark:text-gray-400 mt-1 text-xs tracking-widest uppercase">Panel de gestión</p>
         </div>
 
-        {loginMode === 'select' && (
+        {loginMode === 'login' && (
           <div className="space-y-3">
+            <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300">Usuario</label>
+            <input
+              type="text"
+              autoFocus={!username}
+              autoComplete="username"
+              placeholder="usuario"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') doLogin(); }}
+              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            />
+            <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mt-3">Contraseña</label>
+            <input
+              type="password"
+              autoFocus={!!username}
+              autoComplete="current-password"
+              placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') doLogin(); }}
+              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            />
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={rememberUser} onChange={(e) => setRememberUser(e.target.checked)}
+                className="h-3.5 w-3.5 rounded border-gray-300 dark:border-gray-600 text-pink-600 focus:ring-pink-500" />
+              <span className="text-[11px] text-gray-500 dark:text-gray-400">Recordar usuario</span>
+            </label>
+            {loginError && <p className="text-xs text-red-600 dark:text-red-400">{loginError}</p>}
             <button
-              onClick={() => setLoginMode('email')}
-              className="w-full py-3 px-4 bg-gradient-to-r from-pink-900 to-rose-700 text-white rounded-lg hover:shadow-lg transition font-semibold"
+              onClick={doLogin}
+              disabled={loggingIn}
+              className="w-full py-2.5 mt-2 bg-gradient-to-r from-pink-900 to-rose-700 text-white rounded-lg hover:shadow-lg transition font-semibold disabled:opacity-60"
             >
-              Ingresar con tu email
+              {loggingIn ? 'Ingresando…' : 'Ingresar'}
             </button>
-            <p className="text-center text-[11px] text-gray-500 dark:text-gray-400">Te mandamos un link mágico al mail</p>
-            <div className="pt-3 border-t border-gray-100 dark:border-gray-700">
-              <button
-                onClick={() => setLoginMode('demo')}
-                className="w-full py-2 text-xs text-gray-600 dark:text-gray-400 hover:text-pink-700 dark:hover:text-pink-300 transition"
-              >
-                Acceso demo (sin email) →
-              </button>
-            </div>
           </div>
         )}
 
@@ -1149,10 +1410,10 @@ function LoginScreen({ onLogin, darkMode, toggleDarkMode }) {
               {sending ? 'Enviando…' : 'Enviarme el link'}
             </button>
             <button
-              onClick={() => setLoginMode('select')}
+              onClick={() => setLoginMode('login')}
               className="w-full py-2 text-pink-900 dark:text-pink-300 border border-pink-900 dark:border-pink-300 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition text-sm"
             >
-              Volver
+              Volver al login con usuario
             </button>
           </div>
         )}
@@ -1182,102 +1443,23 @@ function LoginScreen({ onLogin, darkMode, toggleDarkMode }) {
                       {sendResult.devLink}
                     </a>
                   )}
-                  <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-2">Para producción configurá <span className="font-mono">RESEND_API_KEY</span>.</p>
                 </>
               )}
             </div>
             <button
-              onClick={() => { setLoginMode('select'); setSendResult(null); setEmail(''); }}
+              onClick={() => { setLoginMode('login'); setSendResult(null); setEmail(''); }}
               className="w-full py-2 text-pink-900 dark:text-pink-300 border border-pink-900 dark:border-pink-300 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition text-sm"
             >
               Volver
             </button>
           </div>
         )}
-
-        {loginMode === 'demo' && (
-          <div className="space-y-3">
-            <button
-              onClick={() => { setSelectedRole('admin'); setLoginMode('admin-login'); }}
-              className="w-full py-3 px-4 bg-gradient-to-r from-pink-900 to-rose-700 text-white rounded-lg hover:shadow-lg transition font-semibold"
-            >
-              Administrador (demo)
-            </button>
-            <button
-              onClick={() => { setSelectedRole('mentor'); setLoginMode('mentor-select'); }}
-              className="w-full py-3 px-4 bg-gradient-to-r from-pink-600 to-rose-500 text-white rounded-lg hover:shadow-lg transition font-semibold"
-            >
-              Equipo (demo)
-            </button>
-            <button
-              onClick={() => setLoginMode('select')}
-              className="w-full py-2 text-pink-900 dark:text-pink-300 border border-pink-900 dark:border-pink-300 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition text-sm"
-            >
-              Volver
-            </button>
-          </div>
-        )}
-
-        {loginMode === 'admin-login' && (
-          <div className="space-y-4">
-            <input
-              type="password"
-              placeholder="Contraseña"
-              value={adminPassword}
-              onChange={(e) => setAdminPassword(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-            />
-            <button
-              onClick={() => adminPassword === 'admin' ? onLogin('admin', 'Administrador') : alert('Contraseña incorrecta')}
-              className="w-full py-2 bg-pink-900 dark:bg-pink-700 text-white rounded-lg hover:bg-pink-800 dark:hover:bg-pink-600 transition"
-            >
-              Ingresar
-            </button>
-            <button
-              onClick={() => setLoginMode('demo')}
-              className="w-full py-2 text-pink-900 dark:text-pink-300 border border-pink-900 dark:border-pink-300 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition"
-            >
-              Volver
-            </button>
-          </div>
-        )}
-
-        {loginMode === 'mentor-select' && (
-          <div className="space-y-4">
-            <button
-              onClick={() => onLogin('mentor', 'Sofia')}
-              className="w-full py-3 px-4 bg-pink-600 text-white rounded-lg hover:shadow-lg transition font-semibold"
-            >
-              Sofia
-            </button>
-            <button
-              onClick={() => onLogin('mentor', 'Mariano')}
-              className="w-full py-3 px-4 bg-rose-600 text-white rounded-lg hover:shadow-lg transition font-semibold"
-            >
-              Mariano
-            </button>
-            <button
-              onClick={() => setLoginMode('demo')}
-              className="w-full py-2 text-pink-900 dark:text-pink-300 border border-pink-900 dark:border-pink-300 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition"
-            >
-              Volver
-            </button>
-          </div>
-        )}
-
-        {loginMode === 'admin-login' || loginMode === 'mentor-select' ? (
-          <div className="mt-8 p-4 bg-pink-50 dark:bg-pink-900/30 rounded-lg text-sm text-gray-700 dark:text-gray-300">
-            <p className="font-semibold mb-2">Demo Credentials:</p>
-            <p>Admin: password "admin"</p>
-            <p>Mentors: Sofia / Mariano</p>
-          </div>
-        ) : null}
       </div>
     </div>
   );
 }
 
-function InicioSection({ state, dispatch }) {
+function InicioSection({ state, dispatch, onAddSale, onQuickAddClient, onQuickAddProduct, addToast }) {
   const [filters, setFilters] = useState({
     dateFrom: '',
     dateTo: '',
@@ -1286,6 +1468,12 @@ function InicioSection({ state, dispatch }) {
     search: '',
     focus: null, // null | 'comisionesPendientes' | 'pagosProveedoresPendientes' | 'saldoPendiente'
   });
+  // Modal para crear orden sin salir de Inicio.
+  const [showNewOrderModal, setShowNewOrderModal] = useState(false);
+  // Modal para consulta rápida
+  const [showQuickConsultaModal, setShowQuickConsultaModal] = useState(false);
+  // Modal para editar orden
+  const [editingOrder, setEditingOrder] = useState(null);
 
   // Órdenes filtradas según el estado actual de los filtros
   const filteredOrders = useMemo(() => {
@@ -1293,7 +1481,7 @@ function InicioSection({ state, dispatch }) {
     return state.sales.filter(order => {
       if (filters.dateFrom && (order.fecha || '') < filters.dateFrom) return false;
       if (filters.dateTo && (order.fecha || '') > filters.dateTo) return false;
-      if (filters.states.size > 0 && !filters.states.has(order.estado || 'pendiente-cotizacion')) return false;
+      if (filters.states.size > 0 && !filters.states.has(order.estado || 'consulta-recibida')) return false;
       if (filters.onlyIncidencia && !order.tieneIncidencia) return false;
       // Foco: filtros rápidos disparados al clickear un stat card.
       if (filters.focus === 'comisionesPendientes') {
@@ -1323,7 +1511,7 @@ function InicioSection({ state, dispatch }) {
           product?.nombre, product?.descripcion,
           mentor?.nombre,
           order.fecha, order.incidenciaDetalle,
-          ORDER_STATE_LABELS[order.estado || 'pendiente-cotizacion'],
+          ORDER_STATE_LABELS[order.estado || 'consulta-recibida'],
         ].filter(Boolean).join(' ').toLowerCase();
         if (!haystack.includes(q)) return false;
       }
@@ -1373,7 +1561,87 @@ function InicioSection({ state, dispatch }) {
 
   return (
     <div className="space-y-8">
-      <DailyQuoteBanner />
+      {/* Botón principal de "Nueva orden" — destacado arriba de todo para que
+          sea lo primero que ves al entrar. Abre un modal con el form completo
+          sin tener que navegar a Ventas. */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <DailyQuoteBanner />
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowQuickConsultaModal(true)}
+            className="flex items-center gap-2 bg-white dark:bg-gray-800 border border-pink-300 dark:border-pink-700 text-pink-700 dark:text-pink-300 px-4 py-2.5 rounded-xl shadow hover:shadow-lg hover:scale-[1.02] active:scale-100 transition font-semibold text-sm"
+            title="Registrar una consulta rápida con datos mínimos"
+          >
+            <Plus size={18} /> Consulta rápida
+          </button>
+          <button
+            onClick={() => setShowNewOrderModal(true)}
+            className="flex items-center gap-2 bg-gradient-to-r from-pink-700 to-rose-600 text-white px-5 py-2.5 rounded-xl shadow-lg hover:shadow-xl hover:scale-[1.02] active:scale-100 transition font-semibold text-sm"
+            title="Registrar una nueva orden"
+          >
+            <Plus size={18} /> Nueva orden
+          </button>
+        </div>
+      </div>
+
+      {/* Pipeline visual bar: pills con conteo por estado */}
+      <div className="flex flex-wrap gap-2">
+        {ORDER_STATES.map(s => {
+          const count = state.sales.filter(o => (o.estado || 'consulta-recibida') === s).length;
+          const isActive = filters.states.size === 1 && filters.states.has(s);
+          return (
+            <button
+              key={s}
+              onClick={() => {
+                setFilters(f => {
+                  const next = new Set();
+                  if (!(f.states.size === 1 && f.states.has(s))) next.add(s);
+                  return { ...f, states: next };
+                });
+              }}
+              className={`px-3 py-1.5 rounded-full text-xs font-semibold transition ${isActive ? ORDER_STATE_STYLES[s] + ' ring-2 ring-offset-1 ring-pink-500 dark:ring-offset-gray-900' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:opacity-80'}`}
+            >
+              {ORDER_STATE_LABELS[s]} <span className="ml-1 opacity-70">{count}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {showNewOrderModal && (
+        <NewSaleModal
+          state={state}
+          onAddSale={(data) => { onAddSale?.(data); setShowNewOrderModal(false); }}
+          onQuickAddClient={onQuickAddClient}
+          onQuickAddProduct={onQuickAddProduct}
+          onClose={() => setShowNewOrderModal(false)}
+        />
+      )}
+
+      {showQuickConsultaModal && (
+        <QuickConsultaModal
+          state={state}
+          onSubmit={(data) => {
+            onAddSale?.(data);
+            setShowQuickConsultaModal(false);
+          }}
+          onQuickAddClient={onQuickAddClient}
+          onClose={() => setShowQuickConsultaModal(false)}
+        />
+      )}
+
+      {editingOrder && (
+        <EditOrderModal
+          order={editingOrder}
+          state={state}
+          onSave={(patch) => {
+            dispatch({ type: 'UPDATE_ORDER', payload: { id: editingOrder.id, patch } });
+            setEditingOrder(null);
+            addToast?.({ type: 'success', message: `Orden #${editingOrder.id} actualizada` });
+          }}
+          onClose={() => setEditingOrder(null)}
+        />
+      )}
+
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 md:gap-4">
         <StatCard
           icon={DollarSign}
@@ -1401,7 +1669,7 @@ function InicioSection({ state, dispatch }) {
           color="from-amber-500 to-orange-500"
           delay={160}
           active={filters.focus === 'comisionesPendientes'}
-          tooltip="Click para filtrar: solo órdenes con comisión del mentor pendiente"
+          tooltip="Click para filtrar: solo órdenes con comisión del partner pendiente"
           onClick={() => setFilters(f => ({ ...f, focus: f.focus === 'comisionesPendientes' ? null : 'comisionesPendientes' }))}
         />
         <StatCard
@@ -1428,25 +1696,7 @@ function InicioSection({ state, dispatch }) {
 
       <FilterBar filters={filters} onChange={setFilters} totalShown={filteredOrders.length} totalAll={state.sales.length} />
 
-      <OrdersList orders={filteredOrders} state={state} dispatch={dispatch} />
-
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
-        <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-6">Ventas por mes (período seleccionado)</h3>
-        {monthlyChart.length === 0 ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400 italic text-center py-8">No hay datos para el rango y filtros actuales.</p>
-        ) : (
-          <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={monthlyChart}>
-              <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200 dark:stroke-gray-700" />
-              <XAxis dataKey="month" />
-              <YAxis />
-              <Tooltip />
-              <Legend />
-              <Line type="monotone" dataKey="total" stroke="#be185d" strokeWidth={3} name="Total Ventas ($)" />
-            </LineChart>
-          </ResponsiveContainer>
-        )}
-      </div>
+      <OrdersList orders={filteredOrders} state={state} dispatch={dispatch} onEditOrder={setEditingOrder} />
     </div>
   );
 }
@@ -1454,6 +1704,7 @@ function InicioSection({ state, dispatch }) {
 // Barra de filtros del dashboard: búsqueda, rango de fechas con presets,
 // estados múltiples del pipeline y toggle "sólo con incidencia".
 function FilterBar({ filters, onChange, totalShown, totalAll }) {
+  const [expanded, setExpanded] = useState(false);
   const update = (patch) => onChange({ ...filters, ...patch });
 
   const toggleState = (key) => {
@@ -1468,18 +1719,10 @@ function FilterBar({ filters, onChange, totalShown, totalAll }) {
     const todayStr = fmt(today);
     if (preset === 'all') { update({ dateFrom: '', dateTo: '' }); return; }
     if (preset === 'today') { update({ dateFrom: todayStr, dateTo: todayStr }); return; }
-    if (preset === 'yesterday') {
-      const y = new Date(today); y.setDate(y.getDate() - 1);
-      const yStr = fmt(y);
-      update({ dateFrom: yStr, dateTo: yStr });
-      return;
-    }
     const d = new Date(today);
     if (preset === '7') { d.setDate(d.getDate() - 7); update({ dateFrom: fmt(d), dateTo: todayStr }); return; }
     if (preset === '30') { d.setDate(d.getDate() - 30); update({ dateFrom: fmt(d), dateTo: todayStr }); return; }
-    if (preset === '90') { d.setDate(d.getDate() - 90); update({ dateFrom: fmt(d), dateTo: todayStr }); return; }
     if (preset === 'thisMonth') { const s = new Date(today.getFullYear(), today.getMonth(), 1); update({ dateFrom: fmt(s), dateTo: todayStr }); return; }
-    if (preset === 'thisYear') { const s = new Date(today.getFullYear(), 0, 1); update({ dateFrom: fmt(s), dateTo: todayStr }); return; }
   };
 
   const clearAll = () => onChange({
@@ -1487,107 +1730,93 @@ function FilterBar({ filters, onChange, totalShown, totalAll }) {
   });
 
   const anyActive = filters.dateFrom || filters.dateTo || filters.states.size > 0 || filters.onlyIncidencia || filters.search || filters.focus;
+  const filterCount = (filters.dateFrom ? 1 : 0) + (filters.states.size) + (filters.onlyIncidencia ? 1 : 0) + (filters.focus ? 1 : 0);
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-5 space-y-4">
-      <div className="flex flex-col lg:flex-row lg:items-center gap-3">
+    <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-3 space-y-2">
+      {/* Siempre visible: búsqueda + toggle filtros + conteo */}
+      <div className="flex items-center gap-2">
         <div className="relative flex-1">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input
             type="text"
             value={filters.search}
             onChange={(e) => update({ search: e.target.value })}
-            placeholder="Buscar por cliente, producto, mentor, estado..."
-            className="w-full pl-9 pr-9 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            placeholder="Buscar..."
+            className="w-full pl-8 pr-8 py-1.5 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
           />
           {filters.search && (
-            <button
-              onClick={() => update({ search: '' })}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
-              title="Limpiar búsqueda"
-            >
-              <X size={14} />
+            <button onClick={() => update({ search: '' })} className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+              <X size={12} />
             </button>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          <input
-            type="date"
-            value={filters.dateFrom}
-            onChange={(e) => update({ dateFrom: e.target.value })}
-            className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-            title="Desde"
-          />
-          <span className="text-gray-500 dark:text-gray-400 text-sm">→</span>
-          <input
-            type="date"
-            value={filters.dateTo}
-            onChange={(e) => update({ dateTo: e.target.value })}
-            className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-            title="Hasta"
-          />
-        </div>
-      </div>
-
-      <div className="flex flex-wrap gap-2 items-center">
-        <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mr-1">Rango:</span>
-        {[
-          { k: 'today', label: 'Hoy' },
-          { k: 'yesterday', label: 'Ayer' },
-          { k: '7', label: 'Últ. 7 días' },
-          { k: '30', label: 'Últ. 30 días' },
-          { k: '90', label: 'Últ. 90 días' },
-          { k: 'thisMonth', label: 'Este mes' },
-          { k: 'thisYear', label: 'Este año' },
-          { k: 'all', label: 'Todo' },
-        ].map(p => (
-          <button
-            key={p.k}
-            onClick={() => applyPreset(p.k)}
-            className="px-3 py-1 text-xs rounded-full border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition"
-          >
-            {p.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="flex flex-wrap gap-2 items-center">
-        <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mr-1">Estado:</span>
-        {ORDER_STATES.map(s => {
-          const active = filters.states.has(s);
-          return (
-            <button
-              key={s}
-              onClick={() => toggleState(s)}
-              className={`px-3 py-1 text-xs font-semibold rounded-full transition border ${
-                active
-                  ? `${ORDER_STATE_STYLES[s]} border-transparent ring-2 ring-pink-500`
-                  : `${ORDER_STATE_STYLES[s]} border-transparent opacity-50 hover:opacity-100`
-              }`}
-            >
-              {ORDER_STATE_LABELS[s]}
-            </button>
-          );
-        })}
-        <label className="inline-flex items-center gap-2 ml-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={filters.onlyIncidencia}
-            onChange={(e) => update({ onlyIncidencia: e.target.checked })}
-            className="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-red-600 focus:ring-red-500"
-          />
-          <span className="text-xs font-semibold text-red-700 dark:text-red-300">Sólo con incidencia</span>
-        </label>
-      </div>
-
-      <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 pt-1 border-t border-gray-100 dark:border-gray-700">
-        <span>Mostrando <span className="font-bold text-gray-900 dark:text-gray-100">{totalShown}</span> de {totalAll} órdenes</span>
+        <button
+          onClick={() => setExpanded(v => !v)}
+          className={`inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg border transition ${
+            expanded || anyActive
+              ? 'border-pink-500 text-pink-700 dark:text-pink-300 bg-pink-50 dark:bg-pink-900/20'
+              : 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+          }`}
+        >
+          <Filter size={12} />
+          Filtros{filterCount > 0 ? ` (${filterCount})` : ''}
+          <ChevronDown size={12} className={`transition-transform ${expanded ? 'rotate-180' : ''}`} />
+        </button>
         {anyActive && (
-          <button onClick={clearAll} className="text-pink-700 dark:text-pink-300 hover:underline font-semibold">
-            Limpiar filtros
+          <button onClick={clearAll} className="text-[11px] text-pink-700 dark:text-pink-300 hover:underline font-semibold whitespace-nowrap">
+            Limpiar
           </button>
         )}
+        <span className="text-[11px] text-gray-500 dark:text-gray-400 whitespace-nowrap">
+          {totalShown}/{totalAll}
+        </span>
       </div>
+
+      {/* Expandible: rango + estado */}
+      {expanded && (
+        <div className="space-y-2 pt-2 border-t border-gray-100 dark:border-gray-700 animate-fade-in">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[10px] font-bold text-gray-400 uppercase">Rango:</span>
+            {[
+              { k: 'today', label: 'Hoy' },
+              { k: '7', label: '7 días' },
+              { k: '30', label: '30 días' },
+              { k: 'thisMonth', label: 'Este mes' },
+              { k: 'all', label: 'Todo' },
+            ].map(p => (
+              <button key={p.k} onClick={() => applyPreset(p.k)}
+                className="px-2 py-0.5 text-[11px] rounded-full border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition">
+                {p.label}
+              </button>
+            ))}
+            <input type="date" value={filters.dateFrom} onChange={(e) => update({ dateFrom: e.target.value })}
+              className="px-2 py-0.5 text-[11px] border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg" />
+            <span className="text-gray-400 text-[10px]">→</span>
+            <input type="date" value={filters.dateTo} onChange={(e) => update({ dateTo: e.target.value })}
+              className="px-2 py-0.5 text-[11px] border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg" />
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[10px] font-bold text-gray-400 uppercase">Estado:</span>
+            {ORDER_STATES.map(s => {
+              const active = filters.states.has(s);
+              return (
+                <button key={s} onClick={() => toggleState(s)}
+                  className={`px-2 py-0.5 text-[10px] font-semibold rounded-full transition ${
+                    active ? `${ORDER_STATE_STYLES[s]} ring-1 ring-pink-500` : `${ORDER_STATE_STYLES[s]} opacity-40 hover:opacity-80`
+                  }`}>
+                  {ORDER_STATE_LABELS[s]}
+                </button>
+              );
+            })}
+            <label className="inline-flex items-center gap-1 ml-1 cursor-pointer">
+              <input type="checkbox" checked={filters.onlyIncidencia} onChange={(e) => update({ onlyIncidencia: e.target.checked })}
+                className="h-3 w-3 rounded border-gray-300 dark:border-gray-600 text-red-600 focus:ring-red-500" />
+              <span className="text-[10px] font-semibold text-red-700 dark:text-red-300">Incidencias</span>
+            </label>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1604,16 +1833,17 @@ const ORDERS_COLUMNS = [
   { key: 'cantidad',  label: 'Cant.',     default: true,  required: false },
   { key: 'costo',     label: 'Costo',     default: true,  required: false },
   { key: 'precio',    label: 'Precio venta', default: true, required: false },
-  { key: 'comision',  label: 'Com. equipo', default: true, required: false },
+  { key: 'costoInf',  label: 'C. Informado', default: true, required: false },
+  { key: 'comision',  label: 'Com. partner', default: true, required: false },
   { key: 'profit',    label: 'Profit',    default: true,  required: false },
   { key: 'estado',    label: 'Estado',    default: true,  required: false },
   { key: 'cobro',     label: 'Cobro',     default: true,  required: false },
-  { key: 'incidencia', label: 'Incidencia', default: false, required: false },
+  { key: 'incidencia', label: 'Incidencia', default: true, required: false },
 ];
 
 const ORDERS_DEFAULT_VISIBLE = ORDERS_COLUMNS.filter(c => c.default).map(c => c.key);
 
-function OrdersList({ state, dispatch, orders }) {
+function OrdersList({ state, dispatch, orders, onEditOrder }) {
   const [viewMode, setViewMode] = useState('total'); // 'total' | 'unidad'
   const [incidenciaDraft, setIncidenciaDraft] = useState({}); // { [orderId]: texto }
   const [expanded, setExpanded] = useState(() => new Set());
@@ -1632,7 +1862,13 @@ function OrdersList({ state, dispatch, orders }) {
     if (typeof window === 'undefined') return new Set(ORDERS_DEFAULT_VISIBLE);
     try {
       const stored = localStorage.getItem('viora-cols-orders');
-      if (stored) return new Set(JSON.parse(stored));
+      if (stored) {
+        const savedSet = new Set(JSON.parse(stored));
+        // Merge: si hay columnas nuevas con default=true que no estaban
+        // en el set guardado, agregarlas automáticamente.
+        ORDERS_DEFAULT_VISIBLE.forEach(k => savedSet.add(k));
+        return savedSet;
+      }
     } catch {}
     return new Set(ORDERS_DEFAULT_VISIBLE);
   });
@@ -1807,18 +2043,19 @@ function OrdersList({ state, dispatch, orders }) {
       {layout === 'table' && (
       <div className="overflow-x-auto orders-table-scroll">
         <table className="w-full text-xs md:text-sm orders-compact-table">
-          <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700">
+          <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10">
             <tr className="text-left text-gray-700 dark:text-gray-200">
               <th className="px-2 py-3 w-8"></th>
               {isColVisible('fecha') && <th className="px-4 py-3 font-semibold" title="Fecha de creación de la orden">Fecha</th>}
               {isColVisible('cliente') && <th className="px-4 py-3 font-semibold" title="Cliente que solicitó la orden">Cliente</th>}
               {isColVisible('producto') && <th className="px-4 py-3 font-semibold" title="Producto producido">Producto</th>}
-              {isColVisible('mentor') && <th className="px-4 py-3 font-semibold" title="Persona del equipo que refirió al cliente (opcional)">Equipo</th>}
+              {isColVisible('mentor') && <th className="px-4 py-3 font-semibold" title="Persona del partner que refirió al cliente (opcional)">Equipo</th>}
               {isColVisible('cantidad') && <th className="px-4 py-3 font-semibold text-right" title="Unidades a producir. Doble click en la celda para editar.">Cant.</th>}
               {isColVisible('costo') && <th className="px-4 py-3 font-semibold text-right" title="Costo total: contenido + envase + etiqueta. Click en la celda para ver el desglose o cambiar a modo 'sin discriminar'.">Costo</th>}
               {isColVisible('precio') && <th className="px-4 py-3 font-semibold text-right" title="Precio cobrado al cliente. Doble click en la celda para editar.">Precio venta</th>}
-              {isColVisible('comision') && <th className="px-4 py-3 font-semibold text-right" title="Comisión que se le paga al equipo (% del profit, configurable en Comisiones)">Com. equipo</th>}
-              {isColVisible('profit') && <th className="px-4 py-3 font-semibold text-right" title="Profit del laboratorio = precio venta − costo. NO descuenta la comisión del equipo.">Profit</th>}
+              {isColVisible('costoInf') && <th className="px-4 py-3 font-semibold text-right" title="Costo informado al partner para esta orden. Su comisión se calcula sobre (venta − este costo).">C. Informado</th>}
+              {isColVisible('comision') && <th className="px-4 py-3 font-semibold text-right" title="Comisión que se le paga al partner (% de ganancia sobre costo informado)">Com. partner</th>}
+              {isColVisible('profit') && <th className="px-4 py-3 font-semibold text-right" title="Profit del laboratorio = precio venta − costo. NO descuenta la comisión del partner.">Profit</th>}
               {isColVisible('estado') && <th className="px-4 py-3 font-semibold" title="Estado del pipeline: Pendiente cotización → Cotizado → Abonado → En producción → Listo para enviar → Despachado">Estado</th>}
               {isColVisible('cobro') && <th className="px-4 py-3 font-semibold text-center" title="Progreso de cobro al cliente. Click para ver detalle o registrar pagos.">Cobro</th>}
               {isColVisible('incidencia') && <th className="px-4 py-3 font-semibold" title="Marcá esta orden con incidencia si hay alguna demora o problema.">Incidencia</th>}
@@ -1851,14 +2088,26 @@ function OrdersList({ state, dispatch, orders }) {
                 <React.Fragment key={order.id}>
                 <tr className={`transition ${order.tieneIncidencia ? 'bg-red-50/40 dark:bg-red-900/10' : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}>
                   <td className="px-2 py-3 text-center">
-                    <button
-                      onClick={() => toggleExpand(order.id)}
-                      className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300"
-                      title={isOpen ? 'Ocultar pagos' : 'Ver pagos de esta orden'}
-                      aria-label="Expandir fila"
-                    >
-                      {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                    </button>
+                    <div className="flex items-center gap-0.5">
+                      <button
+                        onClick={() => toggleExpand(order.id)}
+                        className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300"
+                        title={isOpen ? 'Ocultar pagos' : 'Ver pagos de esta orden'}
+                        aria-label="Expandir fila"
+                      >
+                        {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                      </button>
+                      {onEditOrder && (
+                        <button
+                          onClick={() => onEditOrder(order)}
+                          className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-400 hover:text-pink-600 dark:text-gray-500 dark:hover:text-pink-400 transition"
+                          title="Editar orden"
+                          aria-label="Editar orden"
+                        >
+                          <Edit2 size={14} />
+                        </button>
+                      )}
+                    </div>
                   </td>
                   {isColVisible('fecha') && <td className="px-4 py-3 text-gray-900 dark:text-gray-100 whitespace-nowrap">{order.fecha}</td>}
                   {isColVisible('cliente') && <td className="px-4 py-3 text-gray-900 dark:text-gray-100">{getClientName(order.clienteId)}</td>}
@@ -1912,6 +2161,11 @@ function OrdersList({ state, dispatch, orders }) {
                       />
                     </td>
                   )}
+                  {isColVisible('costoInf') && (
+                    <td className="px-4 py-3 text-right text-amber-700 dark:text-amber-300 tabular-nums">
+                      {hasMentor ? fmtMoney(getInformedCostUnit(order, product) * (order.cantidad || 0)) : <span className="text-gray-400 dark:text-gray-500">—</span>}
+                    </td>
+                  )}
                   {isColVisible('comision') && (
                     <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300">
                       {hasMentor ? fmtMoney(isTotal ? commissionTotal : commissionUnit) : <span className="text-gray-400 dark:text-gray-500">—</span>}
@@ -1923,9 +2177,9 @@ function OrdersList({ state, dispatch, orders }) {
                   {isColVisible('estado') && (
                     <td className="px-4 py-3">
                       <select
-                        value={order.estado || 'pendiente-cotizacion'}
+                        value={order.estado || 'consulta-recibida'}
                         onChange={(e) => handleStateChange(order.id, e.target.value)}
-                        className={`text-xs font-semibold px-2 py-1 rounded-full border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-pink-500 ${ORDER_STATE_STYLES[order.estado || 'pendiente-cotizacion']}`}
+                        className={`text-xs font-semibold px-2 py-1 rounded-full border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-pink-500 ${ORDER_STATE_STYLES[order.estado || 'consulta-recibida']}`}
                       >
                         {ORDER_STATES.map(s => (
                           <option key={s} value={s} className="bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100">{ORDER_STATE_LABELS[s]}</option>
@@ -1972,6 +2226,8 @@ function OrdersList({ state, dispatch, orders }) {
                         mentorNombre={hasMentor ? getMentorName(mentorId) : null}
                         onCobrosChange={(patch) => handleCobrosChange(order, patch)}
                         onPaymentChange={(rubro, data) => handlePaymentChange(order.id, rubro, data)}
+                        onIncidenciaChange={(patch) => dispatch({ type: 'UPDATE_ORDER_INCIDENCIA', payload: { orderId: order.id, ...patch } })}
+                        dispatch={dispatch}
                       />
                     </td>
                   </tr>
@@ -2112,7 +2368,7 @@ function OrdersCardView({ orders, state, viewMode, onStateChange, expanded, togg
       {orders.map(order => {
         const product = getProduct(order.productoId);
         const mentor = order.mentorId ? state.mentors.find(m => m.id === order.mentorId) : null;
-        const estado = order.estado || 'pendiente-cotizacion';
+        const estado = order.estado || 'consulta-recibida';
         const isTotal = viewMode === 'total';
         const cantidad = order.cantidad || 0;
         const precioVentaUnit = product?.precioVenta || 0;
@@ -2222,7 +2478,7 @@ function OrdersKanbanView({ orders, state, onStateChange, getClientName, getMent
   const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
   const byState = ORDER_STATES.reduce((acc, s) => { acc[s] = []; return acc; }, {});
   orders.forEach(o => {
-    const s = o.estado || 'pendiente-cotizacion';
+    const s = o.estado || 'consulta-recibida';
     if (!byState[s]) byState[s] = [];
     byState[s].push(o);
   });
@@ -2276,7 +2532,7 @@ function OrdersKanbanView({ orders, state, onStateChange, getClientName, getMent
                           />
                         </div>
                         <select
-                          value={order.estado || 'pendiente-cotizacion'}
+                          value={order.estado || 'consulta-recibida'}
                           onChange={(e) => onStateChange(order.id, e.target.value)}
                           className="mt-2 w-full text-[10px] font-semibold px-1.5 py-0.5 rounded border border-gray-200 dark:border-gray-700 bg-transparent text-gray-600 dark:text-gray-300 cursor-pointer focus:outline-none focus:ring-1 focus:ring-pink-500"
                           title="Mover a otro estado"
@@ -2397,26 +2653,47 @@ function StatCard({ icon: Icon, label, value, color, delay = 0, onClick, active 
   );
 }
 
-function VentasSection({ state, onAddSale, onQuickAddClient, onQuickAddProduct, showModal, setShowModal }) {
-  const [formData, setFormData] = useState({ clienteId: '', productoId: '', cantidad: 1, mentorId: '', mentorPresupuesto: '' });
+// Modal reutilizable para registrar una nueva venta/orden. Se usa desde
+// VentasSection y desde InicioSection para dejar la creación a un click
+// sin tener que navegar a otra sección.
+function NewSaleModal({ state, onAddSale, onQuickAddClient, onQuickAddProduct, onClose }) {
+  const [formData, setFormData] = useState({ clienteId: '', productoId: '', cantidad: 1, mentorId: '', costoInformado: '', montoTotal: '' });
   const [showClientQuickModal, setShowClientQuickModal] = useState(false);
   const [showProductQuickModal, setShowProductQuickModal] = useState(false);
 
-  // Cálculos derivados para sugerir el presupuesto del mentor al cargar la venta.
-  // La comisión se calcula como 50% del profit (precioVenta - costos) * cantidad.
   const productoSel = state.products.find(p => p.id === parseInt(formData.productoId));
+  const mentorSel = state.mentors.find(m => m.id === parseInt(formData.mentorId));
   const cantidadNum = parseInt(formData.cantidad) || 0;
-  const profitSugerido = productoSel ? (productoSel.precioVenta - getProductUnitCost(productoSel)) * cantidadNum : 0;
-  const mentorSugerido = Math.max(0, Math.round(profitSugerido * 0.5));
 
-  // Cuando cambia el mentor, producto o cantidad, y el usuario no tocó el
-  // presupuesto manualmente, reseteamos el valor sugerido (50% de la venta).
-  const [presupuestoTouched, setPresupuestoTouched] = useState(false);
+  // Auto-calcular monto total sugerido
+  const montoSugerido = productoSel ? productoSel.precioVenta * cantidadNum : 0;
+  const montoTotal = parseFloat(formData.montoTotal) || montoSugerido;
+
+  // Auto-sugerir costo informado del producto
+  const costoInfProducto = productoSel?.costoInformado ?? productoSel?.costoSinDesglosar ?? getProductUnitCost(productoSel);
+  const costoInfSugerido = (costoInfProducto || 0) * cantidadNum;
+
+  // Cálculos de preview para el partner
+  const costoInfParsed = parseFloat(formData.costoInformado) || costoInfSugerido;
+  const gananciaInformada = Math.max(0, montoTotal - costoInfParsed);
+  const pctPartner = mentorSel?.porcentajeComision ?? 50;
+  const comisionPartner = Math.round(gananciaInformada * (pctPartner / 100));
+
+  // Auto-fill costo informado cuando cambia producto/cantidad/partner
+  const [costoTouched, setCostoTouched] = useState(false);
   useEffect(() => {
-    if (!presupuestoTouched) {
-      setFormData(prev => ({ ...prev, mentorPresupuesto: prev.mentorId ? String(mentorSugerido) : '' }));
+    if (!costoTouched && formData.mentorId) {
+      setFormData(prev => ({ ...prev, costoInformado: costoInfSugerido > 0 ? String(Math.round(costoInfSugerido)) : '' }));
     }
-  }, [formData.mentorId, formData.productoId, formData.cantidad, mentorSugerido, presupuestoTouched]);
+  }, [formData.mentorId, formData.productoId, formData.cantidad, costoInfSugerido, costoTouched]);
+
+  // Auto-fill monto total cuando cambia producto/cantidad
+  const [montoTouched, setMontoTouched] = useState(false);
+  useEffect(() => {
+    if (!montoTouched && montoSugerido > 0) {
+      setFormData(prev => ({ ...prev, montoTotal: String(montoSugerido) }));
+    }
+  }, [formData.productoId, formData.cantidad, montoSugerido, montoTouched]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -2424,35 +2701,26 @@ function VentasSection({ state, onAddSale, onQuickAddClient, onQuickAddProduct, 
     if (!producto) return;
     const cantidad = parseInt(formData.cantidad) || 1;
     const mentorId = formData.mentorId ? parseInt(formData.mentorId) : null;
-    const presupuestoParsed = formData.mentorPresupuesto === ''
-      ? null
-      : parseFloat(formData.mentorPresupuesto);
     const newSale = {
       fecha: new Date().toISOString().split('T')[0],
       clienteId: parseInt(formData.clienteId),
       productoId: parseInt(formData.productoId),
       cantidad,
-      montoTotal: producto.precioVenta * cantidad,
+      montoTotal: parseFloat(formData.montoTotal) || (producto.precioVenta * cantidad),
       mentorId,
-      // Solo guardamos el presupuesto si hay mentor asignado y un valor numérico.
-      mentorPresupuesto: mentorId && presupuestoParsed != null && !Number.isNaN(presupuestoParsed)
-        ? presupuestoParsed
-        : null,
+      costoInformado: mentorId && formData.costoInformado ? parseFloat(formData.costoInformado) / cantidad : null,
     };
     onAddSale(newSale);
-    setFormData({ clienteId: '', productoId: '', cantidad: 1, mentorId: '', mentorPresupuesto: '' });
-    setPresupuestoTouched(false);
   };
 
   const handleQuickClientCreated = (clientData) => {
     const newClient = onQuickAddClient(clientData);
-    // auto-select the new client, and pre-fill mentor if the client has one
     setFormData(prev => ({
       ...prev,
       clienteId: String(newClient.id),
       mentorId: newClient.mentorId ? String(newClient.mentorId) : prev.mentorId,
     }));
-    setPresupuestoTouched(false); // dejar que se recalcule el 50% sugerido
+    setPresupuestoTouched(false);
     setShowClientQuickModal(false);
   };
 
@@ -2462,140 +2730,26 @@ function VentasSection({ state, onAddSale, onQuickAddClient, onQuickAddProduct, 
     setShowProductQuickModal(false);
   };
 
-  const getClientName = (clienteId) => state.clients.find(c => c.id === clienteId)?.nombre || '-';
-  const getProductName = (productoId) => state.products.find(p => p.id === productoId)?.nombre || '-';
-  const getMentorName = (mentorId) => state.mentors.find(m => m.id === mentorId)?.nombre || '-';
-
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Gestión de Ventas</h2>
-        <button
-          onClick={() => setShowModal(true)}
-          className="flex items-center gap-2 bg-pink-900 text-white px-6 py-2 rounded-lg hover:bg-pink-800 transition font-semibold"
-        >
-          <Plus size={20} /> Nueva Venta
-        </button>
-      </div>
-
-      {showModal && (
-        <Modal title="Registrar Nueva Venta" onClose={() => setShowModal(false)}>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <FormLabel required>Cliente</FormLabel>
-              <div className="flex gap-2">
-                <select
-                  value={formData.clienteId}
-                  onChange={(e) => setFormData({ ...formData, clienteId: e.target.value })}
-                  className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-                  required
-                >
-                  <option value="">Seleccionar Cliente</option>
-                  {state.clients.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-                </select>
-                <button
-                  type="button"
-                  onClick={() => setShowClientQuickModal(true)}
-                  className="inline-flex items-center gap-1 px-3 py-2 border border-pink-600 text-pink-700 dark:text-pink-300 dark:border-pink-500 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition text-sm font-semibold whitespace-nowrap"
-                  title="Crear un nuevo cliente sin salir de esta pantalla"
-                >
-                  <Plus size={16} /> Nuevo
-                </button>
-              </div>
-            </div>
-
-            <div>
-              <FormLabel required>Producto</FormLabel>
-              <div className="flex gap-2">
-                <select
-                  value={formData.productoId}
-                  onChange={(e) => setFormData({ ...formData, productoId: e.target.value })}
-                  className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-                  required
-                >
-                  <option value="">Seleccionar Producto</option>
-                  {state.products.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-                </select>
-                <button
-                  type="button"
-                  onClick={() => setShowProductQuickModal(true)}
-                  className="inline-flex items-center gap-1 px-3 py-2 border border-pink-600 text-pink-700 dark:text-pink-300 dark:border-pink-500 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition text-sm font-semibold whitespace-nowrap"
-                  title="Crear un nuevo producto sin salir de esta pantalla"
-                >
-                  <Plus size={16} /> Nuevo
-                </button>
-              </div>
-            </div>
-
-            <div>
-              <FormLabel required tip="Mínimo 100 unidades por producción.">Cantidad</FormLabel>
-              <input
-                type="number"
-                min="1"
-                value={formData.cantidad}
-                onChange={(e) => setFormData({ ...formData, cantidad: e.target.value })}
-                placeholder="Cantidad"
-                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-                required
-              />
-            </div>
-
-            <div>
-              <FormLabel tip="Si hay mentor, cobrará comisión sobre el profit (%) o el presupuesto fijo que pongas abajo.">Mentor asignado</FormLabel>
-              <select
-                value={formData.mentorId}
-                onChange={(e) => { setFormData({ ...formData, mentorId: e.target.value }); setPresupuestoTouched(false); }}
-                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-              >
-                <option value="">Sin mentor</option>
-                {state.mentors.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
-              </select>
-            </div>
-
-            {formData.mentorId && (
-              <div>
-                <FormLabel tip="Monto FIJO que se paga al mentor por esta orden. Si lo dejás vacío, usa el % configurado en Comisiones.">
-                  Presupuesto para el mentor
-                  <span className="ml-1 text-gray-400 dark:text-gray-500 font-normal">
-                    · sugerido ${mentorSugerido.toLocaleString()}
-                  </span>
-                </FormLabel>
-                <div className="flex items-center gap-2">
-                  <div className="relative flex-1">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 text-sm">$</span>
-                    <input
-                      type="number"
-                      min="0"
-                      value={formData.mentorPresupuesto}
-                      onChange={(e) => { setFormData({ ...formData, mentorPresupuesto: e.target.value }); setPresupuestoTouched(true); }}
-                      placeholder={String(mentorSugerido)}
-                      className="w-full pl-6 pr-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-                    />
-                  </div>
-                  {presupuestoTouched && (
-                    <button
-                      type="button"
-                      onClick={() => { setFormData({ ...formData, mentorPresupuesto: String(mentorSugerido) }); setPresupuestoTouched(false); }}
-                      className="text-xs text-pink-700 dark:text-pink-300 hover:underline font-semibold whitespace-nowrap"
-                      title="Restaurar al 50% sugerido"
-                    >
-                      Usar 50%
-                    </button>
-                  )}
-                </div>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Este será el monto fijo que se le paga al mentor por esta orden.</p>
-              </div>
-            )}
-
-            <button
-              type="submit"
-              className="w-full bg-pink-900 text-white py-2 rounded-lg hover:bg-pink-800 transition font-semibold"
-            >
-              Registrar Venta
-            </button>
-          </form>
-        </Modal>
-      )}
+    <>
+      <Modal title="Registrar Nueva Orden" onClose={onClose}>
+        <NewSaleFormContent
+          state={state}
+          formData={formData}
+          setFormData={setFormData}
+          handleSubmit={handleSubmit}
+          openQuickClient={() => setShowClientQuickModal(true)}
+          openQuickProduct={() => setShowProductQuickModal(true)}
+          costoTouched={costoTouched}
+          setCostoTouched={setCostoTouched}
+          montoTouched={montoTouched}
+          setMontoTouched={setMontoTouched}
+          gananciaInformada={gananciaInformada}
+          comisionPartner={comisionPartner}
+          pctPartner={pctPartner}
+          mentorSel={mentorSel}
+        />
+      </Modal>
 
       {showClientQuickModal && (
         <QuickClientModal
@@ -2611,11 +2765,397 @@ function VentasSection({ state, onAddSale, onQuickAddClient, onQuickAddProduct, 
           onCreate={handleQuickProductCreated}
         />
       )}
+    </>
+  );
+}
+
+// Solo los campos del form — extraído para no duplicar el JSX.
+function NewSaleFormContent({ state, formData, setFormData, handleSubmit, openQuickClient, openQuickProduct, costoTouched, setCostoTouched, montoTouched, setMontoTouched, gananciaInformada, comisionPartner, pctPartner, mentorSel }) {
+  const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div>
+        <FormLabel required>Cliente</FormLabel>
+        <div className="flex gap-2">
+          <select value={formData.clienteId} onChange={(e) => setFormData({ ...formData, clienteId: e.target.value })}
+            className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500" required>
+            <option value="">Seleccionar Cliente</option>
+            {state.clients.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+          </select>
+          <button type="button" onClick={openQuickClient}
+            className="inline-flex items-center gap-1 px-3 py-2 border border-pink-600 text-pink-700 dark:text-pink-300 dark:border-pink-500 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition text-sm font-semibold whitespace-nowrap">
+            <Plus size={16} /> Nuevo
+          </button>
+        </div>
+      </div>
+
+      <div>
+        <FormLabel required>Producto</FormLabel>
+        <div className="flex gap-2">
+          <select value={formData.productoId} onChange={(e) => setFormData({ ...formData, productoId: e.target.value })}
+            className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500" required>
+            <option value="">Seleccionar Producto</option>
+            {state.products.map(p => <option key={p.id} value={p.id}>{p.nombre} — ${p.precioVenta?.toLocaleString()}/u</option>)}
+          </select>
+          <button type="button" onClick={openQuickProduct}
+            className="inline-flex items-center gap-1 px-3 py-2 border border-pink-600 text-pink-700 dark:text-pink-300 dark:border-pink-500 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition text-sm font-semibold whitespace-nowrap">
+            <Plus size={16} /> Nuevo
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <FormLabel required tip="Unidades a producir.">Cantidad</FormLabel>
+          <input type="number" min="1" value={formData.cantidad}
+            onChange={(e) => setFormData({ ...formData, cantidad: e.target.value })}
+            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500" required />
+        </div>
+        <div>
+          <FormLabel required tip="Total que paga el cliente (precio × cantidad). Se auto-calcula pero podés editarlo.">Monto total</FormLabel>
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+            <input type="number" min="0" value={formData.montoTotal}
+              onChange={(e) => { setFormData({ ...formData, montoTotal: e.target.value }); setMontoTouched(true); }}
+              className="w-full pl-6 pr-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500" required />
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <FormLabel tip="Si la orden fue referida por un partner, seleccionalo. Se le calcula comisión automáticamente.">Partner asignado</FormLabel>
+        <select value={formData.mentorId} onChange={(e) => { setFormData({ ...formData, mentorId: e.target.value }); setCostoTouched(false); }}
+          className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
+          <option value="">Sin partner</option>
+          {state.mentors.map(m => <option key={m.id} value={m.id}>{m.nombre} ({m.porcentajeComision ?? 50}%)</option>)}
+        </select>
+      </div>
+
+      {formData.mentorId && (
+        <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 space-y-3">
+          <div>
+            <FormLabel tip="Lo que el partner cree que cuesta producir esta orden. Su comisión se calcula sobre (monto total − costo informado).">
+              Costo informado al partner (total)
+            </FormLabel>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+              <input type="number" min="0" value={formData.costoInformado}
+                onChange={(e) => { setFormData({ ...formData, costoInformado: e.target.value }); setCostoTouched(true); }}
+                placeholder="Costo que ve el partner"
+                className="w-full pl-6 pr-3 py-2 border border-amber-300 dark:border-amber-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500" />
+            </div>
+          </div>
+          {/* Preview del cálculo */}
+          <div className="grid grid-cols-3 gap-2 text-center text-xs">
+            <div className="p-2 rounded bg-white dark:bg-gray-800">
+              <p className="text-gray-500 dark:text-gray-400">Ganancia informada</p>
+              <p className="font-bold text-sky-600 dark:text-sky-400">{fmtMoney(gananciaInformada)}</p>
+            </div>
+            <div className="p-2 rounded bg-white dark:bg-gray-800">
+              <p className="text-gray-500 dark:text-gray-400">Comisión ({pctPartner}%)</p>
+              <p className="font-bold text-emerald-600 dark:text-emerald-400">{fmtMoney(comisionPartner)}</p>
+            </div>
+            <div className="p-2 rounded bg-white dark:bg-gray-800">
+              <p className="text-gray-500 dark:text-gray-400">El partner ve</p>
+              <p className="font-bold text-amber-600 dark:text-amber-400">{fmtMoney(comisionPartner)} para él</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <button type="submit" className="w-full bg-pink-900 text-white py-2.5 rounded-lg hover:bg-pink-800 transition font-semibold">
+        Registrar Orden
+      </button>
+    </form>
+  );
+}
+
+// Modal de consulta rápida: datos mínimos para registrar una consulta recibida.
+function QuickConsultaModal({ state, onSubmit, onQuickAddClient, onClose }) {
+  const [clientName, setClientName] = useState('');
+  const [selectedClientId, setSelectedClientId] = useState('');
+  const [productoId, setProductoId] = useState('');
+  const [nota, setNota] = useState('');
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const inputRef = useRef(null);
+
+  const filteredClients = useMemo(() => {
+    const q = clientName.trim().toLowerCase();
+    if (!q) return state.clients.slice(0, 8);
+    return state.clients.filter(c => c.nombre.toLowerCase().includes(q)).slice(0, 8);
+  }, [clientName, state.clients]);
+
+  const handleSelectClient = (client) => {
+    setSelectedClientId(String(client.id));
+    setClientName(client.nombre);
+    setShowSuggestions(false);
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    let clienteId = selectedClientId ? parseInt(selectedClientId) : null;
+    // If typed a name that doesn't match any existing client, create one
+    if (!clienteId && clientName.trim()) {
+      const newClient = onQuickAddClient({ nombre: clientName.trim() });
+      clienteId = newClient.id;
+    }
+    if (!clienteId) return;
+    const data = {
+      fecha: new Date().toISOString().split('T')[0],
+      clienteId,
+      productoId: productoId ? parseInt(productoId) : null,
+      cantidad: 0,
+      montoTotal: 0,
+      mentorId: state.clients.find(c => c.id === clienteId)?.mentorId || null,
+      estado: 'consulta-recibida',
+      notas: nota.trim() ? [{ texto: nota.trim(), fecha: new Date().toISOString().split('T')[0] }] : [],
+    };
+    onSubmit(data);
+  };
+
+  return (
+    <Modal title="Consulta rápida" onClose={onClose}>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="relative">
+          <FormLabel required>Cliente</FormLabel>
+          <input
+            ref={inputRef}
+            type="text"
+            value={clientName}
+            onChange={(e) => { setClientName(e.target.value); setSelectedClientId(''); setShowSuggestions(true); }}
+            onFocus={() => setShowSuggestions(true)}
+            placeholder="Nombre del cliente (existente o nuevo)"
+            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            required
+            autoFocus
+          />
+          {showSuggestions && filteredClients.length > 0 && (
+            <div className="absolute z-50 mt-1 w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+              {filteredClients.map(c => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => handleSelectClient(c)}
+                  className="w-full text-left px-4 py-2 text-sm text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700 transition"
+                >
+                  {c.nombre}
+                </button>
+              ))}
+              {clientName.trim() && !state.clients.some(c => c.nombre.toLowerCase() === clientName.trim().toLowerCase()) && (
+                <div className="px-4 py-2 text-xs text-gray-500 dark:text-gray-400 border-t border-gray-100 dark:border-gray-700">
+                  Se creará el cliente "{clientName.trim()}" al guardar
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div>
+          <FormLabel>Producto</FormLabel>
+          <select
+            value={productoId}
+            onChange={(e) => setProductoId(e.target.value)}
+            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+          >
+            <option value="">Sin definir todavía</option>
+            {state.products.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+          </select>
+        </div>
+
+        <div>
+          <FormLabel>Nota</FormLabel>
+          <textarea
+            value={nota}
+            onChange={(e) => setNota(e.target.value)}
+            placeholder="Algún detalle de la consulta (opcional)"
+            rows={3}
+            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 resize-y"
+          />
+        </div>
+
+        <button
+          type="submit"
+          className="w-full bg-pink-900 text-white py-2 rounded-lg hover:bg-pink-800 transition font-semibold"
+        >
+          Registrar consulta
+        </button>
+      </form>
+    </Modal>
+  );
+}
+
+// Modal para editar una orden existente.
+function EditOrderModal({ order, state, onSave, onClose }) {
+  const [formData, setFormData] = useState({
+    fecha: order.fecha || '',
+    clienteId: String(order.clienteId || ''),
+    productoId: String(order.productoId || ''),
+    cantidad: order.cantidad || 0,
+    montoTotal: order.montoTotal || 0,
+    mentorId: order.mentorId ? String(order.mentorId) : '',
+    estado: order.estado || 'consulta-recibida',
+    mentorPresupuesto: order.mentorPresupuesto != null ? String(order.mentorPresupuesto) : '',
+  });
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    const patch = {
+      fecha: formData.fecha,
+      clienteId: parseInt(formData.clienteId) || order.clienteId,
+      productoId: parseInt(formData.productoId) || order.productoId,
+      cantidad: parseInt(formData.cantidad) || 0,
+      montoTotal: parseFloat(formData.montoTotal) || 0,
+      mentorId: formData.mentorId ? parseInt(formData.mentorId) : null,
+      estado: formData.estado,
+      mentorPresupuesto: formData.mentorPresupuesto !== '' ? parseFloat(formData.mentorPresupuesto) : null,
+    };
+    onSave(patch);
+  };
+
+  return (
+    <Modal title={`Editar orden #${order.id}`} onClose={onClose}>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <FormLabel>Estado</FormLabel>
+          <select
+            value={formData.estado}
+            onChange={(e) => setFormData({ ...formData, estado: e.target.value })}
+            className={`w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 font-semibold ${ORDER_STATE_STYLES[formData.estado]}`}
+          >
+            {ORDER_STATES.map(s => <option key={s} value={s}>{ORDER_STATE_LABELS[s]}</option>)}
+          </select>
+        </div>
+
+        <div>
+          <FormLabel>Fecha</FormLabel>
+          <input
+            type="date"
+            value={formData.fecha}
+            onChange={(e) => setFormData({ ...formData, fecha: e.target.value })}
+            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+          />
+        </div>
+
+        <div>
+          <FormLabel required>Cliente</FormLabel>
+          <select
+            value={formData.clienteId}
+            onChange={(e) => setFormData({ ...formData, clienteId: e.target.value })}
+            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            required
+          >
+            <option value="">Seleccionar Cliente</option>
+            {state.clients.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+          </select>
+        </div>
+
+        <div>
+          <FormLabel required>Producto</FormLabel>
+          <select
+            value={formData.productoId}
+            onChange={(e) => setFormData({ ...formData, productoId: e.target.value })}
+            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            required
+          >
+            <option value="">Seleccionar Producto</option>
+            {state.products.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+          </select>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <FormLabel>Cantidad</FormLabel>
+            <input
+              type="number"
+              min="0"
+              value={formData.cantidad}
+              onChange={(e) => setFormData({ ...formData, cantidad: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            />
+          </div>
+          <div>
+            <FormLabel>Monto total</FormLabel>
+            <input
+              type="number"
+              min="0"
+              value={formData.montoTotal}
+              onChange={(e) => setFormData({ ...formData, montoTotal: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            />
+          </div>
+        </div>
+
+        <div>
+          <FormLabel>Partner asignado</FormLabel>
+          <select
+            value={formData.mentorId}
+            onChange={(e) => setFormData({ ...formData, mentorId: e.target.value })}
+            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+          >
+            <option value="">Sin mentor</option>
+            {state.mentors.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
+          </select>
+        </div>
+
+        {formData.mentorId && (
+          <div>
+            <FormLabel tip="Monto FIJO que se paga al partner por esta orden.">Presupuesto para el partner</FormLabel>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 text-sm">$</span>
+              <input
+                type="number"
+                min="0"
+                value={formData.mentorPresupuesto}
+                onChange={(e) => setFormData({ ...formData, mentorPresupuesto: e.target.value })}
+                placeholder="Vacío = usa % del partner"
+                className="w-full pl-6 pr-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+              />
+            </div>
+          </div>
+        )}
+
+        <button
+          type="submit"
+          className="w-full bg-pink-900 text-white py-2 rounded-lg hover:bg-pink-800 transition font-semibold"
+        >
+          Guardar cambios
+        </button>
+      </form>
+    </Modal>
+  );
+}
+
+function VentasSection({ state, onAddSale, onQuickAddClient, onQuickAddProduct, showModal, setShowModal }) {
+  const getClientName = (clienteId) => state.clients.find(c => c.id === clienteId)?.nombre || '-';
+  const getProductName = (productoId) => state.products.find(p => p.id === productoId)?.nombre || '-';
+  const getMentorName = (mentorId) => state.mentors.find(m => m.id === mentorId)?.nombre || '-';
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Gestión de Ventas</h2>
+        <button
+          onClick={() => setShowModal(true)}
+          className="flex items-center gap-2 bg-pink-900 text-white px-6 py-2 rounded-lg hover:bg-pink-800 transition font-semibold"
+        >
+          <Plus size={20} /> Nueva Orden
+        </button>
+      </div>
+
+      {showModal && (
+        <NewSaleModal
+          state={state}
+          onAddSale={(data) => { onAddSale(data); setShowModal(false); }}
+          onQuickAddClient={onQuickAddClient}
+          onQuickAddProduct={onQuickAddProduct}
+          onClose={() => setShowModal(false)}
+        />
+      )}
 
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700">
+            <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10">
               <tr>
                 <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Fecha</th>
                 <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Cliente</th>
@@ -2647,9 +3187,16 @@ function VentasSection({ state, onAddSale, onQuickAddClient, onQuickAddProduct, 
 }
 
 function ProductosSection({ state, onAddProduct, showModal, setShowModal, calculateMargin }) {
+  // modoCosto: 'total' (un único número) | 'desglose' (contenido/envase/etiqueta).
+  // La mayoría de los casos usa 'total' porque el proveedor entrega todo junto.
+  // costoInformado es lo que le informamos al partner (puede ser distinto al real).
   const [formData, setFormData] = useState({
     nombre: '', descripcion: '',
+    modoCosto: 'total',
+    costoTotal: '',
     costoContenido: '', costoEnvase: '', costoEtiqueta: '',
+    usaCostoInformado: false,
+    costoInformado: '',
     precioVenta: '',
   });
   const [expanded, setExpanded] = useState(() => new Set());
@@ -2692,15 +3239,40 @@ function ProductosSection({ state, onAddProduct, showModal, setShowModal, calcul
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    onAddProduct({
+    const payload = {
       nombre: formData.nombre,
       descripcion: formData.descripcion,
-      costoContenido: parseInt(formData.costoContenido) || 0,
-      costoEnvase: parseInt(formData.costoEnvase) || 0,
-      costoEtiqueta: parseInt(formData.costoEtiqueta) || 0,
       precioVenta: parseInt(formData.precioVenta) || 0,
+    };
+    if (formData.modoCosto === 'total') {
+      // Modo simple: un único número. Se guarda en costoSinDesglosar y los
+      // 3 campos desglosados se dejan en 0 (no se usan en los cálculos).
+      payload.costoSinDesglosar = parseFloat(formData.costoTotal) || 0;
+      payload.costoContenido = 0;
+      payload.costoEnvase = 0;
+      payload.costoEtiqueta = 0;
+    } else {
+      // Modo desglose: los 3 campos separados, costoSinDesglosar queda null.
+      payload.costoContenido = parseInt(formData.costoContenido) || 0;
+      payload.costoEnvase = parseInt(formData.costoEnvase) || 0;
+      payload.costoEtiqueta = parseInt(formData.costoEtiqueta) || 0;
+      payload.costoSinDesglosar = null;
+    }
+    // Costo informado: si no se activó el toggle, queda null (= el mentor ve
+    // el costo interno real). Si se activó, guardamos el valor.
+    payload.costoInformado = formData.usaCostoInformado
+      ? (parseFloat(formData.costoInformado) || 0)
+      : null;
+    onAddProduct(payload);
+    setFormData({
+      nombre: '', descripcion: '',
+      modoCosto: 'total',
+      costoTotal: '',
+      costoContenido: '', costoEnvase: '', costoEtiqueta: '',
+      usaCostoInformado: false,
+      costoInformado: '',
+      precioVenta: '',
     });
-    setFormData({ nombre: '', descripcion: '', costoContenido: '', costoEnvase: '', costoEtiqueta: '', precioVenta: '' });
   };
 
   return (
@@ -2751,30 +3323,109 @@ function ProductosSection({ state, onAddProduct, showModal, setShowModal, calcul
               />
             </div>
             <div>
-              <FormLabel tip="Costos por UNIDAD. Dejá en 0 lo que no tengas y lo completás después (con doble click en el listado).">Costos unitarios (contenido / envase / etiqueta)</FormLabel>
-              <div className="grid grid-cols-3 gap-2">
-                <input
-                  type="number"
-                  value={formData.costoContenido}
-                  onChange={(e) => setFormData({ ...formData, costoContenido: e.target.value })}
-                  placeholder="Contenido"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-                />
-                <input
-                  type="number"
-                  value={formData.costoEnvase}
-                  onChange={(e) => setFormData({ ...formData, costoEnvase: e.target.value })}
-                  placeholder="Envase"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-                />
-                <input
-                  type="number"
-                  value={formData.costoEtiqueta}
-                  onChange={(e) => setFormData({ ...formData, costoEtiqueta: e.target.value })}
-                  placeholder="Etiqueta"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-                />
+              <FormLabel required tip="Lo que te cuesta producir una unidad. Si querés, podés desglosarlo en contenido / envase / etiqueta; pero en la mayoría de los casos alcanza con un solo número.">
+                Costo del producto (por unidad)
+              </FormLabel>
+
+              {/* Tabs: costo total vs desglosado */}
+              <div className="flex gap-1 p-1 bg-gray-100 dark:bg-gray-700 rounded-lg mb-3">
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, modoCosto: 'total' })}
+                  className={`flex-1 py-1.5 text-xs rounded-md transition font-semibold ${
+                    formData.modoCosto === 'total'
+                      ? 'bg-white dark:bg-gray-800 text-pink-900 dark:text-pink-300 shadow'
+                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+                  }`}
+                >
+                  Costo total
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, modoCosto: 'desglose' })}
+                  className={`flex-1 py-1.5 text-xs rounded-md transition font-semibold ${
+                    formData.modoCosto === 'desglose'
+                      ? 'bg-white dark:bg-gray-800 text-pink-900 dark:text-pink-300 shadow'
+                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+                  }`}
+                >
+                  Desglosado
+                </button>
               </div>
+
+              {formData.modoCosto === 'total' ? (
+                <input
+                  type="number"
+                  step="0.01"
+                  value={formData.costoTotal}
+                  onChange={(e) => setFormData({ ...formData, costoTotal: e.target.value })}
+                  placeholder="Ej. 120"
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                />
+              ) : (
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-1">Contenido</label>
+                    <input
+                      type="number"
+                      value={formData.costoContenido}
+                      onChange={(e) => setFormData({ ...formData, costoContenido: e.target.value })}
+                      placeholder="0"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-1">Envase / pote</label>
+                    <input
+                      type="number"
+                      value={formData.costoEnvase}
+                      onChange={(e) => setFormData({ ...formData, costoEnvase: e.target.value })}
+                      placeholder="0"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-1">Etiqueta</label>
+                    <input
+                      type="number"
+                      value={formData.costoEtiqueta}
+                      onChange={(e) => setFormData({ ...formData, costoEtiqueta: e.target.value })}
+                      placeholder="0"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Costo informado al partner (opcional). Si está seteado, el mentor
+                ve ESTE valor en lugar del costo real y su comisión se calcula
+                sobre (precio - costoInformado). */}
+            <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formData.usaCostoInformado}
+                  onChange={(e) => setFormData({ ...formData, usaCostoInformado: e.target.checked })}
+                  className="mt-0.5 w-4 h-4 rounded accent-pink-600"
+                />
+                <div className="flex-1">
+                  <span className="text-xs font-semibold text-amber-900 dark:text-amber-200">Costo informado distinto al real</span>
+                  <p className="text-[11px] text-amber-800 dark:text-amber-300/80 mt-0.5">
+                    Lo que el mentor ve como "costo del producto". La comisión del partner se calcula sobre este valor, no sobre el costo real.
+                  </p>
+                </div>
+              </label>
+              {formData.usaCostoInformado && (
+                <input
+                  type="number"
+                  step="0.01"
+                  value={formData.costoInformado}
+                  onChange={(e) => setFormData({ ...formData, costoInformado: e.target.value })}
+                  placeholder="Costo informado por unidad"
+                  className="w-full mt-2 px-3 py-2 border border-amber-300 dark:border-amber-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
+                />
+              )}
             </div>
             <div>
               <FormLabel required tip="El precio por unidad que le cobrás al cliente.">Precio de venta unitario</FormLabel>
@@ -2839,7 +3490,14 @@ function ProductosSection({ state, onAddProduct, showModal, setShowModal, calcul
               </div>
               <div className="flex justify-between border-t border-gray-200 dark:border-gray-700 pt-2">
                 <span className="text-gray-600 dark:text-gray-400 font-semibold">Costo total unitario:</span>
-                <span className="font-semibold text-gray-900 dark:text-gray-100">${unitCost.toLocaleString()}</span>
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-gray-900 dark:text-gray-100">${unitCost.toLocaleString()}</span>
+                  {product.costoInformado != null && product.costoInformado !== '' && parseFloat(product.costoInformado) !== unitCost && (
+                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                      Informado: ${parseFloat(product.costoInformado).toLocaleString()}
+                    </span>
+                  )}
+                </div>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-600 dark:text-gray-400">Precio Venta:</span>
@@ -2911,7 +3569,7 @@ function ProductosTableView({ products, sales, clients, calculateMargin, expande
     <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700">
+          <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10">
             <tr className="text-left text-gray-700 dark:text-gray-200">
               <th className="px-4 py-3 font-semibold">Nombre</th>
               <th className="px-4 py-3 font-semibold">Descripción</th>
@@ -2939,7 +3597,14 @@ function ProductosTableView({ products, sales, clients, calculateMargin, expande
                   <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300 tabular-nums">{fmtMoney(getContenidoUnitCost(product))}</td>
                   <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300 tabular-nums">{fmtMoney(product.costoEnvase || 0)}</td>
                   <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300 tabular-nums">{fmtMoney(product.costoEtiqueta || 0)}</td>
-                  <td className="px-4 py-3 text-right font-semibold text-gray-900 dark:text-gray-100 tabular-nums">{fmtMoney(unitCost)}</td>
+                  <td className="px-4 py-3 text-right font-semibold text-gray-900 dark:text-gray-100 tabular-nums">
+                    <span>{fmtMoney(unitCost)}</span>
+                    {product.costoInformado != null && product.costoInformado !== '' && parseFloat(product.costoInformado) !== unitCost && (
+                      <span className="ml-2 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                        Inf: ${parseFloat(product.costoInformado).toLocaleString()}
+                      </span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-right font-semibold text-gray-900 dark:text-gray-100 tabular-nums">{fmtMoney(product.precioVenta)}</td>
                   <td className="px-4 py-3 text-right font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{margen}%</td>
                   <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300 tabular-nums">{ordenes}</td>
@@ -2977,6 +3642,9 @@ function ProductosCompactView({ products, sales, calculateMargin }) {
               <div className="text-right">
                 <p className="text-[10px] uppercase text-gray-500 dark:text-gray-400">Costo</p>
                 <p className="font-semibold text-gray-700 dark:text-gray-300">{fmtMoney(unitCost)}</p>
+                {product.costoInformado != null && product.costoInformado !== '' && parseFloat(product.costoInformado) !== unitCost && (
+                  <p className="text-[10px] text-amber-600 dark:text-amber-400">Inf: {fmtMoney(parseFloat(product.costoInformado))}</p>
+                )}
               </div>
               <div className="text-right">
                 <p className="text-[10px] uppercase text-gray-500 dark:text-gray-400">Precio</p>
@@ -3150,7 +3818,7 @@ function ClientesSection({ state, onAddClient, onUpdateClient, showModal, setSho
               />
             </div>
             <div>
-              <FormLabel tip="Mentor que refirió al cliente. Cobrará comisión sobre sus ventas según el % configurado en Comisiones.">Mentor asignado</FormLabel>
+              <FormLabel tip="Partner que refirió al cliente. Cobrará comisión sobre sus ventas según el % configurado en Comisiones.">Partner asignado</FormLabel>
               <select
                 value={formData.mentorId}
                 onChange={(e) => setFormData({ ...formData, mentorId: e.target.value })}
@@ -3215,7 +3883,7 @@ function ClientesSection({ state, onAddClient, onUpdateClient, showModal, setSho
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700">
+            <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10">
               <tr>
                 <th className="px-2 py-3 w-8"></th>
                 <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Nombre</th>
@@ -3284,8 +3952,32 @@ function ClientesSection({ state, onAddClient, onUpdateClient, showModal, setSho
   );
 }
 
-function ComisionesSection({ state, dispatch, onUpdateMentor, getMentorStats, filterMentor, setFilterMentor }) {
+function ComisionesSection({ state, dispatch, onUpdateMentor, onAddMentor, onRemoveMentor, getMentorStats, filterMentor, setFilterMentor }) {
   const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
+  const [showNewMentorModal, setShowNewMentorModal] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [inviteLinks, setInviteLinks] = useState({}); // { [mentorId]: link }
+  const [inviteLoading, setInviteLoading] = useState(null);
+
+  const generateInviteLink = async (mentor) => {
+    setInviteLoading(mentor.id);
+    try {
+      const resp = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'create_invite', mentorId: mentor.id, mentorName: mentor.nombre }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (data?.ok && data.link) {
+        setInviteLinks(prev => ({ ...prev, [mentor.id]: data.link }));
+      }
+    } catch {}
+    setInviteLoading(null);
+  };
+
+  const copyLink = (link) => {
+    navigator.clipboard?.writeText(link).catch(() => {});
+  };
 
   const handlePercentChange = (mentorId, value) => {
     const parsed = parseFloat(value);
@@ -3294,8 +3986,14 @@ function ComisionesSection({ state, dispatch, onUpdateMentor, getMentorStats, fi
     onUpdateMentor?.({ id: mentorId, porcentajeComision: clamped });
   };
 
-  // Manejo de pagos recibidos por mentor — reemplaza al flujo "Liquidar todo".
-  // Cada mentor tiene su propio array persistido en mentor.pagosRecibidos.
+  const handleNameChange = (mentorId, value) => {
+    onUpdateMentor?.({ id: mentorId, nombre: value });
+  };
+
+  const handleContactoChange = (mentorId, value) => {
+    onUpdateMentor?.({ id: mentorId, contacto: value });
+  };
+
   const updateMentorPagos = (mentorId, nuevosPagos) => {
     onUpdateMentor?.({ id: mentorId, pagosRecibidos: nuevosPagos });
   };
@@ -3306,59 +4004,178 @@ function ComisionesSection({ state, dispatch, onUpdateMentor, getMentorStats, fi
     <div className="space-y-6">
       <div className="flex flex-wrap justify-between items-center gap-3">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Gestión de Comisiones</h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Cuánto genera cada mentor, cuánto se le pagó, cuánto le queda.</p>
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Comisiones y Partners</h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Gestioná los mentores, sus porcentajes y los pagos recibidos.</p>
         </div>
-        <select
-          value={filterMentor}
-          onChange={(e) => setFilterMentor(e.target.value)}
-          className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-        >
-          <option value="">Todos los mentores</option>
-          {state.mentors.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
-        </select>
+        <div className="flex items-center gap-2">
+          <select
+            value={filterMentor}
+            onChange={(e) => setFilterMentor(e.target.value)}
+            className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+          >
+            <option value="">Todos los partners</option>
+            {state.mentors.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
+          </select>
+          {onAddMentor && (
+            <button
+              onClick={() => setShowNewMentorModal(true)}
+              className="inline-flex items-center gap-2 bg-pink-900 text-white px-4 py-2 rounded-lg hover:bg-pink-800 transition font-semibold text-sm"
+            >
+              <Plus size={16} /> Nuevo partner
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Porcentaje de comisión por mentor (editable inline) */}
+      {showNewMentorModal && (
+        <NewMentorModal
+          onClose={() => setShowNewMentorModal(false)}
+          onCreate={(data) => { onAddMentor?.(data); setShowNewMentorModal(false); }}
+        />
+      )}
+
+      {confirmDelete != null && (
+        <Modal
+          title="¿Eliminar partner?"
+          onClose={() => setConfirmDelete(null)}
+        >
+          <div className="space-y-4 text-sm text-gray-700 dark:text-gray-200">
+            <p>Esta acción elimina al partner y desasigna sus órdenes y clientes. Los pagos registrados a este partner se pierden.</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Si solo querés pausarlo, cambiá su % de comisión a 0 en vez de eliminarlo.</p>
+            <div className="flex gap-2 pt-2">
+              <button
+                onClick={() => setConfirmDelete(null)}
+                className="flex-1 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition font-semibold"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => { onRemoveMentor?.(confirmDelete); setConfirmDelete(null); }}
+                className="flex-1 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition font-semibold"
+              >
+                Eliminar
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {state.mentors.length === 0 && (
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-12 text-center border border-dashed border-gray-300 dark:border-gray-700">
+          <UserCheck size={36} className="mx-auto mb-3 text-gray-400" />
+          <h3 className="text-base font-bold text-gray-900 dark:text-gray-100 mb-1">No hay partners todavía</h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Agregá el primer partner para empezar a referir órdenes y cobrar comisiones.</p>
+          <button
+            onClick={() => setShowNewMentorModal(true)}
+            className="inline-flex items-center gap-2 bg-pink-900 text-white px-4 py-2 rounded-lg hover:bg-pink-800 transition font-semibold text-sm"
+          >
+            <Plus size={16} /> Nuevo partner
+          </button>
+        </div>
+      )}
+
+      {/* Editor de mentores: nombre, contacto, % comisión, y stats */}
+      {state.mentors.length > 0 && (
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
         <div className="flex items-start justify-between mb-4">
           <div>
-            <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Porcentaje de comisión por mentor</h3>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">Se aplica sobre el <span className="font-semibold">profit</span> de cada orden. Podés pisarlo por orden al registrarla.</p>
+            <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Partners</h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">El % de comisión se aplica sobre el <span className="font-semibold">profit informado</span> de cada orden.</p>
           </div>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {state.mentors.map(mentor => {
             const pct = mentor.porcentajeComision ?? 50;
+            const stats = getMentorStats(mentor.id);
+            const mentorClients = state.clients.filter(c => c.mentorId === mentor.id);
             return (
               <div
                 key={mentor.id}
-                className="group flex items-center gap-3 p-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/60 dark:bg-gray-900/40 hover:border-pink-300 dark:hover:border-pink-600 transition-colors"
+                className="group p-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/60 dark:bg-gray-900/40 hover:border-pink-300 dark:hover:border-pink-600 transition-colors space-y-3"
               >
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-amber-200 to-amber-400 text-[#4a0f22] font-bold flex items-center justify-center shrink-0 shadow-sm">
-                  {(mentor.nombre || 'M').charAt(0).toUpperCase()}
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-amber-200 to-amber-400 text-[#4a0f22] font-bold flex items-center justify-center shrink-0 shadow-sm">
+                    {(mentor.nombre || 'M').charAt(0).toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0 space-y-1.5">
+                    <input
+                      type="text"
+                      value={mentor.nombre || ''}
+                      onChange={(e) => handleNameChange(mentor.id, e.target.value)}
+                      className="w-full px-2 py-1 text-sm font-semibold border border-transparent hover:border-gray-300 dark:hover:border-gray-600 bg-transparent text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-pink-500 focus:border-pink-500 focus:bg-white dark:focus:bg-gray-800"
+                    />
+                    <input
+                      type="text"
+                      value={mentor.contacto || ''}
+                      onChange={(e) => handleContactoChange(mentor.id, e.target.value)}
+                      placeholder="Contacto (WhatsApp, email…)"
+                      className="w-full px-2 py-1 text-[11px] text-gray-600 dark:text-gray-400 border border-transparent hover:border-gray-300 dark:hover:border-gray-600 bg-transparent rounded focus:outline-none focus:ring-1 focus:ring-pink-500 focus:border-pink-500 focus:bg-white dark:focus:bg-gray-800"
+                    />
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => generateInviteLink(mentor)}
+                      disabled={inviteLoading === mentor.id}
+                      className="px-2 py-1 rounded text-[10px] font-semibold bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-200 dark:hover:bg-emerald-900/50 transition"
+                      title="Generar link de acceso para este partner"
+                    >
+                      {inviteLoading === mentor.id ? '...' : '🔗 Link de acceso'}
+                    </button>
+                    <button
+                      onClick={() => setConfirmDelete(mentor.id)}
+                      className="opacity-0 group-hover:opacity-100 p-1 rounded text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition"
+                      title="Eliminar partner"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{mentor.nombre}</p>
-                  <p className="text-[11px] text-gray-500 dark:text-gray-400">Comisión sobre profit</p>
-                </div>
-                <div className="flex items-center gap-1">
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    step="1"
-                    value={pct}
-                    onChange={(e) => handlePercentChange(mentor.id, e.target.value)}
-                    className="w-16 px-2 py-1.5 text-sm font-bold text-right border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-md focus:outline-none focus:ring-2 focus:ring-pink-500 tabular-nums"
-                  />
-                  <span className="text-sm font-semibold text-gray-500 dark:text-gray-400">%</span>
+
+                {inviteLinks[mentor.id] && (
+                  <div className="p-2 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg border border-emerald-200 dark:border-emerald-800 space-y-1">
+                    <p className="text-[10px] font-semibold text-emerald-800 dark:text-emerald-300">Link de acceso generado — mandáselo por WhatsApp:</p>
+                    <div className="flex gap-1">
+                      <input
+                        type="text"
+                        readOnly
+                        value={inviteLinks[mentor.id]}
+                        className="flex-1 px-2 py-1 text-[10px] font-mono bg-white dark:bg-gray-800 border border-emerald-300 dark:border-emerald-700 rounded text-gray-800 dark:text-gray-200"
+                        onClick={(e) => e.target.select()}
+                      />
+                      <button
+                        onClick={() => copyLink(inviteLinks[mentor.id])}
+                        className="px-2 py-1 text-[10px] font-semibold bg-emerald-600 text-white rounded hover:bg-emerald-700 transition"
+                      >
+                        Copiar
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between gap-3 pt-2 border-t border-gray-200 dark:border-gray-700">
+                  <div className="text-[11px] text-gray-500 dark:text-gray-400 space-y-0.5">
+                    <div>Ventas referidas: <span className="font-bold text-gray-900 dark:text-gray-100">{fmtMoney(stats.totalSales)}</span></div>
+                    <div>Clientes: <span className="font-bold text-gray-900 dark:text-gray-100">{mentorClients.length}</span></div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="1"
+                      value={pct}
+                      onChange={(e) => handlePercentChange(mentor.id, e.target.value)}
+                      className="w-16 px-2 py-1.5 text-sm font-bold text-right border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-md focus:outline-none focus:ring-2 focus:ring-pink-500 tabular-nums"
+                    />
+                    <span className="text-sm font-semibold text-gray-500 dark:text-gray-400">%</span>
+                  </div>
                 </div>
               </div>
             );
           })}
         </div>
       </div>
+      )}
 
       {/* Balance + historial de pagos por mentor */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
@@ -3623,6 +4440,7 @@ function DatosSection({ state, dispatch, addToast }) {
         { key: 'cobros', label: 'cobros', serialize: (s) => JSON.stringify(s.cobros || []) },
         { key: 'pagos', label: 'pagos', serialize: (s) => JSON.stringify(s.pagos || {}) },
         { key: 'costsOverride', label: 'costsOverride', serialize: (s) => JSON.stringify(s.costsOverride || {}) },
+        { key: 'notas', label: 'notas', serialize: (s) => JSON.stringify(s.notas || []) },
         { key: 'costoSinDesglosar', label: 'costoSinDesglosar' },
         { key: 'estadoComision', label: 'estadoComision' },
       ],
@@ -3633,7 +4451,7 @@ function DatosSection({ state, dispatch, addToast }) {
         cantidad: toNumber(row.cantidad, 1),
         montoTotal: toNumber(row.montoTotal),
         mentorId: row.mentorId ? toNumber(row.mentorId) : null,
-        estado: row.estado || 'pendiente-cotizacion',
+        estado: row.estado || 'consulta-recibida',
         tieneIncidencia: toBool(row.tieneIncidencia),
         incidenciaDetalle: row.incidenciaDetalle || '',
         mentorPresupuesto: row.mentorPresupuesto ? toNumber(row.mentorPresupuesto) : null,
@@ -3641,6 +4459,7 @@ function DatosSection({ state, dispatch, addToast }) {
         cobros: (() => { try { return JSON.parse(row.cobros || '[]'); } catch { return []; } })(),
         pagos: (() => { try { return JSON.parse(row.pagos || '{}'); } catch { return {}; } })(),
         costsOverride: (() => { try { return JSON.parse(row.costsOverride || '{}'); } catch { return {}; } })(),
+        notas: (() => { try { return JSON.parse(row.notas || '[]'); } catch { return []; } })(),
         costoSinDesglosar: row.costoSinDesglosar ? toNumber(row.costoSinDesglosar) : null,
         estadoComision: row.estadoComision || 'pendiente',
       }),
@@ -3794,11 +4613,10 @@ function EntityDataCard({ entity, state, dispatch, addToast }) {
   );
 }
 
-function AnalyticsSection({ state, currentUser }) {
-  const [report, setReport] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [lastFetch, setLastFetch] = useState(0);
+function AnalyticsSection({ state, currentUser, analyticsState, onFetch }) {
+  // El estado vive en el AppShell para que el reporte siga generándose
+  // aunque el usuario navegue a otra sección.
+  const { report, loading, error, lastFetch } = analyticsState;
 
   // Snapshot enriquecido para analytics (incluye más histórico que el del chatbot)
   const snapshot = {
@@ -3822,31 +4640,14 @@ function AnalyticsSection({ state, currentUser }) {
         producto: p?.nombre || '-',
         cantidad: o.cantidad,
         monto_total: o.montoTotal,
-        estado: ORDER_STATE_LABELS[o.estado || 'pendiente-cotizacion'],
+        estado: ORDER_STATE_LABELS[o.estado || 'consulta-recibida'],
         incidencia: o.tieneIncidencia ? (o.incidenciaDetalle || 'sin detalle') : null,
         mentor: m?.nombre || null,
       };
     }),
   };
 
-  const fetchReport = async () => {
-    setLoading(true); setError('');
-    try {
-      const res = await fetch('/api/analytics', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ snapshot }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
-      setReport(data);
-      setLastFetch(Date.now());
-    } catch (err) {
-      setError(err.message || 'No pude generar el reporte.');
-    } finally {
-      setLoading(false);
-    }
-  };
+  const fetchReport = () => onFetch?.(snapshot);
 
   return (
     <div className="space-y-6">
@@ -4009,10 +4810,10 @@ function AnalyticsSection({ state, currentUser }) {
   );
 }
 
-function MentoresSection({ state, getMentorStats }) {
+function PartnersSection({ state, getMentorStats }) {
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Perfiles de Mentores</h2>
+      <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Perfiles de Partners</h2>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {state.mentors.map(mentor => {
@@ -4065,26 +4866,57 @@ function EquipoInicioSection({ currentUser, state }) {
     ? getMentorBalance(mentor, state.sales, state.products)
     : { generado: 0, cobrado: 0, saldo: 0, porcentaje: 0, ordenes: 0, pagos: [] };
 
-  // Stats del lab que SÍ puede ver: número total de órdenes activas,
-  // sus órdenes referidas, lo que generó este mes, y las incidencias
-  // del lab (igual que la admin, son operativas).
-  const totalOrdenesActivas = state.sales.filter(o => (o.estado || 'pendiente-cotizacion') !== 'despachado').length;
-  const incidenciasLab = state.sales.filter(s => s.tieneIncidencia).length;
-  const mesActual = state.sales
-    .filter(s => s.mentorId === currentUser.id && (s.fecha || '').startsWith(new Date().toISOString().substring(0, 7)))
+  const misOrdenes = state.sales.filter(s => s.mentorId === currentUser.id);
+  const misClientes = state.clients.filter(c => c.mentorId === currentUser.id);
+  const mesActual = misOrdenes
+    .filter(s => (s.fecha || '').startsWith(new Date().toISOString().substring(0, 7)))
     .reduce((sum, s) => {
       const p = state.products.find(pp => pp.id === s.productoId);
       return sum + getMentorCommission(s, p, mentor);
     }, 0);
+  const totalProfitInformado = misOrdenes.reduce((sum, s) => {
+    const p = state.products.find(pp => pp.id === s.productoId);
+    return sum + getOrderInformedProfit(s, p);
+  }, 0);
+
+  const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
 
   return (
-    <div className="space-y-8">
-      <DailyQuoteBanner />
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <StatCard icon={DollarSign} label="Generado total" value={`$${Math.round(balance.generado).toLocaleString()}`} color="from-emerald-500 to-teal-500" delay={0} />
-        <StatCard icon={CreditCard} label="Te queda cobrar" value={`$${Math.max(0, Math.round(balance.saldo)).toLocaleString()}`} color="from-amber-500 to-orange-500" delay={80} />
-        <StatCard icon={TrendingUp} label="Comisión este mes" value={`$${Math.round(mesActual).toLocaleString()}`} color="from-purple-500 to-pink-500" delay={160} />
-        <StatCard icon={AlertCircle} label="Incidencias del lab" value={incidenciasLab} color="from-red-500 to-pink-500" delay={240} />
+    <div className="space-y-6">
+      <div className="text-center p-6 bg-gradient-to-r from-pink-50 to-rose-50 dark:from-pink-900/30 dark:to-rose-900/30 rounded-xl">
+        <h2 className="text-2xl font-bold text-pink-900 dark:text-pink-200">Hola, {currentUser.name}</h2>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Tu resumen como partner — actualizado en vivo.</p>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <StatCard icon={DollarSign} label="Comisiones generadas" value={fmtMoney(balance.generado)} color="from-emerald-500 to-teal-500" delay={0} />
+        <StatCard icon={CreditCard} label="Te queda cobrar" value={fmtMoney(Math.max(0, balance.saldo))} color="from-amber-500 to-orange-500" delay={80} />
+        <StatCard icon={TrendingUp} label="Comisión este mes" value={fmtMoney(mesActual)} color="from-purple-500 to-pink-500" delay={160} />
+        <StatCard icon={Users} label="Clientes referidos" value={misClientes.length} color="from-sky-500 to-blue-500" delay={240} />
+      </div>
+
+      {/* Resumen financiero */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-5">
+        <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 mb-3">Tu resumen financiero</h3>
+        <div className="grid grid-cols-3 gap-4 text-center">
+          <div>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Profit total</p>
+            <p className="text-lg font-bold text-sky-600 dark:text-sky-400 tabular-nums">{fmtMoney(totalProfitInformado)}</p>
+            <p className="text-[10px] text-gray-400">Sobre {misOrdenes.length} órdenes</p>
+          </div>
+          <div>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Tu comisión ({mentor?.porcentajeComision ?? 50}%)</p>
+            <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{fmtMoney(balance.generado)}</p>
+            <p className="text-[10px] text-gray-400">Ya cobraste {fmtMoney(balance.cobrado)}</p>
+          </div>
+          <div>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Cobro pendiente</p>
+            <p className="text-lg font-bold text-amber-600 dark:text-amber-400 tabular-nums">{fmtMoney(Math.max(0, balance.saldo))}</p>
+            <div className="w-full h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden mt-1">
+              <div className="h-full bg-emerald-500 transition-all" style={{ width: `${Math.min(100, balance.porcentaje)}%` }} />
+            </div>
+          </div>
+        </div>
       </div>
 
       <EquipoOrdenesView state={state} mentorId={currentUser.id} compact />
@@ -4132,53 +4964,43 @@ function EquipoOrdenesView({ state, mentorId, compact = false }) {
       )}
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700">
+          <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10">
             <tr className="text-left text-gray-700 dark:text-gray-200">
               <th className="px-4 py-3 font-semibold">Fecha</th>
               <th className="px-4 py-3 font-semibold">Cliente</th>
               <th className="px-4 py-3 font-semibold">Producto</th>
               <th className="px-4 py-3 font-semibold text-right">Cant.</th>
-              <th className="px-4 py-3 font-semibold text-right">Monto venta</th>
+              <th className="px-4 py-3 font-semibold text-right">Costo</th>
+              <th className="px-4 py-3 font-semibold text-right">Precio venta</th>
+              <th className="px-4 py-3 font-semibold text-right">Ganancia</th>
               <th className="px-4 py-3 font-semibold text-right">Tu comisión</th>
               <th className="px-4 py-3 font-semibold">Estado</th>
-              <th className="px-4 py-3 font-semibold">Cobro cliente</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
             {visibles.length === 0 && (
-              <tr><td colSpan={8} className="px-4 py-10 text-center text-gray-500 dark:text-gray-400">Todavía no tenés órdenes referidas.</td></tr>
+              <tr><td colSpan={9} className="px-4 py-10 text-center text-gray-500 dark:text-gray-400">Todavía no tenés órdenes referidas.</td></tr>
             )}
             {visibles.map(order => {
               const product = state.products.find(p => p.id === order.productoId);
               const comision = getMentorCommission(order, product, mentor);
-              const cobros = getOrderCobrosSummary(order);
-              const estado = order.estado || 'pendiente-cotizacion';
-              const saldada = cobros.saldo <= 0 && cobros.total > 0;
+              const costoInfUnit = getInformedCostUnit(order, product);
+              const profitInformado = getOrderInformedProfit(order, product);
+              const estado = order.estado || 'consulta-recibida';
               return (
                 <tr key={order.id} className={`${order.tieneIncidencia ? 'bg-red-50/40 dark:bg-red-900/10' : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}>
                   <td className="px-4 py-3 text-gray-900 dark:text-gray-100 whitespace-nowrap">{order.fecha}</td>
                   <td className="px-4 py-3 text-gray-900 dark:text-gray-100">{getClientName(order.clienteId)}</td>
                   <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{getProductName(order.productoId)}</td>
                   <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300">{order.cantidad}</td>
+                  <td className="px-4 py-3 text-right text-gray-600 dark:text-gray-400 tabular-nums">{fmtMoney(costoInfUnit * (order.cantidad || 0))}</td>
                   <td className="px-4 py-3 text-right text-gray-900 dark:text-gray-100 tabular-nums">{fmtMoney(order.montoTotal || 0)}</td>
+                  <td className="px-4 py-3 text-right font-semibold text-sky-600 dark:text-sky-400 tabular-nums">{fmtMoney(profitInformado)}</td>
                   <td className="px-4 py-3 text-right font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{fmtMoney(comision)}</td>
                   <td className="px-4 py-3">
                     <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${ORDER_STATE_STYLES[estado]}`}>
                       {ORDER_STATE_LABELS[estado]}
                     </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <span className={`text-[11px] font-bold tabular-nums shrink-0 ${saldada ? 'text-emerald-600 dark:text-emerald-400' : cobros.cobrado > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500 dark:text-gray-500'}`}>
-                        {saldada ? '✓' : `${cobros.porcentaje}%`}
-                      </span>
-                      <div className="w-16 h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
-                        <div
-                          className={`h-full ${saldada ? 'bg-emerald-500' : 'bg-gradient-to-r from-amber-400 to-emerald-500'}`}
-                          style={{ width: `${Math.min(100, cobros.porcentaje)}%` }}
-                        />
-                      </div>
-                    </div>
                   </td>
                 </tr>
               );
@@ -4192,7 +5014,7 @@ function EquipoOrdenesView({ state, mentorId, compact = false }) {
 
 function MentorResumenSection({ currentUser, state, getMentorStats }) {
   const mentor = state.mentors.find(m => m.id === currentUser.id);
-  // Balance en vivo calculado sobre TODAS las órdenes del mentor y sus
+  // Balance en vivo calculado sobre TODAS las órdenes del partner y sus
   // pagos recibidos. Se actualiza al segundo cada vez que la admin agrega
   // un pago desde la sección de Comisiones o una orden nueva.
   const balance = mentor ? getMentorBalance(mentor, state.sales, state.products) : { generado: 0, cobrado: 0, saldo: 0, ordenes: 0, porcentaje: 0, pagos: [] };
@@ -4236,7 +5058,7 @@ function MentorResumenSection({ currentUser, state, getMentorStats }) {
         </p>
       </div>
 
-      {/* Historial de pagos recibidos (read-only para el mentor) */}
+      {/* Historial de pagos recibidos (read-only para el partner) */}
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
         <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-4">Historial de pagos recibidos</h3>
         {balance.pagos.length === 0 ? (
@@ -4244,7 +5066,7 @@ function MentorResumenSection({ currentUser, state, getMentorStats }) {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="text-left text-gray-600 dark:text-gray-300 border-b border-gray-200 dark:border-gray-700">
+              <thead className="text-left text-gray-600 dark:text-gray-300 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10 bg-white dark:bg-gray-800">
                 <tr>
                   <th className="px-3 py-2 font-semibold">Fecha</th>
                   <th className="px-3 py-2 font-semibold text-right">Monto</th>
@@ -4303,7 +5125,7 @@ function MentorComisionesSection({ currentUser, state, filterMonth, setFilterMon
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700">
+            <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10">
               <tr>
                 <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Fecha</th>
                 <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Cliente</th>
@@ -4342,7 +5164,7 @@ function MentorClientesSection({ currentUser, state }) {
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700">
+            <thead className="bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10">
               <tr>
                 <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Nombre</th>
                 <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Teléfono</th>
@@ -4363,7 +5185,6 @@ function MentorClientesSection({ currentUser, state }) {
           </table>
         </div>
       </div>
-      )}
     </div>
   );
 }
@@ -4504,7 +5325,7 @@ function ClientDetailPanel({ stats, products }) {
       ) : (
         <div className="overflow-x-auto bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
           <table className="w-full text-xs">
-            <thead className="bg-gray-50 dark:bg-gray-700/60">
+            <thead className="bg-gray-50 dark:bg-gray-700/60 sticky top-0 z-10">
               <tr className="text-left text-gray-600 dark:text-gray-300">
                 <th className="px-3 py-2 font-semibold">Fecha</th>
                 <th className="px-3 py-2 font-semibold">Producto</th>
@@ -4519,7 +5340,7 @@ function ClientDetailPanel({ stats, products }) {
                 .slice()
                 .sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''))
                 .map(order => {
-                  const estado = order.estado || 'pendiente-cotizacion';
+                  const estado = order.estado || 'consulta-recibida';
                   return (
                     <tr key={order.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
                       <td className="px-3 py-2 text-gray-700 dark:text-gray-300 whitespace-nowrap">{order.fecha}</td>
@@ -4575,18 +5396,18 @@ function CostBreakdownCell({ order, product, costs, isTotal, onUpdateProduct, on
   const [open, setOpen] = useState(false);
   const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
   const popoverRef = useRef(null);
+  const buttonRef = useRef(null);
+  const [popoverPos, setPopoverPos] = useState({ top: 0, left: 0 });
 
   const isFlat = order?.costoSinDesglosar != null && order.costoSinDesglosar !== '';
   const cantidad = order?.cantidad || 1;
 
-  // Total mostrado en la celda (suma de los 3 costos, o el flat si está activo)
   const totalShown = isTotal ? costs.costoTotal : costs.costoUnit;
 
-  // Cierre por click fuera + Escape
   useEffect(() => {
     if (!open) return;
     const onDoc = (e) => {
-      if (popoverRef.current && !popoverRef.current.contains(e.target)) setOpen(false);
+      if (popoverRef.current && !popoverRef.current.contains(e.target) && buttonRef.current && !buttonRef.current.contains(e.target)) setOpen(false);
     };
     const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
     document.addEventListener('mousedown', onDoc);
@@ -4597,17 +5418,28 @@ function CostBreakdownCell({ order, product, costs, isTotal, onUpdateProduct, on
     };
   }, [open]);
 
+  const toggleOpen = () => {
+    if (!open && buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      setPopoverPos({
+        top: rect.top - 8,
+        left: Math.max(8, rect.right - 320),
+      });
+    }
+    setOpen(v => !v);
+  };
+
   const switchToDesglose = () => onClearFlat();
   const switchToFlat = () => {
-    // Si pasamos a flat, sembramos el valor con el total actual del desglose
     onSetFlat(costs.costoUnit || 0);
   };
 
   return (
     <div className="relative inline-block">
       <button
+        ref={buttonRef}
         type="button"
-        onClick={() => setOpen(v => !v)}
+        onClick={toggleOpen}
         className={`group inline-flex items-center gap-1 px-2 py-0.5 rounded hover:bg-pink-50 dark:hover:bg-pink-900/20 transition ${isFlat ? 'text-amber-700 dark:text-amber-300 font-medium' : 'text-gray-700 dark:text-gray-300'}`}
         title={isFlat ? 'Costo sin discriminar — click para ver/editar' : 'Click para ver el desglose'}
       >
@@ -4620,8 +5452,8 @@ function CostBreakdownCell({ order, product, costs, isTotal, onUpdateProduct, on
       {open && (
         <div
           ref={popoverRef}
-          className="absolute right-0 mt-1 z-40 w-80 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 p-3 animate-scale-in"
-          style={{ transformOrigin: 'top right' }}
+          className="fixed z-[100] w-80 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 p-3 animate-scale-in"
+          style={{ top: popoverPos.top, left: popoverPos.left, transform: 'translateY(-100%)' }}
         >
           {/* Header con toggle de modo */}
           <div className="flex items-center justify-between mb-3">
@@ -4994,20 +5826,47 @@ function FormLabel({ children, required = false, tip = null }) {
     <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1 inline-flex items-center gap-1">
       <span>{children}</span>
       {required ? (
-        <span className="text-amber-500" title="Campo obligatorio">*</span>
+        <span className="text-amber-500">*</span>
       ) : (
         <span className="font-normal text-gray-400 dark:text-gray-500 lowercase">(opcional)</span>
       )}
-      {tip && (
-        <span
-          className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400 text-[9px] cursor-help select-none hover:bg-amber-200 dark:hover:bg-amber-700 hover:text-gray-700 dark:hover:text-gray-100 transition"
-          title={tip}
-          aria-label={tip}
-        >
-          ?
+      {tip && <InfoTip text={tip} />}
+    </label>
+  );
+}
+
+function InfoTip({ text }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const esc = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', esc); };
+  }, [open]);
+
+  return (
+    <span ref={ref} className="relative inline-flex">
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400 text-[9px] font-bold cursor-help select-none hover:bg-amber-200 dark:hover:bg-amber-700 hover:text-gray-700 dark:hover:text-gray-100 transition"
+        aria-label={text}
+      >
+        ?
+      </button>
+      {open && (
+        <span className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-1.5 w-56 px-3 py-2 rounded-lg bg-gray-900 dark:bg-gray-700 text-white text-[11px] leading-relaxed shadow-xl pointer-events-none animate-fade-in">
+          {text}
+          <span className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900 dark:border-t-gray-700" />
         </span>
       )}
-    </label>
+    </span>
   );
 }
 
@@ -5075,7 +5934,7 @@ function EditableCell({ value, onSave, className = '', prefix = '', suffix = '',
 // como tabs en lugar de apilados (mucho menos vertical, más práctico).
 // El tab default es 'cobros' porque suele ser lo primero que la admin
 // quiere consultar al expandir una orden (cuánto cobré / falta cobrar).
-function OrderExpansion({ order, cobrosSummary, payments, mentorNombre, onCobrosChange, onPaymentChange }) {
+function OrderExpansion({ order, cobrosSummary, payments, mentorNombre, onCobrosChange, onPaymentChange, onIncidenciaChange, dispatch }) {
   const [tab, setTab] = useState('cobros');
   const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
 
@@ -5084,6 +5943,7 @@ function OrderExpansion({ order, cobrosSummary, payments, mentorNombre, onCobros
   const aPagarTotal = ['contenido', 'envase', 'etiqueta', 'mentor']
     .filter(k => k !== 'mentor' || order.mentorId)
     .reduce((sum, k) => sum + (payments[k]?.estado === 'pendiente' ? (payments[k]?.monto || 0) : 0), 0);
+  const notasCount = (order.notas || []).length;
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
@@ -5109,6 +5969,28 @@ function OrderExpansion({ order, cobrosSummary, payments, mentorNombre, onCobros
             {aPagarTotal > 0 ? `${fmtMoney(aPagarTotal)} a pagar` : 'Todo pagado ✓'}
           </p>
         </button>
+        <button
+          type="button"
+          onClick={() => setTab('notas')}
+          className={`flex-1 px-4 py-2.5 text-left transition border-l border-gray-200 dark:border-gray-700 ${tab === 'notas' ? 'bg-indigo-50 dark:bg-indigo-900/20 border-b-2 border-indigo-500' : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b-2 border-transparent'}`}
+        >
+          <p className={`text-xs font-bold uppercase tracking-wider ${tab === 'notas' ? 'text-indigo-700 dark:text-indigo-300' : 'text-gray-500 dark:text-gray-400'}`}>Notas</p>
+          <p className={`text-sm font-semibold ${notasCount > 0 ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-500 dark:text-gray-500'}`}>
+            {notasCount > 0 ? `${notasCount} nota${notasCount !== 1 ? 's' : ''}` : 'Sin notas'}
+          </p>
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab('incidencia')}
+          className={`flex-1 px-4 py-2.5 text-left transition border-l border-gray-200 dark:border-gray-700 ${tab === 'incidencia' ? 'bg-red-50 dark:bg-red-900/20 border-b-2 border-red-500' : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b-2 border-transparent'}`}
+        >
+          <p className={`text-xs font-bold uppercase tracking-wider flex items-center gap-1 ${tab === 'incidencia' ? 'text-red-700 dark:text-red-300' : 'text-gray-500 dark:text-gray-400'}`}>
+            <AlertCircle size={12} /> Incidencia
+          </p>
+          <p className={`text-sm font-semibold ${order.tieneIncidencia ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-500'}`}>
+            {order.tieneIncidencia ? 'Activa' : 'Sin incidencias'}
+          </p>
+        </button>
       </div>
 
       <div className="p-4">
@@ -5118,6 +6000,133 @@ function OrderExpansion({ order, cobrosSummary, payments, mentorNombre, onCobros
         {tab === 'pagos' && (
           <PaymentsPanel order={order} payments={payments} mentorNombre={mentorNombre} onChange={onPaymentChange} />
         )}
+        {tab === 'notas' && (
+          <NotasPanel order={order} dispatch={dispatch} />
+        )}
+        {tab === 'incidencia' && (
+          <IncidenciaPanel order={order} onChange={onIncidenciaChange} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Panel de incidencias: textarea con el motivo y botón toggle para activar/resolver.
+// Si hay incidencia activa, el panel se ve en rojo. Al resolver, se limpia el motivo.
+// Panel de notas por orden. Lista existentes (más reciente primero) y permite agregar.
+function NotasPanel({ order, dispatch }) {
+  const [draft, setDraft] = useState('');
+  const notas = Array.isArray(order.notas) ? order.notas : [];
+  const sorted = [...notas].reverse();
+
+  const addNota = () => {
+    const texto = draft.trim();
+    if (!texto) return;
+    dispatch({ type: 'ADD_ORDER_NOTE', payload: { orderId: order.id, nota: texto } });
+    setDraft('');
+  };
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <h4 className="text-sm font-bold text-gray-900 dark:text-gray-100">Notas de la orden</h4>
+        <p className="text-xs text-gray-500 dark:text-gray-400">Anotaciones internas sobre esta orden.</p>
+      </div>
+      <div className="flex gap-2">
+        <textarea
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="Escribir una nota..."
+          rows={2}
+          className="flex-1 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-y"
+          onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); addNota(); } }}
+        />
+        <button
+          type="button"
+          onClick={addNota}
+          disabled={!draft.trim()}
+          className="self-end px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white rounded-lg font-semibold text-sm transition"
+        >
+          Agregar nota
+        </button>
+      </div>
+      {sorted.length === 0 ? (
+        <p className="text-xs text-gray-500 dark:text-gray-400 italic text-center py-4">Sin notas todavía.</p>
+      ) : (
+        <div className="space-y-2 max-h-60 overflow-y-auto">
+          {sorted.map((nota, i) => (
+            <div key={i} className="bg-gray-50 dark:bg-gray-900/40 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">{nota.fecha}</p>
+              <p className="text-sm text-gray-900 dark:text-gray-100 whitespace-pre-wrap">{nota.texto}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function IncidenciaPanel({ order, onChange }) {
+  const [draft, setDraft] = useState(order.incidenciaDetalle || '');
+  useEffect(() => {
+    setDraft(order.incidenciaDetalle || '');
+  }, [order.id, order.incidenciaDetalle]);
+
+  const activa = !!order.tieneIncidencia;
+
+  const toggle = () => {
+    if (activa) {
+      // Desactivar: confirmamos con el usuario y limpiamos el motivo.
+      onChange?.({ tieneIncidencia: false, incidenciaDetalle: '' });
+    } else {
+      onChange?.({ tieneIncidencia: true, incidenciaDetalle: draft });
+    }
+  };
+
+  const saveDetalle = () => {
+    if (activa) {
+      onChange?.({ tieneIncidencia: true, incidenciaDetalle: draft });
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className={`p-3 rounded-lg border-2 ${activa ? 'bg-red-50 dark:bg-red-900/20 border-red-300 dark:border-red-800' : 'bg-gray-50 dark:bg-gray-900/40 border-gray-200 dark:border-gray-700'}`}>
+        <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">
+          {activa ? '⚠ Esta orden tiene una incidencia activa' : 'Esta orden no tiene incidencias registradas.'}
+        </p>
+        <p className="text-[11px] text-gray-500 dark:text-gray-400">
+          Marcá una incidencia si hay un problema que bloquea o demora el avance (ej. falta de stock, demora de proveedor, observación del cliente). Aparece en el listado y en las notificaciones.
+        </p>
+      </div>
+
+      <div>
+        <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Motivo</label>
+        <textarea
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={saveDetalle}
+          placeholder="Ej. Proveedor demoró el envío de envases. ETA nueva: 15/05."
+          rows={3}
+          className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 resize-y"
+        />
+        {activa && draft !== (order.incidenciaDetalle || '') && (
+          <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-1">Se guarda cuando salís del campo.</p>
+        )}
+      </div>
+
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={toggle}
+          className={`flex-1 py-2 rounded-lg font-semibold text-sm transition ${
+            activa
+              ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow'
+              : 'bg-red-600 hover:bg-red-700 text-white shadow'
+          }`}
+        >
+          {activa ? '✓ Resolver incidencia' : '⚠ Marcar incidencia'}
+        </button>
       </div>
     </div>
   );
@@ -5126,97 +6135,29 @@ function OrderExpansion({ order, cobrosSummary, payments, mentorNombre, onCobros
 function CobrosPanel({ order, summary, onChange }) {
   const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
   const cobros = summary.cobros;
-  const { total, cobrado, saldo, porcentaje, cuotasPlanificadas, cuotasPagadas } = summary;
-  // Vista detalle: por defecto colapsado para que el panel se sienta simple.
-  // Sólo se expande si el usuario lo pide explícitamente.
-  const [showDetalle, setShowDetalle] = useState(false);
+  const { total, cobrado, saldo, porcentaje } = summary;
+  const saldada = saldo <= 0 && total > 0;
 
-  // Atajo rápido: si el usuario cambia directo el total cobrado, consolidamos
-  // el cambio en el primer cobro (ajustamos el monto) o agregamos uno si no
-  // había ninguno. Sirve para el 90% de los casos donde el cliente abonó una
-  // seña y el resto después.
-  const setCobradoTotalQuick = (nuevoCobrado) => {
-    const clean = Math.max(0, parseFloat(nuevoCobrado) || 0);
-    // Si no hay cobros → creamos uno con ese monto
-    if (!cobros || cobros.length === 0) {
-      onChange({ cobros: [{
-        concepto: clean >= total ? 'Pago único' : 'Seña',
-        monto: clean,
-        fecha: new Date().toISOString().split('T')[0],
-        nota: '',
-      }] });
-      return;
-    }
-    // Si hay 1 solo cobro → actualizamos su monto
-    if (cobros.length === 1) {
-      onChange({ cobros: [{ ...cobros[0], monto: clean }] });
-      return;
-    }
-    // Si hay varios → ajustamos el último para que la suma cierre
-    const sinUltimo = cobros.slice(0, -1).reduce((s, c) => s + (parseFloat(c.monto) || 0), 0);
-    const diffUltimo = Math.max(0, clean - sinUltimo);
-    const next = [...cobros];
-    next[next.length - 1] = { ...next[next.length - 1], monto: diffUltimo };
-    onChange({ cobros: next });
-  };
-
-  // Sugiere un concepto inteligente según la posición y el plan pactado.
-  // - 1 solo pago acordado → "Pago único"
-  // - Primer pago → "Seña"
-  // - Último pago del plan → "Saldo"
-  // - Los del medio → "Adelanto N"
-  // - Si no hay plan, se deja en blanco y el usuario escribe lo que quiera.
-  const sugerirConcepto = (index, totalPagosPrevios) => {
-    const pos = index + 1; // 1-indexed
-    if (cuotasPlanificadas === 1) return 'Pago único';
-    if (cuotasPlanificadas > 1) {
-      if (pos === 1) return 'Seña';
-      if (pos === cuotasPlanificadas) return 'Saldo';
-      return `Adelanto ${pos - 1}`;
-    }
-    // Sin plan: seña para el primero, saldo si coincide que salda todo
-    if (totalPagosPrevios === 0) return 'Seña';
-    return '';
-  };
-
-  const updateCobro = (index, patch) => {
-    const next = cobros.map((c, i) => (i === index ? { ...c, ...patch } : c));
-    onChange({ cobros: next });
-  };
+  // Form para registrar un nuevo cobro
+  const [nuevoMonto, setNuevoMonto] = useState('');
+  const [nuevoConcepto, setNuevoConcepto] = useState('Seña');
+  const CONCEPTOS = ['Seña', 'Adelanto', 'Saldo', 'Pago único'];
 
   const addCobro = () => {
-    // Sugerimos como monto: saldo / (pagos planificados - pagados) si hay plan,
-    // o el saldo completo si no.
-    let sugerido = saldo;
-    if (cuotasPlanificadas > 0) {
-      const faltan = Math.max(1, cuotasPlanificadas - cuotasPagadas);
-      sugerido = saldo / faltan;
-    }
+    const monto = parseFloat(nuevoMonto);
+    if (!monto || monto <= 0) return;
     const nuevo = {
-      concepto: sugerirConcepto(cobros.length, cobros.length),
-      monto: sugerido > 0 ? Math.round(sugerido) : 0,
+      concepto: nuevoConcepto,
+      monto,
       fecha: new Date().toISOString().split('T')[0],
       nota: '',
     };
     onChange({ cobros: [...cobros, nuevo] });
+    setNuevoMonto('');
   };
 
   const removeCobro = (index) => {
     onChange({ cobros: cobros.filter((_, i) => i !== index) });
-  };
-
-  const setPlan = (n) => {
-    const parsed = parseInt(n);
-    onChange({ cuotasPlanificadas: Number.isNaN(parsed) ? 0 : Math.max(0, parsed) });
-  };
-
-  const saldada = saldo <= 0 && total > 0;
-
-  // Para cada cobro calculamos el concepto efectivo: si el usuario lo escribió
-  // en concepto, usa eso; si no, cae al sugerido por posición.
-  const displayConcepto = (cobro, i) => {
-    if (cobro.concepto && cobro.concepto.trim()) return cobro.concepto;
-    return sugerirConcepto(i, i);
   };
 
   return (
@@ -5226,145 +6167,98 @@ function CobrosPanel({ order, summary, onChange }) {
         <p className="text-xs text-gray-500 dark:text-gray-400">Cuánto abonó y cuánto falta.</p>
       </div>
 
-      {/* Vista simple: 3 números grandes (Total / Cobrado editable / Falta abonar) */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
-          <p className="text-[10px] uppercase tracking-wider text-gray-500 dark:text-gray-400">Total venta</p>
-          <p className="text-lg font-bold text-gray-900 dark:text-gray-100 tabular-nums">{fmtMoney(total)}</p>
+      {/* Big number: Total cobrado de $Y */}
+      <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+        <p className="text-sm text-gray-600 dark:text-gray-400">Total cobrado</p>
+        <p className="text-2xl font-bold tabular-nums">
+          <span className="text-emerald-600 dark:text-emerald-400">{fmtMoney(cobrado)}</span>
+          <span className="text-gray-400 dark:text-gray-500 font-normal"> de </span>
+          <span className="text-gray-900 dark:text-gray-100">{fmtMoney(total)}</span>
+        </p>
+        {/* Progress bar */}
+        <div className="w-full h-2.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden mt-2">
+          <div
+            className={`h-full transition-all rounded-full ${saldada ? 'bg-emerald-500' : 'bg-gradient-to-r from-emerald-400 to-emerald-600'}`}
+            style={{ width: `${Math.min(100, porcentaje)}%` }}
+          />
         </div>
-        <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-3 border border-emerald-200 dark:border-emerald-800">
-          <p className="text-[10px] uppercase tracking-wider text-emerald-700 dark:text-emerald-300">Cobrado</p>
-          <div className="flex items-baseline gap-0.5">
-            <span className="text-lg font-bold text-emerald-700 dark:text-emerald-300">$</span>
-            <input
-              type="number"
-              min="0"
-              value={cobrado || ''}
-              onChange={(e) => setCobradoTotalQuick(e.target.value)}
-              placeholder="0"
-              className="flex-1 min-w-0 bg-transparent text-lg font-bold text-emerald-700 dark:text-emerald-300 tabular-nums focus:outline-none focus:ring-1 focus:ring-emerald-500 rounded px-0.5"
-              title="Cuánto te abonó el cliente en total hasta ahora"
-            />
+        <p className={`text-xs font-semibold mt-1 ${saldada ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
+          {saldada ? 'Saldada' : `${porcentaje}% — faltan ${fmtMoney(saldo)}`}
+        </p>
+      </div>
+
+      {/* Form to register a new cobro */}
+      {!saldada && (
+        <div className="flex flex-wrap items-end gap-2 p-3 bg-gray-50 dark:bg-gray-900/40 rounded-lg border border-gray-200 dark:border-gray-700">
+          <div className="flex-1 min-w-[120px]">
+            <label className="block text-[10px] uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">Monto</label>
+            <div className="relative">
+              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+              <input
+                type="number"
+                min="0"
+                value={nuevoMonto}
+                onChange={(e) => setNuevoMonto(e.target.value)}
+                placeholder={String(Math.round(saldo))}
+                className="w-full pl-6 pr-2 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCobro(); } }}
+              />
+            </div>
           </div>
+          <div className="min-w-[130px]">
+            <label className="block text-[10px] uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">Concepto</label>
+            <select
+              value={nuevoConcepto}
+              onChange={(e) => setNuevoConcepto(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            >
+              {CONCEPTOS.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <button
+            type="button"
+            onClick={addCobro}
+            disabled={!nuevoMonto || parseFloat(nuevoMonto) <= 0}
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white rounded-lg font-semibold text-sm transition"
+          >
+            Registrar cobro
+          </button>
         </div>
-        <div className={`rounded-lg p-3 border ${saldada ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800' : 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800'}`}>
-          <p className={`text-[10px] uppercase tracking-wider ${saldada ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}`}>Falta abonar</p>
-          <p className={`text-lg font-bold tabular-nums ${saldada ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}`}>{saldada ? 'Saldada ✓' : fmtMoney(saldo)}</p>
-        </div>
-      </div>
+      )}
 
-      {/* Barra de progreso */}
-      <div className="w-full h-2 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
-        <div
-          className="h-full bg-gradient-to-r from-emerald-400 to-emerald-600 transition-all"
-          style={{ width: `${Math.min(100, porcentaje)}%` }}
-        />
-      </div>
-
-      {/* Toggle para ver el detalle de pagos (seña + adelantos + saldo discriminados) */}
-      <button
-        type="button"
-        onClick={() => setShowDetalle(v => !v)}
-        className="inline-flex items-center gap-1 text-[11px] font-semibold text-gray-500 dark:text-gray-400 hover:text-emerald-700 dark:hover:text-emerald-300 transition"
-      >
-        {showDetalle ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        {showDetalle ? 'Ocultar detalle' : `Ver detalle de pagos${cobros.length > 0 ? ` (${cobros.length})` : ''}`}
-      </button>
-
-      {!showDetalle ? null : (
-      <>
-      <div className="flex items-center gap-2 text-xs pt-2">
-        <label className="text-gray-500 dark:text-gray-400">Pagos acordados:</label>
-        <input
-          type="number"
-          min="0"
-          value={cuotasPlanificadas || ''}
-          onChange={(e) => setPlan(e.target.value)}
-          placeholder="0"
-          className="w-16 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-pink-500"
-          title="Cuántos pagos acordaste con el cliente (ej. 2 = seña + saldo). 0 = sin plan definido."
-        />
-        <span className="text-gray-500 dark:text-gray-400">{cuotasPlanificadas > 0 ? (cuotasPlanificadas === 1 ? 'pago' : 'pagos') : 'sin plan'}</span>
-      </div>
-
-      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-        <table className="w-full text-xs">
-          <thead className="bg-gray-50 dark:bg-gray-700/60">
-            <tr className="text-left text-gray-600 dark:text-gray-300">
-              <th className="px-3 py-2 font-semibold w-32">Concepto</th>
-              <th className="px-3 py-2 font-semibold text-right">Monto</th>
-              <th className="px-3 py-2 font-semibold">Fecha</th>
-              <th className="px-3 py-2 font-semibold">Nota</th>
-              <th className="px-3 py-2 w-8"></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-            {cobros.length === 0 && (
-              <tr><td colSpan={5} className="px-3 py-4 text-center text-gray-500 dark:text-gray-400 italic">Sin cobros registrados. Tocá “Registrar cobro” para empezar.</td></tr>
-            )}
-            {cobros.map((cobro, i) => (
-              <tr key={i}>
-                <td className="px-3 py-2">
-                  <input
-                    type="text"
-                    value={cobro.concepto ?? ''}
-                    onChange={(e) => updateCobro(i, { concepto: e.target.value })}
-                    placeholder={sugerirConcepto(i, i) || `Pago ${i + 1}`}
-                    className="w-full px-2 py-1 text-xs font-semibold text-gray-900 dark:text-gray-100 border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                    title="Seña, Adelanto, Saldo, o lo que quieras poner"
-                  />
-                </td>
-                <td className="px-3 py-2 text-right">
-                  <input
-                    type="number"
-                    min="0"
-                    value={cobro.monto ?? ''}
-                    onChange={(e) => updateCobro(i, { monto: parseFloat(e.target.value) || 0 })}
-                    placeholder="0"
-                    className="w-28 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500 text-right"
-                  />
-                </td>
-                <td className="px-3 py-2">
-                  <input
-                    type="date"
-                    value={cobro.fecha || ''}
-                    onChange={(e) => updateCobro(i, { fecha: e.target.value })}
-                    className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                  />
-                </td>
-                <td className="px-3 py-2">
-                  <input
-                    type="text"
-                    value={cobro.nota || ''}
-                    onChange={(e) => updateCobro(i, { nota: e.target.value })}
-                    placeholder="transfer, efectivo, MP..."
-                    className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                  />
-                </td>
-                <td className="px-3 py-2 text-center">
-                  <button
-                    type="button"
-                    onClick={() => removeCobro(i)}
-                    className="p-1 rounded text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 transition"
-                    title="Eliminar este cobro"
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                </td>
+      {/* List of cobros */}
+      {cobros.length > 0 && (
+        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+          <table className="w-full text-xs">
+            <thead className="bg-gray-50 dark:bg-gray-700/60">
+              <tr className="text-left text-gray-600 dark:text-gray-300">
+                <th className="px-3 py-2 font-semibold">Fecha</th>
+                <th className="px-3 py-2 font-semibold">Concepto</th>
+                <th className="px-3 py-2 font-semibold text-right">Monto</th>
+                <th className="px-3 py-2 w-8"></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <button
-        type="button"
-        onClick={addCobro}
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md border border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition"
-      >
-        <Plus size={14} /> Registrar cobro
-      </button>
-      </>
+            </thead>
+            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+              {cobros.map((cobro, i) => (
+                <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                  <td className="px-3 py-2 text-gray-600 dark:text-gray-400 whitespace-nowrap">{cobro.fecha || '-'}</td>
+                  <td className="px-3 py-2 font-semibold text-gray-900 dark:text-gray-100">{cobro.concepto || `Pago ${i + 1}`}</td>
+                  <td className="px-3 py-2 text-right font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{fmtMoney(cobro.monto)}</td>
+                  <td className="px-3 py-2 text-center">
+                    <button
+                      type="button"
+                      onClick={() => removeCobro(i)}
+                      className="p-1 rounded text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 transition"
+                      title="Eliminar este cobro"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
@@ -5372,6 +6266,17 @@ function CobrosPanel({ order, summary, onChange }) {
 
 function PaymentsPanel({ order, payments, mentorNombre, onChange }) {
   const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
+
+  // Modo de despliegue: 'simple' (1 card producción) | 'desglose' (3 cards).
+  // Default: simple. En la mayoría de los casos el proveedor entrega todo
+  // junto y no hace falta discriminar. Se persiste en la orden para que al
+  // volver a abrir el panel quede igual.
+  const initialMode = order.paymentsMode || (order.costoSinDesglosar != null ? 'simple' : (
+    // Si la orden ya tiene datos en los 3 rubros → asumimos desglose
+    (payments.envase?.monto || payments.etiqueta?.monto) ? 'desglose' : 'simple'
+  ));
+  const [mode, setMode] = useState(initialMode);
+
   const totalPagado = Object.values(payments)
     .filter(p => p.estado === 'pagado')
     .reduce((s, p) => s + (parseFloat(p.monto) || 0), 0);
@@ -5379,21 +6284,23 @@ function PaymentsPanel({ order, payments, mentorNombre, onChange }) {
     .filter(p => p.estado === 'pendiente')
     .reduce((s, p) => s + (parseFloat(p.monto) || 0), 0);
 
-  const rubros = [
+  // En modo simple, el pago de "producción" se guarda en el rubro 'contenido'
+  // (histórico por compatibilidad), y los otros 2 se ponen en 0 pagado.
+  const rubrosDesglose = [
     { key: 'contenido', label: 'Contenido' },
     { key: 'envase',    label: 'Envase / Pote' },
     { key: 'etiqueta',  label: 'Etiqueta' },
-    { key: 'mentor',    label: mentorNombre ? `Comisión — ${mentorNombre}` : 'Comisión mentor' },
   ];
+  const rubroMentor = { key: 'mentor', label: mentorNombre ? `Comisión — ${mentorNombre}` : 'Comisión mentor' };
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap gap-2 items-center justify-between">
-        <div>
+      <div className="flex flex-wrap gap-3 items-start justify-between">
+        <div className="flex-1 min-w-[200px]">
           <h4 className="text-sm font-bold text-gray-900 dark:text-gray-100">Pagos de esta orden</h4>
-          <p className="text-xs text-gray-500 dark:text-gray-400">Tildá "Pagado" cuando se haya abonado y completá los datos.</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Tildá "Pagado" cuando se haya abonado.</p>
         </div>
-        <div className="flex gap-4 text-xs">
+        <div className="flex gap-3 text-xs">
           <div className="text-right">
             <p className="text-gray-500 dark:text-gray-400">Pendiente</p>
             <p className="font-bold text-amber-600 dark:text-amber-400">{fmtMoney(totalPendiente)}</p>
@@ -5405,88 +6312,190 @@ function PaymentsPanel({ order, payments, mentorNombre, onChange }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-        {rubros.map(rubro => {
-          const data = payments[rubro.key];
-          const isMentorSinAsignar = rubro.key === 'mentor' && !order.mentorId;
-          const paid = data.estado === 'pagado';
-          return (
-            <div
-              key={rubro.key}
-              className={`rounded-lg border p-3 space-y-2 ${
-                isMentorSinAsignar
-                  ? 'bg-gray-100 dark:bg-gray-800 border-gray-200 dark:border-gray-700 opacity-60'
-                  : paid
-                    ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800'
-                    : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-gray-800 dark:text-gray-100 truncate">{rubro.label}</span>
-                {isMentorSinAsignar ? (
-                  <span className="text-[10px] text-gray-500 dark:text-gray-400 italic">sin mentor</span>
-                ) : (
-                  <label className="inline-flex items-center gap-1 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={paid}
-                      onChange={(e) => onChange(rubro.key, { estado: e.target.checked ? 'pagado' : 'pendiente' })}
-                      className="h-3.5 w-3.5 rounded border-gray-300 dark:border-gray-600 text-emerald-600 focus:ring-emerald-500"
-                    />
-                    <span className={`text-[10px] font-semibold uppercase ${paid ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}`}>
-                      {paid ? 'Pagado' : 'Pendiente'}
-                    </span>
-                  </label>
-                )}
-              </div>
-              <div>
-                <label className="block text-[10px] uppercase text-gray-500 dark:text-gray-400 mb-0.5">Monto</label>
-                <input
-                  type="number"
-                  disabled={isMentorSinAsignar}
-                  value={data.monto ?? ''}
-                  onChange={(e) => onChange(rubro.key, { monto: parseFloat(e.target.value) || 0 })}
-                  placeholder="0"
-                  className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-pink-500 disabled:cursor-not-allowed"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] uppercase text-gray-500 dark:text-gray-400 mb-0.5">Fecha pago</label>
-                <input
-                  type="date"
-                  disabled={isMentorSinAsignar}
-                  value={data.fecha || ''}
-                  onChange={(e) => onChange(rubro.key, { fecha: e.target.value })}
-                  className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-pink-500 disabled:cursor-not-allowed"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] uppercase text-gray-500 dark:text-gray-400 mb-0.5">Proveedor</label>
-                <input
-                  type="text"
-                  disabled={isMentorSinAsignar}
-                  value={data.proveedor || ''}
-                  onChange={(e) => onChange(rubro.key, { proveedor: e.target.value })}
-                  placeholder={rubro.key === 'mentor' ? 'Mentor' : 'Nombre del proveedor'}
-                  className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-pink-500 disabled:cursor-not-allowed"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] uppercase text-gray-500 dark:text-gray-400 mb-0.5">Nota</label>
-                <input
-                  type="text"
-                  disabled={isMentorSinAsignar}
-                  value={data.nota || ''}
-                  onChange={(e) => onChange(rubro.key, { nota: e.target.value })}
-                  placeholder="Opcional"
-                  className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-pink-500 disabled:cursor-not-allowed"
-                />
-              </div>
-            </div>
-          );
-        })}
+      {/* Tabs modo simple / desglose */}
+      <div className="flex gap-1 p-1 bg-gray-100 dark:bg-gray-700 rounded-lg max-w-xs">
+        <button
+          type="button"
+          onClick={() => setMode('simple')}
+          className={`flex-1 py-1 px-2 text-[11px] rounded-md transition font-semibold ${
+            mode === 'simple'
+              ? 'bg-white dark:bg-gray-800 text-pink-900 dark:text-pink-300 shadow'
+              : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+          }`}
+        >
+          Todo junto
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode('desglose')}
+          className={`flex-1 py-1 px-2 text-[11px] rounded-md transition font-semibold ${
+            mode === 'desglose'
+              ? 'bg-white dark:bg-gray-800 text-pink-900 dark:text-pink-300 shadow'
+              : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+          }`}
+        >
+          Desglosado
+        </button>
+      </div>
+
+      <div className={`grid grid-cols-1 gap-3 ${mode === 'simple' ? 'md:grid-cols-2' : 'md:grid-cols-2 xl:grid-cols-4'}`}>
+        {/* Modo simple: 1 sola card "Producción total" */}
+        {mode === 'simple' && (
+          <PaymentCard
+            label="Producción (todo junto)"
+            data={payments.contenido || {}}
+            onChange={(patch) => onChange('contenido', patch)}
+          />
+        )}
+
+        {/* Modo desglose: 3 cards separadas */}
+        {mode === 'desglose' && rubrosDesglose.map(rubro => (
+          <PaymentCard
+            key={rubro.key}
+            label={rubro.label}
+            data={payments[rubro.key] || {}}
+            onChange={(patch) => onChange(rubro.key, patch)}
+          />
+        ))}
+
+        {/* Comisión del partner — siempre se muestra si hay mentor asignado */}
+        <PaymentCard
+          label={rubroMentor.label}
+          data={payments.mentor || {}}
+          onChange={(patch) => onChange('mentor', patch)}
+          disabled={!order.mentorId}
+          disabledLabel="sin partner"
+          variant="mentor"
+        />
       </div>
     </div>
+  );
+}
+
+// Card individual para un rubro de pago. Simplificada: solo monto, fecha
+// y toggle pagado/pendiente. Sin proveedor ni nota (ruido innecesario).
+function PaymentCard({ label, data, onChange, disabled = false, disabledLabel = null, variant = 'default' }) {
+  const paid = data.estado === 'pagado';
+  const bg = disabled
+    ? 'bg-gray-100 dark:bg-gray-800 border-gray-200 dark:border-gray-700 opacity-60'
+    : paid
+      ? (variant === 'mentor'
+          ? 'bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800'
+          : 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800')
+      : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700';
+
+  return (
+    <div className={`rounded-lg border p-3 space-y-2 ${bg}`}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-bold text-gray-800 dark:text-gray-100 truncate">{label}</span>
+        {disabled ? (
+          <span className="text-[10px] text-gray-500 dark:text-gray-400 italic">{disabledLabel}</span>
+        ) : (
+          <label className="inline-flex items-center gap-1 cursor-pointer whitespace-nowrap">
+            <input
+              type="checkbox"
+              checked={paid}
+              onChange={(e) => onChange({ estado: e.target.checked ? 'pagado' : 'pendiente' })}
+              className="h-3.5 w-3.5 rounded border-gray-300 dark:border-gray-600 text-emerald-600 focus:ring-emerald-500"
+            />
+            <span className={`text-[10px] font-semibold uppercase ${paid ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}`}>
+              {paid ? 'Pagado' : 'Pendiente'}
+            </span>
+          </label>
+        )}
+      </div>
+      <div>
+        <label className="block text-[10px] uppercase text-gray-500 dark:text-gray-400 mb-0.5">Monto</label>
+        <input
+          type="number"
+          disabled={disabled}
+          value={data.monto ?? ''}
+          onChange={(e) => onChange({ monto: parseFloat(e.target.value) || 0 })}
+          placeholder="0"
+          className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-pink-500 disabled:cursor-not-allowed"
+        />
+      </div>
+      <div>
+        <label className="block text-[10px] uppercase text-gray-500 dark:text-gray-400 mb-0.5">Fecha pago</label>
+        <input
+          type="date"
+          disabled={disabled}
+          value={data.fecha || ''}
+          onChange={(e) => onChange({ fecha: e.target.value })}
+          className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-pink-500 disabled:cursor-not-allowed"
+        />
+      </div>
+    </div>
+  );
+}
+
+// Modal para crear un partner nuevo desde la sección de Comisiones.
+function NewMentorModal({ onClose, onCreate }) {
+  const [data, setData] = useState({ nombre: '', contacto: '', porcentajeComision: 50 });
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!data.nombre.trim()) return;
+    onCreate({
+      nombre: data.nombre.trim(),
+      contacto: data.contacto.trim(),
+      porcentajeComision: Math.max(0, Math.min(100, parseFloat(data.porcentajeComision) || 50)),
+    });
+  };
+  return (
+    <Modal title="Nuevo partner" onClose={onClose}>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <FormLabel required>Nombre</FormLabel>
+          <input
+            type="text"
+            autoFocus
+            value={data.nombre}
+            onChange={(e) => setData({ ...data, nombre: e.target.value })}
+            placeholder="Nombre del partner"
+            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            required
+          />
+        </div>
+        <div>
+          <FormLabel tip="Teléfono, email o lo que quieras para ubicarlo. Opcional.">Contacto</FormLabel>
+          <input
+            type="text"
+            value={data.contacto}
+            onChange={(e) => setData({ ...data, contacto: e.target.value })}
+            placeholder="Ej. 11 1234-5678 o email"
+            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+          />
+        </div>
+        <div>
+          <FormLabel required tip="Sobre el profit informado de cada orden. Podés editarlo después.">Comisión (%)</FormLabel>
+          <input
+            type="number"
+            min="0"
+            max="100"
+            step="1"
+            value={data.porcentajeComision}
+            onChange={(e) => setData({ ...data, porcentajeComision: e.target.value })}
+            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            required
+          />
+        </div>
+        <div className="flex gap-2 pt-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-1 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition font-semibold"
+          >
+            Cancelar
+          </button>
+          <button
+            type="submit"
+            className="flex-1 bg-pink-900 text-white py-2 rounded-lg hover:bg-pink-800 transition font-semibold"
+          >
+            Crear mentor
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
@@ -5541,7 +6550,7 @@ function QuickClientModal({ mentors, onClose, onCreate }) {
             />
           </div>
           <div>
-            <FormLabel tip="Si el cliente vino referido por un mentor, asignalo para que se calcule su comisión sobre las ventas.">Mentor asignado</FormLabel>
+            <FormLabel tip="Si el cliente vino referido por un partner, asignalo para que se calcule su comisión sobre las ventas.">Partner asignado</FormLabel>
             <select
               value={data.mentorId}
               onChange={(e) => setData({ ...data, mentorId: e.target.value })}
@@ -5588,20 +6597,31 @@ function QuickClientModal({ mentors, onClose, onCreate }) {
 function QuickProductModal({ onClose, onCreate }) {
   const [data, setData] = useState({
     nombre: '', descripcion: '', precioVenta: '',
+    costoTotal: '',
+    modoCosto: 'total',
     costoContenido: '', costoEnvase: '', costoEtiqueta: '',
   });
   const [showCosts, setShowCosts] = useState(false);
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    onCreate({
+    const payload = {
       nombre: data.nombre.trim(),
       descripcion: data.descripcion.trim(),
       precioVenta: parseInt(data.precioVenta) || 0,
-      costoContenido: parseInt(data.costoContenido) || 0,
-      costoEnvase: parseInt(data.costoEnvase) || 0,
-      costoEtiqueta: parseInt(data.costoEtiqueta) || 0,
-    });
+    };
+    if (data.modoCosto === 'total') {
+      payload.costoSinDesglosar = parseFloat(data.costoTotal) || 0;
+      payload.costoContenido = 0;
+      payload.costoEnvase = 0;
+      payload.costoEtiqueta = 0;
+    } else {
+      payload.costoContenido = parseInt(data.costoContenido) || 0;
+      payload.costoEnvase = parseInt(data.costoEnvase) || 0;
+      payload.costoEtiqueta = parseInt(data.costoEtiqueta) || 0;
+      payload.costoSinDesglosar = null;
+    }
+    onCreate(payload);
   };
 
   return (
@@ -5657,38 +6677,73 @@ function QuickProductModal({ onClose, onCreate }) {
             onClick={() => setShowCosts(s => !s)}
             className="text-xs font-semibold text-pink-700 dark:text-pink-300 hover:underline"
           >
-            {showCosts ? '− Ocultar costos' : '+ Cargar costos ahora (opcional)'}
+            {showCosts ? '− Ocultar costo' : '+ Cargar costo ahora (opcional)'}
           </button>
           {showCosts && (
             <div>
-              <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Costos unitarios (contenido / envase / etiqueta)</label>
-              <div className="grid grid-cols-3 gap-2">
-                <input
-                  type="number"
-                  min="0"
-                  value={data.costoContenido}
-                  onChange={(e) => setData({ ...data, costoContenido: e.target.value })}
-                  placeholder="Contenido"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-                />
-                <input
-                  type="number"
-                  min="0"
-                  value={data.costoEnvase}
-                  onChange={(e) => setData({ ...data, costoEnvase: e.target.value })}
-                  placeholder="Envase"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-                />
-                <input
-                  type="number"
-                  min="0"
-                  value={data.costoEtiqueta}
-                  onChange={(e) => setData({ ...data, costoEtiqueta: e.target.value })}
-                  placeholder="Etiqueta"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-                />
+              <div className="flex gap-1 p-1 bg-gray-100 dark:bg-gray-700 rounded-lg mb-2">
+                <button
+                  type="button"
+                  onClick={() => setData({ ...data, modoCosto: 'total' })}
+                  className={`flex-1 py-1 text-[11px] rounded-md transition font-semibold ${
+                    data.modoCosto === 'total'
+                      ? 'bg-white dark:bg-gray-800 text-pink-900 dark:text-pink-300 shadow'
+                      : 'text-gray-600 dark:text-gray-400'
+                  }`}
+                >
+                  Costo total
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setData({ ...data, modoCosto: 'desglose' })}
+                  className={`flex-1 py-1 text-[11px] rounded-md transition font-semibold ${
+                    data.modoCosto === 'desglose'
+                      ? 'bg-white dark:bg-gray-800 text-pink-900 dark:text-pink-300 shadow'
+                      : 'text-gray-600 dark:text-gray-400'
+                  }`}
+                >
+                  Desglosado
+                </button>
               </div>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Si los dejás vacíos se guardan en 0 y los completás después.</p>
+              {data.modoCosto === 'total' ? (
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={data.costoTotal}
+                  onChange={(e) => setData({ ...data, costoTotal: e.target.value })}
+                  placeholder="Costo total por unidad"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                />
+              ) : (
+                <div className="grid grid-cols-3 gap-2">
+                  <input
+                    type="number"
+                    min="0"
+                    value={data.costoContenido}
+                    onChange={(e) => setData({ ...data, costoContenido: e.target.value })}
+                    placeholder="Contenido"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    value={data.costoEnvase}
+                    onChange={(e) => setData({ ...data, costoEnvase: e.target.value })}
+                    placeholder="Envase"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    value={data.costoEtiqueta}
+                    onChange={(e) => setData({ ...data, costoEtiqueta: e.target.value })}
+                    placeholder="Etiqueta"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                  />
+                </div>
+              )}
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Podés completarlo después desde el listado de productos.</p>
             </div>
           )}
           <div className="flex gap-2 pt-2">
@@ -5714,7 +6769,8 @@ function QuickProductModal({ onClose, onCreate }) {
 
 // Utility Components
 function Modal({ title, onClose, children }) {
-  // Cerrar con Escape
+  // Cerrar con Escape. Click afuera NO cierra — evita perder datos por un
+  // click accidental. Para cerrar hay que usar el botón X o apretar Esc.
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose?.(); };
     window.addEventListener('keydown', onKey);
@@ -5724,11 +6780,9 @@ function Modal({ title, onClose, children }) {
   return (
     <div
       className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fade-in"
-      onClick={onClose}
     >
       <div aria-hidden="true" className="absolute inset-0 bg-black/60 backdrop-blur-md" />
       <div
-        onClick={(e) => e.stopPropagation()}
         className="relative bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl p-5 sm:p-8 w-full max-w-md max-h-[90vh] overflow-y-auto border border-gray-100 dark:border-gray-700 animate-scale-in"
       >
         <div className="flex justify-between items-center mb-5 sm:mb-6">
@@ -5773,8 +6827,8 @@ function getSectionTitle(user, section) {
     ventas: 'Ventas',
     productos: 'Productos',
     clientes: 'Clientes',
-    comisiones: 'Comisiones',
-    mentores: 'Equipo',
+    comisiones: 'Comisiones y Partners',
+    mentores: 'Comisiones y Partners', // fallback: sección vieja cae al mismo lugar
     analytics: 'Analytics con IA',
     datos: 'Datos (Export / Import)',
   };
@@ -5857,7 +6911,7 @@ function UserMenu({ currentUser, sidebarOpen, state, onLogout }) {
   const products = state?.products || [];
   const mentors = state?.mentors || [];
 
-  const ordenesActivas = sales.filter(o => (o.estado || 'pendiente-cotizacion') !== 'despachado').length;
+  const ordenesActivas = sales.filter(o => (o.estado || 'consulta-recibida') !== 'despachado').length;
   const incidencias = sales.filter(s => s.tieneIncidencia).length;
 
   const aCobrar = sales.reduce((acc, o) => {
@@ -5881,7 +6935,7 @@ function UserMenu({ currentUser, sidebarOpen, state, onLogout }) {
   }, 0);
 
   // Profit acumulado: (precio venta - costos unitarios) × cantidad, por orden.
-  // No descuenta comisión del mentor (ese es profit del mentor, no del lab).
+  // No descuenta comisión del partner (ese es profit del partner, no del lab).
   const profitTotal = sales.reduce((acc, o) => {
     const product = products.find(p => p.id === o.productoId);
     return acc + getOrderProfit(o, product);
@@ -6004,8 +7058,8 @@ function UserMenu({ currentUser, sidebarOpen, state, onLogout }) {
             </button>
             <button
               onClick={() => {
-                if (window.confirm('¿Borrar todos los datos cargados y volver al estado de demo? Esta acción no se puede deshacer.')) {
-                  try { localStorage.removeItem('viora-state-v1'); } catch {}
+                if (window.confirm('¿Borrar todos los datos cargados? Esta acción no se puede deshacer. Si tenés info importante, exportá primero desde la sección Datos.')) {
+                  try { localStorage.removeItem(STATE_STORAGE_KEY); } catch {}
                   window.location.reload();
                 }
               }}
@@ -6013,7 +7067,22 @@ function UserMenu({ currentUser, sidebarOpen, state, onLogout }) {
               title="Borra todas las órdenes, clientes, productos y pagos cargados"
             >
               <Trash2 size={12} />
-              Resetear datos a demo
+              Vaciar todos los datos
+            </button>
+            <button
+              onClick={() => {
+                if (window.confirm('¿Cargar datos de ejemplo? Esto reemplaza lo que tengas cargado por los datos demo (5 productos, 8 clientes, 2 mentores, 15 órdenes).')) {
+                  try {
+                    localStorage.setItem(STATE_STORAGE_KEY, JSON.stringify(DEMO_STATE));
+                  } catch {}
+                  window.location.reload();
+                }
+              }}
+              className="w-full mt-2 flex items-center gap-2 text-xs text-white/40 hover:text-amber-300 transition"
+              title="Reemplaza los datos cargados por los de demo (útil para probar la app)"
+            >
+              <Package size={12} />
+              Cargar datos de demo
             </button>
           </div>
 
@@ -6192,7 +7261,7 @@ function AlertItem({ alerta }) {
   );
 }
 
-function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, onOpenCommand, onOpenMobileMenu, notificationsSnapshot }) {
+function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, onOpenCommand, onOpenMobileMenu, notificationsSnapshot, bgTasks = [] }) {
   const [scrolled, setScrolled] = useState(false);
   const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform);
 
@@ -6249,6 +7318,15 @@ function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, onOpenCommand
         >
           <Search size={18} />
         </button>
+        {bgTasks.length > 0 && (
+          <div
+            className="hidden sm:inline-flex items-center gap-2 px-3 py-1.5 text-[11px] rounded-lg bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800/50 text-amber-800 dark:text-amber-200 animate-pulse"
+            title={bgTasks.join(', ')}
+          >
+            <Sparkles size={12} className="animate-spin" />
+            <span>{bgTasks[0]}{bgTasks.length > 1 ? ` +${bgTasks.length - 1}` : ''}</span>
+          </div>
+        )}
         {notificationsSnapshot && (
           <NotificationsBell snapshot={notificationsSnapshot} />
         )}
@@ -6311,11 +7389,9 @@ function CommandPalette({ state, currentUser, onClose, onNavigate, onNewSale, on
   if (currentUser?.role === 'admin') {
     baseCmds.push(
       { id: 'go-inicio', group: 'Ir a', label: 'Dashboard / Inicio', icon: Home, shortcut: 'G I', run: () => onNavigate('inicio') },
-      { id: 'go-ventas', group: 'Ir a', label: 'Ventas', icon: TrendingUp, shortcut: 'G V', run: () => onNavigate('ventas') },
       { id: 'go-productos', group: 'Ir a', label: 'Productos', icon: Package, shortcut: 'G P', run: () => onNavigate('productos') },
       { id: 'go-clientes', group: 'Ir a', label: 'Clientes', icon: Users, shortcut: 'G C', run: () => onNavigate('clientes') },
-      { id: 'go-comisiones', group: 'Ir a', label: 'Comisiones', icon: CreditCard, shortcut: 'G $', run: () => onNavigate('comisiones') },
-      { id: 'go-mentores', group: 'Ir a', label: 'Mentores', icon: UserCheck, shortcut: 'G M', run: () => onNavigate('mentores') },
+      { id: 'go-comisiones', group: 'Ir a', label: 'Comisiones y Partners', icon: CreditCard, shortcut: 'G $', run: () => onNavigate('comisiones') },
       { id: 'new-sale', group: 'Acciones', label: 'Nueva venta', icon: Plus, shortcut: 'N V', run: onNewSale },
       { id: 'new-client', group: 'Acciones', label: 'Nuevo cliente', icon: Plus, shortcut: 'N C', run: onNewClient },
       { id: 'new-product', group: 'Acciones', label: 'Nuevo producto', icon: Plus, shortcut: 'N P', run: onNewProduct },

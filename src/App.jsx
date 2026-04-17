@@ -1162,7 +1162,8 @@ function buildPanelChatContext(state, currentUser) {
   const ventasPeriodo = state.sales.reduce((s, o) => s + (o.montoTotal || 0), 0);
   const profitPeriodo = state.sales.reduce((s, o) => {
     const p = state.products.find(p => p.id === o.productoId);
-    return s + getOrderProfit(o, p);
+    const m = o.mentorId ? state.mentors.find(m => m.id === o.mentorId) : null;
+    return s + getLabRealProfit(o, p, m);
   }, 0);
   const comisionesPendientes = state.sales
     .filter(o => o.mentorId && o.estadoComision !== 'pagada')
@@ -1523,7 +1524,8 @@ function InicioSection({ state, dispatch, onAddSale, onQuickAddClient, onQuickAd
   const ventasPeriodo = filteredOrders.reduce((s, o) => s + (o.montoTotal || 0), 0);
   const totalProfit = filteredOrders.reduce((acc, order) => {
     const product = state.products.find(p => p.id === order.productoId);
-    return acc + getOrderProfit(order, product);
+    const mentor = order.mentorId ? state.mentors.find(m => m.id === order.mentorId) : null;
+    return acc + getLabRealProfit(order, product, mentor);
   }, 0);
   const pendingCommissionsPeriodo = filteredOrders
     .filter(o => o.mentorId && o.estadoComision !== 'pagada')
@@ -2055,7 +2057,7 @@ function OrdersList({ state, dispatch, orders, onEditOrder }) {
               {isColVisible('precio') && <th className="px-4 py-3 font-semibold text-right" title="Precio cobrado al cliente. Doble click en la celda para editar.">Precio venta</th>}
               {isColVisible('costoInf') && <th className="px-4 py-3 font-semibold text-right" title="Costo informado al partner para esta orden. Su comisión se calcula sobre (venta − este costo).">C. Informado</th>}
               {isColVisible('comision') && <th className="px-4 py-3 font-semibold text-right" title="Comisión que se le paga al partner (% de ganancia sobre costo informado)">Com. partner</th>}
-              {isColVisible('profit') && <th className="px-4 py-3 font-semibold text-right" title="Profit del laboratorio = precio venta − costo. NO descuenta la comisión del partner.">Profit</th>}
+              {isColVisible('profit') && <th className="px-4 py-3 font-semibold text-right" title="Profit real del laboratorio = precio venta − costo − comisión del partner.">Profit</th>}
               {isColVisible('estado') && <th className="px-4 py-3 font-semibold" title="Estado del pipeline: Pendiente cotización → Cotizado → Abonado → En producción → Listo para enviar → Despachado">Estado</th>}
               {isColVisible('cobro') && <th className="px-4 py-3 font-semibold text-center" title="Progreso de cobro al cliente. Click para ver detalle o registrar pagos.">Cobro</th>}
               {isColVisible('incidencia') && <th className="px-4 py-3 font-semibold" title="Marcá esta orden con incidencia si hay alguna demora o problema.">Incidencia</th>}
@@ -2068,13 +2070,14 @@ function OrdersList({ state, dispatch, orders, onEditOrder }) {
             {ordersToRender.map(order => {
               const product = getProduct(order.productoId);
               const costs = getOrderCosts(order, product);
-              const profitTotal = getOrderProfit(order, product);
-              const profitUnit = product ? (product.precioVenta - getProductUnitCost(product)) : 0;
               const mentorId = order.mentorId;
               const hasMentor = !!mentorId;
               const mentor = hasMentor ? state.mentors.find(m => m.id === mentorId) : null;
               const commissionTotal = hasMentor ? getMentorCommission(order, product, mentor) : 0;
               const commissionUnit = hasMentor && (order.cantidad || 0) > 0 ? (commissionTotal / (order.cantidad || 1)) : 0;
+              // Profit real del laboratorio: precio venta − costo − comisión del partner.
+              const profitTotal = getLabRealProfit(order, product, mentor);
+              const profitUnit = (order.cantidad || 0) > 0 ? (profitTotal / order.cantidad) : 0;
               const precioVentaUnit = product?.precioVenta || 0;
               const precioVentaTotal = precioVentaUnit * (order.cantidad || 0);
 
@@ -2373,8 +2376,8 @@ function OrdersCardView({ orders, state, viewMode, onStateChange, expanded, togg
         const cantidad = order.cantidad || 0;
         const precioVentaUnit = product?.precioVenta || 0;
         const precioVentaTotal = (order.montoTotal != null ? order.montoTotal : precioVentaUnit * cantidad);
-        const profitTotal = getOrderProfit(order, product);
         const commissionTotal = mentor ? getMentorCommission(order, product, mentor) : 0;
+        const profitTotal = getLabRealProfit(order, product, mentor);
         const cobros = getOrderCobrosSummary(order);
         const isOpen = expanded.has(order.id);
         return (
@@ -6934,11 +6937,11 @@ function UserMenu({ currentUser, sidebarOpen, state, onLogout }) {
     return acc + pend;
   }, 0);
 
-  // Profit acumulado: (precio venta - costos unitarios) × cantidad, por orden.
-  // No descuenta comisión del partner (ese es profit del partner, no del lab).
+  // Profit real del lab: (precio venta − costo − comisión del partner) × cantidad.
   const profitTotal = sales.reduce((acc, o) => {
     const product = products.find(p => p.id === o.productoId);
-    return acc + getOrderProfit(o, product);
+    const mentor = o.mentorId ? mentors.find(m => m.id === o.mentorId) : null;
+    return acc + getLabRealProfit(o, product, mentor);
   }, 0);
 
   // Línea motivacional según la situación

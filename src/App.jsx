@@ -4864,26 +4864,57 @@ function EquipoInicioSection({ currentUser, state }) {
     ? getMentorBalance(mentor, state.sales, state.products)
     : { generado: 0, cobrado: 0, saldo: 0, porcentaje: 0, ordenes: 0, pagos: [] };
 
-  // Stats del lab que SÍ puede ver: número total de órdenes activas,
-  // sus órdenes referidas, lo que generó este mes, y las incidencias
-  // del lab (igual que la admin, son operativas).
-  const totalOrdenesActivas = state.sales.filter(o => (o.estado || 'consulta-recibida') !== 'despachado').length;
-  const incidenciasLab = state.sales.filter(s => s.tieneIncidencia).length;
-  const mesActual = state.sales
-    .filter(s => s.mentorId === currentUser.id && (s.fecha || '').startsWith(new Date().toISOString().substring(0, 7)))
+  const misOrdenes = state.sales.filter(s => s.mentorId === currentUser.id);
+  const misClientes = state.clients.filter(c => c.mentorId === currentUser.id);
+  const mesActual = misOrdenes
+    .filter(s => (s.fecha || '').startsWith(new Date().toISOString().substring(0, 7)))
     .reduce((sum, s) => {
       const p = state.products.find(pp => pp.id === s.productoId);
       return sum + getMentorCommission(s, p, mentor);
     }, 0);
+  const totalProfitInformado = misOrdenes.reduce((sum, s) => {
+    const p = state.products.find(pp => pp.id === s.productoId);
+    return sum + getOrderInformedProfit(s, p);
+  }, 0);
+
+  const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
 
   return (
-    <div className="space-y-8">
-      <DailyQuoteBanner />
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <StatCard icon={DollarSign} label="Generado total" value={`$${Math.round(balance.generado).toLocaleString()}`} color="from-emerald-500 to-teal-500" delay={0} />
-        <StatCard icon={CreditCard} label="Te queda cobrar" value={`$${Math.max(0, Math.round(balance.saldo)).toLocaleString()}`} color="from-amber-500 to-orange-500" delay={80} />
-        <StatCard icon={TrendingUp} label="Comisión este mes" value={`$${Math.round(mesActual).toLocaleString()}`} color="from-purple-500 to-pink-500" delay={160} />
-        <StatCard icon={AlertCircle} label="Incidencias del lab" value={incidenciasLab} color="from-red-500 to-pink-500" delay={240} />
+    <div className="space-y-6">
+      <div className="text-center p-6 bg-gradient-to-r from-pink-50 to-rose-50 dark:from-pink-900/30 dark:to-rose-900/30 rounded-xl">
+        <h2 className="text-2xl font-bold text-pink-900 dark:text-pink-200">Hola, {currentUser.name}</h2>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Tu resumen como partner — actualizado en vivo.</p>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <StatCard icon={DollarSign} label="Comisiones generadas" value={fmtMoney(balance.generado)} color="from-emerald-500 to-teal-500" delay={0} />
+        <StatCard icon={CreditCard} label="Te queda cobrar" value={fmtMoney(Math.max(0, balance.saldo))} color="from-amber-500 to-orange-500" delay={80} />
+        <StatCard icon={TrendingUp} label="Comisión este mes" value={fmtMoney(mesActual)} color="from-purple-500 to-pink-500" delay={160} />
+        <StatCard icon={Users} label="Clientes referidos" value={misClientes.length} color="from-sky-500 to-blue-500" delay={240} />
+      </div>
+
+      {/* Resumen financiero */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-5">
+        <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 mb-3">Tu resumen financiero</h3>
+        <div className="grid grid-cols-3 gap-4 text-center">
+          <div>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Profit total</p>
+            <p className="text-lg font-bold text-sky-600 dark:text-sky-400 tabular-nums">{fmtMoney(totalProfitInformado)}</p>
+            <p className="text-[10px] text-gray-400">Sobre {misOrdenes.length} órdenes</p>
+          </div>
+          <div>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Tu comisión ({mentor?.porcentajeComision ?? 50}%)</p>
+            <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{fmtMoney(balance.generado)}</p>
+            <p className="text-[10px] text-gray-400">Ya cobraste {fmtMoney(balance.cobrado)}</p>
+          </div>
+          <div>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Cobro pendiente</p>
+            <p className="text-lg font-bold text-amber-600 dark:text-amber-400 tabular-nums">{fmtMoney(Math.max(0, balance.saldo))}</p>
+            <div className="w-full h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden mt-1">
+              <div className="h-full bg-emerald-500 transition-all" style={{ width: `${Math.min(100, balance.porcentaje)}%` }} />
+            </div>
+          </div>
+        </div>
       </div>
 
       <EquipoOrdenesView state={state} mentorId={currentUser.id} compact />
@@ -4937,47 +4968,37 @@ function EquipoOrdenesView({ state, mentorId, compact = false }) {
               <th className="px-4 py-3 font-semibold">Cliente</th>
               <th className="px-4 py-3 font-semibold">Producto</th>
               <th className="px-4 py-3 font-semibold text-right">Cant.</th>
-              <th className="px-4 py-3 font-semibold text-right">Monto venta</th>
+              <th className="px-4 py-3 font-semibold text-right">Costo</th>
+              <th className="px-4 py-3 font-semibold text-right">Precio venta</th>
+              <th className="px-4 py-3 font-semibold text-right">Ganancia</th>
               <th className="px-4 py-3 font-semibold text-right">Tu comisión</th>
               <th className="px-4 py-3 font-semibold">Estado</th>
-              <th className="px-4 py-3 font-semibold">Cobro cliente</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
             {visibles.length === 0 && (
-              <tr><td colSpan={8} className="px-4 py-10 text-center text-gray-500 dark:text-gray-400">Todavía no tenés órdenes referidas.</td></tr>
+              <tr><td colSpan={9} className="px-4 py-10 text-center text-gray-500 dark:text-gray-400">Todavía no tenés órdenes referidas.</td></tr>
             )}
             {visibles.map(order => {
               const product = state.products.find(p => p.id === order.productoId);
               const comision = getMentorCommission(order, product, mentor);
-              const cobros = getOrderCobrosSummary(order);
+              const costoInfUnit = getInformedCostUnit(order, product);
+              const profitInformado = getOrderInformedProfit(order, product);
               const estado = order.estado || 'consulta-recibida';
-              const saldada = cobros.saldo <= 0 && cobros.total > 0;
               return (
                 <tr key={order.id} className={`${order.tieneIncidencia ? 'bg-red-50/40 dark:bg-red-900/10' : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}>
                   <td className="px-4 py-3 text-gray-900 dark:text-gray-100 whitespace-nowrap">{order.fecha}</td>
                   <td className="px-4 py-3 text-gray-900 dark:text-gray-100">{getClientName(order.clienteId)}</td>
                   <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{getProductName(order.productoId)}</td>
                   <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300">{order.cantidad}</td>
+                  <td className="px-4 py-3 text-right text-gray-600 dark:text-gray-400 tabular-nums">{fmtMoney(costoInfUnit * (order.cantidad || 0))}</td>
                   <td className="px-4 py-3 text-right text-gray-900 dark:text-gray-100 tabular-nums">{fmtMoney(order.montoTotal || 0)}</td>
+                  <td className="px-4 py-3 text-right font-semibold text-sky-600 dark:text-sky-400 tabular-nums">{fmtMoney(profitInformado)}</td>
                   <td className="px-4 py-3 text-right font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{fmtMoney(comision)}</td>
                   <td className="px-4 py-3">
                     <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${ORDER_STATE_STYLES[estado]}`}>
                       {ORDER_STATE_LABELS[estado]}
                     </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <span className={`text-[11px] font-bold tabular-nums shrink-0 ${saldada ? 'text-emerald-600 dark:text-emerald-400' : cobros.cobrado > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500 dark:text-gray-500'}`}>
-                        {saldada ? '✓' : `${cobros.porcentaje}%`}
-                      </span>
-                      <div className="w-16 h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
-                        <div
-                          className={`h-full ${saldada ? 'bg-emerald-500' : 'bg-gradient-to-r from-amber-400 to-emerald-500'}`}
-                          style={{ width: `${Math.min(100, cobros.porcentaje)}%` }}
-                        />
-                      </div>
-                    </div>
                   </td>
                 </tr>
               );

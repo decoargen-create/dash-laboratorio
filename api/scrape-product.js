@@ -75,8 +75,8 @@ Cada variante:
 
 Si no hay variantes claras, devolvé variantes: []. NO inventes variantes.
 
-=== EVALUACIÓN DE LA IMAGEN ===
-Evaluá también si la imagen principal del producto (og:image, o lo que detectes en el HTML) va a ser difícil de procesar con un modelo de remoción de fondo. Marcala como riesgosa si sospechás alguno de estos casos (leyendo descripción, alt text, y contexto del HTML):
+=== EVALUACIÓN DE LA IMAGEN (con visión) ===
+Cuando te adjuntan la imagen real del producto, MIRALA con tu capacidad de visión y evaluá si va a ser difícil de procesar con un modelo automático de remoción de fondo. Marcala como riesgosa si VES alguno de estos casos:
 
 - Tiene PERSONAS o manos sosteniendo el producto (el modelo puede recortar a la persona también).
 - Es una ESCENA compleja (producto en ambiente, sobre una mesa con objetos, en un contexto de uso).
@@ -184,6 +184,72 @@ function extractProductLinksFromCollection(html, baseUrl) {
   return results;
 }
 
+// Intenta bajar datos estructurados del producto si es Shopify: `/products/slug`
+// tiene un endpoint `.json` con todo servido limpio (título, vendor, variantes
+// con options, imágenes). Es 10x más confiable que parsear HTML.
+async function tryShopifyJson(url) {
+  try {
+    const u = new URL(url);
+    if (!u.pathname.match(/\/products\/[^/]+/)) return null;
+    const jsonUrl = u.origin + u.pathname.split('?')[0].replace(/\/$/, '') + '.json';
+    const resp = await fetchWithTimeout(jsonUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; SenydropBocetos/1.0)',
+        'Accept': 'application/json',
+      },
+    }, 8000);
+    if (!resp.ok) return null;
+    const ct = resp.headers.get('content-type') || '';
+    if (!ct.includes('json')) return null;
+    const data = await resp.json();
+    if (!data?.product || !data.product.title) return null;
+    return data.product;
+  } catch { return null; }
+}
+
+// Extrae datos Product de JSON-LD (schema.org). Funciona bien en tiendas
+// modernas (Tiendanube, Wordpress/Woo, varias plataformas).
+function extractJsonLdProduct(html) {
+  const matches = [...html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];
+  for (const m of matches) {
+    try {
+      const data = JSON.parse(m[1].trim());
+      const arr = Array.isArray(data) ? data : (data['@graph'] || [data]);
+      for (const obj of arr) {
+        const t = obj?.['@type'];
+        if (t === 'Product' || (Array.isArray(t) && t.includes('Product'))) return obj;
+      }
+    } catch {}
+  }
+  return null;
+}
+
+// Convierte variantes de Shopify (que vienen como combinaciones) en un array
+// de { tipo, valor } único. Ej: si el producto tiene options [Color, Talle]
+// con valores Rojo/Azul y M/L, devolvemos: [color:Rojo, color:Azul, talle:M, talle:L].
+function variantesFromShopifyOptions(options) {
+  if (!Array.isArray(options)) return [];
+  const out = [];
+  for (const opt of options) {
+    if (!opt?.name) continue;
+    const tipoRaw = String(opt.name).toLowerCase();
+    const tipo = tipoRaw.includes('color') ? 'color'
+      : tipoRaw.includes('talle') || tipoRaw.includes('size') ? 'talle'
+      : tipoRaw.includes('medida') ? 'medida'
+      : tipoRaw.includes('sabor') || tipoRaw.includes('flavor') ? 'sabor'
+      : tipoRaw.includes('material') ? 'material'
+      : tipoRaw.includes('modelo') || tipoRaw.includes('model') ? 'modelo'
+      : 'otro';
+    for (const v of (opt.values || [])) {
+      const valor = String(v).trim();
+      if (valor && !out.some(x => x.tipo === tipo && x.valor.toLowerCase() === valor.toLowerCase())) {
+        out.push({ tipo, valor: valor.slice(0, 40) });
+      }
+    }
+  }
+  return out.slice(0, 20);
+}
+
 // Scrapea UN producto y genera su JSON. Devuelve { ok, error?, data? }.
 // `customInstructions` (opcional) son instrucciones del user para ajustar el
 // comportamiento (se inyectan al prompt como contexto adicional).
@@ -196,32 +262,71 @@ async function scrapeSingleProduct(url, clienteNombre, apiKey, customInstruction
     return { ok: false, error: 'Sólo http(s)', url };
   }
 
+  // Paso 1a: probar Shopify JSON endpoint (la forma más confiable de sacar
+  // datos estructurados cuando la tienda es Shopify).
+  const shopifyProduct = await tryShopifyJson(url);
+
+  // Paso 1b: bajar HTML. Incluso si tenemos Shopify JSON, queremos el HTML
+  // para JSON-LD y otros datos complementarios. Con retry si el primer UA
+  // se come un 403 (algunas tiendas bloquean bots obvios).
   let html;
-  try {
-    const resp = await fetchWithTimeout(parsedUrl.toString(), {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; SenydropBocetos/1.0)',
-        'Accept': 'text/html,application/xhtml+xml',
-      },
-    });
-    if (!resp.ok) return { ok: false, error: `HTTP ${resp.status}`, url };
-    html = await resp.text();
-  } catch (err) {
-    return { ok: false, error: err.message || String(err), url };
+  const uaPool = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+    'Mozilla/5.0 (compatible; SenydropBocetos/1.0)',
+  ];
+  for (const ua of uaPool) {
+    try {
+      const resp = await fetchWithTimeout(parsedUrl.toString(), {
+        headers: {
+          'User-Agent': ua,
+          'Accept': 'text/html,application/xhtml+xml',
+          'Accept-Language': 'es-AR,es;q=0.9,en;q=0.5',
+        },
+      });
+      if (resp.ok) { html = await resp.text(); break; }
+    } catch {}
+  }
+  if (!html) {
+    // Si Shopify JSON sí respondió pero el HTML falló, podemos seguir con
+    // sólo la info del JSON (suficiente para muchos casos).
+    if (!shopifyProduct) return { ok: false, error: 'No pude acceder a la landing (HTTP 403 o timeout)', url };
+    html = '';
   }
 
-  const ogTitle = extractMeta(html, ['og:title', 'twitter:title']);
-  const ogImage = extractMeta(html, ['og:image', 'og:image:secure_url', 'twitter:image']);
-  const ogDesc = extractMeta(html, ['og:description', 'twitter:description', 'description']);
-  const fallbackTitle = extractTitleTag(html);
-  const titulo = ogTitle || fallbackTitle || '';
+  // Paso 2: extraer metadata combinando Shopify > JSON-LD > og: > <title>.
+  const ldProduct = html ? extractJsonLdProduct(html) : null;
+  const ogTitle = html ? extractMeta(html, ['og:title', 'twitter:title']) : null;
+  const ogImage = html ? extractMeta(html, ['og:image', 'og:image:secure_url', 'twitter:image']) : null;
+  const ogDesc = html ? extractMeta(html, ['og:description', 'twitter:description', 'description']) : null;
+  const fallbackTitle = html ? extractTitleTag(html) : null;
 
-  if (!titulo) return { ok: false, error: 'Sin og:title detectable', url };
+  const tituloShopify = shopifyProduct?.title || null;
+  const tituloLd = ldProduct?.name || null;
+  const imagenShopify = shopifyProduct?.images?.[0]?.src || null;
+  const imagenLd = Array.isArray(ldProduct?.image) ? ldProduct.image[0] : ldProduct?.image || null;
+  const descShopify = shopifyProduct?.body_html
+    ? shopifyProduct.body_html.replace(/<[^>]+>/g, '').trim().slice(0, 400)
+    : null;
+  const descLd = ldProduct?.description || null;
+
+  // Prioridad del título: Shopify > JSON-LD > og: > <title>.
+  const titulo = tituloShopify || tituloLd || ogTitle || fallbackTitle || '';
+  const descripcion = descShopify || descLd || ogDesc || null;
+  const imagenPreferida = imagenShopify || imagenLd || ogImage || null;
+
+  if (!titulo) return { ok: false, error: 'No pude detectar el título del producto', url };
+
+  // Variantes estructuradas de Shopify (si las tenemos, evitamos que Claude
+  // tenga que adivinarlas del HTML).
+  const variantesShopify = shopifyProduct ? variantesFromShopifyOptions(shopifyProduct.options) : [];
 
   let imagenDataUrl = null;
-  if (ogImage) {
+  let imagenB64 = null;
+  let imagenContentType = null;
+  if (imagenPreferida) {
     try {
-      const imgUrl = new URL(ogImage, parsedUrl).toString();
+      const imgUrl = new URL(imagenPreferida, parsedUrl).toString();
       const imgResp = await fetchWithTimeout(imgUrl, {
         headers: { 'User-Agent': 'Mozilla/5.0 (compatible; SenydropBocetos/1.0)' },
       });
@@ -231,6 +336,8 @@ async function scrapeSingleProduct(url, clienteNombre, apiKey, customInstruction
         if (buf.byteLength > 0 && buf.byteLength <= MAX_IMG_BYTES) {
           const b64 = Buffer.from(buf).toString('base64');
           imagenDataUrl = `data:${contentType};base64,${b64}`;
+          imagenB64 = b64;
+          imagenContentType = contentType;
         }
       }
     } catch {}
@@ -254,20 +361,36 @@ async function scrapeSingleProduct(url, clienteNombre, apiKey, customInstruction
     try {
       const client = new Anthropic({ apiKey });
       const instruccionesUser = (customInstructions || '').trim();
+      const fuente = shopifyProduct ? 'shopify-json' : ldProduct ? 'json-ld' : 'html-meta';
       const prompt = `Cliente: ${clienteNombre}
-Título detectado por scraper (puede ser de tienda): ${titulo}
-${ogDesc ? `Descripción: ${ogDesc.slice(0, 400)}` : ''}
+Fuente de datos: ${fuente}
+Título detectado: ${titulo}
+${descripcion ? `Descripción: ${descripcion.slice(0, 400)}` : ''}
 URL: ${url}
+${variantesShopify.length > 0 ? `\nVariantes estructuradas ya extraídas (no re-detectes, usalas tal cual):\n${JSON.stringify(variantesShopify)}` : ''}
 
 HTML limpio (primeros 12KB):
 ${htmlLimpio}
 ${instruccionesUser ? `\n=== INSTRUCCIONES ADICIONALES DEL USER (priorizalas sobre defaults) ===\n${instruccionesUser.slice(0, 1500)}\n` : ''}
-Generá el JSON con sku, nombreLimpio (técnico y real, no el de la tienda) y variantes detectadas.`;
+${imagenB64 ? 'TENÉS LA IMAGEN ADJUNTA. Mirá la foto real (no sólo el HTML) para evaluar si va a fallar al remover el fondo: personas, escenas, texto grande, cortes, fusión con fondo. Si la foto está limpia sobre fondo uniforme, imagenRiesgosa: false.' : ''}
+
+Generá el JSON con sku, nombreLimpio (técnico y real), variantes, y evaluación de la imagen.`;
+
+      const userContent = [{ type: 'text', text: prompt }];
+      // Si tenemos la imagen bajada, la pasamos como content block (Haiku 4.5
+      // soporta vision). Así Claude la ve real en vez de adivinar por HTML.
+      if (imagenB64 && imagenContentType && /^image\/(jpeg|png|webp|gif)$/i.test(imagenContentType)) {
+        userContent.push({
+          type: 'image',
+          source: { type: 'base64', media_type: imagenContentType, data: imagenB64 },
+        });
+      }
+
       const message = await client.messages.create({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 1024,
         system: [{ type: 'text', text: SYSTEM_SKU, cache_control: { type: 'ephemeral' } }],
-        messages: [{ role: 'user', content: prompt }],
+        messages: [{ role: 'user', content: userContent }],
       });
       const text = message.content?.[0]?.type === 'text' ? message.content[0].text : '';
       const cleaned = text.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
@@ -286,6 +409,8 @@ Generá el JSON con sku, nombreLimpio (técnico y real, no el de la tienda) y va
             valor: String(v.valor).trim().slice(0, 40),
           }));
       }
+      // Si Shopify nos dio variantes estructuradas, esas ganan (son perfectas).
+      if (variantesShopify.length > 0) variantes = variantesShopify;
     } catch (err) {
       console.error('scrapeSingleProduct: fallo Claude', err?.message);
     }

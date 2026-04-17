@@ -290,14 +290,12 @@ export default function BocetosSection({ addToast }) {
         _normalized: false,
       }));
 
-      // Auto-procesar imágenes según config:
-      //   1) Si hay autoRemoveBackground → bg removal (incluye whitening).
-      //   2) Si sólo hay autoNormalizeImage → padding blanco sin removal.
-      // Si la IA marcó la imagen como riesgosa, skipeamos el bg removal
-      // automático (mejor que el user la reemplace manual a que quede mal).
-      // El padding blanco sí se aplica igual.
+      // Auto-procesar imágenes según config. Siempre preservamos la imagen
+      // original en _imagenOriginal para que el user pueda restaurarla si
+      // el resultado no le gusta.
       for (const n of nuevos) {
         if (!n.imagen) continue;
+        n._imagenOriginal = n.imagen;
         try {
           if (aiConfig.autoRemoveBackground && !n.imagenRiesgosa) {
             n.imagen = await removeBackgroundAndWhiten(n.imagen);
@@ -414,11 +412,19 @@ export default function BocetosSection({ addToast }) {
 
   const handleReplaceImage = async (tempId, file) => {
     try {
-      let dataUrl = await fileToDataURL(file);
+      const original = await fileToDataURL(file);
+      let dataUrl = original;
       if (aiConfig.autoNormalizeImage) {
         try { dataUrl = await normalizeToWhiteBg(dataUrl); } catch {}
       }
-      updatePending(tempId, { imagen: dataUrl, _normalized: aiConfig.autoNormalizeImage });
+      // Si el user sube una imagen nueva, reseteamos el backup original
+      // porque ahora empezamos de cero con esta nueva foto.
+      updatePending(tempId, {
+        imagen: dataUrl,
+        _imagenOriginal: original,
+        _normalized: aiConfig.autoNormalizeImage,
+        _bgRemoved: false,
+      });
     } catch (err) {
       addToast?.({ type: 'error', message: err.message });
     }
@@ -428,8 +434,9 @@ export default function BocetosSection({ addToast }) {
     const item = pending.find(p => p._tempId === tempId);
     if (!item?.imagen) { addToast?.({ type: 'error', message: 'Este pendiente no tiene imagen' }); return; }
     try {
-      const normalized = await normalizeToWhiteBg(item.imagen);
-      updatePending(tempId, { imagen: normalized, _normalized: true });
+      const original = item._imagenOriginal || item.imagen;
+      const normalized = await normalizeToWhiteBg(original);
+      updatePending(tempId, { imagen: normalized, _imagenOriginal: original, _normalized: true, _bgRemoved: false });
       addToast?.({ type: 'success', message: 'Imagen normalizada a fondo blanco' });
     } catch (err) {
       addToast?.({ type: 'error', message: err.message || 'No se pudo normalizar' });
@@ -441,13 +448,34 @@ export default function BocetosSection({ addToast }) {
     if (!item?.imagen) { addToast?.({ type: 'error', message: 'Este pendiente no tiene imagen' }); return; }
     updatePending(tempId, { _bgRemoving: true });
     try {
-      const clean = await removeBackgroundAndWhiten(item.imagen);
-      updatePending(tempId, { imagen: clean, _normalized: true, _bgRemoved: true, _bgRemoving: false });
+      // Siempre removemos fondo sobre la ORIGINAL, no sobre una imagen ya
+      // procesada. Si el user ya normalizó y luego remueve fondo, igual
+      // trabajamos sobre la foto que vino del scrape/upload.
+      const original = item._imagenOriginal || item.imagen;
+      const clean = await removeBackgroundAndWhiten(original);
+      updatePending(tempId, {
+        imagen: clean,
+        _imagenOriginal: original,
+        _normalized: true,
+        _bgRemoved: true,
+        _bgRemoving: false,
+      });
       addToast?.({ type: 'success', message: 'Fondo removido correctamente' });
     } catch (err) {
       updatePending(tempId, { _bgRemoving: false });
       addToast?.({ type: 'error', message: `No se pudo remover el fondo: ${err.message}` });
     }
+  };
+
+  const handleRestoreOriginal = (tempId) => {
+    const item = pending.find(p => p._tempId === tempId);
+    if (!item?._imagenOriginal) { addToast?.({ type: 'error', message: 'No hay imagen original para restaurar' }); return; }
+    updatePending(tempId, {
+      imagen: item._imagenOriginal,
+      _normalized: false,
+      _bgRemoved: false,
+    });
+    addToast?.({ type: 'success', message: 'Imagen original restaurada' });
   };
 
   // ---------- Guardados CRUD ----------
@@ -752,6 +780,7 @@ export default function BocetosSection({ addToast }) {
                   onReplaceImage={(file) => handleReplaceImage(p._tempId, file)}
                   onNormalize={() => handleNormalizeImage(p._tempId)}
                   onRemoveBg={() => handleRemoveBackground(p._tempId)}
+                  onRestoreOriginal={() => handleRestoreOriginal(p._tempId)}
                 />
               ))}
             </div>
@@ -948,11 +977,12 @@ function AiConfigModal({ value, onChange, onClose }) {
 
 // ---------- Pending item (inline editor) ----------
 
-function PendingItem({ item, layout, onChange, onApprove, onDiscard, onReplaceImage, onNormalize, onRemoveBg }) {
+function PendingItem({ item, layout, onChange, onApprove, onDiscard, onReplaceImage, onNormalize, onRemoveBg, onRestoreOriginal }) {
   const fileRef = useRef(null);
   const [showShipping, setShowShipping] = useState(false);
   const missing = !item.nombre.trim() || !item.sku.trim();
   const processing = !!item._bgRemoving;
+  const hasOriginalBackup = !!item._imagenOriginal && item._imagenOriginal !== item.imagen;
 
   const content = (
     <div className="flex gap-4">
@@ -1009,6 +1039,16 @@ function PendingItem({ item, layout, onChange, onApprove, onDiscard, onReplaceIm
                 title="Centrar imagen en cuadrado con padding blanco (sin tocar fondo)"
               >
                 <Wand2 size={10} /> {item._normalized ? 'Cuadrada ✓' : 'Cuadrar'}
+              </button>
+            )}
+            {hasOriginalBackup && (
+              <button
+                type="button"
+                onClick={onRestoreOriginal}
+                className="inline-flex items-center justify-center gap-1 px-2 py-0.5 text-[10px] font-semibold bg-white text-gray-600 border border-gray-300 rounded hover:bg-gray-50 hover:text-gray-900 transition"
+                title="Volver a la foto original (antes del procesamiento)"
+              >
+                <RotateCcw size={10} /> Restaurar
               </button>
             )}
           </div>

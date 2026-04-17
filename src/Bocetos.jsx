@@ -19,12 +19,30 @@ import {
   Plus, Trash2, Download, Upload, Edit2, Package, Image as ImageIcon,
   Save, X, Check, Sparkles, Link as LinkIcon, Loader2, ChevronDown, UserPlus,
   List as ListIcon, LayoutGrid, ExternalLink, AlertTriangle, RefreshCw,
+  Settings, Wand2, RotateCcw,
 } from 'lucide-react';
 
 const STORAGE_KEY_BOCETOS = 'viora-bocetos-v1';
 const STORAGE_KEY_CLIENTES = 'viora-bocetos-clientes-v1';
 const STORAGE_KEY_LAST_CLIENTE = 'viora-bocetos-last-cliente';
+const STORAGE_KEY_AI_CONFIG = 'viora-bocetos-ai-config-v1';
 const MAX_IMG_BYTES = 1024 * 1024;
+const CANVAS_SIZE = 1000; // imagen normalizada a cuadrado de 1000x1000 con fondo blanco
+
+const DEFAULT_AI_INSTRUCTIONS = `Ejemplos de cómo podés entrenar a la IA:
+
+- "Los nombres en español sin acentos, todo con mayúsculas iniciales."
+- "Si es un producto para el hogar, empezalo con 'Set'."
+- "No uses palabras como 'Premium', 'Pro' ni 'Original'."
+- "Si detectás un producto en la categoría 'Limpieza', agregá la variante 'uso profesional' por default."
+- "Si el cliente es 'Agustin Samara', usá el prefijo AS- en el SKU sí o sí (no SA-)."
+
+Escribí acá tus instrucciones y la IA las va a respetar al scrapear.`;
+
+const DEFAULT_AI_CONFIG = {
+  instructions: '',
+  autoNormalizeImage: true, // aplicar normalización fondo-blanco automáticamente al traer productos
+};
 
 // Clientes de ejemplo para arrancar con algo cargado. Si el user ya tiene
 // clientes guardados no los pisa.
@@ -74,6 +92,39 @@ function downloadJSON(data, filename) {
   URL.revokeObjectURL(url);
 }
 
+// Normaliza una imagen (dataURL) a un cuadrado 1000x1000 con fondo blanco:
+// carga la imagen, la encaja centrada preservando proporciones y rellena lo
+// que falta con blanco. No REMUEVE el fondo original — eso requeriría un
+// modelo de segmentación y un servicio externo. Pero sí empareja todas las
+// imágenes al mismo formato cuadrado para el catálogo de Senydrop.
+function normalizeToWhiteBg(dataUrl) {
+  return new Promise((resolve, reject) => {
+    if (!dataUrl) return reject(new Error('Sin imagen'));
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = CANVAS_SIZE;
+        canvas.height = CANVAS_SIZE;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+        // Escalar para que entre preservando aspect ratio con padding.
+        const ratio = Math.min(CANVAS_SIZE / img.width, CANVAS_SIZE / img.height) * 0.92;
+        const w = img.width * ratio;
+        const h = img.height * ratio;
+        const x = (CANVAS_SIZE - w) / 2;
+        const y = (CANVAS_SIZE - h) / 2;
+        ctx.drawImage(img, x, y, w, h);
+        resolve(canvas.toDataURL('image/jpeg', 0.9));
+      } catch (err) { reject(err); }
+    };
+    img.onerror = () => reject(new Error('No se pudo cargar la imagen'));
+    img.src = dataUrl;
+  });
+}
+
 // Iniciales de un cliente para mostrar en el SKU preview.
 function iniciales(nombre) {
   const parts = String(nombre || '').trim().split(/\s+/).filter(Boolean);
@@ -106,6 +157,15 @@ export default function BocetosSection({ addToast }) {
   // Form de nuevo cliente inline.
   const [newClienteName, setNewClienteName] = useState('');
   const [showNewCliente, setShowNewCliente] = useState(false);
+
+  // Config de IA: instrucciones custom + auto-normalizar imagen.
+  const [aiConfig, setAiConfig] = useState(() => {
+    const saved = loadJSON(STORAGE_KEY_AI_CONFIG, null);
+    return saved && typeof saved === 'object' ? { ...DEFAULT_AI_CONFIG, ...saved } : DEFAULT_AI_CONFIG;
+  });
+  const [showAiConfig, setShowAiConfig] = useState(false);
+
+  useEffect(() => { saveJSON(STORAGE_KEY_AI_CONFIG, aiConfig); }, [aiConfig]);
 
   const importInputRef = useRef(null);
 
@@ -145,15 +205,16 @@ export default function BocetosSection({ addToast }) {
 
   const handleScrape = async () => {
     if (!clienteSeleccionado) { addToast?.({ type: 'error', message: 'Elegí un cliente primero' }); return; }
+    const customInstructions = (aiConfig.instructions || '').trim();
     let payload;
     if (mode === 'batch') {
       const urls = urlsText.split('\n').map(s => s.trim()).filter(Boolean);
       if (urls.length === 0) { addToast?.({ type: 'error', message: 'Pegá al menos una URL' }); return; }
-      payload = { urls, clienteNombre: clienteSeleccionado.nombre };
+      payload = { urls, clienteNombre: clienteSeleccionado.nombre, customInstructions };
     } else {
       const col = collectionUrl.trim();
       if (!col) { addToast?.({ type: 'error', message: 'Pegá el link de la colección' }); return; }
-      payload = { collectionUrl: col, clienteNombre: clienteSeleccionado.nombre };
+      payload = { collectionUrl: col, clienteNombre: clienteSeleccionado.nombre, customInstructions };
     }
 
     setScraping(true);
@@ -174,11 +235,24 @@ export default function BocetosSection({ addToast }) {
         clienteId: clienteSeleccionado.id,
         clienteNombre: clienteSeleccionado.nombre,
         nombre: p.nombre || '',
+        nombreOriginal: p.nombreOriginal || '',
+        tituloOriginalEraDeTienda: !!p.tituloOriginalEraDeTienda,
         sku: p.sku || '',
         imagen: p.imagen || '',
         url: p.url || '',
         variantes: Array.isArray(p.variantes) ? p.variantes : [],
+        _normalized: false,
       }));
+
+      // Auto-normalizar imágenes si el user lo tiene activado en AI config.
+      if (aiConfig.autoNormalizeImage) {
+        for (const n of nuevos) {
+          if (!n.imagen) continue;
+          try { n.imagen = await normalizeToWhiteBg(n.imagen); n._normalized = true; }
+          catch { /* si falla una, seguimos */ }
+        }
+      }
+
       setPending(prev => [...nuevos, ...prev]);
       const errs = Array.isArray(data.errores) ? data.errores.length : 0;
       const msg = `Llegaron ${nuevos.length} producto(s)` + (errs > 0 ? ` · ${errs} fallaron` : '');
@@ -248,10 +322,25 @@ export default function BocetosSection({ addToast }) {
 
   const handleReplaceImage = async (tempId, file) => {
     try {
-      const dataUrl = await fileToDataURL(file);
-      updatePending(tempId, { imagen: dataUrl });
+      let dataUrl = await fileToDataURL(file);
+      if (aiConfig.autoNormalizeImage) {
+        try { dataUrl = await normalizeToWhiteBg(dataUrl); } catch {}
+      }
+      updatePending(tempId, { imagen: dataUrl, _normalized: aiConfig.autoNormalizeImage });
     } catch (err) {
       addToast?.({ type: 'error', message: err.message });
+    }
+  };
+
+  const handleNormalizeImage = async (tempId) => {
+    const item = pending.find(p => p._tempId === tempId);
+    if (!item?.imagen) { addToast?.({ type: 'error', message: 'Este pendiente no tiene imagen' }); return; }
+    try {
+      const normalized = await normalizeToWhiteBg(item.imagen);
+      updatePending(tempId, { imagen: normalized, _normalized: true });
+      addToast?.({ type: 'success', message: 'Imagen normalizada a fondo blanco' });
+    } catch (err) {
+      addToast?.({ type: 'error', message: err.message || 'No se pudo normalizar' });
     }
   };
 
@@ -322,6 +411,13 @@ export default function BocetosSection({ addToast }) {
         </div>
         <div className="flex items-center gap-2">
           <input ref={importInputRef} type="file" accept="application/json" onChange={handleImport} className="hidden" />
+          <button
+            onClick={() => setShowAiConfig(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 shadow-sm transition"
+            title="Entrenar la IA con instrucciones personalizadas"
+          >
+            <Settings size={16} /> Configurar IA
+          </button>
           <button
             onClick={() => importInputRef.current?.click()}
             className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 shadow-sm transition"
@@ -539,6 +635,7 @@ export default function BocetosSection({ addToast }) {
                   onApprove={() => handleApprove(p)}
                   onDiscard={() => removePending(p._tempId)}
                   onReplaceImage={(file) => handleReplaceImage(p._tempId, file)}
+                  onNormalize={() => handleNormalizeImage(p._tempId)}
                 />
               ))}
             </div>
@@ -595,23 +692,140 @@ export default function BocetosSection({ addToast }) {
           )}
         </div>
       </div>
+
+      {/* Modal: Configurar IA */}
+      {showAiConfig && (
+        <AiConfigModal
+          value={aiConfig}
+          onChange={setAiConfig}
+          onClose={() => setShowAiConfig(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ---------- AI config modal ----------
+
+function AiConfigModal({ value, onChange, onClose }) {
+  const [draft, setDraft] = useState(value);
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose?.(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const handleSave = () => {
+    onChange(draft);
+    onClose();
+  };
+
+  const handleLoadExamples = () => {
+    setDraft(d => ({ ...d, instructions: DEFAULT_AI_INSTRUCTIONS }));
+  };
+
+  const handleClear = () => {
+    setDraft(d => ({ ...d, instructions: '' }));
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        <div className="p-5 border-b border-gray-200 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Wand2 size={18} className="text-[#d97706]" />
+            <h3 className="text-base font-bold text-gray-900">Configurar IA</h3>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition">
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="p-5 space-y-5">
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-sm font-semibold text-gray-700">
+                Instrucciones personalizadas para la IA
+              </label>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleLoadExamples}
+                  className="text-[11px] font-semibold text-[#d97706] hover:underline"
+                  type="button"
+                >
+                  Cargar ejemplos
+                </button>
+                <button
+                  onClick={handleClear}
+                  className="text-[11px] font-semibold text-gray-500 hover:text-gray-700 hover:underline"
+                  type="button"
+                >
+                  Limpiar
+                </button>
+              </div>
+            </div>
+            <textarea
+              value={draft.instructions}
+              onChange={(e) => setDraft({ ...draft, instructions: e.target.value })}
+              rows={10}
+              placeholder={DEFAULT_AI_INSTRUCTIONS}
+              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#FFD33D] focus:border-[#FFD33D] shadow-sm transition resize-y font-mono"
+            />
+            <p className="text-xs text-gray-500 mt-2">
+              La IA aplica estas instrucciones cada vez que scrapea un producto. Podés escribir reglas sobre cómo generar nombres, SKUs, variantes, o cualquier convención tuya.
+            </p>
+          </div>
+
+          <div className="border-t border-gray-200 pt-4">
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={draft.autoNormalizeImage}
+                onChange={(e) => setDraft({ ...draft, autoNormalizeImage: e.target.checked })}
+                className="mt-0.5 w-4 h-4 rounded border-gray-300 text-[#FFD33D] focus:ring-[#FFD33D]"
+              />
+              <div>
+                <p className="text-sm font-semibold text-gray-900">Normalizar imágenes a fondo blanco automáticamente</p>
+                <p className="text-xs text-gray-500 mt-0.5">Cuando traigo productos o reemplazás una foto, la imagen se centra en un cuadrado 1000×1000 con padding blanco. Todas las fotos quedan del mismo tamaño para el catálogo. (No remueve fondos originales — para eso usá remove.bg o subila ya procesada.)</p>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <div className="p-5 border-t border-gray-200 flex justify-end gap-2">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-sm font-semibold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleSave}
+            className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-gray-900 bg-[#FFD33D] rounded-lg hover:bg-[#f5c518] transition"
+          >
+            <Save size={14} /> Guardar
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
 
 // ---------- Pending item (inline editor) ----------
 
-function PendingItem({ item, layout, onChange, onApprove, onDiscard, onReplaceImage }) {
+function PendingItem({ item, layout, onChange, onApprove, onDiscard, onReplaceImage, onNormalize }) {
   const fileRef = useRef(null);
   const missing = !item.nombre.trim() || !item.sku.trim();
 
   const content = (
     <div className="flex gap-4">
       {/* Imagen */}
-      <div className="shrink-0">
-        <div className="w-24 h-24 rounded-lg bg-gray-100 border border-gray-200 overflow-hidden flex items-center justify-center relative group">
+      <div className="shrink-0 flex flex-col items-center gap-1.5">
+        <div className={`w-24 h-24 rounded-lg bg-white border overflow-hidden flex items-center justify-center relative group ${item._normalized ? 'border-emerald-300' : 'border-gray-200'}`}>
           {item.imagen ? (
-            <img src={item.imagen} alt={item.nombre} className="w-full h-full object-cover" />
+            <img src={item.imagen} alt={item.nombre} className="w-full h-full object-contain" />
           ) : (
             <ImageIcon size={28} className="text-gray-300" />
           )}
@@ -634,12 +848,29 @@ function PendingItem({ item, layout, onChange, onApprove, onDiscard, onReplaceIm
             className="hidden"
           />
         </div>
+        {item.imagen && (
+          <button
+            type="button"
+            onClick={onNormalize}
+            className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold rounded transition ${item._normalized ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'}`}
+            title="Centrar imagen en cuadrado 1000x1000 con fondo blanco"
+          >
+            <Wand2 size={10} /> {item._normalized ? 'Fondo blanco ✓' : 'Normalizar'}
+          </button>
+        )}
       </div>
 
       {/* Campos */}
       <div className="flex-1 min-w-0 space-y-2">
         <div>
-          <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-0.5">Nombre</label>
+          <div className="flex items-center justify-between mb-0.5">
+            <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider">Nombre</label>
+            {item.tituloOriginalEraDeTienda && (
+              <span className="inline-flex items-center gap-1 text-[10px] text-amber-700 font-semibold" title={`El scraper bajó "${item.nombreOriginal || '?'}" pero la IA detectó que es el nombre de la tienda. Revisá el nombre final.`}>
+                <AlertTriangle size={10} /> IA corrigió título de tienda
+              </span>
+            )}
+          </div>
           <input
             type="text"
             value={item.nombre}

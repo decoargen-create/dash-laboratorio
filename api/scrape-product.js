@@ -23,7 +23,24 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 
-const SYSTEM_SKU = `Sos el extractor de datos de producto del sistema Senydrop. Recibís el nombre de un producto, la descripción, el cliente y un fragmento del HTML de la landing. Devolvés: SKU siguiendo una nomenclatura específica + nombre limpio + variantes detectadas.
+const SYSTEM_SKU = `Sos el extractor de datos de producto del sistema Senydrop. Recibís el título que levantó el scraper, la descripción, el cliente y un fragmento del HTML de la landing. Devolvés: un nombre de producto técnico y limpio + SKU + variantes detectadas.
+
+=== IMPORTANTE: PRIORIDAD PARA EL NOMBRE DEL PRODUCTO ===
+El título que te llega viene de og:title, pero muchas landings ponen ahí el NOMBRE DE LA TIENDA (ej: "Main Lab", "Mi Tienda Online", "Shopify Store") en vez del producto. Vos tenés que ANALIZAR el HTML entero y detectar el verdadero nombre del producto, en este orden de prioridad:
+
+  1. JSON-LD: buscá <script type="application/ld+json"> con "@type":"Product" y tomá su "name".
+  2. <h1> de la página (casi siempre tiene el nombre real del producto).
+  3. Atributo "data-product-name", "product-title" o similar.
+  4. El título de og:title SOLO si parece un nombre de producto (2+ palabras, descriptivo).
+  5. <title> de la página (último recurso, sacando el sufijo " - NombreTienda").
+
+SEÑALES de que un título NO es el producto (y tenés que ignorarlo):
+  - Tiene menos de 3 palabras Y es igual/parecido al nombre del dominio/URL
+  - Aparece frases tipo "Tienda Online", "Shop", "E-commerce"
+  - Es una sola palabra genérica ("Home", "Productos", "Inicio")
+
+Si detectás que el título original era el nombre de la tienda, reemplazalo por el real del producto.
+El nombre final tiene que ser TÉCNICO y DESCRIPTIVO: "Mopa de Microfibra Premium 360°", "Protector Antideslizante para Patas de Silla x8", no "Promoción" ni "Nuevo producto".
 
 === NOMENCLATURA DEL SKU ===
 FORMATO: PF-{iniciales_cliente}-{palabras_clave_mayusculas}
@@ -62,7 +79,8 @@ Si no hay variantes claras, devolvé variantes: []. NO inventes variantes.
 Devolvé JSON ESTRICTO:
 {
   "sku": "PF-XX-KEYWORDS",
-  "nombreLimpio": "Nombre del producto sin marketing extra. Si el original ya está bien, devolvelo tal cual.",
+  "nombreLimpio": "Nombre técnico y descriptivo del producto detectado en la página. Si el título que te llegó era el nombre de la tienda, reemplazalo acá por el real.",
+  "tituloOriginalEraDeTienda": true,
   "variantes": [ { "tipo": "color", "valor": "Rojo" } ]
 }
 NO markdown. SOLO el JSON puro.`;
@@ -153,7 +171,9 @@ function extractProductLinksFromCollection(html, baseUrl) {
 }
 
 // Scrapea UN producto y genera su JSON. Devuelve { ok, error?, data? }.
-async function scrapeSingleProduct(url, clienteNombre, apiKey) {
+// `customInstructions` (opcional) son instrucciones del user para ajustar el
+// comportamiento (se inyectan al prompt como contexto adicional).
+async function scrapeSingleProduct(url, clienteNombre, apiKey, customInstructions) {
   let parsedUrl;
   try { parsedUrl = new URL(url); }
   catch { return { ok: false, error: 'URL inválida', url }; }
@@ -212,18 +232,21 @@ async function scrapeSingleProduct(url, clienteNombre, apiKey) {
   let sku = null;
   let nombreLimpio = titulo;
   let variantes = [];
+  let tituloOriginalEraDeTienda = false;
 
   if (apiKey) {
     try {
       const client = new Anthropic({ apiKey });
+      const instruccionesUser = (customInstructions || '').trim();
       const prompt = `Cliente: ${clienteNombre}
-Nombre del producto: ${titulo}
+Título detectado por scraper (puede ser de tienda): ${titulo}
 ${ogDesc ? `Descripción: ${ogDesc.slice(0, 400)}` : ''}
+URL: ${url}
 
 HTML limpio (primeros 12KB):
 ${htmlLimpio}
-
-Generá el JSON con sku, nombreLimpio y variantes detectadas.`;
+${instruccionesUser ? `\n=== INSTRUCCIONES ADICIONALES DEL USER (priorizalas sobre defaults) ===\n${instruccionesUser.slice(0, 1500)}\n` : ''}
+Generá el JSON con sku, nombreLimpio (técnico y real, no el de la tienda) y variantes detectadas.`;
       const message = await client.messages.create({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 1024,
@@ -235,6 +258,7 @@ Generá el JSON con sku, nombreLimpio y variantes detectadas.`;
       const parsed = JSON.parse(cleaned);
       if (parsed.sku) sku = parsed.sku;
       if (parsed.nombreLimpio) nombreLimpio = parsed.nombreLimpio;
+      if (typeof parsed.tituloOriginalEraDeTienda === 'boolean') tituloOriginalEraDeTienda = parsed.tituloOriginalEraDeTienda;
       if (Array.isArray(parsed.variantes)) {
         variantes = parsed.variantes
           .filter(v => v && typeof v.valor === 'string' && v.valor.trim())
@@ -270,6 +294,7 @@ Generá el JSON con sku, nombreLimpio y variantes detectadas.`;
       url,
       nombre: nombreLimpio,
       nombreOriginal: titulo,
+      tituloOriginalEraDeTienda,
       imagen: imagenDataUrl,
       imagenUrl: ogImage || null,
       sku,
@@ -288,6 +313,7 @@ export default async function handler(req, res) {
   const singleUrl = body.url;
   const batchUrls = Array.isArray(body.urls) ? body.urls : null;
   const collectionUrl = body.collectionUrl;
+  const customInstructions = typeof body.customInstructions === 'string' ? body.customInstructions : '';
 
   if (!clienteNombre || typeof clienteNombre !== 'string') {
     return respondJSON(res, 400, { error: 'Falta "clienteNombre"' });
@@ -336,7 +362,7 @@ export default async function handler(req, res) {
   // Scrapeamos en paralelo (con un poco de concurrencia limitada no haría
   // falta porque Vercel ya tiene límites, y además son pocos).
   const results = await Promise.all(
-    urlsToScrape.map(u => scrapeSingleProduct(u, clienteNombre, apiKey))
+    urlsToScrape.map(u => scrapeSingleProduct(u, clienteNombre, apiKey, customInstructions))
   );
 
   const productos = results.filter(r => r.ok).map(r => r.data);

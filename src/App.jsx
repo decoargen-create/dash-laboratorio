@@ -95,12 +95,12 @@ const DEMO_STATE = {
     { id: 7, fecha: '2024-03-12', clienteId: 6, productoId: 2, cantidad: 150, montoTotal: 97500, mentorId: 2, estadoComision: 'pagada', estado: 'despachado', tieneIncidencia: false, incidenciaDetalle: '' },
     { id: 8, fecha: '2024-03-15', clienteId: 1, productoId: 5, cantidad: 200, montoTotal: 84000, mentorId: 1, estadoComision: 'pendiente', estado: 'listo-enviar', tieneIncidencia: false, incidenciaDetalle: '' },
     { id: 9, fecha: '2024-03-18', clienteId: 4, productoId: 3, cantidad: 100, montoTotal: 55000, mentorId: 2, estadoComision: 'pagada', estado: 'despachado', tieneIncidencia: false, incidenciaDetalle: '' },
-    { id: 10, fecha: '2024-03-22', clienteId: 7, productoId: 1, cantidad: 100, montoTotal: 45000, mentorId: 1, estadoComision: 'pendiente', estado: 'cotizado', tieneIncidencia: false, incidenciaDetalle: '' },
-    { id: 11, fecha: '2024-04-02', clienteId: 3, productoId: 2, cantidad: 100, montoTotal: 65000, mentorId: 1, estadoComision: 'pendiente', estado: 'pendiente-cotizacion', tieneIncidencia: false, incidenciaDetalle: '' },
+    { id: 10, fecha: '2024-03-22', clienteId: 7, productoId: 1, cantidad: 100, montoTotal: 45000, mentorId: 1, estadoComision: 'pendiente', estado: 'aprobado', tieneIncidencia: false, incidenciaDetalle: '' },
+    { id: 11, fecha: '2024-04-02', clienteId: 3, productoId: 2, cantidad: 100, montoTotal: 65000, mentorId: 1, estadoComision: 'pendiente', estado: 'consulta-recibida', tieneIncidencia: false, incidenciaDetalle: '' },
     { id: 12, fecha: '2024-04-05', clienteId: 6, productoId: 4, cantidad: 200, montoTotal: 64000, mentorId: 2, estadoComision: 'pendiente', estado: 'abonado', tieneIncidencia: false, incidenciaDetalle: '' },
     { id: 13, fecha: '2024-04-08', clienteId: 2, productoId: 5, cantidad: 100, montoTotal: 42000, mentorId: 2, estadoComision: 'pendiente', estado: 'en-produccion', tieneIncidencia: false, incidenciaDetalle: '' },
-    { id: 14, fecha: '2024-04-10', clienteId: 8, productoId: 3, cantidad: 150, montoTotal: 82500, mentorId: 2, estadoComision: 'pendiente', estado: 'cotizado', tieneIncidencia: false, incidenciaDetalle: '' },
-    { id: 15, fecha: '2024-04-12', clienteId: 4, productoId: 1, cantidad: 250, montoTotal: 112500, mentorId: 2, estadoComision: 'pendiente', estado: 'pendiente-cotizacion', tieneIncidencia: false, incidenciaDetalle: '' },
+    { id: 14, fecha: '2024-04-10', clienteId: 8, productoId: 3, cantidad: 150, montoTotal: 82500, mentorId: 2, estadoComision: 'pendiente', estado: 'aprobado', tieneIncidencia: false, incidenciaDetalle: '' },
+    { id: 15, fecha: '2024-04-12', clienteId: 4, productoId: 1, cantidad: 250, montoTotal: 112500, mentorId: 2, estadoComision: 'pendiente', estado: 'consulta-recibida', tieneIncidencia: false, incidenciaDetalle: '' },
   ],
 };
 
@@ -203,6 +203,16 @@ function appReducer(state, action) {
       return {
         ...state,
         sales: state.sales.map(s => s.id === action.payload.id ? { ...s, ...action.payload.patch } : s)
+      };
+    }
+    case 'ADD_ORDER_NOTE': {
+      const { orderId, nota } = action.payload;
+      return {
+        ...state,
+        sales: state.sales.map(s => s.id !== orderId ? s : {
+          ...s,
+          notas: [...(s.notas || []), { texto: nota, fecha: new Date().toISOString().split('T')[0] }],
+        }),
       };
     }
     default:
@@ -493,11 +503,21 @@ function loadPersistedState() {
     const parsed = JSON.parse(stored);
     // Validación mínima de forma — si falta algún array clave, arranca de cero.
     if (!parsed || typeof parsed !== 'object') return INITIAL_STATE;
+    // Migrate old estado values to new pipeline stages
+    const STATE_MIGRATION = {
+      'pendiente-cotizacion': 'consulta-recibida',
+      'cotizado': 'aprobado',
+    };
+    const rawSales = Array.isArray(parsed.sales) ? parsed.sales : INITIAL_STATE.sales;
+    const migratedSales = rawSales.map(s => {
+      const migrated = STATE_MIGRATION[s.estado];
+      return migrated ? { ...s, estado: migrated } : s;
+    });
     return {
       products: Array.isArray(parsed.products) ? parsed.products : INITIAL_STATE.products,
       clients: Array.isArray(parsed.clients) ? parsed.clients : INITIAL_STATE.clients,
       mentors: Array.isArray(parsed.mentors) ? parsed.mentors : INITIAL_STATE.mentors,
-      sales: Array.isArray(parsed.sales) ? parsed.sales : INITIAL_STATE.sales,
+      sales: migratedSales,
     };
   } catch {
     return INITIAL_STATE;
@@ -725,7 +745,7 @@ function AppShell({ onExit }) {
     const maxId = state.sales.reduce((m, s) => Math.max(m, s.id), 0);
     const newSale = {
       id: maxId + 1,
-      estado: 'pendiente-cotizacion',
+      estado: 'consulta-recibida',
       tieneIncidencia: false,
       incidenciaDetalle: '',
       estadoComision: 'pendiente',
@@ -853,7 +873,7 @@ function AppShell({ onExit }) {
             cantidad: Number(cantidad),
             montoTotal: Number(montoTotal),
             mentorId: fallbackMentor,
-            estado: input.estado || 'pendiente-cotizacion',
+            estado: input.estado || 'consulta-recibida',
             estadoComision: 'pendiente',
             tieneIncidencia: false,
             incidenciaDetalle: '',
@@ -1031,7 +1051,6 @@ function AppShell({ onExit }) {
           {currentUser.role === 'admin' ? (
             <>
               <NavItem icon={Home} label="Inicio" section="inicio" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={TrendingUp} label="Ventas" section="ventas" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={Package} label="Productos" section="productos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={Users} label="Clientes" section="clientes" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={CreditCard} label="Comisiones" section="comisiones" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
@@ -1075,8 +1094,7 @@ function AppShell({ onExit }) {
 
         <div key={currentSection} className="p-4 md:p-8 animate-fade-in-up">
           {/* Admin Views */}
-          {currentUser.role === 'admin' && currentSection === 'inicio' && <InicioSection state={state} dispatch={dispatch} onAddSale={handleAddSale} onQuickAddClient={createClient} onQuickAddProduct={createProduct} />}
-          {currentUser.role === 'admin' && currentSection === 'ventas' && <VentasSection state={state} onAddSale={handleAddSale} onQuickAddClient={createClient} onQuickAddProduct={createProduct} showModal={showNewSaleModal} setShowModal={setShowNewSaleModal} />}
+          {currentUser.role === 'admin' && currentSection === 'inicio' && <InicioSection state={state} dispatch={dispatch} onAddSale={handleAddSale} onQuickAddClient={createClient} onQuickAddProduct={createProduct} addToast={addToast} />}
           {currentUser.role === 'admin' && currentSection === 'productos' && <ProductosSection state={state} onAddProduct={handleAddProduct} showModal={showNewProductModal} setShowModal={setShowNewProductModal} calculateMargin={calculateMargin} />}
           {currentUser.role === 'admin' && currentSection === 'clientes' && <ClientesSection state={state} onAddClient={handleAddClient} onUpdateClient={handleUpdateClient} showModal={showNewClientModal} setShowModal={setShowNewClientModal} />}
           {currentUser.role === 'admin' && currentSection === 'comisiones' && <ComisionesSection state={state} dispatch={dispatch} onUpdateMentor={handleUpdateMentor} onAddMentor={handleAddMentor} onRemoveMentor={handleRemoveMentor} getMentorStats={getMentorStats} filterMentor={filterMentor} setFilterMentor={setFilterMentor} />}
@@ -1128,7 +1146,7 @@ function AppShell({ onExit }) {
 function buildPanelChatContext(state, currentUser) {
   const ordenesPorEstado = {};
   state.sales.forEach(o => {
-    const k = ORDER_STATE_LABELS[o.estado || 'pendiente-cotizacion'] || o.estado || 'sin estado';
+    const k = ORDER_STATE_LABELS[o.estado || 'consulta-recibida'] || o.estado || 'sin estado';
     ordenesPorEstado[k] = (ordenesPorEstado[k] || 0) + 1;
   });
 
@@ -1171,7 +1189,7 @@ function buildPanelChatContext(state, currentUser) {
         producto: producto?.nombre || '-',
         cantidad: o.cantidad || 0,
         monto: o.montoTotal || 0,
-        estado: ORDER_STATE_LABELS[o.estado || 'pendiente-cotizacion'] || '-',
+        estado: ORDER_STATE_LABELS[o.estado || 'consulta-recibida'] || '-',
         incidencia: !!o.tieneIncidencia,
       };
     });
@@ -1426,7 +1444,7 @@ function LoginScreen({ onLogin, onSessionAuth, darkMode, toggleDarkMode }) {
   );
 }
 
-function InicioSection({ state, dispatch, onAddSale, onQuickAddClient, onQuickAddProduct }) {
+function InicioSection({ state, dispatch, onAddSale, onQuickAddClient, onQuickAddProduct, addToast }) {
   const [filters, setFilters] = useState({
     dateFrom: '',
     dateTo: '',
@@ -1437,6 +1455,10 @@ function InicioSection({ state, dispatch, onAddSale, onQuickAddClient, onQuickAd
   });
   // Modal para crear orden sin salir de Inicio.
   const [showNewOrderModal, setShowNewOrderModal] = useState(false);
+  // Modal para consulta rápida
+  const [showQuickConsultaModal, setShowQuickConsultaModal] = useState(false);
+  // Modal para editar orden
+  const [editingOrder, setEditingOrder] = useState(null);
 
   // Órdenes filtradas según el estado actual de los filtros
   const filteredOrders = useMemo(() => {
@@ -1444,7 +1466,7 @@ function InicioSection({ state, dispatch, onAddSale, onQuickAddClient, onQuickAd
     return state.sales.filter(order => {
       if (filters.dateFrom && (order.fecha || '') < filters.dateFrom) return false;
       if (filters.dateTo && (order.fecha || '') > filters.dateTo) return false;
-      if (filters.states.size > 0 && !filters.states.has(order.estado || 'pendiente-cotizacion')) return false;
+      if (filters.states.size > 0 && !filters.states.has(order.estado || 'consulta-recibida')) return false;
       if (filters.onlyIncidencia && !order.tieneIncidencia) return false;
       // Foco: filtros rápidos disparados al clickear un stat card.
       if (filters.focus === 'comisionesPendientes') {
@@ -1474,7 +1496,7 @@ function InicioSection({ state, dispatch, onAddSale, onQuickAddClient, onQuickAd
           product?.nombre, product?.descripcion,
           mentor?.nombre,
           order.fecha, order.incidenciaDetalle,
-          ORDER_STATE_LABELS[order.estado || 'pendiente-cotizacion'],
+          ORDER_STATE_LABELS[order.estado || 'consulta-recibida'],
         ].filter(Boolean).join(' ').toLowerCase();
         if (!haystack.includes(q)) return false;
       }
@@ -1529,13 +1551,45 @@ function InicioSection({ state, dispatch, onAddSale, onQuickAddClient, onQuickAd
           sin tener que navegar a Ventas. */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <DailyQuoteBanner />
-        <button
-          onClick={() => setShowNewOrderModal(true)}
-          className="flex items-center gap-2 bg-gradient-to-r from-pink-700 to-rose-600 text-white px-5 py-2.5 rounded-xl shadow-lg hover:shadow-xl hover:scale-[1.02] active:scale-100 transition font-semibold text-sm"
-          title="Registrar una nueva orden"
-        >
-          <Plus size={18} /> Nueva orden
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowQuickConsultaModal(true)}
+            className="flex items-center gap-2 bg-white dark:bg-gray-800 border border-pink-300 dark:border-pink-700 text-pink-700 dark:text-pink-300 px-4 py-2.5 rounded-xl shadow hover:shadow-lg hover:scale-[1.02] active:scale-100 transition font-semibold text-sm"
+            title="Registrar una consulta rápida con datos mínimos"
+          >
+            <Plus size={18} /> Consulta rápida
+          </button>
+          <button
+            onClick={() => setShowNewOrderModal(true)}
+            className="flex items-center gap-2 bg-gradient-to-r from-pink-700 to-rose-600 text-white px-5 py-2.5 rounded-xl shadow-lg hover:shadow-xl hover:scale-[1.02] active:scale-100 transition font-semibold text-sm"
+            title="Registrar una nueva orden"
+          >
+            <Plus size={18} /> Nueva orden
+          </button>
+        </div>
+      </div>
+
+      {/* Pipeline visual bar: pills con conteo por estado */}
+      <div className="flex flex-wrap gap-2">
+        {ORDER_STATES.map(s => {
+          const count = state.sales.filter(o => (o.estado || 'consulta-recibida') === s).length;
+          const isActive = filters.states.size === 1 && filters.states.has(s);
+          return (
+            <button
+              key={s}
+              onClick={() => {
+                setFilters(f => {
+                  const next = new Set();
+                  if (!(f.states.size === 1 && f.states.has(s))) next.add(s);
+                  return { ...f, states: next };
+                });
+              }}
+              className={`px-3 py-1.5 rounded-full text-xs font-semibold transition ${isActive ? ORDER_STATE_STYLES[s] + ' ring-2 ring-offset-1 ring-pink-500 dark:ring-offset-gray-900' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:opacity-80'}`}
+            >
+              {ORDER_STATE_LABELS[s]} <span className="ml-1 opacity-70">{count}</span>
+            </button>
+          );
+        })}
       </div>
 
       {showNewOrderModal && (
@@ -1545,6 +1599,31 @@ function InicioSection({ state, dispatch, onAddSale, onQuickAddClient, onQuickAd
           onQuickAddClient={onQuickAddClient}
           onQuickAddProduct={onQuickAddProduct}
           onClose={() => setShowNewOrderModal(false)}
+        />
+      )}
+
+      {showQuickConsultaModal && (
+        <QuickConsultaModal
+          state={state}
+          onSubmit={(data) => {
+            onAddSale?.(data);
+            setShowQuickConsultaModal(false);
+          }}
+          onQuickAddClient={onQuickAddClient}
+          onClose={() => setShowQuickConsultaModal(false)}
+        />
+      )}
+
+      {editingOrder && (
+        <EditOrderModal
+          order={editingOrder}
+          state={state}
+          onSave={(patch) => {
+            dispatch({ type: 'UPDATE_ORDER', payload: { id: editingOrder.id, patch } });
+            setEditingOrder(null);
+            addToast?.({ type: 'success', message: `Orden #${editingOrder.id} actualizada` });
+          }}
+          onClose={() => setEditingOrder(null)}
         />
       )}
 
@@ -1602,7 +1681,7 @@ function InicioSection({ state, dispatch, onAddSale, onQuickAddClient, onQuickAd
 
       <FilterBar filters={filters} onChange={setFilters} totalShown={filteredOrders.length} totalAll={state.sales.length} />
 
-      <OrdersList orders={filteredOrders} state={state} dispatch={dispatch} />
+      <OrdersList orders={filteredOrders} state={state} dispatch={dispatch} onEditOrder={setEditingOrder} />
 
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
         <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-6">Ventas por mes (período seleccionado)</h3>
@@ -1787,7 +1866,7 @@ const ORDERS_COLUMNS = [
 
 const ORDERS_DEFAULT_VISIBLE = ORDERS_COLUMNS.filter(c => c.default).map(c => c.key);
 
-function OrdersList({ state, dispatch, orders }) {
+function OrdersList({ state, dispatch, orders, onEditOrder }) {
   const [viewMode, setViewMode] = useState('total'); // 'total' | 'unidad'
   const [incidenciaDraft, setIncidenciaDraft] = useState({}); // { [orderId]: texto }
   const [expanded, setExpanded] = useState(() => new Set());
@@ -2025,14 +2104,26 @@ function OrdersList({ state, dispatch, orders }) {
                 <React.Fragment key={order.id}>
                 <tr className={`transition ${order.tieneIncidencia ? 'bg-red-50/40 dark:bg-red-900/10' : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}>
                   <td className="px-2 py-3 text-center">
-                    <button
-                      onClick={() => toggleExpand(order.id)}
-                      className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300"
-                      title={isOpen ? 'Ocultar pagos' : 'Ver pagos de esta orden'}
-                      aria-label="Expandir fila"
-                    >
-                      {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                    </button>
+                    <div className="flex items-center gap-0.5">
+                      <button
+                        onClick={() => toggleExpand(order.id)}
+                        className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300"
+                        title={isOpen ? 'Ocultar pagos' : 'Ver pagos de esta orden'}
+                        aria-label="Expandir fila"
+                      >
+                        {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                      </button>
+                      {onEditOrder && (
+                        <button
+                          onClick={() => onEditOrder(order)}
+                          className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-400 hover:text-pink-600 dark:text-gray-500 dark:hover:text-pink-400 transition"
+                          title="Editar orden"
+                          aria-label="Editar orden"
+                        >
+                          <Edit2 size={14} />
+                        </button>
+                      )}
+                    </div>
                   </td>
                   {isColVisible('fecha') && <td className="px-4 py-3 text-gray-900 dark:text-gray-100 whitespace-nowrap">{order.fecha}</td>}
                   {isColVisible('cliente') && <td className="px-4 py-3 text-gray-900 dark:text-gray-100">{getClientName(order.clienteId)}</td>}
@@ -2097,9 +2188,9 @@ function OrdersList({ state, dispatch, orders }) {
                   {isColVisible('estado') && (
                     <td className="px-4 py-3">
                       <select
-                        value={order.estado || 'pendiente-cotizacion'}
+                        value={order.estado || 'consulta-recibida'}
                         onChange={(e) => handleStateChange(order.id, e.target.value)}
-                        className={`text-xs font-semibold px-2 py-1 rounded-full border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-pink-500 ${ORDER_STATE_STYLES[order.estado || 'pendiente-cotizacion']}`}
+                        className={`text-xs font-semibold px-2 py-1 rounded-full border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-pink-500 ${ORDER_STATE_STYLES[order.estado || 'consulta-recibida']}`}
                       >
                         {ORDER_STATES.map(s => (
                           <option key={s} value={s} className="bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100">{ORDER_STATE_LABELS[s]}</option>
@@ -2147,6 +2238,7 @@ function OrdersList({ state, dispatch, orders }) {
                         onCobrosChange={(patch) => handleCobrosChange(order, patch)}
                         onPaymentChange={(rubro, data) => handlePaymentChange(order.id, rubro, data)}
                         onIncidenciaChange={(patch) => dispatch({ type: 'UPDATE_ORDER_INCIDENCIA', payload: { orderId: order.id, ...patch } })}
+                        dispatch={dispatch}
                       />
                     </td>
                   </tr>
@@ -2287,7 +2379,7 @@ function OrdersCardView({ orders, state, viewMode, onStateChange, expanded, togg
       {orders.map(order => {
         const product = getProduct(order.productoId);
         const mentor = order.mentorId ? state.mentors.find(m => m.id === order.mentorId) : null;
-        const estado = order.estado || 'pendiente-cotizacion';
+        const estado = order.estado || 'consulta-recibida';
         const isTotal = viewMode === 'total';
         const cantidad = order.cantidad || 0;
         const precioVentaUnit = product?.precioVenta || 0;
@@ -2397,7 +2489,7 @@ function OrdersKanbanView({ orders, state, onStateChange, getClientName, getMent
   const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
   const byState = ORDER_STATES.reduce((acc, s) => { acc[s] = []; return acc; }, {});
   orders.forEach(o => {
-    const s = o.estado || 'pendiente-cotizacion';
+    const s = o.estado || 'consulta-recibida';
     if (!byState[s]) byState[s] = [];
     byState[s].push(o);
   });
@@ -2451,7 +2543,7 @@ function OrdersKanbanView({ orders, state, onStateChange, getClientName, getMent
                           />
                         </div>
                         <select
-                          value={order.estado || 'pendiente-cotizacion'}
+                          value={order.estado || 'consulta-recibida'}
                           onChange={(e) => onStateChange(order.id, e.target.value)}
                           className="mt-2 w-full text-[10px] font-semibold px-1.5 py-0.5 rounded border border-gray-200 dark:border-gray-700 bg-transparent text-gray-600 dark:text-gray-300 cursor-pointer focus:outline-none focus:ring-1 focus:ring-pink-500"
                           title="Mover a otro estado"
@@ -2784,6 +2876,261 @@ function NewSaleFormContent({ state, formData, setFormData, handleSubmit, mentor
         Registrar Orden
       </button>
     </form>
+  );
+}
+
+// Modal de consulta rápida: datos mínimos para registrar una consulta recibida.
+function QuickConsultaModal({ state, onSubmit, onQuickAddClient, onClose }) {
+  const [clientName, setClientName] = useState('');
+  const [selectedClientId, setSelectedClientId] = useState('');
+  const [productoId, setProductoId] = useState('');
+  const [nota, setNota] = useState('');
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const inputRef = useRef(null);
+
+  const filteredClients = useMemo(() => {
+    const q = clientName.trim().toLowerCase();
+    if (!q) return state.clients.slice(0, 8);
+    return state.clients.filter(c => c.nombre.toLowerCase().includes(q)).slice(0, 8);
+  }, [clientName, state.clients]);
+
+  const handleSelectClient = (client) => {
+    setSelectedClientId(String(client.id));
+    setClientName(client.nombre);
+    setShowSuggestions(false);
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    let clienteId = selectedClientId ? parseInt(selectedClientId) : null;
+    // If typed a name that doesn't match any existing client, create one
+    if (!clienteId && clientName.trim()) {
+      const newClient = onQuickAddClient({ nombre: clientName.trim() });
+      clienteId = newClient.id;
+    }
+    if (!clienteId) return;
+    const data = {
+      fecha: new Date().toISOString().split('T')[0],
+      clienteId,
+      productoId: productoId ? parseInt(productoId) : null,
+      cantidad: 0,
+      montoTotal: 0,
+      mentorId: state.clients.find(c => c.id === clienteId)?.mentorId || null,
+      estado: 'consulta-recibida',
+      notas: nota.trim() ? [{ texto: nota.trim(), fecha: new Date().toISOString().split('T')[0] }] : [],
+    };
+    onSubmit(data);
+  };
+
+  return (
+    <Modal title="Consulta rápida" onClose={onClose}>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="relative">
+          <FormLabel required>Cliente</FormLabel>
+          <input
+            ref={inputRef}
+            type="text"
+            value={clientName}
+            onChange={(e) => { setClientName(e.target.value); setSelectedClientId(''); setShowSuggestions(true); }}
+            onFocus={() => setShowSuggestions(true)}
+            placeholder="Nombre del cliente (existente o nuevo)"
+            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            required
+            autoFocus
+          />
+          {showSuggestions && filteredClients.length > 0 && (
+            <div className="absolute z-50 mt-1 w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+              {filteredClients.map(c => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => handleSelectClient(c)}
+                  className="w-full text-left px-4 py-2 text-sm text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700 transition"
+                >
+                  {c.nombre}
+                </button>
+              ))}
+              {clientName.trim() && !state.clients.some(c => c.nombre.toLowerCase() === clientName.trim().toLowerCase()) && (
+                <div className="px-4 py-2 text-xs text-gray-500 dark:text-gray-400 border-t border-gray-100 dark:border-gray-700">
+                  Se creará el cliente "{clientName.trim()}" al guardar
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div>
+          <FormLabel>Producto</FormLabel>
+          <select
+            value={productoId}
+            onChange={(e) => setProductoId(e.target.value)}
+            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+          >
+            <option value="">Sin definir todavía</option>
+            {state.products.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+          </select>
+        </div>
+
+        <div>
+          <FormLabel>Nota</FormLabel>
+          <textarea
+            value={nota}
+            onChange={(e) => setNota(e.target.value)}
+            placeholder="Algún detalle de la consulta (opcional)"
+            rows={3}
+            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 resize-y"
+          />
+        </div>
+
+        <button
+          type="submit"
+          className="w-full bg-pink-900 text-white py-2 rounded-lg hover:bg-pink-800 transition font-semibold"
+        >
+          Registrar consulta
+        </button>
+      </form>
+    </Modal>
+  );
+}
+
+// Modal para editar una orden existente.
+function EditOrderModal({ order, state, onSave, onClose }) {
+  const [formData, setFormData] = useState({
+    fecha: order.fecha || '',
+    clienteId: String(order.clienteId || ''),
+    productoId: String(order.productoId || ''),
+    cantidad: order.cantidad || 0,
+    montoTotal: order.montoTotal || 0,
+    mentorId: order.mentorId ? String(order.mentorId) : '',
+    estado: order.estado || 'consulta-recibida',
+    mentorPresupuesto: order.mentorPresupuesto != null ? String(order.mentorPresupuesto) : '',
+  });
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    const patch = {
+      fecha: formData.fecha,
+      clienteId: parseInt(formData.clienteId) || order.clienteId,
+      productoId: parseInt(formData.productoId) || order.productoId,
+      cantidad: parseInt(formData.cantidad) || 0,
+      montoTotal: parseFloat(formData.montoTotal) || 0,
+      mentorId: formData.mentorId ? parseInt(formData.mentorId) : null,
+      estado: formData.estado,
+      mentorPresupuesto: formData.mentorPresupuesto !== '' ? parseFloat(formData.mentorPresupuesto) : null,
+    };
+    onSave(patch);
+  };
+
+  return (
+    <Modal title={`Editar orden #${order.id}`} onClose={onClose}>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <FormLabel>Estado</FormLabel>
+          <select
+            value={formData.estado}
+            onChange={(e) => setFormData({ ...formData, estado: e.target.value })}
+            className={`w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 font-semibold ${ORDER_STATE_STYLES[formData.estado]}`}
+          >
+            {ORDER_STATES.map(s => <option key={s} value={s}>{ORDER_STATE_LABELS[s]}</option>)}
+          </select>
+        </div>
+
+        <div>
+          <FormLabel>Fecha</FormLabel>
+          <input
+            type="date"
+            value={formData.fecha}
+            onChange={(e) => setFormData({ ...formData, fecha: e.target.value })}
+            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+          />
+        </div>
+
+        <div>
+          <FormLabel required>Cliente</FormLabel>
+          <select
+            value={formData.clienteId}
+            onChange={(e) => setFormData({ ...formData, clienteId: e.target.value })}
+            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            required
+          >
+            <option value="">Seleccionar Cliente</option>
+            {state.clients.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+          </select>
+        </div>
+
+        <div>
+          <FormLabel required>Producto</FormLabel>
+          <select
+            value={formData.productoId}
+            onChange={(e) => setFormData({ ...formData, productoId: e.target.value })}
+            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            required
+          >
+            <option value="">Seleccionar Producto</option>
+            {state.products.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+          </select>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <FormLabel>Cantidad</FormLabel>
+            <input
+              type="number"
+              min="0"
+              value={formData.cantidad}
+              onChange={(e) => setFormData({ ...formData, cantidad: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            />
+          </div>
+          <div>
+            <FormLabel>Monto total</FormLabel>
+            <input
+              type="number"
+              min="0"
+              value={formData.montoTotal}
+              onChange={(e) => setFormData({ ...formData, montoTotal: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            />
+          </div>
+        </div>
+
+        <div>
+          <FormLabel>Mentor asignado</FormLabel>
+          <select
+            value={formData.mentorId}
+            onChange={(e) => setFormData({ ...formData, mentorId: e.target.value })}
+            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+          >
+            <option value="">Sin mentor</option>
+            {state.mentors.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
+          </select>
+        </div>
+
+        {formData.mentorId && (
+          <div>
+            <FormLabel tip="Monto FIJO que se paga al mentor por esta orden.">Presupuesto para el mentor</FormLabel>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 text-sm">$</span>
+              <input
+                type="number"
+                min="0"
+                value={formData.mentorPresupuesto}
+                onChange={(e) => setFormData({ ...formData, mentorPresupuesto: e.target.value })}
+                placeholder="Vacío = usa % del mentor"
+                className="w-full pl-6 pr-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+              />
+            </div>
+          </div>
+        )}
+
+        <button
+          type="submit"
+          className="w-full bg-pink-900 text-white py-2 rounded-lg hover:bg-pink-800 transition font-semibold"
+        >
+          Guardar cambios
+        </button>
+      </form>
+    </Modal>
   );
 }
 
@@ -3152,7 +3499,14 @@ function ProductosSection({ state, onAddProduct, showModal, setShowModal, calcul
               </div>
               <div className="flex justify-between border-t border-gray-200 dark:border-gray-700 pt-2">
                 <span className="text-gray-600 dark:text-gray-400 font-semibold">Costo total unitario:</span>
-                <span className="font-semibold text-gray-900 dark:text-gray-100">${unitCost.toLocaleString()}</span>
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-gray-900 dark:text-gray-100">${unitCost.toLocaleString()}</span>
+                  {product.costoInformado != null && product.costoInformado !== '' && parseFloat(product.costoInformado) !== unitCost && (
+                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                      Informado: ${parseFloat(product.costoInformado).toLocaleString()}
+                    </span>
+                  )}
+                </div>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-600 dark:text-gray-400">Precio Venta:</span>
@@ -3252,7 +3606,14 @@ function ProductosTableView({ products, sales, clients, calculateMargin, expande
                   <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300 tabular-nums">{fmtMoney(getContenidoUnitCost(product))}</td>
                   <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300 tabular-nums">{fmtMoney(product.costoEnvase || 0)}</td>
                   <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300 tabular-nums">{fmtMoney(product.costoEtiqueta || 0)}</td>
-                  <td className="px-4 py-3 text-right font-semibold text-gray-900 dark:text-gray-100 tabular-nums">{fmtMoney(unitCost)}</td>
+                  <td className="px-4 py-3 text-right font-semibold text-gray-900 dark:text-gray-100 tabular-nums">
+                    <span>{fmtMoney(unitCost)}</span>
+                    {product.costoInformado != null && product.costoInformado !== '' && parseFloat(product.costoInformado) !== unitCost && (
+                      <span className="ml-2 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                        Inf: ${parseFloat(product.costoInformado).toLocaleString()}
+                      </span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-right font-semibold text-gray-900 dark:text-gray-100 tabular-nums">{fmtMoney(product.precioVenta)}</td>
                   <td className="px-4 py-3 text-right font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{margen}%</td>
                   <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300 tabular-nums">{ordenes}</td>
@@ -3290,6 +3651,9 @@ function ProductosCompactView({ products, sales, calculateMargin }) {
               <div className="text-right">
                 <p className="text-[10px] uppercase text-gray-500 dark:text-gray-400">Costo</p>
                 <p className="font-semibold text-gray-700 dark:text-gray-300">{fmtMoney(unitCost)}</p>
+                {product.costoInformado != null && product.costoInformado !== '' && parseFloat(product.costoInformado) !== unitCost && (
+                  <p className="text-[10px] text-amber-600 dark:text-amber-400">Inf: {fmtMoney(parseFloat(product.costoInformado))}</p>
+                )}
               </div>
               <div className="text-right">
                 <p className="text-[10px] uppercase text-gray-500 dark:text-gray-400">Precio</p>
@@ -4032,6 +4396,7 @@ function DatosSection({ state, dispatch, addToast }) {
         { key: 'cobros', label: 'cobros', serialize: (s) => JSON.stringify(s.cobros || []) },
         { key: 'pagos', label: 'pagos', serialize: (s) => JSON.stringify(s.pagos || {}) },
         { key: 'costsOverride', label: 'costsOverride', serialize: (s) => JSON.stringify(s.costsOverride || {}) },
+        { key: 'notas', label: 'notas', serialize: (s) => JSON.stringify(s.notas || []) },
         { key: 'costoSinDesglosar', label: 'costoSinDesglosar' },
         { key: 'estadoComision', label: 'estadoComision' },
       ],
@@ -4042,7 +4407,7 @@ function DatosSection({ state, dispatch, addToast }) {
         cantidad: toNumber(row.cantidad, 1),
         montoTotal: toNumber(row.montoTotal),
         mentorId: row.mentorId ? toNumber(row.mentorId) : null,
-        estado: row.estado || 'pendiente-cotizacion',
+        estado: row.estado || 'consulta-recibida',
         tieneIncidencia: toBool(row.tieneIncidencia),
         incidenciaDetalle: row.incidenciaDetalle || '',
         mentorPresupuesto: row.mentorPresupuesto ? toNumber(row.mentorPresupuesto) : null,
@@ -4050,6 +4415,7 @@ function DatosSection({ state, dispatch, addToast }) {
         cobros: (() => { try { return JSON.parse(row.cobros || '[]'); } catch { return []; } })(),
         pagos: (() => { try { return JSON.parse(row.pagos || '{}'); } catch { return {}; } })(),
         costsOverride: (() => { try { return JSON.parse(row.costsOverride || '{}'); } catch { return {}; } })(),
+        notas: (() => { try { return JSON.parse(row.notas || '[]'); } catch { return []; } })(),
         costoSinDesglosar: row.costoSinDesglosar ? toNumber(row.costoSinDesglosar) : null,
         estadoComision: row.estadoComision || 'pendiente',
       }),
@@ -4230,7 +4596,7 @@ function AnalyticsSection({ state, currentUser, analyticsState, onFetch }) {
         producto: p?.nombre || '-',
         cantidad: o.cantidad,
         monto_total: o.montoTotal,
-        estado: ORDER_STATE_LABELS[o.estado || 'pendiente-cotizacion'],
+        estado: ORDER_STATE_LABELS[o.estado || 'consulta-recibida'],
         incidencia: o.tieneIncidencia ? (o.incidenciaDetalle || 'sin detalle') : null,
         mentor: m?.nombre || null,
       };
@@ -4459,7 +4825,7 @@ function EquipoInicioSection({ currentUser, state }) {
   // Stats del lab que SÍ puede ver: número total de órdenes activas,
   // sus órdenes referidas, lo que generó este mes, y las incidencias
   // del lab (igual que la admin, son operativas).
-  const totalOrdenesActivas = state.sales.filter(o => (o.estado || 'pendiente-cotizacion') !== 'despachado').length;
+  const totalOrdenesActivas = state.sales.filter(o => (o.estado || 'consulta-recibida') !== 'despachado').length;
   const incidenciasLab = state.sales.filter(s => s.tieneIncidencia).length;
   const mesActual = state.sales
     .filter(s => s.mentorId === currentUser.id && (s.fecha || '').startsWith(new Date().toISOString().substring(0, 7)))
@@ -4543,7 +4909,7 @@ function EquipoOrdenesView({ state, mentorId, compact = false }) {
               const product = state.products.find(p => p.id === order.productoId);
               const comision = getMentorCommission(order, product, mentor);
               const cobros = getOrderCobrosSummary(order);
-              const estado = order.estado || 'pendiente-cotizacion';
+              const estado = order.estado || 'consulta-recibida';
               const saldada = cobros.saldo <= 0 && cobros.total > 0;
               return (
                 <tr key={order.id} className={`${order.tieneIncidencia ? 'bg-red-50/40 dark:bg-red-900/10' : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}>
@@ -4754,7 +5120,6 @@ function MentorClientesSection({ currentUser, state }) {
           </table>
         </div>
       </div>
-      )}
     </div>
   );
 }
@@ -4910,7 +5275,7 @@ function ClientDetailPanel({ stats, products }) {
                 .slice()
                 .sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''))
                 .map(order => {
-                  const estado = order.estado || 'pendiente-cotizacion';
+                  const estado = order.estado || 'consulta-recibida';
                   return (
                     <tr key={order.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
                       <td className="px-3 py-2 text-gray-700 dark:text-gray-300 whitespace-nowrap">{order.fecha}</td>
@@ -5493,7 +5858,7 @@ function EditableCell({ value, onSave, className = '', prefix = '', suffix = '',
 // como tabs en lugar de apilados (mucho menos vertical, más práctico).
 // El tab default es 'cobros' porque suele ser lo primero que la admin
 // quiere consultar al expandir una orden (cuánto cobré / falta cobrar).
-function OrderExpansion({ order, cobrosSummary, payments, mentorNombre, onCobrosChange, onPaymentChange, onIncidenciaChange }) {
+function OrderExpansion({ order, cobrosSummary, payments, mentorNombre, onCobrosChange, onPaymentChange, onIncidenciaChange, dispatch }) {
   const [tab, setTab] = useState('cobros');
   const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
 
@@ -5502,6 +5867,7 @@ function OrderExpansion({ order, cobrosSummary, payments, mentorNombre, onCobros
   const aPagarTotal = ['contenido', 'envase', 'etiqueta', 'mentor']
     .filter(k => k !== 'mentor' || order.mentorId)
     .reduce((sum, k) => sum + (payments[k]?.estado === 'pendiente' ? (payments[k]?.monto || 0) : 0), 0);
+  const notasCount = (order.notas || []).length;
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
@@ -5529,6 +5895,16 @@ function OrderExpansion({ order, cobrosSummary, payments, mentorNombre, onCobros
         </button>
         <button
           type="button"
+          onClick={() => setTab('notas')}
+          className={`flex-1 px-4 py-2.5 text-left transition border-l border-gray-200 dark:border-gray-700 ${tab === 'notas' ? 'bg-indigo-50 dark:bg-indigo-900/20 border-b-2 border-indigo-500' : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b-2 border-transparent'}`}
+        >
+          <p className={`text-xs font-bold uppercase tracking-wider ${tab === 'notas' ? 'text-indigo-700 dark:text-indigo-300' : 'text-gray-500 dark:text-gray-400'}`}>Notas</p>
+          <p className={`text-sm font-semibold ${notasCount > 0 ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-500 dark:text-gray-500'}`}>
+            {notasCount > 0 ? `${notasCount} nota${notasCount !== 1 ? 's' : ''}` : 'Sin notas'}
+          </p>
+        </button>
+        <button
+          type="button"
           onClick={() => setTab('incidencia')}
           className={`flex-1 px-4 py-2.5 text-left transition border-l border-gray-200 dark:border-gray-700 ${tab === 'incidencia' ? 'bg-red-50 dark:bg-red-900/20 border-b-2 border-red-500' : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b-2 border-transparent'}`}
         >
@@ -5536,7 +5912,7 @@ function OrderExpansion({ order, cobrosSummary, payments, mentorNombre, onCobros
             <AlertCircle size={12} /> Incidencia
           </p>
           <p className={`text-sm font-semibold ${order.tieneIncidencia ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-500'}`}>
-            {order.tieneIncidencia ? 'Activa ⚠' : 'Sin incidencias'}
+            {order.tieneIncidencia ? 'Activa' : 'Sin incidencias'}
           </p>
         </button>
       </div>
@@ -5548,6 +5924,9 @@ function OrderExpansion({ order, cobrosSummary, payments, mentorNombre, onCobros
         {tab === 'pagos' && (
           <PaymentsPanel order={order} payments={payments} mentorNombre={mentorNombre} onChange={onPaymentChange} />
         )}
+        {tab === 'notas' && (
+          <NotasPanel order={order} dispatch={dispatch} />
+        )}
         {tab === 'incidencia' && (
           <IncidenciaPanel order={order} onChange={onIncidenciaChange} />
         )}
@@ -5558,6 +5937,59 @@ function OrderExpansion({ order, cobrosSummary, payments, mentorNombre, onCobros
 
 // Panel de incidencias: textarea con el motivo y botón toggle para activar/resolver.
 // Si hay incidencia activa, el panel se ve en rojo. Al resolver, se limpia el motivo.
+// Panel de notas por orden. Lista existentes (más reciente primero) y permite agregar.
+function NotasPanel({ order, dispatch }) {
+  const [draft, setDraft] = useState('');
+  const notas = Array.isArray(order.notas) ? order.notas : [];
+  const sorted = [...notas].reverse();
+
+  const addNota = () => {
+    const texto = draft.trim();
+    if (!texto) return;
+    dispatch({ type: 'ADD_ORDER_NOTE', payload: { orderId: order.id, nota: texto } });
+    setDraft('');
+  };
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <h4 className="text-sm font-bold text-gray-900 dark:text-gray-100">Notas de la orden</h4>
+        <p className="text-xs text-gray-500 dark:text-gray-400">Anotaciones internas sobre esta orden.</p>
+      </div>
+      <div className="flex gap-2">
+        <textarea
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="Escribir una nota..."
+          rows={2}
+          className="flex-1 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-y"
+          onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); addNota(); } }}
+        />
+        <button
+          type="button"
+          onClick={addNota}
+          disabled={!draft.trim()}
+          className="self-end px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white rounded-lg font-semibold text-sm transition"
+        >
+          Agregar nota
+        </button>
+      </div>
+      {sorted.length === 0 ? (
+        <p className="text-xs text-gray-500 dark:text-gray-400 italic text-center py-4">Sin notas todavía.</p>
+      ) : (
+        <div className="space-y-2 max-h-60 overflow-y-auto">
+          {sorted.map((nota, i) => (
+            <div key={i} className="bg-gray-50 dark:bg-gray-900/40 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">{nota.fecha}</p>
+              <p className="text-sm text-gray-900 dark:text-gray-100 whitespace-pre-wrap">{nota.texto}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function IncidenciaPanel({ order, onChange }) {
   const [draft, setDraft] = useState(order.incidenciaDetalle || '');
   useEffect(() => {
@@ -5627,97 +6059,29 @@ function IncidenciaPanel({ order, onChange }) {
 function CobrosPanel({ order, summary, onChange }) {
   const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
   const cobros = summary.cobros;
-  const { total, cobrado, saldo, porcentaje, cuotasPlanificadas, cuotasPagadas } = summary;
-  // Vista detalle: por defecto colapsado para que el panel se sienta simple.
-  // Sólo se expande si el usuario lo pide explícitamente.
-  const [showDetalle, setShowDetalle] = useState(false);
+  const { total, cobrado, saldo, porcentaje } = summary;
+  const saldada = saldo <= 0 && total > 0;
 
-  // Atajo rápido: si el usuario cambia directo el total cobrado, consolidamos
-  // el cambio en el primer cobro (ajustamos el monto) o agregamos uno si no
-  // había ninguno. Sirve para el 90% de los casos donde el cliente abonó una
-  // seña y el resto después.
-  const setCobradoTotalQuick = (nuevoCobrado) => {
-    const clean = Math.max(0, parseFloat(nuevoCobrado) || 0);
-    // Si no hay cobros → creamos uno con ese monto
-    if (!cobros || cobros.length === 0) {
-      onChange({ cobros: [{
-        concepto: clean >= total ? 'Pago único' : 'Seña',
-        monto: clean,
-        fecha: new Date().toISOString().split('T')[0],
-        nota: '',
-      }] });
-      return;
-    }
-    // Si hay 1 solo cobro → actualizamos su monto
-    if (cobros.length === 1) {
-      onChange({ cobros: [{ ...cobros[0], monto: clean }] });
-      return;
-    }
-    // Si hay varios → ajustamos el último para que la suma cierre
-    const sinUltimo = cobros.slice(0, -1).reduce((s, c) => s + (parseFloat(c.monto) || 0), 0);
-    const diffUltimo = Math.max(0, clean - sinUltimo);
-    const next = [...cobros];
-    next[next.length - 1] = { ...next[next.length - 1], monto: diffUltimo };
-    onChange({ cobros: next });
-  };
-
-  // Sugiere un concepto inteligente según la posición y el plan pactado.
-  // - 1 solo pago acordado → "Pago único"
-  // - Primer pago → "Seña"
-  // - Último pago del plan → "Saldo"
-  // - Los del medio → "Adelanto N"
-  // - Si no hay plan, se deja en blanco y el usuario escribe lo que quiera.
-  const sugerirConcepto = (index, totalPagosPrevios) => {
-    const pos = index + 1; // 1-indexed
-    if (cuotasPlanificadas === 1) return 'Pago único';
-    if (cuotasPlanificadas > 1) {
-      if (pos === 1) return 'Seña';
-      if (pos === cuotasPlanificadas) return 'Saldo';
-      return `Adelanto ${pos - 1}`;
-    }
-    // Sin plan: seña para el primero, saldo si coincide que salda todo
-    if (totalPagosPrevios === 0) return 'Seña';
-    return '';
-  };
-
-  const updateCobro = (index, patch) => {
-    const next = cobros.map((c, i) => (i === index ? { ...c, ...patch } : c));
-    onChange({ cobros: next });
-  };
+  // Form para registrar un nuevo cobro
+  const [nuevoMonto, setNuevoMonto] = useState('');
+  const [nuevoConcepto, setNuevoConcepto] = useState('Seña');
+  const CONCEPTOS = ['Seña', 'Adelanto', 'Saldo', 'Pago único'];
 
   const addCobro = () => {
-    // Sugerimos como monto: saldo / (pagos planificados - pagados) si hay plan,
-    // o el saldo completo si no.
-    let sugerido = saldo;
-    if (cuotasPlanificadas > 0) {
-      const faltan = Math.max(1, cuotasPlanificadas - cuotasPagadas);
-      sugerido = saldo / faltan;
-    }
+    const monto = parseFloat(nuevoMonto);
+    if (!monto || monto <= 0) return;
     const nuevo = {
-      concepto: sugerirConcepto(cobros.length, cobros.length),
-      monto: sugerido > 0 ? Math.round(sugerido) : 0,
+      concepto: nuevoConcepto,
+      monto,
       fecha: new Date().toISOString().split('T')[0],
       nota: '',
     };
     onChange({ cobros: [...cobros, nuevo] });
+    setNuevoMonto('');
   };
 
   const removeCobro = (index) => {
     onChange({ cobros: cobros.filter((_, i) => i !== index) });
-  };
-
-  const setPlan = (n) => {
-    const parsed = parseInt(n);
-    onChange({ cuotasPlanificadas: Number.isNaN(parsed) ? 0 : Math.max(0, parsed) });
-  };
-
-  const saldada = saldo <= 0 && total > 0;
-
-  // Para cada cobro calculamos el concepto efectivo: si el usuario lo escribió
-  // en concepto, usa eso; si no, cae al sugerido por posición.
-  const displayConcepto = (cobro, i) => {
-    if (cobro.concepto && cobro.concepto.trim()) return cobro.concepto;
-    return sugerirConcepto(i, i);
   };
 
   return (
@@ -5727,145 +6091,98 @@ function CobrosPanel({ order, summary, onChange }) {
         <p className="text-xs text-gray-500 dark:text-gray-400">Cuánto abonó y cuánto falta.</p>
       </div>
 
-      {/* Vista simple: 3 números grandes (Total / Cobrado editable / Falta abonar) */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
-          <p className="text-[10px] uppercase tracking-wider text-gray-500 dark:text-gray-400">Total venta</p>
-          <p className="text-lg font-bold text-gray-900 dark:text-gray-100 tabular-nums">{fmtMoney(total)}</p>
+      {/* Big number: Total cobrado de $Y */}
+      <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+        <p className="text-sm text-gray-600 dark:text-gray-400">Total cobrado</p>
+        <p className="text-2xl font-bold tabular-nums">
+          <span className="text-emerald-600 dark:text-emerald-400">{fmtMoney(cobrado)}</span>
+          <span className="text-gray-400 dark:text-gray-500 font-normal"> de </span>
+          <span className="text-gray-900 dark:text-gray-100">{fmtMoney(total)}</span>
+        </p>
+        {/* Progress bar */}
+        <div className="w-full h-2.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden mt-2">
+          <div
+            className={`h-full transition-all rounded-full ${saldada ? 'bg-emerald-500' : 'bg-gradient-to-r from-emerald-400 to-emerald-600'}`}
+            style={{ width: `${Math.min(100, porcentaje)}%` }}
+          />
         </div>
-        <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-3 border border-emerald-200 dark:border-emerald-800">
-          <p className="text-[10px] uppercase tracking-wider text-emerald-700 dark:text-emerald-300">Cobrado</p>
-          <div className="flex items-baseline gap-0.5">
-            <span className="text-lg font-bold text-emerald-700 dark:text-emerald-300">$</span>
-            <input
-              type="number"
-              min="0"
-              value={cobrado || ''}
-              onChange={(e) => setCobradoTotalQuick(e.target.value)}
-              placeholder="0"
-              className="flex-1 min-w-0 bg-transparent text-lg font-bold text-emerald-700 dark:text-emerald-300 tabular-nums focus:outline-none focus:ring-1 focus:ring-emerald-500 rounded px-0.5"
-              title="Cuánto te abonó el cliente en total hasta ahora"
-            />
+        <p className={`text-xs font-semibold mt-1 ${saldada ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
+          {saldada ? 'Saldada' : `${porcentaje}% — faltan ${fmtMoney(saldo)}`}
+        </p>
+      </div>
+
+      {/* Form to register a new cobro */}
+      {!saldada && (
+        <div className="flex flex-wrap items-end gap-2 p-3 bg-gray-50 dark:bg-gray-900/40 rounded-lg border border-gray-200 dark:border-gray-700">
+          <div className="flex-1 min-w-[120px]">
+            <label className="block text-[10px] uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">Monto</label>
+            <div className="relative">
+              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+              <input
+                type="number"
+                min="0"
+                value={nuevoMonto}
+                onChange={(e) => setNuevoMonto(e.target.value)}
+                placeholder={String(Math.round(saldo))}
+                className="w-full pl-6 pr-2 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCobro(); } }}
+              />
+            </div>
           </div>
+          <div className="min-w-[130px]">
+            <label className="block text-[10px] uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">Concepto</label>
+            <select
+              value={nuevoConcepto}
+              onChange={(e) => setNuevoConcepto(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            >
+              {CONCEPTOS.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <button
+            type="button"
+            onClick={addCobro}
+            disabled={!nuevoMonto || parseFloat(nuevoMonto) <= 0}
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white rounded-lg font-semibold text-sm transition"
+          >
+            Registrar cobro
+          </button>
         </div>
-        <div className={`rounded-lg p-3 border ${saldada ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800' : 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800'}`}>
-          <p className={`text-[10px] uppercase tracking-wider ${saldada ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}`}>Falta abonar</p>
-          <p className={`text-lg font-bold tabular-nums ${saldada ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}`}>{saldada ? 'Saldada ✓' : fmtMoney(saldo)}</p>
-        </div>
-      </div>
+      )}
 
-      {/* Barra de progreso */}
-      <div className="w-full h-2 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
-        <div
-          className="h-full bg-gradient-to-r from-emerald-400 to-emerald-600 transition-all"
-          style={{ width: `${Math.min(100, porcentaje)}%` }}
-        />
-      </div>
-
-      {/* Toggle para ver el detalle de pagos (seña + adelantos + saldo discriminados) */}
-      <button
-        type="button"
-        onClick={() => setShowDetalle(v => !v)}
-        className="inline-flex items-center gap-1 text-[11px] font-semibold text-gray-500 dark:text-gray-400 hover:text-emerald-700 dark:hover:text-emerald-300 transition"
-      >
-        {showDetalle ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        {showDetalle ? 'Ocultar detalle' : `Ver detalle de pagos${cobros.length > 0 ? ` (${cobros.length})` : ''}`}
-      </button>
-
-      {!showDetalle ? null : (
-      <>
-      <div className="flex items-center gap-2 text-xs pt-2">
-        <label className="text-gray-500 dark:text-gray-400">Pagos acordados:</label>
-        <input
-          type="number"
-          min="0"
-          value={cuotasPlanificadas || ''}
-          onChange={(e) => setPlan(e.target.value)}
-          placeholder="0"
-          className="w-16 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-pink-500"
-          title="Cuántos pagos acordaste con el cliente (ej. 2 = seña + saldo). 0 = sin plan definido."
-        />
-        <span className="text-gray-500 dark:text-gray-400">{cuotasPlanificadas > 0 ? (cuotasPlanificadas === 1 ? 'pago' : 'pagos') : 'sin plan'}</span>
-      </div>
-
-      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-        <table className="w-full text-xs">
-          <thead className="bg-gray-50 dark:bg-gray-700/60 sticky top-0 z-10">
-            <tr className="text-left text-gray-600 dark:text-gray-300">
-              <th className="px-3 py-2 font-semibold w-32">Concepto</th>
-              <th className="px-3 py-2 font-semibold text-right">Monto</th>
-              <th className="px-3 py-2 font-semibold">Fecha</th>
-              <th className="px-3 py-2 font-semibold">Nota</th>
-              <th className="px-3 py-2 w-8"></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-            {cobros.length === 0 && (
-              <tr><td colSpan={5} className="px-3 py-4 text-center text-gray-500 dark:text-gray-400 italic">Sin cobros registrados. Tocá “Registrar cobro” para empezar.</td></tr>
-            )}
-            {cobros.map((cobro, i) => (
-              <tr key={i}>
-                <td className="px-3 py-2">
-                  <input
-                    type="text"
-                    value={cobro.concepto ?? ''}
-                    onChange={(e) => updateCobro(i, { concepto: e.target.value })}
-                    placeholder={sugerirConcepto(i, i) || `Pago ${i + 1}`}
-                    className="w-full px-2 py-1 text-xs font-semibold text-gray-900 dark:text-gray-100 border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                    title="Seña, Adelanto, Saldo, o lo que quieras poner"
-                  />
-                </td>
-                <td className="px-3 py-2 text-right">
-                  <input
-                    type="number"
-                    min="0"
-                    value={cobro.monto ?? ''}
-                    onChange={(e) => updateCobro(i, { monto: parseFloat(e.target.value) || 0 })}
-                    placeholder="0"
-                    className="w-28 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500 text-right"
-                  />
-                </td>
-                <td className="px-3 py-2">
-                  <input
-                    type="date"
-                    value={cobro.fecha || ''}
-                    onChange={(e) => updateCobro(i, { fecha: e.target.value })}
-                    className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                  />
-                </td>
-                <td className="px-3 py-2">
-                  <input
-                    type="text"
-                    value={cobro.nota || ''}
-                    onChange={(e) => updateCobro(i, { nota: e.target.value })}
-                    placeholder="transfer, efectivo, MP..."
-                    className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                  />
-                </td>
-                <td className="px-3 py-2 text-center">
-                  <button
-                    type="button"
-                    onClick={() => removeCobro(i)}
-                    className="p-1 rounded text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 transition"
-                    title="Eliminar este cobro"
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                </td>
+      {/* List of cobros */}
+      {cobros.length > 0 && (
+        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+          <table className="w-full text-xs">
+            <thead className="bg-gray-50 dark:bg-gray-700/60">
+              <tr className="text-left text-gray-600 dark:text-gray-300">
+                <th className="px-3 py-2 font-semibold">Fecha</th>
+                <th className="px-3 py-2 font-semibold">Concepto</th>
+                <th className="px-3 py-2 font-semibold text-right">Monto</th>
+                <th className="px-3 py-2 w-8"></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <button
-        type="button"
-        onClick={addCobro}
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md border border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition"
-      >
-        <Plus size={14} /> Registrar cobro
-      </button>
-      </>
+            </thead>
+            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+              {cobros.map((cobro, i) => (
+                <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                  <td className="px-3 py-2 text-gray-600 dark:text-gray-400 whitespace-nowrap">{cobro.fecha || '-'}</td>
+                  <td className="px-3 py-2 font-semibold text-gray-900 dark:text-gray-100">{cobro.concepto || `Pago ${i + 1}`}</td>
+                  <td className="px-3 py-2 text-right font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{fmtMoney(cobro.monto)}</td>
+                  <td className="px-3 py-2 text-center">
+                    <button
+                      type="button"
+                      onClick={() => removeCobro(i)}
+                      className="p-1 rounded text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 transition"
+                      title="Eliminar este cobro"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
@@ -6518,7 +6835,7 @@ function UserMenu({ currentUser, sidebarOpen, state, onLogout }) {
   const products = state?.products || [];
   const mentors = state?.mentors || [];
 
-  const ordenesActivas = sales.filter(o => (o.estado || 'pendiente-cotizacion') !== 'despachado').length;
+  const ordenesActivas = sales.filter(o => (o.estado || 'consulta-recibida') !== 'despachado').length;
   const incidencias = sales.filter(s => s.tieneIncidencia).length;
 
   const aCobrar = sales.reduce((acc, o) => {
@@ -6996,7 +7313,6 @@ function CommandPalette({ state, currentUser, onClose, onNavigate, onNewSale, on
   if (currentUser?.role === 'admin') {
     baseCmds.push(
       { id: 'go-inicio', group: 'Ir a', label: 'Dashboard / Inicio', icon: Home, shortcut: 'G I', run: () => onNavigate('inicio') },
-      { id: 'go-ventas', group: 'Ir a', label: 'Ventas', icon: TrendingUp, shortcut: 'G V', run: () => onNavigate('ventas') },
       { id: 'go-productos', group: 'Ir a', label: 'Productos', icon: Package, shortcut: 'G P', run: () => onNavigate('productos') },
       { id: 'go-clientes', group: 'Ir a', label: 'Clientes', icon: Users, shortcut: 'G C', run: () => onNavigate('clientes') },
       { id: 'go-comisiones', group: 'Ir a', label: 'Comisiones y Mentores', icon: CreditCard, shortcut: 'G $', run: () => onNavigate('comisiones') },

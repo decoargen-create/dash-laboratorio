@@ -164,6 +164,74 @@ function normalizeToWhiteBg(dataUrl) {
   });
 }
 
+// Dada una base (nombre + SKU) y un array de variantes, produce todas las
+// combinaciones posibles como productos separados. Cada uno con:
+//   - nombre: base + " - Valor1 / Valor2"
+//   - sku:    base + "-VALOR1-VALOR2"
+//   - variante: { tipo1: valor1, tipo2: valor2 }  ← estructurado por si sirve
+// Agrupa variantes por tipo (color, talle, etc.) y hace cartesian product
+// entre grupos: si hay [color: Rojo, Azul] + [talle: M, L], devuelve 4 combos.
+function expandirVariantesEnSkus(nombreBase, skuBase, variantes) {
+  if (!Array.isArray(variantes) || variantes.length === 0) {
+    return [{ nombre: nombreBase, sku: skuBase, variante: null }];
+  }
+  const groups = {};
+  for (const v of variantes) {
+    if (!v || !v.valor) continue;
+    const tipo = String(v.tipo || 'otro').toLowerCase();
+    if (!groups[tipo]) groups[tipo] = [];
+    groups[tipo].push(v.valor);
+  }
+  const tipos = Object.keys(groups);
+  if (tipos.length === 0) {
+    return [{ nombre: nombreBase, sku: skuBase, variante: null }];
+  }
+  // Cartesian product.
+  let combos = [{}];
+  for (const tipo of tipos) {
+    const next = [];
+    for (const acc of combos) {
+      for (const valor of groups[tipo]) {
+        next.push({ ...acc, [tipo]: valor });
+      }
+    }
+    combos = next;
+  }
+  // Convertir cada combo a producto.
+  return combos.map(combo => {
+    const valoresOrdenados = tipos.map(t => combo[t]);
+    const sufijoNombre = valoresOrdenados.join(' / ');
+    const sufijoSku = valoresOrdenados
+      .map(v => String(v).normalize('NFD').replace(/[\u0300-\u036f]/g, ''))
+      .map(v => v.replace(/[^A-Za-z0-9Ññ]+/g, '-'))
+      .map(v => v.toUpperCase().replace(/^-+|-+$/g, ''))
+      .filter(Boolean)
+      .join('-');
+    return {
+      nombre: `${nombreBase} - ${sufijoNombre}`,
+      sku: sufijoSku ? `${skuBase}-${sufijoSku}` : skuBase,
+      variante: combo,
+    };
+  });
+}
+
+// Cuenta cuántos SKUs se van a generar si se expanden las variantes. Hace el
+// cartesian product: si hay [color: 3] + [talle: 2], son 6. Si todo es del
+// mismo tipo, es N (ej 9 colores = 9 skus).
+function contarExpansiones(variantes) {
+  if (!Array.isArray(variantes) || variantes.length === 0) return 1;
+  const groups = {};
+  for (const v of variantes) {
+    if (!v?.valor) continue;
+    const tipo = String(v.tipo || 'otro').toLowerCase();
+    if (!groups[tipo]) groups[tipo] = 0;
+    groups[tipo]++;
+  }
+  const counts = Object.values(groups);
+  if (counts.length === 0) return 1;
+  return counts.reduce((a, b) => a * b, 1);
+}
+
 // Iniciales de un cliente para mostrar en el SKU preview.
 function iniciales(nombre) {
   const parts = String(nombre || '').trim().split(/\s+/).filter(Boolean);
@@ -282,6 +350,9 @@ export default function BocetosSection({ addToast }) {
         imagen: p.imagen || '',
         url: p.url || '',
         variantes: Array.isArray(p.variantes) ? p.variantes : [],
+        // Si detectó variantes, por default las expandimos en SKUs separados
+        // al aprobar (matchea el modelo Senydrop: cada variante = producto).
+        _expandVariantes: Array.isArray(p.variantes) && p.variantes.length > 0,
         // Datos de envío por default (Andreani / Correo Argentino los pide).
         peso: DEFAULT_SHIPPING.peso,
         largo: DEFAULT_SHIPPING.largo,
@@ -361,15 +432,18 @@ export default function BocetosSection({ addToast }) {
       addToast?.({ type: 'error', message: 'Nombre y SKU son obligatorios para aprobar' });
       return;
     }
-    const boceto = {
-      id: Date.now(),
-      nombre: p.nombre.trim(),
-      sku: p.sku.trim(),
+    const nombreBase = p.nombre.trim();
+    const skuBase = p.sku.trim();
+    const shouldExpand = p._expandVariantes && Array.isArray(p.variantes) && p.variantes.length > 0;
+    const expansiones = shouldExpand
+      ? expandirVariantesEnSkus(nombreBase, skuBase, p.variantes)
+      : [{ nombre: nombreBase, sku: skuBase, variante: null }];
+
+    const baseShared = {
       imagen: p.imagen || '',
       clienteId: p.clienteId,
       cliente: p.clienteNombre,
       url: p.url || '',
-      variantes: p.variantes || [],
       peso: typeof p.peso === 'number' ? p.peso : DEFAULT_SHIPPING.peso,
       largo: typeof p.largo === 'number' ? p.largo : DEFAULT_SHIPPING.largo,
       ancho: typeof p.ancho === 'number' ? p.ancho : DEFAULT_SHIPPING.ancho,
@@ -377,9 +451,24 @@ export default function BocetosSection({ addToast }) {
       manual: !!p._manual,
       createdAt: new Date().toISOString(),
     };
-    setBocetos(prev => [boceto, ...prev]);
+
+    const nuevosBocetos = expansiones.map((exp, idx) => ({
+      id: Date.now() + idx + Math.random(),
+      nombre: exp.nombre,
+      sku: exp.sku,
+      variante: exp.variante, // { color: 'Rojo', talle: 'M' } o null
+      // Si expandimos, cada producto NO lleva el array de variantes (ya se
+      // materializó en SKUs separados). Si no expandimos, las guardamos igual.
+      variantes: shouldExpand ? [] : (p.variantes || []),
+      ...baseShared,
+    }));
+
+    setBocetos(prev => [...nuevosBocetos, ...prev]);
     removePending(p._tempId);
-    addToast?.({ type: 'success', message: `"${boceto.nombre}" cargado` });
+    const msg = nuevosBocetos.length === 1
+      ? `"${nuevosBocetos[0].nombre}" cargado`
+      : `${nuevosBocetos.length} productos cargados (expandido por variantes)`;
+    addToast?.({ type: 'success', message: msg });
   };
 
   const handleApproveAll = () => {
@@ -388,26 +477,41 @@ export default function BocetosSection({ addToast }) {
       addToast?.({ type: 'error', message: 'Ningún pendiente tiene nombre y SKU completos' });
       return;
     }
-    const nuevos = validos.map(p => ({
-      id: Date.now() + Math.random(),
-      nombre: p.nombre.trim(),
-      sku: p.sku.trim(),
-      imagen: p.imagen || '',
-      clienteId: p.clienteId,
-      cliente: p.clienteNombre,
-      url: p.url || '',
-      variantes: p.variantes || [],
-      peso: typeof p.peso === 'number' ? p.peso : DEFAULT_SHIPPING.peso,
-      largo: typeof p.largo === 'number' ? p.largo : DEFAULT_SHIPPING.largo,
-      ancho: typeof p.ancho === 'number' ? p.ancho : DEFAULT_SHIPPING.ancho,
-      alto: typeof p.alto === 'number' ? p.alto : DEFAULT_SHIPPING.alto,
-      manual: !!p._manual,
-      createdAt: new Date().toISOString(),
-    }));
+    const nuevos = [];
+    for (const p of validos) {
+      const nombreBase = p.nombre.trim();
+      const skuBase = p.sku.trim();
+      const shouldExpand = p._expandVariantes && Array.isArray(p.variantes) && p.variantes.length > 0;
+      const expansiones = shouldExpand
+        ? expandirVariantesEnSkus(nombreBase, skuBase, p.variantes)
+        : [{ nombre: nombreBase, sku: skuBase, variante: null }];
+      for (const exp of expansiones) {
+        nuevos.push({
+          id: Date.now() + nuevos.length + Math.random(),
+          nombre: exp.nombre,
+          sku: exp.sku,
+          variante: exp.variante,
+          variantes: shouldExpand ? [] : (p.variantes || []),
+          imagen: p.imagen || '',
+          clienteId: p.clienteId,
+          cliente: p.clienteNombre,
+          url: p.url || '',
+          peso: typeof p.peso === 'number' ? p.peso : DEFAULT_SHIPPING.peso,
+          largo: typeof p.largo === 'number' ? p.largo : DEFAULT_SHIPPING.largo,
+          ancho: typeof p.ancho === 'number' ? p.ancho : DEFAULT_SHIPPING.ancho,
+          alto: typeof p.alto === 'number' ? p.alto : DEFAULT_SHIPPING.alto,
+          manual: !!p._manual,
+          createdAt: new Date().toISOString(),
+        });
+      }
+    }
     const validIds = new Set(validos.map(p => p._tempId));
     setBocetos(prev => [...nuevos, ...prev]);
     setPending(prev => prev.filter(p => !validIds.has(p._tempId)));
-    addToast?.({ type: 'success', message: `${nuevos.length} producto(s) cargados` });
+    const msg = nuevos.length === validos.length
+      ? `${nuevos.length} producto(s) cargados`
+      : `${nuevos.length} producto(s) cargados (desde ${validos.length} pendientes, expandidos por variantes)`;
+    addToast?.({ type: 'success', message: msg });
   };
 
   const handleReplaceImage = async (tempId, file) => {
@@ -1205,6 +1309,19 @@ function PendingItem({ item, layout, onChange, onApprove, onDiscard, onReplaceIm
                 </span>
               ))}
             </div>
+            {/* Toggle: expandir cada variante como un SKU distinto */}
+            <label className="flex items-center gap-2 mt-2 cursor-pointer text-[11px] text-gray-700">
+              <input
+                type="checkbox"
+                checked={!!item._expandVariantes}
+                onChange={(e) => onChange({ _expandVariantes: e.target.checked })}
+                className="w-3.5 h-3.5 rounded border-gray-300 text-[#FFD33D] focus:ring-[#FFD33D]"
+              />
+              <span>
+                Expandir en <span className="font-bold text-gray-900">{contarExpansiones(item.variantes)}</span> SKUs separados
+                <span className="text-gray-500"> (un producto por variante)</span>
+              </span>
+            </label>
           </div>
         )}
         {/* Datos de envío (colapsable) — Andreani / Correo Argentino los piden */}

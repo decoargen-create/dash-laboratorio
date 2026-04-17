@@ -1,28 +1,36 @@
-// Endpoint que, dada una URL de landing (Tiendanube / Shopify / etc.) y el
-// nombre del proveedor, scrapea el producto y devuelve los datos listos para
-// el módulo de Bocetos:
-//   { nombre, imagen (data URL base64), sku }
+// Endpoint que scrapea productos de landings (Tiendanube / Shopify / etc.)
+// y devuelve datos listos para el módulo de Bocetos Senydrop.
 //
-// Flujo:
-//   1. fetch(url) server-side → HTML
-//   2. Extrae og:title, og:image, og:description con regex (no metemos un
-//      parser de HTML completo para mantener esto liviano en Vercel).
-//   3. fetch(imagen) → base64 (evita CORS y HTTPS mixto en el front).
-//   4. Llama a Claude para generar SKU siguiendo la nomenclatura del usuario.
-//   5. Devuelve todo junto.
+// Tres modos de uso:
 //
-// Uso: POST /api/scrape-product { url, proveedorNombre }
+//   1. Single (back-compat):
+//      { url: "https://...", clienteNombre: "Agustin Samara" }
+//      → devuelve { productos: [ { nombre, imagen, sku, variantes, ... } ] }
+//
+//   2. Batch (varias URLs explícitas):
+//      { urls: ["https://...", "https://..."], clienteNombre: "..." }
+//      → scrapea cada una en paralelo, devuelve { productos: [...] }
+//
+//   3. Collection (una URL apuntando a una página con muchos productos):
+//      { collectionUrl: "https://tienda.com/productos/...", clienteNombre: "..." }
+//      → detecta links a productos en el HTML, los scrapea en paralelo.
+//
+// Internamente: extrae og:title / og:image / og:description, baja la imagen
+// a base64, y usa Claude (Haiku 4.5) para generar SKU + detectar variantes.
+//
+// Compatibilidad: sigue aceptando `proveedorNombre` como alias de `clienteNombre`
+// para no romper clientes viejos.
 
 import Anthropic from '@anthropic-ai/sdk';
 
-const SYSTEM_SKU = `Sos el extractor de datos de producto del sistema Senydrop. Recibís el nombre de un producto, la descripción, el proveedor y un fragmento del HTML de la landing. Devolvés: SKU siguiendo una nomenclatura específica + nombre limpio + variantes detectadas.
+const SYSTEM_SKU = `Sos el extractor de datos de producto del sistema Senydrop. Recibís el nombre de un producto, la descripción, el cliente y un fragmento del HTML de la landing. Devolvés: SKU siguiendo una nomenclatura específica + nombre limpio + variantes detectadas.
 
 === NOMENCLATURA DEL SKU ===
-FORMATO: PF-{iniciales_proveedor}-{palabras_clave_mayusculas}
+FORMATO: PF-{iniciales_cliente}-{palabras_clave_mayusculas}
 
 REGLAS:
 - Prefijo fijo: PF-
-- Iniciales: primera letra del nombre + primera letra del apellido del proveedor (ej: "Agustin Samara" → AS, "Lionel Mansilla" → LM).
+- Iniciales: primera letra del nombre + primera letra del apellido del cliente (ej: "Agustin Samara" → AS, "Lionel Mansilla" → LM).
 - Palabras clave: 2 a 4 palabras del nombre, SIN conectores ("de", "para", "y", "al", "con", "sin", "la", "el", "los", "las", "un", "una", "del"), SIN marketing ("Premium", "Pro", "Plus", "Original", "Control"), SIN unidades genéricas ("unidades", "pack").
 - Singularizá sustantivos obvios: "Alicates" → "ALICATE", "Paños" → "PAÑOS", "Productos" → "PRODUCTO".
 - Truncá palabras muy largas a 6-7 letras: "MICROFIBRA" → "MICROF", "ORGANIZADOR" → "ORGANIZ".
@@ -37,36 +45,31 @@ EJEMPLOS DE SKU:
 - "Valentin Aguiar" + "Alicates para quitar clips de panel" → PF-VA-ALICATE-QUITACLIP
 
 === EXTRACCIÓN DE VARIANTES ===
-Buscá en el HTML los selectores, opciones o listas que indiquen variantes del producto. Típicamente aparecen como:
-- <select name="color"> o <option>Rojo</option>
-- Botones tipo "Talle XS / S / M / L"
-- Listas de "Color: Negro / Blanco / Azul"
+Buscá en el HTML los selectores, opciones o listas que indiquen variantes:
+- <select name="color"> / <option>
+- Botones "Talle XS / S / M / L"
 - Schema JSON-LD con "variesBy" o "offers"
-- Shopify: window.product.variants o tag "data-option-name"
-- Tiendanube: "ns.product.variants" o "data-variant"
+- Shopify: window.product.variants, data-option-name
+- Tiendanube: ns.product.variants, data-variant
 
-Para cada variante detectada, devolvé un objeto:
+Cada variante:
 - tipo: "color" | "talle" | "medida" | "sabor" | "material" | "modelo" | "otro"
-- valor: el texto visible que aparece en la landing (ej: "Rojo", "XL", "500ml")
+- valor: texto visible (ej: "Rojo", "XL", "500ml")
 
-Si no encontrás variantes claras, devolvé variantes: [].
-NO inventes variantes que no estén en el HTML.
+Si no hay variantes claras, devolvé variantes: []. NO inventes variantes.
 
 === SALIDA ===
 Devolvé JSON ESTRICTO:
 {
   "sku": "PF-XX-KEYWORDS",
-  "nombreLimpio": "Nombre del producto sin marketing extra. Si el nombre original ya está bien, devolvelo tal cual.",
-  "variantes": [
-    { "tipo": "color", "valor": "Rojo" },
-    { "tipo": "color", "valor": "Negro" },
-    { "tipo": "talle", "valor": "M" }
-  ]
+  "nombreLimpio": "Nombre del producto sin marketing extra. Si el original ya está bien, devolvelo tal cual.",
+  "variantes": [ { "tipo": "color", "valor": "Rojo" } ]
 }
 NO markdown. SOLO el JSON puro.`;
 
-const MAX_IMG_BYTES = 1024 * 1024 * 2; // 2MB para poder bajar fotos grandes, después front las comprime si hace falta.
+const MAX_IMG_BYTES = 1024 * 1024 * 2;
 const FETCH_TIMEOUT_MS = 12000;
+const MAX_BATCH_SIZE = 25; // límite por request para no matar Vercel ni la API key.
 
 async function readBody(req) {
   if (req.body && typeof req.body === 'object') return req.body;
@@ -87,8 +90,6 @@ function respondJSON(res, status, payload) {
   res.end(JSON.stringify(payload));
 }
 
-// Fetch con timeout manual porque fetch del runtime de Vercel no siempre
-// respeta AbortController en todos los runtimes.
 async function fetchWithTimeout(url, opts = {}, timeoutMs = FETCH_TIMEOUT_MS) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -99,11 +100,8 @@ async function fetchWithTimeout(url, opts = {}, timeoutMs = FETCH_TIMEOUT_MS) {
   }
 }
 
-// Extrae atributo `content` de un meta tag por property o name, buscando en
-// orden de prioridad (og:* > twitter:* > name genérico).
 function extractMeta(html, keys) {
   for (const key of keys) {
-    // Soportamos ambos órdenes: property="..." content="..." y content="..." property="..."
     const patterns = [
       new RegExp(`<meta[^>]+(?:property|name)=["']${key}["'][^>]*content=["']([^"']+)["']`, 'i'),
       new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]*(?:property|name)=["']${key}["']`, 'i'),
@@ -121,8 +119,6 @@ function extractTitleTag(html) {
   return m ? m[1].trim() : null;
 }
 
-// Convierte iniciales del proveedor a dos letras: "Agustin Samara" → "AS".
-// Si hay una sola palabra, devuelve las dos primeras letras.
 function iniciales(nombre) {
   const parts = String(nombre || '').trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return 'XX';
@@ -130,24 +126,42 @@ function iniciales(nombre) {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-export default async function handler(req, res) {
-  if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
+// Detecta si una URL apunta a una colección/listado de productos viendo si
+// el HTML tiene muchos links a /products/{slug} o /productos/{slug} distintos.
+// Devuelve array de URLs únicas (absolutas) o null si parece ser un producto simple.
+function extractProductLinksFromCollection(html, baseUrl) {
+  // Patrones típicos de plataformas:
+  //   Shopify:  /products/slug-producto
+  //   Tiendanube: /productos/slug-producto
+  //   Mercado Shops: similares
+  const re = /href=["']([^"']*\/(?:products|productos)\/[a-zA-Z0-9._-]+[^"'#?]*)["']/gi;
+  const seen = new Set();
+  const results = [];
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    try {
+      const abs = new URL(m[1], baseUrl).toString().split('#')[0].split('?')[0];
+      // Evitar links del tipo /products/ sin slug (listados) y duplicados.
+      if (!abs.match(/\/(products|productos)\/[a-zA-Z0-9._-]+/)) continue;
+      if (!seen.has(abs)) {
+        seen.add(abs);
+        results.push(abs);
+      }
+    } catch {}
+  }
+  return results;
+}
 
-  const body = await readBody(req);
-  const { url, proveedorNombre } = body || {};
-
-  if (!url || typeof url !== 'string') return respondJSON(res, 400, { error: 'Falta "url"' });
-  if (!proveedorNombre || typeof proveedorNombre !== 'string') return respondJSON(res, 400, { error: 'Falta "proveedorNombre"' });
-
+// Scrapea UN producto y genera su JSON. Devuelve { ok, error?, data? }.
+async function scrapeSingleProduct(url, clienteNombre, apiKey) {
   let parsedUrl;
   try { parsedUrl = new URL(url); }
-  catch { return respondJSON(res, 400, { error: 'URL inválida' }); }
+  catch { return { ok: false, error: 'URL inválida', url }; }
 
   if (!/^https?:$/.test(parsedUrl.protocol)) {
-    return respondJSON(res, 400, { error: 'Sólo se aceptan URLs http(s)' });
+    return { ok: false, error: 'Sólo http(s)', url };
   }
 
-  // Paso 1: bajar el HTML de la landing.
   let html;
   try {
     const resp = await fetchWithTimeout(parsedUrl.toString(), {
@@ -156,28 +170,24 @@ export default async function handler(req, res) {
         'Accept': 'text/html,application/xhtml+xml',
       },
     });
-    if (!resp.ok) return respondJSON(res, 502, { error: `La landing respondió ${resp.status}` });
+    if (!resp.ok) return { ok: false, error: `HTTP ${resp.status}`, url };
     html = await resp.text();
   } catch (err) {
-    return respondJSON(res, 502, { error: `No pude acceder a la URL: ${err.message || err}` });
+    return { ok: false, error: err.message || String(err), url };
   }
 
-  // Paso 2: extraer meta tags.
   const ogTitle = extractMeta(html, ['og:title', 'twitter:title']);
   const ogImage = extractMeta(html, ['og:image', 'og:image:secure_url', 'twitter:image']);
   const ogDesc = extractMeta(html, ['og:description', 'twitter:description', 'description']);
   const fallbackTitle = extractTitleTag(html);
   const titulo = ogTitle || fallbackTitle || '';
 
-  if (!titulo) {
-    return respondJSON(res, 422, { error: 'No pude detectar el título del producto en la landing (¿tiene og:title?)' });
-  }
+  if (!titulo) return { ok: false, error: 'Sin og:title detectable', url };
 
-  // Paso 3: bajar la imagen y convertir a base64 (si hay).
   let imagenDataUrl = null;
   if (ogImage) {
     try {
-      const imgUrl = new URL(ogImage, parsedUrl).toString(); // resuelve URLs relativas.
+      const imgUrl = new URL(ogImage, parsedUrl).toString();
       const imgResp = await fetchWithTimeout(imgUrl, {
         headers: { 'User-Agent': 'Mozilla/5.0 (compatible; SenydropBocetos/1.0)' },
       });
@@ -189,21 +199,9 @@ export default async function handler(req, res) {
           imagenDataUrl = `data:${contentType};base64,${b64}`;
         }
       }
-    } catch {
-      // Si la imagen falla, seguimos sin ella — el usuario puede subirla a mano.
-    }
+    } catch {}
   }
 
-  // Paso 4: generar SKU + detectar variantes con Claude. Si falla o no hay key,
-  // fallback local (sólo SKU, sin variantes).
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  let sku = null;
-  let nombreLimpio = titulo;
-  let variantes = [];
-
-  // Limpiamos el HTML: sacamos scripts/styles/comentarios y recortamos a 12KB.
-  // Esto es más que suficiente para que Claude encuentre selects/options y
-  // datos de schema.org sin quemarnos tokens con CSS inline y trackers.
   const htmlLimpio = html
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
@@ -211,10 +209,14 @@ export default async function handler(req, res) {
     .replace(/\s+/g, ' ')
     .slice(0, 12000);
 
+  let sku = null;
+  let nombreLimpio = titulo;
+  let variantes = [];
+
   if (apiKey) {
     try {
       const client = new Anthropic({ apiKey });
-      const prompt = `Proveedor: ${proveedorNombre}
+      const prompt = `Cliente: ${clienteNombre}
 Nombre del producto: ${titulo}
 ${ogDesc ? `Descripción: ${ogDesc.slice(0, 400)}` : ''}
 
@@ -234,7 +236,6 @@ Generá el JSON con sku, nombreLimpio y variantes detectadas.`;
       if (parsed.sku) sku = parsed.sku;
       if (parsed.nombreLimpio) nombreLimpio = parsed.nombreLimpio;
       if (Array.isArray(parsed.variantes)) {
-        // Sanitizamos: máx 20 variantes, valores recortados a 40 chars.
         variantes = parsed.variantes
           .filter(v => v && typeof v.valor === 'string' && v.valor.trim())
           .slice(0, 20)
@@ -244,16 +245,14 @@ Generá el JSON con sku, nombreLimpio y variantes detectadas.`;
           }));
       }
     } catch (err) {
-      console.error('scrape-product: fallo Claude, uso fallback', err?.message);
+      console.error('scrapeSingleProduct: fallo Claude', err?.message);
     }
   }
 
-  // Fallback local: SKU simple con regex. Se usa cuando Claude no anduvo o la
-  // key no está configurada.
   if (!sku) {
     const stopwords = new Set(['de','para','y','al','con','sin','la','el','los','las','un','una','del','a','en','por','premium','pro','plus','unidades','pack']);
     const words = String(titulo)
-      .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // quita tildes salvo...
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
       .replace(/[^A-Za-zÑñ0-9\sxX]/g, ' ')
       .split(/\s+/)
       .map(w => w.trim())
@@ -262,16 +261,91 @@ Generá el JSON con sku, nombreLimpio y variantes detectadas.`;
       if (/^x\d+$/i.test(w)) return w.toUpperCase();
       return w.toUpperCase().slice(0, 8);
     });
-    sku = `PF-${iniciales(proveedorNombre)}-${keywords.join('-')}`;
+    sku = `PF-${iniciales(clienteNombre)}-${keywords.join('-')}`;
   }
 
+  return {
+    ok: true,
+    data: {
+      url,
+      nombre: nombreLimpio,
+      nombreOriginal: titulo,
+      imagen: imagenDataUrl,
+      imagenUrl: ogImage || null,
+      sku,
+      variantes,
+      descripcion: ogDesc || null,
+    },
+  };
+}
+
+export default async function handler(req, res) {
+  if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
+
+  const body = await readBody(req);
+  // Compat: aceptamos cliente o proveedor, url o urls, collectionUrl.
+  const clienteNombre = body.clienteNombre || body.proveedorNombre;
+  const singleUrl = body.url;
+  const batchUrls = Array.isArray(body.urls) ? body.urls : null;
+  const collectionUrl = body.collectionUrl;
+
+  if (!clienteNombre || typeof clienteNombre !== 'string') {
+    return respondJSON(res, 400, { error: 'Falta "clienteNombre"' });
+  }
+  if (!singleUrl && !batchUrls && !collectionUrl) {
+    return respondJSON(res, 400, { error: 'Enviá "url", "urls" o "collectionUrl"' });
+  }
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+
+  // Resolver la lista final de URLs a scrapear.
+  let urlsToScrape = [];
+  let expandedFromCollection = false;
+
+  if (collectionUrl) {
+    // Bajamos la colección y extraemos links a productos.
+    try {
+      const resp = await fetchWithTimeout(collectionUrl, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; SenydropBocetos/1.0)' },
+      });
+      if (!resp.ok) return respondJSON(res, 502, { error: `La colección respondió HTTP ${resp.status}` });
+      const html = await resp.text();
+      urlsToScrape = extractProductLinksFromCollection(html, collectionUrl);
+      expandedFromCollection = true;
+      if (urlsToScrape.length === 0) {
+        return respondJSON(res, 422, { error: 'No encontré links a productos en esa página (busco /products/ o /productos/)' });
+      }
+    } catch (err) {
+      return respondJSON(res, 502, { error: `No pude acceder a la colección: ${err.message}` });
+    }
+  } else if (batchUrls) {
+    urlsToScrape = batchUrls.filter(u => typeof u === 'string' && u.trim()).map(u => u.trim());
+  } else {
+    urlsToScrape = [singleUrl];
+  }
+
+  if (urlsToScrape.length === 0) {
+    return respondJSON(res, 400, { error: 'No hay URLs válidas para scrapear' });
+  }
+  if (urlsToScrape.length > MAX_BATCH_SIZE) {
+    // Recortamos y avisamos por logs — el front puede paginar si necesita más.
+    console.warn(`scrape-product: recorto batch de ${urlsToScrape.length} a ${MAX_BATCH_SIZE}`);
+    urlsToScrape = urlsToScrape.slice(0, MAX_BATCH_SIZE);
+  }
+
+  // Scrapeamos en paralelo (con un poco de concurrencia limitada no haría
+  // falta porque Vercel ya tiene límites, y además son pocos).
+  const results = await Promise.all(
+    urlsToScrape.map(u => scrapeSingleProduct(u, clienteNombre, apiKey))
+  );
+
+  const productos = results.filter(r => r.ok).map(r => r.data);
+  const errores = results.filter(r => !r.ok).map(r => ({ url: r.url, error: r.error }));
+
   return respondJSON(res, 200, {
-    nombre: nombreLimpio,
-    nombreOriginal: titulo,
-    imagen: imagenDataUrl,
-    imagenUrl: ogImage || null,
-    sku,
-    variantes,
-    descripcion: ogDesc || null,
+    productos,
+    errores,
+    total: urlsToScrape.length,
+    expandedFromCollection,
   });
 }

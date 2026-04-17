@@ -1,45 +1,61 @@
 // Módulo "Bocetos Senydrop".
 //
-// Este módulo vive DENTRO del panel del Laboratorio Viora pero es para otro
-// proyecto (senydrop.com). La idea es armar bocetos de productos (nombre +
-// imagen + SKU) y después exportarlos como JSON para migrarlos al repo real
-// de Senydrop.
+// Flujo: asignás un cliente, pegás una o más URLs de productos (o una URL de
+// colección con muchos productos), la IA los scrapea y los deja en una lista
+// de PENDIENTES. Ahí revisás cada uno (nombre, SKU, imagen, variantes) y
+// aprobás / descartás. Los aprobados van a la lista de guardados y se pueden
+// exportar como JSON para migrar al repo real de senydrop.com.
 //
-// Persistencia: localStorage bajo la key `viora-bocetos-v1`.
-// Export: botón que descarga un JSON con todos los bocetos (incluyendo las
-// imágenes como data URLs base64).
+// Persistencia:
+//   - viora-bocetos-v1           : array de bocetos APROBADOS
+//   - viora-bocetos-clientes-v1  : array de clientes
+//   - viora-bocetos-last-cliente : id del último cliente usado
 //
-// Estética: intenta replicar el look&feel de Senydrop (amarillo #F5C518,
-// fondo gris claro, cards blancas con bordes sutiles) para que el admin
-// sienta que está maquetando directamente sobre senydrop.com.
+// Estética: paleta Senydrop (amarillo #FFD33D) con inputs blancos + shadow-sm
+// + bordes redondeados más marcados para que se sienta la ergonomía.
 
-import React, { useEffect, useState, useRef } from 'react';
-import { Plus, Trash2, Download, Upload, Edit2, Package, Image as ImageIcon, Save, X, Check, Sparkles, Link as LinkIcon, Loader2 } from 'lucide-react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
+import {
+  Plus, Trash2, Download, Upload, Edit2, Package, Image as ImageIcon,
+  Save, X, Check, Sparkles, Link as LinkIcon, Loader2, ChevronDown, UserPlus,
+  List as ListIcon, LayoutGrid, ExternalLink, AlertTriangle, RefreshCw,
+} from 'lucide-react';
 
-const STORAGE_KEY = 'viora-bocetos-v1';
-const MAX_IMG_BYTES = 1024 * 1024; // 1MB — localStorage tiene ~5MB total.
+const STORAGE_KEY_BOCETOS = 'viora-bocetos-v1';
+const STORAGE_KEY_CLIENTES = 'viora-bocetos-clientes-v1';
+const STORAGE_KEY_LAST_CLIENTE = 'viora-bocetos-last-cliente';
+const MAX_IMG_BYTES = 1024 * 1024;
 
-function loadBocetos() {
+// Clientes de ejemplo para arrancar con algo cargado. Si el user ya tiene
+// clientes guardados no los pisa.
+const CLIENTES_SEED = [
+  { id: 1, nombre: 'Agustin Samara' },
+  { id: 2, nombre: 'Andi Caminos' },
+  { id: 3, nombre: 'Valentin Aguiar' },
+];
+
+function loadJSON(key, fallback) {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch { return []; }
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw);
+  } catch { return fallback; }
+}
+function saveJSON(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { console.error('localStorage fail:', e); }
 }
 
-function saveBocetos(bocetos) {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(bocetos)); }
-  catch (e) { console.error('No se pudo guardar bocetos:', e); }
+function loadClientes() {
+  const cli = loadJSON(STORAGE_KEY_CLIENTES, null);
+  if (Array.isArray(cli) && cli.length > 0) return cli;
+  return CLIENTES_SEED;
 }
 
-// Convierte un File a data URL base64. Rechaza archivos grandes porque
-// localStorage tiene ~5MB y si metemos imágenes de 5MB cada una rompe todo.
 function fileToDataURL(file) {
   return new Promise((resolve, reject) => {
     if (!file) return reject(new Error('Sin archivo'));
     if (file.size > MAX_IMG_BYTES) {
-      return reject(new Error(`La imagen pesa ${(file.size / 1024 / 1024).toFixed(1)}MB. Máximo 1MB — comprimila o redimensionala.`));
+      return reject(new Error(`La imagen pesa ${(file.size / 1024 / 1024).toFixed(1)}MB. Máximo 1MB.`));
     }
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result);
@@ -58,133 +74,208 @@ function downloadJSON(data, filename) {
   URL.revokeObjectURL(url);
 }
 
-const LAST_PROVEEDOR_KEY = 'viora-bocetos-last-proveedor';
+// Iniciales de un cliente para mostrar en el SKU preview.
+function iniciales(nombre) {
+  const parts = String(nombre || '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return 'XX';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
 
 export default function BocetosSection({ addToast }) {
-  const [bocetos, setBocetos] = useState(() => loadBocetos());
-  const [editingId, setEditingId] = useState(null);
-  const [form, setForm] = useState({ nombre: '', sku: '', imagen: '', proveedor: '', url: '', variantes: [] });
+  const [bocetos, setBocetos] = useState(() => loadJSON(STORAGE_KEY_BOCETOS, []));
+  const [clientes, setClientes] = useState(() => loadClientes());
+  const [clienteId, setClienteId] = useState(() => {
+    const saved = loadJSON(STORAGE_KEY_LAST_CLIENTE, null);
+    return saved ?? loadClientes()[0]?.id ?? null;
+  });
+
+  const [mode, setMode] = useState('batch'); // 'batch' | 'collection'
+  const [urlsText, setUrlsText] = useState('');
+  const [collectionUrl, setCollectionUrl] = useState('');
   const [scraping, setScraping] = useState(false);
-  const fileInputRef = useRef(null);
+
+  // Pendientes: scrapeados pero sin aprobar. NO se persisten en localStorage
+  // (son efímeros — si recargás se pierden, idea que aprobes o descartes
+  // antes de cerrar). Si hace falta persistir avisame.
+  const [pending, setPending] = useState([]);
+
+  // Layout del pending review.
+  const [layout, setLayout] = useState('list'); // 'list' | 'grid'
+
+  // Form de nuevo cliente inline.
+  const [newClienteName, setNewClienteName] = useState('');
+  const [showNewCliente, setShowNewCliente] = useState(false);
+
   const importInputRef = useRef(null);
 
-  // Recordamos el último proveedor usado — en general se cargan varios productos
-  // seguidos del mismo, así que no hace falta retipearlo.
-  useEffect(() => {
-    try {
-      const last = localStorage.getItem(LAST_PROVEEDOR_KEY);
-      if (last) setForm(prev => ({ ...prev, proveedor: last }));
-    } catch {}
-  }, []);
+  useEffect(() => { saveJSON(STORAGE_KEY_BOCETOS, bocetos); }, [bocetos]);
+  useEffect(() => { saveJSON(STORAGE_KEY_CLIENTES, clientes); }, [clientes]);
+  useEffect(() => { if (clienteId != null) saveJSON(STORAGE_KEY_LAST_CLIENTE, clienteId); }, [clienteId]);
 
-  useEffect(() => { saveBocetos(bocetos); }, [bocetos]);
+  const clienteSeleccionado = useMemo(
+    () => clientes.find(c => c.id === clienteId) || null,
+    [clientes, clienteId]
+  );
 
-  const resetForm = () => {
-    setForm(prev => ({ nombre: '', sku: '', imagen: '', proveedor: prev.proveedor, url: '', variantes: [] }));
-    setEditingId(null);
-    if (fileInputRef.current) fileInputRef.current.value = '';
+  // ---------- Cliente CRUD ----------
+
+  const handleAddCliente = () => {
+    const nombre = newClienteName.trim();
+    if (!nombre) return;
+    const nuevo = { id: Date.now(), nombre };
+    setClientes(prev => [...prev, nuevo]);
+    setClienteId(nuevo.id);
+    setNewClienteName('');
+    setShowNewCliente(false);
+    addToast?.({ type: 'success', message: `Cliente "${nombre}" agregado` });
   };
 
+  const handleDeleteCliente = (id) => {
+    const cli = clientes.find(c => c.id === id);
+    if (!cli) return;
+    if (!window.confirm(`¿Borrar el cliente "${cli.nombre}"? Los bocetos no se borran, pero pierden la referencia.`)) return;
+    setClientes(prev => prev.filter(c => c.id !== id));
+    if (clienteId === id) {
+      setClienteId(clientes.find(c => c.id !== id)?.id ?? null);
+    }
+  };
+
+  // ---------- Scrape ----------
+
   const handleScrape = async () => {
-    const url = form.url.trim();
-    const proveedor = form.proveedor.trim();
-    if (!url) { addToast?.({ type: 'error', message: 'Pegá la URL del producto' }); return; }
-    if (!proveedor) { addToast?.({ type: 'error', message: 'Cargá primero el nombre del proveedor' }); return; }
+    if (!clienteSeleccionado) { addToast?.({ type: 'error', message: 'Elegí un cliente primero' }); return; }
+    let payload;
+    if (mode === 'batch') {
+      const urls = urlsText.split('\n').map(s => s.trim()).filter(Boolean);
+      if (urls.length === 0) { addToast?.({ type: 'error', message: 'Pegá al menos una URL' }); return; }
+      payload = { urls, clienteNombre: clienteSeleccionado.nombre };
+    } else {
+      const col = collectionUrl.trim();
+      if (!col) { addToast?.({ type: 'error', message: 'Pegá el link de la colección' }); return; }
+      payload = { collectionUrl: col, clienteNombre: clienteSeleccionado.nombre };
+    }
+
     setScraping(true);
     try {
       const resp = await fetch('/api/scrape-product', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, proveedorNombre: proveedor }),
+        body: JSON.stringify(payload),
       });
       const data = await resp.json();
-      if (!resp.ok) throw new Error(data.error || `Error ${resp.status}`);
-      setForm(prev => ({
-        ...prev,
-        nombre: data.nombre || prev.nombre,
-        sku: data.sku || prev.sku,
-        imagen: data.imagen || prev.imagen,
-        variantes: Array.isArray(data.variantes) ? data.variantes : prev.variantes,
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      const prods = Array.isArray(data.productos) ? data.productos : [];
+      if (prods.length === 0) throw new Error('No se trajo ningún producto');
+      // Cada pendiente tiene un id temporal y se enriquece con cliente.
+      const nuevos = prods.map(p => ({
+        _tempId: Date.now() + Math.random(),
+        _status: 'pending',
+        clienteId: clienteSeleccionado.id,
+        clienteNombre: clienteSeleccionado.nombre,
+        nombre: p.nombre || '',
+        sku: p.sku || '',
+        imagen: p.imagen || '',
+        url: p.url || '',
+        variantes: Array.isArray(p.variantes) ? p.variantes : [],
       }));
-      try { localStorage.setItem(LAST_PROVEEDOR_KEY, proveedor); } catch {}
-      const msg = `Cargado: ${data.nombre}` + (data.variantes?.length ? ` · ${data.variantes.length} variante(s)` : '');
+      setPending(prev => [...nuevos, ...prev]);
+      const errs = Array.isArray(data.errores) ? data.errores.length : 0;
+      const msg = `Llegaron ${nuevos.length} producto(s)` + (errs > 0 ? ` · ${errs} fallaron` : '');
       addToast?.({ type: 'success', message: msg });
+      if (mode === 'batch') setUrlsText('');
+      else setCollectionUrl('');
     } catch (err) {
-      addToast?.({ type: 'error', message: err.message });
+      addToast?.({ type: 'error', message: err.message || 'Error scrapeando' });
     } finally {
       setScraping(false);
     }
   };
 
-  const handleImageChange = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  // ---------- Pending review ----------
+
+  const updatePending = (tempId, patch) => {
+    setPending(prev => prev.map(p => p._tempId === tempId ? { ...p, ...patch } : p));
+  };
+
+  const removePending = (tempId) => {
+    setPending(prev => prev.filter(p => p._tempId !== tempId));
+  };
+
+  const handleApprove = (p) => {
+    if (!p.nombre.trim() || !p.sku.trim()) {
+      addToast?.({ type: 'error', message: 'Nombre y SKU son obligatorios para aprobar' });
+      return;
+    }
+    const boceto = {
+      id: Date.now(),
+      nombre: p.nombre.trim(),
+      sku: p.sku.trim(),
+      imagen: p.imagen || '',
+      clienteId: p.clienteId,
+      cliente: p.clienteNombre,
+      url: p.url || '',
+      variantes: p.variantes || [],
+      createdAt: new Date().toISOString(),
+    };
+    setBocetos(prev => [boceto, ...prev]);
+    removePending(p._tempId);
+    addToast?.({ type: 'success', message: `"${boceto.nombre}" aprobado` });
+  };
+
+  const handleApproveAll = () => {
+    const validos = pending.filter(p => p.nombre.trim() && p.sku.trim());
+    if (validos.length === 0) {
+      addToast?.({ type: 'error', message: 'Ningún pendiente tiene nombre y SKU completos' });
+      return;
+    }
+    const nuevos = validos.map(p => ({
+      id: Date.now() + Math.random(),
+      nombre: p.nombre.trim(),
+      sku: p.sku.trim(),
+      imagen: p.imagen || '',
+      clienteId: p.clienteId,
+      cliente: p.clienteNombre,
+      url: p.url || '',
+      variantes: p.variantes || [],
+      createdAt: new Date().toISOString(),
+    }));
+    const validIds = new Set(validos.map(p => p._tempId));
+    setBocetos(prev => [...nuevos, ...prev]);
+    setPending(prev => prev.filter(p => !validIds.has(p._tempId)));
+    addToast?.({ type: 'success', message: `${nuevos.length} boceto(s) aprobados` });
+  };
+
+  const handleReplaceImage = async (tempId, file) => {
     try {
       const dataUrl = await fileToDataURL(file);
-      setForm(prev => ({ ...prev, imagen: dataUrl }));
+      updatePending(tempId, { imagen: dataUrl });
     } catch (err) {
       addToast?.({ type: 'error', message: err.message });
-      e.target.value = '';
     }
   };
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    const nombre = form.nombre.trim();
-    const sku = form.sku.trim();
-    if (!nombre || !sku) {
-      addToast?.({ type: 'error', message: 'Nombre y SKU son obligatorios' });
-      return;
-    }
-    const proveedor = form.proveedor.trim();
-    const url = form.url.trim();
-    const variantes = Array.isArray(form.variantes) ? form.variantes : [];
-    if (editingId) {
-      setBocetos(prev => prev.map(b => b.id === editingId ? { ...b, nombre, sku, proveedor, url, variantes, imagen: form.imagen, updatedAt: new Date().toISOString() } : b));
-      addToast?.({ type: 'success', message: `Boceto "${nombre}" actualizado` });
-    } else {
-      const newBoceto = {
-        id: Date.now(),
-        nombre, sku, proveedor, url, variantes,
-        imagen: form.imagen,
-        createdAt: new Date().toISOString(),
-      };
-      setBocetos(prev => [newBoceto, ...prev]);
-      addToast?.({ type: 'success', message: `Boceto "${nombre}" guardado` });
-    }
-    if (proveedor) {
-      try { localStorage.setItem(LAST_PROVEEDOR_KEY, proveedor); } catch {}
-    }
-    resetForm();
+  // ---------- Guardados CRUD ----------
+
+  const handleDeleteSaved = (id) => {
+    const b = bocetos.find(x => x.id === id);
+    if (!b) return;
+    if (!window.confirm(`¿Borrar "${b.nombre}"?`)) return;
+    setBocetos(prev => prev.filter(x => x.id !== id));
   };
 
-  const handleEdit = (boceto) => {
-    setEditingId(boceto.id);
-    setForm({
-      nombre: boceto.nombre,
-      sku: boceto.sku,
-      imagen: boceto.imagen || '',
-      proveedor: boceto.proveedor || form.proveedor,
-      url: boceto.url || '',
-      variantes: Array.isArray(boceto.variantes) ? boceto.variantes : [],
-    });
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const handleDelete = (boceto) => {
-    if (!window.confirm(`¿Borrar el boceto "${boceto.nombre}"?`)) return;
-    setBocetos(prev => prev.filter(b => b.id !== boceto.id));
-    if (editingId === boceto.id) resetForm();
-    addToast?.({ type: 'success', message: 'Boceto eliminado' });
-  };
+  // ---------- Export / Import ----------
 
   const handleExportAll = () => {
-    if (bocetos.length === 0) {
-      addToast?.({ type: 'error', message: 'No hay bocetos para exportar' });
-      return;
-    }
+    if (bocetos.length === 0) { addToast?.({ type: 'error', message: 'No hay bocetos para exportar' }); return; }
     const stamp = new Date().toISOString().split('T')[0];
-    downloadJSON({ version: 1, source: 'laboratorio-viora.bocetos', exportedAt: new Date().toISOString(), bocetos }, `bocetos-senydrop-${stamp}.json`);
+    downloadJSON({
+      version: 2,
+      source: 'laboratorio-viora.bocetos',
+      exportedAt: new Date().toISOString(),
+      clientes,
+      bocetos,
+    }, `bocetos-senydrop-${stamp}.json`);
     addToast?.({ type: 'success', message: `${bocetos.length} boceto(s) exportados` });
   };
 
@@ -197,6 +288,14 @@ export default function BocetosSection({ addToast }) {
       const items = Array.isArray(parsed) ? parsed : parsed.bocetos;
       if (!Array.isArray(items)) throw new Error('Formato inválido');
       setBocetos(prev => [...items, ...prev]);
+      if (Array.isArray(parsed.clientes)) {
+        // Mergeamos clientes sin duplicar por nombre.
+        setClientes(prev => {
+          const existentes = new Set(prev.map(c => c.nombre.toLowerCase()));
+          const nuevos = parsed.clientes.filter(c => c.nombre && !existentes.has(c.nombre.toLowerCase()));
+          return [...prev, ...nuevos];
+        });
+      }
       addToast?.({ type: 'success', message: `${items.length} boceto(s) importados` });
     } catch (err) {
       addToast?.({ type: 'error', message: `Error importando: ${err.message}` });
@@ -204,253 +303,263 @@ export default function BocetosSection({ addToast }) {
     e.target.value = '';
   };
 
+  // ---------- Render ----------
+
+  const sigBadge = clienteSeleccionado ? iniciales(clienteSeleccionado.nombre) : '—';
+
   return (
     <div className="-m-4 md:-m-8 min-h-full bg-[#fafaf7]">
-      {/* Header estilo Senydrop */}
-      <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+      {/* Header */}
+      <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-lg bg-[#FFD33D] flex items-center justify-center shadow-sm">
             <Package size={20} className="text-gray-900" />
           </div>
           <div>
             <h1 className="text-xl font-bold text-gray-900">Bocetos Senydrop</h1>
-            <p className="text-xs text-gray-500">Maquetá productos y exportalos como JSON para migrarlos a senydrop.com</p>
+            <p className="text-xs text-gray-500">Importá productos de Tiendanube/Shopify y armá el catálogo que llevás a senydrop.com</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
           <input ref={importInputRef} type="file" accept="application/json" onChange={handleImport} className="hidden" />
           <button
             onClick={() => importInputRef.current?.click()}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition"
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 shadow-sm transition"
           >
             <Upload size={16} /> Importar
           </button>
           <button
             onClick={handleExportAll}
             disabled={bocetos.length === 0}
-            className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-gray-900 bg-[#FFD33D] rounded-lg hover:bg-[#f5c518] transition disabled:opacity-40 disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-gray-900 bg-[#FFD33D] rounded-lg hover:bg-[#f5c518] shadow-sm transition disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            <Download size={16} /> Exportar JSON ({bocetos.length})
+            <Download size={16} /> Exportar ({bocetos.length})
           </button>
         </div>
       </div>
 
-      <div className="p-6 grid grid-cols-1 lg:grid-cols-[1fr_1.2fr] gap-6 max-w-7xl mx-auto">
-        {/* Columna izquierda: formulario */}
-        <div className="space-y-4">
-          <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-sm text-blue-900 flex items-start gap-2">
-            <span className="text-blue-500 mt-0.5">ⓘ</span>
-            <span>Los campos con asterisco (<span className="text-[#d97706]">*</span>) son obligatorios.</span>
+      <div className="p-6 max-w-6xl mx-auto space-y-6">
+        {/* Panel de scraping */}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <Sparkles size={18} className="text-[#d97706]" />
+            <h2 className="text-base font-bold text-gray-900">Importar productos con IA</h2>
           </div>
 
-          <form onSubmit={handleSubmit}>
-            {/* Card nueva: Auto-completar con IA desde URL + proveedor */}
-            <div className="bg-gradient-to-br from-[#FFFBEA] to-white rounded-lg border-2 border-[#FFD33D] p-5 mb-4">
-              <div className="flex items-center gap-2 mb-3">
-                <Sparkles size={18} className="text-[#d97706]" />
-                <h2 className="text-base font-bold text-gray-900">Auto-completar con IA</h2>
-              </div>
-              <p className="text-xs text-gray-600 mb-4">Pegá el link del producto (Tiendanube, Shopify o landing pública) y el nombre del proveedor. La IA baja la foto, detecta el nombre y genera el SKU siguiendo tu nomenclatura.</p>
-              <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 mb-3">
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1.5">
-                    Proveedor <span className="text-[#d97706]">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={form.proveedor}
-                    onChange={(e) => setForm({ ...form, proveedor: e.target.value })}
-                    placeholder="Agustin Samara"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-[#FFD33D] focus:border-[#FFD33D] transition"
-                  />
-                </div>
-                <div className="hidden sm:block">
-                  <label className="block text-sm font-semibold text-gray-700 mb-1.5">Iniciales</label>
-                  <div className="px-3 py-2 bg-gray-900 text-[#FFD33D] rounded-md text-sm font-mono font-bold tracking-wider w-20 text-center">
-                    {form.proveedor.trim() ? form.proveedor.trim().split(/\s+/).filter(Boolean).slice(0,2).map(p => p[0]).join('').toUpperCase().slice(0,2) || '—' : '—'}
-                  </div>
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1.5">Link del producto</label>
-                <div className="flex gap-2">
-                  <div className="flex-1 relative">
-                    <LinkIcon size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                    <input
-                      type="url"
-                      value={form.url}
-                      onChange={(e) => setForm({ ...form, url: e.target.value })}
-                      placeholder="https://tienda.com.ar/productos/..."
-                      className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-md text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-[#FFD33D] focus:border-[#FFD33D] transition"
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleScrape}
-                    disabled={scraping || !form.url.trim() || !form.proveedor.trim()}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-gray-900 bg-[#FFD33D] rounded-md hover:bg-[#f5c518] transition disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
-                  >
-                    {scraping ? (
-                      <><Loader2 size={14} className="animate-spin" /> Leyendo…</>
-                    ) : (
-                      <><Sparkles size={14} /> Auto-completar</>
-                    )}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
-              <h2 className="text-base font-bold text-gray-900">Nombre y SKU</h2>
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1.5">
-                  Nombre <span className="text-[#d97706]">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={form.nombre}
-                  onChange={(e) => setForm({ ...form, nombre: e.target.value })}
-                  placeholder="Ej: Bolso portatrajes rojo"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#FFD33D] focus:border-[#FFD33D] transition"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1.5">
-                  SKU Senydrop <span className="text-[#d97706]">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={form.sku}
-                  onChange={(e) => setForm({ ...form, sku: e.target.value })}
-                  placeholder="BARRA-PORTAT-ROJ"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-900 font-mono uppercase focus:outline-none focus:ring-2 focus:ring-[#FFD33D] focus:border-[#FFD33D] transition"
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="bg-white rounded-lg border border-gray-200 p-5 mt-4">
-              <h2 className="text-base font-bold text-gray-900 mb-4">Foto</h2>
-              {form.imagen ? (
-                <div className="relative inline-block group">
-                  <img src={form.imagen} alt="Preview" className="max-h-56 rounded-md border border-gray-200" />
-                  <button
-                    type="button"
-                    onClick={() => { setForm({ ...form, imagen: '' }); if (fileInputRef.current) fileInputRef.current.value = ''; }}
-                    className="absolute top-2 right-2 w-7 h-7 rounded-full bg-white shadow border border-gray-200 hover:bg-red-50 hover:border-red-200 text-gray-700 hover:text-red-600 flex items-center justify-center transition"
-                    aria-label="Quitar foto"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-gray-900 bg-white border border-[#FFD33D] rounded-md hover:bg-[#FFFBEA] transition"
+          {/* Cliente */}
+          <div className="mb-4">
+            <label className="block text-sm font-semibold text-gray-700 mb-1.5">
+              Cliente <span className="text-[#d97706]">*</span>
+            </label>
+            <div className="flex gap-2">
+              <div className="flex-1 relative">
+                <select
+                  value={clienteId ?? ''}
+                  onChange={(e) => setClienteId(Number(e.target.value))}
+                  className="w-full pl-3 pr-9 py-2.5 bg-white border border-gray-300 rounded-lg text-sm text-gray-900 font-medium appearance-none focus:outline-none focus:ring-2 focus:ring-[#FFD33D] focus:border-[#FFD33D] shadow-sm transition"
                 >
-                  <Upload size={16} /> Subir foto
-                </button>
-              )}
-              <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageChange} className="hidden" />
-              <p className="text-xs text-gray-500 mt-2">Máximo 1MB. PNG, JPG o WebP.</p>
-            </div>
-
-            {/* Variantes detectadas por IA (editables) */}
-            <div className="bg-white rounded-lg border border-gray-200 p-5 mt-4">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-base font-bold text-gray-900">Variantes</h2>
-                <button
-                  type="button"
-                  onClick={() => setForm(prev => ({ ...prev, variantes: [...(prev.variantes || []), { tipo: 'color', valor: '' }] }))}
-                  className="inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold text-gray-700 border border-gray-300 rounded hover:bg-gray-50 transition"
-                >
-                  <Plus size={12} /> Agregar
-                </button>
-              </div>
-              {(form.variantes || []).length === 0 ? (
-                <p className="text-xs text-gray-400 italic">Sin variantes. La IA va a buscarlas cuando auto-completes desde una URL (colores, talles, medidas, etc).</p>
-              ) : (
-                <div className="space-y-2">
-                  {form.variantes.map((v, idx) => (
-                    <div key={idx} className="flex gap-2">
-                      <select
-                        value={v.tipo}
-                        onChange={(e) => {
-                          const next = [...form.variantes];
-                          next[idx] = { ...next[idx], tipo: e.target.value };
-                          setForm({ ...form, variantes: next });
-                        }}
-                        className="px-2 py-1.5 border border-gray-300 rounded-md text-xs text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-[#FFD33D] focus:border-[#FFD33D]"
-                      >
-                        <option value="color">Color</option>
-                        <option value="talle">Talle</option>
-                        <option value="medida">Medida</option>
-                        <option value="sabor">Sabor</option>
-                        <option value="material">Material</option>
-                        <option value="modelo">Modelo</option>
-                        <option value="otro">Otro</option>
-                      </select>
-                      <input
-                        type="text"
-                        value={v.valor}
-                        onChange={(e) => {
-                          const next = [...form.variantes];
-                          next[idx] = { ...next[idx], valor: e.target.value };
-                          setForm({ ...form, variantes: next });
-                        }}
-                        placeholder="Ej: Rojo"
-                        className="flex-1 px-3 py-1.5 border border-gray-300 rounded-md text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#FFD33D] focus:border-[#FFD33D]"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setForm({ ...form, variantes: form.variantes.filter((_, i) => i !== idx) })}
-                        className="px-2 text-gray-400 hover:text-red-600 transition"
-                        aria-label="Quitar variante"
-                      >
-                        <X size={14} />
-                      </button>
-                    </div>
+                  {clientes.length === 0 && <option value="">— sin clientes —</option>}
+                  {clientes.map(c => (
+                    <option key={c.id} value={c.id}>{c.nombre}</option>
                   ))}
-                </div>
-              )}
-            </div>
-
-            <div className="mt-6 flex items-center gap-3 justify-end">
-              {editingId && (
+                </select>
+                <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+              </div>
+              <div className="px-3 py-2.5 bg-gray-900 text-[#FFD33D] rounded-lg text-sm font-mono font-bold tracking-wider w-16 text-center shadow-sm">
+                {sigBadge}
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowNewCliente(v => !v)}
+                className="inline-flex items-center gap-1 px-3 py-2.5 text-sm font-semibold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 shadow-sm transition"
+                title="Agregar cliente nuevo"
+              >
+                <UserPlus size={16} />
+              </button>
+              {clienteSeleccionado && (
                 <button
                   type="button"
-                  onClick={resetForm}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition"
+                  onClick={() => handleDeleteCliente(clienteSeleccionado.id)}
+                  className="inline-flex items-center gap-1 px-3 py-2.5 text-sm text-gray-500 bg-white border border-gray-300 rounded-lg hover:bg-red-50 hover:text-red-600 hover:border-red-200 shadow-sm transition"
+                  title="Borrar cliente"
                 >
-                  <X size={16} /> Cancelar edición
+                  <Trash2 size={14} />
                 </button>
               )}
+            </div>
+            {showNewCliente && (
+              <div className="mt-2 flex gap-2 p-3 bg-[#FFFBEA] border border-[#FFD33D] rounded-lg animate-fade-in">
+                <input
+                  type="text"
+                  value={newClienteName}
+                  onChange={(e) => setNewClienteName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddCliente(); } }}
+                  placeholder="Nombre del cliente (ej: Juan Pérez)"
+                  className="flex-1 px-3 py-2 bg-white border border-gray-300 rounded-md text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#FFD33D] focus:border-[#FFD33D] shadow-sm"
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  onClick={handleAddCliente}
+                  disabled={!newClienteName.trim()}
+                  className="px-4 py-2 text-sm font-bold text-gray-900 bg-[#FFD33D] rounded-md hover:bg-[#f5c518] disabled:opacity-40 transition"
+                >
+                  Agregar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setShowNewCliente(false); setNewClienteName(''); }}
+                  className="px-3 py-2 text-sm text-gray-500 hover:text-gray-700 transition"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Modo: batch vs colección */}
+          <div className="mb-4">
+            <div className="inline-flex p-1 bg-gray-100 rounded-lg">
               <button
-                type="submit"
-                className="inline-flex items-center gap-1.5 px-6 py-2 text-sm font-bold text-gray-900 bg-[#FFD33D] rounded-lg hover:bg-[#f5c518] transition"
+                type="button"
+                onClick={() => setMode('batch')}
+                className={`px-4 py-1.5 text-xs font-bold rounded-md transition ${mode === 'batch' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
               >
-                {editingId ? <><Check size={16} /> Guardar cambios</> : <><Save size={16} /> Guardar boceto</>}
+                URLs sueltas
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode('collection')}
+                className={`px-4 py-1.5 text-xs font-bold rounded-md transition ${mode === 'collection' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                Página completa
               </button>
             </div>
-          </form>
-        </div>
-
-        {/* Columna derecha: listado */}
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wide">Bocetos guardados ({bocetos.length})</h2>
           </div>
-          {bocetos.length === 0 ? (
-            <div className="bg-white rounded-lg border-2 border-dashed border-gray-200 p-12 text-center">
-              <ImageIcon size={32} className="mx-auto text-gray-300 mb-2" />
-              <p className="text-sm text-gray-500">Todavía no tenés bocetos. Cargá el primero desde el formulario.</p>
+
+          {mode === 'batch' ? (
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1.5">Links de productos (uno por línea)</label>
+              <textarea
+                value={urlsText}
+                onChange={(e) => setUrlsText(e.target.value)}
+                rows={5}
+                placeholder={'https://tienda.com.ar/productos/bolso-rojo\nhttps://tienda.com.ar/productos/mopa-microfibra\nhttps://tienda.com.ar/productos/protector-patas'}
+                className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-sm text-gray-900 font-mono focus:outline-none focus:ring-2 focus:ring-[#FFD33D] focus:border-[#FFD33D] shadow-sm resize-y transition"
+              />
+              <p className="text-xs text-gray-500 mt-1">Pegá todos los links que quieras. La IA los procesa en paralelo (máx 25 por vez).</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1.5">Link de la colección / listado</label>
+              <div className="relative">
+                <LinkIcon size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="url"
+                  value={collectionUrl}
+                  onChange={(e) => setCollectionUrl(e.target.value)}
+                  placeholder="https://tienda.com.ar/productos (o /collections/todos)"
+                  className="w-full pl-9 pr-3 py-2.5 bg-white border border-gray-300 rounded-lg text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#FFD33D] focus:border-[#FFD33D] shadow-sm transition"
+                />
+              </div>
+              <p className="text-xs text-gray-500 mt-1">La IA detecta automáticamente los links a productos individuales en la página y los scrapea todos.</p>
+            </div>
+          )}
+
+          <div className="mt-4 flex justify-end">
+            <button
+              type="button"
+              onClick={handleScrape}
+              disabled={scraping || !clienteSeleccionado || (mode === 'batch' ? !urlsText.trim() : !collectionUrl.trim())}
+              className="inline-flex items-center gap-2 px-6 py-2.5 text-sm font-bold text-gray-900 bg-[#FFD33D] rounded-lg hover:bg-[#f5c518] shadow-sm transition disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {scraping ? (
+                <><Loader2 size={16} className="animate-spin" /> Procesando…</>
+              ) : (
+                <><Sparkles size={16} /> Traer productos</>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Pending review */}
+        {pending.length > 0 && (
+          <div className="bg-white rounded-xl border-2 border-[#FFD33D] shadow-sm">
+            <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-full bg-[#FFD33D] flex items-center justify-center">
+                  <span className="text-sm font-bold text-gray-900">{pending.length}</span>
+                </div>
+                <h2 className="text-base font-bold text-gray-900">Pendientes de aprobación</h2>
+                <span className="text-xs text-gray-500">Revisá cada uno antes de guardar</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="inline-flex p-1 bg-gray-100 rounded-lg">
+                  <button
+                    type="button"
+                    onClick={() => setLayout('list')}
+                    className={`p-1.5 rounded-md transition ${layout === 'list' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
+                    title="Listado"
+                  >
+                    <ListIcon size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLayout('grid')}
+                    className={`p-1.5 rounded-md transition ${layout === 'grid' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
+                    title="Cards"
+                  >
+                    <LayoutGrid size={14} />
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPending([])}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition"
+                >
+                  <X size={12} /> Descartar todos
+                </button>
+                <button
+                  type="button"
+                  onClick={handleApproveAll}
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-gray-900 bg-[#FFD33D] rounded-md hover:bg-[#f5c518] transition"
+                >
+                  <Check size={12} /> Aprobar todos
+                </button>
+              </div>
+            </div>
+
+            <div className={layout === 'list' ? 'divide-y divide-gray-100' : 'p-4 grid grid-cols-1 md:grid-cols-2 gap-3'}>
+              {pending.map(p => (
+                <PendingItem
+                  key={p._tempId}
+                  item={p}
+                  layout={layout}
+                  onChange={(patch) => updatePending(p._tempId, patch)}
+                  onApprove={() => handleApprove(p)}
+                  onDiscard={() => removePending(p._tempId)}
+                  onReplaceImage={(file) => handleReplaceImage(p._tempId, file)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Guardados */}
+        <div>
+          <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wide mb-3">
+            Bocetos aprobados ({bocetos.length})
+          </h2>
+          {bocetos.length === 0 ? (
+            <div className="bg-white rounded-xl border-2 border-dashed border-gray-200 p-12 text-center">
+              <ImageIcon size={32} className="mx-auto text-gray-300 mb-2" />
+              <p className="text-sm text-gray-500">Todavía no hay bocetos aprobados.</p>
+              <p className="text-xs text-gray-400 mt-1">Importá productos arriba y aprobalos cuando revises los datos.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {bocetos.map(b => (
-                <div key={b.id} className={`bg-white rounded-lg border p-4 flex gap-3 transition ${editingId === b.id ? 'border-[#FFD33D] shadow-md ring-2 ring-[#FFD33D]/30' : 'border-gray-200 hover:border-gray-300'}`}>
+                <div key={b.id} className="bg-white rounded-lg border border-gray-200 shadow-sm p-4 flex gap-3 hover:border-gray-300 transition">
                   <div className="shrink-0 w-20 h-20 rounded-md bg-gray-100 border border-gray-200 overflow-hidden flex items-center justify-center">
                     {b.imagen ? (
                       <img src={b.imagen} alt={b.nombre} className="w-full h-full object-cover" />
@@ -461,10 +570,8 @@ export default function BocetosSection({ addToast }) {
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold text-sm text-gray-900 truncate">{b.nombre}</p>
                     <p className="text-xs text-gray-500 font-mono truncate mt-0.5">{b.sku}</p>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      {b.proveedor && (
-                        <p className="text-[11px] text-[#d97706] truncate">{b.proveedor}</p>
-                      )}
+                    <div className="flex items-center gap-2 mt-1">
+                      {b.cliente && <p className="text-[11px] text-[#d97706] truncate">{b.cliente}</p>}
                       {Array.isArray(b.variantes) && b.variantes.length > 0 && (
                         <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-semibold bg-gray-100 text-gray-700 rounded">
                           {b.variantes.length} var.
@@ -472,27 +579,12 @@ export default function BocetosSection({ addToast }) {
                       )}
                     </div>
                     <div className="flex items-center gap-1 mt-2">
-                      <button
-                        onClick={() => handleEdit(b)}
-                        className="inline-flex items-center gap-1 px-2 py-1 text-xs text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded transition"
-                      >
-                        <Edit2 size={12} /> Editar
-                      </button>
                       {b.url && (
-                        <a
-                          href={b.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-1 px-2 py-1 text-xs text-gray-500 hover:text-[#d97706] hover:bg-[#FFFBEA] rounded transition"
-                          title={b.url}
-                        >
-                          <LinkIcon size={12} /> Link
+                        <a href={b.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 px-2 py-1 text-xs text-gray-500 hover:text-[#d97706] hover:bg-[#FFFBEA] rounded transition" title={b.url}>
+                          <ExternalLink size={12} /> Ver
                         </a>
                       )}
-                      <button
-                        onClick={() => handleDelete(b)}
-                        className="inline-flex items-center gap-1 px-2 py-1 text-xs text-gray-500 hover:text-red-600 hover:bg-red-50 rounded transition"
-                      >
+                      <button onClick={() => handleDeleteSaved(b.id)} className="inline-flex items-center gap-1 px-2 py-1 text-xs text-gray-500 hover:text-red-600 hover:bg-red-50 rounded transition">
                         <Trash2 size={12} /> Borrar
                       </button>
                     </div>
@@ -503,6 +595,123 @@ export default function BocetosSection({ addToast }) {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ---------- Pending item (inline editor) ----------
+
+function PendingItem({ item, layout, onChange, onApprove, onDiscard, onReplaceImage }) {
+  const fileRef = useRef(null);
+  const missing = !item.nombre.trim() || !item.sku.trim();
+
+  const content = (
+    <div className="flex gap-4">
+      {/* Imagen */}
+      <div className="shrink-0">
+        <div className="w-24 h-24 rounded-lg bg-gray-100 border border-gray-200 overflow-hidden flex items-center justify-center relative group">
+          {item.imagen ? (
+            <img src={item.imagen} alt={item.nombre} className="w-full h-full object-cover" />
+          ) : (
+            <ImageIcon size={28} className="text-gray-300" />
+          )}
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            className="absolute inset-0 bg-black/50 text-white text-[11px] font-semibold opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-1"
+          >
+            <RefreshCw size={12} /> Cambiar
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) onReplaceImage(f);
+              e.target.value = '';
+            }}
+            className="hidden"
+          />
+        </div>
+      </div>
+
+      {/* Campos */}
+      <div className="flex-1 min-w-0 space-y-2">
+        <div>
+          <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-0.5">Nombre</label>
+          <input
+            type="text"
+            value={item.nombre}
+            onChange={(e) => onChange({ nombre: e.target.value })}
+            className="w-full px-2.5 py-1.5 bg-white border border-gray-300 rounded-md text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#FFD33D] focus:border-[#FFD33D] shadow-sm transition"
+          />
+        </div>
+        <div>
+          <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-0.5">SKU</label>
+          <input
+            type="text"
+            value={item.sku}
+            onChange={(e) => onChange({ sku: e.target.value })}
+            className="w-full px-2.5 py-1.5 bg-white border border-gray-300 rounded-md text-sm text-gray-900 font-mono uppercase focus:outline-none focus:ring-2 focus:ring-[#FFD33D] focus:border-[#FFD33D] shadow-sm transition"
+          />
+        </div>
+        {/* Variantes */}
+        {item.variantes && item.variantes.length > 0 && (
+          <div>
+            <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-0.5">Variantes ({item.variantes.length})</label>
+            <div className="flex flex-wrap gap-1">
+              {item.variantes.map((v, idx) => (
+                <span key={idx} className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 text-gray-700 rounded text-[11px]">
+                  <span className="text-gray-400">{v.tipo}:</span> {v.valor}
+                  <button
+                    onClick={() => onChange({ variantes: item.variantes.filter((_, i) => i !== idx) })}
+                    className="hover:text-red-600"
+                    aria-label="Quitar variante"
+                  >
+                    <X size={10} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+        {missing && (
+          <div className="flex items-center gap-1 text-[11px] text-amber-700">
+            <AlertTriangle size={12} /> Nombre y SKU son obligatorios
+          </div>
+        )}
+        {item.url && (
+          <a href={item.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] text-gray-500 hover:text-[#d97706] transition">
+            <ExternalLink size={11} /> Ver original
+          </a>
+        )}
+      </div>
+
+      {/* Acciones */}
+      <div className="shrink-0 flex flex-col gap-2">
+        <button
+          type="button"
+          onClick={onApprove}
+          disabled={missing}
+          className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-gray-900 bg-[#FFD33D] rounded-md hover:bg-[#f5c518] transition disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <Check size={12} /> Aprobar
+        </button>
+        <button
+          type="button"
+          onClick={onDiscard}
+          className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-gray-500 bg-white border border-gray-300 rounded-md hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition"
+        >
+          <X size={12} /> Descartar
+        </button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className={layout === 'list' ? 'p-4 hover:bg-gray-50 transition' : 'p-4 rounded-lg border border-gray-200 hover:border-gray-300 transition'}>
+      {content}
     </div>
   );
 }

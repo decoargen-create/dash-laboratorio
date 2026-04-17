@@ -7,7 +7,7 @@ import {
   Menu, LogOut, Home, ShoppingCart, Package, Users, AlertCircle, CreditCard,
   UserCheck, TrendingUp, Plus, Filter, Eye, Edit2, Trash2, Calendar, DollarSign,
   Moon, Sun, ChevronDown, ChevronRight, Search, X, Command, Check, Bell,
-  AlignJustify, LayoutGrid, Columns3, Sparkles
+  AlignJustify, LayoutGrid, Columns3, Sparkles, Bot, Zap, Activity, FileText
 } from 'lucide-react';
 import { VioraLogo, VioraMark } from './logo.jsx';
 import LandingPage from './LandingPage.jsx';
@@ -1063,6 +1063,7 @@ function AppShell({ onExit }) {
               <NavItem icon={Users} label="Clientes" section="clientes" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={CreditCard} label="Comisiones" section="comisiones" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={Sparkles} label="Analytics IA" section="analytics" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              <NavItem icon={Bot} label="Agentes IA" section="agentes" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={Package} label="Datos" section="datos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
             </>
           ) : (
@@ -1109,6 +1110,7 @@ function AppShell({ onExit }) {
           {/* La sección "Equipo" (mentores) se unificó adentro de Comisiones */}
           {currentUser.role === 'admin' && currentSection === 'mentores' && <ComisionesSection state={state} dispatch={dispatch} onUpdateMentor={handleUpdateMentor} onAddMentor={handleAddMentor} onRemoveMentor={handleRemoveMentor} getMentorStats={getMentorStats} filterMentor={filterMentor} setFilterMentor={setFilterMentor} />}
           {currentUser.role === 'admin' && currentSection === 'analytics' && <AnalyticsSection state={state} currentUser={currentUser} analyticsState={analyticsState} onFetch={fetchAnalytics} />}
+          {currentUser.role === 'admin' && currentSection === 'agentes' && <AgentesSection state={state} addToast={addToast} />}
           {currentUser.role === 'admin' && currentSection === 'datos' && <DatosSection state={state} dispatch={dispatch} addToast={addToast} />}
 
           {/* Mentor Views */}
@@ -4620,6 +4622,463 @@ function EntityDataCard({ entity, state, dispatch, addToast }) {
         </div>
       </div>
     </div>
+  );
+}
+
+// ============================================================
+// Sección "Agentes IA": 4 agentes especializados que corren sobre
+// un snapshot del negocio y devuelven JSON estructurado.
+// - Arranque del día: briefing matinal
+// - Precios: audita catálogo
+// - Cotizador: propone cotización para un pedido
+// - Salud del sistema: detecta inconsistencias
+// Los 4 llaman al mismo endpoint POST /api/agents con un action distinto.
+// ============================================================
+
+function buildAgentSnapshot(state, action) {
+  const today = new Date().toISOString().split('T')[0];
+  const diasEntre = (d1, d2) => {
+    if (!d1 || !d2) return null;
+    const a = new Date(d1); const b = new Date(d2);
+    return Math.round((b - a) / (1000 * 60 * 60 * 24));
+  };
+
+  // Snapshot base: métricas agregadas + entidades con IDs (para que el
+  // agente pueda referenciar y proponer acciones concretas).
+  const clientes = state.clients.map(c => ({
+    id: c.id, nombre: c.nombre, telefono: c.telefono || null, partnerId: c.mentorId || null,
+    ordenes: state.sales.filter(s => s.clienteId === c.id).length,
+  }));
+
+  const productos = state.products.map(p => ({
+    id: p.id, nombre: p.nombre, precioVenta: p.precioVenta,
+    costoReal: getProductUnitCost(p),
+    costoInformado: p.costoInformado ?? null,
+  }));
+
+  const partners = state.mentors.map(m => ({
+    id: m.id, nombre: m.nombre, pctComision: m.porcentajeComision ?? 50,
+  }));
+
+  const ordenes = state.sales.map(o => {
+    const p = state.products.find(x => x.id === o.productoId);
+    const m = o.mentorId ? state.mentors.find(x => x.id === o.mentorId) : null;
+    const cobrado = (o.cobros || []).filter(c => c.estado === 'pagado').reduce((s, c) => s + (c.monto || 0), 0);
+    return {
+      id: o.id,
+      fecha: o.fecha,
+      clienteId: o.clienteId,
+      productoId: o.productoId,
+      cantidad: o.cantidad,
+      montoTotal: o.montoTotal,
+      partnerId: o.mentorId || null,
+      estado: o.estado || 'consulta-recibida',
+      incidencia: !!o.tieneIncidencia,
+      costoInformado: o.costoInformado ?? null,
+      cobrado,
+      saldo: (o.montoTotal || 0) - cobrado,
+      diasDesdeCreacion: diasEntre(o.fecha, today),
+      profitReal: p ? getLabRealProfit(o, p, m) : null,
+      comision: m ? getMentorCommission(o, p, m) : 0,
+    };
+  });
+
+  return {
+    fechaActual: today,
+    totales: {
+      ordenesTotales: ordenes.length,
+      ordenesActivas: ordenes.filter(o => !['despachado'].includes(o.estado)).length,
+      incidenciasAbiertas: ordenes.filter(o => o.incidencia).length,
+      montoTotalVentas: ordenes.reduce((s, o) => s + (o.montoTotal || 0), 0),
+      montoTotalCobrado: ordenes.reduce((s, o) => s + o.cobrado, 0),
+      saldoPendiente: ordenes.reduce((s, o) => s + o.saldo, 0),
+    },
+    productos,
+    partners,
+    clientes: action === 'salud' ? clientes : clientes.slice(0, 30),
+    ordenes,
+  };
+}
+
+function AgentesSection({ state, addToast }) {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+          <Bot size={24} className="text-pink-600 dark:text-pink-400" /> Agentes IA
+        </h2>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+          4 agentes especializados que analizan el estado del negocio y te devuelven información accionable.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <AgenteArranqueCard state={state} addToast={addToast} />
+        <AgentePreciosCard state={state} addToast={addToast} />
+        <AgenteCotizadorCard state={state} addToast={addToast} />
+        <AgenteSaludCard state={state} addToast={addToast} />
+      </div>
+    </div>
+  );
+}
+
+// Hook común: corre un agente contra /api/agents, maneja loading/error/data.
+function useAgent(action) {
+  const [state, setState] = useState({ status: 'idle', data: null, error: null, generatedAt: null });
+  const run = async (snapshot, extras) => {
+    setState({ status: 'running', data: null, error: null, generatedAt: null });
+    try {
+      const res = await fetch('/api/agents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, snapshot, extras }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setState({ status: 'error', data: null, error: json.error || 'Error en el servidor', generatedAt: null });
+        return;
+      }
+      setState({ status: 'ok', data: json.data, error: null, generatedAt: json.generatedAt });
+    } catch (err) {
+      setState({ status: 'error', data: null, error: err.message || 'Error de red', generatedAt: null });
+    }
+  };
+  return [state, run];
+}
+
+function AgenteCardShell({ icon: Icon, color, title, description, children }) {
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-5 border border-gray-100 dark:border-gray-700">
+      <div className="flex items-start gap-3 mb-3">
+        <div className={`p-2 rounded-lg bg-gradient-to-br ${color}`}>
+          <Icon size={20} className="text-white" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h3 className="font-bold text-gray-900 dark:text-gray-100">{title}</h3>
+          <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">{description}</p>
+        </div>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function AgenteRunButton({ status, onRun, label = 'Ejecutar agente' }) {
+  return (
+    <button
+      onClick={onRun}
+      disabled={status === 'running'}
+      className="w-full flex items-center justify-center gap-2 bg-pink-900 text-white py-2 rounded-lg hover:bg-pink-800 transition font-semibold text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+    >
+      {status === 'running' ? (
+        <>
+          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+          Ejecutando...
+        </>
+      ) : (
+        <>
+          <Sparkles size={16} /> {label}
+        </>
+      )}
+    </button>
+  );
+}
+
+function AgenteError({ error }) {
+  return (
+    <div className="mt-3 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-sm text-red-700 dark:text-red-300">
+      {error}
+    </div>
+  );
+}
+
+// ----- 1) Arranque del día -----
+function AgenteArranqueCard({ state, addToast }) {
+  const [agent, run] = useAgent('arranque');
+
+  const handleRun = () => run(buildAgentSnapshot(state, 'arranque'));
+
+  return (
+    <AgenteCardShell
+      icon={Zap}
+      color="from-amber-500 to-orange-500"
+      title="Arranque del día"
+      description="Briefing matinal con urgencias, oportunidades y tip del día."
+    >
+      <AgenteRunButton status={agent.status} onRun={handleRun} label="Generar briefing" />
+      {agent.error && <AgenteError error={agent.error} />}
+      {agent.data && (
+        <div className="mt-4 space-y-3 text-sm">
+          {agent.data.resumen && (
+            <p className="text-gray-900 dark:text-gray-100 font-semibold">{agent.data.resumen}</p>
+          )}
+          {Array.isArray(agent.data.urgencias) && agent.data.urgencias.length > 0 && (
+            <div>
+              <p className="text-xs font-bold uppercase text-red-600 dark:text-red-400 mb-1">Urgencias</p>
+              <ul className="space-y-2">
+                {agent.data.urgencias.map((u, i) => (
+                  <li key={i} className="p-2 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800/50">
+                    <p className="font-semibold text-gray-900 dark:text-gray-100">{u.titulo}</p>
+                    <p className="text-xs text-gray-600 dark:text-gray-300">{u.detalle}</p>
+                    {u.accion && <p className="text-xs text-red-700 dark:text-red-300 mt-1">→ {u.accion}</p>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {Array.isArray(agent.data.oportunidades) && agent.data.oportunidades.length > 0 && (
+            <div>
+              <p className="text-xs font-bold uppercase text-emerald-600 dark:text-emerald-400 mb-1">Oportunidades</p>
+              <ul className="space-y-2">
+                {agent.data.oportunidades.map((o, i) => (
+                  <li key={i} className="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800/50">
+                    <p className="font-semibold text-gray-900 dark:text-gray-100">{o.titulo}</p>
+                    <p className="text-xs text-gray-600 dark:text-gray-300">{o.detalle}</p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {agent.data.tipDelDia && (
+            <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50">
+              <p className="text-xs font-bold uppercase text-amber-700 dark:text-amber-400 mb-1">Tip del día</p>
+              <p className="text-gray-800 dark:text-gray-200">{agent.data.tipDelDia}</p>
+            </div>
+          )}
+        </div>
+      )}
+    </AgenteCardShell>
+  );
+}
+
+// ----- 2) Precios -----
+function AgentePreciosCard({ state, addToast }) {
+  const [agent, run] = useAgent('precios');
+
+  const handleRun = () => run(buildAgentSnapshot(state, 'precios'));
+
+  const sevColor = (s) => s === 'alta' ? 'text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'
+    : s === 'media' ? 'text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800'
+    : 'text-sky-700 dark:text-sky-300 bg-sky-50 dark:bg-sky-900/20 border-sky-200 dark:border-sky-800';
+
+  return (
+    <AgenteCardShell
+      icon={DollarSign}
+      color="from-emerald-500 to-teal-500"
+      title="Agente de precios"
+      description="Audita el catálogo y sugiere ajustes de precio con números concretos."
+    >
+      <AgenteRunButton status={agent.status} onRun={handleRun} label="Auditar catálogo" />
+      {agent.error && <AgenteError error={agent.error} />}
+      {agent.data && (
+        <div className="mt-4 space-y-3 text-sm">
+          {agent.data.resumen && (
+            <p className="text-gray-900 dark:text-gray-100 font-semibold">{agent.data.resumen}</p>
+          )}
+          {agent.data.resumenNumerico && (
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="p-2 rounded bg-gray-50 dark:bg-gray-700/50">
+                <p className="text-gray-500 dark:text-gray-400">Margen prom.</p>
+                <p className="font-bold text-gray-900 dark:text-gray-100">{agent.data.resumenNumerico.margenPromedio}%</p>
+              </div>
+              <div className="p-2 rounded bg-gray-50 dark:bg-gray-700/50">
+                <p className="text-gray-500 dark:text-gray-400">Con margen bajo</p>
+                <p className="font-bold text-gray-900 dark:text-gray-100">{agent.data.resumenNumerico.productosConMargenBajo}</p>
+              </div>
+            </div>
+          )}
+          {Array.isArray(agent.data.alertas) && agent.data.alertas.map((a, i) => (
+            <div key={i} className={`p-3 rounded-lg border ${sevColor(a.severidad)}`}>
+              <p className="font-semibold">{a.productoNombre}</p>
+              <p className="text-xs mt-1 opacity-90">{a.diagnostico}</p>
+              <p className="text-xs mt-1 font-semibold">→ {a.sugerencia}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </AgenteCardShell>
+  );
+}
+
+// ----- 3) Cotizador -----
+function AgenteCotizadorCard({ state, addToast }) {
+  const [agent, run] = useAgent('cotizador');
+  const [form, setForm] = useState({ clienteId: '', productoId: '', cantidad: '', notas: '' });
+
+  const handleRun = () => {
+    const cliente = state.clients.find(c => c.id === parseInt(form.clienteId));
+    const producto = state.products.find(p => p.id === parseInt(form.productoId));
+    const partner = cliente?.mentorId ? state.mentors.find(m => m.id === cliente.mentorId) : null;
+    if (!cliente || !producto || !form.cantidad) {
+      addToast?.({ type: 'error', message: 'Completá cliente, producto y cantidad' });
+      return;
+    }
+    const extras = {
+      cliente: { id: cliente.id, nombre: cliente.nombre, ordenesPrevias: state.sales.filter(s => s.clienteId === cliente.id).length },
+      producto: { id: producto.id, nombre: producto.nombre, precioVentaUnit: producto.precioVenta, costoRealUnit: getProductUnitCost(producto), costoInformadoUnit: producto.costoInformado ?? null },
+      partner: partner ? { id: partner.id, nombre: partner.nombre, pctComision: partner.porcentajeComision ?? 50 } : null,
+      cantidad: parseInt(form.cantidad),
+      notas: form.notas?.trim() || null,
+    };
+    run(buildAgentSnapshot(state, 'cotizador'), extras);
+  };
+
+  const copiarPropuesta = () => {
+    if (!agent.data?.propuestaTexto) return;
+    navigator.clipboard?.writeText(agent.data.propuestaTexto).then(() => {
+      addToast?.({ type: 'success', message: 'Propuesta copiada al portapapeles' });
+    });
+  };
+
+  return (
+    <AgenteCardShell
+      icon={FileText}
+      color="from-sky-500 to-indigo-500"
+      title="Agente cotizador"
+      description="Dale cliente + producto + cantidad y te propone la cotización lista para WhatsApp."
+    >
+      <div className="space-y-2 mb-3">
+        <select
+          value={form.clienteId}
+          onChange={(e) => setForm({ ...form, clienteId: e.target.value })}
+          className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+        >
+          <option value="">Seleccionar cliente</option>
+          {state.clients.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+        </select>
+        <select
+          value={form.productoId}
+          onChange={(e) => setForm({ ...form, productoId: e.target.value })}
+          className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+        >
+          <option value="">Seleccionar producto</option>
+          {state.products.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+        </select>
+        <input
+          type="number"
+          min="1"
+          value={form.cantidad}
+          onChange={(e) => setForm({ ...form, cantidad: e.target.value })}
+          placeholder="Cantidad"
+          className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+        />
+        <input
+          type="text"
+          value={form.notas}
+          onChange={(e) => setForm({ ...form, notas: e.target.value })}
+          placeholder="Notas (opcional)"
+          className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+        />
+      </div>
+      <AgenteRunButton status={agent.status} onRun={handleRun} label="Cotizar con IA" />
+      {agent.error && <AgenteError error={agent.error} />}
+      {agent.data && (
+        <div className="mt-4 space-y-3 text-sm">
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div className="p-2 rounded bg-gray-50 dark:bg-gray-700/50">
+              <p className="text-gray-500 dark:text-gray-400">Precio venta</p>
+              <p className="font-bold text-gray-900 dark:text-gray-100">${(agent.data.precioVentaTotal || 0).toLocaleString('es-AR')}</p>
+            </div>
+            <div className="p-2 rounded bg-gray-50 dark:bg-gray-700/50">
+              <p className="text-gray-500 dark:text-gray-400">Costo informado</p>
+              <p className="font-bold text-amber-700 dark:text-amber-400">${(agent.data.costoInformadoTotal || 0).toLocaleString('es-AR')}</p>
+            </div>
+            <div className="p-2 rounded bg-gray-50 dark:bg-gray-700/50">
+              <p className="text-gray-500 dark:text-gray-400">Comisión partner</p>
+              <p className="font-bold text-gray-900 dark:text-gray-100">${(agent.data.comisionPartnerEstimada || 0).toLocaleString('es-AR')}</p>
+            </div>
+            <div className="p-2 rounded bg-gray-50 dark:bg-gray-700/50">
+              <p className="text-gray-500 dark:text-gray-400">Profit lab</p>
+              <p className="font-bold text-emerald-600 dark:text-emerald-400">${(agent.data.profitRealLab || 0).toLocaleString('es-AR')} ({agent.data.margenPctLab}%)</p>
+            </div>
+          </div>
+          {agent.data.timeline && (
+            <p className="text-xs text-gray-700 dark:text-gray-300"><span className="font-semibold">Timeline:</span> {agent.data.timeline}</p>
+          )}
+          {agent.data.condicionesPago && (
+            <p className="text-xs text-gray-700 dark:text-gray-300"><span className="font-semibold">Pago:</span> {agent.data.condicionesPago}</p>
+          )}
+          {agent.data.propuestaTexto && (
+            <div className="p-3 rounded-lg bg-sky-50 dark:bg-sky-900/20 border border-sky-200 dark:border-sky-800">
+              <p className="text-xs font-bold uppercase text-sky-700 dark:text-sky-400 mb-1">Propuesta para WhatsApp</p>
+              <p className="text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{agent.data.propuestaTexto}</p>
+              <button onClick={copiarPropuesta} className="mt-2 text-xs font-semibold text-sky-700 dark:text-sky-400 hover:underline">
+                Copiar al portapapeles
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </AgenteCardShell>
+  );
+}
+
+// ----- 4) Salud del sistema -----
+function AgenteSaludCard({ state, addToast }) {
+  const [agent, run] = useAgent('salud');
+
+  const handleRun = () => run(buildAgentSnapshot(state, 'salud'));
+
+  const estadoBadge = (estado) => {
+    if (estado === 'saludable') return { label: 'Saludable', cls: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300' };
+    if (estado === 'atencion') return { label: 'Atención', cls: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300' };
+    return { label: 'Crítico', cls: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300' };
+  };
+
+  const nivelColor = (n) => n === 'rojo' ? 'border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-900/20'
+    : n === 'amarillo' ? 'border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20'
+    : 'border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20';
+
+  return (
+    <AgenteCardShell
+      icon={Activity}
+      color="from-rose-500 to-pink-600"
+      title="Salud del sistema"
+      description="Red/yellow/green flags sobre inconsistencias de datos y riesgos operativos."
+    >
+      <AgenteRunButton status={agent.status} onRun={handleRun} label="Chequear salud" />
+      {agent.error && <AgenteError error={agent.error} />}
+      {agent.data && (
+        <div className="mt-4 space-y-3 text-sm">
+          <div className="flex items-center gap-2">
+            <span className={`px-2 py-1 rounded-full text-xs font-bold ${estadoBadge(agent.data.estado).cls}`}>
+              {estadoBadge(agent.data.estado).label}
+            </span>
+            <p className="text-gray-900 dark:text-gray-100 flex-1">{agent.data.resumen}</p>
+          </div>
+          {agent.data.metricas && (
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="p-2 rounded bg-gray-50 dark:bg-gray-700/50">
+                <p className="text-gray-500 dark:text-gray-400">Órdenes activas</p>
+                <p className="font-bold">{agent.data.metricas.ordenesActivas}</p>
+              </div>
+              <div className="p-2 rounded bg-gray-50 dark:bg-gray-700/50">
+                <p className="text-gray-500 dark:text-gray-400">% Cobrado</p>
+                <p className="font-bold">{agent.data.metricas.pctCobrado}%</p>
+              </div>
+              <div className="p-2 rounded bg-gray-50 dark:bg-gray-700/50">
+                <p className="text-gray-500 dark:text-gray-400">Com. pendientes</p>
+                <p className="font-bold">${(agent.data.metricas.comisionesPendientes || 0).toLocaleString('es-AR')}</p>
+              </div>
+              <div className="p-2 rounded bg-gray-50 dark:bg-gray-700/50">
+                <p className="text-gray-500 dark:text-gray-400">Incidencias</p>
+                <p className="font-bold">{agent.data.metricas.incidenciasAbiertas}</p>
+              </div>
+            </div>
+          )}
+          {Array.isArray(agent.data.banderas) && agent.data.banderas.map((b, i) => (
+            <div key={i} className={`p-3 rounded-lg border ${nivelColor(b.nivel)}`}>
+              <div className="flex items-start justify-between gap-2">
+                <p className="font-semibold text-gray-900 dark:text-gray-100">{b.titulo}</p>
+                <span className="text-[10px] uppercase font-bold opacity-70">{b.categoria}</span>
+              </div>
+              <p className="text-xs text-gray-700 dark:text-gray-300 mt-1">{b.detalle}</p>
+              {b.accion && <p className="text-xs font-semibold text-gray-800 dark:text-gray-200 mt-1">→ {b.accion}</p>}
+            </div>
+          ))}
+        </div>
+      )}
+    </AgenteCardShell>
   );
 }
 

@@ -1696,6 +1696,7 @@ function InicioSection({ state, dispatch, onAddSale, onQuickAddClient, onQuickAd
 // Barra de filtros del dashboard: búsqueda, rango de fechas con presets,
 // estados múltiples del pipeline y toggle "sólo con incidencia".
 function FilterBar({ filters, onChange, totalShown, totalAll }) {
+  const [expanded, setExpanded] = useState(false);
   const update = (patch) => onChange({ ...filters, ...patch });
 
   const toggleState = (key) => {
@@ -1710,18 +1711,10 @@ function FilterBar({ filters, onChange, totalShown, totalAll }) {
     const todayStr = fmt(today);
     if (preset === 'all') { update({ dateFrom: '', dateTo: '' }); return; }
     if (preset === 'today') { update({ dateFrom: todayStr, dateTo: todayStr }); return; }
-    if (preset === 'yesterday') {
-      const y = new Date(today); y.setDate(y.getDate() - 1);
-      const yStr = fmt(y);
-      update({ dateFrom: yStr, dateTo: yStr });
-      return;
-    }
     const d = new Date(today);
     if (preset === '7') { d.setDate(d.getDate() - 7); update({ dateFrom: fmt(d), dateTo: todayStr }); return; }
     if (preset === '30') { d.setDate(d.getDate() - 30); update({ dateFrom: fmt(d), dateTo: todayStr }); return; }
-    if (preset === '90') { d.setDate(d.getDate() - 90); update({ dateFrom: fmt(d), dateTo: todayStr }); return; }
     if (preset === 'thisMonth') { const s = new Date(today.getFullYear(), today.getMonth(), 1); update({ dateFrom: fmt(s), dateTo: todayStr }); return; }
-    if (preset === 'thisYear') { const s = new Date(today.getFullYear(), 0, 1); update({ dateFrom: fmt(s), dateTo: todayStr }); return; }
   };
 
   const clearAll = () => onChange({
@@ -1729,107 +1722,93 @@ function FilterBar({ filters, onChange, totalShown, totalAll }) {
   });
 
   const anyActive = filters.dateFrom || filters.dateTo || filters.states.size > 0 || filters.onlyIncidencia || filters.search || filters.focus;
+  const filterCount = (filters.dateFrom ? 1 : 0) + (filters.states.size) + (filters.onlyIncidencia ? 1 : 0) + (filters.focus ? 1 : 0);
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-5 space-y-4">
-      <div className="flex flex-col lg:flex-row lg:items-center gap-3">
+    <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-3 space-y-2">
+      {/* Siempre visible: búsqueda + toggle filtros + conteo */}
+      <div className="flex items-center gap-2">
         <div className="relative flex-1">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input
             type="text"
             value={filters.search}
             onChange={(e) => update({ search: e.target.value })}
-            placeholder="Buscar por cliente, producto, partner, estado..."
-            className="w-full pl-9 pr-9 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            placeholder="Buscar..."
+            className="w-full pl-8 pr-8 py-1.5 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
           />
           {filters.search && (
-            <button
-              onClick={() => update({ search: '' })}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
-              title="Limpiar búsqueda"
-            >
-              <X size={14} />
+            <button onClick={() => update({ search: '' })} className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+              <X size={12} />
             </button>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          <input
-            type="date"
-            value={filters.dateFrom}
-            onChange={(e) => update({ dateFrom: e.target.value })}
-            className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-            title="Desde"
-          />
-          <span className="text-gray-500 dark:text-gray-400 text-sm">→</span>
-          <input
-            type="date"
-            value={filters.dateTo}
-            onChange={(e) => update({ dateTo: e.target.value })}
-            className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-            title="Hasta"
-          />
-        </div>
-      </div>
-
-      <div className="flex flex-wrap gap-2 items-center">
-        <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mr-1">Rango:</span>
-        {[
-          { k: 'today', label: 'Hoy' },
-          { k: 'yesterday', label: 'Ayer' },
-          { k: '7', label: 'Últ. 7 días' },
-          { k: '30', label: 'Últ. 30 días' },
-          { k: '90', label: 'Últ. 90 días' },
-          { k: 'thisMonth', label: 'Este mes' },
-          { k: 'thisYear', label: 'Este año' },
-          { k: 'all', label: 'Todo' },
-        ].map(p => (
-          <button
-            key={p.k}
-            onClick={() => applyPreset(p.k)}
-            className="px-3 py-1 text-xs rounded-full border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition"
-          >
-            {p.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="flex flex-wrap gap-2 items-center">
-        <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mr-1">Estado:</span>
-        {ORDER_STATES.map(s => {
-          const active = filters.states.has(s);
-          return (
-            <button
-              key={s}
-              onClick={() => toggleState(s)}
-              className={`px-3 py-1 text-xs font-semibold rounded-full transition border ${
-                active
-                  ? `${ORDER_STATE_STYLES[s]} border-transparent ring-2 ring-pink-500`
-                  : `${ORDER_STATE_STYLES[s]} border-transparent opacity-50 hover:opacity-100`
-              }`}
-            >
-              {ORDER_STATE_LABELS[s]}
-            </button>
-          );
-        })}
-        <label className="inline-flex items-center gap-2 ml-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={filters.onlyIncidencia}
-            onChange={(e) => update({ onlyIncidencia: e.target.checked })}
-            className="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-red-600 focus:ring-red-500"
-          />
-          <span className="text-xs font-semibold text-red-700 dark:text-red-300">Sólo con incidencia</span>
-        </label>
-      </div>
-
-      <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 pt-1 border-t border-gray-100 dark:border-gray-700">
-        <span>Mostrando <span className="font-bold text-gray-900 dark:text-gray-100">{totalShown}</span> de {totalAll} órdenes</span>
+        <button
+          onClick={() => setExpanded(v => !v)}
+          className={`inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg border transition ${
+            expanded || anyActive
+              ? 'border-pink-500 text-pink-700 dark:text-pink-300 bg-pink-50 dark:bg-pink-900/20'
+              : 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+          }`}
+        >
+          <Filter size={12} />
+          Filtros{filterCount > 0 ? ` (${filterCount})` : ''}
+          <ChevronDown size={12} className={`transition-transform ${expanded ? 'rotate-180' : ''}`} />
+        </button>
         {anyActive && (
-          <button onClick={clearAll} className="text-pink-700 dark:text-pink-300 hover:underline font-semibold">
-            Limpiar filtros
+          <button onClick={clearAll} className="text-[11px] text-pink-700 dark:text-pink-300 hover:underline font-semibold whitespace-nowrap">
+            Limpiar
           </button>
         )}
+        <span className="text-[11px] text-gray-500 dark:text-gray-400 whitespace-nowrap">
+          {totalShown}/{totalAll}
+        </span>
       </div>
+
+      {/* Expandible: rango + estado */}
+      {expanded && (
+        <div className="space-y-2 pt-2 border-t border-gray-100 dark:border-gray-700 animate-fade-in">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[10px] font-bold text-gray-400 uppercase">Rango:</span>
+            {[
+              { k: 'today', label: 'Hoy' },
+              { k: '7', label: '7 días' },
+              { k: '30', label: '30 días' },
+              { k: 'thisMonth', label: 'Este mes' },
+              { k: 'all', label: 'Todo' },
+            ].map(p => (
+              <button key={p.k} onClick={() => applyPreset(p.k)}
+                className="px-2 py-0.5 text-[11px] rounded-full border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition">
+                {p.label}
+              </button>
+            ))}
+            <input type="date" value={filters.dateFrom} onChange={(e) => update({ dateFrom: e.target.value })}
+              className="px-2 py-0.5 text-[11px] border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg" />
+            <span className="text-gray-400 text-[10px]">→</span>
+            <input type="date" value={filters.dateTo} onChange={(e) => update({ dateTo: e.target.value })}
+              className="px-2 py-0.5 text-[11px] border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg" />
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[10px] font-bold text-gray-400 uppercase">Estado:</span>
+            {ORDER_STATES.map(s => {
+              const active = filters.states.has(s);
+              return (
+                <button key={s} onClick={() => toggleState(s)}
+                  className={`px-2 py-0.5 text-[10px] font-semibold rounded-full transition ${
+                    active ? `${ORDER_STATE_STYLES[s]} ring-1 ring-pink-500` : `${ORDER_STATE_STYLES[s]} opacity-40 hover:opacity-80`
+                  }`}>
+                  {ORDER_STATE_LABELS[s]}
+                </button>
+              );
+            })}
+            <label className="inline-flex items-center gap-1 ml-1 cursor-pointer">
+              <input type="checkbox" checked={filters.onlyIncidencia} onChange={(e) => update({ onlyIncidencia: e.target.checked })}
+                className="h-3 w-3 rounded border-gray-300 dark:border-gray-600 text-red-600 focus:ring-red-500" />
+              <span className="text-[10px] font-semibold text-red-700 dark:text-red-300">Incidencias</span>
+            </label>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -5394,18 +5373,18 @@ function CostBreakdownCell({ order, product, costs, isTotal, onUpdateProduct, on
   const [open, setOpen] = useState(false);
   const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
   const popoverRef = useRef(null);
+  const buttonRef = useRef(null);
+  const [popoverPos, setPopoverPos] = useState({ top: 0, left: 0 });
 
   const isFlat = order?.costoSinDesglosar != null && order.costoSinDesglosar !== '';
   const cantidad = order?.cantidad || 1;
 
-  // Total mostrado en la celda (suma de los 3 costos, o el flat si está activo)
   const totalShown = isTotal ? costs.costoTotal : costs.costoUnit;
 
-  // Cierre por click fuera + Escape
   useEffect(() => {
     if (!open) return;
     const onDoc = (e) => {
-      if (popoverRef.current && !popoverRef.current.contains(e.target)) setOpen(false);
+      if (popoverRef.current && !popoverRef.current.contains(e.target) && buttonRef.current && !buttonRef.current.contains(e.target)) setOpen(false);
     };
     const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
     document.addEventListener('mousedown', onDoc);
@@ -5416,17 +5395,28 @@ function CostBreakdownCell({ order, product, costs, isTotal, onUpdateProduct, on
     };
   }, [open]);
 
+  const toggleOpen = () => {
+    if (!open && buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      setPopoverPos({
+        top: rect.top - 8,
+        left: Math.max(8, rect.right - 320),
+      });
+    }
+    setOpen(v => !v);
+  };
+
   const switchToDesglose = () => onClearFlat();
   const switchToFlat = () => {
-    // Si pasamos a flat, sembramos el valor con el total actual del desglose
     onSetFlat(costs.costoUnit || 0);
   };
 
   return (
     <div className="relative inline-block">
       <button
+        ref={buttonRef}
         type="button"
-        onClick={() => setOpen(v => !v)}
+        onClick={toggleOpen}
         className={`group inline-flex items-center gap-1 px-2 py-0.5 rounded hover:bg-pink-50 dark:hover:bg-pink-900/20 transition ${isFlat ? 'text-amber-700 dark:text-amber-300 font-medium' : 'text-gray-700 dark:text-gray-300'}`}
         title={isFlat ? 'Costo sin discriminar — click para ver/editar' : 'Click para ver el desglose'}
       >
@@ -5439,8 +5429,8 @@ function CostBreakdownCell({ order, product, costs, isTotal, onUpdateProduct, on
       {open && (
         <div
           ref={popoverRef}
-          className="absolute right-0 bottom-full mb-1 z-40 w-80 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 p-3 animate-scale-in"
-          style={{ transformOrigin: 'top right' }}
+          className="fixed z-[100] w-80 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 p-3 animate-scale-in"
+          style={{ top: popoverPos.top, left: popoverPos.left, transform: 'translateY(-100%)' }}
         >
           {/* Header con toggle de modo */}
           <div className="flex items-center justify-between mb-3">

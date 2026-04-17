@@ -649,9 +649,16 @@ function AppShell({ onExit }) {
           if (data?.ok && data.session && data.user) {
             localStorage.setItem('viora-session', data.session);
             if (!cancelled) {
-              setCurrentUser({ role: data.user.role, name: data.user.name, email: data.user.email, id: data.user.role === 'admin' ? 'admin' : data.user.email });
+              const u = data.user;
+              setCurrentUser({
+                role: u.role,
+                name: u.name,
+                email: u.email || null,
+                username: u.username || null,
+                id: u.role === 'admin' ? 'admin' : (u.mentorId || u.email || u.username || u.name),
+              });
               setCurrentSection('inicio');
-              addToast?.({ type: 'success', message: `Bienvenido, ${data.user.name}` });
+              addToast?.({ type: 'success', message: `Bienvenido, ${u.name}` });
             }
             return;
           }
@@ -1682,24 +1689,6 @@ function InicioSection({ state, dispatch, onAddSale, onQuickAddClient, onQuickAd
       <FilterBar filters={filters} onChange={setFilters} totalShown={filteredOrders.length} totalAll={state.sales.length} />
 
       <OrdersList orders={filteredOrders} state={state} dispatch={dispatch} onEditOrder={setEditingOrder} />
-
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
-        <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-6">Ventas por mes (período seleccionado)</h3>
-        {monthlyChart.length === 0 ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400 italic text-center py-8">No hay datos para el rango y filtros actuales.</p>
-        ) : (
-          <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={monthlyChart}>
-              <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200 dark:stroke-gray-700" />
-              <XAxis dataKey="month" />
-              <YAxis />
-              <Tooltip />
-              <Legend />
-              <Line type="monotone" dataKey="total" stroke="#be185d" strokeWidth={3} name="Total Ventas ($)" />
-            </LineChart>
-          </ResponsiveContainer>
-        )}
-      </div>
     </div>
   );
 }
@@ -3964,7 +3953,29 @@ function ClientesSection({ state, onAddClient, onUpdateClient, showModal, setSho
 function ComisionesSection({ state, dispatch, onUpdateMentor, onAddMentor, onRemoveMentor, getMentorStats, filterMentor, setFilterMentor }) {
   const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
   const [showNewMentorModal, setShowNewMentorModal] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(null); // mentor id a borrar
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [inviteLinks, setInviteLinks] = useState({}); // { [mentorId]: link }
+  const [inviteLoading, setInviteLoading] = useState(null);
+
+  const generateInviteLink = async (mentor) => {
+    setInviteLoading(mentor.id);
+    try {
+      const resp = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'create_invite', mentorId: mentor.id, mentorName: mentor.nombre }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (data?.ok && data.link) {
+        setInviteLinks(prev => ({ ...prev, [mentor.id]: data.link }));
+      }
+    } catch {}
+    setInviteLoading(null);
+  };
+
+  const copyLink = (link) => {
+    navigator.clipboard?.writeText(link).catch(() => {});
+  };
 
   const handlePercentChange = (mentorId, value) => {
     const parsed = parseFloat(value);
@@ -4099,14 +4110,45 @@ function ComisionesSection({ state, dispatch, onUpdateMentor, onAddMentor, onRem
                       className="w-full px-2 py-1 text-[11px] text-gray-600 dark:text-gray-400 border border-transparent hover:border-gray-300 dark:hover:border-gray-600 bg-transparent rounded focus:outline-none focus:ring-1 focus:ring-pink-500 focus:border-pink-500 focus:bg-white dark:focus:bg-gray-800"
                     />
                   </div>
-                  <button
-                    onClick={() => setConfirmDelete(mentor.id)}
-                    className="opacity-0 group-hover:opacity-100 p-1 rounded text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition"
-                    title="Eliminar mentor"
-                  >
-                    <Trash2 size={14} />
-                  </button>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => generateInviteLink(mentor)}
+                      disabled={inviteLoading === mentor.id}
+                      className="px-2 py-1 rounded text-[10px] font-semibold bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-200 dark:hover:bg-emerald-900/50 transition"
+                      title="Generar link de acceso para este mentor"
+                    >
+                      {inviteLoading === mentor.id ? '...' : '🔗 Link de acceso'}
+                    </button>
+                    <button
+                      onClick={() => setConfirmDelete(mentor.id)}
+                      className="opacity-0 group-hover:opacity-100 p-1 rounded text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition"
+                      title="Eliminar mentor"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
                 </div>
+
+                {inviteLinks[mentor.id] && (
+                  <div className="p-2 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg border border-emerald-200 dark:border-emerald-800 space-y-1">
+                    <p className="text-[10px] font-semibold text-emerald-800 dark:text-emerald-300">Link de acceso generado — mandáselo por WhatsApp:</p>
+                    <div className="flex gap-1">
+                      <input
+                        type="text"
+                        readOnly
+                        value={inviteLinks[mentor.id]}
+                        className="flex-1 px-2 py-1 text-[10px] font-mono bg-white dark:bg-gray-800 border border-emerald-300 dark:border-emerald-700 rounded text-gray-800 dark:text-gray-200"
+                        onClick={(e) => e.target.select()}
+                      />
+                      <button
+                        onClick={() => copyLink(inviteLinks[mentor.id])}
+                        className="px-2 py-1 text-[10px] font-semibold bg-emerald-600 text-white rounded hover:bg-emerald-700 transition"
+                      >
+                        Copiar
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 <div className="flex items-center justify-between gap-3 pt-2 border-t border-gray-200 dark:border-gray-700">
                   <div className="text-[11px] text-gray-500 dark:text-gray-400 space-y-0.5">
@@ -5376,7 +5418,7 @@ function CostBreakdownCell({ order, product, costs, isTotal, onUpdateProduct, on
       {open && (
         <div
           ref={popoverRef}
-          className="absolute right-0 mt-1 z-40 w-80 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 p-3 animate-scale-in"
+          className="absolute right-0 bottom-full mb-1 z-40 w-80 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 p-3 animate-scale-in"
           style={{ transformOrigin: 'top right' }}
         >
           {/* Header con toggle de modo */}

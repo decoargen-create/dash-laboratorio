@@ -301,18 +301,54 @@ export default async function handler(req, res) {
   if (action === 'verify') {
     const { token } = body || {};
     const payload = verifyToken(token, secret);
-    if (!payload || payload.purpose !== 'magic_link') {
+    if (!payload || !['magic_link', 'invite'].includes(payload.purpose)) {
       return respondJSON(res, 401, { error: 'Token inválido o expirado' });
     }
     const session = signToken({
       email: payload.email,
+      username: payload.username,
+      mentorId: payload.mentorId,
       role: payload.role,
-      name: resolveNameFromEmail(payload.email),
+      name: payload.name || resolveNameFromEmail(payload.email || ''),
       purpose: 'session',
-      exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 7,
+      exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30, // 30 días para invites
       iat: Math.floor(Date.now() / 1000),
     }, secret);
     return respondJSON(res, 200, {
+      ok: true,
+      session,
+      user: {
+        email: payload.email,
+        username: payload.username,
+        mentorId: payload.mentorId,
+        role: payload.role,
+        name: payload.name || resolveNameFromEmail(payload.email || ''),
+      },
+    });
+  }
+
+  // ============ GENERAR INVITE LINK PARA MENTOR ============
+  if (action === 'create_invite') {
+    const { mentorId, mentorName, pin } = body || {};
+    if (mentorId == null || !mentorName) {
+      return respondJSON(res, 400, { error: 'Faltan mentorId o mentorName' });
+    }
+    const username = mentorName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+    const token = signToken({
+      mentorId: Number(mentorId),
+      username,
+      name: mentorName,
+      role: 'mentor',
+      pin: pin || null,
+      purpose: 'invite',
+      exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 365, // 1 año
+      iat: Math.floor(Date.now() / 1000),
+    }, secret);
+    const origin = (req.headers.origin || process.env.APP_URL || '').replace(/\/$/, '')
+      || `http://${req.headers.host || 'localhost:5173'}`;
+    const link = `${origin}/acceso?token=${encodeURIComponent(token)}`;
+    return respondJSON(res, 200, { ok: true, link, username });
+  }
       ok: true,
       session,
       user: { email: payload.email, role: payload.role, name: resolveNameFromEmail(payload.email) },

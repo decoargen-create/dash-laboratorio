@@ -521,6 +521,106 @@ function loadPersistedState() {
   }
 }
 
+// Definición de plataformas disponibles en el dashboard. Cada una tiene su
+// propio look (sidebar gradient + acento) y sus datos aislados.
+// Para agregar una nueva plataforma: sumala acá + agregá su sidebar en el
+// render del AppShell (bloque condicional por currentPlatform).
+const PLATFORMS = [
+  {
+    id: 'viora',
+    name: 'Laboratorio Viora',
+    shortName: 'Viora',
+    initials: 'LV',
+    // Tailwind clases para el gradient del sidebar.
+    sidebarGradient: 'from-[#4a0f22] via-pink-900 to-[#3f0c1e]',
+    // Clase del "badge" cuadrado en el switcher.
+    badgeBg: 'bg-gradient-to-br from-pink-600 to-rose-500',
+    badgeText: 'text-white',
+    defaultSection: 'inicio',
+  },
+  {
+    id: 'senydrop',
+    name: 'Senydrop',
+    shortName: 'Senydrop',
+    initials: 'SD',
+    sidebarGradient: 'from-gray-900 via-gray-800 to-black',
+    badgeBg: 'bg-[#FFD33D]',
+    badgeText: 'text-gray-900',
+    defaultSection: 'seny-productos',
+  },
+];
+
+function getPlatform(id) {
+  return PLATFORMS.find(p => p.id === id) || PLATFORMS[0];
+}
+
+// Switcher al tope del sidebar. Muestra la plataforma activa y, al hacer click,
+// abre un dropdown para cambiar de plataforma.
+function PlatformSwitcher({ currentPlatform, onSwitch, sidebarOpen }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const platform = getPlatform(currentPlatform);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDocClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        className={`w-full flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-white/10 transition-colors ${!sidebarOpen ? 'justify-center' : ''}`}
+        title={!sidebarOpen ? platform.name : 'Cambiar de plataforma'}
+      >
+        <div className={`shrink-0 w-9 h-9 rounded-lg ${platform.badgeBg} ${platform.badgeText} flex items-center justify-center font-bold text-xs shadow-md`}>
+          {platform.initials}
+        </div>
+        {sidebarOpen && (
+          <>
+            <div className="flex-1 min-w-0 text-left">
+              <div className="text-[10px] font-semibold text-white/50 uppercase tracking-wider leading-none">Plataforma</div>
+              <div className="text-sm font-bold text-white truncate leading-tight mt-0.5">{platform.shortName}</div>
+            </div>
+            <ChevronDown size={14} className={`text-white/50 transition-transform ${open ? 'rotate-180' : ''}`} />
+          </>
+        )}
+      </button>
+
+      {open && (
+        <div className={`absolute z-50 mt-2 ${sidebarOpen ? 'left-0 right-0' : 'left-full ml-2 w-56'} bg-gray-900 border border-white/10 rounded-lg shadow-2xl overflow-hidden`}>
+          <div className="px-3 py-2 text-[10px] font-bold text-white/40 uppercase tracking-wider border-b border-white/5">
+            Plataformas
+          </div>
+          {PLATFORMS.map(p => {
+            const isActive = p.id === currentPlatform;
+            return (
+              <button
+                key={p.id}
+                onClick={() => { onSwitch(p.id); setOpen(false); }}
+                className={`w-full flex items-center gap-2 px-3 py-2 text-left transition ${isActive ? 'bg-white/5' : 'hover:bg-white/5'}`}
+              >
+                <div className={`shrink-0 w-7 h-7 rounded-md ${p.badgeBg} ${p.badgeText} flex items-center justify-center font-bold text-[10px]`}>
+                  {p.initials}
+                </div>
+                <span className="flex-1 text-sm font-medium text-white truncate">{p.name}</span>
+                {isActive && <Check size={14} className="text-white/60" />}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AppShell({ onExit }) {
   const [state, dispatch] = useReducer(appReducer, undefined, loadPersistedState);
 
@@ -535,6 +635,14 @@ function AppShell({ onExit }) {
     }
   }, [state]);
   const [currentUser, setCurrentUser] = useState(null);
+  // Plataforma actual (switcher en el tope del sidebar). Cada plataforma tiene
+  // su propio sidebar (logo, colores, secciones) y sus datos aislados.
+  const [currentPlatform, setCurrentPlatform] = useState(() => {
+    try { return localStorage.getItem('viora-current-platform') || 'viora'; } catch { return 'viora'; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('viora-current-platform', currentPlatform); } catch {}
+  }, [currentPlatform]);
   const [currentSection, setCurrentSection] = useState(() => {
     try { return localStorage.getItem('viora-last-section') || 'inicio'; } catch { return 'inicio'; }
   });
@@ -1021,10 +1129,11 @@ function AppShell({ onExit }) {
           className="md:hidden fixed inset-0 z-40 bg-black/50 backdrop-blur-sm animate-fade-in"
         />
       )}
-      {/* Sidebar — desktop: lateral fijo. Mobile: overlay deslizante */}
+      {/* Sidebar — desktop: lateral fijo. Mobile: overlay deslizante.
+          El gradient cambia según la plataforma activa. */}
       <aside className={`
         ${effectiveSidebarOpen ? 'w-64' : 'w-20'}
-        relative bg-gradient-to-b from-[#4a0f22] via-pink-900 to-[#3f0c1e] text-white shadow-2xl
+        relative bg-gradient-to-b ${getPlatform(currentPlatform).sidebarGradient} text-white shadow-2xl
         transition-all duration-500 ease-out flex flex-col
         max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 max-md:w-72
         max-md:transform max-md:transition-transform
@@ -1048,16 +1157,25 @@ function AppShell({ onExit }) {
           <ChevronRight size={14} className={`transition-transform duration-300 ${sidebarOpen ? 'rotate-180' : 'rotate-0'}`} />
         </button>
 
-        {/* Logo */}
-        <div className="relative p-4 flex items-center justify-center min-h-[90px]">
-          {sidebarOpen ? <VioraLogo variant="light" size="sm" /> : <VioraMark size={36} />}
+        {/* Platform switcher + logo */}
+        <div className="relative p-3 pt-4">
+          <PlatformSwitcher
+            currentPlatform={currentPlatform}
+            onSwitch={(id) => {
+              setCurrentPlatform(id);
+              const p = getPlatform(id);
+              setCurrentSection(p.defaultSection);
+              setMobileMenuOpen(false);
+            }}
+            sidebarOpen={sidebarOpen}
+          />
         </div>
 
-        {/* Divisor dorado sutil */}
-        <div aria-hidden="true" className="mx-4 h-px bg-gradient-to-r from-transparent via-amber-300/30 to-transparent" />
+        {/* Divisor sutil */}
+        <div aria-hidden="true" className="mx-4 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
 
         <nav className="relative flex-1 p-3 space-y-1 overflow-y-auto">
-          {currentUser.role === 'admin' ? (
+          {currentUser.role === 'admin' && currentPlatform === 'viora' && (
             <>
               <NavItem icon={Home} label="Inicio" section="inicio" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={Package} label="Productos" section="productos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
@@ -1065,10 +1183,15 @@ function AppShell({ onExit }) {
               <NavItem icon={CreditCard} label="Comisiones" section="comisiones" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={Sparkles} label="Analytics IA" section="analytics" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={Bot} label="Agentes IA" section="agentes" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={FileText} label="Productos Senydrop" section="bocetos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={Package} label="Datos" section="datos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
             </>
-          ) : (
+          )}
+          {currentUser.role === 'admin' && currentPlatform === 'senydrop' && (
+            <>
+              <NavItem icon={FileText} label="Productos" section="seny-productos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+            </>
+          )}
+          {currentUser.role !== 'admin' && (
             <>
               <NavItem icon={Home} label="Inicio" section="inicio" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={TrendingUp} label="Mis Órdenes" section="mis-ordenes" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
@@ -1105,16 +1228,16 @@ function AppShell({ onExit }) {
 
         <div key={currentSection} className="p-4 md:p-8 animate-fade-in-up">
           {/* Admin Views */}
-          {currentUser.role === 'admin' && currentSection === 'inicio' && <InicioSection state={state} dispatch={dispatch} onAddSale={handleAddSale} onQuickAddClient={createClient} onQuickAddProduct={createProduct} addToast={addToast} />}
-          {currentUser.role === 'admin' && currentSection === 'productos' && <ProductosSection state={state} onAddProduct={handleAddProduct} showModal={showNewProductModal} setShowModal={setShowNewProductModal} calculateMargin={calculateMargin} />}
-          {currentUser.role === 'admin' && currentSection === 'clientes' && <ClientesSection state={state} onAddClient={handleAddClient} onUpdateClient={handleUpdateClient} showModal={showNewClientModal} setShowModal={setShowNewClientModal} />}
-          {currentUser.role === 'admin' && currentSection === 'comisiones' && <ComisionesSection state={state} dispatch={dispatch} onUpdateMentor={handleUpdateMentor} onAddMentor={handleAddMentor} onRemoveMentor={handleRemoveMentor} getMentorStats={getMentorStats} filterMentor={filterMentor} setFilterMentor={setFilterMentor} />}
+          {currentUser.role === 'admin' && currentPlatform === 'viora' && currentSection === 'inicio' && <InicioSection state={state} dispatch={dispatch} onAddSale={handleAddSale} onQuickAddClient={createClient} onQuickAddProduct={createProduct} addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'viora' && currentSection === 'productos' && <ProductosSection state={state} onAddProduct={handleAddProduct} showModal={showNewProductModal} setShowModal={setShowNewProductModal} calculateMargin={calculateMargin} />}
+          {currentUser.role === 'admin' && currentPlatform === 'viora' && currentSection === 'clientes' && <ClientesSection state={state} onAddClient={handleAddClient} onUpdateClient={handleUpdateClient} showModal={showNewClientModal} setShowModal={setShowNewClientModal} />}
+          {currentUser.role === 'admin' && currentPlatform === 'viora' && currentSection === 'comisiones' && <ComisionesSection state={state} dispatch={dispatch} onUpdateMentor={handleUpdateMentor} onAddMentor={handleAddMentor} onRemoveMentor={handleRemoveMentor} getMentorStats={getMentorStats} filterMentor={filterMentor} setFilterMentor={setFilterMentor} />}
           {/* La sección "Equipo" (mentores) se unificó adentro de Comisiones */}
-          {currentUser.role === 'admin' && currentSection === 'mentores' && <ComisionesSection state={state} dispatch={dispatch} onUpdateMentor={handleUpdateMentor} onAddMentor={handleAddMentor} onRemoveMentor={handleRemoveMentor} getMentorStats={getMentorStats} filterMentor={filterMentor} setFilterMentor={setFilterMentor} />}
-          {currentUser.role === 'admin' && currentSection === 'analytics' && <AnalyticsSection state={state} currentUser={currentUser} analyticsState={analyticsState} onFetch={fetchAnalytics} />}
-          {currentUser.role === 'admin' && currentSection === 'agentes' && <AgentesSection state={state} addToast={addToast} />}
-          {currentUser.role === 'admin' && currentSection === 'bocetos' && <BocetosSection addToast={addToast} />}
-          {currentUser.role === 'admin' && currentSection === 'datos' && <DatosSection state={state} dispatch={dispatch} addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'viora' && currentSection === 'mentores' && <ComisionesSection state={state} dispatch={dispatch} onUpdateMentor={handleUpdateMentor} onAddMentor={handleAddMentor} onRemoveMentor={handleRemoveMentor} getMentorStats={getMentorStats} filterMentor={filterMentor} setFilterMentor={setFilterMentor} />}
+          {currentUser.role === 'admin' && currentPlatform === 'viora' && currentSection === 'analytics' && <AnalyticsSection state={state} currentUser={currentUser} analyticsState={analyticsState} onFetch={fetchAnalytics} />}
+          {currentUser.role === 'admin' && currentPlatform === 'viora' && currentSection === 'agentes' && <AgentesSection state={state} addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'viora' && currentSection === 'datos' && <DatosSection state={state} dispatch={dispatch} addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'senydrop' && currentSection === 'seny-productos' && <BocetosSection addToast={addToast} />}
 
           {/* Mentor Views */}
           {currentUser.role === 'mentor' && currentSection === 'inicio' && <EquipoInicioSection currentUser={currentUser} state={state} />}
@@ -7316,8 +7439,8 @@ function getSectionTitle(user, section) {
     mentores: 'Comisiones y Partners', // fallback: sección vieja cae al mismo lugar
     analytics: 'Analytics con IA',
     agentes: 'Agentes IA',
-    bocetos: 'Productos Senydrop',
     datos: 'Datos (Export / Import)',
+    'seny-productos': 'Productos · Senydrop',
   };
   const mentor = {
     inicio: 'Inicio',

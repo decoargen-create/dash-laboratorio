@@ -7,7 +7,7 @@ import {
   Menu, LogOut, Home, ShoppingCart, Package, Users, AlertCircle, CreditCard,
   UserCheck, TrendingUp, Plus, Filter, Eye, Edit2, Trash2, Calendar, DollarSign,
   Moon, Sun, ChevronDown, ChevronRight, Search, X, Command, Check, Bell,
-  AlignJustify, LayoutGrid, Columns3, Sparkles, Bot, Zap, Activity, FileText
+  AlignJustify, LayoutGrid, Columns3, Sparkles, Bot, Zap, Activity, FileText, Settings
 } from 'lucide-react';
 import { VioraLogo, VioraMark } from './logo.jsx';
 import LandingPage from './LandingPage.jsx';
@@ -548,6 +548,16 @@ const PLATFORMS = [
     badgeText: 'text-gray-900',
     defaultSection: 'seny-productos',
   },
+  {
+    id: 'metaads',
+    name: 'Meta Ads',
+    shortName: 'Meta Ads',
+    initials: 'MA',
+    sidebarGradient: 'from-[#0668E1] via-[#1877F2] to-[#0053A0]',
+    badgeBg: 'bg-gradient-to-br from-[#0668E1] to-[#1877F2]',
+    badgeText: 'text-white',
+    defaultSection: 'meta-inicio',
+  },
 ];
 
 function getPlatform(id) {
@@ -617,6 +627,47 @@ function PlatformSwitcher({ currentPlatform, onSwitch, sidebarOpen }) {
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+// Placeholder de la plataforma Meta Ads. Arranca con las 4 sub-secciones
+// como stubs para que se vean en la UI. Cuando pases el código de cowork lo
+// cargamos de verdad (OAuth, campañas, métricas, etc.).
+function MetaAdsPlaceholder({ section }) {
+  const titles = {
+    'meta-inicio': 'Meta Ads — Inicio',
+    'meta-campanas': 'Campañas',
+    'meta-metricas': 'Métricas y Reportes',
+    'meta-config': 'Conexión con Meta',
+  };
+  const descs = {
+    'meta-inicio': 'Panel principal con las métricas clave del día de tus campañas activas.',
+    'meta-campanas': 'Listado y creación de campañas, ad sets y creatividades.',
+    'meta-metricas': 'Reportes de performance: CPM, CTR, conversiones, ROAS por período.',
+    'meta-config': 'Conectá tu cuenta de Meta vía OAuth para habilitar el resto de las funciones.',
+  };
+  return (
+    <div className="max-w-3xl mx-auto">
+      <div className="bg-gradient-to-br from-[#E7F3FF] to-white border border-[#1877F2]/20 rounded-2xl p-8 shadow-sm">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#0668E1] to-[#1877F2] flex items-center justify-center text-white font-bold">
+            MA
+          </div>
+          <div>
+            <h2 className="text-xl font-bold text-gray-900">{titles[section] || 'Meta Ads'}</h2>
+            <p className="text-sm text-gray-600 mt-0.5">{descs[section] || 'Plataforma en construcción.'}</p>
+          </div>
+        </div>
+        <div className="mt-6 p-4 bg-white border border-dashed border-gray-300 rounded-xl">
+          <p className="text-sm font-semibold text-gray-700 mb-1">🚧 En construcción</p>
+          <p className="text-xs text-gray-500 leading-relaxed">
+            Esta sección está reservada para la integración con la API de Meta.
+            Pasame el código del task programado que tenés en cowork y la conectamos
+            (OAuth + Marketing API + UI de campañas).
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1191,6 +1242,14 @@ function AppShell({ onExit }) {
               <NavItem icon={FileText} label="Productos" section="seny-productos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
             </>
           )}
+          {currentUser.role === 'admin' && currentPlatform === 'metaads' && (
+            <>
+              <NavItem icon={Home} label="Inicio" section="meta-inicio" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              <NavItem icon={Zap} label="Campañas" section="meta-campanas" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              <NavItem icon={Activity} label="Métricas" section="meta-metricas" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              <NavItem icon={Settings} label="Conexión Meta" section="meta-config" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+            </>
+          )}
           {currentUser.role !== 'admin' && (
             <>
               <NavItem icon={Home} label="Inicio" section="inicio" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
@@ -1238,6 +1297,7 @@ function AppShell({ onExit }) {
           {currentUser.role === 'admin' && currentPlatform === 'viora' && currentSection === 'agentes' && <AgentesSection state={state} addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'viora' && currentSection === 'datos' && <DatosSection state={state} dispatch={dispatch} addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'senydrop' && currentSection === 'seny-productos' && <BocetosSection addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'metaads' && <MetaAdsPlaceholder section={currentSection} />}
 
           {/* Mentor Views */}
           {currentUser.role === 'mentor' && currentSection === 'inicio' && <EquipoInicioSection currentUser={currentUser} state={state} />}
@@ -7441,6 +7501,10 @@ function getSectionTitle(user, section) {
     agentes: 'Agentes IA',
     datos: 'Datos (Export / Import)',
     'seny-productos': 'Productos · Senydrop',
+    'meta-inicio': 'Meta Ads · Inicio',
+    'meta-campanas': 'Meta Ads · Campañas',
+    'meta-metricas': 'Meta Ads · Métricas',
+    'meta-config': 'Meta Ads · Conexión',
   };
   const mentor = {
     inicio: 'Inicio',

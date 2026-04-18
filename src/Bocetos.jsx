@@ -1,11 +1,18 @@
-// Módulo de carga de productos para un PROYECTO específico.
+// Módulo "Bocetos Senydrop".
 //
-// Recibe projectId como prop: todos los datos de localStorage se leen/escriben
-// bajo el namespace `viora-proj-{projectId}-*`. Esto permite tener múltiples
-// proyectos con datos aislados dentro de la misma plataforma.
+// Flujo: asignás un cliente, pegás una o más URLs de productos (o una URL de
+// colección con muchos productos), la IA los scrapea y los deja en una lista
+// de PENDIENTES. Ahí revisás cada uno (nombre, SKU, imagen, variantes) y
+// aprobás / descartás. Los aprobados van a la lista de guardados y se pueden
+// exportar como JSON para migrar al repo real de senydrop.com.
 //
-// Flujo: asignás un cliente, pegás URLs, la IA scrapea, revisás, aprobás,
-// exportás. Igual que antes, pero con namespace por proyecto.
+// Persistencia:
+//   - viora-bocetos-v1           : array de bocetos APROBADOS
+//   - viora-bocetos-clientes-v1  : array de clientes
+//   - viora-bocetos-last-cliente : id del último cliente usado
+//
+// Estética: paleta Senydrop (amarillo #FFD33D) con inputs blancos + shadow-sm
+// + bordes redondeados más marcados para que se sienta la ergonomía.
 
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import {
@@ -16,6 +23,10 @@ import {
   MessageSquare, Send, GraduationCap, FileCheck,
 } from 'lucide-react';
 
+const STORAGE_KEY_BOCETOS = 'viora-bocetos-v1';
+const STORAGE_KEY_CLIENTES = 'viora-bocetos-clientes-v1';
+const STORAGE_KEY_LAST_CLIENTE = 'viora-bocetos-last-cliente';
+const STORAGE_KEY_AI_CONFIG = 'viora-bocetos-ai-config-v1';
 const MAX_IMG_BYTES = 1024 * 1024;
 const CANVAS_SIZE = 1000; // imagen normalizada a cuadrado de 1000x1000 con fondo blanco
 
@@ -230,24 +241,12 @@ function iniciales(nombre) {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-export default function BocetosSection({ addToast, projectId, projectName, projectColor }) {
-  // Keys de localStorage dinámicas según el proyecto activo.
-  const pid = projectId || 'default';
-  const KEY_PRODUCTOS = `viora-proj-${pid}-productos`;
-  const KEY_CLIENTES = `viora-proj-${pid}-clientes`;
-  const KEY_LAST_CLIENTE = `viora-proj-${pid}-last-cliente`;
-  const KEY_AI_CONFIG = `viora-proj-${pid}-ai-config`;
-
-  const [bocetos, setBocetos] = useState(() => loadJSON(KEY_PRODUCTOS, []));
-  const [clientes, setClientes] = useState(() => {
-    const cli = loadJSON(KEY_CLIENTES, null);
-    return Array.isArray(cli) && cli.length > 0 ? cli : CLIENTES_SEED;
-  });
+export default function BocetosSection({ addToast }) {
+  const [bocetos, setBocetos] = useState(() => loadJSON(STORAGE_KEY_BOCETOS, []));
+  const [clientes, setClientes] = useState(() => loadClientes());
   const [clienteId, setClienteId] = useState(() => {
-    const cli = loadJSON(KEY_CLIENTES, null);
-    const seed = Array.isArray(cli) && cli.length > 0 ? cli : CLIENTES_SEED;
-    const saved = loadJSON(KEY_LAST_CLIENTE, null);
-    return saved ?? seed[0]?.id ?? null;
+    const saved = loadJSON(STORAGE_KEY_LAST_CLIENTE, null);
+    return saved ?? loadClientes()[0]?.id ?? null;
   });
 
   const [mode, setMode] = useState('batch'); // 'batch' | 'collection'
@@ -277,18 +276,18 @@ export default function BocetosSection({ addToast, projectId, projectName, proje
 
   // Config de IA: instrucciones custom + auto-normalizar imagen.
   const [aiConfig, setAiConfig] = useState(() => {
-    const saved = loadJSON(KEY_AI_CONFIG, null);
+    const saved = loadJSON(STORAGE_KEY_AI_CONFIG, null);
     return saved && typeof saved === 'object' ? { ...DEFAULT_AI_CONFIG, ...saved } : DEFAULT_AI_CONFIG;
   });
   const [showAiConfig, setShowAiConfig] = useState(false);
 
-  useEffect(() => { saveJSON(KEY_AI_CONFIG, aiConfig); }, [aiConfig, KEY_AI_CONFIG]);
+  useEffect(() => { saveJSON(STORAGE_KEY_AI_CONFIG, aiConfig); }, [aiConfig]);
 
   const importInputRef = useRef(null);
 
-  useEffect(() => { saveJSON(KEY_PRODUCTOS, bocetos); }, [bocetos, KEY_PRODUCTOS]);
-  useEffect(() => { saveJSON(KEY_CLIENTES, clientes); }, [clientes, KEY_CLIENTES]);
-  useEffect(() => { if (clienteId != null) saveJSON(KEY_LAST_CLIENTE, clienteId); }, [clienteId, KEY_LAST_CLIENTE]);
+  useEffect(() => { saveJSON(STORAGE_KEY_BOCETOS, bocetos); }, [bocetos]);
+  useEffect(() => { saveJSON(STORAGE_KEY_CLIENTES, clientes); }, [clientes]);
+  useEffect(() => { if (clienteId != null) saveJSON(STORAGE_KEY_LAST_CLIENTE, clienteId); }, [clienteId]);
 
   const clienteSeleccionado = useMemo(
     () => clientes.find(c => c.id === clienteId) || null,
@@ -755,16 +754,13 @@ export default function BocetosSection({ addToast, projectId, projectName, proje
   const handleExportAll = () => {
     if (bocetos.length === 0) { addToast?.({ type: 'error', message: 'No hay productos para exportar' }); return; }
     const stamp = new Date().toISOString().split('T')[0];
-    const slug = (projectName || 'productos').toLowerCase().replace(/\s+/g, '-');
     downloadJSON({
       version: 2,
-      source: `laboratorio-viora.${pid}`,
-      projectId: pid,
-      projectName: projectName || 'Default',
+      source: 'laboratorio-viora.bocetos',
       exportedAt: new Date().toISOString(),
       clientes,
       bocetos,
-    }, `productos-${slug}-${stamp}.json`);
+    }, `bocetos-senydrop-${stamp}.json`);
     addToast?.({ type: 'success', message: `${bocetos.length} producto(s) exportados` });
   };
 
@@ -805,8 +801,8 @@ export default function BocetosSection({ addToast, projectId, projectName, proje
             <Package size={20} className="text-gray-900" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-gray-900">Productos {projectName || 'Senydrop'}</h1>
-            <p className="text-xs text-gray-500">Importá productos de Tiendanube/Shopify y armá el catálogo</p>
+            <h1 className="text-xl font-bold text-gray-900">Productos Senydrop</h1>
+            <p className="text-xs text-gray-500">Importá productos de Tiendanube/Shopify y armá el catálogo que llevás a senydrop.com</p>
           </div>
         </div>
         <div className="flex items-center gap-2">

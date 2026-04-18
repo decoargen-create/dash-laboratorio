@@ -7,7 +7,7 @@ import {
   Menu, LogOut, Home, ShoppingCart, Package, Users, AlertCircle, CreditCard,
   UserCheck, TrendingUp, Plus, Filter, Eye, Edit2, Trash2, Calendar, DollarSign,
   Moon, Sun, ChevronDown, ChevronRight, Search, X, Command, Check, Bell,
-  AlignJustify, LayoutGrid, Columns3, Sparkles, Bot, Zap, Activity, FileText, Settings
+  AlignJustify, LayoutGrid, Columns3, Sparkles, Bot, Zap, Activity, FileText, Settings, Loader2
 } from 'lucide-react';
 import { VioraLogo, VioraMark } from './logo.jsx';
 import LandingPage from './LandingPage.jsx';
@@ -632,20 +632,19 @@ function PlatformSwitcher({ currentPlatform, onSwitch, sidebarOpen }) {
 }
 
 // Placeholder de la plataforma Meta Ads. Arranca con las 4 sub-secciones
-// como stubs para que se vean en la UI. Cuando pases el código de cowork lo
-// cargamos de verdad (OAuth, campañas, métricas, etc.).
+// como stubs para que se vean en la UI. La sub-sección "Conexión" ya es
+// funcional (OAuth real con Meta Graph API).
 function MetaAdsPlaceholder({ section }) {
+  if (section === 'meta-config') return <MetaConexionSection />;
   const titles = {
     'meta-inicio': 'Meta Ads — Inicio',
     'meta-campanas': 'Campañas',
     'meta-metricas': 'Métricas y Reportes',
-    'meta-config': 'Conexión con Meta',
   };
   const descs = {
     'meta-inicio': 'Panel principal con las métricas clave del día de tus campañas activas.',
     'meta-campanas': 'Listado y creación de campañas, ad sets y creatividades.',
     'meta-metricas': 'Reportes de performance: CPM, CTR, conversiones, ROAS por período.',
-    'meta-config': 'Conectá tu cuenta de Meta vía OAuth para habilitar el resto de las funciones.',
   };
   return (
     <div className="max-w-3xl mx-auto">
@@ -660,13 +659,139 @@ function MetaAdsPlaceholder({ section }) {
           </div>
         </div>
         <div className="mt-6 p-4 bg-white border border-dashed border-gray-300 rounded-xl">
-          <p className="text-sm font-semibold text-gray-700 mb-1">🚧 En construcción</p>
+          <p className="text-sm font-semibold text-gray-700 mb-1">🚧 Próximamente</p>
           <p className="text-xs text-gray-500 leading-relaxed">
-            Esta sección está reservada para la integración con la API de Meta.
-            Pasame el código del task programado que tenés en cowork y la conectamos
-            (OAuth + Marketing API + UI de campañas).
+            Primero hay que conectar la cuenta de Meta. Andá a <span className="font-semibold">Conexión Meta</span> en el sidebar.
           </p>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Sección de conexión con Meta: OAuth flow. Llama /api/meta/me al montar
+// para chequear si ya hay sesión activa, ofrece botón Conectar (redirect a
+// /api/meta/connect) o muestra datos del usuario conectado con botón
+// Desconectar.
+function MetaConexionSection() {
+  const [state, setState] = useState({ loading: true, connected: false, user: null, expiresAt: null });
+  const [busy, setBusy] = useState(false);
+
+  const refresh = React.useCallback(async () => {
+    setState(s => ({ ...s, loading: true }));
+    try {
+      const r = await fetch('/api/meta/me');
+      const data = await r.json();
+      setState({ loading: false, connected: !!data.connected, user: data.user || null, expiresAt: data.expiresAt || null });
+    } catch (err) {
+      setState({ loading: false, connected: false, user: null, expiresAt: null, error: err.message });
+    }
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  // Si el callback redirigió con ?meta=connected o ?meta=error, limpiamos el
+  // query param y refrescamos el estado.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.has('meta')) {
+      params.delete('meta');
+      const qs = params.toString();
+      const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash;
+      window.history.replaceState({}, '', newUrl);
+      refresh();
+    }
+  }, [refresh]);
+
+  const handleConnect = () => {
+    setBusy(true);
+    // Redirigimos al endpoint que a su vez redirige a Meta. No usamos fetch
+    // porque el flow OAuth requiere redirección completa del browser.
+    window.location.href = `/api/meta/connect?returnTo=${encodeURIComponent('/acceso')}`;
+  };
+
+  const handleDisconnect = async () => {
+    if (!confirm('¿Desconectar tu cuenta de Meta? Podés volver a conectarla cuando quieras.')) return;
+    setBusy(true);
+    try {
+      await fetch('/api/meta/disconnect', { method: 'POST' });
+      await refresh();
+    } finally { setBusy(false); }
+  };
+
+  if (state.loading) {
+    return (
+      <div className="max-w-3xl mx-auto">
+        <div className="bg-white border border-gray-200 rounded-2xl p-8 shadow-sm flex items-center gap-3">
+          <Loader2 size={18} className="animate-spin text-gray-500" />
+          <span className="text-sm text-gray-600">Verificando conexión con Meta…</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-3xl mx-auto space-y-4">
+      <div className="bg-gradient-to-br from-[#E7F3FF] to-white border border-[#1877F2]/20 rounded-2xl p-6 shadow-sm">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#0668E1] to-[#1877F2] flex items-center justify-center text-white font-bold">MA</div>
+          <div>
+            <h2 className="text-xl font-bold text-gray-900">Conexión con Meta</h2>
+            <p className="text-sm text-gray-600 mt-0.5">Conectá tu cuenta para poder leer y gestionar campañas vía Marketing API.</p>
+          </div>
+        </div>
+
+        {state.connected ? (
+          <div className="space-y-4">
+            <div className="flex items-center gap-3 p-4 bg-white rounded-xl border border-emerald-200">
+              <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center">
+                <Check size={20} className="text-emerald-600" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-gray-900">Conectado como {state.user?.name || 'usuario Meta'}</p>
+                <p className="text-xs text-gray-500">
+                  ID: <code className="font-mono">{state.user?.id || '—'}</code>
+                  {state.expiresAt && <> · Expira {new Date(state.expiresAt).toLocaleDateString('es-AR')}</>}
+                </p>
+              </div>
+              <button
+                onClick={handleDisconnect}
+                disabled={busy}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-red-50 hover:text-red-700 hover:border-red-200 transition disabled:opacity-50"
+              >
+                <LogOut size={14} /> Desconectar
+              </button>
+            </div>
+            <div className="p-4 bg-white border border-dashed border-gray-300 rounded-xl">
+              <p className="text-sm font-semibold text-gray-700 mb-1">✅ Listo para usar</p>
+              <p className="text-xs text-gray-500 leading-relaxed">
+                Andá a <span className="font-semibold">Campañas</span> para elegir una de tus cuentas publicitarias y empezar a trabajar.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <button
+              onClick={handleConnect}
+              disabled={busy}
+              className="inline-flex items-center gap-2 px-5 py-3 text-sm font-bold text-white bg-gradient-to-br from-[#0668E1] to-[#1877F2] rounded-lg hover:from-[#0556BE] hover:to-[#1668D8] shadow-sm transition disabled:opacity-50"
+            >
+              {busy ? <Loader2 size={16} className="animate-spin" /> : <Zap size={16} />}
+              Conectar con Meta
+            </button>
+            <div className="p-4 bg-white border border-dashed border-gray-300 rounded-xl">
+              <p className="text-sm font-semibold text-gray-700 mb-2">Qué permisos se piden</p>
+              <ul className="text-xs text-gray-600 space-y-1 list-disc pl-4">
+                <li><code className="font-mono">ads_read</code>, <code className="font-mono">ads_management</code> — lectura y gestión de campañas</li>
+                <li><code className="font-mono">business_management</code> — listar cuentas publicitarias</li>
+                <li><code className="font-mono">pages_show_list</code>, <code className="font-mono">instagram_basic</code> — lectura de posts de Instagram</li>
+              </ul>
+              <p className="text-xs text-gray-500 mt-3">
+                El token se guarda en una cookie HttpOnly del servidor (no accesible por JavaScript). Para revocar acceso podés venir acá y desconectar, o ir a Meta → Configuración → Apps.
+              </p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

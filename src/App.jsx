@@ -7,12 +7,12 @@ import {
   Menu, LogOut, Home, ShoppingCart, Package, Users, AlertCircle, CreditCard,
   UserCheck, TrendingUp, Plus, Filter, Eye, Edit2, Trash2, Calendar, DollarSign,
   Moon, Sun, ChevronDown, ChevronRight, Search, X, Command, Check, Bell,
-  AlignJustify, LayoutGrid, Columns3, Sparkles, Bot, Zap, Activity, FileText
+  AlignJustify, LayoutGrid, Columns3, Sparkles, Bot, Zap, Activity, FileText, FolderOpen
 } from 'lucide-react';
 import { VioraLogo, VioraMark } from './logo.jsx';
 import LandingPage from './LandingPage.jsx';
 import ChatbotWidget from './ChatbotWidget.jsx';
-import BocetosSection from './Bocetos.jsx';
+import ProyectosSection from './Proyectos.jsx';
 import { generateCSV, downloadCSV, parseCSV, toNumber, toBool } from './csv.js';
 
 // Estados del pipeline de producción de una orden
@@ -1065,7 +1065,7 @@ function AppShell({ onExit }) {
               <NavItem icon={CreditCard} label="Comisiones" section="comisiones" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={Sparkles} label="Analytics IA" section="analytics" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={Bot} label="Agentes IA" section="agentes" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={FileText} label="Productos Senydrop" section="bocetos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              <NavItem icon={FolderOpen} label="Proyectos" section="proyectos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={Package} label="Datos" section="datos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
             </>
           ) : (
@@ -1113,7 +1113,7 @@ function AppShell({ onExit }) {
           {currentUser.role === 'admin' && currentSection === 'mentores' && <ComisionesSection state={state} dispatch={dispatch} onUpdateMentor={handleUpdateMentor} onAddMentor={handleAddMentor} onRemoveMentor={handleRemoveMentor} getMentorStats={getMentorStats} filterMentor={filterMentor} setFilterMentor={setFilterMentor} />}
           {currentUser.role === 'admin' && currentSection === 'analytics' && <AnalyticsSection state={state} currentUser={currentUser} analyticsState={analyticsState} onFetch={fetchAnalytics} />}
           {currentUser.role === 'admin' && currentSection === 'agentes' && <AgentesSection state={state} addToast={addToast} />}
-          {currentUser.role === 'admin' && currentSection === 'bocetos' && <BocetosSection addToast={addToast} />}
+          {currentUser.role === 'admin' && currentSection === 'proyectos' && <ProyectosSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentSection === 'datos' && <DatosSection state={state} dispatch={dispatch} addToast={addToast} />}
 
           {/* Mentor Views */}
@@ -7316,7 +7316,7 @@ function getSectionTitle(user, section) {
     mentores: 'Comisiones y Partners', // fallback: sección vieja cae al mismo lugar
     analytics: 'Analytics con IA',
     agentes: 'Agentes IA',
-    bocetos: 'Productos Senydrop',
+    proyectos: 'Proyectos',
     datos: 'Datos (Export / Import)',
   };
   const mentor = {

@@ -55,6 +55,26 @@ export default function handler(req, res) {
       ok: !!env.ANTHROPIC_API_KEY,
       hint: env.ANTHROPIC_API_KEY ? 'OK (chatbot habilitado)' : 'Faltante (el chatbot no va a andar, pero el login sí).',
     },
+    META_APP_ID: {
+      configured: !!env.META_APP_ID,
+      length: (env.META_APP_ID || '').length,
+      ok: !!env.META_APP_ID && /^\d+$/.test(env.META_APP_ID),
+      hint: !env.META_APP_ID
+        ? 'Faltante. Copiala de developers.facebook.com → Tu app → Configuración → Básica.'
+        : /^\d+$/.test(env.META_APP_ID)
+        ? `OK — ${env.META_APP_ID.length} dígitos`
+        : 'Debería ser solo dígitos (si pegaste el Secret por error, cambialo)',
+    },
+    META_APP_SECRET: {
+      configured: !!env.META_APP_SECRET,
+      length: (env.META_APP_SECRET || '').length,
+      ok: !!env.META_APP_SECRET && env.META_APP_SECRET.length >= 20,
+      hint: !env.META_APP_SECRET
+        ? 'Faltante. Copiala de Meta → App → Configuración → Básica → App secret (click "Show").'
+        : env.META_APP_SECRET.length < 20
+        ? 'Muy corta, normalmente son 32+ caracteres hex'
+        : 'OK',
+    },
     AUTH_USERS_FIRST_BYTES: env.AUTH_USERS
       ? env.AUTH_USERS.slice(0, 2)
       : null,

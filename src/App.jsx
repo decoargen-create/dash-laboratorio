@@ -199,11 +199,15 @@ function appReducer(state, action) {
       return { ...state, [entity]: [...existing, ...reIdd] };
     }
     case 'UPDATE_ORDER': {
-      // Acción genérica: patchea cualquier campo de una orden por id.
-      // payload: { id, patch: {...} }
       return {
         ...state,
         sales: state.sales.map(s => s.id === action.payload.id ? { ...s, ...action.payload.patch } : s)
+      };
+    }
+    case 'DELETE_ORDER': {
+      return {
+        ...state,
+        sales: state.sales.filter(s => s.id !== action.payload.id)
       };
     }
     case 'ADD_ORDER_NOTE': {
@@ -2444,6 +2448,18 @@ function OrdersList({ state, dispatch, orders, onEditOrder }) {
                           <Edit2 size={14} />
                         </button>
                       )}
+                      <button
+                        onClick={() => {
+                          if (window.confirm(`¿Borrar la orden #${order.id} de ${getClientName(order.clienteId)}? Esta acción no se puede deshacer.`)) {
+                            dispatch({ type: 'DELETE_ORDER', payload: { id: order.id } });
+                          }
+                        }}
+                        className="p-1 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-gray-400 hover:text-red-600 dark:text-gray-500 dark:hover:text-red-400 transition"
+                        title="Eliminar orden"
+                        aria-label="Eliminar orden"
+                      >
+                        <Trash2 size={14} />
+                      </button>
                     </div>
                   </td>
                   {isColVisible('fecha') && <td className="px-4 py-3 text-gray-900 dark:text-gray-100 whitespace-nowrap">{order.fecha}</td>}
@@ -4020,7 +4036,7 @@ function ProductosCompactView({ products, sales, calculateMargin }) {
 }
 
 function ClientesSection({ state, onAddClient, onUpdateClient, showModal, setShowModal }) {
-  const emptyForm = { nombre: '', telefono: '', domicilio: '', mentorId: '', totalCompras: '', unidadesProducidas: '' };
+  const emptyForm = { nombre: '', telefono: '', domicilio: '', mentorId: '', totalCompras: '', unidadesProducidas: '', fulfillment: false, fulfillmentCosto: '' };
   const [formData, setFormData] = useState(emptyForm);
   const [editingId, setEditingId] = useState(null);
   const [expanded, setExpanded] = useState(() => new Set());
@@ -4080,6 +4096,8 @@ function ClientesSection({ state, onAddClient, onUpdateClient, showModal, setSho
       mentorId: client.mentorId ? String(client.mentorId) : '',
       totalCompras: String(client.totalCompras ?? ''),
       unidadesProducidas: String(client.unidadesProducidas ?? ''),
+      fulfillment: !!client.fulfillment,
+      fulfillmentCosto: client.fulfillmentCosto != null ? String(client.fulfillmentCosto) : '',
     });
     setShowModal(true);
   };
@@ -4093,6 +4111,8 @@ function ClientesSection({ state, onAddClient, onUpdateClient, showModal, setSho
       mentorId: formData.mentorId ? parseInt(formData.mentorId) : null,
       totalCompras: formData.totalCompras === '' ? 0 : parseInt(formData.totalCompras) || 0,
       unidadesProducidas: formData.unidadesProducidas === '' ? 0 : parseInt(formData.unidadesProducidas) || 0,
+      fulfillment: !!formData.fulfillment,
+      fulfillmentCosto: formData.fulfillment && formData.fulfillmentCosto !== '' ? parseFloat(formData.fulfillmentCosto) || 0 : null,
     };
     if (editingId) {
       onUpdateClient({ id: editingId, ...payload });
@@ -4169,6 +4189,38 @@ function ClientesSection({ state, onAddClient, onUpdateClient, showModal, setSho
                 placeholder="Calle 123, Localidad"
                 className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
               />
+            </div>
+            <div className="p-3 rounded-lg bg-sky-50 dark:bg-sky-900/20 border border-sky-200 dark:border-sky-800/50">
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formData.fulfillment}
+                  onChange={(e) => setFormData({ ...formData, fulfillment: e.target.checked })}
+                  className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-sky-600 focus:ring-sky-500"
+                />
+                <div>
+                  <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">Hacemos fulfillment</span>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Activalo si nosotros gestionamos el envío/despacho de este cliente.</p>
+                </div>
+              </label>
+              {formData.fulfillment && (
+                <div className="mt-3">
+                  <FormLabel tip="Valor que cobramos al cliente por el fulfillment (por envío/orden). Se puede usar para calcular costos operativos.">
+                    Costo de fulfillment
+                  </FormLabel>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={formData.fulfillmentCosto}
+                      onChange={(e) => setFormData({ ...formData, fulfillmentCosto: e.target.value })}
+                      placeholder="Valor por envío"
+                      className="w-full pl-6 pr-3 py-2 border border-sky-300 dark:border-sky-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
             <div>
               <FormLabel tip="Partner que refirió al cliente. Cobrará comisión sobre sus ventas según el % configurado en Comisiones.">Partner asignado</FormLabel>

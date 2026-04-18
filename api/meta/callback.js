@@ -39,16 +39,29 @@ async function fetchMe(accessToken) {
   return await resp.json();
 }
 
+// Redirige al user al frontend con un query param de error. Así ve un mensaje
+// amigable dentro de la app en vez de un JSON crudo en el browser.
+function redirectWithError(res, origin, returnTo, reason) {
+  const path = (returnTo || '/acceso').startsWith('/') ? returnTo : '/acceso';
+  const url = new URL(path, origin);
+  url.searchParams.set('meta', 'error');
+  url.searchParams.set('reason', reason.slice(0, 200));
+  res.statusCode = 302;
+  res.setHeader('Location', url.toString());
+  res.end();
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
+
+  const origin = getOrigin(req);
 
   const appId = process.env.META_APP_ID;
   const appSecret = process.env.META_APP_SECRET;
   const authSecret = process.env.AUTH_SECRET;
-  if (!appId || !appSecret) return respondJSON(res, 500, { error: 'META_APP_ID / META_APP_SECRET no configuradas' });
-  if (!authSecret) return respondJSON(res, 500, { error: 'AUTH_SECRET no configurada' });
+  if (!appId || !appSecret) return redirectWithError(res, origin, '/acceso', 'META_APP_ID o META_APP_SECRET faltan en el servidor');
+  if (!authSecret) return redirectWithError(res, origin, '/acceso', 'AUTH_SECRET no configurada');
 
-  const origin = getOrigin(req);
   const url = new URL(req.url, origin);
   const code = url.searchParams.get('code');
   const stateRaw = url.searchParams.get('state');
@@ -56,29 +69,28 @@ export default async function handler(req, res) {
 
   if (errorFromMeta) {
     const desc = url.searchParams.get('error_description') || errorFromMeta;
-    return respondJSON(res, 400, { error: `Meta rechazó el login: ${desc}` });
+    return redirectWithError(res, origin, '/acceso', `Meta rechazó el login: ${desc}`);
   }
-  if (!code || !stateRaw) return respondJSON(res, 400, { error: 'Falta code o state' });
+  if (!code || !stateRaw) return redirectWithError(res, origin, '/acceso', 'Callback incompleto (falta code o state)');
 
   const state = verifyState(stateRaw, authSecret);
-  if (!state) return respondJSON(res, 403, { error: 'State inválido o adulterado' });
-  // Rechazamos states viejos (>10 min) para mitigar replays.
+  if (!state) return redirectWithError(res, origin, '/acceso', 'State inválido o adulterado');
   if (Date.now() - (state.ts || 0) > 10 * 60 * 1000) {
-    return respondJSON(res, 403, { error: 'State expirado, reiniciá el login' });
+    return redirectWithError(res, origin, state.returnTo || '/acceso', 'State expirado, reiniciá el login');
   }
 
   const redirectUri = `${origin}/api/meta/callback`;
+  const returnTo = (state.returnTo || '/acceso').startsWith('/') ? state.returnTo : '/acceso';
 
-  let shortToken, longToken, me;
+  let longToken, me;
   try {
     const short = await exchangeCodeForToken(appId, appSecret, code, redirectUri);
-    shortToken = short.access_token;
-    const long = await exchangeForLongLived(appId, appSecret, shortToken);
+    const long = await exchangeForLongLived(appId, appSecret, short.access_token);
     longToken = long.access_token;
     me = await fetchMe(longToken);
   } catch (err) {
     console.error('meta/callback exchange error:', err);
-    return respondJSON(res, 502, { error: `Intercambio de token falló: ${err.message}` });
+    return redirectWithError(res, origin, returnTo, `Intercambio de token falló: ${err.message}`);
   }
 
   // Firmamos la cookie con el access_token + datos del usuario Meta.
@@ -92,7 +104,6 @@ export default async function handler(req, res) {
   const signed = signState(cookiePayload, authSecret);
   setMetaCookie(res, signed);
 
-  const returnTo = (state.returnTo || '/acceso').startsWith('/') ? state.returnTo : '/acceso';
   res.statusCode = 302;
   res.setHeader('Location', `${returnTo}?meta=connected`);
   res.end();

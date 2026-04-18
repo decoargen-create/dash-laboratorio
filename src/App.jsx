@@ -1,4 +1,4 @@
-import React, { useState, useReducer, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useReducer, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   LineChart, Line, PieChart, Pie, Cell
@@ -676,8 +676,9 @@ function MetaAdsPlaceholder({ section }) {
 function MetaConexionSection() {
   const [state, setState] = useState({ loading: true, connected: false, user: null, expiresAt: null });
   const [busy, setBusy] = useState(false);
+  const [connectError, setConnectError] = useState(null);
 
-  const refresh = React.useCallback(async () => {
+  const refresh = useCallback(async () => {
     setState(s => ({ ...s, loading: true }));
     try {
       const r = await fetch('/api/meta/me');
@@ -690,12 +691,17 @@ function MetaConexionSection() {
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  // Si el callback redirigió con ?meta=connected o ?meta=error, limpiamos el
-  // query param y refrescamos el estado.
+  // Si el callback redirigió con ?meta=connected o ?meta=error, detectamos el
+  // mensaje, limpiamos el query param y refrescamos el estado.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.has('meta')) {
+      const status = params.get('meta');
+      const reason = params.get('reason');
+      if (status === 'error' && reason) setConnectError(reason);
+      else setConnectError(null);
       params.delete('meta');
+      params.delete('reason');
       const qs = params.toString();
       const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash;
       window.history.replaceState({}, '', newUrl);
@@ -711,7 +717,7 @@ function MetaConexionSection() {
   };
 
   const handleDisconnect = async () => {
-    if (!confirm('¿Desconectar tu cuenta de Meta? Podés volver a conectarla cuando quieras.')) return;
+    if (!window.confirm('¿Desconectar tu cuenta de Meta? Podés volver a conectarla cuando quieras.')) return;
     setBusy(true);
     try {
       await fetch('/api/meta/disconnect', { method: 'POST' });
@@ -771,6 +777,22 @@ function MetaConexionSection() {
           </div>
         ) : (
           <div className="space-y-4">
+            {connectError && (
+              <div className="p-4 bg-red-50 border border-red-200 rounded-xl flex items-start gap-3">
+                <AlertCircle size={18} className="text-red-600 shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-red-900">No se pudo conectar</p>
+                  <p className="text-xs text-red-700 mt-0.5 break-words">{connectError}</p>
+                </div>
+                <button
+                  onClick={() => setConnectError(null)}
+                  className="text-red-400 hover:text-red-600 transition"
+                  aria-label="Cerrar"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            )}
             <button
               onClick={handleConnect}
               disabled={busy}

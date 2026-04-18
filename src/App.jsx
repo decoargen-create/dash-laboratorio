@@ -7,7 +7,7 @@ import {
   Menu, LogOut, Home, ShoppingCart, Package, Users, AlertCircle, CreditCard,
   UserCheck, TrendingUp, Plus, Filter, Eye, Edit2, Trash2, Calendar, DollarSign,
   Moon, Sun, ChevronDown, ChevronRight, Search, X, Command, Check, Bell,
-  AlignJustify, LayoutGrid, Columns3, Sparkles, Bot, Zap, Activity, FileText, Settings, Loader2
+  AlignJustify, LayoutGrid, Columns3, Sparkles, Bot, Zap, Activity, FileText, Settings, Loader2, Calculator, Copy
 } from 'lucide-react';
 import { VioraLogo, VioraMark } from './logo.jsx';
 import LandingPage from './LandingPage.jsx';
@@ -631,6 +631,346 @@ function PlatformSwitcher({ currentPlatform, onSwitch, sidebarOpen }) {
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+// Calculadora de proyección: simula órdenes sin tocar los datos reales.
+// Podés elegir producto + partner del estado actual o armar custom, cambiar
+// cantidad, precio venta, costo informado, % comisión, fulfillment y extras.
+// Ve en vivo ganancia informada, comisión, profit real, margen. Guardás
+// escenarios en localStorage para compararlos side-by-side.
+function CalculadoraSection({ state, addToast }) {
+  const STORAGE_KEY = 'viora-calc-escenarios-v1';
+  const DEFAULT_FORM = {
+    productoId: '',
+    cantidad: 100,
+    costoRealUnit: 0,          // costo real por unidad
+    precioVentaUnit: 0,
+    costoInfUnit: 0,           // costo informado al partner por unidad
+    mentorId: '',
+    pctPartner: 50,
+    fulfillmentTotal: 0,       // costo fulfillment total (no per unit)
+    extrasTotal: 0,            // otros costos fijos (envío, impuestos, etc)
+  };
+
+  const [form, setForm] = useState(DEFAULT_FORM);
+  const [escenarios, setEscenarios] = useState(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch { return []; }
+  });
+  const [nombreEscenario, setNombreEscenario] = useState('');
+
+  useEffect(() => {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(escenarios)); } catch {}
+  }, [escenarios]);
+
+  // Auto-rellena los valores del producto seleccionado. El user después
+  // puede tocarlos libremente (simulación).
+  const handleProductoChange = (productoId) => {
+    const p = state.products.find(x => x.id === Number(productoId));
+    if (!p) { setForm(prev => ({ ...prev, productoId })); return; }
+    const costoUnit = getProductUnitCost(p);
+    const costoInfUnit = p.costoInformado ?? p.costoSinDesglosar ?? costoUnit;
+    setForm(prev => ({
+      ...prev,
+      productoId,
+      costoRealUnit: costoUnit,
+      precioVentaUnit: p.precioVenta || 0,
+      costoInfUnit: costoInfUnit || 0,
+    }));
+  };
+
+  const handleMentorChange = (mentorId) => {
+    const m = state.mentors.find(x => x.id === Number(mentorId));
+    setForm(prev => ({
+      ...prev,
+      mentorId,
+      pctPartner: m?.porcentajeComision ?? prev.pctPartner,
+    }));
+  };
+
+  // Cálculos en vivo.
+  const calc = useMemo(() => {
+    const cantidad = Number(form.cantidad) || 0;
+    const costoRealUnit = Number(form.costoRealUnit) || 0;
+    const precioVentaUnit = Number(form.precioVentaUnit) || 0;
+    const costoInfUnit = Number(form.costoInfUnit) || 0;
+    const pctPartner = Number(form.pctPartner) || 0;
+    const fulfillmentTotal = Number(form.fulfillmentTotal) || 0;
+    const extrasTotal = Number(form.extrasTotal) || 0;
+
+    const precioVentaTotal = precioVentaUnit * cantidad;
+    const costoRealTotal = costoRealUnit * cantidad;
+    const costoInfTotal = costoInfUnit * cantidad;
+    const gananciaInformada = Math.max(0, precioVentaTotal - costoInfTotal);
+    const comisionPartner = form.mentorId || pctPartner > 0
+      ? Math.round(gananciaInformada * (pctPartner / 100))
+      : 0;
+    const profitReal = precioVentaTotal - costoRealTotal - comisionPartner - fulfillmentTotal - extrasTotal;
+    const margenPct = precioVentaTotal > 0 ? (profitReal / precioVentaTotal) * 100 : 0;
+    const profitPerUnit = cantidad > 0 ? profitReal / cantidad : 0;
+
+    return {
+      cantidad, costoRealUnit, precioVentaUnit, costoInfUnit, pctPartner,
+      fulfillmentTotal, extrasTotal,
+      precioVentaTotal, costoRealTotal, costoInfTotal,
+      gananciaInformada, comisionPartner, profitReal, margenPct, profitPerUnit,
+    };
+  }, [form]);
+
+  const handleGuardar = () => {
+    const nombre = nombreEscenario.trim() || `Escenario ${escenarios.length + 1}`;
+    const producto = state.products.find(p => p.id === Number(form.productoId));
+    const mentor = state.mentors.find(m => m.id === Number(form.mentorId));
+    const snapshot = {
+      id: Date.now(),
+      nombre,
+      createdAt: new Date().toISOString(),
+      form: { ...form },
+      calc: { ...calc },
+      productoNombre: producto?.nombre || 'Personalizado',
+      mentorNombre: mentor?.nombre || (form.pctPartner > 0 ? `${form.pctPartner}% custom` : 'Sin partner'),
+    };
+    setEscenarios(prev => [snapshot, ...prev].slice(0, 10));
+    setNombreEscenario('');
+    addToast?.({ type: 'success', message: `Escenario "${nombre}" guardado` });
+  };
+
+  const handleDelete = (id) => {
+    setEscenarios(prev => prev.filter(e => e.id !== id));
+  };
+
+  const handleLoad = (e) => {
+    setForm(e.form);
+    setNombreEscenario(e.nombre);
+    addToast?.({ type: 'success', message: `Escenario "${e.nombre}" cargado` });
+  };
+
+  const handleReset = () => {
+    setForm(DEFAULT_FORM);
+    setNombreEscenario('');
+  };
+
+  const f = (n) => `$${Math.round(n || 0).toLocaleString('es-AR')}`;
+
+  return (
+    <div className="space-y-6 max-w-6xl mx-auto">
+      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-5">
+        <div className="flex items-center gap-3 mb-5">
+          <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-pink-600 to-rose-500 flex items-center justify-center">
+            <Calculator size={20} className="text-white" />
+          </div>
+          <div>
+            <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Calculadora de proyección</h2>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Simulá órdenes sin tocar tus datos reales. Cargá escenarios para comparar.</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          {/* Columna inputs */}
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1.5">Producto</label>
+              <select
+                value={form.productoId}
+                onChange={(e) => handleProductoChange(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-pink-500"
+              >
+                <option value="">— Personalizado —</option>
+                {state.products.map(p => <option key={p.id} value={p.id}>{p.nombre} · ${p.precioVenta}/u</option>)}
+              </select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1.5">Cantidad</label>
+                <input type="number" min="1" value={form.cantidad}
+                  onChange={(e) => setForm({ ...form, cantidad: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-pink-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1.5">Precio venta /u</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                  <input type="number" min="0" value={form.precioVentaUnit}
+                    onChange={(e) => setForm({ ...form, precioVentaUnit: e.target.value })}
+                    className="w-full pl-6 pr-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-pink-500" />
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1.5">Costo real /u</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                  <input type="number" min="0" value={form.costoRealUnit}
+                    onChange={(e) => setForm({ ...form, costoRealUnit: e.target.value })}
+                    className="w-full pl-6 pr-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-pink-500" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1.5">Costo informado /u</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                  <input type="number" min="0" value={form.costoInfUnit}
+                    onChange={(e) => setForm({ ...form, costoInfUnit: e.target.value })}
+                    className="w-full pl-6 pr-3 py-2 border border-amber-300 dark:border-amber-700 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-500" />
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1.5">Partner</label>
+                <select
+                  value={form.mentorId}
+                  onChange={(e) => handleMentorChange(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-pink-500"
+                >
+                  <option value="">Sin partner</option>
+                  {state.mentors.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1.5">% Comisión</label>
+                <div className="relative">
+                  <input type="number" min="0" max="100" step="0.5" value={form.pctPartner}
+                    onChange={(e) => setForm({ ...form, pctPartner: e.target.value })}
+                    className="w-full pr-7 pl-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-pink-500" />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">%</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1.5">Fulfillment (total)</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                  <input type="number" min="0" value={form.fulfillmentTotal}
+                    onChange={(e) => setForm({ ...form, fulfillmentTotal: e.target.value })}
+                    className="w-full pl-6 pr-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-pink-500" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1.5">Extras (total)</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                  <input type="number" min="0" value={form.extrasTotal}
+                    onChange={(e) => setForm({ ...form, extrasTotal: e.target.value })}
+                    className="w-full pl-6 pr-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-pink-500" />
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-2 flex gap-2">
+              <input
+                type="text"
+                value={nombreEscenario}
+                onChange={(e) => setNombreEscenario(e.target.value)}
+                placeholder="Nombre del escenario (opcional)"
+                className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-pink-500" />
+              <button onClick={handleGuardar}
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-white bg-pink-900 rounded-lg hover:bg-pink-800 transition">
+                <Save size={14} /> Guardar
+              </button>
+              <button onClick={handleReset}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 transition"
+                title="Resetear">
+                <RotateCcw size={14} />
+              </button>
+            </div>
+          </div>
+
+          {/* Columna resultados */}
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-2">
+              <ResultadoCard label="Precio venta" value={f(calc.precioVentaTotal)} sub={`${f(calc.precioVentaUnit)}/u × ${calc.cantidad}`} color="gray" />
+              <ResultadoCard label="Costo real" value={f(calc.costoRealTotal)} sub={`${f(calc.costoRealUnit)}/u`} color="gray" />
+              <ResultadoCard label="Costo informado" value={f(calc.costoInfTotal)} sub={`${f(calc.costoInfUnit)}/u`} color="amber" />
+              <ResultadoCard label="Ganancia informada" value={f(calc.gananciaInformada)} sub="PV − costo informado" color="sky" />
+              <ResultadoCard label={`Comisión partner (${calc.pctPartner}%)`} value={f(calc.comisionPartner)} sub="sobre ganancia informada" color="emerald" />
+              <ResultadoCard label="Extras + fulfillment" value={f(calc.fulfillmentTotal + calc.extrasTotal)} sub="costos adicionales" color="gray" />
+            </div>
+            <div className={`p-4 rounded-xl border-2 ${calc.profitReal >= 0 ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-300 dark:border-emerald-700' : 'bg-red-50 dark:bg-red-900/20 border-red-300 dark:border-red-700'}`}>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-bold uppercase tracking-wider text-gray-600 dark:text-gray-300">Profit real</span>
+                <span className={`text-xs font-bold ${calc.margenPct >= 20 ? 'text-emerald-700 dark:text-emerald-300' : calc.margenPct >= 0 ? 'text-amber-700 dark:text-amber-300' : 'text-red-700 dark:text-red-300'}`}>
+                  margen {calc.margenPct.toFixed(1)}%
+                </span>
+              </div>
+              <p className={`text-2xl font-bold ${calc.profitReal >= 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-700 dark:text-red-300'}`}>
+                {f(calc.profitReal)}
+              </p>
+              <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
+                {f(calc.profitPerUnit)}/u · fórmula: PV − costo real − comisión − extras
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Escenarios guardados */}
+      {escenarios.length > 0 && (
+        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-5">
+          <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 uppercase tracking-wider mb-4">
+            Escenarios guardados ({escenarios.length})
+          </h3>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-200 dark:border-gray-700 text-xs text-gray-500 dark:text-gray-400 uppercase">
+                  <th className="text-left py-2 px-2">Nombre</th>
+                  <th className="text-left py-2 px-2">Producto / Partner</th>
+                  <th className="text-right py-2 px-2">Cant.</th>
+                  <th className="text-right py-2 px-2">PV total</th>
+                  <th className="text-right py-2 px-2">Comisión</th>
+                  <th className="text-right py-2 px-2">Profit</th>
+                  <th className="text-right py-2 px-2">Margen</th>
+                  <th className="text-right py-2 px-2"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {escenarios.map(e => (
+                  <tr key={e.id} className="border-b border-gray-100 dark:border-gray-700/50 hover:bg-gray-50 dark:hover:bg-gray-700/30 transition">
+                    <td className="py-2 px-2 font-semibold text-gray-900 dark:text-gray-100">{e.nombre}</td>
+                    <td className="py-2 px-2 text-xs text-gray-600 dark:text-gray-300">{e.productoNombre} · {e.mentorNombre}</td>
+                    <td className="py-2 px-2 text-right text-gray-700 dark:text-gray-200 tabular-nums">{e.calc.cantidad}</td>
+                    <td className="py-2 px-2 text-right text-gray-700 dark:text-gray-200 tabular-nums">{f(e.calc.precioVentaTotal)}</td>
+                    <td className="py-2 px-2 text-right text-emerald-600 dark:text-emerald-400 tabular-nums">{f(e.calc.comisionPartner)}</td>
+                    <td className={`py-2 px-2 text-right font-bold tabular-nums ${e.calc.profitReal >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>{f(e.calc.profitReal)}</td>
+                    <td className="py-2 px-2 text-right text-xs text-gray-500 dark:text-gray-400 tabular-nums">{e.calc.margenPct.toFixed(1)}%</td>
+                    <td className="py-2 px-2 text-right">
+                      <button onClick={() => handleLoad(e)} className="p-1 text-gray-500 hover:text-pink-600 transition" title="Cargar"><Copy size={12} /></button>
+                      <button onClick={() => handleDelete(e.id)} className="p-1 text-gray-500 hover:text-red-600 transition" title="Borrar"><Trash2 size={12} /></button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ResultadoCard({ label, value, sub, color }) {
+  const colors = {
+    gray: 'bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100',
+    amber: 'bg-amber-50 dark:bg-amber-900/20 text-amber-900 dark:text-amber-200',
+    sky: 'bg-sky-50 dark:bg-sky-900/20 text-sky-900 dark:text-sky-200',
+    emerald: 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-900 dark:text-emerald-200',
+  };
+  return (
+    <div className={`p-3 rounded-lg ${colors[color] || colors.gray}`}>
+      <p className="text-[10px] font-bold uppercase tracking-wider opacity-70 mb-0.5">{label}</p>
+      <p className="text-base font-bold tabular-nums">{value}</p>
+      {sub && <p className="text-[10px] opacity-60 mt-0.5">{sub}</p>}
     </div>
   );
 }
@@ -1385,6 +1725,7 @@ function AppShell({ onExit }) {
               <NavItem icon={CreditCard} label="Comisiones" section="comisiones" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={Sparkles} label="Analytics IA" section="analytics" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={Bot} label="Agentes IA" section="agentes" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              <NavItem icon={Calculator} label="Calculadora" section="calculadora" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={Package} label="Datos" section="datos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
             </>
           )}
@@ -1445,6 +1786,7 @@ function AppShell({ onExit }) {
           {/* La sección "Equipo" (mentores) se unificó adentro de Comisiones */}
           {currentUser.role === 'admin' && currentPlatform === 'viora' && currentSection === 'mentores' && <ComisionesSection state={state} dispatch={dispatch} onUpdateMentor={handleUpdateMentor} onAddMentor={handleAddMentor} onRemoveMentor={handleRemoveMentor} getMentorStats={getMentorStats} filterMentor={filterMentor} setFilterMentor={setFilterMentor} />}
           {currentUser.role === 'admin' && currentPlatform === 'viora' && currentSection === 'analytics' && <AnalyticsSection state={state} currentUser={currentUser} analyticsState={analyticsState} onFetch={fetchAnalytics} />}
+          {currentUser.role === 'admin' && currentPlatform === 'viora' && currentSection === 'calculadora' && <CalculadoraSection state={state} addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'viora' && currentSection === 'agentes' && <AgentesSection state={state} addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'viora' && currentSection === 'datos' && <DatosSection state={state} dispatch={dispatch} addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'senydrop' && currentSection === 'seny-productos' && <BocetosSection addToast={addToast} />}
@@ -7706,6 +8048,7 @@ function getSectionTitle(user, section) {
     mentores: 'Comisiones y Partners', // fallback: sección vieja cae al mismo lugar
     analytics: 'Analytics con IA',
     agentes: 'Agentes IA',
+    calculadora: 'Calculadora de Proyección',
     datos: 'Datos (Export / Import)',
     'seny-productos': 'Productos · Senydrop',
     'meta-inicio': 'Meta Ads · Inicio',

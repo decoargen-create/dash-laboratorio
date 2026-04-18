@@ -3006,13 +3006,15 @@ function NewSaleModal({ state, onAddSale, onQuickAddClient, onQuickAddProduct, o
   const montoSugerido = productoSel ? productoSel.precioVenta * cantidadNum : 0;
   const montoTotal = parseFloat(formData.montoTotal) || montoSugerido;
 
-  // Auto-sugerir costo informado del producto
+  // Auto-sugerir costo informado del producto (POR UNIDAD — el form acepta
+  // valor por unidad y se guarda tal cual, sin dividir por cantidad).
   const costoInfProducto = productoSel?.costoInformado ?? productoSel?.costoSinDesglosar ?? getProductUnitCost(productoSel);
-  const costoInfSugerido = (costoInfProducto || 0) * cantidadNum;
+  const costoInfSugerido = costoInfProducto || 0;
 
-  // Cálculos de preview para el partner
+  // Cálculos de preview para el partner (comisión sobre TOTALES).
   const costoInfParsed = parseFloat(formData.costoInformado) || costoInfSugerido;
-  const gananciaInformada = Math.max(0, montoTotal - costoInfParsed);
+  const costoInfTotal = costoInfParsed * cantidadNum;
+  const gananciaInformada = Math.max(0, montoTotal - costoInfTotal);
   const pctPartner = mentorSel?.porcentajeComision ?? 50;
   const comisionPartner = Math.round(gananciaInformada * (pctPartner / 100));
 
@@ -3045,7 +3047,8 @@ function NewSaleModal({ state, onAddSale, onQuickAddClient, onQuickAddProduct, o
       cantidad,
       montoTotal: parseFloat(formData.montoTotal) || (producto.precioVenta * cantidad),
       mentorId,
-      costoInformado: mentorId && formData.costoInformado ? parseFloat(formData.costoInformado) / cantidad : null,
+      // costoInformado se guarda POR UNIDAD (el form ya muestra/acepta por unidad).
+      costoInformado: mentorId && formData.costoInformado ? parseFloat(formData.costoInformado) : null,
     };
     onAddSale(newSale);
   };
@@ -3171,14 +3174,19 @@ function NewSaleFormContent({ state, formData, setFormData, handleSubmit, openQu
       {formData.mentorId && (
         <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 space-y-3">
           <div>
-            <FormLabel tip="Lo que el partner cree que cuesta producir esta orden. Su comisión se calcula sobre (monto total − costo informado).">
-              Costo informado al partner (total)
+            <FormLabel tip="Costo POR UNIDAD que el partner cree que tiene el producto. Se multiplica por la cantidad para calcular la comisión: (precio venta total − costo informado × unidades) × %.">
+              Costo informado al partner (por unidad)
+              {cantidadNum > 0 && costoInfParsed > 0 && (
+                <span className="ml-2 text-[11px] font-normal text-amber-700 dark:text-amber-400">
+                  = ${Math.round(costoInfParsed).toLocaleString()} × {cantidadNum} u = ${Math.round(costoInfTotal).toLocaleString()} total
+                </span>
+              )}
             </FormLabel>
             <div className="relative">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
               <input type="number" min="0" value={formData.costoInformado}
                 onChange={(e) => { setFormData({ ...formData, costoInformado: e.target.value }); setCostoTouched(true); }}
-                placeholder="Costo que ve el partner"
+                placeholder="Costo por unidad que ve el partner"
                 className="w-full pl-6 pr-3 py-2 border border-amber-300 dark:border-amber-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500" />
             </div>
           </div>
@@ -3323,9 +3331,9 @@ function QuickConsultaModal({ state, onSubmit, onQuickAddClient, onClose }) {
 
 // Modal para editar una orden existente.
 function EditOrderModal({ order, state, onSave, onClose }) {
-  const cantidadOrden = order.cantidad || 1;
-  const costoInfGuardadoTotal = order.costoInformado != null
-    ? Math.round(order.costoInformado * cantidadOrden)
+  // costoInformado se guarda y edita POR UNIDAD.
+  const costoInfGuardado = order.costoInformado != null
+    ? String(Math.round(order.costoInformado))
     : '';
   const [formData, setFormData] = useState({
     fecha: order.fecha || '',
@@ -3335,7 +3343,7 @@ function EditOrderModal({ order, state, onSave, onClose }) {
     montoTotal: order.montoTotal || 0,
     mentorId: order.mentorId ? String(order.mentorId) : '',
     estado: order.estado || 'consulta-recibida',
-    costoInformado: costoInfGuardadoTotal !== '' ? String(costoInfGuardadoTotal) : '',
+    costoInformado: costoInfGuardado,
   });
 
   const handleSubmit = (e) => {
@@ -3349,9 +3357,9 @@ function EditOrderModal({ order, state, onSave, onClose }) {
       montoTotal: parseFloat(formData.montoTotal) || 0,
       mentorId: formData.mentorId ? parseInt(formData.mentorId) : null,
       estado: formData.estado,
-      // Guardamos costoInformado POR UNIDAD (consistente con NewSaleModal).
+      // costoInformado ya es POR UNIDAD — el form lo muestra y acepta así.
       costoInformado: formData.mentorId && formData.costoInformado !== ''
-        ? parseFloat(formData.costoInformado) / cant
+        ? parseFloat(formData.costoInformado)
         : null,
     };
     onSave(patch);
@@ -3444,7 +3452,7 @@ function EditOrderModal({ order, state, onSave, onClose }) {
 
         {formData.mentorId && (
           <div>
-            <FormLabel tip="Costo total (todas las unidades) que se le informa al partner. Su comisión se calcula sobre (monto total − costo informado) × %.">Costo informado al partner</FormLabel>
+            <FormLabel tip="Costo POR UNIDAD que se le informa al partner. Se multiplica por la cantidad para calcular la comisión.">Costo informado al partner (por unidad)</FormLabel>
             <div className="relative">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 text-sm">$</span>
               <input

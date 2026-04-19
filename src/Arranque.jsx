@@ -588,6 +588,22 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     }
   };
 
+  const handleCancel = () => {
+    setCancelled(true);
+    addToast?.({ type: 'info', message: 'Cancelando después del paso actual…' });
+  };
+
+  // --- Estados derivados para los checks de la wizard ---
+  // IMPORTANTE: tienen que estar declarados antes de `ofrecerRun` (que los
+  // usa). `const` tiene temporal dead zone — usar antes de declarar
+  // explota en prod minificado aunque el dev mode lo tolere.
+  const prodReady = !!producto;
+  const compsReady = competidores.length >= 1;
+
+  const stepsDone = steps.filter(s => s.status === 'done').length;
+  const stepsTotal = steps.length || 1;
+  const progress = Math.round((stepsDone / stepsTotal) * 100);
+
   // Sugerencia de auto-run diario: si pasaron más de 24h desde el último
   // pipeline exitoso y hay competidores cargados, mostramos un prompt
   // suave al tope de la página.
@@ -601,19 +617,6 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     ? Math.round((Date.now() - new Date(lastRun).getTime()) / 3600000)
     : null;
   const ofrecerRun = !running && compsReady && (horasDesdeUltimoRun == null || horasDesdeUltimoRun >= 24);
-
-  const handleCancel = () => {
-    setCancelled(true);
-    addToast?.({ type: 'info', message: 'Cancelando después del paso actual…' });
-  };
-
-  const stepsDone = steps.filter(s => s.status === 'done').length;
-  const stepsTotal = steps.length || 1;
-  const progress = Math.round((stepsDone / stepsTotal) * 100);
-
-  // --- Estados derivados para los checks de la wizard ---
-  const prodReady = !!producto;
-  const compsReady = competidores.length >= 1;
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">

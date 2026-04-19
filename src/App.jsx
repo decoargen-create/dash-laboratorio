@@ -1162,7 +1162,7 @@ function MetaConexionSection() {
               <ul className="text-xs text-gray-600 space-y-1 list-disc pl-4">
                 <li><code className="font-mono">ads_read</code>, <code className="font-mono">ads_management</code> — lectura y gestión de campañas</li>
                 <li><code className="font-mono">business_management</code> — listar cuentas publicitarias</li>
-                <li><code className="font-mono">pages_show_list</code>, <code className="font-mono">instagram_basic</code> — lectura de posts de Instagram</li>
+                <li><code className="font-mono">pages_show_list</code> — listar las páginas de Facebook que administrás</li>
               </ul>
               <p className="text-xs text-gray-500 mt-3">
                 El token se guarda en una cookie HttpOnly del servidor (no accesible por JavaScript). Para revocar acceso podés venir acá y desconectar, o ir a Meta → Configuración → Apps.

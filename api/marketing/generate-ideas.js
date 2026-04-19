@@ -87,33 +87,65 @@ function buildMixSection(mix, formatoMix, targetCount) {
   return lines.join('\n');
 }
 
-const SHAPE_COMUN = `Por cada idea devolvé este shape EXACTO:
+const SHAPE_GUIDANCE = `Para devolver las ideas, llamá a la tool \`submit_ideas\` con el array completo. El API valida el schema — no vas a poder devolver basura.
 
-{
-  "titulo": "string corto y concreto, ≤ 80 chars",
-  "tipo": "replica" | "iteracion" | "diferenciacion" | "desde_cero",
-  "angulo": "el ángulo emocional o estratégico",
-  "painPoint": "el pain específico que toca",
-  "hook": "primer frame o primeras 3 líneas que paran el scroll",
-  "copy": "copy completo sugerido (2-5 oraciones)",
-  "guion": "VIDEO: guión con beats numerados, ej: 'Beat 1 (0-3s): ... · Beat 2 (3-8s): ...'. Incluí duración total (15s/30s/60s) y tono de VO. STATIC: descripción de layout (headline arriba/centro, imagen hero, subcopy, CTA), paleta, mood y composición. CARRUSEL: slide-by-slide con hook en slide 1 y CTA en la última.",
-  "formato": "video" | "static" | "carrusel",
-  "razonamiento": "1-2 oraciones: por qué esta idea, qué la hace fuerte",
-  "iteracionBase": "OBLIGATORIO solo si tipo='iteracion': { adId, adNombre, razon — con métrica concreta que justifica la iteración }",
-  "variableDeTesteo": "OBLIGATORIO — qué se está testeando puntual vs un baseline (importa para aprender qué funcionó después). Valores válidos: 'hook' | 'visual' | 'cta' | 'formato' | 'angulo' | 'audience' | 'prueba_social' | 'oferta' | 'mix' (mix = varios a la vez).",
-  "testHipotesis": "OBLIGATORIO — hipótesis medible, ej: 'el hook con dato numérico va a bajar CPA vs el hook emocional genérico' o 'el formato carrusel va a tener más thumb-stop que el video en frío'"
-}
-
-**IMPORTANTE sobre variableDeTesteo**: para iteraciones, identificá qué UNA cosa estás cambiando vs el ad base (si cambiás hook Y visual a la vez, poné "mix"). Para réplicas/diferenciaciones, identificá cuál es la palanca central de la idea. Esto permite al user armar A/B coherentes y aprender qué funciona.
-
-El campo "guion" es CRÍTICO — tiene que darle al diseñador/editor toda la info que necesita para producir sin preguntar nada.
-
-DEVOLVÉ ÚNICAMENTE el array JSON (empezá con "[" y terminá con "]"). Sin texto antes ni después. Sin \`\`\`json wrappers.`;
+**Puntos críticos del contenido**:
+- variableDeTesteo: para iteraciones, identificá qué UNA cosa cambiás vs el ad base (si cambiás hook Y visual, poné "mix"). Para réplicas/diferenciaciones, la palanca central de la idea.
+- testHipotesis: medible y accionable. Ej: "el hook con dato numérico va a bajar CPA vs el hook emocional genérico".
+- iteracionBase: SOLO para ideas tipo "iteracion". Debe referenciar el adId exacto de un ad propio + razón con métrica concreta que justifique iterarlo.
+- guion: CRÍTICO. Tiene que darle al diseñador/editor toda la info para producir sin preguntar. Video: beats numerados + duración + VO. Static: layout + paleta + mood. Carrusel: slide-by-slide.
+`;
 
 function buildSystemPrompt({ hasPropios, targetCount, formatoMix }) {
   const mix = buildTypeMix(targetCount, hasPropios);
-  return SYSTEM_PROMPT_BASE + buildMixSection(mix, formatoMix, targetCount) + SHAPE_COMUN;
+  return SYSTEM_PROMPT_BASE + buildMixSection(mix, formatoMix, targetCount) + SHAPE_GUIDANCE;
 }
+
+// Tool schema para structured output. Forzamos a Claude a llamar esta tool
+// y el API valida que matchee el schema. Adiós a parsear JSON frágil.
+const SUBMIT_IDEAS_TOOL = {
+  name: 'submit_ideas',
+  description: 'Envía el array completo de ideas creativas generadas.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      ideas: {
+        type: 'array',
+        description: 'Array de ideas. Respetá la calidad: si tenés contexto para 12 ideas buenas devolvé 12, no fuerces a 40.',
+        items: {
+          type: 'object',
+          properties: {
+            titulo: { type: 'string', description: 'Título corto, ≤ 100 chars.' },
+            tipo: { type: 'string', enum: ['replica', 'iteracion', 'diferenciacion', 'desde_cero'] },
+            angulo: { type: 'string' },
+            painPoint: { type: 'string' },
+            hook: { type: 'string', description: 'Primer frame / primeras 3 líneas. Diversificá arquetipos entre ideas.' },
+            copy: { type: 'string' },
+            guion: { type: 'string', description: 'Detallado según formato (video/static/carrusel).' },
+            formato: { type: 'string', enum: ['video', 'static', 'carrusel'] },
+            razonamiento: { type: 'string' },
+            variableDeTesteo: {
+              type: 'string',
+              enum: ['hook', 'visual', 'cta', 'formato', 'angulo', 'audience', 'prueba_social', 'oferta', 'mix'],
+            },
+            testHipotesis: { type: 'string' },
+            iteracionBase: {
+              type: 'object',
+              description: 'OBLIGATORIO solo si tipo=iteracion.',
+              properties: {
+                adId: { type: 'string' },
+                adNombre: { type: 'string' },
+                razon: { type: 'string' },
+              },
+            },
+          },
+          required: ['titulo', 'tipo', 'angulo', 'hook', 'copy', 'formato', 'razonamiento', 'variableDeTesteo', 'testHipotesis'],
+        },
+      },
+    },
+    required: ['ideas'],
+  },
+};
 
 async function readBody(req) {
   if (req.body && typeof req.body === 'object') return req.body;
@@ -311,14 +343,15 @@ export default async function handler(req, res) {
   });
 
   try {
-    // Adaptive thinking: Sonnet 4.6 soporta que Claude decida cuánto pensar
-    // según la complejidad. Para generación creativa ancla mucho mejor las
-    // ideas al research/contexto, a costo de ~15-30s más de latencia.
-    // Streaming evita timeout HTTP en requests largos con thinking.
+    // Tool use con forzado a submit_ideas — el API valida el schema,
+    // no tenemos que parsear JSON ni lidiar con ```json wrappers.
+    // Adaptive thinking ayuda a la calidad creativa.
     const stream = await client.messages.stream({
       model: MODEL,
       max_tokens: maxTokens,
       thinking: { type: 'adaptive' },
+      tools: [SUBMIT_IDEAS_TOOL],
+      tool_choice: { type: 'tool', name: 'submit_ideas' },
       system: [
         { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } },
       ],
@@ -328,28 +361,13 @@ export default async function handler(req, res) {
     });
     const resp = await stream.finalMessage();
 
-    const textBlock = resp.content.find(b => b.type === 'text');
-    if (!textBlock) throw new Error('Claude no devolvió texto');
-
-    let jsonStr = textBlock.text.trim();
-    const match = jsonStr.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-    if (match) jsonStr = match[1];
-    // Si viene envuelto en "ideas": [...] lo desenvolvemos.
-    if (jsonStr.startsWith('{')) {
-      try {
-        const obj = JSON.parse(jsonStr);
-        if (Array.isArray(obj.ideas)) jsonStr = JSON.stringify(obj.ideas);
-      } catch {}
+    const toolUseBlock = resp.content.find(b => b.type === 'tool_use' && b.name === 'submit_ideas');
+    if (!toolUseBlock || !toolUseBlock.input) {
+      throw new Error('Claude no llamó a submit_ideas');
     }
-
-    let ideas;
-    try {
-      ideas = JSON.parse(jsonStr);
-    } catch (err) {
-      throw new Error(`JSON inválido del modelo: ${err.message}. Primeros 200 chars: ${jsonStr.slice(0, 200)}`);
-    }
+    const ideas = toolUseBlock.input.ideas;
     if (!Array.isArray(ideas)) {
-      throw new Error('La respuesta no es un array');
+      throw new Error('submit_ideas.ideas no es un array');
     }
 
     // Filtrado defensivo: solo ideas con titulo + tipo válido.

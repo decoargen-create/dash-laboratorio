@@ -14,8 +14,8 @@
 
 import React, { useState, useEffect } from 'react';
 import {
-  Inbox, Search, Filter, ExternalLink, Trash2,
-  ChevronDown, Check, Circle, CircleDot, Archive, Edit3,
+  Inbox, Search, Filter, ExternalLink, Trash2, Download,
+  ChevronDown, Check, Circle, CircleDot, Archive, Edit3, CheckSquare, Square,
 } from 'lucide-react';
 import {
   loadIdeas, updateIdea, removeIdea, TIPO_META, ESTADO_META,
@@ -29,6 +29,7 @@ export default function BandejaSection({ addToast }) {
   const [query, setQuery] = useState('');
   const [editandoNotasId, setEditandoNotasId] = useState(null);
   const [notasDraft, setNotasDraft] = useState('');
+  const [selected, setSelected] = useState(() => new Set());
 
   // Re-sincronizar cuando otras secciones agregan ideas (event storage no es
   // ideal para same-tab — usamos un polling liviano cada 3s mientras la
@@ -52,6 +53,83 @@ export default function BandejaSection({ addToast }) {
   const handleRemove = (id) => {
     if (!window.confirm('¿Borrar esta idea? No se puede deshacer.')) return;
     setIdeas(removeIdea(id));
+    setSelected(prev => {
+      const next = new Set(prev); next.delete(id); return next;
+    });
+  };
+
+  const toggleSelect = (id) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAllFiltered = (ids) => {
+    setSelected(prev => {
+      const allSelected = ids.every(id => prev.has(id));
+      const next = new Set(prev);
+      if (allSelected) ids.forEach(id => next.delete(id));
+      else ids.forEach(id => next.add(id));
+      return next;
+    });
+  };
+
+  // Exporta las ideas seleccionadas como Markdown descargable. Lo suficiente
+  // para pegarlo en Docs/Notion/Word y entregárselo al diseñador/editor.
+  const exportSelected = () => {
+    const chosen = ideas.filter(i => selected.has(i.id));
+    if (chosen.length === 0) return;
+
+    const today = new Date().toLocaleDateString('es-AR', { year: 'numeric', month: 'long', day: 'numeric' });
+    const byTipo = chosen.reduce((acc, i) => {
+      (acc[i.tipo] = acc[i.tipo] || []).push(i);
+      return acc;
+    }, {});
+
+    const lines = [];
+    lines.push(`# Brief de creativos — ${today}`);
+    lines.push(``);
+    lines.push(`${chosen.length} idea${chosen.length > 1 ? 's' : ''} seleccionada${chosen.length > 1 ? 's' : ''} de la Bandeja.`);
+    lines.push(``);
+
+    const ordenTipos = ['replica', 'iteracion', 'diferenciacion', 'desde_cero'];
+    for (const tipo of ordenTipos) {
+      const group = byTipo[tipo];
+      if (!group || group.length === 0) continue;
+      const meta = TIPO_META[tipo] || TIPO_META.desde_cero;
+      lines.push(`## ${meta.emoji} ${meta.label} (${group.length})`);
+      lines.push(`_${meta.descripcion}_`);
+      lines.push(``);
+      group.forEach((idea, idx) => {
+        lines.push(`### ${idx + 1}. ${idea.titulo}`);
+        if (idea.origen?.competidorNombre) lines.push(`**Origen:** ${idea.origen.competidorNombre}${idea.origen.daysRunning ? ` · ${idea.origen.daysRunning}d corriendo` : ''}`);
+        if (idea.origen?.razonamiento) lines.push(`**Razonamiento:** ${idea.origen.razonamiento}`);
+        if (idea.formato) lines.push(`**Formato:** ${idea.formato}`);
+        lines.push(``);
+        if (idea.angulo) { lines.push(`**Ángulo:** ${idea.angulo}`); lines.push(``); }
+        if (idea.hook) { lines.push(`**Hook:**  \n> ${idea.hook.replace(/\n/g, '\n> ')}`); lines.push(``); }
+        if (idea.painPoint) { lines.push(`**Pain point:** ${idea.painPoint}`); lines.push(``); }
+        if (idea.copy) { lines.push(`**Copy sugerido:**`); lines.push(idea.copy); lines.push(``); }
+        if (idea.guion) { lines.push(`**Guión / transcripción:**`); lines.push('```'); lines.push(idea.guion); lines.push('```'); lines.push(``); }
+        if (idea.notas) { lines.push(`**Notas:** ${idea.notas}`); lines.push(``); }
+        if (idea.origen?.adSnapshotUrl) { lines.push(`[Ver ad original en Ad Library](${idea.origen.adSnapshotUrl})`); lines.push(``); }
+        lines.push(`---`);
+        lines.push(``);
+      });
+    }
+
+    const md = lines.join('\n');
+    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const stamp = new Date().toISOString().slice(0, 10);
+    a.href = url;
+    a.download = `brief-creativos-${stamp}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+    addToast?.({ type: 'success', message: `Brief con ${chosen.length} ideas descargado` });
   };
 
   const guardarNotas = (id) => {
@@ -100,6 +178,21 @@ export default function BandejaSection({ addToast }) {
             <p className="text-xs text-gray-500 dark:text-gray-400">Lista continua de renovaciones — se va llenando con cada análisis.</p>
           </div>
         </div>
+        {selected.size > 0 && (
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-600 dark:text-gray-300">
+              {selected.size} seleccionada{selected.size > 1 ? 's' : ''}
+            </span>
+            <button onClick={() => setSelected(new Set())}
+              className="px-2.5 py-1.5 text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition">
+              Limpiar
+            </button>
+            <button onClick={exportSelected}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-fuchsia-500 to-pink-500 rounded-lg hover:from-fuchsia-600 hover:to-pink-600 shadow-sm transition">
+              <Download size={12} /> Exportar brief .md
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Contadores */}
@@ -152,6 +245,18 @@ export default function BandejaSection({ addToast }) {
         </div>
       ) : (
         <div className="space-y-2">
+          {/* Toolbar de selección masiva */}
+          <div className="flex items-center gap-2 text-[10px] text-gray-500 dark:text-gray-400">
+            <button
+              onClick={() => toggleSelectAllFiltered(sorted.map(i => i.id))}
+              className="inline-flex items-center gap-1 hover:text-fuchsia-600 transition"
+            >
+              {sorted.every(i => selected.has(i.id))
+                ? <><CheckSquare size={12} /> Deseleccionar todas las visibles</>
+                : <><Square size={12} /> Seleccionar todas las visibles ({sorted.length})</>
+              }
+            </button>
+          </div>
           {sorted.map(idea => (
             <IdeaCard
               key={idea.id}
@@ -166,6 +271,8 @@ export default function BandejaSection({ addToast }) {
               setNotasDraft={setNotasDraft}
               onSaveNotas={() => guardarNotas(idea.id)}
               onCancelNotas={() => { setEditandoNotasId(null); setNotasDraft(''); }}
+              isSelected={selected.has(idea.id)}
+              onToggleSelect={() => toggleSelect(idea.id)}
             />
           ))}
         </div>
@@ -191,6 +298,7 @@ function CounterCard({ label, value, color, accent = false }) {
 function IdeaCard({
   idea, expanded, onToggle, onEstado, onRemove,
   editandoNotas, onEditNotas, notasDraft, setNotasDraft, onSaveNotas, onCancelNotas,
+  isSelected, onToggleSelect,
 }) {
   const tipo = TIPO_META[idea.tipo] || TIPO_META.desde_cero;
   const estado = ESTADO_META[idea.estado] || ESTADO_META.pendiente;
@@ -198,12 +306,21 @@ function IdeaCard({
 
   return (
     <div className={`bg-white dark:bg-gray-800 border rounded-xl overflow-hidden shadow-sm transition ${
-      usada
-        ? 'border-gray-200 dark:border-gray-700 opacity-70'
-        : 'border-gray-200 dark:border-gray-700 hover:border-fuchsia-300 dark:hover:border-fuchsia-700'
+      isSelected
+        ? 'border-fuchsia-400 dark:border-fuchsia-600 ring-2 ring-fuchsia-200 dark:ring-fuchsia-900/40'
+        : usada
+          ? 'border-gray-200 dark:border-gray-700 opacity-70'
+          : 'border-gray-200 dark:border-gray-700 hover:border-fuchsia-300 dark:hover:border-fuchsia-700'
     }`}>
       {/* Header siempre visible */}
       <div className="px-4 py-3 flex items-start gap-3">
+        {/* Checkbox para multi-select export */}
+        <button onClick={onToggleSelect}
+          className="mt-1 shrink-0 text-gray-400 hover:text-fuchsia-600 transition"
+          title={isSelected ? 'Deseleccionar' : 'Seleccionar para exportar'}>
+          {isSelected ? <CheckSquare size={16} className="text-fuchsia-600" /> : <Square size={16} />}
+        </button>
+
         {/* Thumbnail */}
         {idea.origen?.imageUrl ? (
           <img src={idea.origen.imageUrl} alt=""

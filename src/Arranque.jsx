@@ -1150,6 +1150,43 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 </div>
               );
             })()}
+
+            {/* Activo visual de marca — elemento icónico reutilizable que se
+                propaga a todos los prompts de imagen. */}
+            <details className="mt-3 group">
+              <summary className="cursor-pointer inline-flex items-center gap-1 text-[10px] font-semibold text-gray-600 dark:text-gray-300 hover:text-purple-600 dark:hover:text-purple-400">
+                <ChevronDown size={10} className="group-open:rotate-180 transition-transform" />
+                🎨 Activo visual de marca (opcional)
+                {producto.activoVisual?.descripcion && <span className="text-emerald-600 dark:text-emerald-400">✓ definido</span>}
+              </summary>
+              <div className="mt-2 space-y-2 pl-4">
+                <p className="text-[10px] text-gray-500 dark:text-gray-400">
+                  Elemento icónico reutilizable de tu marca (frasco distintivo, textura, forma, empaque). Claude lo va a incluir en 40-60% de los prompts de imagen como hilo conductor visual.
+                </p>
+                <textarea
+                  value={producto.activoVisual?.descripcion || ''}
+                  onChange={e => setProductos(prev => prev.map(p =>
+                    String(p.id) === String(activeProductoId)
+                      ? { ...p, activoVisual: { ...(p.activoVisual || {}), descripcion: e.target.value } }
+                      : p
+                  ))}
+                  placeholder="Ej: Frasco de vidrio ámbar con tapa dorada, textura tallada en el cuerpo, etiqueta minimalista granate con tipografía serif."
+                  rows={3}
+                  className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 resize-y"
+                />
+                <input
+                  type="url"
+                  value={producto.activoVisual?.imageUrl || ''}
+                  onChange={e => setProductos(prev => prev.map(p =>
+                    String(p.id) === String(activeProductoId)
+                      ? { ...p, activoVisual: { ...(p.activoVisual || {}), imageUrl: e.target.value } }
+                      : p
+                  ))}
+                  placeholder="URL de una imagen de referencia (opcional)"
+                  className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+              </div>
+            </details>
           </div>
         ) : !showProdForm ? (
           <button onClick={() => setShowProdForm(true)}

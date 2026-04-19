@@ -155,7 +155,24 @@ testHipotesis: "Hook con número concreto (4 cremas) va a bajar CPA vs hook gen�
 - titulo: igual o derivado del hook, ≤ 100 chars. Usa comillas si es el hook literal.
 - estiloVisual: categoría concreta que un director de arte entienda ("Editorial premium" · "UGC testimonial" · "Before/After clínico" · "Flat lay producto" · "Lifestyle aspiracional" · "Ilustrado humor").
 - descripcionImagen: en ESPAÑOL rioplatense, detallada, para el diseñador humano. Si es video, describí la escena clave o la miniatura. Si es carrusel, describí la slide principal.
-- promptGeneradorImagen: en INGLÉS, específico, incluí: estilo fotográfico + composición + iluminación + paleta + aspect ratio. Listo para pegar en Nano Banana/Midjourney/DALL-E sin editar.
+- promptGeneradorImagen: en INGLÉS, específico. REGLAS OBLIGATORIAS:
+  · CERRAR SIEMPRE con el aspect ratio según el formato:
+      static/feed → "photorealistic, commercial ad quality, 1:1 square composition"
+      video/stories/reels → "photorealistic, commercial ad quality, 9:16 vertical composition"
+      carrusel → "photorealistic, commercial ad quality, 4:5 portrait composition"
+  · Si aparecen PERSONAS/PIEL y puede salir plástico, AGREGAR:
+      "natural skin texture, subtle imperfections, editorial unretouched look, shot on medium format camera"
+  · EUFEMISMOS OBLIGATORIOS para palabras que Meta o los generadores de imagen censuran/rechazan:
+      "vagina" → "intimate area" / "delicate skin"
+      "nude" → "tasteful editorial portrait" / "soft draped fabric"
+      "sexual" → "sensual" / "intimate mood"
+      "infection" → "inflammation" / "redness"
+      "disease" → "condition" / "imbalance"
+      "cellulite" → "skin texture on thighs"
+      "wrinkles" → "fine lines" / "texture of mature skin"
+      "fat" / "overweight" → "body silhouette" / "softer form"
+  · Si el producto tiene ACTIVO VISUAL DE MARCA (elemento icónico reutilizable: frasco distintivo, textura, forma), DEBE aparecer con descripción detallada en el prompt. Apuntá a que aparezca en ~40-60% de las piezas — en las que estratégicamente potencia el hook (autoridad, testimonio, solución). En hooks de puro shock/POV puede NO aparecer, eso baja el "olor a ad" y sube CTR.
+  · Incluí SIEMPRE: composición + iluminación + paleta.
 - textoEnImagen: layout del TEXTO SOBRE LA IMAGEN con jerarquía, estilo (bold/italic), colores y tamaños relativos. Separá hook, microcopy, sellos y CTA. Usá \\n para saltos de línea.
 - copyPostMeta: lo que va ARRIBA de la imagen en el feed (NO dentro). Puede ser largo, usar bullets/saltos de línea. Storytelling está OK. Cerrá con un call-to-action o pregunta. Castellano rioplatense.
 - publicoSugerido: targeting concreto. Ej: "cold prospecting: mujeres 30-55 con interés en cosmética natural" o "retargeting: visitantes del último 14d que no compraron".
@@ -276,6 +293,17 @@ function buildContext({ producto, competidoresAnalisis, allCompAds, ideasExisten
   if (producto?.landingUrl) parts.push(`Landing: ${producto.landingUrl}`);
   if (producto?.descripcion) parts.push(`Descripción: ${producto.descripcion}`);
   if (producto?.resumenEjecutivo) parts.push(`\nResumen ejecutivo: ${producto.resumenEjecutivo}`);
+
+  // Activo visual de marca — elemento icónico reutilizable (frasco, textura,
+  // forma distintiva). Si está definido, Claude debe incluirlo en el
+  // promptGeneradorImagen de ~40-60% de las piezas como hilo conductor.
+  if (producto?.activoVisual?.descripcion) {
+    parts.push(`\n**ACTIVO VISUAL DE MARCA** (hilo conductor icónico del producto — incluir en 40-60% de las piezas):`);
+    parts.push(producto.activoVisual.descripcion);
+    if (producto.activoVisual.imageUrl) {
+      parts.push(`Referencia visual: ${producto.activoVisual.imageUrl}`);
+    }
+  }
 
   // Stage del prospect — determina el tipo de hook a usar.
   const stageLabels = {

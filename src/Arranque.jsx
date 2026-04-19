@@ -120,9 +120,42 @@ function landingToKeyword(url) {
 }
 
 export default function ArranqueSection({ addToast, onGoToSection }) {
-  const [productos, setProductos] = useState(() => loadJSON(PRODUCTOS_KEY, []));
-  const [competidores, setCompetidores] = useState(() => loadJSON(COMPETIDORES_KEY, []));
+  const [productos, setProductos] = useState(() => {
+    const prods = loadJSON(PRODUCTOS_KEY, []);
+    // Migración: si hay competidores globales sueltos y el primer producto
+    // no tiene competidores propios, los migramos al primer producto.
+    const globalComps = loadJSON(COMPETIDORES_KEY, []);
+    if (globalComps.length > 0 && prods.length > 0 && !prods[0].competidores?.length) {
+      prods[0] = { ...prods[0], competidores: globalComps };
+      saveJSON(PRODUCTOS_KEY, prods);
+    }
+    return prods;
+  });
   const [metaAccount, setMetaAccount] = useState(() => loadJSON(META_ACCOUNT_KEY, null));
+
+  // Producto activo — null = vista de lista, id = workspace del producto.
+  const [activeProductoId, setActiveProductoId] = useState(() => {
+    try { return localStorage.getItem('viora-marketing-active-product') || null; } catch { return null; }
+  });
+  useEffect(() => {
+    try {
+      if (activeProductoId) localStorage.setItem('viora-marketing-active-product', activeProductoId);
+      else localStorage.removeItem('viora-marketing-active-product');
+    } catch {}
+  }, [activeProductoId]);
+
+  // Producto activo derivado + competidores del producto activo.
+  const producto = productos.find(p => String(p.id) === String(activeProductoId)) || null;
+  const competidores = producto?.competidores || [];
+  // Setter de competidores que los guarda DENTRO del producto activo.
+  const setCompetidores = (updater) => {
+    setProductos(prev => prev.map(p => {
+      if (String(p.id) !== String(activeProductoId)) return p;
+      const current = p.competidores || [];
+      const next = typeof updater === 'function' ? updater(current) : updater;
+      return { ...p, competidores: next };
+    }));
+  };
 
   // Wizard product form
   const [showProdForm, setShowProdForm] = useState(false);
@@ -160,7 +193,6 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   const [runCost, setRunCost] = useState({ anthropic: 0, openai: 0, apify: 0, meta: 0, total: 0 });
 
   useEffect(() => { saveJSON(PRODUCTOS_KEY, productos); }, [productos]);
-  useEffect(() => { saveJSON(COMPETIDORES_KEY, competidores); }, [competidores]);
   useEffect(() => { saveJSON(META_ACCOUNT_KEY, metaAccount); }, [metaAccount]);
   useEffect(() => { saveJSON(GEN_CONFIG_KEY, genConfig); }, [genConfig]);
 
@@ -310,26 +342,27 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     }
   };
 
-  // El producto "principal" es el primero (simplificamos: 1 producto por ahora).
-  const producto = productos[0];
+  // `producto` ahora es el activo (derivado arriba, no productos[0]).
 
   const handleAddProducto = async () => {
     const nombre = prodDraft.nombre.trim();
     const landingUrl = prodDraft.landingUrl.trim();
     if (!nombre) { addToast?.({ type: 'error', message: 'Ponele nombre al producto' }); return; }
 
+    const nuevoId = Date.now();
     const nuevo = {
-      id: Date.now(),
+      id: nuevoId,
       nombre,
       landingUrl,
       descripcion: prodDraft.descripcion.trim(),
+      competidores: [],
       createdAt: new Date().toISOString(),
-      // stage lo infiere el pipeline después de generar el research doc.
     };
     setProductos(prev => [nuevo, ...prev]);
     setProdDraft({ nombre: '', landingUrl: '', descripcion: '' });
     setShowProdForm(false);
-    addToast?.({ type: 'success', message: `Producto "${nombre}" cargado · ahora corré el pipeline` });
+    setActiveProductoId(String(nuevoId));
+    addToast?.({ type: 'success', message: `Producto "${nombre}" creado — cargá competidores y corré el pipeline` });
   };
 
   const handleAddCompetidor = () => {
@@ -900,16 +933,119 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     : null;
   const ofrecerRun = !running && prodReady && (horasDesdeUltimoRun == null || horasDesdeUltimoRun >= 24);
 
+  // ====================================================================
+  // VISTA DE LISTA DE PRODUCTOS (si no hay producto activo seleccionado)
+  // ====================================================================
+  if (!producto) {
+    return (
+      <div className="max-w-4xl mx-auto space-y-6">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-600 to-violet-600 flex items-center justify-center text-white shadow-sm">
+              <Package size={20} />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Tus productos</h2>
+              <p className="text-xs text-gray-500 dark:text-gray-400">Cada producto tiene su propia competencia, research y bandeja de ideas.</p>
+            </div>
+          </div>
+          <button onClick={() => setShowProdForm(true)}
+            className="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-bold text-white bg-gradient-to-br from-purple-600 to-violet-600 rounded-lg hover:from-purple-700 hover:to-violet-700 shadow-sm transition">
+            <Plus size={16} /> Nuevo producto
+          </button>
+        </div>
+
+        {/* Form de nuevo producto */}
+        {showProdForm && (
+          <div className="bg-white dark:bg-gray-800 border-2 border-purple-300 dark:border-purple-700 rounded-xl p-5 space-y-3 animate-fade-in">
+            <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Nuevo producto</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <input type="text" value={prodDraft.nombre} onChange={e => setProdDraft({ ...prodDraft, nombre: e.target.value })}
+                placeholder="Nombre del producto"
+                className="px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500" />
+              <input type="url" value={prodDraft.landingUrl} onChange={e => setProdDraft({ ...prodDraft, landingUrl: e.target.value })}
+                placeholder="URL de la landing"
+                className="px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500" />
+            </div>
+            <textarea value={prodDraft.descripcion} onChange={e => setProdDraft({ ...prodDraft, descripcion: e.target.value })}
+              placeholder="Descripción corta (opcional)"
+              rows={2}
+              className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 resize-y" />
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => { setShowProdForm(false); setProdDraft({ nombre: '', landingUrl: '', descripcion: '' }); }}
+                className="px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 transition">
+                Cancelar
+              </button>
+              <button onClick={handleAddProducto}
+                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-purple-600 to-violet-600 rounded-md hover:from-purple-700 hover:to-violet-700 transition">
+                <Check size={12} /> Crear
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Lista de productos existentes */}
+        {productos.length === 0 ? (
+          <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-12 text-center">
+            <Package size={36} className="mx-auto text-gray-300 dark:text-gray-600 mb-3" />
+            <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Sin productos</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Creá tu primer producto para empezar a analizar la competencia y generar ideas.</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {productos.map(p => {
+              const comps = p.competidores || [];
+              const hasResearch = !!(p.docs?.research);
+              const ideasCount = 0; // TODO: contar ideas por producto si queremos
+              return (
+                <button key={p.id}
+                  onClick={() => setActiveProductoId(String(p.id))}
+                  className="w-full flex items-center gap-4 p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm hover:border-purple-300 dark:hover:border-purple-700 hover:shadow-md transition text-left group"
+                >
+                  <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-purple-500 to-violet-500 flex items-center justify-center text-white font-bold text-lg shrink-0 group-hover:scale-105 transition">
+                    {p.nombre?.charAt(0)?.toUpperCase() || 'P'}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{p.nombre}</p>
+                    <div className="flex items-center gap-2 text-[10px] text-gray-500 dark:text-gray-400 mt-0.5 flex-wrap">
+                      {p.landingUrl && <span className="truncate max-w-[200px]">{p.landingUrl}</span>}
+                      <span className={`font-semibold ${hasResearch ? 'text-emerald-600' : 'text-gray-400'}`}>
+                        {hasResearch ? '✓ documentado' : '○ sin research'}
+                      </span>
+                      <span>{comps.length} competidor{comps.length !== 1 ? 'es' : ''}</span>
+                      {p.stage && <span className="text-purple-600 dark:text-purple-400">· {p.stage.replace('_', '-')}</span>}
+                    </div>
+                  </div>
+                  <ChevronRight size={16} className="text-gray-400 group-hover:text-purple-500 transition shrink-0" />
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ====================================================================
+  // WORKSPACE DEL PRODUCTO ACTIVO
+  // ====================================================================
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      {/* Header */}
+      {/* Header con breadcrumb */}
       <div className="flex items-center gap-3">
+        <button onClick={() => setActiveProductoId(null)}
+          className="p-2 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 transition shrink-0"
+          title="Volver a la lista de productos">
+          <ChevronRight size={16} className="rotate-180" />
+        </button>
         <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-600 to-violet-600 flex items-center justify-center text-white shadow-sm">
           <Play size={20} />
         </div>
-        <div>
-          <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Arranque</h2>
-          <p className="text-xs text-gray-500 dark:text-gray-400">Cargá tu producto + competidores una vez y corré el pipeline cuando quieras.</p>
+        <div className="flex-1 min-w-0">
+          <p className="text-[10px] text-gray-500 dark:text-gray-400">
+            <button onClick={() => setActiveProductoId(null)} className="hover:text-purple-500 transition">Productos</button> / {producto.nombre}
+          </p>
+          <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100 truncate">{producto.nombre}</h2>
         </div>
       </div>
 

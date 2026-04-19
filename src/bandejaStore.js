@@ -112,6 +112,21 @@ export function removeIdea(id) {
   return list;
 }
 
+// Cuántas ideas se generaron "hoy" según horario Argentina (UTC-3 sin DST).
+// Usamos locale en-CA que devuelve YYYY-MM-DD para comparar fechas sin
+// lidiar con timezones manualmente.
+function argDate(iso) {
+  try {
+    return new Date(iso).toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
+  } catch { return ''; }
+}
+
+export function countIdeasGeneratedToday(ideas = null) {
+  const list = ideas || loadIdeas();
+  const today = argDate(new Date());
+  return list.filter(i => argDate(i.createdAt) === today).length;
+}
+
 // Transforma un resultado de deep-analyze en una idea tipo "replica".
 // Pensada para llamarse desde Competencia.jsx y Arranque.jsx justo después
 // de que vuelva el análisis, así se puebla la bandeja de forma pasiva.

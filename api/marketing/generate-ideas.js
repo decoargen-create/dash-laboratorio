@@ -30,46 +30,72 @@ const MODEL = 'claude-sonnet-4-6';
 
 const SYSTEM_PROMPT_BASE = `Sos director creativo senior de DTC cosméticos en Argentina. Tu trabajo es generar ideas de creativos accionables para Meta Ads. Tus ideas no son genéricas: son específicas al producto, al avatar y al contexto de la competencia.
 
-`;
-
-const SYSTEM_SIN_PROPIOS = `Tenés que devolver EXACTAMENTE 10 ideas en un JSON array, clasificadas en 3 tipos:
-
-- 3 ideas tipo "replica": tomá los ángulos más fuertes que detectaste en la competencia y adaptalos al producto. NO copies literal — extraé el patrón (estructura, trigger, formato) y aplícalo al producto propio de forma que se sienta nuestra. Dejá claro en "razonamiento" qué ganador te inspiró.
-
-- 3 ideas tipo "diferenciacion": identificá qué ángulos/ganchos NINGÚN competidor está usando todavía. Pensá en el blue ocean. Lo repetido entre varios competidores está saturado — buscá lo que falta. En "razonamiento" explicá por qué nadie lo hizo.
-
-- 4 ideas tipo "desde_cero": ángulos originales basados en el producto + avatar. Cada idea debe explorar un pain distinto, un trigger distinto o un beneficio distinto. Diversificá formatos (mezclá video + static + carrusel).
+**CALIDAD > CANTIDAD.** Si solo tenés contexto sólido para generar 12 ideas excelentes, devolvé 12. Nunca rellenes con ideas mediocres para alcanzar un número. Una mediocre pinta mal la bandeja entera.
 
 `;
 
-const SYSTEM_CON_PROPIOS = `Tenés que devolver EXACTAMENTE 10 ideas en un JSON array, clasificadas en 4 tipos:
+function buildTypeMix(targetCount, hasPropios) {
+  if (hasPropios) {
+    const replica = Math.max(1, Math.round(targetCount * 0.30));
+    const iteracion = Math.max(1, Math.round(targetCount * 0.30));
+    const diferenciacion = Math.max(1, Math.round(targetCount * 0.20));
+    const desde_cero = Math.max(1, targetCount - replica - iteracion - diferenciacion);
+    return { replica, iteracion, diferenciacion, desde_cero };
+  }
+  const replica = Math.max(1, Math.round(targetCount * 0.30));
+  const diferenciacion = Math.max(1, Math.round(targetCount * 0.30));
+  const desde_cero = Math.max(1, targetCount - replica - diferenciacion);
+  return { replica, iteracion: 0, diferenciacion, desde_cero };
+}
 
-- 3 ideas tipo "replica": tomá los ángulos más fuertes que detectaste en la competencia y adaptalos al producto. NO copies literal — extraé el patrón y aplícalo al producto propio. En "razonamiento" indicá qué ganador te inspiró.
+function buildMixSection(mix, formatoMix, targetCount) {
+  const vPct = Math.round((formatoMix.video ?? 0.4) * 100);
+  const sPct = Math.round((formatoMix.static ?? 0.6) * 100);
+  const lines = [];
+  lines.push(`**Target: hasta ${targetCount} ideas**, distribuidas aproximadamente así (respetá la calidad — podés devolver menos):`);
+  lines.push('');
+  if (mix.replica > 0) {
+    lines.push(`- ~${mix.replica} tipo "replica": tomá los ángulos más fuertes de la competencia y adaptalos al producto. NO copies literal — extraé el patrón (estructura, trigger, formato) y aplícalo. En "razonamiento" indicá qué ganador te inspiró.`);
+    lines.push('');
+  }
+  if (mix.iteracion > 0) {
+    lines.push(`- ~${mix.iteracion} tipo "iteracion": variaciones de tus ads propios que mejor performan (CTR alto, spend sostenido). Cambiá hook, headline, prueba social o formato. Mantené lo que funciona, variá lo que puede estar fatigando. En "razonamiento" indicá qué ad base iterás y por qué.`);
+    lines.push('');
+  }
+  if (mix.diferenciacion > 0) {
+    lines.push(`- ~${mix.diferenciacion} tipo "diferenciacion": ángulos que NINGÚN competidor está usando. Blue ocean. Si 5 competidores repiten un ángulo, está saturado — buscá lo que falta. En "razonamiento" explicá por qué nadie lo hizo.`);
+    lines.push('');
+  }
+  if (mix.desde_cero > 0) {
+    lines.push(`- ~${mix.desde_cero} tipo "desde_cero": ángulos originales basados en producto + avatar. Diversificá pain points, triggers y beneficios.`);
+    lines.push('');
+  }
+  lines.push(`**MIX DE FORMATO**: apuntá a ~${sPct}% static y ~${vPct}% video sobre el total. Podés incluir algún carrusel si el concepto lo pide.`);
+  lines.push('');
+  return lines.join('\n');
+}
 
-- 3 ideas tipo "iteracion": analizá los ads propios que te paso (con sus métricas) y generá variaciones de los que están funcionando mejor (mejor CTR / más spend sostenido). Cambiá hook, headline, prueba social, o formato. Mantené lo que funciona y variá lo que puede estar fatigando. En "razonamiento" indicá qué ad base estás iterando y por qué.
+const SHAPE_COMUN = `Por cada idea devolvé este shape EXACTO:
 
-- 2 ideas tipo "diferenciacion": ángulos que NINGÚN competidor está usando. Blue ocean. En "razonamiento" explicá por qué nadie lo hizo.
-
-- 2 ideas tipo "desde_cero": ángulos originales basados en producto + avatar + patrones que detectás en tus propios ads ganadores.
-
-`;
-
-const SHAPE_COMUN = `{
+{
   "titulo": "string corto y concreto, ≤ 80 chars",
   "tipo": "replica" | "iteracion" | "diferenciacion" | "desde_cero",
   "angulo": "el ángulo emocional o estratégico",
   "painPoint": "el pain específico que toca",
   "hook": "primer frame o primeras 3 líneas que paran el scroll",
   "copy": "copy completo sugerido (2-5 oraciones)",
-  "guion": "si es video, script corto esquemático en rioplatense. Si es static, dejá string vacío.",
+  "guion": "VIDEO: guión con beats numerados, ej: 'Beat 1 (0-3s): ... · Beat 2 (3-8s): ...'. Incluí duración total (15s/30s/60s) y tono de VO. STATIC: descripción de layout (headline arriba/centro, imagen hero, subcopy, CTA), paleta, mood y composición. CARRUSEL: slide-by-slide con hook en slide 1 y CTA en la última.",
   "formato": "video" | "static" | "carrusel",
   "razonamiento": "1-2 oraciones: por qué esta idea, qué la hace fuerte"
 }
 
-DEVOLVÉ ÚNICAMENTE el array JSON (empezá con "[" y terminá con "]"). Sin texto antes ni después. Sin \`\`\`json wrappers. 10 ideas en total.`;
+El campo "guion" es CRÍTICO — tiene que darle al diseñador/editor toda la info que necesita para producir sin preguntar nada.
 
-function buildSystemPrompt(hasPropios) {
-  return SYSTEM_PROMPT_BASE + (hasPropios ? SYSTEM_CON_PROPIOS : SYSTEM_SIN_PROPIOS) + SHAPE_COMUN;
+DEVOLVÉ ÚNICAMENTE el array JSON (empezá con "[" y terminá con "]"). Sin texto antes ni después. Sin \`\`\`json wrappers.`;
+
+function buildSystemPrompt({ hasPropios, targetCount, formatoMix }) {
+  const mix = buildTypeMix(targetCount, hasPropios);
+  return SYSTEM_PROMPT_BASE + buildMixSection(mix, formatoMix, targetCount) + SHAPE_COMUN;
 }
 
 async function readBody(req) {
@@ -156,20 +182,42 @@ export default async function handler(req, res) {
   }
 
   const body = await readBody(req);
-  const { producto, competidoresAnalisis = [], ideasExistentes = [], propiosAds = [] } = body || {};
+  const {
+    producto,
+    competidoresAnalisis = [],
+    ideasExistentes = [],
+    propiosAds = [],
+    targetCount = 15,
+    formatoMix = { static: 0.6, video: 0.4 },
+  } = body || {};
+
   if (!producto || !producto.nombre) {
     return respondJSON(res, 400, { error: 'Falta producto.nombre en el body' });
   }
 
+  // Clamp: entre 1 y 40 para no quemar tokens indefinidamente.
+  const clampedTarget = Math.max(1, Math.min(40, Number(targetCount) || 15));
+
+  // Max tokens dinámico: ~500 tokens por idea como margen (hooks, guiones de
+  // video son los más caros). 16K tokens cubren 30+ ideas con comodidad.
+  const maxTokens = Math.min(16000, 500 + clampedTarget * 500);
+
   const client = new Anthropic({ apiKey: anthropicKey });
   const hasPropios = Array.isArray(propiosAds) && propiosAds.length > 0;
   const userContent = buildContext({ producto, competidoresAnalisis, ideasExistentes, propiosAds });
-  const systemPrompt = buildSystemPrompt(hasPropios);
+  const systemPrompt = buildSystemPrompt({
+    hasPropios,
+    targetCount: clampedTarget,
+    formatoMix: {
+      static: Number(formatoMix?.static) || 0.6,
+      video: Number(formatoMix?.video) || 0.4,
+    },
+  });
 
   try {
     const resp = await client.messages.create({
       model: MODEL,
-      max_tokens: 6000,
+      max_tokens: maxTokens,
       system: [
         { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } },
       ],

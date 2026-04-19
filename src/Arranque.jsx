@@ -17,7 +17,14 @@ import {
   Package, Target, Play, Check, Loader2, AlertTriangle, ChevronRight,
   Plus, X, Sparkles, Link2, Search, Clock,
 } from 'lucide-react';
-import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas } from './bandejaStore.js';
+import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGeneratedToday } from './bandejaStore.js';
+
+const GEN_CONFIG_KEY = 'viora-marketing-gen-config-v1';
+const DEFAULT_GEN_CONFIG = {
+  limiteDiario: 15,
+  formatoStatic: 60, // %
+  formatoVideo: 40, // %
+};
 
 const PRODUCTOS_KEY = 'viora-marketing-productos-v1';
 const COMPETIDORES_KEY = 'viora-marketing-competidores-v1';
@@ -73,6 +80,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   const [suggesting, setSuggesting] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
 
+  // Config del generador de ideas (límite diario + mix de formato)
+  const [genConfig, setGenConfig] = useState(() => ({ ...DEFAULT_GEN_CONFIG, ...loadJSON(GEN_CONFIG_KEY, {}) }));
+  const [showGenConfig, setShowGenConfig] = useState(false);
+  const [ideasToday, setIdeasToday] = useState(() => countIdeasGeneratedToday());
+
   // Pipeline runner
   const [running, setRunning] = useState(false);
   const [steps, setSteps] = useState([]); // { id, label, detail, status: 'pending'|'running'|'done'|'error', startedAt, endedAt }
@@ -81,6 +93,48 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   useEffect(() => { saveJSON(PRODUCTOS_KEY, productos); }, [productos]);
   useEffect(() => { saveJSON(COMPETIDORES_KEY, competidores); }, [competidores]);
   useEffect(() => { saveJSON(META_ACCOUNT_KEY, metaAccount); }, [metaAccount]);
+  useEffect(() => { saveJSON(GEN_CONFIG_KEY, genConfig); }, [genConfig]);
+
+  // Refrescar contador de ideas del día cada vez que montamos o cambia la bandeja.
+  useEffect(() => {
+    setIdeasToday(countIdeasGeneratedToday());
+    const interval = setInterval(() => setIdeasToday(countIdeasGeneratedToday()), 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Mix promedio de la competencia (% video vs static) — calculado sobre
+  // todos los ads scrapeados de los competidores cargados. Sirve como
+  // sugerencia del default: "tu competencia usa X% video, te recomendamos eso".
+  const competitorMix = (() => {
+    let totalAds = 0, videoAds = 0, staticAds = 0;
+    for (const c of competidores) {
+      for (const ad of (c.ads || [])) {
+        const hasVideo = (ad.videoUrls?.length || 0) > 0;
+        const hasImage = (ad.imageUrls?.length || 0) > 0;
+        if (!hasVideo && !hasImage) continue;
+        totalAds++;
+        if (hasVideo) videoAds++;
+        else staticAds++;
+      }
+    }
+    if (totalAds === 0) return null;
+    return {
+      totalAds,
+      videoPct: Math.round((videoAds / totalAds) * 100),
+      staticPct: Math.round((staticAds / totalAds) * 100),
+      competidoresConAds: competidores.filter(c => (c.ads || []).length > 0).length,
+    };
+  })();
+
+  const usarMixCompetencia = () => {
+    if (!competitorMix) return;
+    setGenConfig(c => ({
+      ...c,
+      formatoStatic: competitorMix.staticPct,
+      formatoVideo: competitorMix.videoPct,
+    }));
+    addToast?.({ type: 'success', message: `Mix ajustado al promedio de la competencia: ${competitorMix.staticPct}/${competitorMix.videoPct}` });
+  };
 
   // Chequeo rápido de conexión Meta al montar — solo para habilitar/deshabilitar la card.
   useEffect(() => {
@@ -466,6 +520,29 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             insights: a.insights,
           }));
 
+        // Target count: primera vez (bandeja vacía) sin cap duro (hasta 40 con
+        // piso de calidad). Después, cap al límite diario restante.
+        const yaGeneradasHoy = countIdeasGeneratedToday();
+        const esPrimeraVez = ideasExistentes.length === 0;
+        const targetCount = esPrimeraVez
+          ? 40
+          : Math.max(0, genConfig.limiteDiario - yaGeneradasHoy);
+
+        if (targetCount === 0) {
+          updateStep('generate', {
+            status: 'done',
+            endedAt: Date.now(),
+            detail: `Ya generaste ${yaGeneradasHoy} ideas hoy (límite ${genConfig.limiteDiario}). Subí el límite o esperá al reset de medianoche.`,
+          });
+          throw new Error('SKIP_GENERATE');
+        }
+
+        const sumaMix = Math.max(1, genConfig.formatoStatic + genConfig.formatoVideo);
+        const formatoMix = {
+          static: genConfig.formatoStatic / sumaMix,
+          video: genConfig.formatoVideo / sumaMix,
+        };
+
         const resp = await fetch('/api/marketing/generate-ideas', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -474,19 +551,25 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             competidoresAnalisis: compAnalisis,
             ideasExistentes,
             propiosAds,
+            targetCount,
+            formatoMix,
           }),
         });
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
 
         const nuevas = addGeneratedIdeas(data.ideas || [], { producto });
+        setIdeasToday(countIdeasGeneratedToday());
         updateStep('generate', {
           status: 'done',
           endedAt: Date.now(),
           detail: `${nuevas.length} ideas nuevas agregadas (${data.count || 0} generadas)`,
         });
       } catch (err) {
-        updateStep('generate', { status: 'error', endedAt: Date.now(), detail: err.message });
+        // SKIP_GENERATE es un soft-skip (ya avisamos en updateStep), no error.
+        if (err.message !== 'SKIP_GENERATE') {
+          updateStep('generate', { status: 'error', endedAt: Date.now(), detail: err.message });
+        }
       }
     }
 
@@ -813,6 +896,82 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             <p className="text-xs text-gray-600 dark:text-gray-300 mb-3">
               Va a buscar los ads activos de cada competidor, detectar los ganadores (≥17d o ≥2 variantes) y analizarlos en profundidad con Claude Vision + Whisper. Tarda 2-5 min según cuántos competidores tengas.
             </p>
+
+            {/* Config del generador — colapsable */}
+            <div className="mb-3 p-3 bg-gray-50 dark:bg-gray-900/30 border border-gray-200 dark:border-gray-700 rounded-lg">
+              <button onClick={() => setShowGenConfig(v => !v)}
+                className="w-full flex items-center justify-between text-xs font-semibold text-gray-700 dark:text-gray-200">
+                <span className="inline-flex items-center gap-2">
+                  ⚙️ Generador de ideas
+                  <span className="text-[10px] font-mono text-gray-400">
+                    {ideasToday}/{genConfig.limiteDiario} hoy · {genConfig.formatoStatic}/{genConfig.formatoVideo} static/video
+                  </span>
+                </span>
+                <ChevronDown size={12} className={`text-gray-400 transition-transform ${showGenConfig ? 'rotate-180' : ''}`} />
+              </button>
+              {showGenConfig && (
+                <div className="mt-3 space-y-3">
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">Límite diario de ideas</label>
+                    <input type="number" min="1" max="40" value={genConfig.limiteDiario}
+                      onChange={e => setGenConfig(c => ({ ...c, limiteDiario: Math.max(1, Math.min(40, Number(e.target.value) || 15)) }))}
+                      className="w-24 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-purple-500" />
+                    <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">
+                      Se resetea a las 00:00 hs Argentina. Primera corrida (bandeja vacía) ignora el límite y genera hasta 40 con piso de calidad.
+                    </p>
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase">Mix static / video</label>
+                      {competitorMix && (
+                        <button onClick={usarMixCompetencia}
+                          className="text-[10px] font-semibold text-fuchsia-600 dark:text-fuchsia-400 hover:underline">
+                          📊 Usar mix de la competencia ({competitorMix.staticPct}/{competitorMix.videoPct})
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Slider + inputs numéricos sincronizados */}
+                    <input type="range" min="0" max="100" step="5" value={genConfig.formatoStatic}
+                      onChange={e => {
+                        const v = Number(e.target.value);
+                        setGenConfig(c => ({ ...c, formatoStatic: v, formatoVideo: 100 - v }));
+                      }}
+                      className="w-full accent-purple-600 cursor-pointer" />
+                    <div className="flex items-center gap-2 mt-1">
+                      <input type="number" min="0" max="100" value={genConfig.formatoStatic}
+                        onChange={e => {
+                          const v = Math.max(0, Math.min(100, Number(e.target.value) || 0));
+                          setGenConfig(c => ({ ...c, formatoStatic: v, formatoVideo: 100 - v }));
+                        }}
+                        className="w-16 px-2 py-1 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-purple-500" />
+                      <span className="text-[10px] text-gray-500">% static</span>
+                      <span className="text-gray-400 mx-1">·</span>
+                      <input type="number" min="0" max="100" value={genConfig.formatoVideo}
+                        onChange={e => {
+                          const v = Math.max(0, Math.min(100, Number(e.target.value) || 0));
+                          setGenConfig(c => ({ ...c, formatoVideo: v, formatoStatic: 100 - v }));
+                        }}
+                        className="w-16 px-2 py-1 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-purple-500" />
+                      <span className="text-[10px] text-gray-500">% video</span>
+                    </div>
+
+                    {competitorMix ? (
+                      <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-1.5">
+                        <span className="font-semibold">Dato de tu competencia:</span> entre {competitorMix.competidoresConAds} competidor{competitorMix.competidoresConAds > 1 ? 'es' : ''} con ads, {competitorMix.videoPct}% usa video ({competitorMix.totalAds} ads analizados).
+                      </p>
+                    ) : (
+                      <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-1.5 italic">
+                        Corré el pipeline al menos una vez para ver qué mix usa tu competencia y ajustar en base a eso.
+                      </p>
+                    )}
+                    <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">
+                      Videos incluyen guión con beats numerados + duración + VO. Statics incluyen layout + composición + paleta.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
             <div className="flex items-center gap-2">
               {!running ? (
                 <button onClick={runPipeline}

@@ -49,14 +49,23 @@ export function logCost({ autoTipo, amount, descripcion }) {
 }
 
 // Helper: loguea de una sola los costs que vinieron en una response del backend.
-// Las respuestas de nuestros endpoints devuelven { cost: { anthropic?, openai?, apify? } }.
+// Devuelve el breakdown + total, para que el caller pueda acumular el gasto
+// de la corrida actual en vivo (además de quedar persistido en el store).
 export function logCostsFromResponse(respData, descripcion) {
-  if (!respData?.cost) return;
-  const { anthropic, openai, apify, meta } = respData.cost;
+  const zero = { anthropic: 0, openai: 0, apify: 0, meta: 0, total: 0 };
+  if (!respData?.cost) return zero;
+  const { anthropic = 0, openai = 0, apify = 0, meta = 0 } = respData.cost;
   if (anthropic > 0) logCost({ autoTipo: 'anthropic', amount: anthropic, descripcion });
   if (openai > 0) logCost({ autoTipo: 'openai', amount: openai, descripcion });
   if (apify > 0) logCost({ autoTipo: 'apify', amount: apify, descripcion });
   if (meta > 0) logCost({ autoTipo: 'meta', amount: meta, descripcion });
+  return {
+    anthropic: anthropic || 0,
+    openai: openai || 0,
+    apify: apify || 0,
+    meta: meta || 0,
+    total: (anthropic || 0) + (openai || 0) + (apify || 0) + (meta || 0),
+  };
 }
 
 // Devuelve el gasto acumulado de un autoTipo dado en el mes actual

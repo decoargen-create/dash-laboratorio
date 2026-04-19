@@ -154,6 +154,10 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // Ideas generadas en vivo durante el pipeline — se llena por streaming
   // y se muestra debajo del paso "Generando ideas" en el stepper.
   const [liveIdeas, setLiveIdeas] = useState([]);
+  // Costo acumulado de la corrida actual — se resetea al arrancar el pipeline
+  // y va sumando a medida que cada endpoint devuelve su cost{}. Se muestra
+  // en vivo en el stepper.
+  const [runCost, setRunCost] = useState({ anthropic: 0, openai: 0, apify: 0, meta: 0, total: 0 });
 
   useEffect(() => { saveJSON(PRODUCTOS_KEY, productos); }, [productos]);
   useEffect(() => { saveJSON(COMPETIDORES_KEY, competidores); }, [competidores]);
@@ -421,6 +425,22 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     setRunning(true);
     setCancelled(false);
     setLiveIdeas([]);
+    setRunCost({ anthropic: 0, openai: 0, apify: 0, meta: 0, total: 0 });
+
+    // Wrapper sobre logCostsFromResponse que también suma al runCost local.
+    const trackCost = (data, descripcion) => {
+      const added = logCostsFromResponse(data, descripcion);
+      if (added?.total > 0) {
+        setRunCost(prev => ({
+          anthropic: prev.anthropic + added.anthropic,
+          openai: prev.openai + added.openai,
+          apify: prev.apify + added.apify,
+          meta: prev.meta + added.meta,
+          total: prev.total + added.total,
+        }));
+      }
+      return added;
+    };
 
     // Pasos dinámicos según estado:
     //   - docs-gen: solo si el producto aún no tiene research doc
@@ -506,7 +526,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         });
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-        logCostsFromResponse(data, `post-research-analysis · ${productoActualizado.nombre}`);
+        trackCost(data, `post-research-analysis · ${productoActualizado.nombre}`);
 
         searchKeywords = data.searchKeywords || [];
         productoActualizado = {
@@ -582,7 +602,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         });
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-        logCostsFromResponse(data, `apify-ingest · ${c.nombre}`);
+        trackCost(data, `apify-ingest · ${c.nombre}`);
 
         const ads = data.ads || [];
         const allWinners = ads.filter(a => a.isWinner);
@@ -649,7 +669,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           });
           const data = await resp.json();
           if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-          logCostsFromResponse(data, `deep-analyze · ${comp.nombre} · ${ad.id}`);
+          trackCost(data, `deep-analyze · ${comp.nombre} · ${ad.id}`);
 
           setCompetidores(prev => prev.map(x =>
             x.id === comp.id ? {
@@ -1414,6 +1434,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                   <p className="text-xs text-emerald-700 dark:text-emerald-300">
                     {winnersTotal > 0 && <><strong>{winnersTotal}</strong> ganador{winnersTotal !== 1 ? 'es' : ''} analizado{winnersTotal !== 1 ? 's' : ''} · </>}
                     {ideasNuevas > 0 ? <><strong>{ideasNuevas}</strong> idea{ideasNuevas !== 1 ? 's' : ''} nueva{ideasNuevas !== 1 ? 's' : ''} esperándote en la Bandeja</> : 'Todo procesado'}
+                    {runCost.total > 0 && <> · gasto total: <strong className="font-mono">${runCost.total.toFixed(4)}</strong></>}
                   </p>
                 </div>
                 <button
@@ -1436,10 +1457,19 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         {/* Stepper */}
         {steps.length > 0 && (
           <div className="mt-5 space-y-3">
-            {/* Barra de progreso */}
+            {/* Barra de progreso + costo en vivo */}
             <div className="space-y-1">
-              <div className="flex items-center justify-between text-[10px] text-gray-600 dark:text-gray-400">
+              <div className="flex items-center justify-between text-[10px] text-gray-600 dark:text-gray-400 flex-wrap gap-2">
                 <span>{stepsDone} de {stepsTotal} pasos</span>
+                {runCost.total > 0 && (
+                  <span className="inline-flex items-center gap-1.5 font-mono">
+                    <span className="text-purple-600 dark:text-purple-400 font-bold">💰 ${runCost.total.toFixed(4)}</span>
+                    <span className="text-gray-400">·</span>
+                    {runCost.anthropic > 0 && <span className="text-violet-600 dark:text-violet-400">🧠 ${runCost.anthropic.toFixed(4)}</span>}
+                    {runCost.openai > 0 && <span className="text-emerald-600 dark:text-emerald-400">🎤 ${runCost.openai.toFixed(4)}</span>}
+                    {runCost.apify > 0 && <span className="text-amber-600 dark:text-amber-400">🔍 ${runCost.apify.toFixed(4)}</span>}
+                  </span>
+                )}
                 <span className="font-mono">{progress}%</span>
               </div>
               <div className="h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">

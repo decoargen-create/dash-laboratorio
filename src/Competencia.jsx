@@ -643,14 +643,18 @@ export default function CompetenciaSection({ addToast }) {
               </div>
 
               <div className="p-5 space-y-4">
-                {/* Meta info */}
-                <div className="flex items-center gap-3 text-[10px] text-gray-500 dark:text-gray-400 pb-2 border-b border-gray-100 dark:border-gray-800">
-                  <span>{ad.daysRunning || 0}d corriendo</span>
-                  <span>·</span>
-                  <span>{new Date(generatedAt).toLocaleString('es-AR')}</span>
-                  {transcriptStatus === 'ok' && (
-                    <span className="ml-auto inline-flex items-center gap-1 text-emerald-600"><Volume2 size={10} /> transcrito</span>
+                {/* Header con preview del ad que se analizó */}
+                <div className="flex gap-3 pb-3 border-b border-gray-100 dark:border-gray-800">
+                  {ad.imageUrls?.[0] && (
+                    <img src={ad.imageUrls[0]} alt="" className="w-20 h-20 rounded-lg object-cover bg-gray-100 dark:bg-gray-800 shrink-0" onError={e => { e.target.style.display = 'none'; }} />
                   )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] font-mono text-gray-400">{ad.daysRunning || 0}d corriendo · {new Date(generatedAt).toLocaleString('es-AR')}</p>
+                    <p className="text-[11px] text-gray-700 dark:text-gray-300 mt-1 line-clamp-3">
+                      {(ad.body || '(sin copy)').slice(0, 200)}{(ad.body || '').length > 200 && '…'}
+                    </p>
+                    <TranscriptBadge status={transcriptStatus} />
+                  </div>
                 </div>
 
                 <Section title="🎯 Hooks (primeros 3 seg)" items={analysis.hooks} />
@@ -659,16 +663,7 @@ export default function CompetenciaSection({ addToast }) {
                 <SectionText title="👤 Audience" text={analysis.audience} />
                 <Section title="💰 Ofertas" items={analysis.offers} />
 
-                {analysis.cta && (
-                  <div>
-                    <h4 className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1.5">🖱️ CTA</h4>
-                    <div className="text-xs text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800/50 rounded-md px-3 py-2 space-y-1">
-                      {analysis.cta.texto && <p><strong>Texto:</strong> {analysis.cta.texto}</p>}
-                      {analysis.cta.ubicacion && <p><strong>Ubicación:</strong> {analysis.cta.ubicacion}</p>}
-                      {analysis.cta.urgencia && <p><strong>Urgencia:</strong> {analysis.cta.urgencia}</p>}
-                    </div>
-                  </div>
-                )}
+                <CtaSection cta={analysis.cta} />
 
                 <Section title="🛡️ Objeciones que aborda" items={analysis.objections} />
                 <Section title="📝 Patrones de copy reutilizables" items={analysis.copy_patterns} />
@@ -734,4 +729,49 @@ function SectionText({ title, text, highlight = false }) {
       </p>
     </div>
   );
+}
+
+// Claude debería devolver cta como { texto, ubicacion, urgencia } pero a veces
+// devuelve un string. Toleramos ambos formatos.
+function CtaSection({ cta }) {
+  if (!cta) return null;
+  const isString = typeof cta === 'string';
+  const hasFields = !isString && (cta.texto || cta.ubicacion || cta.urgencia);
+  if (!isString && !hasFields) return null;
+  return (
+    <div>
+      <h4 className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1.5">🖱️ CTA</h4>
+      <div className="text-xs text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800/50 rounded-md px-3 py-2 space-y-1">
+        {isString ? (
+          <p>{cta}</p>
+        ) : (
+          <>
+            {cta.texto && <p><strong>Texto:</strong> {cta.texto}</p>}
+            {cta.ubicacion && <p><strong>Ubicación:</strong> {cta.ubicacion}</p>}
+            {cta.urgencia && <p><strong>Urgencia:</strong> {cta.urgencia}</p>}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Muestra el estado de la transcripción con copy rioplatense claro.
+function TranscriptBadge({ status }) {
+  if (!status || status === 'no_video') {
+    return <p className="text-[10px] text-gray-400 mt-1 inline-flex items-center gap-1"><Volume2 size={10} /> Ad sin video</p>;
+  }
+  if (status === 'ok') {
+    return <p className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-1 inline-flex items-center gap-1"><Volume2 size={10} /> Video transcrito con Whisper</p>;
+  }
+  if (status === 'no_openai_key') {
+    return <p className="text-[10px] text-amber-600 mt-1 inline-flex items-center gap-1"><AlertTriangle size={10} /> Falta OPENAI_API_KEY — no se transcribió el video</p>;
+  }
+  if (status.startsWith('skipped:')) {
+    return <p className="text-[10px] text-gray-500 mt-1 inline-flex items-center gap-1"><AlertTriangle size={10} /> {status.replace('skipped:', '').trim()}</p>;
+  }
+  if (status.startsWith('error:')) {
+    return <p className="text-[10px] text-red-500 mt-1 inline-flex items-center gap-1"><AlertTriangle size={10} /> Transcripción falló: {status.replace('error:', '').trim()}</p>;
+  }
+  return null;
 }

@@ -65,7 +65,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
   // Wizard product form
   const [showProdForm, setShowProdForm] = useState(false);
-  const [prodDraft, setProdDraft] = useState({ nombre: '', landingUrl: '', descripcion: '' });
+  const [prodDraft, setProdDraft] = useState({ nombre: '', landingUrl: '', descripcion: '', stage: 'problem_aware' });
 
   // Wizard competitors
   const [showCompForm, setShowCompForm] = useState(false);
@@ -254,10 +254,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       nombre,
       landingUrl,
       descripcion: prodDraft.descripcion.trim(),
+      stage: prodDraft.stage || 'problem_aware',
       createdAt: new Date().toISOString(),
     };
     setProductos(prev => [nuevo, ...prev]);
-    setProdDraft({ nombre: '', landingUrl: '', descripcion: '' });
+    setProdDraft({ nombre: '', landingUrl: '', descripcion: '', stage: 'problem_aware' });
     setShowProdForm(false);
     addToast?.({ type: 'success', message: `Producto "${nombre}" cargado` });
   };
@@ -666,6 +667,17 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               </a>
             )}
             {producto.descripcion && <p className="text-gray-600 dark:text-gray-400">{producto.descripcion}</p>}
+            {/* Stage del producto — editable inline */}
+            <div className="flex items-center gap-2 mt-1">
+              <label className="text-[10px] font-bold text-gray-500 uppercase">Stage:</label>
+              <select value={producto.stage || 'problem_aware'}
+                onChange={e => setProductos(prev => prev.map(p => p.id === producto.id ? { ...p, stage: e.target.value } : p))}
+                className="px-2 py-0.5 text-[11px] bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-purple-500">
+                <option value="problem_aware">Problem-Aware</option>
+                <option value="solution_aware">Solution-Aware</option>
+                <option value="product_aware">Product-Aware</option>
+              </select>
+            </div>
             {/* Hint de calidad: sugerir correr el pipeline de Documentación si no hay research doc */}
             {(() => {
               const hasResearch = !!(producto.docs?.research || producto.research || producto.docs?.avatar || producto.avatar);
@@ -705,8 +717,20 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               placeholder="Descripción corta (opcional — qué es, para quién, diferenciales)"
               rows={2}
               className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 resize-y" />
+            <div>
+              <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">Stage del producto (awareness del prospect)</label>
+              <select value={prodDraft.stage} onChange={e => setProdDraft({ ...prodDraft, stage: e.target.value })}
+                className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500">
+                <option value="problem_aware">Problem-Aware — el prospect sabe que tiene el problema, no conoce las soluciones</option>
+                <option value="solution_aware">Solution-Aware — conoce soluciones, no conoce tu producto</option>
+                <option value="product_aware">Product-Aware — ya conoce tu marca/producto, le falta decidir</option>
+              </select>
+              <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">
+                Determina el tipo de hook: problem-aware necesita agitar el dolor, product-aware necesita diferenciación y prueba.
+              </p>
+            </div>
             <div className="flex gap-2 justify-end">
-              <button onClick={() => { setShowProdForm(false); setProdDraft({ nombre: '', landingUrl: '', descripcion: '' }); }}
+              <button onClick={() => { setShowProdForm(false); setProdDraft({ nombre: '', landingUrl: '', descripcion: '', stage: 'problem_aware' }); }}
                 className="px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 transition">
                 Cancelar
               </button>

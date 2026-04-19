@@ -144,6 +144,16 @@ function buildContext({ producto, competidoresAnalisis, ideasExistentes, propios
   if (producto?.descripcion) parts.push(`Descripción: ${producto.descripcion}`);
   if (producto?.resumenEjecutivo) parts.push(`\nResumen ejecutivo: ${producto.resumenEjecutivo}`);
 
+  // Stage del prospect — determina el tipo de hook a usar.
+  const stageLabels = {
+    problem_aware: 'PROBLEM-AWARE — el prospect sabe que tiene el problema pero no conoce las soluciones. Los hooks deben AGITAR EL DOLOR y después dejar entrever que hay una salida. Evitar hablar del producto en los primeros 3 segundos.',
+    solution_aware: 'SOLUTION-AWARE — el prospect ya conoce tipos de solución (serum, mascarillas, etc) pero no tu marca. Los hooks deben DIFERENCIARTE de las soluciones existentes: "vos probaste X, Y y Z, y acá hay un enfoque distinto".',
+    product_aware: 'PRODUCT-AWARE — el prospect ya te conoce, falta decidir. Los hooks deben APILAR PRUEBA (testimonios, autoridad, data) y remover objeciones específicas.',
+  };
+  const stage = producto?.stage || 'problem_aware';
+  parts.push(`\n**STAGE DEL PROSPECT: ${stage}**`);
+  parts.push(stageLabels[stage] || stageLabels.problem_aware);
+
   // Research docs (Marketing.jsx los guarda en producto.docs.{research,avatar,offerBrief,beliefs})
   // Fallback a campos planos por si vienen por otro path. Pasamos el texto
   // COMPLETO — Sonnet 4.6 tiene 1M de contexto, cortar a snippets tira

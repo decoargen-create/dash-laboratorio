@@ -13,6 +13,7 @@ import { VioraLogo, VioraMark } from './logo.jsx';
 import LandingPage from './LandingPage.jsx';
 import ChatbotWidget from './ChatbotWidget.jsx';
 import BocetosSection from './Bocetos.jsx';
+import MarketingSection from './Marketing.jsx';
 import { generateCSV, downloadCSV, parseCSV, toNumber, toBool } from './csv.js';
 
 // Estados del pipeline de producción de una orden
@@ -561,6 +562,16 @@ const PLATFORMS = [
     badgeBg: 'bg-gradient-to-br from-[#0668E1] to-[#1877F2]',
     badgeText: 'text-white',
     defaultSection: 'meta-inicio',
+  },
+  {
+    id: 'marketing',
+    name: 'Marketing',
+    shortName: 'Marketing',
+    initials: 'MK',
+    sidebarGradient: 'from-purple-900 via-purple-700 to-violet-800',
+    badgeBg: 'bg-gradient-to-br from-purple-600 to-violet-500',
+    badgeText: 'text-white',
+    defaultSection: 'mk-docs',
   },
 ];
 
@@ -1742,6 +1753,11 @@ function AppShell({ onExit }) {
               <NavItem icon={Settings} label="Conexión Meta" section="meta-config" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
             </>
           )}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (
+            <>
+              <NavItem icon={FileText} label="Documentación" section="mk-docs" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+            </>
+          )}
           {currentUser.role !== 'admin' && (
             <>
               <NavItem icon={Home} label="Inicio" section="inicio" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
@@ -1791,6 +1807,7 @@ function AppShell({ onExit }) {
           {currentUser.role === 'admin' && currentPlatform === 'viora' && currentSection === 'datos' && <DatosSection state={state} dispatch={dispatch} addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'senydrop' && currentSection === 'seny-productos' && <BocetosSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'metaads' && <MetaAdsPlaceholder section={currentSection} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-docs' && <MarketingSection addToast={addToast} />}
 
           {/* Mentor Views */}
           {currentUser.role === 'mentor' && currentSection === 'inicio' && <EquipoInicioSection currentUser={currentUser} state={state} />}
@@ -8055,6 +8072,7 @@ function getSectionTitle(user, section) {
     'meta-campanas': 'Meta Ads · Campañas',
     'meta-metricas': 'Meta Ads · Métricas',
     'meta-config': 'Meta Ads · Conexión',
+    'mk-docs': 'Marketing · Documentación de producto',
   };
   const mentor = {
     inicio: 'Inicio',

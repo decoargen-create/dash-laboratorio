@@ -14,7 +14,7 @@
 
 import React, { useState, useEffect } from 'react';
 import {
-  Package, Target, Play, Check, Loader2, AlertTriangle, ChevronRight,
+  Package, Target, Play, Check, Loader2, AlertTriangle, ChevronRight, ChevronDown,
   Plus, X, Sparkles, Link2, Search, Clock,
 } from 'lucide-react';
 import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGeneratedToday } from './bandejaStore.js';

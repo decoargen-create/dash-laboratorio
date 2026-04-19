@@ -680,6 +680,22 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
   const historial = p.historial || [];
   const creativos = p.creativos || null;
 
+  // ---- Workflow step-by-step (paso 1 → 4) ----
+  // Cada paso se marca como done cuando el user completó su acción clave.
+  // Los clicks llevan al tab correspondiente.
+  const docsComplete = !!(p.docs?.research && p.docs.research.length > 200);
+  const competenciaComplete = competidores.length > 0;
+  const creativosComplete = !!(creativos?.fase1?.hooks?.length > 0);
+  const briefsComplete = false; // Fase 4 pendiente
+  const wizardSteps = [
+    { n: 1, label: 'Análisis del producto', tab: 'docs',        done: docsComplete,        desc: 'Research + Avatar + Offer Brief + Creencias' },
+    { n: 2, label: 'Agregar competencia',   tab: 'competencia', done: competenciaComplete, desc: 'Competidores con ads monitoreados' },
+    { n: 3, label: 'Generar creativos',     tab: 'creativos',   done: creativosComplete,   desc: 'Hooks + ángulos basados en todo' },
+    { n: 4, label: 'Briefs para producción', tab: 'briefs',     done: briefsComplete,      desc: 'Videos + estáticos para diseño (próximamente)', disabled: true },
+  ];
+  // "Paso actual" = el primero que NO está done.
+  const currentStepIdx = wizardSteps.findIndex(s => !s.done);
+
   const generarHooks = async () => {
     setHooksRunning(true);
     try {
@@ -803,6 +819,68 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
             <Trash2 size={13} />
           </button>
         </div>
+      </div>
+
+      {/* Workflow stepper (paso 1 → 4) */}
+      <div className="px-4 pt-4 pb-1">
+        <div className="flex items-center gap-0.5 sm:gap-2 overflow-x-auto">
+          {wizardSteps.map((s, idx) => {
+            const isCurrent = idx === currentStepIdx;
+            const isPast = s.done;
+            const isFuture = !s.done && !isCurrent;
+            return (
+              <React.Fragment key={s.n}>
+                <button
+                  onClick={() => !s.disabled && setActiveTab(s.tab)}
+                  disabled={s.disabled}
+                  className={`group flex-1 min-w-[140px] flex items-center gap-2 px-2.5 py-2 rounded-lg text-left transition ${s.disabled ? 'opacity-40 cursor-not-allowed' : 'hover:shadow-sm cursor-pointer'} ${
+                    isPast ? 'bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-300 dark:border-emerald-700' :
+                    isCurrent ? 'bg-purple-50 dark:bg-purple-900/20 border-2 border-purple-400 dark:border-purple-600 shadow-sm' :
+                    'bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700'
+                  }`}
+                  title={s.disabled ? 'Próximamente' : s.desc}
+                >
+                  <div className={`shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${
+                    isPast ? 'bg-emerald-500 text-white' :
+                    isCurrent ? 'bg-purple-600 text-white' :
+                    'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
+                  }`}>
+                    {isPast ? <Check size={13} /> : s.n}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-[10px] font-bold uppercase tracking-wider ${
+                      isPast ? 'text-emerald-700 dark:text-emerald-300' :
+                      isCurrent ? 'text-purple-700 dark:text-purple-300' :
+                      'text-gray-500 dark:text-gray-400'
+                    }`}>
+                      Paso {s.n} {isPast && '✓'}
+                    </p>
+                    <p className={`text-[11px] font-semibold truncate ${
+                      isCurrent ? 'text-gray-900 dark:text-gray-100' :
+                      isPast ? 'text-gray-700 dark:text-gray-300' :
+                      'text-gray-500 dark:text-gray-400'
+                    }`}>
+                      {s.label}
+                    </p>
+                  </div>
+                </button>
+                {idx < wizardSteps.length - 1 && (
+                  <div className={`hidden sm:block w-4 h-px ${isPast ? 'bg-emerald-400' : 'bg-gray-300 dark:bg-gray-600'}`} />
+                )}
+              </React.Fragment>
+            );
+          })}
+        </div>
+        {currentStepIdx !== -1 && !wizardSteps[currentStepIdx].disabled && (
+          <p className="text-[11px] text-purple-700 dark:text-purple-300 mt-2 italic">
+            → Siguiente: <span className="font-semibold">{wizardSteps[currentStepIdx].desc}</span>
+          </p>
+        )}
+        {currentStepIdx === -1 && (
+          <p className="text-[11px] text-emerald-700 dark:text-emerald-300 mt-2 italic font-semibold">
+            ✓ Todos los pasos completados. Listo para escalar.
+          </p>
+        )}
       </div>
 
       {/* Tabs */}

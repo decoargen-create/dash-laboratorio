@@ -839,6 +839,19 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                             {fatBadge.icon} {fatBadge.label}
                           </span>
                         )}
+                        {ad.audienceSegment && (
+                          <span className={`inline-flex items-center px-1 py-0.5 text-[9px] font-semibold rounded ${
+                            ad.audienceSegment === 'retargeting'
+                              ? 'bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300'
+                              : 'bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300'
+                          }`} title={
+                            ad.audienceSegment === 'retargeting'
+                              ? 'Retargeting / warm — CTR esperado 2-5%, tolera freq 5-8'
+                              : 'Prospecting / cold — CTR esperado 0.8-1.5%, freq >4 quema'
+                          }>
+                            {ad.audienceSegment === 'retargeting' ? '🔥 warm' : '❄️ cold'}
+                          </span>
+                        )}
                         <span className="flex-1 truncate font-semibold">{ad.creative?.title || ad.name}</span>
                         {ad.insights && (
                           <span className="text-[10px] text-gray-500 font-mono flex items-center gap-1.5" title={

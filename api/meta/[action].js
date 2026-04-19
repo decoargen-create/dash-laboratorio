@@ -279,7 +279,15 @@ const MIN_IMPRESSIONS_FOR_FATIGUE = 1000;
 //   fatiguing → CTR cayó > 20% respecto al período anterior
 //   dying     → CTR cayó > 40% O > 20% con freq > 4 (audiencia quemada)
 //   new       → no hay datos suficientes (<1000 imp en algún período)
-function computeFatigue(recent, prev) {
+//
+// Ajustes por audienceSegment:
+//   - retargeting (warm): CTR 2-5% es normal, tolera más freq (5-8) antes
+//     de quemarse. Pero cuando fatiga, fatiga rápido.
+//   - prospecting (cold): CTR 0.8-1.5% es normal, freq >4 quema rápido.
+//     Threshold de fatigue más estricto (cae cualquier cosa → reaccionar).
+function computeFatigue(recent, prev, opts = {}) {
+  const { audienceSegment = 'prospecting' } = opts;
+  const freqThreshold = audienceSegment === 'retargeting' ? 6 : 4;
   if (!recent || recent.impressions < MIN_IMPRESSIONS_FOR_FATIGUE) {
     return { status: 'new', reason: `Aún no hay datos suficientes (${recent?.impressions || 0} imp · mín ${MIN_IMPRESSIONS_FOR_FATIGUE})` };
   }
@@ -292,7 +300,7 @@ function computeFatigue(recent, prev) {
   if (ctrPrev === 0) return { status: 'new', reason: 'CTR previo inválido' };
 
   const ctrChangePct = Math.round(((ctrRecent - ctrPrev) / ctrPrev) * 100);
-  const freqOverload = recent.frequency > 4;
+  const freqOverload = recent.frequency > freqThreshold;
 
   // ROAS change — señal secundaria pero muy fuerte. Si ROAS cae mientras
   // CTR se mantiene, puede ser audience decay (los que clickean compran menos).
@@ -323,6 +331,7 @@ function computeFatigue(recent, prev) {
   return {
     status,
     reason,
+    audienceSegment,
     ctrRecent, ctrPrev, ctrChangePct,
     roasRecent: recent.roas,
     roasPrev: prev.roas,
@@ -369,6 +378,8 @@ async function handleAdsWithInsights(req, res) {
     const data = await graphGet(`${accountId}/ads`, session.accessToken, {
       fields: [
         'id,name,status,effective_status,created_time,updated_time',
+        `campaign{id,name,objective}`,
+        `adset{id,name,optimization_goal,targeting}`,
         `creative{id,name,title,body,thumbnail_url,image_url,video_id,object_story_spec,effective_object_story_id}`,
         `insights.time_range(${recentRange}).as(recent){impressions,clicks,ctr,spend,cpc,cpm,actions,action_values,reach,frequency,video_3_sec_watched_actions}`,
         `insights.time_range(${prevRange}).as(previous){impressions,clicks,ctr,spend,cpc,cpm,actions,action_values,reach,frequency,video_3_sec_watched_actions}`,
@@ -379,9 +390,19 @@ async function handleAdsWithInsights(req, res) {
 
     const ads = (data.data || []).map(ad => {
       const creative = ad.creative || {};
+      const campaign = ad.campaign || {};
+      const adset = ad.adset || {};
       const recent = parseInsights(ad.recent?.data?.[0]);
       const previous = parseInsights(ad.previous?.data?.[0]);
-      const fatigue = computeFatigue(recent, previous);
+
+      // Audience segment: prospecting (cold) vs retargeting (warm).
+      // Heurística: si el targeting tiene custom_audiences → retargeting.
+      // Si no, prospecting. Se usa para benchmarks diferentes de fatigue.
+      const targeting = adset.targeting || {};
+      const hasCustomAudiences = Array.isArray(targeting.custom_audiences) && targeting.custom_audiences.length > 0;
+      const audienceSegment = hasCustomAudiences ? 'retargeting' : 'prospecting';
+
+      const fatigue = computeFatigue(recent, previous, { audienceSegment });
 
       return {
         id: ad.id,
@@ -390,6 +411,17 @@ async function handleAdsWithInsights(req, res) {
         effectiveStatus: ad.effective_status,
         createdTime: ad.created_time,
         updatedTime: ad.updated_time,
+        campaign: {
+          id: campaign.id || null,
+          name: campaign.name || null,
+          objective: campaign.objective || null,
+        },
+        adset: {
+          id: adset.id || null,
+          name: adset.name || null,
+          optimizationGoal: adset.optimization_goal || null,
+        },
+        audienceSegment,
         creative: {
           id: creative.id,
           name: creative.name,

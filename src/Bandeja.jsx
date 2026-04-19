@@ -44,10 +44,44 @@ export default function BandejaSection({ addToast }) {
 
   const setEstado = (id, estado) => {
     const patch = { estado };
-    if (estado === 'usada') patch.usedAt = new Date().toISOString();
+    if (estado === 'usada') {
+      patch.usedAt = new Date().toISOString();
+      // Si el user marca "usada", le pedimos el adId con el que la lanzó.
+      // Es opcional — si lo deja vacío, no pasa nada, solo no habilita el
+      // pull de performance.
+      const adIdRaw = window.prompt(
+        '¿Con qué ad ID de Meta la lanzaste?\n\n(Opcional — pegá el ID para cerrar el loop y traer performance real después. Ej: "120211234567890". Dejá vacío para saltear.)',
+        ''
+      );
+      const adId = (adIdRaw || '').trim();
+      if (adId) patch.launchedAsAdId = adId;
+    }
     const list = updateIdea(id, patch);
     setIdeas(list);
     addToast?.({ type: 'success', message: `Idea → ${ESTADO_META[estado].label}` });
+  };
+
+  // Trae la performance real del ad lanzado (last_14d + lifetime) y la
+  // guarda en la idea. Cierra el loop: hipótesis vs resultado.
+  const fetchPerformance = async (idea) => {
+    if (!idea.launchedAsAdId) return;
+    try {
+      const r = await fetch(`/api/meta/ad-performance?ad_id=${encodeURIComponent(idea.launchedAsAdId)}`);
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      const list = updateIdea(idea.id, {
+        launchedAsAdName: d.ad?.name || idea.launchedAsAdName || '',
+        performance: {
+          recent: d.recent,
+          lifetime: d.lifetime,
+          fetchedAt: d.fetchedAt,
+        },
+      });
+      setIdeas(list);
+      addToast?.({ type: 'success', message: 'Performance actualizada' });
+    } catch (err) {
+      addToast?.({ type: 'error', message: `No pude traer métricas: ${err.message}` });
+    }
   };
 
   const handleRemove = (id) => {
@@ -277,6 +311,7 @@ export default function BandejaSection({ addToast }) {
               onCancelNotas={() => { setEditandoNotasId(null); setNotasDraft(''); }}
               isSelected={selected.has(idea.id)}
               onToggleSelect={() => toggleSelect(idea.id)}
+              onFetchPerformance={() => fetchPerformance(idea)}
             />
           ))}
         </div>
@@ -302,7 +337,7 @@ function CounterCard({ label, value, color, accent = false }) {
 function IdeaCard({
   idea, expanded, onToggle, onEstado, onRemove,
   editandoNotas, onEditNotas, notasDraft, setNotasDraft, onSaveNotas, onCancelNotas,
-  isSelected, onToggleSelect,
+  isSelected, onToggleSelect, onFetchPerformance,
 }) {
   const tipo = TIPO_META[idea.tipo] || TIPO_META.desde_cero;
   const estado = ESTADO_META[idea.estado] || ESTADO_META.pendiente;
@@ -428,6 +463,42 @@ function IdeaCard({
             </div>
           )}
 
+          {/* Performance real del ad lanzado — cierra el loop de aprendizaje */}
+          {idea.launchedAsAdId && (
+            <div className="p-3 bg-fuchsia-50 dark:bg-fuchsia-900/20 border border-fuchsia-200 dark:border-fuchsia-800 rounded-md">
+              <div className="flex items-center justify-between mb-1.5">
+                <p className="text-[10px] font-bold text-fuchsia-800 dark:text-fuchsia-300 uppercase tracking-wider">
+                  🚀 Lanzada en Meta
+                </p>
+                <button onClick={onFetchPerformance}
+                  className="text-[10px] font-semibold text-fuchsia-600 dark:text-fuchsia-400 hover:underline inline-flex items-center gap-1">
+                  <Download size={10} /> Traer métricas
+                </button>
+              </div>
+              <p className="text-[10px] text-fuchsia-700 dark:text-fuchsia-400 mb-1 font-mono">
+                Ad: {idea.launchedAsAdName || idea.launchedAsAdId}
+              </p>
+              {idea.performance ? (
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                  <PerformanceStat label="CTR" val={idea.performance.recent?.ctr} fmt={v => `${v.toFixed(2)}%`} />
+                  <PerformanceStat label="ROAS" val={idea.performance.recent?.roas} fmt={v => v.toFixed(2)}
+                    semaforo={v => v >= 2 ? 'good' : v >= 1 ? 'mid' : 'bad'} />
+                  <PerformanceStat label="CPA" val={idea.performance.recent?.cpa} fmt={v => `$${v.toFixed(2)}`} />
+                  <PerformanceStat label="Thumb-stop" val={idea.performance.recent?.thumbStopRate} fmt={v => `${v.toFixed(1)}%`} />
+                  <PerformanceStat label="Impressions" val={idea.performance.recent?.impressions} fmt={v => v.toLocaleString('es-AR')} />
+                  <PerformanceStat label="Compras" val={idea.performance.recent?.purchases} fmt={v => v.toLocaleString('es-AR')} />
+                  <p className="col-span-2 text-[9px] text-fuchsia-500 dark:text-fuchsia-400 text-right italic">
+                    Últimos 14d · actualizado {new Date(idea.performance.fetchedAt).toLocaleString('es-AR')}
+                  </p>
+                </div>
+              ) : (
+                <p className="text-xs text-fuchsia-700 dark:text-fuchsia-300 italic">
+                  Click "Traer métricas" para ver cómo está funcionando.
+                </p>
+              )}
+            </div>
+          )}
+
           {idea.angulo && (
             <Field label="📐 Ángulo" text={idea.angulo} />
           )}
@@ -518,6 +589,29 @@ function Field({ label, text, highlight = false }) {
           ? 'bg-fuchsia-50 dark:bg-fuchsia-900/20 border border-fuchsia-200 dark:border-fuchsia-800 rounded-md px-3 py-2 text-fuchsia-900 dark:text-fuchsia-200'
           : 'text-gray-700 dark:text-gray-300'
       }`}>{text}</p>
+    </div>
+  );
+}
+
+function PerformanceStat({ label, val, fmt, semaforo }) {
+  const v = Number(val);
+  if (val == null || isNaN(v)) {
+    return (
+      <div className="text-[10px]">
+        <p className="text-fuchsia-600 dark:text-fuchsia-400 font-semibold">{label}</p>
+        <p className="text-gray-400 font-mono">—</p>
+      </div>
+    );
+  }
+  const tone = semaforo ? semaforo(v) : null;
+  const toneClass = tone === 'good' ? 'text-emerald-600 dark:text-emerald-400' :
+                    tone === 'mid' ? 'text-amber-600 dark:text-amber-400' :
+                    tone === 'bad' ? 'text-red-600 dark:text-red-400' :
+                    'text-fuchsia-900 dark:text-fuchsia-200';
+  return (
+    <div className="text-[10px]">
+      <p className="text-fuchsia-600 dark:text-fuchsia-400 font-semibold">{label}</p>
+      <p className={`font-mono font-bold ${toneClass}`}>{fmt(v)}</p>
     </div>
   );
 }

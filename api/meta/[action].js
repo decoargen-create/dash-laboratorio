@@ -424,6 +424,58 @@ async function handleAdsWithInsights(req, res) {
   }
 }
 
+// Performance de UN ad específico — usado cuando el user marca una idea
+// de la Bandeja como "usada" con un adId real, para cerrar el loop de
+// aprendizaje (hipótesis vs resultado real).
+async function handleAdPerformance(req, res) {
+  if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
+  const session = readMetaCookie(req);
+  if (!session?.accessToken) return respondJSON(res, 401, { error: 'Meta no conectado' });
+
+  const origin = getOrigin(req);
+  const url = new URL(req.url, origin);
+  const adId = url.searchParams.get('ad_id');
+  if (!adId) return respondJSON(res, 400, { error: 'Falta ad_id' });
+
+  try {
+    // Metadata del ad + insights desde el lanzamiento + insights 14d recientes.
+    const data = await graphGet(adId, session.accessToken, {
+      fields: [
+        'id,name,status,effective_status,created_time,campaign{id,name,objective}',
+        `creative{id,name,title,body,thumbnail_url,image_url}`,
+        `insights.date_preset(maximum).as(lifetime){impressions,clicks,ctr,spend,cpc,cpm,actions,action_values,reach,frequency,video_3_sec_watched_actions}`,
+        `insights.date_preset(last_14d).as(recent){impressions,clicks,ctr,spend,cpc,cpm,actions,action_values,reach,frequency,video_3_sec_watched_actions}`,
+      ].join(','),
+    });
+
+    const lifetime = parseInsights(data.lifetime?.data?.[0]);
+    const recent = parseInsights(data.recent?.data?.[0]);
+
+    return respondJSON(res, 200, {
+      ad: {
+        id: data.id,
+        name: data.name,
+        status: data.status,
+        effectiveStatus: data.effective_status,
+        createdTime: data.created_time,
+        campaign: data.campaign ? {
+          id: data.campaign.id, name: data.campaign.name, objective: data.campaign.objective,
+        } : null,
+        creative: data.creative ? {
+          id: data.creative.id, name: data.creative.name,
+          title: data.creative.title, body: data.creative.body,
+          thumbnailUrl: data.creative.thumbnail_url, imageUrl: data.creative.image_url,
+        } : null,
+      },
+      lifetime,
+      recent,
+      fetchedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    return respondJSON(res, err.status || 502, { error: err.message });
+  }
+}
+
 // --- dispatcher ---
 
 const actions = {
@@ -433,6 +485,7 @@ const actions = {
   me: handleMe,
   'ad-accounts': handleAdAccounts,
   'ads-with-insights': handleAdsWithInsights,
+  'ad-performance': handleAdPerformance,
 };
 
 export default async function handler(req, res) {

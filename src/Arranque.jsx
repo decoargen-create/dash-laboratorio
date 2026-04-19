@@ -567,7 +567,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       const stepId = `scrape-${c.id}`;
       updateStep(stepId, { status: 'running', startedAt: Date.now() });
       try {
-        const payload = { country: 'ALL', limit: 50 };
+        const payload = { country: 'ALL', limit: 200 };
         if (c.fbPageUrl) {
           payload.fbPageUrl = c.fbPageUrl.startsWith('http') ? c.fbPageUrl : `https://www.facebook.com/${c.fbPageUrl}`;
         } else if (c.landingUrl) {
@@ -585,24 +585,34 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         logCostsFromResponse(data, `apify-ingest · ${c.nombre}`);
 
         const ads = data.ads || [];
-        const winners = ads.filter(a => a.isWinner).slice(0, 3);
+        const allWinners = ads.filter(a => a.isWinner);
 
-        // Guardar en el competidor
-        setCompetidores(prev => prev.map(x =>
-          x.id === c.id ? {
-            ...x,
-            ads,
-            adsTotal: data.total || 0,
-            winnersCount: data.winners || 0,
-            lastAdsCheck: new Date().toISOString(),
-          } : x
-        ));
+        // Guardar en el competidor (con historial de corridas)
+        setCompetidores(prev => prev.map(x => {
+          if (x.id !== c.id) return x;
+          const prevHistory = Array.isArray(x.adsHistory) ? x.adsHistory : [];
+          const history = [...prevHistory, {
+            ts: new Date().toISOString(),
+            total: data.total || 0,
+            winners: data.winners || 0,
+          }].slice(-10);
+          return {
+            ...x, ads, adsTotal: data.total || 0, winnersCount: data.winners || 0,
+            lastAdsCheck: new Date().toISOString(), adsHistory: history,
+          };
+        }));
 
-        compWithAds.push({ comp: c, winners });
+        // Deep-analyze: top 10 winners por score (los más fuertes).
+        // Todos los demás ads (winners o no) llegan al generador con
+        // su copy crudo — no los tiramos.
+        const topWinnersForAnalysis = allWinners
+          .slice().sort((a, b) => (b.score || 0) - (a.score || 0))
+          .slice(0, 10);
+        compWithAds.push({ comp: c, winners: topWinnersForAnalysis, allAds: ads });
         updateStep(stepId, {
           status: 'done',
           endedAt: Date.now(),
-          detail: `${winners.length} ganador${winners.length !== 1 ? 'es' : ''} de ${ads.length} ads`,
+          detail: `${allWinners.length} ganador${allWinners.length !== 1 ? 'es' : ''} de ${ads.length} ads · top ${topWinnersForAnalysis.length} para análisis profundo`,
         });
       } catch (err) {
         updateStep(stepId, { status: 'error', endedAt: Date.now(), detail: err.message });
@@ -672,11 +682,16 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     if (!cancelled) {
       updateStep('generate', { status: 'running', startedAt: Date.now() });
       try {
-        // Armar el array de análisis para el endpoint.
+        // Armar el contexto competitivo COMPLETO para el generador.
+        // 1. compAnalisis: ads con deep-analysis (hooks, ángulo, why_it_works)
+        // 2. allCompAds: TODOS los ads scrapeados (body + headline + score +
+        //    días + formato). El generador ve los 700+ ads crudos para
+        //    identificar patrones que no capturamos con deep-analyze.
         const compAnalisis = [];
-        // Leemos state fresh del localStorage porque setCompetidores es async.
+        const allCompAds = [];
         const compsActualizados = loadJSON(COMPETIDORES_KEY, competidores);
         for (const c of compsActualizados) {
+          // Deep-analyzed (con insights completos)
           const analyses = c.adsAnalysis || {};
           for (const adId of Object.keys(analyses)) {
             const a = analyses[adId];
@@ -687,6 +702,20 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               adHeadline: ad?.headline || '',
               adBody: ad?.body || '',
               analysis: a.analysis,
+            });
+          }
+          // TODOS los ads (copy crudo — para pattern mining)
+          for (const ad of (c.ads || [])) {
+            allCompAds.push({
+              competidor: c.nombre,
+              body: (ad.body || '').slice(0, 300),
+              headline: ad.headline || '',
+              formato: (ad.videoUrls?.length > 0) ? 'video' : 'static',
+              daysRunning: ad.daysRunning || 0,
+              score: ad.score || 0,
+              isWinner: !!ad.isWinner,
+              winnerTier: ad.winnerTier || null,
+              variantes: ad.variantes || 0,
             });
           }
         }
@@ -737,6 +766,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           body: JSON.stringify({
             producto: productoActualizado || producto || { nombre: 'Producto sin definir' },
             competidoresAnalisis: compAnalisis,
+            allCompAds,
             ideasExistentes,
             propiosAds,
             targetCount,

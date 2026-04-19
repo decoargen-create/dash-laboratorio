@@ -29,21 +29,31 @@ import { anthropicCost } from './_costs.js';
 
 const MODEL = 'claude-sonnet-4-6';
 
-const SYSTEM_PROMPT_BASE = `Sos director creativo senior de DTC cosméticos en Argentina. Tu trabajo es generar ideas de creativos accionables para Meta Ads. Tus ideas no son genéricas: son específicas al producto, al avatar y al contexto de la competencia.
+const SYSTEM_PROMPT_BASE = `Sos director creativo senior de DTC cosméticos en ARGENTINA. Tu idioma es castellano RIOPLATENSE (vos, tuteo, modismos argentinos). NUNCA español de España, NUNCA neutro. Todo el copy, guiones y hooks tienen que sonar como si los hubiera escrito un publicista de Buenos Aires.
 
-**CALIDAD > CANTIDAD.** Si solo tenés contexto sólido para generar 12 ideas excelentes, devolvé 12. Nunca rellenes con ideas mediocres para alcanzar un número. Una mediocre pinta mal la bandeja entera.
+Tu proceso para generar ideas es en 2 fases:
 
-**DIVERSIDAD DE HOOKS — muy importante.** Antes de finalizar la respuesta, revisá todos los hooks que propusiste. Si dos hooks arrancan con el mismo template ("¿Cansada de X?", "¿Sabías que X?", "Dejá de X"), reescribí uno. Repetir estructuras en 2+ ideas las vuelve intercambiables y pierde el valor de diversificar ángulos. Mezclá arquetipos:
-- Pregunta retórica
-- Dato o estadística shocking
-- Confesión / storytelling en 1ra persona
-- Comparación antes/después
-- Autoridad / "Me dijo el dermatólogo"
-- Micro-agresión / provocación
-- Instrucción / "Tenés que saber esto"
-- Curiosidad / "No te vas a creer lo que pasó"
+**FASE 1 — PATTERN MINING** (hacelo mentalmente antes de generar):
+Leé TODOS los ads de la competencia que te paso (pueden ser cientos). Identificá los PATRONES que se repiten entre los ganadores:
+- ¿Qué hooks están usando los que llevan 20+ días? (estructura, no texto literal)
+- ¿Qué ángulos emocionales repiten 2+ competidores? (→ patrón validado)
+- ¿Qué formatos dominan entre los winners fuertes? (video/static/carrusel)
+- ¿Qué objeciones están atajando en el copy?
+- ¿Qué ofertas/ganchos monetarios usan?
+Estos patrones son ORO — están validados con plata real de los competidores.
 
-Una buena batería tiene al menos 4 arquetipos de hook distintos.
+**FASE 2 — GENERACIÓN**:
+Con los patrones identificados + el research doc del producto + el avatar:
+- Para RÉPLICAS: tomá un patrón ganador y adaptalo a la marca del user. Referenciá en "razonamiento" qué patrón/competidor te inspiró.
+- Para DIFERENCIACIÓN: buscá ángulos que NADIE en toda la lista está usando. Si 5 competidores repiten "testimonial antes/después", ESO está saturado — buscá lo contrario.
+- Para DESDE CERO: salí del contexto competitivo y usá puro avatar + beliefs.
+
+**CALIDAD > CANTIDAD.** Cada idea tiene que ser producible: el equipo agarra el guión/layout y puede ir directo a producción sin preguntar nada.
+
+**DIVERSIDAD DE HOOKS — regla dura.** Revisá todos los hooks antes de finalizar. NO repetir el mismo template en 2+ ideas. Mezclá:
+- Pregunta retórica · Dato shocking · Storytelling 1ra persona · Antes/después
+- Autoridad ("mi dermatólogo me dijo") · Provocación · Instrucción · Curiosidad
+Mínimo 4 arquetipos distintos en una batería.
 
 `;
 
@@ -83,7 +93,7 @@ function buildMixSection(mix, formatoMix, targetCount) {
     lines.push(`- ~${mix.desde_cero} tipo "desde_cero": ángulos originales basados en producto + avatar. Diversificá pain points, triggers y beneficios.`);
     lines.push('');
   }
-  lines.push(`**MIX DE FORMATO**: apuntá a ~${sPct}% static y ~${vPct}% video sobre el total. Podés incluir algún carrusel si el concepto lo pide.`);
+  lines.push(`**MIX DE FORMATO — OBLIGATORIO**: MÍNIMO ${Math.round(sPct * targetCount / 100)} ideas STATIC y MÍNIMO ${Math.round(vPct * targetCount / 100)} ideas VIDEO del total de ${targetCount}. Si la competencia es 90% video, VOS igual generás ${sPct}% static PORQUE ESO PIDIÓ EL USER. Para statics, describí layout + composición + paleta + mood. Podés incluir carruseles dentro del cupo de statics.`);
   lines.push('');
   return lines.join('\n');
 }
@@ -168,7 +178,7 @@ function respondJSON(res, status, payload) {
 }
 
 // Serializamos el contexto en un string estructurado y legible para Claude.
-function buildContext({ producto, competidoresAnalisis, ideasExistentes, propiosAds }) {
+function buildContext({ producto, competidoresAnalisis, allCompAds, ideasExistentes, propiosAds }) {
   const parts = [];
 
   parts.push('## PRODUCTO PROPIO');
@@ -214,11 +224,45 @@ function buildContext({ producto, competidoresAnalisis, ideasExistentes, propios
     parts.push(`\n⚠️ SIN RESEARCH DOC. Las ideas van a ser más genéricas. Correr el pipeline de Documentación antes daría ideas mucho más ancladas al avatar real.`);
   }
 
-  parts.push('\n## COMPETENCIA — ANÁLISIS DE GANADORES');
-  if (!competidoresAnalisis?.length) {
-    parts.push('(Sin análisis de competencia todavía. Igual generá ideas pero marcá que las "replica" son genéricas.)');
-  } else {
-    competidoresAnalisis.slice(0, 8).forEach((c, i) => {
+  // === SECCIÓN 1: TODOS los ads de la competencia (copy crudo) ===
+  // El generador recibe CADA ad que scrapeamos — no filtramos nada.
+  // Esto le da la visión completa del mercado para detectar patrones.
+  if (allCompAds?.length) {
+    // Agrupar por competidor para que el contexto sea legible.
+    const byComp = {};
+    for (const ad of allCompAds) {
+      const key = ad.competidor || 'Desconocido';
+      if (!byComp[key]) byComp[key] = [];
+      byComp[key].push(ad);
+    }
+
+    parts.push('\n## TODOS LOS ADS DE LA COMPETENCIA (copy crudo para pattern mining)');
+    parts.push(`Total: ${allCompAds.length} ads de ${Object.keys(byComp).length} competidores.`);
+    parts.push(`**Tu trabajo**: leer TODOS estos ads, identificar los PATRONES que se repiten entre los ganadores (hooks, ángulos, estructura, formatos), y usarlos para generar ideas. No te limites a los 10 primeros — mirá toda la lista.`);
+    parts.push('');
+
+    for (const [compName, ads] of Object.entries(byComp)) {
+      const winners = ads.filter(a => a.isWinner);
+      const videoCount = ads.filter(a => a.formato === 'video').length;
+      const staticCount = ads.length - videoCount;
+      const maxDays = Math.max(...ads.map(a => a.daysRunning || 0), 0);
+      parts.push(`\n### ${compName} (${ads.length} ads · ${winners.length} ganadores · ${staticCount} static/${videoCount} video · máx ${maxDays}d corriendo)`);
+
+      // Winners primero, después los demás
+      const sorted = [...ads].sort((a, b) => (b.score || 0) - (a.score || 0));
+      for (const ad of sorted) {
+        const winBadge = ad.winnerTier === 'strong' ? '🏆🔥' : ad.isWinner ? '🏆' : '';
+        const body = ad.body ? ad.body.slice(0, 200) : '(sin copy)';
+        parts.push(`- ${winBadge} [${ad.formato}·${ad.daysRunning}d·score${ad.score}${ad.variantes > 0 ? `·${ad.variantes}var` : ''}] ${ad.headline ? ad.headline + ' — ' : ''}${body}`);
+      }
+    }
+  }
+
+  // === SECCIÓN 2: Análisis PROFUNDOS (los top con Vision + Whisper) ===
+  if (competidoresAnalisis?.length) {
+    parts.push('\n## ANÁLISIS PROFUNDOS (Vision + Whisper) — los ganadores más fuertes');
+    parts.push(`${competidoresAnalisis.length} ads analizados en profundidad. Estos son los insights estructurados:`);
+    competidoresAnalisis.forEach((c, i) => {
       parts.push(`\n### ${i + 1}. ${c.competidorNombre || 'Competidor'} — ad ${c.adId || ''}`);
       if (c.adHeadline) parts.push(`Headline: ${c.adHeadline}`);
       if (c.adBody) parts.push(`Body: ${String(c.adBody).slice(0, 400)}`);
@@ -228,7 +272,12 @@ function buildContext({ producto, competidoresAnalisis, ideasExistentes, propios
       if (Array.isArray(a.triggers)) parts.push(`Triggers: ${a.triggers.join(', ')}`);
       if (a.audience) parts.push(`Audience: ${a.audience}`);
       if (a.why_it_works) parts.push(`Por qué funciona: ${a.why_it_works}`);
+      if (Array.isArray(a.copy_patterns)) parts.push(`Patrones de copy: ${a.copy_patterns.join(' | ')}`);
+      if (Array.isArray(a.objections)) parts.push(`Objeciones que aborda: ${a.objections.join(' | ')}`);
     });
+  } else if (!allCompAds?.length) {
+    parts.push('\n## COMPETENCIA');
+    parts.push('(Sin datos de competencia todavía. Generá ideas basadas solo en el research doc del producto.)');
   }
 
   if (propiosAds?.length) {
@@ -392,6 +441,7 @@ export default async function handler(req, res) {
   const {
     producto,
     competidoresAnalisis = [],
+    allCompAds = [],
     ideasExistentes = [],
     propiosAds = [],
     targetCount = 15,
@@ -407,7 +457,7 @@ export default async function handler(req, res) {
 
   const client = new Anthropic({ apiKey: anthropicKey });
   const hasPropios = Array.isArray(propiosAds) && propiosAds.length > 0;
-  const userContent = buildContext({ producto, competidoresAnalisis, ideasExistentes, propiosAds });
+  const userContent = buildContext({ producto, competidoresAnalisis, allCompAds, ideasExistentes, propiosAds });
   const systemPrompt = buildSystemPrompt({
     hasPropios,
     targetCount: clampedTarget,

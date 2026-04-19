@@ -10,7 +10,8 @@
     "api/marketing/deep-analyze.js":    { "maxDuration": 240 },
     "api/marketing/generate-ideas.js":  { "maxDuration": 180 },
     "api/marketing/match-product-ads.js": { "maxDuration": 60 },
-    "api/marketing/suggest-competitors.js": { "maxDuration": 180 }
+    "api/marketing/suggest-competitors.js": { "maxDuration": 180 },
+    "api/marketing/post-research-analysis.js": { "maxDuration": 60 }
   },
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/index.html" }

@@ -17,7 +17,7 @@ import crypto from 'node:crypto';
 import {
   META_API_VERSION, META_COOKIE_MAX_AGE, META_SCOPES,
   verifyState, signState, setMetaCookie, clearMetaCookie,
-  readMetaCookie, getOrigin, respondJSON,
+  readMetaCookie, getOrigin, respondJSON, graphGet,
 } from './_lib.js';
 
 // --- helpers locales ---
@@ -186,6 +186,328 @@ async function handleMe(req, res) {
   });
 }
 
+// Lista las cuentas publicitarias del user conectado. Devuelve id, name,
+// account_status, currency, timezone_name — lo suficiente para que el user
+// elija en un dropdown de "¿cuál usamos?".
+async function handleAdAccounts(req, res) {
+  if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
+  const session = readMetaCookie(req);
+  if (!session?.accessToken) return respondJSON(res, 401, { error: 'Meta no conectado' });
+
+  try {
+    const data = await graphGet('me/adaccounts', session.accessToken, {
+      fields: 'id,account_id,name,account_status,currency,timezone_name,business_name',
+      limit: 100,
+    });
+    // account_status: 1=ACTIVE, 2=DISABLED, 3=UNSETTLED, 7=PENDING_RISK_REVIEW, ...
+    const accounts = (data.data || [])
+      .filter(a => a.account_status === 1)
+      .map(a => ({
+        id: a.id, // con prefijo act_
+        accountId: a.account_id,
+        name: a.name,
+        currency: a.currency,
+        timezone: a.timezone_name,
+        business: a.business_name || null,
+      }));
+    return respondJSON(res, 200, { accounts, total: accounts.length });
+  } catch (err) {
+    return respondJSON(res, err.status || 502, { error: err.message });
+  }
+}
+
+// Helper: extrae métricas relevantes de un objeto insights crudo de Meta.
+// Ahora calcula ROAS, CPA y thumb-stop rate (para video) además de las
+// métricas básicas — esos 3 son los indicadores más predictivos de fatigue
+// y de calidad del creativo.
+function parseInsights(ins) {
+  if (!ins) return null;
+  const actions = ins.actions || [];
+  const actionValues = ins.action_values || [];
+
+  const isPurchase = (a) =>
+    a.action_type === 'purchase' ||
+    a.action_type === 'offsite_conversion.fb_pixel_purchase';
+
+  const purchases = actions.find(isPurchase);
+  const purchaseValue = actionValues.find(isPurchase);
+
+  const impressions = Number(ins.impressions || 0);
+  const spend = Number(ins.spend || 0);
+  const purchasesCount = purchases ? Number(purchases.value || 0) : 0;
+  const revenue = purchaseValue ? Number(purchaseValue.value || 0) : 0;
+
+  // video_3_sec_watched_actions: viewers que miraron >=3s. Dividido por
+  // impressions da el thumb-stop rate — el indicador más predictivo de
+  // calidad del hook en video.
+  const video3sArr = ins.video_3_sec_watched_actions || [];
+  const video3sTotal = video3sArr.reduce((sum, a) => sum + Number(a.value || 0), 0);
+  const thumbStopRate = impressions > 0 ? (video3sTotal / impressions) * 100 : 0;
+
+  return {
+    impressions,
+    clicks: Number(ins.clicks || 0),
+    ctr: Number(ins.ctr || 0),
+    spend,
+    cpc: Number(ins.cpc || 0),
+    cpm: Number(ins.cpm || 0),
+    reach: Number(ins.reach || 0),
+    frequency: Number(ins.frequency || 0),
+    purchases: purchasesCount,
+    revenue,
+    // Métricas derivadas — calculamos nosotros (Meta no las manda formateadas).
+    roas: spend > 0 ? revenue / spend : 0,                    // return on ad spend
+    cpa: purchasesCount > 0 ? spend / purchasesCount : 0,     // cost per acquisition
+    thumbStopRate,                                             // % que ven ≥3s (video)
+    video3sViews: video3sTotal,
+  };
+}
+
+// Mínimo de impressions por período para que el CTR sea estadísticamente
+// significativo. Abajo de 1000 imp, CTR es ruido — un solo click cambia %
+// demasiado. En DTC con targeting apretado, 1000 imp equivale a ~24-48h de
+// runtime normal en un set activo.
+const MIN_IMPRESSIONS_FOR_FATIGUE = 1000;
+
+// Calcula el estado de fatigue comparando las métricas del último 14d con
+// los 14d previos (days -28 a -14). Ventana más larga que 7d vs 7d porque
+// en DTC los creativos viven 60-90 días — 7d es ruido, 14d captura la
+// tendencia real sin reaccionar a picos puntuales.
+//
+//   healthy   → CTR estable o subiendo
+//   warming   → CTR bajó algo pero spend sigue subiendo (escala normal)
+//   fatiguing → CTR cayó > 20% respecto al período anterior
+//   dying     → CTR cayó > 40% O > 20% con freq > 4 (audiencia quemada)
+//   new       → no hay datos suficientes (<1000 imp en algún período)
+//
+// Ajustes por audienceSegment:
+//   - retargeting (warm): CTR 2-5% es normal, tolera más freq (5-8) antes
+//     de quemarse. Pero cuando fatiga, fatiga rápido.
+//   - prospecting (cold): CTR 0.8-1.5% es normal, freq >4 quema rápido.
+//     Threshold de fatigue más estricto (cae cualquier cosa → reaccionar).
+function computeFatigue(recent, prev, opts = {}) {
+  const { audienceSegment = 'prospecting' } = opts;
+  const freqThreshold = audienceSegment === 'retargeting' ? 6 : 4;
+  if (!recent || recent.impressions < MIN_IMPRESSIONS_FOR_FATIGUE) {
+    return { status: 'new', reason: `Aún no hay datos suficientes (${recent?.impressions || 0} imp · mín ${MIN_IMPRESSIONS_FOR_FATIGUE})` };
+  }
+  if (!prev || prev.impressions < MIN_IMPRESSIONS_FOR_FATIGUE) {
+    return { status: 'new', reason: `Sin período previo significativo para comparar (${prev?.impressions || 0} imp)` };
+  }
+
+  const ctrRecent = recent.ctr;
+  const ctrPrev = prev.ctr;
+  if (ctrPrev === 0) return { status: 'new', reason: 'CTR previo inválido' };
+
+  const ctrChangePct = Math.round(((ctrRecent - ctrPrev) / ctrPrev) * 100);
+  const freqOverload = recent.frequency > freqThreshold;
+
+  // ROAS change — señal secundaria pero muy fuerte. Si ROAS cae mientras
+  // CTR se mantiene, puede ser audience decay (los que clickean compran menos).
+  let roasChangePct = null;
+  if (prev.roas > 0 && recent.roas >= 0) {
+    roasChangePct = Math.round(((recent.roas - prev.roas) / prev.roas) * 100);
+  }
+  const roasCollapse = roasChangePct != null && roasChangePct < -30;
+
+  let status = 'healthy';
+  let reason = `CTR estable (${ctrChangePct >= 0 ? '+' : ''}${ctrChangePct}%) · ROAS ${recent.roas.toFixed(2)}`;
+
+  if (ctrChangePct < -40 || (ctrChangePct < -20 && freqOverload)) {
+    status = 'dying';
+    reason = `CTR cayó ${Math.abs(ctrChangePct)}% vs 14d previos · freq ${recent.frequency.toFixed(1)} — audiencia quemada`;
+  } else if (ctrChangePct < -20 || roasCollapse) {
+    status = 'fatiguing';
+    if (roasCollapse && ctrChangePct >= -20) {
+      reason = `ROAS cayó ${Math.abs(roasChangePct)}% — los que clickean ya no compran`;
+    } else {
+      reason = `CTR cayó ${Math.abs(ctrChangePct)}% vs 14d previos` + (roasCollapse ? ` + ROAS ${Math.abs(roasChangePct)}%` : '');
+    }
+  } else if (ctrChangePct < -5 && recent.spend > prev.spend * 1.1) {
+    status = 'warming';
+    reason = `CTR bajó ${Math.abs(ctrChangePct)}% pero spend subió — normal al escalar`;
+  }
+
+  return {
+    status,
+    reason,
+    audienceSegment,
+    ctrRecent, ctrPrev, ctrChangePct,
+    roasRecent: recent.roas,
+    roasPrev: prev.roas,
+    roasChangePct,
+    cpaRecent: recent.cpa,
+    frequencyRecent: recent.frequency,
+    thumbStopRate: recent.thumbStopRate,
+  };
+}
+
+// Formato "YYYY-MM-DD" para rangos custom en Meta API.
+function ymd(d) {
+  return d.toISOString().slice(0, 10);
+}
+
+// Devuelve los ads activos de una ad account con su creativo + insights.
+// Trae 2 rangos de insights (últimos 7 días y los 7 días previos a ese) y
+// computa estado de fatigue por ad. Usado para que el generador priorice
+// iteraciones sobre creativos que están fatigando.
+async function handleAdsWithInsights(req, res) {
+  if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
+  const session = readMetaCookie(req);
+  if (!session?.accessToken) return respondJSON(res, 401, { error: 'Meta no conectado' });
+
+  const origin = getOrigin(req);
+  const url = new URL(req.url, origin);
+  const accountId = url.searchParams.get('account_id');
+  const limit = Math.min(Number(url.searchParams.get('limit') || 50), 100);
+
+  if (!accountId) return respondJSON(res, 400, { error: 'Falta account_id (con prefijo act_)' });
+
+  // Ventanas de comparación: últimos 14d vs 14d previos (días -28 a -14).
+  // En DTC los creativos viven 60-90 días — 7d es muy ruidoso, 14d captura
+  // tendencia real con buffer de significancia estadística.
+  const now = new Date();
+  const recentSince = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+  const recentRange = JSON.stringify({ since: ymd(recentSince), until: ymd(now) });
+  const prevSince = new Date(now.getTime() - 28 * 24 * 60 * 60 * 1000);
+  const prevUntil = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+  const prevRange = JSON.stringify({ since: ymd(prevSince), until: ymd(prevUntil) });
+
+  try {
+    // Un solo call a Graph API con dos expansiones de insights.
+    const data = await graphGet(`${accountId}/ads`, session.accessToken, {
+      fields: [
+        'id,name,status,effective_status,created_time,updated_time',
+        `campaign{id,name,objective}`,
+        `adset{id,name,optimization_goal,targeting}`,
+        `creative{id,name,title,body,thumbnail_url,image_url,video_id,object_story_spec,effective_object_story_id}`,
+        `insights.time_range(${recentRange}).as(recent){impressions,clicks,ctr,spend,cpc,cpm,actions,action_values,reach,frequency,video_3_sec_watched_actions}`,
+        `insights.time_range(${prevRange}).as(previous){impressions,clicks,ctr,spend,cpc,cpm,actions,action_values,reach,frequency,video_3_sec_watched_actions}`,
+      ].join(','),
+      limit,
+      effective_status: JSON.stringify(['ACTIVE', 'PAUSED']),
+    });
+
+    const ads = (data.data || []).map(ad => {
+      const creative = ad.creative || {};
+      const campaign = ad.campaign || {};
+      const adset = ad.adset || {};
+      const recent = parseInsights(ad.recent?.data?.[0]);
+      const previous = parseInsights(ad.previous?.data?.[0]);
+
+      // Audience segment: prospecting (cold) vs retargeting (warm).
+      // Heurística: si el targeting tiene custom_audiences → retargeting.
+      // Si no, prospecting. Se usa para benchmarks diferentes de fatigue.
+      const targeting = adset.targeting || {};
+      const hasCustomAudiences = Array.isArray(targeting.custom_audiences) && targeting.custom_audiences.length > 0;
+      const audienceSegment = hasCustomAudiences ? 'retargeting' : 'prospecting';
+
+      const fatigue = computeFatigue(recent, previous, { audienceSegment });
+
+      return {
+        id: ad.id,
+        name: ad.name,
+        status: ad.status,
+        effectiveStatus: ad.effective_status,
+        createdTime: ad.created_time,
+        updatedTime: ad.updated_time,
+        campaign: {
+          id: campaign.id || null,
+          name: campaign.name || null,
+          objective: campaign.objective || null,
+        },
+        adset: {
+          id: adset.id || null,
+          name: adset.name || null,
+          optimizationGoal: adset.optimization_goal || null,
+        },
+        audienceSegment,
+        creative: {
+          id: creative.id,
+          name: creative.name,
+          title: creative.title,
+          body: creative.body,
+          thumbnailUrl: creative.thumbnail_url,
+          imageUrl: creative.image_url,
+          videoId: creative.video_id || null,
+          storyId: creative.effective_object_story_id || null,
+        },
+        insights: recent,
+        insightsPrev: previous,
+        fatigue,
+      };
+    });
+
+    // Contador de cada status para que el front muestre un resumen.
+    const fatigueSummary = ads.reduce((acc, a) => {
+      const s = a.fatigue?.status || 'new';
+      acc[s] = (acc[s] || 0) + 1;
+      return acc;
+    }, {});
+
+    return respondJSON(res, 200, {
+      accountId,
+      total: ads.length,
+      fatigueSummary,
+      ads,
+    });
+  } catch (err) {
+    return respondJSON(res, err.status || 502, { error: err.message });
+  }
+}
+
+// Performance de UN ad específico — usado cuando el user marca una idea
+// de la Bandeja como "usada" con un adId real, para cerrar el loop de
+// aprendizaje (hipótesis vs resultado real).
+async function handleAdPerformance(req, res) {
+  if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
+  const session = readMetaCookie(req);
+  if (!session?.accessToken) return respondJSON(res, 401, { error: 'Meta no conectado' });
+
+  const origin = getOrigin(req);
+  const url = new URL(req.url, origin);
+  const adId = url.searchParams.get('ad_id');
+  if (!adId) return respondJSON(res, 400, { error: 'Falta ad_id' });
+
+  try {
+    // Metadata del ad + insights desde el lanzamiento + insights 14d recientes.
+    const data = await graphGet(adId, session.accessToken, {
+      fields: [
+        'id,name,status,effective_status,created_time,campaign{id,name,objective}',
+        `creative{id,name,title,body,thumbnail_url,image_url}`,
+        `insights.date_preset(maximum).as(lifetime){impressions,clicks,ctr,spend,cpc,cpm,actions,action_values,reach,frequency,video_3_sec_watched_actions}`,
+        `insights.date_preset(last_14d).as(recent){impressions,clicks,ctr,spend,cpc,cpm,actions,action_values,reach,frequency,video_3_sec_watched_actions}`,
+      ].join(','),
+    });
+
+    const lifetime = parseInsights(data.lifetime?.data?.[0]);
+    const recent = parseInsights(data.recent?.data?.[0]);
+
+    return respondJSON(res, 200, {
+      ad: {
+        id: data.id,
+        name: data.name,
+        status: data.status,
+        effectiveStatus: data.effective_status,
+        createdTime: data.created_time,
+        campaign: data.campaign ? {
+          id: data.campaign.id, name: data.campaign.name, objective: data.campaign.objective,
+        } : null,
+        creative: data.creative ? {
+          id: data.creative.id, name: data.creative.name,
+          title: data.creative.title, body: data.creative.body,
+          thumbnailUrl: data.creative.thumbnail_url, imageUrl: data.creative.image_url,
+        } : null,
+      },
+      lifetime,
+      recent,
+      fetchedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    return respondJSON(res, err.status || 502, { error: err.message });
+  }
+}
+
 // --- dispatcher ---
 
 const actions = {
@@ -193,6 +515,9 @@ const actions = {
   callback: handleCallback,
   disconnect: handleDisconnect,
   me: handleMe,
+  'ad-accounts': handleAdAccounts,
+  'ads-with-insights': handleAdsWithInsights,
+  'ad-performance': handleAdPerformance,
 };
 
 export default async function handler(req, res) {

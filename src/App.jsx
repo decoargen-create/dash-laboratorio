@@ -7,7 +7,7 @@ import {
   Menu, LogOut, Home, ShoppingCart, Package, Users, AlertCircle, CreditCard,
   UserCheck, TrendingUp, Plus, Filter, Eye, Edit2, Trash2, Calendar, DollarSign,
   Moon, Sun, ChevronDown, ChevronRight, Search, X, Command, Check, Bell,
-  AlignJustify, LayoutGrid, Columns3, Sparkles, Bot, Zap, Activity, FileText, Settings, Loader2, Calculator, Copy, Save, RotateCcw, Target
+  AlignJustify, LayoutGrid, Columns3, Sparkles, Bot, Zap, Activity, FileText, Settings, Loader2, Calculator, Copy, Save, RotateCcw, Target, Play, Inbox
 } from 'lucide-react';
 import { VioraLogo, VioraMark } from './logo.jsx';
 import LandingPage from './LandingPage.jsx';
@@ -15,6 +15,10 @@ import ChatbotWidget from './ChatbotWidget.jsx';
 import BocetosSection from './Bocetos.jsx';
 import MarketingSection from './Marketing.jsx';
 import CompetenciaSection from './Competencia.jsx';
+import GastosStackSection from './GastosStack.jsx';
+import MetaConnectBanner from './MetaConnectBanner.jsx';
+import ArranqueSection from './Arranque.jsx';
+import BandejaSection from './Bandeja.jsx';
 import { generateCSV, downloadCSV, parseCSV, toNumber, toBool } from './csv.js';
 
 // Estados del pipeline de producción de una orden
@@ -572,7 +576,7 @@ const PLATFORMS = [
     sidebarGradient: 'from-purple-900 via-purple-700 to-violet-800',
     badgeBg: 'bg-gradient-to-br from-purple-600 to-violet-500',
     badgeText: 'text-white',
-    defaultSection: 'mk-docs',
+    defaultSection: 'mk-arranque',
   },
 ];
 
@@ -1977,8 +1981,11 @@ function AppShell({ onExit }) {
           )}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (
             <>
-              <NavItem icon={FileText} label="Documentación" section="mk-docs" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              <NavItem icon={Play} label="Arranque" section="mk-arranque" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              <NavItem icon={Inbox} label="Bandeja de ideas" section="mk-bandeja" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={Target} label="Competencia" section="mk-competencia" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              <NavItem icon={FileText} label="Documentación" section="mk-docs" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              <NavItem icon={DollarSign} label="Gastos del stack" section="mk-gastos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
             </>
           )}
           {currentUser.role !== 'admin' && (
@@ -2040,7 +2047,13 @@ function AppShell({ onExit }) {
           {currentUser.role === 'admin' && currentPlatform === 'viora' && currentSection === 'datos' && <DatosSection state={state} dispatch={dispatch} addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'senydrop' && currentSection === 'seny-productos' && <BocetosSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'metaads' && <MetaAdsPlaceholder section={currentSection} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (
+            <MetaConnectBanner returnTo={`/acceso?section=${currentSection}`} />
+          )}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-arranque' && <ArranqueSection addToast={addToast} onGoToSection={setCurrentSection} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-bandeja' && <BandejaSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-competencia' && <CompetenciaSection addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-gastos' && <GastosStackSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-docs' && (
             <MarketingSection
               addToast={addToast}
@@ -8314,8 +8327,11 @@ function getSectionTitle(user, section) {
     'meta-campanas': 'Meta Ads · Campañas',
     'meta-metricas': 'Meta Ads · Métricas',
     'meta-config': 'Meta Ads · Conexión',
+    'mk-arranque': 'Marketing · Arranque',
+    'mk-bandeja': 'Marketing · Bandeja de ideas',
     'mk-docs': 'Marketing · Documentación de producto',
     'mk-competencia': 'Marketing · Competencia',
+    'mk-gastos': 'Marketing · Gastos del stack',
   };
   const mentor = {
     inicio: 'Inicio',

@@ -138,15 +138,20 @@ function similarBodies(a, b) {
 
 // Score compuesto del ad. Mayor = más "ganador confirmado".
 // Señales:
-//  - daysRunning (base)
-//  - multiplatform (Meta confía en distribuirlo)
-//  - variantes (están iterando = están escalando)
-//  - pageLikeCount (marca con tracción)
-//  - penalty si pausado temprano
+//  - daysRunning (base) — cuántos días corriendo
+//  - multiplatform (+20) — Meta lo distribuye en FB+IG+Audience Network
+//  - variantes escalado:
+//      4+ variantes (+60) — señal FORTÍSIMA, están escalando activamente
+//      2-3 variantes (+30) — están iterando, ganador probable
+//      1 variante (+10) — chispa inicial
+//  - pageLikeCount (log, *2) — marca establecida
+//  - penalty si pausado temprano (<5d) — posible loser
+//  - bonus de recencia: ads nuevos (<7d) con 2+ variantes ya tienen bonus
+//    porque la marca está apostando fuerte aunque aún no tengan 17d
 //
-// Threshold de "isWinner" (según criterio del user):
-//   daysRunning >= 17  ó  variantes >= 2
-// Un ad con esos dos disparadores se marca como ganador confirmado.
+// Threshold de "isWinner":
+//   daysRunning >= 17  OR  variantes >= 2
+// (El criterio del user, se mantiene — el score afina la relevancia.)
 const WINNER_DAYS_THRESHOLD = 17;
 const WINNER_VARIANTS_THRESHOLD = 2;
 
@@ -157,7 +162,11 @@ export function scoreAd(ad, allAdsOfSamePage = []) {
   const variantes = allAdsOfSamePage.filter(a =>
     a.id !== ad.id && similarBodies(a.body, ad.body)
   ).length;
-  if (variantes >= 2) score += 30;
+  // Escalado de variantes — refleja que 4+ es señal mucho más fuerte
+  // que 2-3. En realidad pocos competidores llegan a 4+ variantes si no
+  // están seguros del ganador.
+  if (variantes >= 4) score += 60;
+  else if (variantes >= 2) score += 30;
   else if (variantes >= 1) score += 10;
 
   score += Math.log10((ad.pageLikeCount || 0) + 1) * 2;
@@ -168,10 +177,22 @@ export function scoreAd(ad, allAdsOfSamePage = []) {
   const isWinner = (ad.daysRunning || 0) >= WINNER_DAYS_THRESHOLD ||
                    variantes >= WINNER_VARIANTS_THRESHOLD;
 
+  // Tier del ganador — para que el front pueda priorizar visualmente.
+  // "strong" = cumple ambos criterios o tiene 4+ variantes.
+  // "confirmed" = cumple al menos uno.
+  // null = no es ganador.
+  let winnerTier = null;
+  if (isWinner) {
+    const bothCriteria = (ad.daysRunning || 0) >= WINNER_DAYS_THRESHOLD && variantes >= WINNER_VARIANTS_THRESHOLD;
+    const heavyIteration = variantes >= 4;
+    winnerTier = (bothCriteria || heavyIteration) ? 'strong' : 'confirmed';
+  }
+
   return {
     score: Math.round(score * 10) / 10,
     variantes,
     isWinner,
+    winnerTier,
   };
 }
 

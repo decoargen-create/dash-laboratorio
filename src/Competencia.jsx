@@ -7,9 +7,11 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  Plus, Trash2, ExternalLink, RefreshCw, Loader2, X, Check,
-  Target, Package, Search, Copy, ChevronDown, AlertTriangle, Zap,
+  Plus, Trash2, ExternalLink, RefreshCw, Loader2, X,
+  Target, Search, ChevronDown, AlertTriangle,
+  Sparkles, Volume2,
 } from 'lucide-react';
+import { ideaFromDeepAnalysis } from './bandejaStore.js';
 
 const STORAGE_KEY = 'viora-marketing-competidores-v1';
 
@@ -67,28 +69,12 @@ export default function CompetenciaSection({ addToast }) {
   const [scraping, setScraping] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
   const [checkingId, setCheckingId] = useState(null);
-  const [metaConn, setMetaConn] = useState({ loading: true, connected: false, user: null });
+  // Análisis profundo: { [adId]: { analysis, transcript, transcriptStatus, generatedAt } }
+  // Guardado dentro de cada competidor para que persista con el resto.
+  const [deepLoadingId, setDeepLoadingId] = useState(null); // adId en análisis
+  const [deepOpen, setDeepOpen] = useState(null); // { compId, adId } para modal
 
   useEffect(() => { saveCompetidores(competidores); }, [competidores]);
-
-  // Estado de conexión Meta para mostrar widget + habilitar "Traer ads".
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const r = await fetch('/api/meta/me');
-        const d = await r.json();
-        if (!cancelled) setMetaConn({ loading: false, connected: !!d.connected, user: d.user || null });
-      } catch {
-        if (!cancelled) setMetaConn({ loading: false, connected: false, user: null });
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
-
-  const handleConnectMeta = () => {
-    window.location.href = `/api/meta/connect?returnTo=${encodeURIComponent('/acceso?section=mk-competencia')}`;
-  };
 
   const handleAdd = async () => {
     const nombre = form.nombre.trim();
@@ -221,6 +207,60 @@ export default function CompetenciaSection({ addToast }) {
     setCompetidores(prev => prev.map(c => c.id === id ? { ...c, notas } : c));
   };
 
+  // Profundizar un ad ganador: manda el ad a /api/marketing/deep-analyze
+  // (Claude Vision + Whisper) y cachea la respuesta dentro del competidor.
+  const handleDeepAnalyze = async (comp, ad, { force = false } = {}) => {
+    const cached = comp.adsAnalysis?.[ad.id];
+    if (cached && !force) {
+      setDeepOpen({ compId: comp.id, adId: ad.id });
+      return;
+    }
+    setDeepLoadingId(ad.id);
+    try {
+      const resp = await fetch('/api/marketing/deep-analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ad: {
+            id: ad.id, body: ad.body, headline: ad.headline,
+            cta: ad.cta, ctaLink: ad.ctaLink, pageName: ad.pageName,
+            imageUrls: ad.imageUrls || [], videoUrls: ad.videoUrls || [],
+            daysRunning: ad.daysRunning, platforms: ad.platforms || [],
+            isMultiplatform: ad.isMultiplatform,
+            score: ad.score, variantes: ad.variantes,
+          },
+          transcribe: true,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+
+      setCompetidores(prev => prev.map(c =>
+        c.id === comp.id ? {
+          ...c,
+          adsAnalysis: {
+            ...(c.adsAnalysis || {}),
+            [ad.id]: {
+              analysis: data.analysis,
+              transcript: data.transcript,
+              transcriptStatus: data.transcriptStatus,
+              model: data.model,
+              generatedAt: data.generatedAt,
+            },
+          },
+        } : c
+      ));
+      // Empuja la idea a la Bandeja (dedupea por adId — no duplica si ya existía).
+      ideaFromDeepAnalysis({ analysis: data.analysis, transcript: data.transcript, ad, competidor: comp });
+      setDeepOpen({ compId: comp.id, adId: ad.id });
+      addToast?.({ type: 'success', message: 'Análisis profundo listo · idea agregada a la Bandeja' });
+    } catch (err) {
+      addToast?.({ type: 'error', message: `No pude analizar: ${err.message}` });
+    } finally {
+      setDeepLoadingId(null);
+    }
+  };
+
   // Ganadores según el backend: isWinner = daysRunning >= 17 OR variantes >= 2.
   // Fallback (ads viejos con shape previo sin isWinner): usar el criterio
   // histórico (daysRunning >= 7) así no quedan invisibles.
@@ -261,36 +301,6 @@ export default function CompetenciaSection({ addToast }) {
           <Plus size={16} /> Agregar competidor
         </button>
       </div>
-
-      {/* Widget de conexión Meta */}
-      {!metaConn.loading && (
-        metaConn.connected ? (
-          <div className="flex items-center gap-2 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg">
-            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <p className="text-xs text-emerald-800 dark:text-emerald-200">
-              <span className="font-semibold">Meta conectado</span>
-              {metaConn.user?.name && <> como <span className="font-semibold">{metaConn.user.name}</span></>}.
-              Podés traer los ads directamente desde cada competidor.
-            </p>
-          </div>
-        ) : (
-          <div className="flex items-center gap-3 px-4 py-3 bg-gradient-to-br from-blue-50 to-white dark:from-blue-900/20 dark:to-gray-800 border border-blue-200 dark:border-blue-800 rounded-lg">
-            <div className="shrink-0 w-8 h-8 rounded-lg bg-gradient-to-br from-[#0668E1] to-[#1877F2] flex items-center justify-center text-white">
-              <Zap size={14} />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-bold text-gray-900 dark:text-gray-100">Conectá Meta para auto-traer ads</p>
-              <p className="text-[11px] text-gray-600 dark:text-gray-300">Sin Meta igual podés abrir Ad Library manualmente. Conectado, los ads se sincronizan solos cada 6h.</p>
-            </div>
-            <button
-              onClick={handleConnectMeta}
-              className="shrink-0 inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-[#0668E1] to-[#1877F2] rounded-md hover:from-[#0556BE] hover:to-[#1668D8] transition"
-            >
-              <Zap size={12} /> Conectar
-            </button>
-          </div>
-        )
-      )}
 
       {/* Form agregar */}
       {showForm && (
@@ -475,9 +485,17 @@ export default function CompetenciaSection({ addToast }) {
                                     {/* Badges */}
                                     <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
                                       {ad.isWinner && (
-                                        <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded">
-                                          🏆 Winner
-                                        </span>
+                                        ad.winnerTier === 'strong' ? (
+                                          <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-bold bg-gradient-to-r from-amber-200 to-yellow-300 dark:from-amber-900/60 dark:to-yellow-800/60 text-amber-900 dark:text-amber-200 rounded shadow-sm"
+                                            title="Winner FUERTE: cumple ambos criterios (≥17d + ≥2 variantes) o tiene 4+ variantes — están escalándolo en serio">
+                                            🏆🔥 Winner fuerte
+                                          </span>
+                                        ) : (
+                                          <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded"
+                                            title="Winner confirmado: cumple ≥17d OR ≥2 variantes">
+                                            🏆 Winner
+                                          </span>
+                                        )
                                       )}
                                       {typeof ad.score === 'number' && (
                                         <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-mono bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded">
@@ -503,18 +521,41 @@ export default function CompetenciaSection({ addToast }) {
                                     <p className="text-[9px] text-gray-400 uppercase">corriendo</p>
                                   </div>
                                 </div>
-                                <div className="flex items-center gap-2 mt-2 text-[10px] text-gray-500 dark:text-gray-400">
+                                <div className="flex items-center gap-2 mt-2 text-[10px] text-gray-500 dark:text-gray-400 flex-wrap">
                                   {ad.platforms?.length > 0 && (
                                     <span className="inline-flex items-center gap-0.5">
                                       {ad.platforms.join(' · ')}
                                       {ad.isMultiplatform && <span className="text-emerald-600 font-bold ml-1">multi ✓</span>}
                                     </span>
                                   )}
-                                  {ad.snapshotUrl && (
-                                    <a href={ad.snapshotUrl} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline ml-auto">
-                                      Ver en Ad Library →
-                                    </a>
-                                  )}
+                                  <div className="ml-auto flex items-center gap-2">
+                                    {c.adsAnalysis?.[ad.id] ? (
+                                      <button
+                                        onClick={() => setDeepOpen({ compId: c.id, adId: ad.id })}
+                                        className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold text-purple-700 dark:text-purple-300 bg-purple-100 dark:bg-purple-900/40 rounded hover:bg-purple-200 dark:hover:bg-purple-900/60 transition"
+                                        title="Ver análisis profundo guardado"
+                                      >
+                                        <Sparkles size={10} /> Analizado
+                                      </button>
+                                    ) : (
+                                      <button
+                                        onClick={() => handleDeepAnalyze(c, ad)}
+                                        disabled={deepLoadingId === ad.id}
+                                        className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold text-white bg-gradient-to-br from-purple-600 to-violet-600 rounded hover:from-purple-700 hover:to-violet-700 transition disabled:opacity-40"
+                                        title="Profundizar: Claude Vision + Whisper (si hay video) → insights accionables"
+                                      >
+                                        {deepLoadingId === ad.id
+                                          ? <><Loader2 size={10} className="animate-spin" /> Analizando…</>
+                                          : <><Sparkles size={10} /> Profundizar</>
+                                        }
+                                      </button>
+                                    )}
+                                    {ad.snapshotUrl && (
+                                      <a href={ad.snapshotUrl} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">
+                                        Ver en Ad Library →
+                                      </a>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
                             ))}
@@ -541,6 +582,157 @@ export default function CompetenciaSection({ addToast }) {
           })}
         </div>
       )}
+
+      {/* Modal de análisis profundo */}
+      {deepOpen && (() => {
+        const comp = competidores.find(c => c.id === deepOpen.compId);
+        const ad = comp?.ads?.find(a => a.id === deepOpen.adId);
+        const data = comp?.adsAnalysis?.[deepOpen.adId];
+        if (!comp || !ad || !data) return null;
+        const { analysis, transcript, transcriptStatus, generatedAt } = data;
+        return (
+          <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in" onClick={() => setDeepOpen(null)}>
+            <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto border border-gray-200 dark:border-gray-700" onClick={e => e.stopPropagation()}>
+              <div className="sticky top-0 bg-gradient-to-r from-purple-600 to-violet-600 px-5 py-3 flex items-center justify-between">
+                <div className="flex items-center gap-2 text-white">
+                  <Sparkles size={18} />
+                  <h3 className="font-bold">Análisis profundo · {comp.nombre}</h3>
+                </div>
+                <button onClick={() => setDeepOpen(null)} className="p-1 hover:bg-white/20 rounded text-white">
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="p-5 space-y-4">
+                {/* Header con preview del ad que se analizó */}
+                <div className="flex gap-3 pb-3 border-b border-gray-100 dark:border-gray-800">
+                  {ad.imageUrls?.[0] && (
+                    <img src={ad.imageUrls[0]} alt="" className="w-20 h-20 rounded-lg object-cover bg-gray-100 dark:bg-gray-800 shrink-0" onError={e => { e.target.style.display = 'none'; }} />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] font-mono text-gray-400">{ad.daysRunning || 0}d corriendo · {new Date(generatedAt).toLocaleString('es-AR')}</p>
+                    <p className="text-[11px] text-gray-700 dark:text-gray-300 mt-1 line-clamp-3">
+                      {(ad.body || '(sin copy)').slice(0, 200)}{(ad.body || '').length > 200 && '…'}
+                    </p>
+                    <TranscriptBadge status={transcriptStatus} />
+                  </div>
+                </div>
+
+                <Section title="🎯 Hooks (primeros 3 seg)" items={analysis.hooks} />
+                <SectionText title="📐 Ángulo" text={analysis.angle} />
+                <Section title="⚡ Triggers emocionales" items={analysis.triggers} />
+                <SectionText title="👤 Audience" text={analysis.audience} />
+                <Section title="💰 Ofertas" items={analysis.offers} />
+
+                <CtaSection cta={analysis.cta} />
+
+                <Section title="🛡️ Objeciones que aborda" items={analysis.objections} />
+                <Section title="📝 Patrones de copy reutilizables" items={analysis.copy_patterns} />
+                <SectionText title="🎨 Visual" text={analysis.visual} />
+                <SectionText title="✨ Por qué funciona" text={analysis.why_it_works} highlight />
+
+                {transcript && (
+                  <details className="bg-gray-50 dark:bg-gray-800/50 rounded-md">
+                    <summary className="cursor-pointer px-3 py-2 text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
+                      Transcripción del video
+                    </summary>
+                    <p className="px-3 pb-3 text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{transcript}</p>
+                  </details>
+                )}
+
+                <div className="flex items-center justify-between pt-2 border-t border-gray-100 dark:border-gray-800">
+                  <button
+                    onClick={() => handleDeepAnalyze(comp, ad, { force: true })}
+                    disabled={deepLoadingId === ad.id}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 transition disabled:opacity-40"
+                  >
+                    {deepLoadingId === ad.id ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} Re-analizar
+                  </button>
+                  {ad.snapshotUrl && (
+                    <a href={ad.snapshotUrl} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline">
+                      Ver original en Ad Library →
+                    </a>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
+}
+
+function Section({ title, items }) {
+  if (!Array.isArray(items) || items.length === 0) return null;
+  return (
+    <div>
+      <h4 className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1.5">{title}</h4>
+      <ul className="text-xs text-gray-700 dark:text-gray-300 space-y-1">
+        {items.map((item, i) => (
+          <li key={i} className="flex gap-2">
+            <span className="text-purple-500">•</span>
+            <span>{item}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function SectionText({ title, text, highlight = false }) {
+  if (!text) return null;
+  return (
+    <div>
+      <h4 className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1.5">{title}</h4>
+      <p className={`text-xs leading-relaxed ${highlight ? 'bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-md px-3 py-2 text-purple-900 dark:text-purple-200' : 'text-gray-700 dark:text-gray-300'}`}>
+        {text}
+      </p>
+    </div>
+  );
+}
+
+// Claude debería devolver cta como { texto, ubicacion, urgencia } pero a veces
+// devuelve un string. Toleramos ambos formatos.
+function CtaSection({ cta }) {
+  if (!cta) return null;
+  const isString = typeof cta === 'string';
+  const hasFields = !isString && (cta.texto || cta.ubicacion || cta.urgencia);
+  if (!isString && !hasFields) return null;
+  return (
+    <div>
+      <h4 className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1.5">🖱️ CTA</h4>
+      <div className="text-xs text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800/50 rounded-md px-3 py-2 space-y-1">
+        {isString ? (
+          <p>{cta}</p>
+        ) : (
+          <>
+            {cta.texto && <p><strong>Texto:</strong> {cta.texto}</p>}
+            {cta.ubicacion && <p><strong>Ubicación:</strong> {cta.ubicacion}</p>}
+            {cta.urgencia && <p><strong>Urgencia:</strong> {cta.urgencia}</p>}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Muestra el estado de la transcripción con copy rioplatense claro.
+function TranscriptBadge({ status }) {
+  if (!status || status === 'no_video') {
+    return <p className="text-[10px] text-gray-400 mt-1 inline-flex items-center gap-1"><Volume2 size={10} /> Ad sin video</p>;
+  }
+  if (status === 'ok') {
+    return <p className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-1 inline-flex items-center gap-1"><Volume2 size={10} /> Video transcrito con Whisper</p>;
+  }
+  if (status === 'no_openai_key') {
+    return <p className="text-[10px] text-amber-600 mt-1 inline-flex items-center gap-1"><AlertTriangle size={10} /> Falta OPENAI_API_KEY — no se transcribió el video</p>;
+  }
+  if (status.startsWith('skipped:')) {
+    return <p className="text-[10px] text-gray-500 mt-1 inline-flex items-center gap-1"><AlertTriangle size={10} /> {status.replace('skipped:', '').trim()}</p>;
+  }
+  if (status.startsWith('error:')) {
+    return <p className="text-[10px] text-red-500 mt-1 inline-flex items-center gap-1"><AlertTriangle size={10} /> Transcripción falló: {status.replace('error:', '').trim()}</p>;
+  }
+  return null;
 }

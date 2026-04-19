@@ -15,6 +15,19 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Allura&family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <title>Laboratorio Viora</title>
+    <script>
+      // Aplica dark mode antes del render para evitar flash de tema claro
+      // cuando el user tiene preferencia oscura (propia o del sistema).
+      (function () {
+        try {
+          var stored = localStorage.getItem('dash-dark-mode');
+          var isDark = stored === null
+            ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)
+            : stored === 'true';
+          if (isDark) document.documentElement.classList.add('dark');
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

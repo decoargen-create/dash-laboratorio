@@ -9,6 +9,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Plus, Trash2, ExternalLink, RefreshCw, Loader2, X, Check,
   Target, Package, Search, Copy, ChevronDown, AlertTriangle, Zap,
+  Sparkles, Eye, Volume2,
 } from 'lucide-react';
 
 const STORAGE_KEY = 'viora-marketing-competidores-v1';
@@ -68,6 +69,10 @@ export default function CompetenciaSection({ addToast }) {
   const [expandedId, setExpandedId] = useState(null);
   const [checkingId, setCheckingId] = useState(null);
   const [metaConn, setMetaConn] = useState({ loading: true, connected: false, user: null });
+  // Análisis profundo: { [adId]: { analysis, transcript, transcriptStatus, generatedAt } }
+  // Guardado dentro de cada competidor para que persista con el resto.
+  const [deepLoadingId, setDeepLoadingId] = useState(null); // adId en análisis
+  const [deepOpen, setDeepOpen] = useState(null); // { compId, adId } para modal
 
   useEffect(() => { saveCompetidores(competidores); }, [competidores]);
 
@@ -219,6 +224,58 @@ export default function CompetenciaSection({ addToast }) {
 
   const handleUpdateNotas = (id, notas) => {
     setCompetidores(prev => prev.map(c => c.id === id ? { ...c, notas } : c));
+  };
+
+  // Profundizar un ad ganador: manda el ad a /api/marketing/deep-analyze
+  // (Claude Vision + Whisper) y cachea la respuesta dentro del competidor.
+  const handleDeepAnalyze = async (comp, ad, { force = false } = {}) => {
+    const cached = comp.adsAnalysis?.[ad.id];
+    if (cached && !force) {
+      setDeepOpen({ compId: comp.id, adId: ad.id });
+      return;
+    }
+    setDeepLoadingId(ad.id);
+    try {
+      const resp = await fetch('/api/marketing/deep-analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ad: {
+            id: ad.id, body: ad.body, headline: ad.headline,
+            cta: ad.cta, ctaLink: ad.ctaLink, pageName: ad.pageName,
+            imageUrls: ad.imageUrls || [], videoUrls: ad.videoUrls || [],
+            daysRunning: ad.daysRunning, platforms: ad.platforms || [],
+            isMultiplatform: ad.isMultiplatform,
+            score: ad.score, variantes: ad.variantes,
+          },
+          transcribe: true,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+
+      setCompetidores(prev => prev.map(c =>
+        c.id === comp.id ? {
+          ...c,
+          adsAnalysis: {
+            ...(c.adsAnalysis || {}),
+            [ad.id]: {
+              analysis: data.analysis,
+              transcript: data.transcript,
+              transcriptStatus: data.transcriptStatus,
+              model: data.model,
+              generatedAt: data.generatedAt,
+            },
+          },
+        } : c
+      ));
+      setDeepOpen({ compId: comp.id, adId: ad.id });
+      addToast?.({ type: 'success', message: 'Análisis profundo listo' });
+    } catch (err) {
+      addToast?.({ type: 'error', message: `No pude analizar: ${err.message}` });
+    } finally {
+      setDeepLoadingId(null);
+    }
   };
 
   // Ganadores según el backend: isWinner = daysRunning >= 17 OR variantes >= 2.
@@ -503,18 +560,41 @@ export default function CompetenciaSection({ addToast }) {
                                     <p className="text-[9px] text-gray-400 uppercase">corriendo</p>
                                   </div>
                                 </div>
-                                <div className="flex items-center gap-2 mt-2 text-[10px] text-gray-500 dark:text-gray-400">
+                                <div className="flex items-center gap-2 mt-2 text-[10px] text-gray-500 dark:text-gray-400 flex-wrap">
                                   {ad.platforms?.length > 0 && (
                                     <span className="inline-flex items-center gap-0.5">
                                       {ad.platforms.join(' · ')}
                                       {ad.isMultiplatform && <span className="text-emerald-600 font-bold ml-1">multi ✓</span>}
                                     </span>
                                   )}
-                                  {ad.snapshotUrl && (
-                                    <a href={ad.snapshotUrl} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline ml-auto">
-                                      Ver en Ad Library →
-                                    </a>
-                                  )}
+                                  <div className="ml-auto flex items-center gap-2">
+                                    {c.adsAnalysis?.[ad.id] ? (
+                                      <button
+                                        onClick={() => setDeepOpen({ compId: c.id, adId: ad.id })}
+                                        className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold text-purple-700 dark:text-purple-300 bg-purple-100 dark:bg-purple-900/40 rounded hover:bg-purple-200 dark:hover:bg-purple-900/60 transition"
+                                        title="Ver análisis profundo guardado"
+                                      >
+                                        <Sparkles size={10} /> Analizado
+                                      </button>
+                                    ) : (
+                                      <button
+                                        onClick={() => handleDeepAnalyze(c, ad)}
+                                        disabled={deepLoadingId === ad.id}
+                                        className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold text-white bg-gradient-to-br from-purple-600 to-violet-600 rounded hover:from-purple-700 hover:to-violet-700 transition disabled:opacity-40"
+                                        title="Profundizar: Claude Vision + Whisper (si hay video) → insights accionables"
+                                      >
+                                        {deepLoadingId === ad.id
+                                          ? <><Loader2 size={10} className="animate-spin" /> Analizando…</>
+                                          : <><Sparkles size={10} /> Profundizar</>
+                                        }
+                                      </button>
+                                    )}
+                                    {ad.snapshotUrl && (
+                                      <a href={ad.snapshotUrl} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">
+                                        Ver en Ad Library →
+                                      </a>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
                             ))}
@@ -541,6 +621,117 @@ export default function CompetenciaSection({ addToast }) {
           })}
         </div>
       )}
+
+      {/* Modal de análisis profundo */}
+      {deepOpen && (() => {
+        const comp = competidores.find(c => c.id === deepOpen.compId);
+        const ad = comp?.ads?.find(a => a.id === deepOpen.adId);
+        const data = comp?.adsAnalysis?.[deepOpen.adId];
+        if (!comp || !ad || !data) return null;
+        const { analysis, transcript, transcriptStatus, generatedAt } = data;
+        return (
+          <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in" onClick={() => setDeepOpen(null)}>
+            <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto border border-gray-200 dark:border-gray-700" onClick={e => e.stopPropagation()}>
+              <div className="sticky top-0 bg-gradient-to-r from-purple-600 to-violet-600 px-5 py-3 flex items-center justify-between">
+                <div className="flex items-center gap-2 text-white">
+                  <Sparkles size={18} />
+                  <h3 className="font-bold">Análisis profundo · {comp.nombre}</h3>
+                </div>
+                <button onClick={() => setDeepOpen(null)} className="p-1 hover:bg-white/20 rounded text-white">
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="p-5 space-y-4">
+                {/* Meta info */}
+                <div className="flex items-center gap-3 text-[10px] text-gray-500 dark:text-gray-400 pb-2 border-b border-gray-100 dark:border-gray-800">
+                  <span>{ad.daysRunning || 0}d corriendo</span>
+                  <span>·</span>
+                  <span>{new Date(generatedAt).toLocaleString('es-AR')}</span>
+                  {transcriptStatus === 'ok' && (
+                    <span className="ml-auto inline-flex items-center gap-1 text-emerald-600"><Volume2 size={10} /> transcrito</span>
+                  )}
+                </div>
+
+                <Section title="🎯 Hooks (primeros 3 seg)" items={analysis.hooks} />
+                <SectionText title="📐 Ángulo" text={analysis.angle} />
+                <Section title="⚡ Triggers emocionales" items={analysis.triggers} />
+                <SectionText title="👤 Audience" text={analysis.audience} />
+                <Section title="💰 Ofertas" items={analysis.offers} />
+
+                {analysis.cta && (
+                  <div>
+                    <h4 className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1.5">🖱️ CTA</h4>
+                    <div className="text-xs text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800/50 rounded-md px-3 py-2 space-y-1">
+                      {analysis.cta.texto && <p><strong>Texto:</strong> {analysis.cta.texto}</p>}
+                      {analysis.cta.ubicacion && <p><strong>Ubicación:</strong> {analysis.cta.ubicacion}</p>}
+                      {analysis.cta.urgencia && <p><strong>Urgencia:</strong> {analysis.cta.urgencia}</p>}
+                    </div>
+                  </div>
+                )}
+
+                <Section title="🛡️ Objeciones que aborda" items={analysis.objections} />
+                <Section title="📝 Patrones de copy reutilizables" items={analysis.copy_patterns} />
+                <SectionText title="🎨 Visual" text={analysis.visual} />
+                <SectionText title="✨ Por qué funciona" text={analysis.why_it_works} highlight />
+
+                {transcript && (
+                  <details className="bg-gray-50 dark:bg-gray-800/50 rounded-md">
+                    <summary className="cursor-pointer px-3 py-2 text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
+                      Transcripción del video
+                    </summary>
+                    <p className="px-3 pb-3 text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{transcript}</p>
+                  </details>
+                )}
+
+                <div className="flex items-center justify-between pt-2 border-t border-gray-100 dark:border-gray-800">
+                  <button
+                    onClick={() => handleDeepAnalyze(comp, ad, { force: true })}
+                    disabled={deepLoadingId === ad.id}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 transition disabled:opacity-40"
+                  >
+                    {deepLoadingId === ad.id ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} Re-analizar
+                  </button>
+                  {ad.snapshotUrl && (
+                    <a href={ad.snapshotUrl} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline">
+                      Ver original en Ad Library →
+                    </a>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
+function Section({ title, items }) {
+  if (!Array.isArray(items) || items.length === 0) return null;
+  return (
+    <div>
+      <h4 className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1.5">{title}</h4>
+      <ul className="text-xs text-gray-700 dark:text-gray-300 space-y-1">
+        {items.map((item, i) => (
+          <li key={i} className="flex gap-2">
+            <span className="text-purple-500">•</span>
+            <span>{item}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function SectionText({ title, text, highlight = false }) {
+  if (!text) return null;
+  return (
+    <div>
+      <h4 className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1.5">{title}</h4>
+      <p className={`text-xs leading-relaxed ${highlight ? 'bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-md px-3 py-2 text-purple-900 dark:text-purple-200' : 'text-gray-700 dark:text-gray-300'}`}>
+        {text}
+      </p>
     </div>
   );
 }

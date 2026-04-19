@@ -11,7 +11,8 @@
     "api/agents.js":                    { "maxDuration": 45 },
     "api/marketing/generate.js":        { "maxDuration": 300 },
     "api/marketing/apify-ingest.js":    { "maxDuration": 300 },
-    "api/marketing/deep-analyze.js":    { "maxDuration": 240 }
+    "api/marketing/deep-analyze.js":    { "maxDuration": 240 },
+    "api/marketing/generate-ideas.js":  { "maxDuration": 120 }
   },
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/index.html" }

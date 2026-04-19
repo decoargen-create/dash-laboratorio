@@ -17,7 +17,7 @@ import {
   Package, Target, Play, Check, Loader2, AlertTriangle, ChevronRight,
   Plus, X, Sparkles, Link2, Search, Clock,
 } from 'lucide-react';
-import { ideaFromDeepAnalysis } from './bandejaStore.js';
+import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas } from './bandejaStore.js';
 
 const PRODUCTOS_KEY = 'viora-marketing-productos-v1';
 const COMPETIDORES_KEY = 'viora-marketing-competidores-v1';
@@ -145,7 +145,8 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         detail: 'Claude Vision + Whisper (si hay video)',
         status: 'pending',
       })),
-      { id: 'done', label: '✅ Listo', detail: 'Tenés análisis fresco en Competencia', status: 'pending' },
+      { id: 'generate', label: '💡 Generando ideas nuevas con IA', detail: 'Réplicas + diferenciaciones + ideas desde cero', status: 'pending' },
+      { id: 'done', label: '✅ Listo', detail: 'Tenés análisis fresco + ideas nuevas en la Bandeja', status: 'pending' },
     ];
     setSteps(pasos);
 
@@ -260,6 +261,54 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       updateStep(stepId, { status: 'done', endedAt: Date.now(), detail: `${analyzed}/${winners.length} analizados` });
     }
 
+    // Paso generate: llamar a generate-ideas con todo el contexto acumulado.
+    if (!cancelled) {
+      updateStep('generate', { status: 'running', startedAt: Date.now() });
+      try {
+        // Armar el array de análisis para el endpoint.
+        const compAnalisis = [];
+        // Leemos state fresh del localStorage porque setCompetidores es async.
+        const compsActualizados = loadJSON(COMPETIDORES_KEY, competidores);
+        for (const c of compsActualizados) {
+          const analyses = c.adsAnalysis || {};
+          for (const adId of Object.keys(analyses)) {
+            const a = analyses[adId];
+            const ad = (c.ads || []).find(x => x.id === adId);
+            compAnalisis.push({
+              competidorNombre: c.nombre,
+              adId,
+              adHeadline: ad?.headline || '',
+              adBody: ad?.body || '',
+              analysis: a.analysis,
+            });
+          }
+        }
+
+        const ideasExistentes = loadIdeas().map(i => ({ titulo: i.titulo, angulo: i.angulo, tipo: i.tipo }));
+
+        const resp = await fetch('/api/marketing/generate-ideas', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            producto: producto || { nombre: 'Producto sin definir' },
+            competidoresAnalisis: compAnalisis,
+            ideasExistentes,
+          }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+
+        const nuevas = addGeneratedIdeas(data.ideas || [], { producto });
+        updateStep('generate', {
+          status: 'done',
+          endedAt: Date.now(),
+          detail: `${nuevas.length} ideas nuevas agregadas (${data.count || 0} generadas)`,
+        });
+      } catch (err) {
+        updateStep('generate', { status: 'error', endedAt: Date.now(), detail: err.message });
+      }
+    }
+
     // Paso final
     updateStep('done', { status: 'running', startedAt: Date.now() });
     await new Promise(r => setTimeout(r, 400));
@@ -267,7 +316,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
     setRunning(false);
     if (!cancelled) {
-      addToast?.({ type: 'success', message: '¡Listo! Mirá los análisis en Competencia.' });
+      addToast?.({ type: 'success', message: '¡Listo! Mirá los análisis + ideas en la Bandeja.' });
     }
   };
 
@@ -434,10 +483,16 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 </button>
               )}
               {!running && steps.length > 0 && (
-                <button onClick={() => onGoToSection?.('mk-competencia')}
-                  className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded transition">
-                    Ver análisis en Competencia <ChevronRight size={12} />
-                </button>
+                <>
+                  <button onClick={() => onGoToSection?.('mk-bandeja')}
+                    className="inline-flex items-center gap-1 px-3 py-2 text-xs font-bold text-fuchsia-700 dark:text-fuchsia-300 hover:bg-fuchsia-50 dark:hover:bg-fuchsia-900/20 rounded transition">
+                      Ver Bandeja de ideas <ChevronRight size={12} />
+                  </button>
+                  <button onClick={() => onGoToSection?.('mk-competencia')}
+                    className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded transition">
+                      Ver Competencia <ChevronRight size={12} />
+                  </button>
+                </>
               )}
             </div>
           </>

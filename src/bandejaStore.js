@@ -34,16 +34,21 @@ function genId() {
   return `idea-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-// Agrega una idea. Si ya existe una del mismo tipo y mismo adId de origen,
-// NO duplica (devuelve la existente). Esto hace que re-analizar un ad no
-// llene la bandeja de copias.
+// Agrega una idea. Dedupe:
+//   - Si tiene origen.adId → dedupe por (tipo, adId). Caso "replica" de ad.
+//   - Si no tiene origen.adId → dedupe por (tipo, titulo normalizado). Caso
+//     ideas generadas por IA, para que re-generar no duplique exacto.
 export function addIdea(idea) {
   const list = loadIdeas();
-  const existing = list.find(i =>
-    i.tipo === idea.tipo &&
-    i.origen?.adId &&
-    i.origen.adId === idea.origen?.adId
-  );
+  const normTitulo = (idea.titulo || '').trim().toLowerCase();
+  const existing = list.find(i => {
+    if (i.tipo !== idea.tipo) return false;
+    if (i.origen?.adId && idea.origen?.adId) return i.origen.adId === idea.origen.adId;
+    if (!i.origen?.adId && !idea.origen?.adId) {
+      return (i.titulo || '').trim().toLowerCase() === normTitulo && normTitulo.length > 0;
+    }
+    return false;
+  });
   if (existing) return existing;
 
   const nueva = {
@@ -56,6 +61,42 @@ export function addIdea(idea) {
   };
   saveIdeas([nueva, ...list]);
   return nueva;
+}
+
+// Bulk add: agrega varias ideas de una y devuelve el subset realmente
+// insertado (las duplicadas se saltean). Útil tras generate-ideas.
+export function addGeneratedIdeas(rawIdeas, { producto } = {}) {
+  if (!Array.isArray(rawIdeas)) return [];
+  const nuevas = [];
+  const existentes = loadIdeas();
+  const existingCount = existentes.length;
+  for (const r of rawIdeas) {
+    const idea = addIdea({
+      titulo: r.titulo,
+      tipo: r.tipo,
+      origen: {
+        tipo: 'generado',
+        competidorNombre: null,
+        competidorId: null,
+        adId: null,
+        adSnapshotUrl: null,
+        imageUrl: null,
+        daysRunning: null,
+        productoNombre: producto?.nombre || null,
+        razonamiento: r.razonamiento || '',
+      },
+      angulo: r.angulo || '',
+      painPoint: r.painPoint || '',
+      hook: r.hook || '',
+      copy: r.copy || '',
+      guion: r.guion || '',
+      formato: r.formato || 'static',
+    });
+    // Si es nueva (no match previo) queda al tope — detectamos comparando
+    // la longitud del storage antes/después.
+    if (loadIdeas().length > existingCount + nuevas.length) nuevas.push(idea);
+  }
+  return nuevas;
 }
 
 export function updateIdea(id, patch) {

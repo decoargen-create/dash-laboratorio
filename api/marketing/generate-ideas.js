@@ -302,6 +302,84 @@ function buildContext({ producto, competidoresAnalisis, ideasExistentes, propios
   return parts.join('\n');
 }
 
+// Parsea chars de un JSON parcial en streaming y extrae los objetos completos
+// del array "ideas":[]. Usa un contador de profundidad tolerante a strings
+// con llaves/corchetes escapados, para detectar cada `{...}` que cierra a
+// depth 0 (respecto al interior del array).
+function extractNewIdeas(buffer, alreadyEmitted) {
+  const m = buffer.match(/"ideas"\s*:\s*\[/);
+  if (!m) return [];
+  const arrayStart = m.index + m[0].length;
+
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  let itemStart = -1;
+  const items = [];
+
+  for (let i = arrayStart; i < buffer.length; i++) {
+    const c = buffer[i];
+    if (escape) { escape = false; continue; }
+    if (inString) {
+      if (c === '\\') escape = true;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') { inString = true; continue; }
+    if (c === '{') {
+      if (depth === 0) itemStart = i;
+      depth++;
+    } else if (c === '}') {
+      depth--;
+      if (depth === 0 && itemStart >= 0) {
+        items.push(buffer.slice(itemStart, i + 1));
+        itemStart = -1;
+      }
+    } else if (c === '[') {
+      depth++;
+    } else if (c === ']') {
+      if (depth === 0) break;
+      depth--;
+    }
+  }
+
+  return items.slice(alreadyEmitted).map(s => {
+    try { return JSON.parse(s); } catch { return null; }
+  }).filter(Boolean);
+}
+
+function sseWrite(res, obj) {
+  res.write(`data: ${JSON.stringify(obj)}\n\n`);
+}
+
+// Limpia/valida una idea antes de emitirla al cliente.
+function sanitizeIdea(i) {
+  const tiposValidos = new Set(['replica', 'iteracion', 'diferenciacion', 'desde_cero']);
+  const variablesValidas = new Set(['hook', 'visual', 'cta', 'formato', 'angulo', 'audience', 'prueba_social', 'oferta', 'mix']);
+  if (!i || typeof i.titulo !== 'string' || !tiposValidos.has(i.tipo)) return null;
+  const base = {
+    titulo: String(i.titulo).slice(0, 150),
+    tipo: i.tipo,
+    angulo: String(i.angulo || '').slice(0, 500),
+    painPoint: String(i.painPoint || '').slice(0, 500),
+    hook: String(i.hook || '').slice(0, 500),
+    copy: String(i.copy || '').slice(0, 1500),
+    guion: String(i.guion || '').slice(0, 3000),
+    formato: ['video', 'static', 'carrusel'].includes(i.formato) ? i.formato : 'static',
+    razonamiento: String(i.razonamiento || '').slice(0, 500),
+    variableDeTesteo: variablesValidas.has(i.variableDeTesteo) ? i.variableDeTesteo : 'mix',
+    testHipotesis: String(i.testHipotesis || '').slice(0, 500),
+  };
+  if (i.tipo === 'iteracion' && i.iteracionBase) {
+    base.iteracionBase = {
+      adId: String(i.iteracionBase.adId || '').slice(0, 100),
+      adNombre: String(i.iteracionBase.adNombre || '').slice(0, 200),
+      razon: String(i.iteracionBase.razon || '').slice(0, 500),
+    };
+  }
+  return base;
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
 
@@ -324,11 +402,7 @@ export default async function handler(req, res) {
     return respondJSON(res, 400, { error: 'Falta producto.nombre en el body' });
   }
 
-  // Clamp: entre 1 y 40 para no quemar tokens indefinidamente.
   const clampedTarget = Math.max(1, Math.min(40, Number(targetCount) || 15));
-
-  // Max tokens dinámico: ~500 tokens por idea como margen (hooks, guiones de
-  // video son los más caros). 16K tokens cubren 30+ ideas con comodidad.
   const maxTokens = Math.min(16000, 500 + clampedTarget * 500);
 
   const client = new Anthropic({ apiKey: anthropicKey });
@@ -343,17 +417,18 @@ export default async function handler(req, res) {
     },
   });
 
+  // Stream SSE: emitimos cada idea apenas Claude termina de escribirla.
+  // El cliente puede empujarla a la Bandeja en tiempo real y mostrarla
+  // en el stepper sin esperar a la respuesta completa.
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-store');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // nginx/proxy: no bufferear
+
   try {
-    // Tool use con forzado a submit_ideas — el API valida el schema,
-    // no tenemos que parsear JSON ni lidiar con ```json wrappers.
-    // Adaptive thinking ayuda a la calidad creativa.
     const stream = await client.messages.stream({
       model: MODEL,
       max_tokens: maxTokens,
-      // NOTA: thinking adaptive es incompatible con tool_choice forzado.
-      // Priorizamos tool_choice (structured output garantizado) sobre
-      // thinking — la calidad de la respuesta depende más del prompt que
-      // del razonamiento explícito para este caso.
       tools: [SUBMIT_IDEAS_TOOL],
       tool_choice: { type: 'tool', name: 'submit_ideas' },
       system: [
@@ -363,57 +438,41 @@ export default async function handler(req, res) {
         { role: 'user', content: userContent },
       ],
     });
-    const resp = await stream.finalMessage();
 
-    const toolUseBlock = resp.content.find(b => b.type === 'tool_use' && b.name === 'submit_ideas');
-    if (!toolUseBlock || !toolUseBlock.input) {
-      throw new Error('Claude no llamó a submit_ideas');
-    }
-    const ideas = toolUseBlock.input.ideas;
-    if (!Array.isArray(ideas)) {
-      throw new Error('submit_ideas.ideas no es un array');
-    }
+    let partialBuffer = '';
+    let emittedCount = 0;
 
-    // Filtrado defensivo: solo ideas con titulo + tipo válido.
-    const tiposValidos = new Set(['replica', 'iteracion', 'diferenciacion', 'desde_cero']);
-    const variablesValidas = new Set(['hook', 'visual', 'cta', 'formato', 'angulo', 'audience', 'prueba_social', 'oferta', 'mix']);
-    const clean = ideas
-      .filter(i => i && typeof i.titulo === 'string' && tiposValidos.has(i.tipo))
-      .map(i => {
-        const base = {
-          titulo: String(i.titulo).slice(0, 150),
-          tipo: i.tipo,
-          angulo: String(i.angulo || '').slice(0, 500),
-          painPoint: String(i.painPoint || '').slice(0, 500),
-          hook: String(i.hook || '').slice(0, 500),
-          copy: String(i.copy || '').slice(0, 1500),
-          guion: String(i.guion || '').slice(0, 3000),
-          formato: ['video', 'static', 'carrusel'].includes(i.formato) ? i.formato : 'static',
-          razonamiento: String(i.razonamiento || '').slice(0, 500),
-          variableDeTesteo: variablesValidas.has(i.variableDeTesteo) ? i.variableDeTesteo : 'mix',
-          testHipotesis: String(i.testHipotesis || '').slice(0, 500),
-        };
-        // Para iteraciones, capturamos el link al ad base con la razón concreta.
-        if (i.tipo === 'iteracion' && i.iteracionBase) {
-          base.iteracionBase = {
-            adId: String(i.iteracionBase.adId || '').slice(0, 100),
-            adNombre: String(i.iteracionBase.adNombre || '').slice(0, 200),
-            razon: String(i.iteracionBase.razon || '').slice(0, 500),
-          };
+    for await (const event of stream) {
+      // input_json_delta llega a medida que Claude va escribiendo el JSON
+      // de la tool call. Acumulamos y extraemos ideas completas apenas
+      // se cierran los {...}.
+      if (event.type === 'content_block_delta' && event.delta?.type === 'input_json_delta') {
+        partialBuffer += event.delta.partial_json || '';
+        const newIdeas = extractNewIdeas(partialBuffer, emittedCount);
+        for (const rawIdea of newIdeas) {
+          const clean = sanitizeIdea(rawIdea);
+          if (clean) {
+            sseWrite(res, { type: 'idea', idea: clean });
+            emittedCount++;
+          }
         }
-        return base;
-      });
+      }
+    }
 
-    return respondJSON(res, 200, {
-      ideas: clean,
-      count: clean.length,
+    const finalMsg = await stream.finalMessage();
+    const cost = { anthropic: anthropicCost(finalMsg.usage, MODEL) };
+
+    sseWrite(res, {
+      type: 'complete',
+      count: emittedCount,
       model: MODEL,
       generatedAt: new Date().toISOString(),
-      usage: resp.usage,
-      cost: { anthropic: anthropicCost(resp.usage, MODEL) },
+      cost,
     });
+    res.end();
   } catch (err) {
     console.error('generate-ideas error:', err);
-    return respondJSON(res, 502, { error: err.message || 'Error generando ideas' });
+    sseWrite(res, { type: 'error', error: err.message || 'Error generando ideas' });
+    res.end();
   }
 }

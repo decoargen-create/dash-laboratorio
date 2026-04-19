@@ -203,7 +203,11 @@ export const WINNER_CRITERIA = {
 
 // Genera el startUrl de Meta Ad Library para un search por keyword.
 // Replica el formato del bookmarklet del user.
-export function buildAdLibraryUrl({ keyword, country = 'AR' }) {
+// Default country ALL — cubre anuncios targeteados a cualquier mercado.
+// Limitar a AR dejaba afuera la mayoría de marcas DTC internacionales que
+// pautan a otros países. is_targeted_country=false para no restringir
+// a anuncios targeteados al país del que mira.
+export function buildAdLibraryUrl({ keyword, country = 'ALL' }) {
   const q = encodeURIComponent(keyword);
-  return `https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=${country}&q=${q}&search_type=keyword_unordered&media_type=all`;
+  return `https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=${country}&is_targeted_country=false&q=${q}&search_type=keyword_unordered&media_type=all`;
 }

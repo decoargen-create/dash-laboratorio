@@ -20,7 +20,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   Package, Target, Play, Check, Loader2, AlertTriangle, ChevronRight, ChevronDown,
-  Plus, X, Sparkles, Link2, Search, Clock,
+  Plus, X, Sparkles, Link2, Search, Clock, Inbox,
 } from 'lucide-react';
 import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGeneratedToday } from './bandejaStore.js';
 import { logCostsFromResponse } from './costsStore.js';
@@ -101,7 +101,10 @@ async function streamGenerateDocs({ productoNombre, productoUrl, descripcion, on
 }
 
 // Derivamos keyword para búsqueda en Ad Library (igual que el bookmarklet
-// del user): si es app.dropi, último segmento del path; sino hostname sin www.
+// del user):
+//   - app.dropi: último segmento del path con guiones como espacios
+//   - resto: hostname completo con TLD (ej: "elova.es" — NO recortar a "elova",
+//     Meta Ad Library da resultados distintos con cada forma).
 function landingToKeyword(url) {
   if (!url) return '';
   try {
@@ -110,7 +113,7 @@ function landingToKeyword(url) {
       const parts = u.pathname.split('/').filter(Boolean);
       return (parts[parts.length - 1] || '').replace(/-/g, ' ');
     }
-    return u.hostname.replace(/^www\./, '').split('.')[0];
+    return u.hostname.replace(/^www\./, '');
   } catch {
     return String(url).replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
   }
@@ -148,6 +151,9 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   const [running, setRunning] = useState(false);
   const [steps, setSteps] = useState([]); // { id, label, detail, status: 'pending'|'running'|'done'|'error', startedAt, endedAt }
   const [cancelled, setCancelled] = useState(false);
+  // Ideas generadas en vivo durante el pipeline — se llena por streaming
+  // y se muestra debajo del paso "Generando ideas" en el stepper.
+  const [liveIdeas, setLiveIdeas] = useState([]);
 
   useEffect(() => { saveJSON(PRODUCTOS_KEY, productos); }, [productos]);
   useEffect(() => { saveJSON(COMPETIDORES_KEY, competidores); }, [competidores]);
@@ -361,7 +367,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       const resp = await fetch('/api/marketing/suggest-competitors', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ searchKeyword: keyword, country: 'AR', limit: 30 }),
+        body: JSON.stringify({ searchKeyword: keyword, country: 'ALL', limit: 30 }),
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
@@ -414,6 +420,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
     setRunning(true);
     setCancelled(false);
+    setLiveIdeas([]);
 
     // Pasos dinámicos según estado:
     //   - docs-gen: solo si el producto aún no tiene research doc
@@ -560,7 +567,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       const stepId = `scrape-${c.id}`;
       updateStep(stepId, { status: 'running', startedAt: Date.now() });
       try {
-        const payload = { country: 'AR', limit: 50 };
+        const payload = { country: 'ALL', limit: 50 };
         if (c.fbPageUrl) {
           payload.fbPageUrl = c.fbPageUrl.startsWith('http') ? c.fbPageUrl : `https://www.facebook.com/${c.fbPageUrl}`;
         } else if (c.landingUrl) {
@@ -721,6 +728,9 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           video: genConfig.formatoVideo / sumaMix,
         };
 
+        // Consumimos SSE stream. Cada evento 'idea' llega en vivo apenas
+        // Claude termina de escribirla → la empujamos a la Bandeja y al
+        // stepper al toque. Al final viene 'complete' con el costo total.
         const resp = await fetch('/api/marketing/generate-ideas', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -733,16 +743,62 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             formatoMix,
           }),
         });
-        const data = await resp.json();
-        if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-        logCostsFromResponse(data, `generate-ideas · ${(productoActualizado || producto)?.nombre || ''}`);
+        if (!resp.ok || !resp.body) {
+          // Error antes de que arranque el stream — lo leemos como text y
+          // damos un mensaje accionable.
+          const text = await resp.text().catch(() => '');
+          const isTimeout = /504|timeout|FUNCTION_INVOCATION_TIMEOUT/i.test(text);
+          throw new Error(isTimeout
+            ? 'Timeout: el generador tardó más de 5 min. Probá con menos competidores o menos ideas.'
+            : `HTTP ${resp.status}${text ? ': ' + text.slice(0, 120) : ''}`);
+        }
 
-        const nuevas = addGeneratedIdeas(data.ideas || [], { producto: productoActualizado || producto });
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let sseBuffer = '';
+        let insertadas = 0;
+        let streamErr = null;
+        let costPayload = null;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          sseBuffer += decoder.decode(value, { stream: true });
+          const lines = sseBuffer.split('\n');
+          sseBuffer = lines.pop() || '';
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const payload = line.slice(6).trim();
+            if (!payload) continue;
+            try {
+              const ev = JSON.parse(payload);
+              if (ev.type === 'idea' && ev.idea) {
+                // Empujamos a la Bandeja — addGeneratedIdeas dedupea
+                // por (tipo, titulo), así que si ya existe no molesta.
+                const nuevas = addGeneratedIdeas([ev.idea], { producto: productoActualizado || producto });
+                if (nuevas.length > 0) insertadas++;
+                setLiveIdeas(prev => [...prev, ev.idea]);
+                updateStep('generate', {
+                  detail: `${insertadas} ideas nuevas en la Bandeja · generando…`,
+                });
+              } else if (ev.type === 'complete') {
+                costPayload = ev;
+              } else if (ev.type === 'error') {
+                streamErr = new Error(ev.error || 'Error desconocido del stream');
+              }
+            } catch {
+              // Línea parcial / no-JSON: ignoramos.
+            }
+          }
+        }
+
+        if (streamErr) throw streamErr;
+        if (costPayload) logCostsFromResponse(costPayload, `generate-ideas · ${(productoActualizado || producto)?.nombre || ''}`);
         setIdeasToday(countIdeasGeneratedToday());
         updateStep('generate', {
           status: 'done',
           endedAt: Date.now(),
-          detail: `${nuevas.length} ideas nuevas agregadas (${data.count || 0} generadas)`,
+          detail: `${insertadas} ideas nuevas agregadas${costPayload?.count ? ` (${costPayload.count} generadas)` : ''}`,
         });
       } catch (err) {
         // SKIP_GENERATE es un soft-skip (ya avisamos en updateStep), no error.
@@ -1128,11 +1184,24 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                   {c.landingUrl && (
                     <span className="text-[10px] text-gray-500 dark:text-gray-400 truncate max-w-[200px]">{c.landingUrl}</span>
                   )}
-                  {c.ads?.length > 0 && (
-                    <span className="ml-auto text-[10px] text-emerald-600 dark:text-emerald-400">
-                      {c.ads.length} ads · {c.winnersCount || 0} 🏆
-                    </span>
-                  )}
+                  {(c.ads?.length > 0 || c.adsTotal > 0) ? (() => {
+                    const total = c.adsTotal || c.ads?.length || 0;
+                    const winners = c.winnersCount || 0;
+                    const history = Array.isArray(c.adsHistory) ? c.adsHistory : [];
+                    const prev = history.length >= 2 ? history[history.length - 2] : null;
+                    const delta = prev ? total - prev.total : null;
+                    return (
+                      <span className="ml-auto inline-flex items-center gap-1.5 text-[10px] tabular-nums">
+                        <span className="font-bold text-gray-900 dark:text-gray-100">{total} ads</span>
+                        {winners > 0 && <span className="text-emerald-600 dark:text-emerald-400 font-bold">{winners} 🏆</span>}
+                        {delta != null && delta !== 0 && (
+                          <span className={delta > 0 ? 'text-blue-600 dark:text-blue-400' : 'text-red-500'}>
+                            {delta > 0 ? `↑${delta}` : `↓${Math.abs(delta)}`}
+                          </span>
+                        )}
+                      </span>
+                    );
+                  })() : null}
                   <button onClick={() => handleRemoveCompetidor(c.id)}
                     className="p-0.5 text-gray-400 hover:text-red-600 transition" title="Sacar">
                     <X size={10} />
@@ -1292,6 +1361,48 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           </>
         )}
 
+        {/* Banner de éxito al terminar — CTA grande para ir a la Bandeja */}
+        {!running && steps.length > 0 && steps[steps.length - 1]?.id === 'done' && steps[steps.length - 1]?.status === 'done' && (() => {
+          // Contamos qué se logró: ganadores totales + ideas nuevas.
+          const winnersTotal = steps
+            .filter(s => s.id.startsWith('scrape-') && s.status === 'done')
+            .reduce((sum, s) => {
+              const m = (s.detail || '').match(/(\d+)\s+ganador/i);
+              return sum + (m ? Number(m[1]) : 0);
+            }, 0);
+          const genStep = steps.find(s => s.id === 'generate');
+          const ideasMatch = genStep?.detail?.match(/(\d+)\s+ideas\s+nuevas/i);
+          const ideasNuevas = ideasMatch ? Number(ideasMatch[1]) : 0;
+          return (
+            <div className="mt-5 p-4 bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 border-2 border-emerald-300 dark:border-emerald-700 rounded-xl">
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="shrink-0 w-10 h-10 rounded-full bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center text-white shadow">
+                  <Check size={20} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-base font-bold text-emerald-900 dark:text-emerald-100">¡Pipeline terminado!</p>
+                  <p className="text-xs text-emerald-700 dark:text-emerald-300">
+                    {winnersTotal > 0 && <><strong>{winnersTotal}</strong> ganador{winnersTotal !== 1 ? 'es' : ''} analizado{winnersTotal !== 1 ? 's' : ''} · </>}
+                    {ideasNuevas > 0 ? <><strong>{ideasNuevas}</strong> idea{ideasNuevas !== 1 ? 's' : ''} nueva{ideasNuevas !== 1 ? 's' : ''} esperándote en la Bandeja</> : 'Todo procesado'}
+                  </p>
+                </div>
+                <button
+                  onClick={() => onGoToSection?.('mk-bandeja')}
+                  className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-bold text-white bg-gradient-to-br from-fuchsia-500 to-pink-500 rounded-lg hover:from-fuchsia-600 hover:to-pink-600 shadow-sm transition"
+                >
+                  <Inbox size={14} /> Ver ideas en la Bandeja <ChevronRight size={14} />
+                </button>
+                <button
+                  onClick={() => onGoToSection?.('mk-competencia')}
+                  className="shrink-0 inline-flex items-center gap-1 px-3 py-2.5 text-xs font-semibold text-purple-700 dark:text-purple-300 bg-white dark:bg-gray-800 border border-purple-200 dark:border-purple-800 rounded-lg hover:bg-purple-50 dark:hover:bg-purple-900/20 transition"
+                >
+                  Ver Competencia <ChevronRight size={12} />
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+
         {/* Stepper */}
         {steps.length > 0 && (
           <div className="mt-5 space-y-3">
@@ -1312,7 +1423,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             {/* Lista de pasos */}
             <ul className="space-y-1.5">
               {steps.map(step => (
-                <StepRow key={step.id} step={step} />
+                <StepRow key={step.id} step={step} liveIdeas={step.id === 'generate' ? liveIdeas : null} />
               ))}
             </ul>
           </div>
@@ -1353,35 +1464,55 @@ function WizardCard({ num, title, done, disabled = false, badge, children }) {
   );
 }
 
-function StepRow({ step }) {
+function StepRow({ step, liveIdeas }) {
   const { status, label, detail, startedAt, endedAt } = step;
   const elapsed = startedAt
     ? Math.round(((endedAt || Date.now()) - startedAt) / 1000)
     : null;
 
+  const TIPO_EMOJI = { replica: '🔵', iteracion: '🟡', diferenciacion: '🟢', desde_cero: '✨' };
+
   return (
-    <li className={`flex items-start gap-2 px-3 py-2 rounded-md text-xs transition ${
+    <li className={`rounded-md text-xs transition ${
       status === 'running' ? 'bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800' :
       status === 'done' ? 'bg-emerald-50/50 dark:bg-emerald-900/10' :
       status === 'error' ? 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800' :
       'bg-gray-50/50 dark:bg-gray-800/30'
     }`}>
-      <span className="mt-0.5 shrink-0">
-        {status === 'running' && <Loader2 size={13} className="animate-spin text-purple-600 dark:text-purple-400" />}
-        {status === 'done' && <Check size={13} className="text-emerald-600 dark:text-emerald-400" />}
-        {status === 'error' && <AlertTriangle size={13} className="text-red-600" />}
-        {status === 'pending' && <Clock size={13} className="text-gray-400" />}
-      </span>
-      <div className="flex-1 min-w-0">
-        <p className={`font-semibold ${
-          status === 'done' ? 'text-emerald-900 dark:text-emerald-200' :
-          status === 'error' ? 'text-red-900 dark:text-red-200' :
-          'text-gray-800 dark:text-gray-200'
-        }`}>{label}</p>
-        <p className="text-[10px] text-gray-600 dark:text-gray-400">{detail}</p>
+      <div className="flex items-start gap-2 px-3 py-2">
+        <span className="mt-0.5 shrink-0">
+          {status === 'running' && <Loader2 size={13} className="animate-spin text-purple-600 dark:text-purple-400" />}
+          {status === 'done' && <Check size={13} className="text-emerald-600 dark:text-emerald-400" />}
+          {status === 'error' && <AlertTriangle size={13} className="text-red-600" />}
+          {status === 'pending' && <Clock size={13} className="text-gray-400" />}
+        </span>
+        <div className="flex-1 min-w-0">
+          <p className={`font-semibold ${
+            status === 'done' ? 'text-emerald-900 dark:text-emerald-200' :
+            status === 'error' ? 'text-red-900 dark:text-red-200' :
+            'text-gray-800 dark:text-gray-200'
+          }`}>{label}</p>
+          <p className="text-[10px] text-gray-600 dark:text-gray-400">{detail}</p>
+        </div>
+        {elapsed != null && status !== 'pending' && (
+          <span className="text-[10px] font-mono text-gray-400 shrink-0">{elapsed}s</span>
+        )}
       </div>
-      {elapsed != null && status !== 'pending' && (
-        <span className="text-[10px] font-mono text-gray-400 shrink-0">{elapsed}s</span>
+
+      {/* Mini-lista de ideas cayendo en vivo (solo en el paso 'generate') */}
+      {Array.isArray(liveIdeas) && liveIdeas.length > 0 && status !== 'pending' && (
+        <ul className="px-3 pb-2 pl-9 space-y-1 max-h-52 overflow-y-auto">
+          {liveIdeas.map((idea, i) => (
+            <li key={i} className="flex items-start gap-2 text-[10px] text-gray-700 dark:text-gray-300 animate-fade-in-up">
+              <span className="shrink-0 mt-0.5">{TIPO_EMOJI[idea.tipo] || '•'}</span>
+              <span className="flex-1 min-w-0">
+                <span className="font-semibold truncate block">{idea.titulo}</span>
+                {idea.hook && <span className="text-gray-500 dark:text-gray-400 italic truncate block">"{idea.hook.slice(0, 80)}{idea.hook.length > 80 ? '…' : ''}"</span>}
+              </span>
+              <span className="shrink-0 text-[9px] text-gray-400 font-mono">{idea.formato}</span>
+            </li>
+          ))}
+        </ul>
       )}
     </li>
   );

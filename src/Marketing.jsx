@@ -12,7 +12,8 @@
 import React, { useEffect, useState, useRef } from 'react';
 import {
   FileText, Sparkles, Download, Loader2, Check, AlertTriangle, X,
-  RefreshCw, Trash2, ChevronRight, Copy, Package,
+  RefreshCw, Trash2, ChevronRight, Copy, Package, Plus, MessageSquare,
+  Users, BookOpen, Clock, ExternalLink, ChevronDown, Target,
 } from 'lucide-react';
 
 const STORAGE_KEY = 'viora-marketing-productos-v1';
@@ -548,42 +549,19 @@ export default function MarketingSection({ addToast, bgAnalysis, onStart, onCanc
                   <ChevronRight size={16} className={`text-gray-400 transition-transform shrink-0 mt-1 ${activeProductId === p.id ? 'rotate-90' : ''}`} />
                 </button>
 
-                {/* Detalle expandido */}
+                {/* Dashboard expandido del producto */}
                 {activeProductId === p.id && (
-                  <div className="bg-gray-50 dark:bg-gray-900/30 border-t border-gray-200 dark:border-gray-700">
-                    <div className="flex items-center justify-between px-4 py-2 gap-2">
-                      <div className="flex gap-1 overflow-x-auto">
-                        {STEPS.map(s => (
-                          <button
-                            key={s.key}
-                            onClick={() => setActiveTab(s.key)}
-                            className={`px-3 py-1.5 text-xs font-semibold rounded-md transition whitespace-nowrap ${activeTab === s.key ? 'bg-white dark:bg-gray-800 text-purple-700 dark:text-purple-300 shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:bg-white/50 dark:hover:bg-gray-800/50'}`}
-                          >
-                            {s.label}
-                          </button>
-                        ))}
-                      </div>
-                      <div className="flex items-center gap-1 shrink-0">
-                        <button onClick={() => handleCopy(p.docs[activeTab] || '')} className="p-1.5 text-gray-500 hover:text-gray-900 dark:hover:text-gray-100 transition" title="Copiar doc actual">
-                          <Copy size={12} />
-                        </button>
-                        <button onClick={() => handleDownloadSingle(p, activeTab, activeTab)} className="p-1.5 text-gray-500 hover:text-gray-900 dark:hover:text-gray-100 transition" title="Descargar doc actual">
-                          <Download size={12} />
-                        </button>
-                        <button onClick={() => handleDownloadPack(p)} className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-bold text-white bg-purple-600 rounded hover:bg-purple-700 transition" title="Descargar paquete completo">
-                          <Download size={11} /> Todo
-                        </button>
-                        <button onClick={() => handleDeleteProducto(p.id)} className="p-1.5 text-gray-400 hover:text-red-600 transition" title="Borrar">
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
-                    </div>
-                    <div className="px-4 pb-4 max-h-[500px] overflow-y-auto">
-                      <pre className="text-xs text-gray-800 dark:text-gray-200 whitespace-pre-wrap font-sans leading-relaxed bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
-                        {p.docs[activeTab] || '(sin contenido)'}
-                      </pre>
-                    </div>
-                  </div>
+                  <ProductDashboard
+                    product={p}
+                    activeTab={activeTab}
+                    setActiveTab={setActiveTab}
+                    onCopy={handleCopy}
+                    onDownloadSingle={handleDownloadSingle}
+                    onDownloadPack={handleDownloadPack}
+                    onDelete={() => handleDeleteProducto(p.id)}
+                    onUpdateProduct={(patch) => setProductos(prev => prev.map(x => x.id === p.id ? { ...x, ...patch, updatedAt: new Date().toISOString() } : x))}
+                    addToast={addToast}
+                  />
                 )}
               </div>
             ))}
@@ -597,6 +575,344 @@ export default function MarketingSection({ addToast, bgAnalysis, onStart, onCanc
           <FileText size={36} className="mx-auto text-gray-300 dark:text-gray-600 mb-3" />
           <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Todavía no tenés productos documentados</p>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Completá el formulario arriba para generar el primero.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// Dashboard expandido de un producto
+// ============================================================
+const DASH_TABS = [
+  { key: 'resumen',      label: 'Resumen',      icon: BookOpen },
+  { key: 'docs',         label: 'Documentos',   icon: FileText },
+  { key: 'competencia',  label: 'Competencia',  icon: Target },
+  { key: 'memoria',      label: 'Memoria',      icon: MessageSquare },
+  { key: 'historial',    label: 'Historial',    icon: Clock },
+];
+
+function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownloadSingle, onDownloadPack, onDelete, onUpdateProduct, addToast }) {
+  const [noteText, setNoteText] = useState('');
+  const [learningText, setLearningText] = useState('');
+  const [compName, setCompName] = useState('');
+  const [compUrl, setCompUrl] = useState('');
+  const [compPageId, setCompPageId] = useState('');
+
+  const tab = activeTab || 'resumen';
+  // Si el tab no existe en DASH_TABS (ej: 'research'), mapear a 'docs'
+  const effTab = DASH_TABS.some(t => t.key === tab) ? tab : 'docs';
+
+  const memoria = p.memoria || { notas: [], aprendizajes: [] };
+  const competidores = p.competidores || [];
+  const historial = p.historial || [];
+
+  const addNota = () => {
+    const texto = noteText.trim();
+    if (!texto) return;
+    const nueva = { id: Date.now(), texto, at: new Date().toISOString() };
+    onUpdateProduct({
+      memoria: { ...memoria, notas: [nueva, ...memoria.notas] },
+      historial: [...historial, { tipo: 'nota', at: nueva.at, meta: texto.slice(0, 80) }],
+    });
+    setNoteText('');
+    addToast?.({ type: 'success', message: 'Nota guardada' });
+  };
+
+  const addAprendizaje = () => {
+    const texto = learningText.trim();
+    if (!texto) return;
+    const nuevo = { id: Date.now(), texto, at: new Date().toISOString() };
+    onUpdateProduct({
+      memoria: { ...memoria, aprendizajes: [nuevo, ...memoria.aprendizajes] },
+      historial: [...historial, { tipo: 'aprendizaje', at: nuevo.at, meta: texto.slice(0, 80) }],
+    });
+    setLearningText('');
+    addToast?.({ type: 'success', message: 'Aprendizaje registrado — Claude lo usa en futuras generaciones' });
+  };
+
+  const addCompetidor = () => {
+    const nombre = compName.trim();
+    if (!nombre) return;
+    const nuevo = { id: Date.now(), nombre, url: compUrl.trim(), pageId: compPageId.trim(), ads: [], lastCheck: null, addedAt: new Date().toISOString() };
+    onUpdateProduct({
+      competidores: [nuevo, ...competidores],
+      historial: [...historial, { tipo: 'competidor-agregado', at: nuevo.addedAt, meta: nombre }],
+    });
+    setCompName(''); setCompUrl(''); setCompPageId('');
+    addToast?.({ type: 'success', message: `Competidor "${nombre}" agregado` });
+  };
+
+  const removeCompetidor = (id) => {
+    onUpdateProduct({ competidores: competidores.filter(c => c.id !== id) });
+  };
+
+  const checkCompetitorAds = async (comp) => {
+    if (!comp.pageId) { addToast?.({ type: 'error', message: 'Necesitás el Page ID de Facebook para consultar sus ads' }); return; }
+    try {
+      const resp = await fetch('/api/meta/ad-library', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pageId: comp.pageId }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      const updated = competidores.map(c => c.id === comp.id ? { ...c, ads: data.ads || [], lastCheck: new Date().toISOString() } : c);
+      onUpdateProduct({
+        competidores: updated,
+        historial: [...historial, { tipo: 'ads-check', at: new Date().toISOString(), meta: `${comp.nombre}: ${data.total} ads` }],
+      });
+      addToast?.({ type: 'success', message: `${data.total} ads activos de ${comp.nombre}` });
+    } catch (err) {
+      addToast?.({ type: 'error', message: err.message });
+    }
+  };
+
+  return (
+    <div className="bg-gray-50 dark:bg-gray-900/30 border-t border-gray-200 dark:border-gray-700">
+      {/* Resumen + acciones arriba */}
+      <div className="p-4 flex items-start gap-4 border-b border-gray-200 dark:border-gray-700">
+        {p.imagen && <img src={p.imagen} alt="" className="w-16 h-16 rounded-lg object-cover bg-gray-100 dark:bg-gray-700 shrink-0 border" />}
+        <div className="flex-1 min-w-0">
+          {p.resumenEjecutivo && <p className="text-xs text-gray-700 dark:text-gray-300 leading-relaxed mb-1">{p.resumenEjecutivo}</p>}
+          {p.descripcion && <p className="text-[11px] text-gray-500 dark:text-gray-400 italic">{p.descripcion}</p>}
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          <button onClick={() => onDownloadPack(p)} className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-bold text-white bg-purple-600 rounded-md hover:bg-purple-700 transition" title="Descargar todos los docs">
+            <Download size={11} /> Paquete
+          </button>
+          <button onClick={onDelete} className="p-1.5 text-gray-400 hover:text-red-600 transition" title="Borrar producto">
+            <Trash2 size={13} />
+          </button>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-1 px-4 pt-3 overflow-x-auto">
+        {DASH_TABS.map(t => {
+          const Icon = t.icon;
+          const isActive = effTab === t.key;
+          return (
+            <button
+              key={t.key}
+              onClick={() => setActiveTab(t.key)}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-t-md transition whitespace-nowrap ${isActive ? 'bg-white dark:bg-gray-800 text-purple-700 dark:text-purple-300 shadow-sm border border-b-0 border-gray-200 dark:border-gray-700' : 'text-gray-500 dark:text-gray-400 hover:bg-white/50 dark:hover:bg-gray-800/50'}`}
+            >
+              <Icon size={12} /> {t.label}
+              {t.key === 'competencia' && competidores.length > 0 && (
+                <span className="ml-0.5 px-1 py-0 text-[9px] font-bold bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 rounded">{competidores.length}</span>
+              )}
+              {t.key === 'memoria' && (memoria.notas.length + memoria.aprendizajes.length) > 0 && (
+                <span className="ml-0.5 px-1 py-0 text-[9px] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded">{memoria.notas.length + memoria.aprendizajes.length}</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Tab content */}
+      <div className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-4">
+
+        {/* RESUMEN */}
+        {effTab === 'resumen' && (
+          <div className="space-y-3 max-w-3xl">
+            <p className="text-sm text-gray-800 dark:text-gray-200 leading-relaxed">{p.resumenEjecutivo || 'Sin resumen ejecutivo generado.'}</p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+              {[
+                { label: 'Research', key: 'research', words: (p.docs?.research || '').split(/\s+/).length },
+                { label: 'Avatar', key: 'avatar', words: (p.docs?.avatar || '').split(/\s+/).length },
+                { label: 'Offer Brief', key: 'offerBrief', words: (p.docs?.offerBrief || '').split(/\s+/).length },
+                { label: 'Creencias', key: 'beliefs', words: (p.docs?.beliefs || '').split(/\s+/).length },
+              ].map(d => (
+                <button key={d.key} onClick={() => setActiveTab('docs')} className="p-3 rounded-lg bg-gray-50 dark:bg-gray-700/50 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition text-left">
+                  <p className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase">{d.label}</p>
+                  <p className="text-lg font-bold text-gray-900 dark:text-gray-100 tabular-nums">{d.words > 1 ? d.words : '—'}</p>
+                  <p className="text-[10px] text-gray-400 dark:text-gray-500">palabras</p>
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-2 text-[11px] text-gray-500 dark:text-gray-400">
+              <span>Competidores: {competidores.length}</span>
+              <span>·</span>
+              <span>Notas: {memoria.notas.length}</span>
+              <span>·</span>
+              <span>Aprendizajes: {memoria.aprendizajes.length}</span>
+            </div>
+          </div>
+        )}
+
+        {/* DOCUMENTOS */}
+        {effTab === 'docs' && (
+          <div className="space-y-2">
+            {STEPS.filter(s => s.key !== 'resumenEjecutivo').map(s => {
+              const content = p.docs?.[s.key] || '';
+              return (
+                <DocAccordion
+                  key={s.key}
+                  title={s.label}
+                  content={content}
+                  wordCount={content.split(/\s+/).length}
+                  onCopy={() => onCopy(content)}
+                  onDownload={() => onDownloadSingle(p, s.key, s.label)}
+                />
+              );
+            })}
+          </div>
+        )}
+
+        {/* COMPETENCIA */}
+        {effTab === 'competencia' && (
+          <div className="space-y-4">
+            <div className="flex gap-2">
+              <input type="text" value={compName} onChange={e => setCompName(e.target.value)} placeholder="Nombre del competidor" className="flex-1 px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" />
+              <input type="text" value={compUrl} onChange={e => setCompUrl(e.target.value)} placeholder="URL (landing o FB)" className="flex-1 px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" />
+              <input type="text" value={compPageId} onChange={e => setCompPageId(e.target.value)} placeholder="Page ID (Meta)" className="w-32 px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500" />
+              <button onClick={addCompetidor} disabled={!compName.trim()} className="inline-flex items-center gap-1 px-3 py-2 text-sm font-bold text-white bg-purple-600 rounded-lg hover:bg-purple-700 transition disabled:opacity-40">
+                <Plus size={14} /> Agregar
+              </button>
+            </div>
+            {competidores.length === 0 ? (
+              <div className="p-8 text-center border-2 border-dashed border-gray-200 dark:border-gray-600 rounded-xl">
+                <Users size={28} className="mx-auto text-gray-300 dark:text-gray-600 mb-2" />
+                <p className="text-sm text-gray-500 dark:text-gray-400">Todavía no cargaste competidores.</p>
+                <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-1">Agregá un competidor con su URL o Page ID de Facebook para monitorear sus ads.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {competidores.map(c => (
+                  <div key={c.id} className="bg-gray-50 dark:bg-gray-700/30 rounded-lg border border-gray-200 dark:border-gray-600 p-3">
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <div>
+                        <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{c.nombre}</p>
+                        <div className="flex items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">
+                          {c.url && <a href={c.url} target="_blank" rel="noreferrer" className="hover:text-purple-600 inline-flex items-center gap-0.5"><ExternalLink size={10} /> Web</a>}
+                          {c.pageId && <span className="font-mono">ID: {c.pageId}</span>}
+                          {c.lastCheck && <span>Check: {new Date(c.lastCheck).toLocaleDateString('es-AR')}</span>}
+                        </div>
+                      </div>
+                      <div className="flex gap-1">
+                        {c.pageId && (
+                          <button onClick={() => checkCompetitorAds(c)} className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-900/30 rounded hover:bg-purple-100 transition">
+                            <RefreshCw size={11} /> Actualizar ads
+                          </button>
+                        )}
+                        <button onClick={() => removeCompetidor(c.id)} className="p-1 text-gray-400 hover:text-red-600 transition"><Trash2 size={12} /></button>
+                      </div>
+                    </div>
+                    {/* Ads del competidor */}
+                    {Array.isArray(c.ads) && c.ads.length > 0 && (
+                      <div className="mt-2 space-y-1.5">
+                        <p className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase">{c.ads.length} ads activos (top por días corriendo)</p>
+                        {c.ads.slice(0, 5).map((ad, idx) => (
+                          <div key={ad.id || idx} className="flex gap-2 p-2 bg-white dark:bg-gray-800 rounded border border-gray-100 dark:border-gray-700 text-xs">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-gray-900 dark:text-gray-100 font-medium line-clamp-2">{(ad.bodies || [])[0] || '(sin copy)'}</p>
+                              <div className="flex items-center gap-2 mt-1 text-[10px] text-gray-500 dark:text-gray-400">
+                                {ad.daysRunning != null && <span className={`font-bold ${ad.daysRunning >= 30 ? 'text-emerald-600' : ad.daysRunning >= 14 ? 'text-amber-600' : 'text-gray-500'}`}>{ad.daysRunning}d</span>}
+                                {ad.platforms && <span>{ad.platforms.join(', ')}</span>}
+                                {ad.snapshotUrl && <a href={ad.snapshotUrl} target="_blank" rel="noreferrer" className="text-purple-600 hover:underline">Ver ad →</a>}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                        {c.ads.length > 5 && <p className="text-[10px] text-gray-400 dark:text-gray-500">+ {c.ads.length - 5} ads más</p>}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* MEMORIA */}
+        {effTab === 'memoria' && (
+          <div className="space-y-5 max-w-3xl">
+            {/* Agregar nota */}
+            <div>
+              <label className="block text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1.5">Agregar nota</label>
+              <div className="flex gap-2">
+                <input type="text" value={noteText} onChange={e => setNoteText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addNota(); }}
+                  placeholder='Ej: "Llamar a proveedor de envases" / "Revisar copy del hero"'
+                  className="flex-1 px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" />
+                <button onClick={addNota} disabled={!noteText.trim()} className="px-3 py-2 text-sm font-bold text-white bg-purple-600 rounded-lg hover:bg-purple-700 transition disabled:opacity-40">Guardar</button>
+              </div>
+            </div>
+            {/* Agregar aprendizaje */}
+            <div>
+              <label className="block text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1.5">Registrar aprendizaje (la IA lo usa en futuras generaciones)</label>
+              <div className="flex gap-2">
+                <input type="text" value={learningText} onChange={e => setLearningText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addAprendizaje(); }}
+                  placeholder='Ej: "Hook X tuvo 4.5% CTR" / "El ángulo conspiracional no funcionó con esta audiencia"'
+                  className="flex-1 px-3 py-2 bg-white dark:bg-gray-700 border border-emerald-300 dark:border-emerald-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                <button onClick={addAprendizaje} disabled={!learningText.trim()} className="px-3 py-2 text-sm font-bold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition disabled:opacity-40">Registrar</button>
+              </div>
+            </div>
+            {/* Listado */}
+            {(memoria.notas.length + memoria.aprendizajes.length) === 0 ? (
+              <p className="text-xs text-gray-400 dark:text-gray-500 italic">Sin notas ni aprendizajes todavía.</p>
+            ) : (
+              <div className="space-y-1.5">
+                {[...memoria.aprendizajes.map(a => ({ ...a, _tipo: 'aprendizaje' })), ...memoria.notas.map(n => ({ ...n, _tipo: 'nota' }))]
+                  .sort((a, b) => b.at.localeCompare(a.at))
+                  .map(item => (
+                    <div key={item.id} className={`px-3 py-2 rounded-lg text-xs ${item._tipo === 'aprendizaje' ? 'bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800' : 'bg-gray-50 dark:bg-gray-700/30 border border-gray-200 dark:border-gray-600'}`}>
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <span className={`text-[9px] font-bold uppercase ${item._tipo === 'aprendizaje' ? 'text-emerald-700 dark:text-emerald-300' : 'text-gray-500 dark:text-gray-400'}`}>{item._tipo === 'aprendizaje' ? '🧠 Aprendizaje' : '📝 Nota'}</span>
+                        <span className="text-[9px] text-gray-400 dark:text-gray-500">{new Date(item.at).toLocaleString('es-AR')}</span>
+                      </div>
+                      <p className="text-gray-800 dark:text-gray-200">{item.texto}</p>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* HISTORIAL */}
+        {effTab === 'historial' && (
+          <div className="space-y-1 max-w-3xl">
+            {historial.length === 0 ? (
+              <p className="text-xs text-gray-400 dark:text-gray-500 italic">Sin actividad registrada.</p>
+            ) : (
+              [...historial].reverse().map((h, idx) => (
+                <div key={idx} className="flex items-start gap-2 text-xs px-3 py-1.5 rounded hover:bg-gray-50 dark:hover:bg-gray-700/30 transition">
+                  <span className="text-[10px] text-gray-400 dark:text-gray-500 tabular-nums whitespace-nowrap">{new Date(h.at).toLocaleString('es-AR')}</span>
+                  <span className="text-gray-700 dark:text-gray-300">
+                    {h.tipo === 'generacion-inicial' && '🚀 Documentación generada'}
+                    {h.tipo === 'nota' && `📝 Nota: ${h.meta || ''}`}
+                    {h.tipo === 'aprendizaje' && `🧠 Aprendizaje: ${h.meta || ''}`}
+                    {h.tipo === 'competidor-agregado' && `👥 Competidor agregado: ${h.meta || ''}`}
+                    {h.tipo === 'ads-check' && `📊 ${h.meta || ''}`}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Accordion para cada documento (en tab Docs).
+function DocAccordion({ title, content, wordCount, onCopy, onDownload }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center gap-2 px-4 py-3 text-left bg-gray-50 dark:bg-gray-800/50 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition"
+      >
+        <ChevronDown size={14} className={`text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+        <span className="flex-1 text-sm font-semibold text-gray-900 dark:text-gray-100">{title}</span>
+        <span className="text-[10px] text-gray-400 dark:text-gray-500 tabular-nums">{wordCount > 1 ? `${wordCount} palabras` : '—'}</span>
+        <button onClick={(e) => { e.stopPropagation(); onCopy(); }} className="p-1 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition" title="Copiar"><Copy size={12} /></button>
+        <button onClick={(e) => { e.stopPropagation(); onDownload(); }} className="p-1 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition" title="Descargar"><Download size={12} /></button>
+      </button>
+      {open && (
+        <div className="px-4 pb-4 pt-2 max-h-[500px] overflow-y-auto">
+          <pre className="text-xs text-gray-800 dark:text-gray-200 whitespace-pre-wrap font-sans leading-relaxed">{content || '(sin contenido)'}</pre>
         </div>
       )}
     </div>

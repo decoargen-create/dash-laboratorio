@@ -5,10 +5,6 @@
   "outputDirectory": "dist",
   "installCommand": "npm install",
   "functions": {
-    "api/chat.js":                      { "maxDuration": 60 },
-    "api/insights.js":                  { "maxDuration": 30 },
-    "api/analytics.js":                 { "maxDuration": 60 },
-    "api/agents.js":                    { "maxDuration": 45 },
     "api/marketing/generate.js":        { "maxDuration": 300 },
     "api/marketing/apify-ingest.js":    { "maxDuration": 300 },
     "api/marketing/deep-analyze.js":    { "maxDuration": 240 },

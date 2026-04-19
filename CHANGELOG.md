@@ -405,7 +405,6 @@ Se consolidaron 2 nuevas acciones + una tercera para performance individual:
 
 ### API existentes reusadas sin cambios
 
-`/api/chat`, `/api/agents`, `/api/analytics`, `/api/insights`,
 `/api/scrape-product`, `/api/marketing/generate` (pipeline de docs),
 `/api/marketing/creatives`, `/api/agent-refine`.
 

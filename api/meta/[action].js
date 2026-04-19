@@ -216,9 +216,79 @@ async function handleAdAccounts(req, res) {
   }
 }
 
-// Devuelve los ads activos de una ad account con su creativo + insights básicos
-// (7 días: impressions, clicks, CTR, spend, cpc, CPM).
-// Usado para que el user seleccione cuáles son del producto que está analizando.
+// Helper: extrae métricas relevantes de un objeto insights crudo de Meta.
+function parseInsights(ins) {
+  if (!ins) return null;
+  const actions = ins.actions || [];
+  const purchases = actions.find(a =>
+    a.action_type === 'purchase' ||
+    a.action_type === 'offsite_conversion.fb_pixel_purchase'
+  );
+  return {
+    impressions: Number(ins.impressions || 0),
+    clicks: Number(ins.clicks || 0),
+    ctr: Number(ins.ctr || 0),
+    spend: Number(ins.spend || 0),
+    cpc: Number(ins.cpc || 0),
+    cpm: Number(ins.cpm || 0),
+    reach: Number(ins.reach || 0),
+    frequency: Number(ins.frequency || 0),
+    purchases: purchases ? Number(purchases.value || 0) : 0,
+  };
+}
+
+// Calcula el estado de fatigue comparando las métricas de los últimos 7 días
+// con los 7 días previos (days -14 a -7).
+//
+//   healthy   → todo OK, CTR estable o subiendo
+//   warming   → CTR bajó algo pero spend sigue subiendo (normal al escalar)
+//   fatiguing → CTR cayó > 20% respecto al período anterior
+//   dying     → CTR cayó > 40% + freq > 4
+//   new       → no hay datos suficientes de período previo
+//
+// Si frequency > 5 y CTR cayendo → ya está quemado en la audiencia.
+function computeFatigue(recent, prev) {
+  if (!recent || recent.impressions < 100) return { status: 'new', reason: 'Aún no hay datos suficientes' };
+  if (!prev || prev.impressions < 100) return { status: 'new', reason: 'Sin período previo para comparar' };
+
+  const ctrRecent = recent.ctr;
+  const ctrPrev = prev.ctr;
+  if (ctrPrev === 0) return { status: 'new', reason: 'CTR previo inválido' };
+
+  const ctrChangePct = Math.round(((ctrRecent - ctrPrev) / ctrPrev) * 100);
+  const freqOverload = recent.frequency > 4;
+
+  let status = 'healthy';
+  let reason = `CTR estable (${ctrChangePct >= 0 ? '+' : ''}${ctrChangePct}% vs 7d previos)`;
+
+  if (ctrChangePct < -40 || (ctrChangePct < -20 && freqOverload)) {
+    status = 'dying';
+    reason = `CTR cayó ${Math.abs(ctrChangePct)}% · freq ${recent.frequency.toFixed(1)} — audiencia quemada`;
+  } else if (ctrChangePct < -20) {
+    status = 'fatiguing';
+    reason = `CTR cayó ${Math.abs(ctrChangePct)}% vs 7d previos — fatiguing`;
+  } else if (ctrChangePct < -5 && recent.spend > prev.spend * 1.1) {
+    status = 'warming';
+    reason = `CTR bajó ${Math.abs(ctrChangePct)}% pero spend subió — normal al escalar`;
+  }
+
+  return {
+    status,
+    reason,
+    ctrRecent, ctrPrev, ctrChangePct,
+    frequencyRecent: recent.frequency,
+  };
+}
+
+// Formato "YYYY-MM-DD" para rangos custom en Meta API.
+function ymd(d) {
+  return d.toISOString().slice(0, 10);
+}
+
+// Devuelve los ads activos de una ad account con su creativo + insights.
+// Trae 2 rangos de insights (últimos 7 días y los 7 días previos a ese) y
+// computa estado de fatigue por ad. Usado para que el generador priorice
+// iteraciones sobre creativos que están fatigando.
 async function handleAdsWithInsights(req, res) {
   if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
   const session = readMetaCookie(req);
@@ -228,18 +298,25 @@ async function handleAdsWithInsights(req, res) {
   const url = new URL(req.url, origin);
   const accountId = url.searchParams.get('account_id');
   const limit = Math.min(Number(url.searchParams.get('limit') || 50), 100);
-  const datePreset = url.searchParams.get('date_preset') || 'last_7d';
 
   if (!accountId) return respondJSON(res, 400, { error: 'Falta account_id (con prefijo act_)' });
 
+  // Rango previo: días -14 a -7 (los 7 días anteriores al "last_7d" de Meta).
+  const now = new Date();
+  const prevSince = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+  const prevUntil = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const prevRange = JSON.stringify({ since: ymd(prevSince), until: ymd(prevUntil) });
+
   try {
-    // Traemos ads activos con creativo + insights inline.
-    // La API de Meta permite expandir creative{...} e insights{...} en un solo call.
+    // Un solo call a Graph API con dos expansiones de insights (distintos
+    // date_preset vs time_range). Meta permite alias de expansiones con
+    // `.as()`: as(recent) / as(previous).
     const data = await graphGet(`${accountId}/ads`, session.accessToken, {
       fields: [
         'id,name,status,effective_status,created_time,updated_time',
         `creative{id,name,title,body,thumbnail_url,image_url,video_id,object_story_spec,effective_object_story_id}`,
-        `insights.date_preset(${datePreset}){impressions,clicks,ctr,spend,cpc,cpm,actions,cost_per_action_type,reach,frequency}`,
+        `insights.date_preset(last_7d).as(recent){impressions,clicks,ctr,spend,cpc,cpm,actions,reach,frequency}`,
+        `insights.time_range(${prevRange}).as(previous){impressions,clicks,ctr,spend,cpc,cpm,actions,reach,frequency}`,
       ].join(','),
       limit,
       effective_status: JSON.stringify(['ACTIVE', 'PAUSED']),
@@ -247,10 +324,10 @@ async function handleAdsWithInsights(req, res) {
 
     const ads = (data.data || []).map(ad => {
       const creative = ad.creative || {};
-      const insightsArr = ad.insights?.data || [];
-      const ins = insightsArr[0] || null;
-      const actions = ins?.actions || [];
-      const purchases = actions.find(a => a.action_type === 'purchase' || a.action_type === 'offsite_conversion.fb_pixel_purchase');
+      const recent = parseInsights(ad.recent?.data?.[0]);
+      const previous = parseInsights(ad.previous?.data?.[0]);
+      const fatigue = computeFatigue(recent, previous);
+
       return {
         id: ad.id,
         name: ad.name,
@@ -268,24 +345,23 @@ async function handleAdsWithInsights(req, res) {
           videoId: creative.video_id || null,
           storyId: creative.effective_object_story_id || null,
         },
-        insights: ins ? {
-          impressions: Number(ins.impressions || 0),
-          clicks: Number(ins.clicks || 0),
-          ctr: Number(ins.ctr || 0),
-          spend: Number(ins.spend || 0),
-          cpc: Number(ins.cpc || 0),
-          cpm: Number(ins.cpm || 0),
-          reach: Number(ins.reach || 0),
-          frequency: Number(ins.frequency || 0),
-          purchases: purchases ? Number(purchases.value || 0) : 0,
-        } : null,
+        insights: recent,
+        insightsPrev: previous,
+        fatigue,
       };
     });
 
+    // Contador de cada status para que el front muestre un resumen.
+    const fatigueSummary = ads.reduce((acc, a) => {
+      const s = a.fatigue?.status || 'new';
+      acc[s] = (acc[s] || 0) + 1;
+      return acc;
+    }, {});
+
     return respondJSON(res, 200, {
       accountId,
-      datePreset,
       total: ads.length,
+      fatigueSummary,
       ads,
     });
   } catch (err) {

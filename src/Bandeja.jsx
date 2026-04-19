@@ -347,6 +347,11 @@ function IdeaCard({
                 {idea.origen.daysRunning ? ` · ${idea.origen.daysRunning}d corriendo` : ''}
               </span>
             )}
+            {idea.tipo === 'iteracion' && idea.origen?.adNombre && (
+              <span className="text-[10px] text-gray-500 dark:text-gray-400">
+                · itera: <span className="font-semibold text-gray-700 dark:text-gray-300">{idea.origen.adNombre}</span>
+              </span>
+            )}
             {idea.formato && (
               <span className="text-[10px] text-gray-400 ml-auto">
                 {idea.formato === 'video' ? '🎬' : idea.formato === 'static' ? '🖼️' : '📑'} {idea.formato}
@@ -376,6 +381,28 @@ function IdeaCard({
       {/* Detalle expandido */}
       {expanded && (
         <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 px-4 py-3 space-y-3">
+          {/* Razón de iteración — destacado arriba para iteraciones */}
+          {idea.tipo === 'iteracion' && idea.origen?.razonIteracion && (
+            <div className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md">
+              <p className="text-[10px] font-bold text-amber-800 dark:text-amber-300 uppercase tracking-wider mb-1">
+                🔄 ¿Por qué iterar este ad?
+              </p>
+              <p className="text-xs text-amber-900 dark:text-amber-200">
+                <span className="font-semibold">Ad base:</span> {idea.origen.adNombre || '(sin nombre)'}
+              </p>
+              <p className="text-xs text-amber-900 dark:text-amber-200 mt-1">{idea.origen.razonIteracion}</p>
+            </div>
+          )}
+          {/* Razonamiento general para réplicas/diferenciaciones/desde-cero */}
+          {idea.tipo !== 'iteracion' && idea.origen?.razonamiento && (
+            <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md">
+              <p className="text-[10px] font-bold text-blue-800 dark:text-blue-300 uppercase tracking-wider mb-1">
+                💡 Por qué esta idea
+              </p>
+              <p className="text-xs text-blue-900 dark:text-blue-200">{idea.origen.razonamiento}</p>
+            </div>
+          )}
+
           {idea.angulo && (
             <Field label="📐 Ángulo" text={idea.angulo} />
           )}

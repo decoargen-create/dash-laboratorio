@@ -86,7 +86,8 @@ const SHAPE_COMUN = `Por cada idea devolvé este shape EXACTO:
   "copy": "copy completo sugerido (2-5 oraciones)",
   "guion": "VIDEO: guión con beats numerados, ej: 'Beat 1 (0-3s): ... · Beat 2 (3-8s): ...'. Incluí duración total (15s/30s/60s) y tono de VO. STATIC: descripción de layout (headline arriba/centro, imagen hero, subcopy, CTA), paleta, mood y composición. CARRUSEL: slide-by-slide con hook en slide 1 y CTA en la última.",
   "formato": "video" | "static" | "carrusel",
-  "razonamiento": "1-2 oraciones: por qué esta idea, qué la hace fuerte"
+  "razonamiento": "1-2 oraciones: por qué esta idea, qué la hace fuerte",
+  "iteracionBase": "OBLIGATORIO solo si tipo='iteracion': { adId, adNombre, razon — con métrica concreta que justifica la iteración }"
 }
 
 El campo "guion" es CRÍTICO — tiene que darle al diseñador/editor toda la info que necesita para producir sin preguntar nada.
@@ -148,16 +149,46 @@ function buildContext({ producto, competidoresAnalisis, ideasExistentes, propios
   }
 
   if (propiosAds?.length) {
-    parts.push('\n## TUS PROPIOS ADS ACTIVOS (para generar iteraciones)');
-    parts.push('Incluyen métricas de los últimos 7 días. Los que tienen mejor CTR o más spend sostenido son buenos candidatos para iterar.');
-    propiosAds.slice(0, 15).forEach((ad, i) => {
-      const ins = ad.insights || {};
-      parts.push(`\n### ${i + 1}. ${ad.name || ad.creative?.title || 'Ad sin nombre'}`);
-      if (ad.creative?.title) parts.push(`Título: ${ad.creative.title}`);
-      if (ad.creative?.body) parts.push(`Body: ${String(ad.creative.body).slice(0, 300)}`);
-      parts.push(`Métricas 7d: CTR ${(ins.ctr || 0).toFixed(2)}% · ${ins.impressions || 0} imp · $${ins.spend || 0} spend · ${ins.purchases || 0} compras`);
-      parts.push(`Ad ID: ${ad.id}`);
+    // Ordenar fatigando primero (priorizar iteración de los que lo necesitan).
+    const orderedAds = [...propiosAds].sort((a, b) => {
+      const prioridad = { dying: 0, fatiguing: 1, warming: 2, healthy: 3, new: 4 };
+      return (prioridad[a.fatigue?.status] ?? 5) - (prioridad[b.fatigue?.status] ?? 5);
     });
+
+    const fatigando = orderedAds.filter(a => ['dying', 'fatiguing'].includes(a.fatigue?.status));
+    const sanos = orderedAds.filter(a => !['dying', 'fatiguing'].includes(a.fatigue?.status));
+
+    parts.push('\n## TUS PROPIOS ADS ACTIVOS (para generar iteraciones)');
+    parts.push(`Cada ad viene con su estado de fatigue y métricas 7d + 7d previos. PRIORIZÁ iterar los que están 🔻 FATIGANDO o 💀 MURIENDO — son los que más necesitan renovación. Los saludables podés tomarlos como base si su estructura/ángulo anduvo bien para escalar.`);
+
+    if (fatigando.length > 0) {
+      parts.push(`\n### 🔻 Fatigando / muriendo (${fatigando.length}) — prioridad alta para iterar`);
+      fatigando.forEach((ad, i) => {
+        const ins = ad.insights || {};
+        const fat = ad.fatigue || {};
+        parts.push(`\n**${i + 1}. ${ad.name || ad.creative?.title || 'Sin nombre'}** [adId: ${ad.id}]`);
+        if (ad.creative?.title) parts.push(`Título: ${ad.creative.title}`);
+        if (ad.creative?.body) parts.push(`Body: ${String(ad.creative.body).slice(0, 300)}`);
+        parts.push(`Estado: ${fat.status === 'dying' ? '💀 muriendo' : '🔻 fatigando'} — ${fat.reason}`);
+        parts.push(`7d actuales: CTR ${(ins.ctr || 0).toFixed(2)}% · ${ins.impressions || 0} imp · $${ins.spend || 0} · ${ins.purchases || 0} compras · freq ${(ins.frequency || 0).toFixed(1)}`);
+      });
+    }
+
+    if (sanos.length > 0) {
+      parts.push(`\n### ✅ Saludables (${sanos.length}) — se pueden iterar para escalar`);
+      sanos.slice(0, 8).forEach((ad, i) => {
+        const ins = ad.insights || {};
+        const fat = ad.fatigue || {};
+        parts.push(`\n**${fatigando.length + i + 1}. ${ad.name || ad.creative?.title || 'Sin nombre'}** [adId: ${ad.id}]`);
+        if (ad.creative?.title) parts.push(`Título: ${ad.creative.title}`);
+        parts.push(`Estado: ${fat.status === 'healthy' ? '✅ saludable' : fat.status === 'warming' ? '📈 escalando' : '🆕 nuevo'} — ${fat.reason || ''}`);
+        parts.push(`7d: CTR ${(ins.ctr || 0).toFixed(2)}% · $${ins.spend || 0} · ${ins.purchases || 0} compras`);
+      });
+    }
+
+    parts.push(`\n**PARA IDEAS TIPO "iteracion"**, incluí en el shape estos campos extra:`);
+    parts.push(`  - "iteracionBase": { "adId": "<id del ad base>", "adNombre": "<nombre>", "razon": "<qué estás cambiando y por qué, referenciando métrica concreta>" }`);
+    parts.push(`Ejemplo de razon: "El ad base tiene CTR -28% últimos 7d con freq 4.2 — audiencia quemada con ese hook. Cambiamos a hook de dolor específico + mismo formato."`);
   }
 
   if (ideasExistentes?.length) {
@@ -254,17 +285,28 @@ export default async function handler(req, res) {
     const tiposValidos = new Set(['replica', 'iteracion', 'diferenciacion', 'desde_cero']);
     const clean = ideas
       .filter(i => i && typeof i.titulo === 'string' && tiposValidos.has(i.tipo))
-      .map(i => ({
-        titulo: String(i.titulo).slice(0, 150),
-        tipo: i.tipo,
-        angulo: String(i.angulo || '').slice(0, 500),
-        painPoint: String(i.painPoint || '').slice(0, 500),
-        hook: String(i.hook || '').slice(0, 500),
-        copy: String(i.copy || '').slice(0, 1500),
-        guion: String(i.guion || '').slice(0, 3000),
-        formato: ['video', 'static', 'carrusel'].includes(i.formato) ? i.formato : 'static',
-        razonamiento: String(i.razonamiento || '').slice(0, 500),
-      }));
+      .map(i => {
+        const base = {
+          titulo: String(i.titulo).slice(0, 150),
+          tipo: i.tipo,
+          angulo: String(i.angulo || '').slice(0, 500),
+          painPoint: String(i.painPoint || '').slice(0, 500),
+          hook: String(i.hook || '').slice(0, 500),
+          copy: String(i.copy || '').slice(0, 1500),
+          guion: String(i.guion || '').slice(0, 3000),
+          formato: ['video', 'static', 'carrusel'].includes(i.formato) ? i.formato : 'static',
+          razonamiento: String(i.razonamiento || '').slice(0, 500),
+        };
+        // Para iteraciones, capturamos el link al ad base con la razón concreta.
+        if (i.tipo === 'iteracion' && i.iteracionBase) {
+          base.iteracionBase = {
+            adId: String(i.iteracionBase.adId || '').slice(0, 100),
+            adNombre: String(i.iteracionBase.adNombre || '').slice(0, 200),
+            razon: String(i.iteracionBase.razon || '').slice(0, 500),
+          };
+        }
+        return base;
+      });
 
     return respondJSON(res, 200, {
       ideas: clean,

@@ -29,6 +29,7 @@ const DEFAULT_GEN_CONFIG = {
 const PRODUCTOS_KEY = 'viora-marketing-productos-v1';
 const COMPETIDORES_KEY = 'viora-marketing-competidores-v1';
 const META_ACCOUNT_KEY = 'viora-marketing-meta-account-v1';
+const LAST_RUN_KEY = 'viora-marketing-last-pipeline-run-v1';
 
 function loadJSON(key, fallback) {
   try {
@@ -518,6 +519,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             name: a.name,
             creative: { title: a.creative?.title, body: a.creative?.body },
             insights: a.insights,
+            fatigue: a.fatigue,
           }));
 
         // Target count: primera vez (bandeja vacía) sin cap duro (hasta 40 con
@@ -580,9 +582,24 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
     setRunning(false);
     if (!cancelled) {
+      try { localStorage.setItem(LAST_RUN_KEY, new Date().toISOString()); } catch {}
       addToast?.({ type: 'success', message: '¡Listo! Mirá los análisis + ideas en la Bandeja.' });
     }
   };
+
+  // Sugerencia de auto-run diario: si pasaron más de 24h desde el último
+  // pipeline exitoso y hay competidores cargados, mostramos un prompt
+  // suave al tope de la página.
+  const lastRun = (() => {
+    try {
+      const raw = localStorage.getItem(LAST_RUN_KEY);
+      return raw || null;
+    } catch { return null; }
+  })();
+  const horasDesdeUltimoRun = lastRun
+    ? Math.round((Date.now() - new Date(lastRun).getTime()) / 3600000)
+    : null;
+  const ofrecerRun = !running && compsReady && (horasDesdeUltimoRun == null || horasDesdeUltimoRun >= 24);
 
   const handleCancel = () => {
     setCancelled(true);
@@ -609,6 +626,29 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           <p className="text-xs text-gray-500 dark:text-gray-400">Cargá tu producto + competidores una vez y corré el pipeline cuando quieras.</p>
         </div>
       </div>
+
+      {/* Nudge de auto-run: si pasaron > 24h y el user no está corriendo ahora */}
+      {ofrecerRun && (
+        <div className="px-4 py-3 bg-gradient-to-br from-fuchsia-50 to-purple-50 dark:from-fuchsia-900/20 dark:to-purple-900/20 border border-fuchsia-200 dark:border-fuchsia-800 rounded-lg flex items-center gap-3">
+          <div className="shrink-0 w-8 h-8 rounded-lg bg-gradient-to-br from-fuchsia-500 to-purple-500 flex items-center justify-center text-white">
+            <Sparkles size={14} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold text-gray-900 dark:text-gray-100">
+              {lastRun
+                ? `Hace ${horasDesdeUltimoRun >= 48 ? `${Math.round(horasDesdeUltimoRun / 24)} días` : `${horasDesdeUltimoRun} horas`} que no corrés el pipeline`
+                : 'Todavía no corriste el pipeline'}
+            </p>
+            <p className="text-[11px] text-gray-600 dark:text-gray-300">
+              Lo ideal es correrlo 1 vez por día para detectar ganadores nuevos, ads propios fatigando y armar ideas frescas para la Bandeja.
+            </p>
+          </div>
+          <button onClick={runPipeline}
+            className="shrink-0 inline-flex items-center gap-1 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-fuchsia-600 to-purple-600 rounded-md hover:from-fuchsia-700 hover:to-purple-700 transition shadow-sm">
+            <Play size={12} /> Correr ahora
+          </button>
+        </div>
+      )}
 
       {/* Paso 1 — Producto */}
       <WizardCard
@@ -674,7 +714,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           </p>
         ) : metaAccount ? (
           <div className="space-y-2">
-            <div className="flex items-center gap-2 text-xs">
+            <div className="flex items-center gap-2 text-xs flex-wrap">
               <span className="font-semibold text-gray-900 dark:text-gray-100">{metaAccount.name}</span>
               <span className="text-gray-400">· {metaAccount.currency}</span>
               <span className="text-gray-400">· {metaAccount.ads?.length || 0} ads</span>
@@ -688,6 +728,46 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 <X size={12} />
               </button>
             </div>
+
+            {/* Resumen de fatigue — solo si hay al menos 1 ad con estado detectado */}
+            {(() => {
+              const summary = (metaAccount.ads || []).reduce((acc, a) => {
+                const s = a.fatigue?.status || 'new';
+                acc[s] = (acc[s] || 0) + 1;
+                return acc;
+              }, {});
+              const critical = (summary.dying || 0) + (summary.fatiguing || 0);
+              if ((metaAccount.ads?.length || 0) === 0 || critical === 0 && !summary.healthy) return null;
+              return (
+                <div className="flex items-center gap-1.5 flex-wrap text-[10px]">
+                  {summary.dying > 0 && (
+                    <span className="inline-flex items-center px-1.5 py-0.5 bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 rounded font-bold">
+                      💀 {summary.dying} muriendo
+                    </span>
+                  )}
+                  {summary.fatiguing > 0 && (
+                    <span className="inline-flex items-center px-1.5 py-0.5 bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 rounded font-bold">
+                      🔻 {summary.fatiguing} fatigando
+                    </span>
+                  )}
+                  {summary.warming > 0 && (
+                    <span className="inline-flex items-center px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded">
+                      📈 {summary.warming} escalando
+                    </span>
+                  )}
+                  {summary.healthy > 0 && (
+                    <span className="inline-flex items-center px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded">
+                      ✅ {summary.healthy} sanos
+                    </span>
+                  )}
+                  {critical > 0 && (
+                    <span className="text-gray-500 dark:text-gray-400 italic ml-1">
+                      · el pipeline va a priorizar iteraciones sobre los {critical} que están cayendo
+                    </span>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Botón matcher IA */}
             {producto?.nombre && !metaAccount.productMatched && (
@@ -710,29 +790,50 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 <summary className="cursor-pointer px-3 py-2 text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
                   Ver ads cargados
                 </summary>
-                <ul className="px-3 pb-3 space-y-1 text-xs text-gray-700 dark:text-gray-300 max-h-60 overflow-y-auto">
-                  {metaAccount.ads.slice(0, 30).map(ad => (
-                    <li key={ad.id} className="flex items-center gap-2 py-1 border-b border-gray-100 dark:border-gray-700/50">
-                      <span className={`inline-block w-1.5 h-1.5 rounded-full ${
-                        ad.effectiveStatus === 'ACTIVE' ? 'bg-emerald-500' : 'bg-gray-400'
-                      }`} />
-                      {ad.productMatch && (
-                        <span className={`inline-flex items-center px-1 py-0.5 text-[9px] font-bold rounded ${
-                          ad.productMatch.confidence === 'high' ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300' :
-                          ad.productMatch.confidence === 'medium' ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300' :
-                          'bg-gray-100 dark:bg-gray-700 text-gray-600'
-                        }`} title={ad.productMatch.reason}>
-                          ✓ {ad.productMatch.confidence}
-                        </span>
-                      )}
-                      <span className="flex-1 truncate font-semibold">{ad.creative?.title || ad.name}</span>
-                      {ad.insights && (
-                        <span className="text-[10px] text-gray-500 font-mono">
-                          CTR {(ad.insights.ctr).toFixed(2)}% · {ad.insights.impressions.toLocaleString('es-AR')} imp
-                        </span>
-                      )}
-                    </li>
-                  ))}
+                <ul className="px-3 pb-3 space-y-1 text-xs text-gray-700 dark:text-gray-300 max-h-72 overflow-y-auto">
+                  {metaAccount.ads.slice(0, 30).map(ad => {
+                    const fat = ad.fatigue || {};
+                    const fatBadge = {
+                      dying:     { icon: '💀', color: 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300', label: 'muriendo' },
+                      fatiguing: { icon: '🔻', color: 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300', label: 'fatigando' },
+                      warming:   { icon: '📈', color: 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300', label: 'escalando' },
+                      healthy:   { icon: '✅', color: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300', label: 'saludable' },
+                      new:       { icon: '🆕', color: 'bg-gray-100 dark:bg-gray-700 text-gray-600', label: 'nuevo' },
+                    }[fat.status] || null;
+                    return (
+                      <li key={ad.id} className="flex items-center gap-2 py-1 border-b border-gray-100 dark:border-gray-700/50">
+                        <span className={`inline-block w-1.5 h-1.5 rounded-full ${
+                          ad.effectiveStatus === 'ACTIVE' ? 'bg-emerald-500' : 'bg-gray-400'
+                        }`} />
+                        {ad.productMatch && (
+                          <span className={`inline-flex items-center px-1 py-0.5 text-[9px] font-bold rounded ${
+                            ad.productMatch.confidence === 'high' ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300' :
+                            ad.productMatch.confidence === 'medium' ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300' :
+                            'bg-gray-100 dark:bg-gray-700 text-gray-600'
+                          }`} title={ad.productMatch.reason}>
+                            ✓ {ad.productMatch.confidence}
+                          </span>
+                        )}
+                        {fatBadge && (
+                          <span className={`inline-flex items-center px-1 py-0.5 text-[9px] font-bold rounded ${fatBadge.color}`}
+                            title={fat.reason}>
+                            {fatBadge.icon} {fatBadge.label}
+                          </span>
+                        )}
+                        <span className="flex-1 truncate font-semibold">{ad.creative?.title || ad.name}</span>
+                        {ad.insights && (
+                          <span className="text-[10px] text-gray-500 font-mono">
+                            CTR {(ad.insights.ctr).toFixed(2)}%
+                            {fat.ctrChangePct != null && (
+                              <span className={fat.ctrChangePct < 0 ? 'text-red-500 ml-1' : 'text-emerald-500 ml-1'}>
+                                ({fat.ctrChangePct > 0 ? '+' : ''}{fat.ctrChangePct}%)
+                              </span>
+                            )}
+                          </span>
+                        )}
+                      </li>
+                    );
+                  })}
                   {metaAccount.ads.length > 30 && (
                     <li className="text-[10px] text-gray-400 italic pt-1">+ {metaAccount.ads.length - 30} ads más</li>
                   )}

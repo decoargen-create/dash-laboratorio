@@ -71,20 +71,38 @@ export function addGeneratedIdeas(rawIdeas, { producto } = {}) {
   const existentes = loadIdeas();
   const existingCount = existentes.length;
   for (const r of rawIdeas) {
+    // Para iteraciones, el origen apunta al ad propio base + guarda la razón
+    // concreta (métrica que cayó, por qué estamos iterando).
+    const origen = r.tipo === 'iteracion' && r.iteracionBase
+      ? {
+          tipo: 'propio',
+          adId: r.iteracionBase.adId || null,
+          adNombre: r.iteracionBase.adNombre || '',
+          competidorNombre: null,
+          competidorId: null,
+          adSnapshotUrl: null,
+          imageUrl: null,
+          daysRunning: null,
+          productoNombre: producto?.nombre || null,
+          razonamiento: r.razonamiento || '',
+          razonIteracion: r.iteracionBase.razon || '',
+        }
+      : {
+          tipo: 'generado',
+          competidorNombre: null,
+          competidorId: null,
+          adId: null,
+          adSnapshotUrl: null,
+          imageUrl: null,
+          daysRunning: null,
+          productoNombre: producto?.nombre || null,
+          razonamiento: r.razonamiento || '',
+        };
+
     const idea = addIdea({
       titulo: r.titulo,
       tipo: r.tipo,
-      origen: {
-        tipo: 'generado',
-        competidorNombre: null,
-        competidorId: null,
-        adId: null,
-        adSnapshotUrl: null,
-        imageUrl: null,
-        daysRunning: null,
-        productoNombre: producto?.nombre || null,
-        razonamiento: r.razonamiento || '',
-      },
+      origen,
       angulo: r.angulo || '',
       painPoint: r.painPoint || '',
       hook: r.hook || '',
@@ -92,8 +110,6 @@ export function addGeneratedIdeas(rawIdeas, { producto } = {}) {
       guion: r.guion || '',
       formato: r.formato || 'static',
     });
-    // Si es nueva (no match previo) queda al tope — detectamos comparando
-    // la longitud del storage antes/después.
     if (loadIdeas().length > existingCount + nuevas.length) nuevas.push(idea);
   }
   return nuevas;

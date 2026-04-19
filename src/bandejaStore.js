@@ -109,6 +109,8 @@ export function addGeneratedIdeas(rawIdeas, { producto } = {}) {
       copy: r.copy || '',
       guion: r.guion || '',
       formato: r.formato || 'static',
+      variableDeTesteo: r.variableDeTesteo || 'mix',
+      testHipotesis: r.testHipotesis || '',
     });
     if (loadIdeas().length > existingCount + nuevas.length) nuevas.push(idea);
   }
@@ -214,4 +216,19 @@ export const ESTADO_META = {
   en_uso:    { label: 'En uso',    color: 'text-amber-600 dark:text-amber-400', icon: '◐' },
   usada:     { label: 'Usada',     color: 'text-emerald-600 dark:text-emerald-400', icon: '✓' },
   archivada: { label: 'Archivada', color: 'text-gray-400 dark:text-gray-500', icon: '✕' },
+};
+
+// Catálogo de variables de testeo. La idea es que cada idea declare qué
+// UNA cosa se está variando vs el baseline, así se pueden armar A/B
+// coherentes y aprender qué palanca mueve las métricas.
+export const VARIABLE_META = {
+  hook:          { label: 'Hook',           emoji: '🎣', descripcion: 'Cambia los primeros 3 segundos' },
+  visual:        { label: 'Visual',         emoji: '🎨', descripcion: 'Cambia la estética / composición / paleta' },
+  cta:           { label: 'CTA',            emoji: '🖱️', descripcion: 'Cambia el call-to-action' },
+  formato:       { label: 'Formato',        emoji: '🔀', descripcion: 'Pasa de static a video, o vice versa' },
+  angulo:        { label: 'Ángulo',         emoji: '📐', descripcion: 'Cambia el ángulo emocional/estratégico' },
+  audience:      { label: 'Audience',       emoji: '👥', descripcion: 'Mismo creativo, distinta audiencia' },
+  prueba_social: { label: 'Prueba social',  emoji: '👤', descripcion: 'Agrega/varía testimonios, UGC, autoridad' },
+  oferta:        { label: 'Oferta',         emoji: '💰', descripcion: 'Cambia descuento, bundle, garantía' },
+  mix:           { label: 'Mix',            emoji: '🎛️', descripcion: 'Varios cambios a la vez (no es A/B puro)' },
 };

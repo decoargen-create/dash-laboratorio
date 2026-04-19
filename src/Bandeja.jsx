@@ -18,7 +18,7 @@ import {
   ChevronDown, Check, Circle, CircleDot, Archive, Edit3, CheckSquare, Square,
 } from 'lucide-react';
 import {
-  loadIdeas, updateIdea, removeIdea, TIPO_META, ESTADO_META,
+  loadIdeas, updateIdea, removeIdea, TIPO_META, ESTADO_META, VARIABLE_META,
 } from './bandejaStore.js';
 
 export default function BandejaSection({ addToast }) {
@@ -107,6 +107,10 @@ export default function BandejaSection({ addToast }) {
         if (idea.origen?.competidorNombre) lines.push(`**Origen:** ${idea.origen.competidorNombre}${idea.origen.daysRunning ? ` · ${idea.origen.daysRunning}d corriendo` : ''}`);
         if (idea.origen?.razonamiento) lines.push(`**Razonamiento:** ${idea.origen.razonamiento}`);
         if (idea.formato) lines.push(`**Formato:** ${idea.formato}`);
+        if (idea.variableDeTesteo && VARIABLE_META[idea.variableDeTesteo]) {
+          lines.push(`**Variable a testear:** ${VARIABLE_META[idea.variableDeTesteo].emoji} ${VARIABLE_META[idea.variableDeTesteo].label} — ${VARIABLE_META[idea.variableDeTesteo].descripcion}`);
+        }
+        if (idea.testHipotesis) lines.push(`**Hipótesis:** ${idea.testHipotesis}`);
         lines.push(``);
         if (idea.angulo) { lines.push(`**Ángulo:** ${idea.angulo}`); lines.push(``); }
         if (idea.hook) { lines.push(`**Hook:**  \n> ${idea.hook.replace(/\n/g, '\n> ')}`); lines.push(``); }
@@ -352,6 +356,12 @@ function IdeaCard({
                 · itera: <span className="font-semibold text-gray-700 dark:text-gray-300">{idea.origen.adNombre}</span>
               </span>
             )}
+            {idea.variableDeTesteo && VARIABLE_META[idea.variableDeTesteo] && (
+              <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-semibold bg-cyan-100 dark:bg-cyan-900/40 text-cyan-700 dark:text-cyan-300 rounded"
+                title={`Variable a testear: ${VARIABLE_META[idea.variableDeTesteo].descripcion}`}>
+                {VARIABLE_META[idea.variableDeTesteo].emoji} testea: {VARIABLE_META[idea.variableDeTesteo].label}
+              </span>
+            )}
             {idea.formato && (
               <span className="text-[10px] text-gray-400 ml-auto">
                 {idea.formato === 'video' ? '🎬' : idea.formato === 'static' ? '🖼️' : '📑'} {idea.formato}
@@ -400,6 +410,21 @@ function IdeaCard({
                 💡 Por qué esta idea
               </p>
               <p className="text-xs text-blue-900 dark:text-blue-200">{idea.origen.razonamiento}</p>
+            </div>
+          )}
+
+          {/* Hipótesis a validar — crítico para el loop de aprendizaje */}
+          {idea.testHipotesis && (
+            <div className="p-3 bg-cyan-50 dark:bg-cyan-900/20 border border-cyan-200 dark:border-cyan-800 rounded-md">
+              <p className="text-[10px] font-bold text-cyan-800 dark:text-cyan-300 uppercase tracking-wider mb-1">
+                🔬 Hipótesis a validar
+              </p>
+              {VARIABLE_META[idea.variableDeTesteo] && (
+                <p className="text-[10px] text-cyan-700 dark:text-cyan-400 mb-1">
+                  Variable: <strong>{VARIABLE_META[idea.variableDeTesteo].emoji} {VARIABLE_META[idea.variableDeTesteo].label}</strong> · {VARIABLE_META[idea.variableDeTesteo].descripcion}
+                </p>
+              )}
+              <p className="text-xs text-cyan-900 dark:text-cyan-200">{idea.testHipotesis}</p>
             </div>
           )}
 

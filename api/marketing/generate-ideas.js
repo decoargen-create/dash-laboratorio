@@ -87,8 +87,12 @@ const SHAPE_COMUN = `Por cada idea devolvé este shape EXACTO:
   "guion": "VIDEO: guión con beats numerados, ej: 'Beat 1 (0-3s): ... · Beat 2 (3-8s): ...'. Incluí duración total (15s/30s/60s) y tono de VO. STATIC: descripción de layout (headline arriba/centro, imagen hero, subcopy, CTA), paleta, mood y composición. CARRUSEL: slide-by-slide con hook en slide 1 y CTA en la última.",
   "formato": "video" | "static" | "carrusel",
   "razonamiento": "1-2 oraciones: por qué esta idea, qué la hace fuerte",
-  "iteracionBase": "OBLIGATORIO solo si tipo='iteracion': { adId, adNombre, razon — con métrica concreta que justifica la iteración }"
+  "iteracionBase": "OBLIGATORIO solo si tipo='iteracion': { adId, adNombre, razon — con métrica concreta que justifica la iteración }",
+  "variableDeTesteo": "OBLIGATORIO — qué se está testeando puntual vs un baseline (importa para aprender qué funcionó después). Valores válidos: 'hook' | 'visual' | 'cta' | 'formato' | 'angulo' | 'audience' | 'prueba_social' | 'oferta' | 'mix' (mix = varios a la vez).",
+  "testHipotesis": "OBLIGATORIO — hipótesis medible, ej: 'el hook con dato numérico va a bajar CPA vs el hook emocional genérico' o 'el formato carrusel va a tener más thumb-stop que el video en frío'"
 }
+
+**IMPORTANTE sobre variableDeTesteo**: para iteraciones, identificá qué UNA cosa estás cambiando vs el ad base (si cambiás hook Y visual a la vez, poné "mix"). Para réplicas/diferenciaciones, identificá cuál es la palanca central de la idea. Esto permite al user armar A/B coherentes y aprender qué funciona.
 
 El campo "guion" es CRÍTICO — tiene que darle al diseñador/editor toda la info que necesita para producir sin preguntar nada.
 
@@ -328,6 +332,7 @@ export default async function handler(req, res) {
 
     // Filtrado defensivo: solo ideas con titulo + tipo válido.
     const tiposValidos = new Set(['replica', 'iteracion', 'diferenciacion', 'desde_cero']);
+    const variablesValidas = new Set(['hook', 'visual', 'cta', 'formato', 'angulo', 'audience', 'prueba_social', 'oferta', 'mix']);
     const clean = ideas
       .filter(i => i && typeof i.titulo === 'string' && tiposValidos.has(i.tipo))
       .map(i => {
@@ -341,6 +346,8 @@ export default async function handler(req, res) {
           guion: String(i.guion || '').slice(0, 3000),
           formato: ['video', 'static', 'carrusel'].includes(i.formato) ? i.formato : 'static',
           razonamiento: String(i.razonamiento || '').slice(0, 500),
+          variableDeTesteo: variablesValidas.has(i.variableDeTesteo) ? i.variableDeTesteo : 'mix',
+          testHipotesis: String(i.testHipotesis || '').slice(0, 500),
         };
         // Para iteraciones, capturamos el link al ad base con la razón concreta.
         if (i.tipo === 'iteracion' && i.iteracionBase) {

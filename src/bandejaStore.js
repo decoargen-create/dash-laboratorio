@@ -140,6 +140,9 @@ export function addGeneratedIdeas(rawIdeas, { producto } = {}) {
       copyPostMeta: r.copyPostMeta || r.copy || '', // fallback a copy por compat
       publicoSugerido: r.publicoSugerido || '',
       guion: r.guion || '',
+      anguloCategoria: r.anguloCategoria || null,
+      tipoCampaña: r.tipoCampaña || null,
+      metaRiesgo: r.metaRiesgo || { tieneRiesgo: false, palabras: [], sugerencia: '' },
       variableDeTesteo: r.variableDeTesteo || 'mix',
       testHipotesis: r.testHipotesis || '',
       hookDuplicado,
@@ -253,6 +256,30 @@ export const ESTADO_META = {
 // Catálogo de variables de testeo. La idea es que cada idea declare qué
 // UNA cosa se está variando vs el baseline, así se pueden armar A/B
 // coherentes y aprender qué palanca mueve las métricas.
+// Catálogo de los 10 ángulos estratégicos (método propio).
+// Cada idea puede pertenecer a uno — para agrupar/filtrar en la Bandeja.
+export const ANGULO_META = {
+  A: { label: 'Sarcasmo / vulgar', emoji: '🔥', color: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300' },
+  B: { label: 'Insight incómodo',  emoji: '💢', color: 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300' },
+  C: { label: 'POV relatable',     emoji: '🎭', color: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300' },
+  D: { label: 'Doble sentido',     emoji: '🎯', color: 'bg-fuchsia-100 dark:bg-fuchsia-900/30 text-fuchsia-700 dark:text-fuchsia-300' },
+  E: { label: 'Autoridad/solución',emoji: '🏆', color: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' },
+  F: { label: 'Testimonio c/edad', emoji: '👵', color: 'bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300' },
+  G: { label: 'Científico',        emoji: '🔬', color: 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-300' },
+  H: { label: 'Antes/después',     emoji: '🔄', color: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' },
+  I: { label: 'Humor anti-cultura',emoji: '😈', color: 'bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300' },
+  J: { label: 'Edad emocional',    emoji: '⏳', color: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300' },
+};
+
+export const CAMPAÑA_META = {
+  TOFU:         { label: 'TOFU · prospecting', emoji: '🧊', color: 'text-sky-600 dark:text-sky-400' },
+  MOFU:         { label: 'MOFU · consideración', emoji: '🤔', color: 'text-indigo-600 dark:text-indigo-400' },
+  BOFU:         { label: 'BOFU · conversión', emoji: '💰', color: 'text-emerald-600 dark:text-emerald-400' },
+  retargeting:  { label: 'Retargeting caliente', emoji: '🔥', color: 'text-red-600 dark:text-red-400' },
+  social_proof: { label: 'Prueba social', emoji: '⭐', color: 'text-amber-600 dark:text-amber-400' },
+  branding:     { label: 'Branding', emoji: '🎨', color: 'text-violet-600 dark:text-violet-400' },
+};
+
 export const VARIABLE_META = {
   hook:          { label: 'Hook',           emoji: '🎣', descripcion: 'Cambia los primeros 3 segundos' },
   visual:        { label: 'Visual',         emoji: '🎨', descripcion: 'Cambia la estética / composición / paleta' },

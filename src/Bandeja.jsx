@@ -18,7 +18,7 @@ import {
   ChevronDown, Check, Circle, CircleDot, Archive, Edit3, CheckSquare, Square,
 } from 'lucide-react';
 import {
-  loadIdeas, updateIdea, removeIdea, TIPO_META, ESTADO_META, VARIABLE_META,
+  loadIdeas, updateIdea, removeIdea, TIPO_META, ESTADO_META, VARIABLE_META, ANGULO_META, CAMPAÑA_META,
 } from './bandejaStore.js';
 
 export default function BandejaSection({ addToast }) {
@@ -453,10 +453,28 @@ function IdeaCard({
                 · itera: <span className="font-semibold text-gray-700 dark:text-gray-300">{idea.origen.adNombre}</span>
               </span>
             )}
+            {idea.anguloCategoria && ANGULO_META[idea.anguloCategoria] && (
+              <span className={`inline-flex items-center px-1.5 py-0.5 text-[9px] font-bold rounded ${ANGULO_META[idea.anguloCategoria].color}`}
+                title={`Ángulo estratégico ${idea.anguloCategoria}: ${ANGULO_META[idea.anguloCategoria].label}`}>
+                {ANGULO_META[idea.anguloCategoria].emoji} {idea.anguloCategoria}
+              </span>
+            )}
+            {idea.tipoCampaña && CAMPAÑA_META[idea.tipoCampaña] && (
+              <span className={`inline-flex items-center text-[9px] font-semibold ${CAMPAÑA_META[idea.tipoCampaña].color}`}
+                title={CAMPAÑA_META[idea.tipoCampaña].label}>
+                {CAMPAÑA_META[idea.tipoCampaña].emoji} {idea.tipoCampaña}
+              </span>
+            )}
             {idea.variableDeTesteo && VARIABLE_META[idea.variableDeTesteo] && (
               <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-semibold bg-cyan-100 dark:bg-cyan-900/40 text-cyan-700 dark:text-cyan-300 rounded"
                 title={`Variable a testear: ${VARIABLE_META[idea.variableDeTesteo].descripcion}`}>
                 {VARIABLE_META[idea.variableDeTesteo].emoji} testea: {VARIABLE_META[idea.variableDeTesteo].label}
+              </span>
+            )}
+            {idea.metaRiesgo?.tieneRiesgo && (
+              <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-bold bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 rounded"
+                title={`Palabras gatillo de Meta: ${(idea.metaRiesgo.palabras || []).join(', ')}${idea.metaRiesgo.sugerencia ? ' · ' + idea.metaRiesgo.sugerencia : ''}`}>
+                ⚠ Meta
               </span>
             )}
             {idea.hookDuplicado && (
@@ -528,6 +546,26 @@ function IdeaCard({
                 </p>
               )}
               <p className="text-xs text-cyan-900 dark:text-cyan-200">{idea.testHipotesis}</p>
+            </div>
+          )}
+
+          {/* ⚠ Riesgo de alcance Meta — palabras gatillo */}
+          {idea.metaRiesgo?.tieneRiesgo && (
+            <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md">
+              <p className="text-[10px] font-bold text-red-800 dark:text-red-300 uppercase tracking-wider mb-1">
+                ⚠ Riesgo de alcance en Meta
+              </p>
+              {idea.metaRiesgo.palabras?.length > 0 && (
+                <p className="text-[10px] text-red-700 dark:text-red-400 mb-1">
+                  Palabras gatillo detectadas: <strong>{idea.metaRiesgo.palabras.join(', ')}</strong>
+                </p>
+              )}
+              {idea.metaRiesgo.sugerencia && (
+                <p className="text-xs text-red-900 dark:text-red-200">{idea.metaRiesgo.sugerencia}</p>
+              )}
+              <p className="text-[10px] text-red-600 dark:text-red-400 italic mt-1">
+                Recomendación: testear primero en campaña chica antes de escalar.
+              </p>
             </div>
           )}
 

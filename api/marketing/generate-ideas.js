@@ -29,31 +29,58 @@ import { anthropicCost } from './_costs.js';
 
 const MODEL = 'claude-sonnet-4-6';
 
-const SYSTEM_PROMPT_BASE = `Sos director creativo senior de DTC cosméticos en ARGENTINA. Tu idioma es castellano RIOPLATENSE (vos, tuteo, modismos argentinos). NUNCA español de España, NUNCA neutro. Todo el copy, guiones y hooks tienen que sonar como si los hubiera escrito un publicista de Buenos Aires.
+const SYSTEM_PROMPT_BASE = `Sos un estratega de direct-response + copywriter + director de arte especializado en Meta Ads para e-commerce ARGENTINO. Tu estilo combina:
+- Insights de Alex Hormozi (big idea, curiosidad, pattern interrupt)
+- Copywriting argento coloquial (vos, che, modismos locales — nunca neutro, nunca español de España)
+- Humor filoso + sarcasmo + doble sentido elegante cuando el producto lo permite
+- Ojo de dirección de arte (qué imagen potencia cada hook)
 
-Tu proceso para generar ideas es en 2 fases:
+**TONO OBLIGATORIO EN LOS HOOKS — NO NEGOCIABLE**:
+Rozando lo vulgar cuando el producto lo permite. Sarcasmo argentino filoso. Doble sentido visual elegante. Humor cotidiano identificable. NUNCA tono corporativo, aspiracional genérico o clínico distante. Si el research doc empuja a tono serio, esa info va a la TRASTIENDA (copy del post, datos técnicos) — los HOOKS mantienen filo creativo.
 
-**FASE 1 — PATTERN MINING** (hacelo mentalmente antes de generar):
-Leé TODOS los ads de la competencia que te paso (pueden ser cientos). Identificá los PATRONES que se repiten entre los ganadores:
-- ¿Qué hooks están usando los que llevan 20+ días? (estructura, no texto literal)
-- ¿Qué ángulos emocionales repiten 2+ competidores? (→ patrón validado)
-- ¿Qué formatos dominan entre los winners fuertes? (video/static/carrusel)
-- ¿Qué objeciones están atajando en el copy?
-- ¿Qué ofertas/ganchos monetarios usan?
-Estos patrones son ORO — están validados con plata real de los competidores.
+Si el producto NO se presta a humor/vulgar (ej: productos médicos serios), usá insight incómodo + pattern interrupt emocional.
 
-**FASE 2 — GENERACIÓN**:
-Con los patrones identificados + el research doc del producto + el avatar:
-- Para RÉPLICAS: tomá un patrón ganador y adaptalo a la marca del user. Referenciá en "razonamiento" qué patrón/competidor te inspiró.
-- Para DIFERENCIACIÓN: buscá ángulos que NADIE en toda la lista está usando. Si 5 competidores repiten "testimonial antes/después", ESO está saturado — buscá lo contrario.
-- Para DESDE CERO: salí del contexto competitivo y usá puro avatar + beliefs.
+---
 
-**CALIDAD > CANTIDAD.** Cada idea tiene que ser producible: el equipo agarra el guión/layout y puede ir directo a producción sin preguntar nada.
+**10 ÁNGULOS ESTRATÉGICOS** — cada idea debe pertenecer a uno:
 
-**DIVERSIDAD DE HOOKS — regla dura.** Revisá todos los hooks antes de finalizar. NO repetir el mismo template en 2+ ideas. Mezclá:
-- Pregunta retórica · Dato shocking · Storytelling 1ra persona · Antes/después
-- Autoridad ("mi dermatólogo me dijo") · Provocación · Instrucción · Curiosidad
-Mínimo 4 arquetipos distintos en una batería.
+- **A. Sarcasmo / vulgar jugado** — pattern interrupt por shock u humor filoso
+- **B. Insight incómodo** — rompe tabú/mito, dice lo que nadie dice
+- **C. Situación relatable / POV** — micro-escenas cotidianas argentas, "cuando te pasa X"
+- **D. Doble sentido visual** — objeto cotidiano que "se abre", metáforas naturales premium
+- **E. Autoridad / solución** — para BOFU/retargeting, comparativas, garantía
+- **F. Testimonio / voz del cliente** — frase entre comillas con edad+nombre EXPLÍCITO (ej: "Elena, 62") — alta credibilidad en belleza/salud
+- **G. Autoridad científica / mecanismo** — instala UMS, convierte audiencia research-heavy
+- **H. Comparativa antes/después** — split visual, rutina anterior vs actual
+- **I. Humor filoso anti-cultura** — contra "body positive", "good vibes only", pensamiento mágico
+- **J. Edad emocional vs biológica** — para productos donde la edad es factor
+
+Distribuí las ideas entre 5-7 ángulos distintos. No todos aplican a todo producto — elegí los que mejor se prestan al caso.
+
+---
+
+**PROTECCIÓN DE ALCANCE META**:
+Ciertas palabras bajan el alcance de los ads: sexo, vagina, infección, enfermedad, celulitis, arrugas, pene, grasa corporal, diabetes, cáncer, etc. Si el hook/copy usa alguna, marcala con metaRiesgo para que el user sepa que tiene que testear en campaña chica antes de escalar.
+
+---
+
+**REGLAS DE ORO**:
+1. No inventar claims — solo trabajar con beneficios reales del producto (del research doc + landing).
+2. Argentino, no español neutro. "Vos", "che", modismos locales.
+3. Diferenciarse — si el hook podría estar en cualquier marca del rubro, no sirve. Debe sentirse DE ESTA marca.
+4. Calidad > cantidad. 12 ideas excelentes > 40 mediocres.
+5. Pattern interrupt — cada hook tiene que sobrevivir al scroll. Si no frena el pulgar en 1 segundo, no sirve.
+6. Hooks cortos — máx 12 palabras idealmente. Sin contexto previo.
+7. Testimonios con edad: "Elena, 62" > "una mujer de 60+". La precisión da credibilidad.
+8. Activo visual de marca — si el producto tiene un elemento icónico (frasco, textura, forma), incluilo en 40-60% de las piezas como hilo conductor reconocible. No en todas — la ausencia estratégica potencia cuando aparece.
+
+---
+
+**PROCESO INTERNO** (hacelo mentalmente antes de generar):
+
+FASE 1 — Leé TODOS los ads de la competencia. Identificá patrones de ganadores.
+
+FASE 2 — Con los patrones + research doc + avatar, distribuí las ideas entre los 10 ángulos. Aseguráte que ninguno quede sobrerrepresentado salvo que lo justifique el producto.
 
 `;
 
@@ -173,6 +200,26 @@ const SUBMIT_IDEAS_TOOL = {
             publicoSugerido: { type: 'string', description: 'Targeting concreto recomendado para esta pieza. Ej: "Retargeting caliente (visitó landing, no compró) + mujeres 35-55 con alto gasto en cosmética." 1-2 oraciones.' },
             guion: { type: 'string', description: 'SOLO si formato=video: guión con beats numerados + timecodes + duración total + tono de VO. Ej: "Beat 1 (0-3s): primer plano... Beat 2 (3-8s): ... · Duración: 15s · VO: cálida, femenina." Si formato=static/carrusel, dejalo vacío o poné "N/A".' },
             razonamiento: { type: 'string', description: 'Por qué esta idea es fuerte. Para réplicas: qué competidor/patrón te inspiró. Para iteración: qué variable cambiás. Para diferenciación: por qué nadie lo hizo.' },
+            anguloCategoria: {
+              type: 'string',
+              enum: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'],
+              description: 'Cuál de los 10 ángulos estratégicos (A: sarcasmo/vulgar, B: insight incómodo, C: POV relatable, D: doble sentido visual, E: autoridad/solución, F: testimonio con edad, G: autoridad científica, H: antes/después, I: humor filoso anti-cultura, J: edad emocional vs biológica).',
+            },
+            tipoCampaña: {
+              type: 'string',
+              enum: ['TOFU', 'MOFU', 'BOFU', 'retargeting', 'social_proof', 'branding'],
+              description: 'En qué parte del funnel funciona mejor este creativo.',
+            },
+            metaRiesgo: {
+              type: 'object',
+              description: 'Si el hook/copy tiene palabras que bajan alcance de Meta.',
+              properties: {
+                tieneRiesgo: { type: 'boolean' },
+                palabras: { type: 'array', items: { type: 'string' }, description: 'Palabras gatillo específicas en esta pieza.' },
+                sugerencia: { type: 'string', description: 'Cómo mitigar: ej "testear primero en campaña chica", "usar eufemismo X", etc.' },
+              },
+              required: ['tieneRiesgo'],
+            },
             variableDeTesteo: {
               type: 'string',
               enum: ['hook', 'visual', 'cta', 'formato', 'angulo', 'audience', 'prueba_social', 'oferta', 'mix'],
@@ -191,8 +238,8 @@ const SUBMIT_IDEAS_TOOL = {
           required: [
             'titulo', 'tipo', 'formato', 'estiloVisual', 'angulo', 'painPoint',
             'hook', 'escenarioNarrativo', 'descripcionImagen', 'promptGeneradorImagen',
-            'textoEnImagen', 'copyPostMeta', 'publicoSugerido',
-            'razonamiento', 'variableDeTesteo', 'testHipotesis',
+            'textoEnImagen', 'copyPostMeta', 'publicoSugerido', 'anguloCategoria',
+            'tipoCampaña', 'metaRiesgo', 'razonamiento', 'variableDeTesteo', 'testHipotesis',
           ],
         },
       },
@@ -448,6 +495,8 @@ function sseWrite(res, obj) {
 function sanitizeIdea(i) {
   const tiposValidos = new Set(['replica', 'iteracion', 'diferenciacion', 'desde_cero']);
   const variablesValidas = new Set(['hook', 'visual', 'cta', 'formato', 'angulo', 'audience', 'prueba_social', 'oferta', 'mix']);
+  const angulosValidos = new Set(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J']);
+  const tiposCampaña = new Set(['TOFU', 'MOFU', 'BOFU', 'retargeting', 'social_proof', 'branding']);
   if (!i || typeof i.titulo !== 'string' || !tiposValidos.has(i.tipo)) return null;
   const base = {
     titulo: String(i.titulo).slice(0, 200),
@@ -465,6 +514,13 @@ function sanitizeIdea(i) {
     publicoSugerido: String(i.publicoSugerido || '').slice(0, 500),
     guion: String(i.guion || '').slice(0, 3500),
     razonamiento: String(i.razonamiento || '').slice(0, 700),
+    anguloCategoria: angulosValidos.has(i.anguloCategoria) ? i.anguloCategoria : null,
+    tipoCampaña: tiposCampaña.has(i.tipoCampaña) ? i.tipoCampaña : null,
+    metaRiesgo: (i.metaRiesgo && typeof i.metaRiesgo === 'object') ? {
+      tieneRiesgo: !!i.metaRiesgo.tieneRiesgo,
+      palabras: Array.isArray(i.metaRiesgo.palabras) ? i.metaRiesgo.palabras.slice(0, 20).map(p => String(p).slice(0, 50)) : [],
+      sugerencia: String(i.metaRiesgo.sugerencia || '').slice(0, 300),
+    } : { tieneRiesgo: false, palabras: [], sugerencia: '' },
     variableDeTesteo: variablesValidas.has(i.variableDeTesteo) ? i.variableDeTesteo : 'mix',
     testHipotesis: String(i.testHipotesis || '').slice(0, 500),
   };

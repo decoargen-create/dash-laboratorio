@@ -7,9 +7,9 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  Plus, Trash2, ExternalLink, RefreshCw, Loader2, X, Check,
-  Target, Package, Search, Copy, ChevronDown, AlertTriangle, Zap,
-  Sparkles, Eye, Volume2,
+  Plus, Trash2, ExternalLink, RefreshCw, Loader2, X,
+  Target, Search, ChevronDown, AlertTriangle,
+  Sparkles, Volume2,
 } from 'lucide-react';
 
 const STORAGE_KEY = 'viora-marketing-competidores-v1';
@@ -68,32 +68,12 @@ export default function CompetenciaSection({ addToast }) {
   const [scraping, setScraping] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
   const [checkingId, setCheckingId] = useState(null);
-  const [metaConn, setMetaConn] = useState({ loading: true, connected: false, user: null });
   // Análisis profundo: { [adId]: { analysis, transcript, transcriptStatus, generatedAt } }
   // Guardado dentro de cada competidor para que persista con el resto.
   const [deepLoadingId, setDeepLoadingId] = useState(null); // adId en análisis
   const [deepOpen, setDeepOpen] = useState(null); // { compId, adId } para modal
 
   useEffect(() => { saveCompetidores(competidores); }, [competidores]);
-
-  // Estado de conexión Meta para mostrar widget + habilitar "Traer ads".
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const r = await fetch('/api/meta/me');
-        const d = await r.json();
-        if (!cancelled) setMetaConn({ loading: false, connected: !!d.connected, user: d.user || null });
-      } catch {
-        if (!cancelled) setMetaConn({ loading: false, connected: false, user: null });
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
-
-  const handleConnectMeta = () => {
-    window.location.href = `/api/meta/connect?returnTo=${encodeURIComponent('/acceso?section=mk-competencia')}`;
-  };
 
   const handleAdd = async () => {
     const nombre = form.nombre.trim();
@@ -318,36 +298,6 @@ export default function CompetenciaSection({ addToast }) {
           <Plus size={16} /> Agregar competidor
         </button>
       </div>
-
-      {/* Widget de conexión Meta */}
-      {!metaConn.loading && (
-        metaConn.connected ? (
-          <div className="flex items-center gap-2 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg">
-            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <p className="text-xs text-emerald-800 dark:text-emerald-200">
-              <span className="font-semibold">Meta conectado</span>
-              {metaConn.user?.name && <> como <span className="font-semibold">{metaConn.user.name}</span></>}.
-              Podés traer los ads directamente desde cada competidor.
-            </p>
-          </div>
-        ) : (
-          <div className="flex items-center gap-3 px-4 py-3 bg-gradient-to-br from-blue-50 to-white dark:from-blue-900/20 dark:to-gray-800 border border-blue-200 dark:border-blue-800 rounded-lg">
-            <div className="shrink-0 w-8 h-8 rounded-lg bg-gradient-to-br from-[#0668E1] to-[#1877F2] flex items-center justify-center text-white">
-              <Zap size={14} />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-bold text-gray-900 dark:text-gray-100">Conectá Meta para auto-traer ads</p>
-              <p className="text-[11px] text-gray-600 dark:text-gray-300">Sin Meta igual podés abrir Ad Library manualmente. Conectado, los ads se sincronizan solos cada 6h.</p>
-            </div>
-            <button
-              onClick={handleConnectMeta}
-              className="shrink-0 inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-[#0668E1] to-[#1877F2] rounded-md hover:from-[#0556BE] hover:to-[#1668D8] transition"
-            >
-              <Zap size={12} /> Conectar
-            </button>
-          </div>
-        )
-      )}
 
       {/* Form agregar */}
       {showForm && (

@@ -16,6 +16,7 @@ import BocetosSection from './Bocetos.jsx';
 import MarketingSection from './Marketing.jsx';
 import CompetenciaSection from './Competencia.jsx';
 import GastosStackSection from './GastosStack.jsx';
+import MetaConnectBanner from './MetaConnectBanner.jsx';
 import { generateCSV, downloadCSV, parseCSV, toNumber, toBool } from './csv.js';
 
 // Estados del pipeline de producción de una orden
@@ -2042,6 +2043,9 @@ function AppShell({ onExit }) {
           {currentUser.role === 'admin' && currentPlatform === 'viora' && currentSection === 'datos' && <DatosSection state={state} dispatch={dispatch} addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'senydrop' && currentSection === 'seny-productos' && <BocetosSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'metaads' && <MetaAdsPlaceholder section={currentSection} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (
+            <MetaConnectBanner returnTo={`/acceso?section=${currentSection}`} />
+          )}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-competencia' && <CompetenciaSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-gastos' && <GastosStackSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-docs' && (

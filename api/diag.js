@@ -28,6 +28,8 @@ export default function handler(req, res) {
   const anthropicKey = env.ANTHROPIC_API_KEY || '';
   const metaAppId = env.META_APP_ID || '';
   const metaAppSecret = env.META_APP_SECRET || '';
+  const apifyToken = env.APIFY_TOKEN || '';
+  const openaiKey = env.OPENAI_API_KEY || '';
 
   const checks = {
     AUTH_SECRET: {
@@ -83,6 +85,26 @@ export default function handler(req, res) {
         ? 'Muy corta, normalmente son 32+ caracteres.'
         : 'OK',
     },
+    APIFY_TOKEN: {
+      configured: !!apifyToken,
+      length: apifyToken.length,
+      ok: apifyToken.startsWith('apify_api_'),
+      hint: !apifyToken
+        ? 'Faltante. Sacala de Apify → Settings → Integrations → Personal API Token.'
+        : !apifyToken.startsWith('apify_api_')
+        ? 'El prefijo esperado es "apify_api_" — ¿seguro es el token correcto?'
+        : 'OK (Ad Library scraping habilitado)',
+    },
+    OPENAI_API_KEY: {
+      configured: !!openaiKey,
+      length: openaiKey.length,
+      ok: openaiKey.startsWith('sk-'),
+      hint: !openaiKey
+        ? 'Faltante. Whisper (transcripción de videos ganadores) no va a andar.'
+        : !openaiKey.startsWith('sk-')
+        ? 'Debería empezar con "sk-" — ¿pegaste la correcta?'
+        : 'OK (Whisper habilitado)',
+    },
     deployment: {
       timestamp: new Date().toISOString(),
       vercel: !!env.VERCEL,
@@ -94,16 +116,20 @@ export default function handler(req, res) {
   const criticalOk = checks.AUTH_SECRET.ok && checks.AUTH_USERS.ok;
   const allOk = criticalOk && checks.ANTHROPIC_API_KEY.ok;
   const metaOk = checks.META_APP_ID.ok && checks.META_APP_SECRET.ok;
+  const mktOk = checks.APIFY_TOKEN.ok && checks.OPENAI_API_KEY.ok;
+
+  // Summary prioriza lo que falta, de más crítico a menos.
+  let summary;
+  if (!criticalOk) summary = 'Hay env vars críticas faltantes (login no va a andar).';
+  else if (!checks.ANTHROPIC_API_KEY.ok) summary = 'Login OK pero falta ANTHROPIC_API_KEY para IA.';
+  else if (allOk && metaOk && mktOk) summary = 'Todo OK: login + IA + Meta OAuth + Marketing (Apify + Whisper).';
+  else if (allOk && metaOk) summary = 'Login + IA + Meta OAuth OK. Falta APIFY_TOKEN y/o OPENAI_API_KEY para Marketing.';
+  else if (allOk && mktOk) summary = 'Login + IA + Marketing OK. Meta OAuth no configurado.';
+  else if (allOk) summary = 'Login + IA OK. Faltan integraciones Meta y/o Marketing.';
+  else summary = 'Hay env vars faltantes o mal configuradas.';
 
   res.statusCode = 200;
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Cache-Control', 'no-store');
-  res.end(JSON.stringify({
-    summary: allOk
-      ? (metaOk ? 'Todo OK, incluyendo Meta OAuth.' : 'OK para login + IA. Meta OAuth no configurado.')
-      : criticalOk
-      ? 'Login OK pero falta ANTHROPIC_API_KEY para IA.'
-      : 'Hay env vars críticas faltantes o mal configuradas.',
-    checks,
-  }, null, 2));
+  res.end(JSON.stringify({ summary, checks }, null, 2));
 }

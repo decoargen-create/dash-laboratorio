@@ -9,6 +9,7 @@
 // Output: { stage, stageReason, searchKeywords, model, generatedAt }
 
 import Anthropic from '@anthropic-ai/sdk';
+import { anthropicCost } from './_costs.js';
 
 const MODEL = 'claude-sonnet-4-6';
 
@@ -113,10 +114,12 @@ export default async function handler(req, res) {
   ].filter(Boolean).join('\n');
 
   try {
+    // NOTA: tool_choice forzado es incompatible con thinking adaptive.
+    // Este endpoint es clasificación simple — tool_choice garantiza shape,
+    // más importante que el thinking acá.
     const stream = await client.messages.stream({
       model: MODEL,
       max_tokens: 2000,
-      thinking: { type: 'adaptive' },
       tools: [SUBMIT_ANALYSIS_TOOL],
       tool_choice: { type: 'tool', name: 'submit_analysis' },
       system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
@@ -138,6 +141,7 @@ export default async function handler(req, res) {
       searchKeywords: cleanKeywords,
       model: MODEL,
       generatedAt: new Date().toISOString(),
+      cost: { anthropic: anthropicCost(resp.usage, MODEL) },
     });
   } catch (err) {
     console.error('post-research-analysis error:', err);

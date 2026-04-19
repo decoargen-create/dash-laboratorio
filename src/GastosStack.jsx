@@ -10,13 +10,15 @@
 import React, { useState, useEffect } from 'react';
 import {
   DollarSign, Plus, Trash2, Edit2, Check, X, ExternalLink,
-  Server, Bot, Target, Zap, Package, AlertTriangle,
+  Server, Bot, Target, Zap, Package, AlertTriangle, Activity,
 } from 'lucide-react';
+import { spendThisMonth, spendToday, AUTO_TIPO_LABELS } from './costsStore.js';
 
 const STORAGE_KEY = 'viora-stack-costs-v1';
 const USD_ARS = 1500; // tipo de cambio aproximado para mostrar conversión
 
 // Servicios precargados la primera vez que entrás.
+// autoTipo: matchea con los logs de costsStore para sumar gasto real automático.
 const SEED_SERVICES = [
   {
     id: 1, nombre: 'Vercel', categoria: 'hosting', tipo: 'fijo',
@@ -25,21 +27,25 @@ const SEED_SERVICES = [
   },
   {
     id: 2, nombre: 'Anthropic Claude', categoria: 'ia', tipo: 'variable',
+    autoTipo: 'anthropic',
     estimadoMensual: 30, url: 'https://console.anthropic.com/settings/usage',
-    notas: 'Research docs, análisis de creativos, agentes. Con prompt caching activo.',
+    notas: 'Research docs, análisis de creativos, generator. Con prompt caching activo.',
   },
   {
     id: 3, nombre: 'OpenAI Whisper', categoria: 'ia', tipo: 'variable',
+    autoTipo: 'openai',
     estimadoMensual: 10, url: 'https://platform.openai.com/usage',
     notas: '$0.006/min de transcripción. Para videos de competencia.',
   },
   {
     id: 4, nombre: 'Apify (Ad Library scraping)', categoria: 'scraping', tipo: 'variable',
+    autoTipo: 'apify',
     estimadoMensual: 25, url: 'https://console.apify.com/billing',
     notas: '$5.80/1000 ads en plan free. Escalar a Starter ($49/mo) si superás 4k ads/mes.',
   },
   {
     id: 5, nombre: 'Meta Ads (publicidad)', categoria: 'ads', tipo: 'variable',
+    autoTipo: 'meta',
     estimadoMensual: 0, url: 'https://adsmanager.facebook.com',
     notas: 'Tu inversión en paid ads. Actualizá con el spend real del mes.',
   },
@@ -73,12 +79,20 @@ function saveServices(services) {
 }
 
 // Devuelve el costo mensual efectivo de un servicio (USD).
-// - fijo: montoFijo
-// - variable: gastoVariable del mes si se cargó real (>0), sino estimadoMensual
-// - trial: 0
+// Prioridad:
+//   1. fijo → montoFijo
+//   2. variable → auto-tracked (gasto real del mes según logs del sistema)
+//   3. variable → gastoVariable manual (si el user lo cargó)
+//   4. variable → estimadoMensual
+//   5. trial → 0
 function costoMensual(svc) {
   if (svc.tipo === 'trial') return 0;
   if (svc.tipo === 'fijo') return Number(svc.montoFijo || 0);
+  // Auto-tracked: si el servicio tiene autoTipo, usamos lo realmente gastado.
+  if (svc.autoTipo) {
+    const auto = spendThisMonth(svc.autoTipo);
+    if (auto > 0) return auto;
+  }
   const gv = Number(svc.gastoVariable || 0);
   if (gv > 0) return gv;
   return Number(svc.estimadoMensual || 0);
@@ -89,8 +103,14 @@ export default function GastosStackSection({ addToast }) {
   const [editing, setEditing] = useState(null); // id del servicio en edición
   const [draft, setDraft] = useState({});
   const [showNew, setShowNew] = useState(false);
+  // Tick cada 10s para re-renderizar cuando hay nuevos logs de costos.
+  const [, setTick] = useState(0);
 
   useEffect(() => { saveServices(services); }, [services]);
+  useEffect(() => {
+    const i = setInterval(() => setTick(t => t + 1), 10000);
+    return () => clearInterval(i);
+  }, []);
 
   // Totales
   const totalFijo = services.filter(s => s.tipo === 'fijo').reduce((sum, s) => sum + costoMensual(s), 0);
@@ -173,6 +193,35 @@ export default function GastosStackSection({ addToast }) {
         </button>
       </div>
 
+      {/* Banner de gasto auto-trackeado — se actualiza con cada corrida del pipeline */}
+      {(() => {
+        const tiposAuto = ['anthropic', 'openai', 'apify', 'meta'];
+        const totalHoy = tiposAuto.reduce((s, t) => s + spendToday(t), 0);
+        const totalMes = tiposAuto.reduce((s, t) => s + spendThisMonth(t), 0);
+        if (totalHoy === 0 && totalMes === 0) return null;
+        return (
+          <div className="p-4 bg-gradient-to-br from-purple-50 to-fuchsia-50 dark:from-purple-900/20 dark:to-fuchsia-900/20 border border-purple-200 dark:border-purple-800 rounded-xl flex items-center gap-4 flex-wrap">
+            <Activity size={18} className="text-purple-600 dark:text-purple-400 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] font-bold text-purple-700 dark:text-purple-300 uppercase tracking-wider">⚡ Gasto auto-trackeado</p>
+              <p className="text-[11px] text-purple-800 dark:text-purple-200 mt-0.5">
+                Cada vez que corrés un análisis (Apify + Claude + Whisper), el sistema registra el costo real. Los números de abajo salen de los logs, no los estimás vos.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-3 text-right">
+              <div>
+                <p className="text-[9px] font-bold text-purple-600 dark:text-purple-400 uppercase">Hoy</p>
+                <p className="text-lg font-bold text-purple-900 dark:text-purple-100 tabular-nums">{fmtUSD(totalHoy)}</p>
+              </div>
+              <div>
+                <p className="text-[9px] font-bold text-purple-600 dark:text-purple-400 uppercase">Este mes</p>
+                <p className="text-lg font-bold text-purple-900 dark:text-purple-100 tabular-nums">{fmtUSD(totalMes)}</p>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Resumen de totales */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
         <ResumenCard label="Fijo mensual" value={fmtUSD(totalFijo)} sub={fmtARS(totalFijo)} color="emerald" />
@@ -229,13 +278,14 @@ export default function GastosStackSection({ addToast }) {
               <th className="text-left px-3 py-2 font-bold">Servicio</th>
               <th className="text-left px-3 py-2 font-bold">Categoría</th>
               <th className="text-left px-3 py-2 font-bold">Tipo</th>
-              <th className="text-right px-3 py-2 font-bold">Costo mensual</th>
+              <th className="text-right px-3 py-2 font-bold" title="Gasto real de hoy, acumulado automáticamente con cada corrida">Hoy</th>
+              <th className="text-right px-3 py-2 font-bold">Este mes</th>
               <th className="text-right px-3 py-2 font-bold"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 dark:divide-gray-700/50">
             {services.length === 0 && (
-              <tr><td colSpan={5} className="text-center py-8 text-gray-500 italic">Sin servicios cargados. Agregá el primero.</td></tr>
+              <tr><td colSpan={6} className="text-center py-8 text-gray-500 italic">Sin servicios cargados. Agregá el primero.</td></tr>
             )}
             {services.map(svc => {
               const cat = CATEGORIAS[svc.categoria] || CATEGORIAS.otros;
@@ -247,7 +297,7 @@ export default function GastosStackSection({ addToast }) {
               if (isEditing) {
                 return (
                   <tr key={svc.id} className="bg-emerald-50/30 dark:bg-emerald-900/10">
-                    <td colSpan={5} className="px-3 py-3">
+                    <td colSpan={6} className="px-3 py-3">
                       <ServiceFields draft={draft} setDraft={setDraft} />
                       <div className="flex gap-2 justify-end mt-3">
                         <button onClick={cancelEdit}
@@ -287,9 +337,33 @@ export default function GastosStackSection({ addToast }) {
                       {tipo.label}
                     </span>
                   </td>
+                  {/* Gastado hoy (auto-tracked) */}
+                  <td className="px-3 py-2.5 text-right">
+                    {svc.autoTipo ? (() => {
+                      const hoy = spendToday(svc.autoTipo);
+                      return hoy > 0 ? (
+                        <p className="text-xs font-mono font-bold text-purple-600 dark:text-purple-400 tabular-nums" title="Gastado hoy, auto-tracked">
+                          {fmtUSD(hoy)}
+                        </p>
+                      ) : (
+                        <p className="text-[10px] text-gray-400 tabular-nums">—</p>
+                      );
+                    })() : (
+                      <p className="text-[10px] text-gray-400 italic">manual</p>
+                    )}
+                  </td>
+                  {/* Este mes (auto si hay autoTipo, sino manual) */}
                   <td className="px-3 py-2.5 text-right">
                     <p className="text-sm font-bold text-gray-900 dark:text-gray-100 tabular-nums">{fmtUSD(costo)}</p>
                     <p className="text-[10px] text-gray-400 tabular-nums">{fmtARS(costo)}</p>
+                    {svc.autoTipo && (() => {
+                      const mes = spendThisMonth(svc.autoTipo);
+                      if (mes > 0) return (
+                        <p className="text-[9px] text-purple-600 dark:text-purple-400 tabular-nums" title="Proveniente de logs auto-tracked">
+                          ⚡ auto
+                        </p>
+                      );
+                    })()}
                   </td>
                   <td className="px-3 py-2.5 text-right">
                     <div className="inline-flex items-center gap-0.5">

@@ -12,6 +12,7 @@ import {
   Sparkles, Volume2,
 } from 'lucide-react';
 import { ideaFromDeepAnalysis } from './bandejaStore.js';
+import { logCostsFromResponse } from './costsStore.js';
 
 const STORAGE_KEY = 'viora-marketing-competidores-v1';
 
@@ -182,6 +183,7 @@ export default function CompetenciaSection({ addToast }) {
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      logCostsFromResponse(data, `apify-ingest · ${comp.nombre}`);
 
       setCompetidores(prev => prev.map(c =>
         c.id === comp.id ? {
@@ -234,6 +236,7 @@ export default function CompetenciaSection({ addToast }) {
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      logCostsFromResponse(data, `deep-analyze · ${comp.nombre} · ${ad.id}`);
 
       setCompetidores(prev => prev.map(c =>
         c.id === comp.id ? {

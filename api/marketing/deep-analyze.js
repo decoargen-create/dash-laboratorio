@@ -25,6 +25,7 @@
 // }
 
 import Anthropic from '@anthropic-ai/sdk';
+import { anthropicCost, whisperCost } from './_costs.js';
 
 const MODEL = 'claude-sonnet-4-6';
 const WHISPER_MAX_MB = 25;
@@ -167,7 +168,7 @@ async function analyzeAd(ad, transcript, client) {
   if (match) jsonStr = match[1];
 
   try {
-    return JSON.parse(jsonStr);
+    return { analysis: JSON.parse(jsonStr), usage: resp.usage };
   } catch (err) {
     throw new Error(`JSON inválido de Claude: ${err.message}. Raw: ${jsonStr.slice(0, 200)}...`);
   }
@@ -198,6 +199,7 @@ export default async function handler(req, res) {
   // Paso 1 — transcripción (si hay video y está habilitado)
   let transcript = null;
   let transcriptStatus = 'no_video';
+  let whisperDurationSec = 0;
   const videoUrl = ad.videoUrls?.[0];
   if (transcribe && videoUrl) {
     const openaiKey = process.env.OPENAI_API_KEY;
@@ -209,6 +211,7 @@ export default async function handler(req, res) {
         if (result.text) {
           transcript = result.text;
           transcriptStatus = 'ok';
+          whisperDurationSec = Number(result.duration) || 0;
         } else {
           transcriptStatus = `skipped: ${result.reason}`;
         }
@@ -220,7 +223,13 @@ export default async function handler(req, res) {
 
   // Paso 2 — análisis estructurado con Claude Vision
   try {
-    const analysis = await analyzeAd(ad, transcript, client);
+    const { analysis, usage } = await analyzeAd(ad, transcript, client);
+    const cost = {
+      anthropic: anthropicCost(usage, MODEL),
+    };
+    const whisper = whisperCost(whisperDurationSec);
+    if (whisper > 0) cost.openai = whisper;
+
     return respondJSON(res, 200, {
       adId: ad.id,
       transcript,
@@ -228,6 +237,7 @@ export default async function handler(req, res) {
       analysis,
       model: MODEL,
       generatedAt: new Date().toISOString(),
+      cost,
     });
   } catch (err) {
     console.error('deep-analyze error:', err);

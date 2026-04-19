@@ -1,16 +1,21 @@
 // Sección Arranque — punto de entrada de Marketing.
 //
-// 3 cards de setup (producto, competidores, correr pipeline) que se van
-// completando a medida que tenés data. El botón "Correr pipeline" dispara
-// un flow completo:
-//   1. Scrape de ads de cada competidor (apify-ingest, force=true)
-//   2. Para cada competidor, deep-analyze de los top 3 winners
-//   3. Poblado de ideas en la Bandeja (futuro — por ahora solo el análisis)
+// 4 cards de setup (producto, cuenta Meta opcional, competidores, correr
+// pipeline). El botón "Correr pipeline" dispara el flow end-to-end:
+//   1. Si el producto no tiene research → genera docs (research + avatar
+//      + offer brief + creencias + resumen ejecutivo).
+//   2. Post-research analysis: infiere stage del prospect + genera 5-8
+//      keywords de búsqueda para competencia.
+//   3. Si no hay competidores cargados → auto-sugiere top-5 con esos
+//      keywords vía Meta Ad Library.
+//   4. Para cada competidor: scrape de ads activos + deep-analyze de los
+//      ganadores (Claude Vision + Whisper).
+//   5. Generator: crea ideas clasificadas (réplica / iteración /
+//      diferenciación / desde cero) y las puebla en la Bandeja.
 //
-// Todo lo que carga usa los mismos localStorage keys que las otras secciones:
-//   - 'viora-marketing-productos-v1' (Marketing.jsx)
-//   - 'viora-marketing-competidores-v1' (Competencia.jsx)
-// Así tenés continuidad entre secciones.
+// Todo lo que carga usa los mismos localStorage keys que las otras secciones
+// para continuidad entre Arranque, Documentación (viewer), Competencia,
+// Bandeja y Gastos.
 
 import React, { useState, useEffect } from 'react';
 import {
@@ -18,6 +23,7 @@ import {
   Plus, X, Sparkles, Link2, Search, Clock,
 } from 'lucide-react';
 import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGeneratedToday } from './bandejaStore.js';
+import { logCostsFromResponse } from './costsStore.js';
 
 const GEN_CONFIG_KEY = 'viora-marketing-gen-config-v1';
 const DEFAULT_GEN_CONFIG = {
@@ -272,6 +278,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      logCostsFromResponse(data, `match-product-ads · ${metaAccount.ads.length} ads`);
 
       // Enriquecemos los ads con el confidence match.
       const matchMap = new Map(data.matches.map(m => [m.adId, m]));
@@ -358,6 +365,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      logCostsFromResponse(data, `suggest-competitors · "${keyword}"`);
       // Filtramos los que ya están agregados (por pageName).
       const existentes = new Set(competidores.map(c => (c.nombre || '').toLowerCase()));
       const nuevas = (data.suggestions || []).filter(s => !existentes.has((s.pageName || '').toLowerCase()));
@@ -410,10 +418,10 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     // Pasos dinámicos según estado:
     //   - docs-gen: solo si el producto aún no tiene research doc
     //   - post-research: siempre tras docs (infiere stage + keywords)
-    //   - auto-suggest: solo si NO hay competidores cargados todavía
-    //   - scrape/analyze: uno por competidor (se agregan después del auto-suggest)
+    //   - scrape/analyze: uno por competidor (los tiene que cargar el user a mano)
+    // La sugerencia automática de competidores fue sacada — devolvía matches
+    // imprecisos (e.g. la propia tienda) que confundían más que ayudaban.
     const necesitaDocs = !producto?.docs?.research;
-    const necesitaSugerencia = competidores.length === 0;
 
     const pasosIniciales = [
       { id: 'prep', label: '🚀 Arrancando', detail: `Producto: ${producto.nombre}`, status: 'pending' },
@@ -424,17 +432,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       );
     }
     pasosIniciales.push(
-      { id: 'post-research', label: '🧠 Inferiendo stage + keywords de búsqueda', detail: 'Claude clasifica el awareness del prospect', status: 'pending' },
+      { id: 'post-research', label: '🧠 Inferiendo stage del prospect', detail: 'Claude clasifica el awareness según el research', status: 'pending' },
     );
-    if (necesitaSugerencia) {
-      pasosIniciales.push(
-        { id: 'auto-suggest', label: '🎯 Sugiriendo competidores con los keywords', detail: 'Buscamos en Meta Ad Library y sumamos los top', status: 'pending' },
-      );
-    }
     pasosIniciales.push(
       { id: 'done', label: '✅ Listo', detail: 'Tenés análisis fresco + ideas nuevas en la Bandeja', status: 'pending' },
     );
-    // Los pasos de scrape/analyze se agregan dinámicamente después del auto-suggest.
     setSteps(pasosIniciales);
 
     // Paso 1: prep
@@ -497,6 +499,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         });
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+        logCostsFromResponse(data, `post-research-analysis · ${productoActualizado.nombre}`);
 
         searchKeywords = data.searchKeywords || [];
         productoActualizado = {
@@ -518,66 +521,17 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       }
     }
 
-    // ============================================================
-    // PASO: Auto-sugerir competidores si no hay cargados.
-    // Usamos el keyword más potente (primero de la lista) o fallback a landing/nombre.
-    // ============================================================
-    let competidoresLocal = competidores;
-    if (necesitaSugerencia && !cancelled) {
-      updateStep('auto-suggest', { status: 'running', startedAt: Date.now() });
-      try {
-        const keywordAUsar = searchKeywords[0] ||
-          (productoActualizado.landingUrl ? landingToKeyword(productoActualizado.landingUrl) : productoActualizado.nombre);
-        const resp = await fetch('/api/marketing/suggest-competitors', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ searchKeyword: keywordAUsar, country: 'AR', limit: 30 }),
-        });
-        const data = await resp.json();
-        if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-
-        const top5 = (data.suggestions || []).slice(0, 5);
-        if (top5.length === 0) {
-          updateStep('auto-suggest', {
-            status: 'done',
-            endedAt: Date.now(),
-            detail: `No encontramos competidores con keyword "${keywordAUsar}". Agregá a mano en la card de Competidores y re-ejecutá.`,
-          });
-        } else {
-          const nuevos = top5.map(s => ({
-            id: Date.now() + Math.random(),
-            nombre: s.pageName,
-            landingUrl: '',
-            fbPageUrl: s.pageId ? `https://www.facebook.com/${s.pageId}` : '',
-            notas: `Auto-sugerido · ${s.adsCount} ads activos · máx ${s.maxDaysRunning}d corriendo`,
-            imagen: s.sampleImage,
-            descripcion: s.sampleHeadline,
-            ads: [], lastAdsCheck: null,
-            createdAt: new Date().toISOString(),
-          }));
-          setCompetidores(prev => [...nuevos, ...prev]);
-          competidoresLocal = [...nuevos, ...competidoresLocal];
-          updateStep('auto-suggest', {
-            status: 'done',
-            endedAt: Date.now(),
-            detail: `${top5.length} competidores agregados: ${top5.map(s => s.pageName).join(', ')}`,
-          });
-        }
-      } catch (err) {
-        updateStep('auto-suggest', { status: 'error', endedAt: Date.now(), detail: err.message });
-      }
-    }
-
-    // Si sigue sin haber competidores (ni manual ni auto), no tiene sentido
-    // seguir con scrape/analyze.
+    // La competencia la carga el user a mano — sin auto-sugerencia
+    // (daba matches imprecisos y confundía más que ayudaba).
+    const competidoresLocal = competidores;
     if (competidoresLocal.length === 0) {
       addToast?.({ type: 'error', message: 'Sin competidores no podemos analizar ganadores. Agregá a mano y reejecutá.' });
       setRunning(false);
       return;
     }
 
-    // Agregamos los pasos de scrape/analyze/generate AHORA que sabemos cuántos
-    // competidores hay (puede haber cambiado con el auto-suggest).
+    // Agregamos los pasos de scrape/analyze/generate ahora que sabemos
+    // cuántos competidores hay.
     setSteps(prev => {
       const base = prev.filter(p => p.id !== 'done');
       const nuevos = [
@@ -621,6 +575,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         });
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+        logCostsFromResponse(data, `apify-ingest · ${c.nombre}`);
 
         const ads = data.ads || [];
         const winners = ads.filter(a => a.isWinner).slice(0, 3);
@@ -677,6 +632,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           });
           const data = await resp.json();
           if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+          logCostsFromResponse(data, `deep-analyze · ${comp.nombre} · ${ad.id}`);
 
           setCompetidores(prev => prev.map(x =>
             x.id === comp.id ? {
@@ -779,6 +735,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         });
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+        logCostsFromResponse(data, `generate-ideas · ${(productoActualizado || producto)?.nombre || ''}`);
 
         const nuevas = addGeneratedIdeas(data.ideas || [], { producto: productoActualizado || producto });
         setIdeasToday(countIdeasGeneratedToday());
@@ -909,7 +866,8 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 )}
               </div>
             )}
-            {/* Hint de calidad: sugerir correr el pipeline de Documentación si no hay research doc */}
+            {/* Estado del research doc — ahora lo genera el pipeline automático
+                como primer paso, no hay que ir a Documentación aparte. */}
             {(() => {
               const hasResearch = !!(producto.docs?.research || producto.research || producto.docs?.avatar || producto.avatar);
               if (hasResearch) {
@@ -920,11 +878,8 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 );
               }
               return (
-                <div className="mt-2 flex items-start gap-2 p-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded">
-                  <AlertTriangle size={12} className="text-amber-600 shrink-0 mt-0.5" />
-                  <p className="text-[10px] text-amber-900 dark:text-amber-200 leading-snug flex-1">
-                    <strong>Sin research doc.</strong> Las ideas van a ser más genéricas. Correr el pipeline de <button onClick={() => onGoToSection?.('mk-docs')} className="font-bold underline hover:text-amber-700">Documentación</button> primero da ideas mucho más ancladas al avatar real (demographics, pain points, belief chains).
-                  </p>
+                <div className="mt-2 inline-flex items-center gap-1.5 px-2 py-1 text-[10px] font-semibold bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded">
+                  ℹ️ Sin research doc todavía — el pipeline lo genera solo en el primer paso (~3-4 min).
                 </div>
               );
             })()}
@@ -1193,13 +1148,6 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-md hover:bg-purple-100 transition">
                 <Plus size={11} /> Agregar a mano
               </button>
-              {producto && (
-                <button onClick={handleSuggestCompetidores} disabled={suggesting}
-                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-fuchsia-700 dark:text-fuchsia-300 bg-fuchsia-50 dark:bg-fuchsia-900/20 border border-fuchsia-200 dark:border-fuchsia-800 rounded-md hover:bg-fuchsia-100 transition disabled:opacity-40">
-                  {suggesting ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
-                  Sugerir con IA
-                </button>
-              )}
             </div>
           ) : (
             <div className="flex flex-col sm:flex-row gap-2 items-stretch">
@@ -1222,50 +1170,6 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             </div>
           )}
 
-          {/* Sugerencias de la IA */}
-          {suggestions.length > 0 && (
-            <div className="mt-3 p-3 bg-fuchsia-50/50 dark:bg-fuchsia-900/10 border border-fuchsia-200 dark:border-fuchsia-800 rounded-md space-y-2">
-              <div className="flex items-center justify-between">
-                <p className="text-[10px] font-bold text-fuchsia-700 dark:text-fuchsia-300 uppercase tracking-wider">
-                  ✨ Sugerencias · basadas en "{producto?.nombre}"
-                </p>
-                <button onClick={() => setSuggestions([])}
-                  className="text-[10px] text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
-                  Limpiar
-                </button>
-              </div>
-              <ul className="space-y-1.5">
-                {suggestions.map(s => (
-                  <li key={s.pageId} className="flex items-center gap-2 p-2 bg-white dark:bg-gray-800 rounded border border-fuchsia-100 dark:border-fuchsia-900/40">
-                    {s.sampleImage ? (
-                      <img src={s.sampleImage} alt="" className="w-10 h-10 rounded object-cover bg-gray-100 dark:bg-gray-700 shrink-0"
-                        onError={e => { e.target.style.display = 'none'; }} />
-                    ) : (
-                      <div className="w-10 h-10 rounded bg-gradient-to-br from-fuchsia-200 to-pink-200 flex items-center justify-center shrink-0">
-                        <Target size={14} className="text-fuchsia-700" />
-                      </div>
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-semibold text-gray-900 dark:text-gray-100 truncate">{s.pageName}</p>
-                      <p className="text-[10px] text-gray-500 dark:text-gray-400">
-                        {s.adsCount} ads activos · máx {s.maxDaysRunning}d corriendo
-                      </p>
-                    </div>
-                    <button onClick={() => handleAddSuggestion(s)}
-                      className="shrink-0 inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold text-white bg-fuchsia-600 rounded hover:bg-fuchsia-700 transition">
-                      <Plus size={10} /> Agregar
-                    </button>
-                    {s.sampleSnapshotUrl && (
-                      <a href={s.sampleSnapshotUrl} target="_blank" rel="noreferrer"
-                        className="shrink-0 p-1 text-gray-400 hover:text-gray-700 transition" title="Ver ad de ejemplo">
-                        <Search size={12} />
-                      </a>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
         </div>
       </WizardCard>
 

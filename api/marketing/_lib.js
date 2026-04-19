@@ -318,8 +318,9 @@ No devuelvas más ni menos de 6 creencias. Castellano rioplatense. Sólo el mark
 
 // Orden de ejecución del pipeline. Cada paso recibe el output del anterior.
 export const PIPELINE_STEPS = [
-  { key: 'research',    label: 'Research Doc',         maxTokens: 8192 },
-  { key: 'avatar',      label: 'Avatar Sheet',         maxTokens: 4096 },
-  { key: 'offerBrief',  label: 'Offer Brief',          maxTokens: 4096 },
-  { key: 'beliefs',     label: 'Creencias necesarias', maxTokens: 2048 },
+  { key: 'research',          label: 'Research Doc',         maxTokens: 8192 },
+  { key: 'avatar',            label: 'Avatar Sheet',         maxTokens: 4096 },
+  { key: 'offerBrief',        label: 'Offer Brief',          maxTokens: 4096 },
+  { key: 'beliefs',           label: 'Creencias necesarias', maxTokens: 2048 },
+  { key: 'resumenEjecutivo',  label: 'Resumen ejecutivo',    maxTokens: 512 },
 ];

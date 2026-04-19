@@ -66,6 +66,28 @@ async function scrapeLanding(url) {
   return null;
 }
 
+// Extrae meta tags del HTML.
+function extractMeta(html, keys) {
+  if (!html) return null;
+  for (const key of keys) {
+    const patterns = [
+      new RegExp(`<meta[^>]+(?:property|name)=["']${key}["'][^>]*content=["']([^"']+)["']`, 'i'),
+      new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]*(?:property|name)=["']${key}["']`, 'i'),
+    ];
+    for (const re of patterns) {
+      const m = html.match(re);
+      if (m && m[1]) return m[1].trim();
+    }
+  }
+  return null;
+}
+
+function extractTitleTag(html) {
+  if (!html) return null;
+  const m = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+  return m ? m[1].trim() : null;
+}
+
 // Extrae texto "legible" del HTML para darle a Claude (sin scripts/styles/tags).
 function stripHtml(html, limit = 12000) {
   if (!html) return '';
@@ -104,17 +126,11 @@ export default async function handler(req, res) {
   }
 
   const body = await readBody(req);
-  const { productoUrl, productoNombre, descripcion, landingContent } = body || {};
+  const { productoUrl, productoNombre, descripcion: descripcionManual, landingContent, memoria } = body || {};
   if (!productoNombre || typeof productoNombre !== 'string') {
     res.statusCode = 400;
     res.setHeader('Content-Type', 'application/json');
     res.end(JSON.stringify({ error: 'Falta productoNombre' }));
-    return;
-  }
-  if (!descripcion || typeof descripcion !== 'string') {
-    res.statusCode = 400;
-    res.setHeader('Content-Type', 'application/json');
-    res.end(JSON.stringify({ error: 'Falta descripcion (qué vende y a quién)' }));
     return;
   }
 
@@ -129,23 +145,52 @@ export default async function handler(req, res) {
   const client = new Anthropic({ apiKey });
 
   // Resultados de cada paso — se acumulan y pasan al siguiente.
-  const outputs = { research: '', avatar: '', offerBrief: '', beliefs: '' };
+  const outputs = { research: '', avatar: '', offerBrief: '', beliefs: '', resumenEjecutivo: '' };
+  let descripcion = (descripcionManual && typeof descripcionManual === 'string') ? descripcionManual.trim() : '';
+  let ogImage = null;
 
   try {
-    // ------ Pre-paso: scrape de la landing (si hace falta) ------
+    // ------ Pre-paso: scrape de la landing ------
     let landingText = landingContent && typeof landingContent === 'string' ? landingContent : '';
+    let landingHtml = '';
     if (!landingText && productoUrl) {
       sseWrite(res, { type: 'info', message: 'Scrapeando landing page…' });
-      const html = await scrapeLanding(productoUrl);
-      landingText = stripHtml(html || '', 12000);
-      sseWrite(res, { type: 'info', message: landingText ? `Landing obtenida (${landingText.length} chars)` : 'No se pudo acceder a la landing — seguimos con nombre y descripción' });
+      landingHtml = await scrapeLanding(productoUrl) || '';
+      landingText = stripHtml(landingHtml, 12000);
+      ogImage = extractMeta(landingHtml, ['og:image', 'og:image:secure_url', 'twitter:image']);
+      const ogDesc = extractMeta(landingHtml, ['og:description', 'twitter:description', 'description']);
+      if (!descripcion && ogDesc) descripcion = ogDesc; // seed inicial si no vino
+      sseWrite(res, { type: 'info', message: landingText ? `Landing obtenida (${landingText.length} chars)` : 'No se pudo acceder a la landing' });
+      if (ogImage) sseWrite(res, { type: 'og-image', url: ogImage });
     }
+
+    // Auto-generar descripción si todavía no la tenemos (ni manual ni og:desc).
+    // Usamos una mini-llamada a Haiku para sacarla del contexto scrapeado.
+    if (!descripcion && (landingText || productoNombre)) {
+      sseWrite(res, { type: 'info', message: 'Generando descripción automática del producto…' });
+      try {
+        const descResp = await client.messages.create({
+          model: MODEL_HAIKU,
+          max_tokens: 256,
+          system: [{ type: 'text', text: 'Sos un asistente que resume productos de ecommerce. Recibís el nombre y un fragmento de la landing. Devolvés una sola oración describiendo qué vende el producto y a quién va dirigido. Tono neutro, castellano rioplatense, máximo 240 caracteres. Sin intro, sin preámbulo.' }],
+          messages: [{ role: 'user', content: `Nombre: ${productoNombre}\n\nLanding:\n${landingText.slice(0, 3000) || '(sin landing)'}` }],
+        });
+        descripcion = descResp.content?.[0]?.type === 'text' ? descResp.content[0].text.trim() : '';
+        if (descripcion) sseWrite(res, { type: 'info', message: `Descripción: ${descripcion.slice(0, 120)}${descripcion.length > 120 ? '…' : ''}` });
+      } catch (err) {
+        console.error('auto-descripcion error:', err?.message);
+      }
+    }
+
+    const memoriaBlock = memoria && typeof memoria === 'object'
+      ? `\n---MEMORIA ACUMULADA DEL PRODUCTO (usá esta info como contexto previo)---\n${JSON.stringify(memoria, null, 2)}\n---FIN MEMORIA---\n`
+      : '';
 
     const productContext = `
 Nombre del producto: ${productoNombre}
 URL: ${productoUrl || '(no suministrada)'}
-Descripción corta: ${descripcion}
-${landingText ? `\n---LANDING PAGE (texto extraído)---\n${landingText}\n---FIN LANDING---\n` : ''}
+Descripción: ${descripcion || '(no disponible)'}
+${landingText ? `\n---LANDING PAGE (texto extraído)---\n${landingText}\n---FIN LANDING---\n` : ''}${memoriaBlock}
 `.trim();
 
     // ------ Paso 1: Research ------
@@ -204,8 +249,31 @@ ${landingText ? `\n---LANDING PAGE (texto extraído)---\n${landingText}\n---FIN 
     outputs.beliefs = beliefsResp.content?.[0]?.type === 'text' ? beliefsResp.content[0].text : '';
     sseWrite(res, { type: 'step-done', key: 'beliefs', label: 'Creencias necesarias', content: outputs.beliefs });
 
+    // ------ Paso 5 (bonus): Resumen ejecutivo ------
+    // Síntesis 2-3 líneas de TODO lo generado, para mostrar en la cabecera
+    // del expediente del producto. Útil para contextos futuros (ej: al
+    // regenerar con memoria, este resumen es el "ancla" rápida).
+    sseWrite(res, { type: 'step-start', key: 'resumenEjecutivo', label: 'Resumen ejecutivo' });
+    try {
+      const resumenResp = await client.messages.create({
+        model: MODEL_HAIKU,
+        max_tokens: 512,
+        system: [{ type: 'text', text: 'Sos un estratega de marketing. Recibís 4 documentos de un producto (research, avatar, offer brief, creencias). Devolvés un RESUMEN EJECUTIVO de 2-3 oraciones (máx 500 chars) que capture: qué vende el producto, a quién va dirigido, y el ángulo estratégico central (Big Idea). Castellano rioplatense. Sin preámbulo, sin markdown.' }],
+        messages: [{ role: 'user', content: `RESEARCH:\n${outputs.research.slice(0, 3000)}\n\nAVATAR:\n${outputs.avatar.slice(0, 1500)}\n\nOFFER BRIEF:\n${outputs.offerBrief.slice(0, 1500)}\n\nCREENCIAS:\n${outputs.beliefs.slice(0, 800)}` }],
+      });
+      outputs.resumenEjecutivo = resumenResp.content?.[0]?.type === 'text' ? resumenResp.content[0].text.trim() : '';
+    } catch (err) {
+      console.error('resumen-ejecutivo error:', err?.message);
+    }
+    sseWrite(res, { type: 'step-done', key: 'resumenEjecutivo', label: 'Resumen ejecutivo', content: outputs.resumenEjecutivo });
+
     // ------ Fin ------
-    sseWrite(res, { type: 'complete', outputs });
+    sseWrite(res, {
+      type: 'complete',
+      outputs,
+      descripcion,
+      ogImage,
+    });
     sseEnd(res);
   } catch (err) {
     console.error('marketing/generate error:', err);

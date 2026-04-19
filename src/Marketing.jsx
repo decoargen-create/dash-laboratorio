@@ -18,10 +18,11 @@ import {
 const STORAGE_KEY = 'viora-marketing-productos-v1';
 
 const STEPS = [
-  { key: 'research',   label: 'Research Doc',        desc: 'Investigación profunda del mercado, avatar, competidores, horror stories, corruption angles.' },
-  { key: 'avatar',     label: 'Avatar Sheet',        desc: 'Ficha completa del cliente ideal con quotes y emotional journey.' },
-  { key: 'offerBrief', label: 'Offer Brief',         desc: 'Brief para el copywriter: Big Idea, UMP/UMS, headlines, objections, belief chains.' },
-  { key: 'beliefs',    label: 'Creencias',           desc: '6 creencias que el prospect debe adoptar antes de comprar.' },
+  { key: 'research',          label: 'Research Doc',        desc: 'Investigación profunda del mercado, avatar, competidores, horror stories, corruption angles.' },
+  { key: 'avatar',            label: 'Avatar Sheet',        desc: 'Ficha completa del cliente ideal con quotes y emotional journey.' },
+  { key: 'offerBrief',        label: 'Offer Brief',         desc: 'Brief para el copywriter: Big Idea, UMP/UMS, headlines, objections, belief chains.' },
+  { key: 'beliefs',           label: 'Creencias',           desc: '6 creencias que el prospect debe adoptar antes de comprar.' },
+  { key: 'resumenEjecutivo',  label: 'Resumen ejecutivo',   desc: 'Síntesis de 2-3 oraciones con lo central del producto.' },
 ];
 
 function loadProductos() {
@@ -48,7 +49,7 @@ function downloadText(content, filename) {
 
 export default function MarketingSection({ addToast }) {
   const [productos, setProductos] = useState(() => loadProductos());
-  const [form, setForm] = useState({ productoUrl: '', productoNombre: '', descripcion: '' });
+  const [form, setForm] = useState({ productoUrl: '', productoNombre: '' });
   const [activeProductId, setActiveProductId] = useState(null);
   const [activeTab, setActiveTab] = useState('research');
 
@@ -76,10 +77,8 @@ export default function MarketingSection({ addToast }) {
 
   const handleGenerate = async () => {
     const productoNombre = form.productoNombre.trim();
-    const descripcion = form.descripcion.trim();
     const productoUrl = form.productoUrl.trim();
     if (!productoNombre) { addToast?.({ type: 'error', message: 'Falta el nombre del producto' }); return; }
-    if (!descripcion) { addToast?.({ type: 'error', message: 'Falta la descripción (qué vende y a quién)' }); return; }
 
     setRunning(true);
     resetRun();
@@ -88,7 +87,7 @@ export default function MarketingSection({ addToast }) {
       const resp = await fetch('/api/marketing/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ productoUrl, productoNombre, descripcion }),
+        body: JSON.stringify({ productoUrl, productoNombre }),
       });
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));
@@ -98,7 +97,8 @@ export default function MarketingSection({ addToast }) {
       readerRef.current = reader;
       const decoder = new TextDecoder();
       let buffer = '';
-      const collectedOutputs = { research: '', avatar: '', offerBrief: '', beliefs: '' };
+      const collectedOutputs = { research: '', avatar: '', offerBrief: '', beliefs: '', resumenEjecutivo: '' };
+      let ogImage = null;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -115,6 +115,8 @@ export default function MarketingSection({ addToast }) {
 
           if (ev.type === 'info') {
             setInfoMsg(ev.message || '');
+          } else if (ev.type === 'og-image') {
+            ogImage = ev.url || null;
           } else if (ev.type === 'step-start') {
             setCurrentStep(ev.key);
             setStepStatus(s => ({ ...s, [ev.key]: 'running' }));
@@ -123,19 +125,23 @@ export default function MarketingSection({ addToast }) {
             collectedOutputs[ev.key] = ev.content || '';
             setLiveOutputs(prev => ({ ...prev, [ev.key]: ev.content || '' }));
           } else if (ev.type === 'complete') {
-            // Guardamos el paquete en la lista.
+            // Guardamos el paquete en la lista (expediente del producto).
             const paquete = {
               id: Date.now(),
               productoNombre,
-              descripcion,
               productoUrl,
+              descripcion: ev.descripcion || '', // la autogenera el backend
+              imagen: ev.ogImage || ogImage || null,
+              resumenEjecutivo: (ev.outputs?.resumenEjecutivo || collectedOutputs.resumenEjecutivo) || '',
               docs: ev.outputs || collectedOutputs,
+              memoria: { notas: [], aprendizajes: [] }, // para Fase 2b
+              historial: [{ tipo: 'generacion-inicial', at: new Date().toISOString() }],
               createdAt: new Date().toISOString(),
             };
             setProductos(prev => [paquete, ...prev]);
             setActiveProductId(paquete.id);
             setActiveTab('research');
-            setForm({ productoUrl: '', productoNombre: '', descripcion: '' });
+            setForm({ productoUrl: '', productoNombre: '' });
             addToast?.({ type: 'success', message: `Documentación generada para "${productoNombre}"` });
           } else if (ev.type === 'error') {
             setErrorMsg(ev.error || 'Error durante la generación');
@@ -206,7 +212,7 @@ export default function MarketingSection({ addToast }) {
         </div>
       </div>
 
-      {/* Form de generación */}
+      {/* Form de generación — sólo nombre + URL. La descripción la autogenera el backend. */}
       {!showingLive && (
         <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm p-5 space-y-4">
           <div>
@@ -220,7 +226,7 @@ export default function MarketingSection({ addToast }) {
             />
           </div>
           <div>
-            <label className="block text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1.5">URL de la landing <span className="text-gray-400 normal-case font-normal">(opcional pero recomendado)</span></label>
+            <label className="block text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1.5">URL de la landing <span className="text-gray-400 normal-case font-normal">(opcional)</span></label>
             <input
               type="url"
               value={form.productoUrl}
@@ -228,22 +234,11 @@ export default function MarketingSection({ addToast }) {
               placeholder="https://tumarca.com.ar/productos/slug"
               className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-purple-500"
             />
-            <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">Si la poné, scrapeo la landing y la uso como contexto. Si no, trabajo solo con nombre + descripción.</p>
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1.5">Qué vende y a quién <span className="text-red-500">*</span></label>
-            <textarea
-              value={form.descripcion}
-              onChange={(e) => setForm({ ...form, descripcion: e.target.value })}
-              placeholder="Ej: Suplemento en gomitas para reducir celulitis en mujeres de 30-55 años que ya probaron cremas y dietas sin resultados duraderos."
-              rows={3}
-              className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-purple-500 resize-y"
-            />
-            <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">Cuanto más específico seas sobre el avatar y el dolor, mejor sale el research.</p>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">Si la poné, scrapeo la landing, extraigo foto + descripción y uso todo como contexto. Sin URL igual funciona pero el research queda más genérico.</p>
           </div>
           <button
             onClick={handleGenerate}
-            disabled={running || !form.productoNombre.trim() || !form.descripcion.trim()}
+            disabled={running || !form.productoNombre.trim()}
             className="w-full inline-flex items-center justify-center gap-2 px-6 py-3.5 text-sm font-bold text-white bg-gradient-to-br from-purple-600 to-violet-500 rounded-xl hover:from-purple-700 hover:to-violet-600 shadow-sm transition disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <Sparkles size={18} /> Generar documentación completa
@@ -323,19 +318,28 @@ export default function MarketingSection({ addToast }) {
               <div key={p.id}>
                 <button
                   onClick={() => setActiveProductId(activeProductId === p.id ? null : p.id)}
-                  className="w-full flex items-center gap-3 p-4 text-left hover:bg-gray-50 dark:hover:bg-gray-700/30 transition"
+                  className="w-full flex items-start gap-3 p-4 text-left hover:bg-gray-50 dark:hover:bg-gray-700/30 transition"
                 >
-                  <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-purple-600 to-violet-500 flex items-center justify-center shrink-0">
-                    <Package size={18} className="text-white" />
-                  </div>
+                  {/* Thumbnail: og:image si existe, fallback al ícono */}
+                  {p.imagen ? (
+                    <img src={p.imagen} alt={p.productoNombre} className="w-14 h-14 rounded-lg object-cover bg-gray-100 dark:bg-gray-700 shrink-0 border border-gray-200 dark:border-gray-600" />
+                  ) : (
+                    <div className="w-14 h-14 rounded-lg bg-gradient-to-br from-purple-600 to-violet-500 flex items-center justify-center shrink-0">
+                      <Package size={22} className="text-white" />
+                    </div>
+                  )}
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{p.productoNombre}</p>
-                    <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate">
+                    <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate mb-0.5">
                       {new Date(p.createdAt).toLocaleDateString('es-AR')}
-                      {p.productoUrl && <> · <span className="text-purple-600 dark:text-purple-400">{new URL(p.productoUrl).hostname}</span></>}
+                      {p.productoUrl && <> · <span className="text-purple-600 dark:text-purple-400">{(() => { try { return new URL(p.productoUrl).hostname; } catch { return p.productoUrl; } })()}</span></>}
                     </p>
+                    {/* Resumen ejecutivo inline (si se generó) */}
+                    {p.resumenEjecutivo && (
+                      <p className="text-xs text-gray-700 dark:text-gray-300 leading-snug line-clamp-2 mt-1">{p.resumenEjecutivo}</p>
+                    )}
                   </div>
-                  <ChevronRight size={16} className={`text-gray-400 transition-transform ${activeProductId === p.id ? 'rotate-90' : ''}`} />
+                  <ChevronRight size={16} className={`text-gray-400 transition-transform shrink-0 mt-1 ${activeProductId === p.id ? 'rotate-90' : ''}`} />
                 </button>
 
                 {/* Detalle expandido */}

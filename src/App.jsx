@@ -1947,6 +1947,242 @@ function AppShell({ onExit }) {
   );
 }
 
+
+function NavItem({ icon: Icon, label, section, currentSection, onSelect, sidebarOpen }) {
+  const isActive = currentSection === section;
+  return (
+    <button
+      onClick={() => onSelect(section)}
+      title={!sidebarOpen ? label : undefined}
+      className={`group relative w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all duration-200 ${
+        isActive
+          ? 'bg-gradient-to-r from-pink-600/80 to-rose-500/60 text-white shadow-lg shadow-pink-900/40'
+          : 'text-pink-100/80 hover:text-white hover:bg-white/5'
+      }`}
+    >
+      {/* Indicador lateral animado sobre el activo */}
+      <span
+        aria-hidden="true"
+        className={`absolute left-0 top-1/2 -translate-y-1/2 w-1 rounded-r-full bg-gradient-to-b from-amber-200 to-amber-400 transition-all duration-300 ${
+          isActive ? 'h-6 opacity-100' : 'h-0 opacity-0'
+        }`}
+      />
+      <Icon size={19} className={`shrink-0 transition-transform duration-200 ${isActive ? 'scale-110' : 'group-hover:scale-110'}`} />
+      {sidebarOpen && <span className="text-sm font-medium whitespace-nowrap">{label}</span>}
+      {/* Tooltip en modo colapsado */}
+      {!sidebarOpen && (
+        <span className="pointer-events-none absolute left-full ml-3 px-2 py-1 rounded-md text-xs font-semibold whitespace-nowrap bg-gray-900 text-white opacity-0 group-hover:opacity-100 translate-x-[-6px] group-hover:translate-x-0 transition-all duration-150 z-50 shadow-lg">
+          {label}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function LoginScreen({ onLogin, onSessionAuth, darkMode, toggleDarkMode }) {
+  const [loginMode, setLoginMode] = useState('login');
+  const [username, setUsername] = useState(() => {
+    try { return localStorage.getItem('viora-last-user') || ''; } catch { return ''; }
+  });
+  const [password, setPassword] = useState('');
+  const [rememberUser, setRememberUser] = useState(true);
+  const [loginError, setLoginError] = useState('');
+  const [loggingIn, setLoggingIn] = useState(false);
+
+  // Magic link (opcional, secundario)
+  const [email, setEmail] = useState('');
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState('');
+  const [sendResult, setSendResult] = useState(null);
+
+  const doLogin = async () => {
+    setLoginError('');
+    if (!username.trim() || !password) {
+      setLoginError('Completá usuario y contraseña');
+      return;
+    }
+    setLoggingIn(true);
+    try {
+      const resp = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'login', username: username.trim(), password }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data?.ok) {
+        setLoginError(data?.error || 'Usuario o contraseña inválidos');
+        return;
+      }
+      localStorage.setItem('viora-session', data.session);
+      if (rememberUser) {
+        try { localStorage.setItem('viora-last-user', username.trim()); } catch {}
+      } else {
+        try { localStorage.removeItem('viora-last-user'); } catch {}
+      }
+      if (typeof onSessionAuth === 'function') {
+        onSessionAuth(data.user);
+      } else {
+        // Fallback: llamar onLogin con los datos equivalentes
+        onLogin(data.user.role, data.user.name);
+      }
+    } catch (err) {
+      setLoginError('No pude conectar con el servidor.');
+    } finally {
+      setLoggingIn(false);
+    }
+  };
+
+  const sendMagicLink = async () => {
+    setSendError('');
+    const trimmed = email.trim();
+    if (!trimmed) { setSendError('Ingresá tu email'); return; }
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(trimmed)) { setSendError('Email con formato inválido'); return; }
+    setSending(true);
+    try {
+      const resp = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'send', email: trimmed }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        setSendError(data?.error || `Error ${resp.status}`);
+      } else {
+        setSendResult({ emailSent: !!data.emailSent, devLink: data.devLink, hidden: !!data.hidden });
+        setLoginMode('email-sent');
+      }
+    } catch (err) {
+      setSendError('No pude conectar con el servidor.');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-pink-50 to-rose-50 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center p-4 relative">
+      <button
+        onClick={toggleDarkMode}
+        className="absolute top-4 right-4 p-2 rounded-lg bg-white/80 dark:bg-gray-800/80 hover:bg-white dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 shadow transition"
+        title={darkMode ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
+        aria-label="Toggle dark mode"
+      >
+        {darkMode ? <Sun size={20} /> : <Moon size={20} />}
+      </button>
+      <div className="w-full max-w-md bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-8">
+        <div className="text-center mb-8 flex flex-col items-center">
+          <VioraLogo size="md" variant={darkMode ? 'light' : 'default'} />
+          <p className="text-gray-600 dark:text-gray-400 mt-1 text-xs tracking-widest uppercase">Panel de gestión</p>
+        </div>
+
+        {loginMode === 'login' && (
+          <div className="space-y-3">
+            <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300">Usuario</label>
+            <input
+              type="text"
+              autoFocus={!username}
+              autoComplete="username"
+              placeholder="usuario"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') doLogin(); }}
+              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            />
+            <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mt-3">Contraseña</label>
+            <input
+              type="password"
+              autoFocus={!!username}
+              autoComplete="current-password"
+              placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') doLogin(); }}
+              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            />
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={rememberUser} onChange={(e) => setRememberUser(e.target.checked)}
+                className="h-3.5 w-3.5 rounded border-gray-300 dark:border-gray-600 text-pink-600 focus:ring-pink-500" />
+              <span className="text-[11px] text-gray-500 dark:text-gray-400">Recordar usuario</span>
+            </label>
+            {loginError && <p className="text-xs text-red-600 dark:text-red-400">{loginError}</p>}
+            <button
+              onClick={doLogin}
+              disabled={loggingIn}
+              className="w-full py-2.5 mt-2 bg-gradient-to-r from-pink-900 to-rose-700 text-white rounded-lg hover:shadow-lg transition font-semibold disabled:opacity-60"
+            >
+              {loggingIn ? 'Ingresando…' : 'Ingresar'}
+            </button>
+          </div>
+        )}
+
+        {loginMode === 'email' && (
+          <div className="space-y-3">
+            <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300">Tu email</label>
+            <input
+              type="email"
+              autoFocus
+              placeholder="nombre@ejemplo.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') sendMagicLink(); }}
+              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            />
+            {sendError && <p className="text-xs text-red-600 dark:text-red-400">{sendError}</p>}
+            <button
+              onClick={sendMagicLink}
+              disabled={sending}
+              className="w-full py-2 bg-pink-900 dark:bg-pink-700 text-white rounded-lg hover:bg-pink-800 dark:hover:bg-pink-600 transition disabled:opacity-60"
+            >
+              {sending ? 'Enviando…' : 'Enviarme el link'}
+            </button>
+            <button
+              onClick={() => setLoginMode('login')}
+              className="w-full py-2 text-pink-900 dark:text-pink-300 border border-pink-900 dark:border-pink-300 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition text-sm"
+            >
+              Volver al login con usuario
+            </button>
+          </div>
+        )}
+
+        {loginMode === 'email-sent' && (
+          <div className="space-y-4">
+            <div className="p-4 bg-emerald-50 dark:bg-emerald-900/30 rounded-lg">
+              {sendResult?.hidden ? (
+                <>
+                  <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">Si el email está autorizado, vas a recibir un link de acceso en pocos segundos.</p>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">El link expira en 15 minutos.</p>
+                </>
+              ) : sendResult?.emailSent ? (
+                <>
+                  <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">Listo, te mandamos el link a <span className="font-mono">{email}</span>.</p>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">Revisá tu bandeja (y el spam). El link expira en 15 minutos.</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">Modo setup: no hay proveedor de email configurado.</p>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 mt-2">Usá este link para entrar ahora (expira en 15 minutos):</p>
+                  {sendResult?.devLink && (
+                    <a
+                      href={sendResult.devLink}
+                      className="block mt-2 px-3 py-2 bg-white dark:bg-gray-800 rounded border border-emerald-300 dark:border-emerald-700 text-[11px] font-mono text-emerald-900 dark:text-emerald-200 break-all hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition"
+                    >
+                      {sendResult.devLink}
+                    </a>
+                  )}
+                </>
+              )}
+            </div>
+            <button
+              onClick={() => { setLoginMode('login'); setSendResult(null); setEmail(''); }}
+              className="w-full py-2 text-pink-900 dark:text-pink-300 border border-pink-900 dark:border-pink-300 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/30 transition text-sm"
+            >
+              Volver
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 function InicioSection({ state, dispatch, onAddSale, onQuickAddClient, onQuickAddProduct, addToast }) {
   const [filters, setFilters] = useState({
     dateFrom: '',

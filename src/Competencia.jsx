@@ -485,9 +485,17 @@ export default function CompetenciaSection({ addToast }) {
                                     {/* Badges */}
                                     <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
                                       {ad.isWinner && (
-                                        <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded">
-                                          🏆 Winner
-                                        </span>
+                                        ad.winnerTier === 'strong' ? (
+                                          <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-bold bg-gradient-to-r from-amber-200 to-yellow-300 dark:from-amber-900/60 dark:to-yellow-800/60 text-amber-900 dark:text-amber-200 rounded shadow-sm"
+                                            title="Winner FUERTE: cumple ambos criterios (≥17d + ≥2 variantes) o tiene 4+ variantes — están escalándolo en serio">
+                                            🏆🔥 Winner fuerte
+                                          </span>
+                                        ) : (
+                                          <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded"
+                                            title="Winner confirmado: cumple ≥17d OR ≥2 variantes">
+                                            🏆 Winner
+                                          </span>
+                                        )
                                       )}
                                       {typeof ad.score === 'number' && (
                                         <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-mono bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded">

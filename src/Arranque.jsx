@@ -680,9 +680,30 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         updateStep(stepId, { status: 'done', endedAt: Date.now(), detail: 'Sin ganadores para analizar todavía' });
         continue;
       }
-      updateStep(stepId, { status: 'running', startedAt: Date.now(), detail: `0/${winners.length} analizados` });
+      // Filtrar: no re-analizar los ads que ya tienen análisis guardado.
+      // Ahorramos tokens + tiempo + evitamos tirar ideas duplicadas en la
+      // bandeja. Solo analizamos ads nuevos que aparecieron en este scrape.
+      const compFresh = loadJSON(COMPETIDORES_KEY, competidores).find(x => x.id === comp.id);
+      const existingAnalyses = compFresh?.adsAnalysis || {};
+      const nuevosParaAnalizar = winners.filter(ad => !existingAnalyses[ad.id]);
+      const yaAnalizados = winners.length - nuevosParaAnalizar.length;
+
+      if (nuevosParaAnalizar.length === 0) {
+        updateStep(stepId, {
+          status: 'done',
+          endedAt: Date.now(),
+          detail: `Todos (${winners.length}) ya analizados en corridas anteriores — nada nuevo.`,
+        });
+        continue;
+      }
+
+      updateStep(stepId, {
+        status: 'running',
+        startedAt: Date.now(),
+        detail: `0/${nuevosParaAnalizar.length} analizados${yaAnalizados > 0 ? ` · ${yaAnalizados} salteados (ya había análisis)` : ''}`,
+      });
       let analyzed = 0;
-      for (const ad of winners) {
+      for (const ad of nuevosParaAnalizar) {
         if (cancelled) break;
         try {
           const resp = await fetch('/api/marketing/deep-analyze', {
@@ -722,13 +743,17 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           // Empuja la idea a la Bandeja automáticamente.
           ideaFromDeepAnalysis({ analysis: data.analysis, transcript: data.transcript, ad, competidor: comp });
           analyzed++;
-          updateStep(stepId, { detail: `${analyzed}/${winners.length} analizados` });
+          updateStep(stepId, { detail: `${analyzed}/${nuevosParaAnalizar.length} analizados${yaAnalizados > 0 ? ` · ${yaAnalizados} salteados (ya había análisis)` : ''}` });
         } catch (err) {
           // Un análisis fallido no rompe el resto — seguimos.
           console.error(`deep-analyze falló para ad ${ad.id}:`, err);
         }
       }
-      updateStep(stepId, { status: 'done', endedAt: Date.now(), detail: `${analyzed}/${winners.length} analizados` });
+      updateStep(stepId, {
+        status: 'done',
+        endedAt: Date.now(),
+        detail: `${analyzed} nuevos analizados${yaAnalizados > 0 ? ` · ${yaAnalizados} salteados (ya había análisis)` : ''}`,
+      });
     }
 
     // Paso generate: llamar a generate-ideas con todo el contexto acumulado.

@@ -63,13 +63,30 @@ export function addIdea(idea) {
   return nueva;
 }
 
+// Normaliza un hook para comparar semánticamente: baja caja, saca tildes,
+// saca puntuación, toma las primeras 3 palabras significativas.
+function hookSignature(hook) {
+  if (!hook) return '';
+  const normalized = hook
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length >= 3);
+  return normalized.slice(0, 3).join(' ');
+}
+
 // Bulk add: agrega varias ideas de una y devuelve el subset realmente
-// insertado (las duplicadas se saltean). Útil tras generate-ideas.
+// insertado. Dedupea por (tipo, titulo) y también detecta hooks casi
+// idénticos (primeras 3 palabras significativas iguales) — si el generator
+// repite un patrón, se loggea warning pero no se bloquea.
 export function addGeneratedIdeas(rawIdeas, { producto } = {}) {
   if (!Array.isArray(rawIdeas)) return [];
   const nuevas = [];
   const existentes = loadIdeas();
   const existingCount = existentes.length;
+  const existingHookSigs = new Set(existentes.map(i => hookSignature(i.hook)).filter(Boolean));
+  const newHookSigs = new Set();
   for (const r of rawIdeas) {
     // Para iteraciones, el origen apunta al ad propio base + guarda la razón
     // concreta (métrica que cayó, por qué estamos iterando).
@@ -99,6 +116,14 @@ export function addGeneratedIdeas(rawIdeas, { producto } = {}) {
           razonamiento: r.razonamiento || '',
         };
 
+    // Check de diversidad de hooks — si este hook ya tiene signature igual
+    // a otro recién generado o en la bandeja, lo marcamos con un flag
+    // interno para que la UI pueda advertirlo al user (no lo bloqueamos,
+    // el user decide si lo descarta).
+    const sig = hookSignature(r.hook);
+    const hookDuplicado = sig && (existingHookSigs.has(sig) || newHookSigs.has(sig));
+    if (sig) newHookSigs.add(sig);
+
     const idea = addIdea({
       titulo: r.titulo,
       tipo: r.tipo,
@@ -111,6 +136,7 @@ export function addGeneratedIdeas(rawIdeas, { producto } = {}) {
       formato: r.formato || 'static',
       variableDeTesteo: r.variableDeTesteo || 'mix',
       testHipotesis: r.testHipotesis || '',
+      hookDuplicado,
     });
     if (loadIdeas().length > existingCount + nuevas.length) nuevas.push(idea);
   }

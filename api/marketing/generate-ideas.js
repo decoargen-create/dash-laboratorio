@@ -32,6 +32,18 @@ const SYSTEM_PROMPT_BASE = `Sos director creativo senior de DTC cosméticos en A
 
 **CALIDAD > CANTIDAD.** Si solo tenés contexto sólido para generar 12 ideas excelentes, devolvé 12. Nunca rellenes con ideas mediocres para alcanzar un número. Una mediocre pinta mal la bandeja entera.
 
+**DIVERSIDAD DE HOOKS — muy importante.** Antes de finalizar la respuesta, revisá todos los hooks que propusiste. Si dos hooks arrancan con el mismo template ("¿Cansada de X?", "¿Sabías que X?", "Dejá de X"), reescribí uno. Repetir estructuras en 2+ ideas las vuelve intercambiables y pierde el valor de diversificar ángulos. Mezclá arquetipos:
+- Pregunta retórica
+- Dato o estadística shocking
+- Confesión / storytelling en 1ra persona
+- Comparación antes/después
+- Autoridad / "Me dijo el dermatólogo"
+- Micro-agresión / provocación
+- Instrucción / "Tenés que saber esto"
+- Curiosidad / "No te vas a creer lo que pasó"
+
+Una buena batería tiene al menos 4 arquetipos de hook distintos.
+
 `;
 
 function buildTypeMix(targetCount, hasPropios) {

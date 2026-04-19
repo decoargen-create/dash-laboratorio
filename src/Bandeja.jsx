@@ -397,6 +397,12 @@ function IdeaCard({
                 {VARIABLE_META[idea.variableDeTesteo].emoji} testea: {VARIABLE_META[idea.variableDeTesteo].label}
               </span>
             )}
+            {idea.hookDuplicado && (
+              <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-semibold bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300 rounded"
+                title="Este hook arranca igual que otra idea — considerá reescribirlo para diversificar arquetipos">
+                ⚠ hook similar
+              </span>
+            )}
             {idea.formato && (
               <span className="text-[10px] text-gray-400 ml-auto">
                 {idea.formato === 'video' ? '🎬' : idea.formato === 'static' ? '🖼️' : '📑'} {idea.formato}

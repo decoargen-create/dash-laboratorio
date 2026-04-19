@@ -217,39 +217,75 @@ async function handleAdAccounts(req, res) {
 }
 
 // Helper: extrae métricas relevantes de un objeto insights crudo de Meta.
+// Ahora calcula ROAS, CPA y thumb-stop rate (para video) además de las
+// métricas básicas — esos 3 son los indicadores más predictivos de fatigue
+// y de calidad del creativo.
 function parseInsights(ins) {
   if (!ins) return null;
   const actions = ins.actions || [];
-  const purchases = actions.find(a =>
+  const actionValues = ins.action_values || [];
+
+  const isPurchase = (a) =>
     a.action_type === 'purchase' ||
-    a.action_type === 'offsite_conversion.fb_pixel_purchase'
-  );
+    a.action_type === 'offsite_conversion.fb_pixel_purchase';
+
+  const purchases = actions.find(isPurchase);
+  const purchaseValue = actionValues.find(isPurchase);
+
+  const impressions = Number(ins.impressions || 0);
+  const spend = Number(ins.spend || 0);
+  const purchasesCount = purchases ? Number(purchases.value || 0) : 0;
+  const revenue = purchaseValue ? Number(purchaseValue.value || 0) : 0;
+
+  // video_3_sec_watched_actions: viewers que miraron >=3s. Dividido por
+  // impressions da el thumb-stop rate — el indicador más predictivo de
+  // calidad del hook en video.
+  const video3sArr = ins.video_3_sec_watched_actions || [];
+  const video3sTotal = video3sArr.reduce((sum, a) => sum + Number(a.value || 0), 0);
+  const thumbStopRate = impressions > 0 ? (video3sTotal / impressions) * 100 : 0;
+
   return {
-    impressions: Number(ins.impressions || 0),
+    impressions,
     clicks: Number(ins.clicks || 0),
     ctr: Number(ins.ctr || 0),
-    spend: Number(ins.spend || 0),
+    spend,
     cpc: Number(ins.cpc || 0),
     cpm: Number(ins.cpm || 0),
     reach: Number(ins.reach || 0),
     frequency: Number(ins.frequency || 0),
-    purchases: purchases ? Number(purchases.value || 0) : 0,
+    purchases: purchasesCount,
+    revenue,
+    // Métricas derivadas — calculamos nosotros (Meta no las manda formateadas).
+    roas: spend > 0 ? revenue / spend : 0,                    // return on ad spend
+    cpa: purchasesCount > 0 ? spend / purchasesCount : 0,     // cost per acquisition
+    thumbStopRate,                                             // % que ven ≥3s (video)
+    video3sViews: video3sTotal,
   };
 }
 
-// Calcula el estado de fatigue comparando las métricas de los últimos 7 días
-// con los 7 días previos (days -14 a -7).
+// Mínimo de impressions por período para que el CTR sea estadísticamente
+// significativo. Abajo de 1000 imp, CTR es ruido — un solo click cambia %
+// demasiado. En DTC con targeting apretado, 1000 imp equivale a ~24-48h de
+// runtime normal en un set activo.
+const MIN_IMPRESSIONS_FOR_FATIGUE = 1000;
+
+// Calcula el estado de fatigue comparando las métricas del último 14d con
+// los 14d previos (days -28 a -14). Ventana más larga que 7d vs 7d porque
+// en DTC los creativos viven 60-90 días — 7d es ruido, 14d captura la
+// tendencia real sin reaccionar a picos puntuales.
 //
-//   healthy   → todo OK, CTR estable o subiendo
-//   warming   → CTR bajó algo pero spend sigue subiendo (normal al escalar)
+//   healthy   → CTR estable o subiendo
+//   warming   → CTR bajó algo pero spend sigue subiendo (escala normal)
 //   fatiguing → CTR cayó > 20% respecto al período anterior
-//   dying     → CTR cayó > 40% + freq > 4
-//   new       → no hay datos suficientes de período previo
-//
-// Si frequency > 5 y CTR cayendo → ya está quemado en la audiencia.
+//   dying     → CTR cayó > 40% O > 20% con freq > 4 (audiencia quemada)
+//   new       → no hay datos suficientes (<1000 imp en algún período)
 function computeFatigue(recent, prev) {
-  if (!recent || recent.impressions < 100) return { status: 'new', reason: 'Aún no hay datos suficientes' };
-  if (!prev || prev.impressions < 100) return { status: 'new', reason: 'Sin período previo para comparar' };
+  if (!recent || recent.impressions < MIN_IMPRESSIONS_FOR_FATIGUE) {
+    return { status: 'new', reason: `Aún no hay datos suficientes (${recent?.impressions || 0} imp · mín ${MIN_IMPRESSIONS_FOR_FATIGUE})` };
+  }
+  if (!prev || prev.impressions < MIN_IMPRESSIONS_FOR_FATIGUE) {
+    return { status: 'new', reason: `Sin período previo significativo para comparar (${prev?.impressions || 0} imp)` };
+  }
 
   const ctrRecent = recent.ctr;
   const ctrPrev = prev.ctr;
@@ -258,15 +294,27 @@ function computeFatigue(recent, prev) {
   const ctrChangePct = Math.round(((ctrRecent - ctrPrev) / ctrPrev) * 100);
   const freqOverload = recent.frequency > 4;
 
+  // ROAS change — señal secundaria pero muy fuerte. Si ROAS cae mientras
+  // CTR se mantiene, puede ser audience decay (los que clickean compran menos).
+  let roasChangePct = null;
+  if (prev.roas > 0 && recent.roas >= 0) {
+    roasChangePct = Math.round(((recent.roas - prev.roas) / prev.roas) * 100);
+  }
+  const roasCollapse = roasChangePct != null && roasChangePct < -30;
+
   let status = 'healthy';
-  let reason = `CTR estable (${ctrChangePct >= 0 ? '+' : ''}${ctrChangePct}% vs 7d previos)`;
+  let reason = `CTR estable (${ctrChangePct >= 0 ? '+' : ''}${ctrChangePct}%) · ROAS ${recent.roas.toFixed(2)}`;
 
   if (ctrChangePct < -40 || (ctrChangePct < -20 && freqOverload)) {
     status = 'dying';
-    reason = `CTR cayó ${Math.abs(ctrChangePct)}% · freq ${recent.frequency.toFixed(1)} — audiencia quemada`;
-  } else if (ctrChangePct < -20) {
+    reason = `CTR cayó ${Math.abs(ctrChangePct)}% vs 14d previos · freq ${recent.frequency.toFixed(1)} — audiencia quemada`;
+  } else if (ctrChangePct < -20 || roasCollapse) {
     status = 'fatiguing';
-    reason = `CTR cayó ${Math.abs(ctrChangePct)}% vs 7d previos — fatiguing`;
+    if (roasCollapse && ctrChangePct >= -20) {
+      reason = `ROAS cayó ${Math.abs(roasChangePct)}% — los que clickean ya no compran`;
+    } else {
+      reason = `CTR cayó ${Math.abs(ctrChangePct)}% vs 14d previos` + (roasCollapse ? ` + ROAS ${Math.abs(roasChangePct)}%` : '');
+    }
   } else if (ctrChangePct < -5 && recent.spend > prev.spend * 1.1) {
     status = 'warming';
     reason = `CTR bajó ${Math.abs(ctrChangePct)}% pero spend subió — normal al escalar`;
@@ -276,7 +324,12 @@ function computeFatigue(recent, prev) {
     status,
     reason,
     ctrRecent, ctrPrev, ctrChangePct,
+    roasRecent: recent.roas,
+    roasPrev: prev.roas,
+    roasChangePct,
+    cpaRecent: recent.cpa,
     frequencyRecent: recent.frequency,
+    thumbStopRate: recent.thumbStopRate,
   };
 }
 
@@ -301,22 +354,24 @@ async function handleAdsWithInsights(req, res) {
 
   if (!accountId) return respondJSON(res, 400, { error: 'Falta account_id (con prefijo act_)' });
 
-  // Rango previo: días -14 a -7 (los 7 días anteriores al "last_7d" de Meta).
+  // Ventanas de comparación: últimos 14d vs 14d previos (días -28 a -14).
+  // En DTC los creativos viven 60-90 días — 7d es muy ruidoso, 14d captura
+  // tendencia real con buffer de significancia estadística.
   const now = new Date();
-  const prevSince = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
-  const prevUntil = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const recentSince = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+  const recentRange = JSON.stringify({ since: ymd(recentSince), until: ymd(now) });
+  const prevSince = new Date(now.getTime() - 28 * 24 * 60 * 60 * 1000);
+  const prevUntil = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
   const prevRange = JSON.stringify({ since: ymd(prevSince), until: ymd(prevUntil) });
 
   try {
-    // Un solo call a Graph API con dos expansiones de insights (distintos
-    // date_preset vs time_range). Meta permite alias de expansiones con
-    // `.as()`: as(recent) / as(previous).
+    // Un solo call a Graph API con dos expansiones de insights.
     const data = await graphGet(`${accountId}/ads`, session.accessToken, {
       fields: [
         'id,name,status,effective_status,created_time,updated_time',
         `creative{id,name,title,body,thumbnail_url,image_url,video_id,object_story_spec,effective_object_story_id}`,
-        `insights.date_preset(last_7d).as(recent){impressions,clicks,ctr,spend,cpc,cpm,actions,reach,frequency}`,
-        `insights.time_range(${prevRange}).as(previous){impressions,clicks,ctr,spend,cpc,cpm,actions,reach,frequency}`,
+        `insights.time_range(${recentRange}).as(recent){impressions,clicks,ctr,spend,cpc,cpm,actions,action_values,reach,frequency,video_3_sec_watched_actions}`,
+        `insights.time_range(${prevRange}).as(previous){impressions,clicks,ctr,spend,cpc,cpm,actions,action_values,reach,frequency,video_3_sec_watched_actions}`,
       ].join(','),
       limit,
       effective_status: JSON.stringify(['ACTIVE', 'PAUSED']),

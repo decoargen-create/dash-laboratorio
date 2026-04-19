@@ -185,6 +185,21 @@ function buildContext({ producto, competidoresAnalisis, ideasExistentes, propios
     parts.push('\n## TUS PROPIOS ADS ACTIVOS (para generar iteraciones)');
     parts.push(`Cada ad viene con su estado de fatigue y métricas 7d + 7d previos. PRIORIZÁ iterar los que están 🔻 FATIGANDO o 💀 MURIENDO — son los que más necesitan renovación. Los saludables podés tomarlos como base si su estructura/ángulo anduvo bien para escalar.`);
 
+    // Helper para formatear las métricas de un ad de forma compacta pero rica.
+    const fmtMetrics = (ins) => {
+      const parts_m = [
+        `CTR ${(ins.ctr || 0).toFixed(2)}%`,
+        `ROAS ${(ins.roas || 0).toFixed(2)}`,
+        `CPA $${(ins.cpa || 0).toFixed(2)}`,
+        `${ins.purchases || 0} compras`,
+        `freq ${(ins.frequency || 0).toFixed(1)}`,
+      ];
+      if ((ins.thumbStopRate || 0) > 0) {
+        parts_m.push(`thumb-stop ${ins.thumbStopRate.toFixed(1)}%`);
+      }
+      return parts_m.join(' · ');
+    };
+
     if (fatigando.length > 0) {
       parts.push(`\n### 🔻 Fatigando / muriendo (${fatigando.length}) — prioridad alta para iterar`);
       fatigando.forEach((ad, i) => {
@@ -194,7 +209,7 @@ function buildContext({ producto, competidoresAnalisis, ideasExistentes, propios
         if (ad.creative?.title) parts.push(`Título: ${ad.creative.title}`);
         if (ad.creative?.body) parts.push(`Body: ${String(ad.creative.body).slice(0, 300)}`);
         parts.push(`Estado: ${fat.status === 'dying' ? '💀 muriendo' : '🔻 fatigando'} — ${fat.reason}`);
-        parts.push(`7d actuales: CTR ${(ins.ctr || 0).toFixed(2)}% · ${ins.impressions || 0} imp · $${ins.spend || 0} · ${ins.purchases || 0} compras · freq ${(ins.frequency || 0).toFixed(1)}`);
+        parts.push(`14d actuales: ${fmtMetrics(ins)}`);
       });
     }
 
@@ -206,7 +221,7 @@ function buildContext({ producto, competidoresAnalisis, ideasExistentes, propios
         parts.push(`\n**${fatigando.length + i + 1}. ${ad.name || ad.creative?.title || 'Sin nombre'}** [adId: ${ad.id}]`);
         if (ad.creative?.title) parts.push(`Título: ${ad.creative.title}`);
         parts.push(`Estado: ${fat.status === 'healthy' ? '✅ saludable' : fat.status === 'warming' ? '📈 escalando' : '🆕 nuevo'} — ${fat.reason || ''}`);
-        parts.push(`7d: CTR ${(ins.ctr || 0).toFixed(2)}% · $${ins.spend || 0} · ${ins.purchases || 0} compras`);
+        parts.push(`14d: ${fmtMetrics(ins)}`);
       });
     }
 

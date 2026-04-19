@@ -13,6 +13,7 @@
 // }
 
 import Anthropic from '@anthropic-ai/sdk';
+import { anthropicCost } from './_costs.js';
 
 const MODEL = 'claude-sonnet-4-6';
 
@@ -128,6 +129,7 @@ export default async function handler(req, res) {
       matched: clean.length,
       model: MODEL,
       generatedAt: new Date().toISOString(),
+      cost: { anthropic: anthropicCost(resp.usage, MODEL) },
     });
   } catch (err) {
     console.error('match-product-ads error:', err);

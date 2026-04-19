@@ -105,6 +105,10 @@ export default async function handler(req, res) {
 
     const winnersCount = scored.filter(a => a.isWinner).length;
 
+    // Costo estimado: Apify facebook-ads-scraper cobra ~$5.80/1000 ads en el
+    // plan free (usage-based). ~$0.0058 por ad scrapeado.
+    const apifyCost = scored.length * 0.0058;
+
     return respondJSON(res, 200, {
       total: scored.length,
       winners: winnersCount,
@@ -112,6 +116,7 @@ export default async function handler(req, res) {
       generatedAt: new Date().toISOString(),
       source: { actor: actorId, input: { fbPageUrl, searchKeyword, country, limit } },
       ads: scored,
+      cost: { apify: Math.round(apifyCost * 10000) / 10000 },
     });
   } catch (err) {
     console.error('apify-ingest error:', err);

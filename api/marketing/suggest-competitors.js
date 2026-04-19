@@ -100,12 +100,16 @@ export default async function handler(req, res) {
       .sort((a, b) => b.adsCount - a.adsCount || b.maxDaysRunning - a.maxDaysRunning)
       .slice(0, 12);
 
+    // Costo Apify: ~$0.0058 × ads devueltos por el actor.
+    const apifyCost = (items?.length || 0) * 0.0058;
+
     return respondJSON(res, 200, {
       searchKeyword,
       country,
       total: suggestions.length,
       suggestions,
       generatedAt: new Date().toISOString(),
+      cost: { apify: Math.round(apifyCost * 10000) / 10000 },
     });
   } catch (err) {
     console.error('suggest-competitors error:', err);

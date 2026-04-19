@@ -1,16 +1,21 @@
 // Sección Arranque — punto de entrada de Marketing.
 //
-// 3 cards de setup (producto, competidores, correr pipeline) que se van
-// completando a medida que tenés data. El botón "Correr pipeline" dispara
-// un flow completo:
-//   1. Scrape de ads de cada competidor (apify-ingest, force=true)
-//   2. Para cada competidor, deep-analyze de los top 3 winners
-//   3. Poblado de ideas en la Bandeja (futuro — por ahora solo el análisis)
+// 4 cards de setup (producto, cuenta Meta opcional, competidores, correr
+// pipeline). El botón "Correr pipeline" dispara el flow end-to-end:
+//   1. Si el producto no tiene research → genera docs (research + avatar
+//      + offer brief + creencias + resumen ejecutivo).
+//   2. Post-research analysis: infiere stage del prospect + genera 5-8
+//      keywords de búsqueda para competencia.
+//   3. Si no hay competidores cargados → auto-sugiere top-5 con esos
+//      keywords vía Meta Ad Library.
+//   4. Para cada competidor: scrape de ads activos + deep-analyze de los
+//      ganadores (Claude Vision + Whisper).
+//   5. Generator: crea ideas clasificadas (réplica / iteración /
+//      diferenciación / desde cero) y las puebla en la Bandeja.
 //
-// Todo lo que carga usa los mismos localStorage keys que las otras secciones:
-//   - 'viora-marketing-productos-v1' (Marketing.jsx)
-//   - 'viora-marketing-competidores-v1' (Competencia.jsx)
-// Así tenés continuidad entre secciones.
+// Todo lo que carga usa los mismos localStorage keys que las otras secciones
+// para continuidad entre Arranque, Documentación (viewer), Competencia,
+// Bandeja y Gastos.
 
 import React, { useState, useEffect } from 'react';
 import {
@@ -18,6 +23,7 @@ import {
   Plus, X, Sparkles, Link2, Search, Clock,
 } from 'lucide-react';
 import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGeneratedToday } from './bandejaStore.js';
+import { logCostsFromResponse } from './costsStore.js';
 
 const GEN_CONFIG_KEY = 'viora-marketing-gen-config-v1';
 const DEFAULT_GEN_CONFIG = {
@@ -272,6 +278,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      logCostsFromResponse(data, `match-product-ads · ${metaAccount.ads.length} ads`);
 
       // Enriquecemos los ads con el confidence match.
       const matchMap = new Map(data.matches.map(m => [m.adId, m]));
@@ -358,6 +365,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      logCostsFromResponse(data, `suggest-competitors · "${keyword}"`);
       // Filtramos los que ya están agregados (por pageName).
       const existentes = new Set(competidores.map(c => (c.nombre || '').toLowerCase()));
       const nuevas = (data.suggestions || []).filter(s => !existentes.has((s.pageName || '').toLowerCase()));
@@ -497,6 +505,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         });
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+        logCostsFromResponse(data, `post-research-analysis · ${productoActualizado.nombre}`);
 
         searchKeywords = data.searchKeywords || [];
         productoActualizado = {
@@ -535,6 +544,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         });
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+        logCostsFromResponse(data, `auto-suggest · "${keywordAUsar}"`);
 
         const top5 = (data.suggestions || []).slice(0, 5);
         if (top5.length === 0) {
@@ -621,6 +631,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         });
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+        logCostsFromResponse(data, `apify-ingest · ${c.nombre}`);
 
         const ads = data.ads || [];
         const winners = ads.filter(a => a.isWinner).slice(0, 3);
@@ -677,6 +688,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           });
           const data = await resp.json();
           if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+          logCostsFromResponse(data, `deep-analyze · ${comp.nombre} · ${ad.id}`);
 
           setCompetidores(prev => prev.map(x =>
             x.id === comp.id ? {
@@ -779,6 +791,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         });
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+        logCostsFromResponse(data, `generate-ideas · ${(productoActualizado || producto)?.nombre || ''}`);
 
         const nuevas = addGeneratedIdeas(data.ideas || [], { producto: productoActualizado || producto });
         setIdeasToday(countIdeasGeneratedToday());
@@ -909,7 +922,8 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 )}
               </div>
             )}
-            {/* Hint de calidad: sugerir correr el pipeline de Documentación si no hay research doc */}
+            {/* Estado del research doc — ahora lo genera el pipeline automático
+                como primer paso, no hay que ir a Documentación aparte. */}
             {(() => {
               const hasResearch = !!(producto.docs?.research || producto.research || producto.docs?.avatar || producto.avatar);
               if (hasResearch) {
@@ -920,11 +934,8 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 );
               }
               return (
-                <div className="mt-2 flex items-start gap-2 p-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded">
-                  <AlertTriangle size={12} className="text-amber-600 shrink-0 mt-0.5" />
-                  <p className="text-[10px] text-amber-900 dark:text-amber-200 leading-snug flex-1">
-                    <strong>Sin research doc.</strong> Las ideas van a ser más genéricas. Correr el pipeline de <button onClick={() => onGoToSection?.('mk-docs')} className="font-bold underline hover:text-amber-700">Documentación</button> primero da ideas mucho más ancladas al avatar real (demographics, pain points, belief chains).
-                  </p>
+                <div className="mt-2 inline-flex items-center gap-1.5 px-2 py-1 text-[10px] font-semibold bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded">
+                  ℹ️ Sin research doc todavía — el pipeline lo genera solo en el primer paso (~3-4 min).
                 </div>
               );
             })()}

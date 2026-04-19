@@ -25,6 +25,7 @@
 // cuando esté conectado el pull de insights.
 
 import Anthropic from '@anthropic-ai/sdk';
+import { anthropicCost } from './_costs.js';
 
 const MODEL = 'claude-sonnet-4-6';
 
@@ -406,6 +407,7 @@ export default async function handler(req, res) {
       model: MODEL,
       generatedAt: new Date().toISOString(),
       usage: resp.usage,
+      cost: { anthropic: anthropicCost(resp.usage, MODEL) },
     });
   } catch (err) {
     console.error('generate-ideas error:', err);

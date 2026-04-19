@@ -81,6 +81,23 @@ const STEPS = [
 // Segundos totales estimados para el pipeline completo.
 const TOTAL_ETA_SEC = STEPS.reduce((s, step) => s + (step.etaSec || 60), 0);
 
+// Config del auto-refresh de competidores (Ad Library).
+const COMP_REFRESH_STALE_HOURS = 6;     // si un competidor tiene lastCheck > 6h, re-checkeamos
+const COMP_REFRESH_INTERVAL_MS = 30 * 60 * 1000;  // cada 30 min revisamos si hay algo stale
+
+// Formatea "hace X" relativo.
+function timeAgo(iso) {
+  if (!iso) return 'nunca';
+  const diff = Date.now() - new Date(iso).getTime();
+  const min = Math.round(diff / 60000);
+  if (min < 1) return 'recién';
+  if (min < 60) return `hace ${min} min`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `hace ${hr}h`;
+  const d = Math.round(hr / 24);
+  return `hace ${d}d`;
+}
+
 function loadProductos() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -123,6 +140,56 @@ export default function MarketingSection({ addToast, bgAnalysis, onStart, onCanc
   const readerRef = useRef(null);
 
   useEffect(() => { saveProductos(productos); }, [productos]);
+
+  // ------------------------------------------------------------------------
+  // Auto-refresh de competidores.
+  // Mientras la app esté abierta, cada 30 min chequeamos si algún competidor
+  // tiene lastCheck > 6h. Si sí, re-consulta Ad Library en silencio.
+  // Así no tenés que apretar "Actualizar ads" a mano.
+  // ------------------------------------------------------------------------
+  const productosRef = useRef(productos);
+  useEffect(() => { productosRef.current = productos; }, [productos]);
+
+  useEffect(() => {
+    const refreshStaleCompetitors = async () => {
+      const now = Date.now();
+      const staleMs = COMP_REFRESH_STALE_HOURS * 60 * 60 * 1000;
+      const current = productosRef.current;
+      for (const p of current) {
+        const comps = p.competidores || [];
+        for (const c of comps) {
+          if (!c.pageId) continue; // sin pageId no podemos consultar
+          const last = c.lastCheck ? new Date(c.lastCheck).getTime() : 0;
+          if (now - last < staleMs) continue;
+          try {
+            const resp = await fetch('/api/meta/ad-library', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ pageId: c.pageId }),
+            });
+            if (!resp.ok) continue; // silencioso: si falla, no molestamos al user
+            const data = await resp.json();
+            // Actualizo el producto en el state, preservando todo lo demás.
+            setProductos(prev => prev.map(prod => {
+              if (prod.id !== p.id) return prod;
+              const updatedComps = (prod.competidores || []).map(cc =>
+                cc.id === c.id ? { ...cc, ads: data.ads || [], lastCheck: new Date().toISOString() } : cc
+              );
+              return { ...prod, competidores: updatedComps, updatedAt: new Date().toISOString() };
+            }));
+          } catch { /* silencioso */ }
+        }
+      }
+    };
+
+    // Corremos al montar (después de 3s para no pisar el primer render) y cada 30 min.
+    const initial = setTimeout(refreshStaleCompetitors, 3000);
+    const interval = setInterval(refreshStaleCompetitors, COMP_REFRESH_INTERVAL_MS);
+    return () => {
+      clearTimeout(initial);
+      clearInterval(interval);
+    };
+  }, []);
 
   // Contador de segundos mientras corre el pipeline.
   useEffect(() => {
@@ -763,6 +830,14 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
         {/* COMPETENCIA */}
         {effTab === 'competencia' && (
           <div className="space-y-4">
+            {/* Badge de auto-refresh */}
+            <div className="flex items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">
+              <div className="inline-flex items-center gap-1.5 px-2 py-1 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-md">
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="font-semibold text-emerald-700 dark:text-emerald-300">Auto-actualización activa</span>
+              </div>
+              <span>Los ads se refrescan solos cada {COMP_REFRESH_STALE_HOURS}h mientras tengas la app abierta. También podés forzar refresh con el botón.</span>
+            </div>
             <div className="flex gap-2">
               <input type="text" value={compName} onChange={e => setCompName(e.target.value)} placeholder="Nombre del competidor" className="flex-1 px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" />
               <input type="text" value={compUrl} onChange={e => setCompUrl(e.target.value)} placeholder="URL (landing o FB)" className="flex-1 px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" />
@@ -787,7 +862,10 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
                         <div className="flex items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">
                           {c.url && <a href={c.url} target="_blank" rel="noreferrer" className="hover:text-purple-600 inline-flex items-center gap-0.5"><ExternalLink size={10} /> Web</a>}
                           {c.pageId && <span className="font-mono">ID: {c.pageId}</span>}
-                          {c.lastCheck && <span>Check: {new Date(c.lastCheck).toLocaleDateString('es-AR')}</span>}
+                          <span className="inline-flex items-center gap-1">
+                            <span className={`w-1.5 h-1.5 rounded-full ${c.lastCheck ? 'bg-emerald-500 animate-pulse' : 'bg-gray-300'}`} />
+                            {c.lastCheck ? `Actualizado ${timeAgo(c.lastCheck)}` : 'Pendiente de primer check'}
+                          </span>
                         </div>
                       </div>
                       <div className="flex gap-1">

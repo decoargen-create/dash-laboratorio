@@ -1143,11 +1143,24 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                   {c.landingUrl && (
                     <span className="text-[10px] text-gray-500 dark:text-gray-400 truncate max-w-[200px]">{c.landingUrl}</span>
                   )}
-                  {c.ads?.length > 0 && (
-                    <span className="ml-auto text-[10px] text-emerald-600 dark:text-emerald-400">
-                      {c.ads.length} ads · {c.winnersCount || 0} 🏆
-                    </span>
-                  )}
+                  {(c.ads?.length > 0 || c.adsTotal > 0) ? (() => {
+                    const total = c.adsTotal || c.ads?.length || 0;
+                    const winners = c.winnersCount || 0;
+                    const history = Array.isArray(c.adsHistory) ? c.adsHistory : [];
+                    const prev = history.length >= 2 ? history[history.length - 2] : null;
+                    const delta = prev ? total - prev.total : null;
+                    return (
+                      <span className="ml-auto inline-flex items-center gap-1.5 text-[10px] tabular-nums">
+                        <span className="font-bold text-gray-900 dark:text-gray-100">{total} ads</span>
+                        {winners > 0 && <span className="text-emerald-600 dark:text-emerald-400 font-bold">{winners} 🏆</span>}
+                        {delta != null && delta !== 0 && (
+                          <span className={delta > 0 ? 'text-blue-600 dark:text-blue-400' : 'text-red-500'}>
+                            {delta > 0 ? `↑${delta}` : `↓${Math.abs(delta)}`}
+                          </span>
+                        )}
+                      </span>
+                    );
+                  })() : null}
                   <button onClick={() => handleRemoveCompetidor(c.id)}
                     className="p-0.5 text-gray-400 hover:text-red-600 transition" title="Sacar">
                     <X size={10} />

@@ -391,16 +391,34 @@ export default function CompetenciaSection({ addToast }) {
                   )}
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{c.nombre}</p>
-                    <div className="flex items-center gap-3 text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                    <div className="flex items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 flex-wrap">
                       {c.landingUrl && <span className="truncate max-w-[200px]">{(() => { try { return new URL(c.landingUrl).hostname; } catch { return c.landingUrl; } })()}</span>}
-                      <span className="inline-flex items-center gap-1">
-                        <span className={`w-1.5 h-1.5 rounded-full ${c.ads?.length > 0 ? 'bg-emerald-500' : 'bg-gray-300'}`} />
-                        {c.ads?.length || 0} ads
-                      </span>
-                      {c.lastAdsCheck && <span>· Ads {timeAgo(c.lastAdsCheck)}</span>}
+                      {c.lastAdsCheck && <span>· {timeAgo(c.lastAdsCheck)}</span>}
                     </div>
                     {c.descripcion && <p className="text-[11px] text-gray-600 dark:text-gray-300 truncate mt-0.5">{c.descripcion}</p>}
                   </div>
+                  {/* Counter prominente de ads + ganadores + trend */}
+                  {(c.ads?.length > 0 || c.adsTotal > 0) && (() => {
+                    const total = c.adsTotal || c.ads?.length || 0;
+                    const winners = c.winnersCount || 0;
+                    const history = Array.isArray(c.adsHistory) ? c.adsHistory : [];
+                    const prev = history.length >= 2 ? history[history.length - 2] : null;
+                    const delta = prev ? total - prev.total : null;
+                    return (
+                      <div className="shrink-0 text-right mr-2">
+                        <p className="text-lg font-bold tabular-nums text-gray-900 dark:text-gray-100">{total}</p>
+                        <p className="text-[9px] text-gray-500 dark:text-gray-400 uppercase">ads activos</p>
+                        {winners > 0 && (
+                          <p className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">{winners} 🏆</p>
+                        )}
+                        {delta != null && delta !== 0 && (
+                          <p className={`text-[10px] font-semibold mt-0.5 ${delta > 0 ? 'text-blue-600 dark:text-blue-400' : 'text-red-500'}`}>
+                            {delta > 0 ? `↑${delta}` : `↓${Math.abs(delta)}`} vs anterior
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })()}
                   <ChevronDown size={16} className={`text-gray-400 shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                 </button>
 

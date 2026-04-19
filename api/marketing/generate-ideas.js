@@ -126,10 +126,34 @@ function buildContext({ producto, competidoresAnalisis, ideasExistentes, propios
   parts.push(`Nombre: ${producto?.nombre || '(sin nombre)'}`);
   if (producto?.landingUrl) parts.push(`Landing: ${producto.landingUrl}`);
   if (producto?.descripcion) parts.push(`Descripción: ${producto.descripcion}`);
-  // Opcionalmente, si el user corrió el research pipeline, pasamos research/avatar.
-  if (producto?.research) parts.push(`\nResearch (snippet):\n${String(producto.research).slice(0, 2000)}`);
-  if (producto?.avatar) parts.push(`\nAvatar (snippet):\n${String(producto.avatar).slice(0, 1500)}`);
-  if (producto?.offerBrief) parts.push(`\nOffer Brief (snippet):\n${String(producto.offerBrief).slice(0, 1500)}`);
+  if (producto?.resumenEjecutivo) parts.push(`\nResumen ejecutivo: ${producto.resumenEjecutivo}`);
+
+  // Research docs (Marketing.jsx los guarda en producto.docs.{research,avatar,offerBrief,beliefs})
+  // Fallback a campos planos por si vienen por otro path. Pasamos el texto
+  // COMPLETO — Sonnet 4.6 tiene 1M de contexto, cortar a snippets tira
+  // información crítica del avatar.
+  const docs = producto?.docs || {};
+  const research = docs.research || producto?.research;
+  const avatar = docs.avatar || producto?.avatar;
+  const offerBrief = docs.offerBrief || producto?.offerBrief;
+  const beliefs = docs.beliefs || producto?.beliefs;
+
+  if (research) {
+    parts.push(`\n### Research Doc (investigación profunda del avatar)\n${research}`);
+  }
+  if (avatar) {
+    parts.push(`\n### Avatar Sheet (perfil del cliente ideal con quotes en 1ra persona)\n${avatar}`);
+  }
+  if (offerBrief) {
+    parts.push(`\n### Offer Brief (Big Idea, UMP/UMS, objections, belief chains)\n${offerBrief}`);
+  }
+  if (beliefs) {
+    parts.push(`\n### Creencias necesarias (las 6 "Yo creo que..." que el prospect debe adoptar antes de comprar)\n${beliefs}\n\nIMPORTANTE: cada idea debería empujar una de estas creencias. En "razonamiento" indicá cuál creencia apalanca.`);
+  }
+
+  if (!research && !avatar && !offerBrief && !beliefs) {
+    parts.push(`\n⚠️ SIN RESEARCH DOC. Las ideas van a ser más genéricas. Correr el pipeline de Documentación antes daría ideas mucho más ancladas al avatar real.`);
+  }
 
   parts.push('\n## COMPETENCIA — ANÁLISIS DE GANADORES');
   if (!competidoresAnalisis?.length) {

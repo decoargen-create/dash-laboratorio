@@ -666,6 +666,25 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               </a>
             )}
             {producto.descripcion && <p className="text-gray-600 dark:text-gray-400">{producto.descripcion}</p>}
+            {/* Hint de calidad: sugerir correr el pipeline de Documentación si no hay research doc */}
+            {(() => {
+              const hasResearch = !!(producto.docs?.research || producto.research || producto.docs?.avatar || producto.avatar);
+              if (hasResearch) {
+                return (
+                  <div className="mt-2 inline-flex items-center gap-1.5 px-2 py-1 text-[10px] font-semibold bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 rounded">
+                    ✓ Research doc cargado — ideas van a salir más ancladas al avatar
+                  </div>
+                );
+              }
+              return (
+                <div className="mt-2 flex items-start gap-2 p-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded">
+                  <AlertTriangle size={12} className="text-amber-600 shrink-0 mt-0.5" />
+                  <p className="text-[10px] text-amber-900 dark:text-amber-200 leading-snug flex-1">
+                    <strong>Sin research doc.</strong> Las ideas van a ser más genéricas. Correr el pipeline de <button onClick={() => onGoToSection?.('mk-docs')} className="font-bold underline hover:text-amber-700">Documentación</button> primero da ideas mucho más ancladas al avatar real (demographics, pain points, belief chains).
+                  </p>
+                </div>
+              );
+            })()}
           </div>
         ) : !showProdForm ? (
           <button onClick={() => setShowProdForm(true)}

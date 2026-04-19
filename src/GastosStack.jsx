@@ -74,12 +74,14 @@ function saveServices(services) {
 
 // Devuelve el costo mensual efectivo de un servicio (USD).
 // - fijo: montoFijo
-// - variable: estimadoMensual (o gastoVariable del mes si se cargó)
+// - variable: gastoVariable del mes si se cargó real (>0), sino estimadoMensual
 // - trial: 0
 function costoMensual(svc) {
   if (svc.tipo === 'trial') return 0;
   if (svc.tipo === 'fijo') return Number(svc.montoFijo || 0);
-  return Number(svc.gastoVariable ?? svc.estimadoMensual ?? 0);
+  const gv = Number(svc.gastoVariable || 0);
+  if (gv > 0) return gv;
+  return Number(svc.estimadoMensual || 0);
 }
 
 export default function GastosStackSection({ addToast }) {
@@ -91,7 +93,6 @@ export default function GastosStackSection({ addToast }) {
   useEffect(() => { saveServices(services); }, [services]);
 
   // Totales
-  const activos = services.filter(s => s.tipo !== 'trial');
   const totalFijo = services.filter(s => s.tipo === 'fijo').reduce((sum, s) => sum + costoMensual(s), 0);
   const totalVariable = services.filter(s => s.tipo === 'variable').reduce((sum, s) => sum + costoMensual(s), 0);
   const totalMensual = totalFijo + totalVariable;

@@ -15,6 +15,7 @@ import ChatbotWidget from './ChatbotWidget.jsx';
 import BocetosSection from './Bocetos.jsx';
 import MarketingSection from './Marketing.jsx';
 import CompetenciaSection from './Competencia.jsx';
+import GastosStackSection from './GastosStack.jsx';
 import { generateCSV, downloadCSV, parseCSV, toNumber, toBool } from './csv.js';
 
 // Estados del pipeline de producción de una orden
@@ -1979,6 +1980,7 @@ function AppShell({ onExit }) {
             <>
               <NavItem icon={FileText} label="Documentación" section="mk-docs" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={Target} label="Competencia" section="mk-competencia" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              <NavItem icon={DollarSign} label="Gastos del stack" section="mk-gastos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
             </>
           )}
           {currentUser.role !== 'admin' && (
@@ -2041,6 +2043,7 @@ function AppShell({ onExit }) {
           {currentUser.role === 'admin' && currentPlatform === 'senydrop' && currentSection === 'seny-productos' && <BocetosSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'metaads' && <MetaAdsPlaceholder section={currentSection} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-competencia' && <CompetenciaSection addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-gastos' && <GastosStackSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-docs' && (
             <MarketingSection
               addToast={addToast}
@@ -8316,6 +8319,7 @@ function getSectionTitle(user, section) {
     'meta-config': 'Meta Ads · Conexión',
     'mk-docs': 'Marketing · Documentación de producto',
     'mk-competencia': 'Marketing · Competencia',
+    'mk-gastos': 'Marketing · Gastos del stack',
   };
   const mentor = {
     inicio: 'Inicio',

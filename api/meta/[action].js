@@ -237,11 +237,13 @@ function parseInsights(ins) {
   const purchasesCount = purchases ? Number(purchases.value || 0) : 0;
   const revenue = purchaseValue ? Number(purchaseValue.value || 0) : 0;
 
-  // video_3_sec_watched_actions: viewers que miraron >=3s. Dividido por
-  // impressions da el thumb-stop rate — el indicador más predictivo de
-  // calidad del hook en video.
-  const video3sArr = ins.video_3_sec_watched_actions || [];
-  const video3sTotal = video3sArr.reduce((sum, a) => sum + Number(a.value || 0), 0);
+  // Thumb-stop rate: % de viewers que ven ≥3s del video.
+  // Meta no expone `video_3_sec_watched_actions` como field válido en
+  // insights (tira error 100), pero el mismo dato viene dentro de
+  // `actions` con action_type = 'video_view' (que Meta define como views
+  // de ≥3s). Lo extraemos de ahí.
+  const video3sAction = actions.find(a => a.action_type === 'video_view');
+  const video3sTotal = video3sAction ? Number(video3sAction.value || 0) : 0;
   const thumbStopRate = impressions > 0 ? (video3sTotal / impressions) * 100 : 0;
 
   return {
@@ -381,8 +383,8 @@ async function handleAdsWithInsights(req, res) {
         `campaign{id,name,objective}`,
         `adset{id,name,optimization_goal,targeting}`,
         `creative{id,name,title,body,thumbnail_url,image_url,video_id,object_story_spec,effective_object_story_id}`,
-        `insights.time_range(${recentRange}).as(recent){impressions,clicks,ctr,spend,cpc,cpm,actions,action_values,reach,frequency,video_3_sec_watched_actions}`,
-        `insights.time_range(${prevRange}).as(previous){impressions,clicks,ctr,spend,cpc,cpm,actions,action_values,reach,frequency,video_3_sec_watched_actions}`,
+        `insights.time_range(${recentRange}).as(recent){impressions,clicks,ctr,spend,cpc,cpm,actions,action_values,reach,frequency}`,
+        `insights.time_range(${prevRange}).as(previous){impressions,clicks,ctr,spend,cpc,cpm,actions,action_values,reach,frequency}`,
       ].join(','),
       limit,
       effective_status: JSON.stringify(['ACTIVE', 'PAUSED']),
@@ -475,8 +477,8 @@ async function handleAdPerformance(req, res) {
       fields: [
         'id,name,status,effective_status,created_time,campaign{id,name,objective}',
         `creative{id,name,title,body,thumbnail_url,image_url}`,
-        `insights.date_preset(maximum).as(lifetime){impressions,clicks,ctr,spend,cpc,cpm,actions,action_values,reach,frequency,video_3_sec_watched_actions}`,
-        `insights.date_preset(last_14d).as(recent){impressions,clicks,ctr,spend,cpc,cpm,actions,action_values,reach,frequency,video_3_sec_watched_actions}`,
+        `insights.date_preset(maximum).as(lifetime){impressions,clicks,ctr,spend,cpc,cpm,actions,action_values,reach,frequency}`,
+        `insights.date_preset(last_14d).as(recent){impressions,clicks,ctr,spend,cpc,cpm,actions,action_values,reach,frequency}`,
       ].join(','),
     });
 

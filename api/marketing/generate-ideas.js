@@ -350,7 +350,10 @@ export default async function handler(req, res) {
     const stream = await client.messages.stream({
       model: MODEL,
       max_tokens: maxTokens,
-      thinking: { type: 'adaptive' },
+      // NOTA: thinking adaptive es incompatible con tool_choice forzado.
+      // Priorizamos tool_choice (structured output garantizado) sobre
+      // thinking — la calidad de la respuesta depende más del prompt que
+      // del razonamiento explícito para este caso.
       tools: [SUBMIT_IDEAS_TOOL],
       tool_choice: { type: 'tool', name: 'submit_ideas' },
       system: [

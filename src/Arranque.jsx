@@ -68,6 +68,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   const [availableAccounts, setAvailableAccounts] = useState([]);
   const [loadingAccounts, setLoadingAccounts] = useState(false);
   const [loadingAds, setLoadingAds] = useState(false);
+  const [matching, setMatching] = useState(false);
 
   // Pipeline runner
   const [running, setRunning] = useState(false);
@@ -133,6 +134,53 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   const resetMetaAccount = () => {
     setMetaAccount(null);
     setAvailableAccounts([]);
+  };
+
+  // Matcher IA — identifica cuáles de los ads cargados son del producto actual.
+  const matchProductAds = async () => {
+    if (!producto?.nombre) {
+      addToast?.({ type: 'error', message: 'Primero cargá el producto (paso 1)' });
+      return;
+    }
+    if (!metaAccount?.ads?.length) {
+      addToast?.({ type: 'error', message: 'Primero cargá los ads de la cuenta' });
+      return;
+    }
+    setMatching(true);
+    try {
+      const resp = await fetch('/api/marketing/match-product-ads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          producto: {
+            nombre: producto.nombre,
+            descripcion: producto.descripcion,
+            landingUrl: producto.landingUrl,
+          },
+          ads: metaAccount.ads,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+
+      // Enriquecemos los ads con el confidence match.
+      const matchMap = new Map(data.matches.map(m => [m.adId, m]));
+      setMetaAccount(prev => prev ? {
+        ...prev,
+        ads: prev.ads.map(ad => {
+          const m = matchMap.get(ad.id);
+          return m ? { ...ad, productMatch: m } : { ...ad, productMatch: null };
+        }),
+        matchedAt: new Date().toISOString(),
+        productMatched: producto.nombre,
+      } : prev);
+
+      addToast?.({ type: 'success', message: `${data.matched} de ${data.total} ads identificados como "${producto.nombre}"` });
+    } catch (err) {
+      addToast?.({ type: 'error', message: `Matcher falló: ${err.message}` });
+    } finally {
+      setMatching(false);
+    }
   };
 
   // El producto "principal" es el primero (simplificamos: 1 producto por ahora).
@@ -352,6 +400,17 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
         const ideasExistentes = loadIdeas().map(i => ({ titulo: i.titulo, angulo: i.angulo, tipo: i.tipo }));
 
+        // Ads propios matcheados al producto (solo si ya corrió el matcher IA
+        // y son high/medium confidence). Sirven para generar iteraciones.
+        const propiosAds = (metaAccount?.ads || [])
+          .filter(a => a.productMatch && ['high', 'medium'].includes(a.productMatch.confidence))
+          .map(a => ({
+            id: a.id,
+            name: a.name,
+            creative: { title: a.creative?.title, body: a.creative?.body },
+            insights: a.insights,
+          }));
+
         const resp = await fetch('/api/marketing/generate-ideas', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -359,6 +418,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             producto: producto || { nombre: 'Producto sin definir' },
             competidoresAnalisis: compAnalisis,
             ideasExistentes,
+            propiosAds,
           }),
         });
         const data = await resp.json();
@@ -479,23 +539,54 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             <div className="flex items-center gap-2 text-xs">
               <span className="font-semibold text-gray-900 dark:text-gray-100">{metaAccount.name}</span>
               <span className="text-gray-400">· {metaAccount.currency}</span>
-              <span className="text-gray-400">· {metaAccount.ads?.length || 0} ads cargados</span>
+              <span className="text-gray-400">· {metaAccount.ads?.length || 0} ads</span>
+              {metaAccount.productMatched && (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded">
+                  ✓ {metaAccount.ads.filter(a => a.productMatch).length} del producto
+                </span>
+              )}
               <button onClick={resetMetaAccount}
                 className="ml-auto p-1 text-gray-400 hover:text-red-600 transition" title="Cambiar cuenta">
                 <X size={12} />
               </button>
             </div>
+
+            {/* Botón matcher IA */}
+            {producto?.nombre && !metaAccount.productMatched && (
+              <button onClick={matchProductAds} disabled={matching}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-violet-600 to-purple-600 rounded-md hover:from-violet-700 hover:to-purple-700 transition disabled:opacity-40">
+                {matching ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                Identificar ads del producto con IA
+              </button>
+            )}
+            {producto?.nombre && metaAccount.productMatched && metaAccount.productMatched !== producto.nombre && (
+              <button onClick={matchProductAds} disabled={matching}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-violet-700 dark:text-violet-300 bg-white dark:bg-gray-700 border border-violet-300 dark:border-violet-800 rounded-md hover:bg-violet-50 transition disabled:opacity-40">
+                {matching ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                Re-matchear (producto cambió a "{producto.nombre}")
+              </button>
+            )}
+
             {metaAccount.ads?.length > 0 && (
               <details className="bg-gray-50 dark:bg-gray-800/50 rounded-md">
                 <summary className="cursor-pointer px-3 py-2 text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
                   Ver ads cargados
                 </summary>
-                <ul className="px-3 pb-3 space-y-1 text-xs text-gray-700 dark:text-gray-300 max-h-48 overflow-y-auto">
-                  {metaAccount.ads.slice(0, 20).map(ad => (
+                <ul className="px-3 pb-3 space-y-1 text-xs text-gray-700 dark:text-gray-300 max-h-60 overflow-y-auto">
+                  {metaAccount.ads.slice(0, 30).map(ad => (
                     <li key={ad.id} className="flex items-center gap-2 py-1 border-b border-gray-100 dark:border-gray-700/50">
                       <span className={`inline-block w-1.5 h-1.5 rounded-full ${
                         ad.effectiveStatus === 'ACTIVE' ? 'bg-emerald-500' : 'bg-gray-400'
                       }`} />
+                      {ad.productMatch && (
+                        <span className={`inline-flex items-center px-1 py-0.5 text-[9px] font-bold rounded ${
+                          ad.productMatch.confidence === 'high' ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300' :
+                          ad.productMatch.confidence === 'medium' ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300' :
+                          'bg-gray-100 dark:bg-gray-700 text-gray-600'
+                        }`} title={ad.productMatch.reason}>
+                          ✓ {ad.productMatch.confidence}
+                        </span>
+                      )}
                       <span className="flex-1 truncate font-semibold">{ad.creative?.title || ad.name}</span>
                       {ad.insights && (
                         <span className="text-[10px] text-gray-500 font-mono">
@@ -504,15 +595,12 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                       )}
                     </li>
                   ))}
-                  {metaAccount.ads.length > 20 && (
-                    <li className="text-[10px] text-gray-400 italic pt-1">+ {metaAccount.ads.length - 20} ads más</li>
+                  {metaAccount.ads.length > 30 && (
+                    <li className="text-[10px] text-gray-400 italic pt-1">+ {metaAccount.ads.length - 30} ads más</li>
                   )}
                 </ul>
               </details>
             )}
-            <p className="text-[10px] text-gray-500 dark:text-gray-400 italic">
-              Próximo paso: identificar con IA cuáles de estos ads son del producto "{producto?.nombre || '(sin producto)'}" para generar iteraciones.
-            </p>
           </div>
         ) : availableAccounts.length === 0 ? (
           <button onClick={loadAdAccounts} disabled={loadingAccounts}

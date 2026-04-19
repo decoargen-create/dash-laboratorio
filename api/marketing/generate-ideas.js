@@ -28,9 +28,11 @@ import Anthropic from '@anthropic-ai/sdk';
 
 const MODEL = 'claude-sonnet-4-6';
 
-const SYSTEM_PROMPT = `Sos director creativo senior de DTC cosméticos en Argentina. Tu trabajo es generar ideas de creativos accionables para Meta Ads. Tus ideas no son genéricas: son específicas al producto, al avatar y al contexto de la competencia.
+const SYSTEM_PROMPT_BASE = `Sos director creativo senior de DTC cosméticos en Argentina. Tu trabajo es generar ideas de creativos accionables para Meta Ads. Tus ideas no son genéricas: son específicas al producto, al avatar y al contexto de la competencia.
 
-Tenés que devolver EXACTAMENTE 10 ideas en un JSON array, clasificadas en 3 tipos:
+`;
+
+const SYSTEM_SIN_PROPIOS = `Tenés que devolver EXACTAMENTE 10 ideas en un JSON array, clasificadas en 3 tipos:
 
 - 3 ideas tipo "replica": tomá los ángulos más fuertes que detectaste en la competencia y adaptalos al producto. NO copies literal — extraé el patrón (estructura, trigger, formato) y aplícalo al producto propio de forma que se sienta nuestra. Dejá claro en "razonamiento" qué ganador te inspiró.
 
@@ -38,10 +40,23 @@ Tenés que devolver EXACTAMENTE 10 ideas en un JSON array, clasificadas en 3 tip
 
 - 4 ideas tipo "desde_cero": ángulos originales basados en el producto + avatar. Cada idea debe explorar un pain distinto, un trigger distinto o un beneficio distinto. Diversificá formatos (mezclá video + static + carrusel).
 
-Por cada idea devolvé este shape EXACTO:
-{
+`;
+
+const SYSTEM_CON_PROPIOS = `Tenés que devolver EXACTAMENTE 10 ideas en un JSON array, clasificadas en 4 tipos:
+
+- 3 ideas tipo "replica": tomá los ángulos más fuertes que detectaste en la competencia y adaptalos al producto. NO copies literal — extraé el patrón y aplícalo al producto propio. En "razonamiento" indicá qué ganador te inspiró.
+
+- 3 ideas tipo "iteracion": analizá los ads propios que te paso (con sus métricas) y generá variaciones de los que están funcionando mejor (mejor CTR / más spend sostenido). Cambiá hook, headline, prueba social, o formato. Mantené lo que funciona y variá lo que puede estar fatigando. En "razonamiento" indicá qué ad base estás iterando y por qué.
+
+- 2 ideas tipo "diferenciacion": ángulos que NINGÚN competidor está usando. Blue ocean. En "razonamiento" explicá por qué nadie lo hizo.
+
+- 2 ideas tipo "desde_cero": ángulos originales basados en producto + avatar + patrones que detectás en tus propios ads ganadores.
+
+`;
+
+const SHAPE_COMUN = `{
   "titulo": "string corto y concreto, ≤ 80 chars",
-  "tipo": "replica" | "diferenciacion" | "desde_cero",
+  "tipo": "replica" | "iteracion" | "diferenciacion" | "desde_cero",
   "angulo": "el ángulo emocional o estratégico",
   "painPoint": "el pain específico que toca",
   "hook": "primer frame o primeras 3 líneas que paran el scroll",
@@ -52,6 +67,10 @@ Por cada idea devolvé este shape EXACTO:
 }
 
 DEVOLVÉ ÚNICAMENTE el array JSON (empezá con "[" y terminá con "]"). Sin texto antes ni después. Sin \`\`\`json wrappers. 10 ideas en total.`;
+
+function buildSystemPrompt(hasPropios) {
+  return SYSTEM_PROMPT_BASE + (hasPropios ? SYSTEM_CON_PROPIOS : SYSTEM_SIN_PROPIOS) + SHAPE_COMUN;
+}
 
 async function readBody(req) {
   if (req.body && typeof req.body === 'object') return req.body;
@@ -73,7 +92,7 @@ function respondJSON(res, status, payload) {
 }
 
 // Serializamos el contexto en un string estructurado y legible para Claude.
-function buildContext({ producto, competidoresAnalisis, ideasExistentes }) {
+function buildContext({ producto, competidoresAnalisis, ideasExistentes, propiosAds }) {
   const parts = [];
 
   parts.push('## PRODUCTO PROPIO');
@@ -102,6 +121,19 @@ function buildContext({ producto, competidoresAnalisis, ideasExistentes }) {
     });
   }
 
+  if (propiosAds?.length) {
+    parts.push('\n## TUS PROPIOS ADS ACTIVOS (para generar iteraciones)');
+    parts.push('Incluyen métricas de los últimos 7 días. Los que tienen mejor CTR o más spend sostenido son buenos candidatos para iterar.');
+    propiosAds.slice(0, 15).forEach((ad, i) => {
+      const ins = ad.insights || {};
+      parts.push(`\n### ${i + 1}. ${ad.name || ad.creative?.title || 'Ad sin nombre'}`);
+      if (ad.creative?.title) parts.push(`Título: ${ad.creative.title}`);
+      if (ad.creative?.body) parts.push(`Body: ${String(ad.creative.body).slice(0, 300)}`);
+      parts.push(`Métricas 7d: CTR ${(ins.ctr || 0).toFixed(2)}% · ${ins.impressions || 0} imp · $${ins.spend || 0} spend · ${ins.purchases || 0} compras`);
+      parts.push(`Ad ID: ${ad.id}`);
+    });
+  }
+
   if (ideasExistentes?.length) {
     parts.push('\n## IDEAS YA EN LA BANDEJA (NO repitas, generá nuevas)');
     ideasExistentes.slice(0, 30).forEach(i => {
@@ -124,20 +156,22 @@ export default async function handler(req, res) {
   }
 
   const body = await readBody(req);
-  const { producto, competidoresAnalisis = [], ideasExistentes = [] } = body || {};
+  const { producto, competidoresAnalisis = [], ideasExistentes = [], propiosAds = [] } = body || {};
   if (!producto || !producto.nombre) {
     return respondJSON(res, 400, { error: 'Falta producto.nombre en el body' });
   }
 
   const client = new Anthropic({ apiKey: anthropicKey });
-  const userContent = buildContext({ producto, competidoresAnalisis, ideasExistentes });
+  const hasPropios = Array.isArray(propiosAds) && propiosAds.length > 0;
+  const userContent = buildContext({ producto, competidoresAnalisis, ideasExistentes, propiosAds });
+  const systemPrompt = buildSystemPrompt(hasPropios);
 
   try {
     const resp = await client.messages.create({
       model: MODEL,
       max_tokens: 6000,
       system: [
-        { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } },
       ],
       messages: [
         { role: 'user', content: userContent },

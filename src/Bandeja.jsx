@@ -137,20 +137,82 @@ export default function BandejaSection({ addToast }) {
       lines.push(`_${meta.descripcion}_`);
       lines.push(``);
       group.forEach((idea, idx) => {
-        lines.push(`### ${idx + 1}. ${idea.titulo}`);
+        lines.push(`## PIEZA #${idx + 1} — ${idea.titulo}`);
+        const formatoLabel = { video: 'Video', static: 'Static', carrusel: 'Carrusel' }[idea.formato] || idea.formato;
+        lines.push(`**${formatoLabel}${idea.estiloVisual ? ` · Estilo: ${idea.estiloVisual}` : ''}**`);
+        lines.push(``);
         if (idea.origen?.competidorNombre) lines.push(`**Origen:** ${idea.origen.competidorNombre}${idea.origen.daysRunning ? ` · ${idea.origen.daysRunning}d corriendo` : ''}`);
         if (idea.origen?.razonamiento) lines.push(`**Razonamiento:** ${idea.origen.razonamiento}`);
-        if (idea.formato) lines.push(`**Formato:** ${idea.formato}`);
         if (idea.variableDeTesteo && VARIABLE_META[idea.variableDeTesteo]) {
-          lines.push(`**Variable a testear:** ${VARIABLE_META[idea.variableDeTesteo].emoji} ${VARIABLE_META[idea.variableDeTesteo].label} — ${VARIABLE_META[idea.variableDeTesteo].descripcion}`);
+          lines.push(`**Variable a testear:** ${VARIABLE_META[idea.variableDeTesteo].emoji} ${VARIABLE_META[idea.variableDeTesteo].label}`);
         }
         if (idea.testHipotesis) lines.push(`**Hipótesis:** ${idea.testHipotesis}`);
         lines.push(``);
+
+        // 📖 Escenario narrativo
+        if (idea.escenarioNarrativo) {
+          lines.push(`### 📖 Escenario (contexto narrativo)`);
+          lines.push(idea.escenarioNarrativo);
+          lines.push(``);
+        }
+
+        // 🎯 Hook + 📐 Ángulo + 💥 Pain point
+        if (idea.hook) {
+          lines.push(`### 🎯 Hook`);
+          lines.push(`> ${idea.hook.replace(/\n/g, '\n> ')}`);
+          lines.push(``);
+        }
         if (idea.angulo) { lines.push(`**Ángulo:** ${idea.angulo}`); lines.push(``); }
-        if (idea.hook) { lines.push(`**Hook:**  \n> ${idea.hook.replace(/\n/g, '\n> ')}`); lines.push(``); }
         if (idea.painPoint) { lines.push(`**Pain point:** ${idea.painPoint}`); lines.push(``); }
-        if (idea.copy) { lines.push(`**Copy sugerido:**`); lines.push(idea.copy); lines.push(``); }
-        if (idea.guion) { lines.push(`**Guión / transcripción:**`); lines.push('```'); lines.push(idea.guion); lines.push('```'); lines.push(``); }
+
+        // 🖼 Descripción de imagen
+        if (idea.descripcionImagen) {
+          lines.push(`### 🖼 Descripción de la imagen`);
+          lines.push(idea.descripcionImagen);
+          lines.push(``);
+        }
+
+        // 🤖 Prompt en inglés para generadores de IA
+        if (idea.promptGeneradorImagen) {
+          lines.push(`### 🤖 Prompt para Nano Banana / Midjourney (inglés)`);
+          lines.push('```');
+          lines.push(idea.promptGeneradorImagen);
+          lines.push('```');
+          lines.push(``);
+        }
+
+        // ✍️ Texto dentro de la imagen
+        if (idea.textoEnImagen) {
+          lines.push(`### ✍️ Texto que va DENTRO de la imagen`);
+          lines.push('```');
+          lines.push(idea.textoEnImagen);
+          lines.push('```');
+          lines.push(``);
+        }
+
+        // 📱 Copy del post en Meta
+        if (idea.copyPostMeta) {
+          lines.push(`### 📱 Copy del post en Meta (va ARRIBA del creativo, NO en la imagen)`);
+          lines.push(idea.copyPostMeta);
+          lines.push(``);
+        }
+
+        // 🎬 Guión (solo si es video)
+        if (idea.guion && !/^n\/?a/i.test(idea.guion.trim())) {
+          lines.push(`### 🎬 Guión${idea.formato === 'video' ? ' (beats + VO)' : ''}`);
+          lines.push('```');
+          lines.push(idea.guion);
+          lines.push('```');
+          lines.push(``);
+        }
+
+        // 🎯 Público sugerido
+        if (idea.publicoSugerido) {
+          lines.push(`### 🎯 Público sugerido`);
+          lines.push(idea.publicoSugerido);
+          lines.push(``);
+        }
+
         if (idea.notas) { lines.push(`**Notas:** ${idea.notas}`); lines.push(``); }
         if (idea.origen?.adSnapshotUrl) { lines.push(`[Ver ad original en Ad Library](${idea.origen.adSnapshotUrl})`); lines.push(``); }
         lines.push(`---`);
@@ -505,22 +567,75 @@ function IdeaCard({
             </div>
           )}
 
-          {idea.angulo && (
-            <Field label="📐 Ángulo" text={idea.angulo} />
-          )}
+          {/* Grid superior: ángulo, hook, formato/estilo */}
           {idea.hook && (
             <Field label="🎯 Hook" text={idea.hook} highlight />
+          )}
+          {idea.angulo && (
+            <Field label="📐 Ángulo" text={idea.angulo} />
           )}
           {idea.painPoint && (
             <Field label="💥 Pain point" text={idea.painPoint} />
           )}
-          {idea.copy && (
-            <Field label="📝 Copy patterns" text={idea.copy} />
+          {idea.estiloVisual && (
+            <Field label="🎨 Estilo visual" text={idea.estiloVisual} />
           )}
-          {idea.guion && (
-            <details className="bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700">
+
+          {/* 📖 Escenario narrativo — concepto estratégico */}
+          {idea.escenarioNarrativo && (
+            <Field label="📖 Escenario narrativo" text={idea.escenarioNarrativo} />
+          )}
+
+          {/* 🖼 Descripción de imagen en español */}
+          {idea.descripcionImagen && (
+            <Field label="🖼 Descripción de imagen (para el diseñador)" text={idea.descripcionImagen} />
+          )}
+
+          {/* 🤖 Prompt en inglés para Nano Banana / Midjourney */}
+          {idea.promptGeneradorImagen && (
+            <details open className="bg-indigo-50 dark:bg-indigo-900/20 rounded-md border border-indigo-200 dark:border-indigo-800">
+              <summary className="cursor-pointer px-3 py-2 text-[10px] font-bold text-indigo-700 dark:text-indigo-300 uppercase tracking-wider flex items-center justify-between">
+                <span>🤖 Prompt para Nano Banana / Midjourney (inglés)</span>
+                <button
+                  onClick={(e) => {
+                    e.preventDefault();
+                    navigator.clipboard?.writeText(idea.promptGeneradorImagen);
+                  }}
+                  className="text-[10px] font-normal text-indigo-600 dark:text-indigo-400 hover:underline"
+                >
+                  📋 copiar
+                </button>
+              </summary>
+              <p className="px-3 pb-3 text-xs font-mono text-indigo-900 dark:text-indigo-200 whitespace-pre-wrap break-words">{idea.promptGeneradorImagen}</p>
+            </details>
+          )}
+
+          {/* ✍️ Texto que va DENTRO de la imagen */}
+          {idea.textoEnImagen && (
+            <div>
+              <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1">✍️ Texto dentro de la imagen (layout)</p>
+              <pre className="text-[11px] font-mono whitespace-pre-wrap bg-gray-50 dark:bg-gray-800/50 rounded-md px-3 py-2 text-gray-800 dark:text-gray-200 border border-gray-200 dark:border-gray-700">{idea.textoEnImagen}</pre>
+            </div>
+          )}
+
+          {/* 📱 Copy del post en Meta (va arriba del creativo en el feed) */}
+          {idea.copyPostMeta && (
+            <div>
+              <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1">📱 Copy del post en Meta (arriba del creativo)</p>
+              <div className="text-xs text-gray-800 dark:text-gray-200 whitespace-pre-wrap bg-gray-50 dark:bg-gray-800/50 rounded-md px-3 py-2 border border-gray-200 dark:border-gray-700">{idea.copyPostMeta}</div>
+            </div>
+          )}
+
+          {/* 🎯 Público sugerido */}
+          {idea.publicoSugerido && (
+            <Field label="🎯 Público sugerido" text={idea.publicoSugerido} />
+          )}
+
+          {/* 🎬 Guión (solo si es video o carrusel detallado) */}
+          {idea.guion && !/^n\/?a/i.test(idea.guion.trim()) && (
+            <details open={idea.formato === 'video'} className="bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700">
               <summary className="cursor-pointer px-3 py-2 text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
-                🎬 Guión / transcripción
+                🎬 Guión {idea.formato === 'video' ? '(beats + VO)' : ''}
               </summary>
               <p className="px-3 pb-3 text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{idea.guion}</p>
             </details>

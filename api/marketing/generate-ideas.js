@@ -98,13 +98,43 @@ function buildMixSection(mix, formatoMix, targetCount) {
   return lines.join('\n');
 }
 
-const SHAPE_GUIDANCE = `Para devolver las ideas, llamá a la tool \`submit_ideas\` con el array completo. El API valida el schema — no vas a poder devolver basura.
+const SHAPE_GUIDANCE = `Para devolver las ideas, llamá a la tool \`submit_ideas\` con el array completo. El API valida el schema.
 
-**Puntos críticos del contenido**:
-- variableDeTesteo: para iteraciones, identificá qué UNA cosa cambiás vs el ad base (si cambiás hook Y visual, poné "mix"). Para réplicas/diferenciaciones, la palanca central de la idea.
-- testHipotesis: medible y accionable. Ej: "el hook con dato numérico va a bajar CPA vs el hook emocional genérico".
-- iteracionBase: SOLO para ideas tipo "iteracion". Debe referenciar el adId exacto de un ad propio + razón con métrica concreta que justifique iterarlo.
-- guion: CRÍTICO. Tiene que darle al diseñador/editor toda la info para producir sin preguntar. Video: beats numerados + duración + VO. Static: layout + paleta + mood. Carrusel: slide-by-slide.
+**Cada idea es un brief COMPLETO** que debería poder irse a producción sin preguntar nada. Formato obligatorio, tomá este ejemplo de calidad como referencia:
+
+---
+EJEMPLO DE CALIDAD (PIEZA #7, static, réplica):
+
+titulo: "Tirá las 4 cremas del botiquín. Con esta sola ya está."
+tipo: "replica"
+formato: "static"
+estiloVisual: "Editorial premium / conceptual minimalista"
+angulo: "Simplificación del ritual de skincare — reemplazo de 4 productos por 1"
+painPoint: "Gasto disperso en múltiples cremas sin resultados visibles"
+hook: "Tirá las 4 cremas del botiquín. Con esta sola ya está."
+escenarioNarrativo: "La oferta directa de simplicidad: Cellu reemplaza 4 cremas distintas (anti-age, anti-celulitis, anti-estrías, hidratante). Un gasto, un ritual, un producto. Pieza de retargeting y cierre — target ya conoce el problema pero tiene varios productos en el botiquín."
+descripcionImagen: "Editorial conceptual overhead. A la izquierda del frame, un tacho minimalista blanco con 4 frascos genéricos de cremas (blancos/beiges, usados, viejos) cayendo dentro. A la derecha, parado en foco perfecto con luz cálida dorada lateral, el frasco de Cellu — elegante, único protagonista. Fondo rosado empolvado limpio. Narrativa visual clara: reemplazo. Estética premium beauty."
+promptGeneradorImagen: "Editorial conceptual composition overhead shot, four generic used cosmetic cream jars in white and beige tones falling into a minimalist white trash bin on the left side of the frame, their lids worn and the products looking tired and generic, on the right side standing upright in perfect sharp focus one elegant cream jar with warm golden highlights representing the chosen product, soft dusty pink background, clear visual narrative of replacement, photorealistic, minimalist beauty photography, soft natural lighting, muted pastel color palette, 1:1 square composition"
+textoEnImagen: "HOOK:\\n• Línea 1 (bold granate, GRANDE): 'TIRÁ LAS 4 CREMAS'\\n• Línea 2 (bold granate, GRANDE): 'DEL BOTIQUÍN.'\\n• Línea 3 (italic naranja, más chica): 'Con esta sola ya está.'\\nMICROCOPY (sans-serif chico): '5 problemas. 1 fórmula. Aprobado por ANMAT.'\\nSELLO ESQUINA INFERIOR DERECHA: '✅ APROBADO POR ANMAT'\\nCTA (botón): 'Quiero simplificar mi rutina →'"
+copyPostMeta: "Esto es lo que probablemente tenés en tu baño ahora:\\n\\n• Crema anti-edad para la cara\\n• Crema para la papada / cuello / escote\\n• Crema anti-celulitis para piernas y glúteos\\n• Aceite o crema para estrías\\n• Hidratante corporal genérico\\n\\nGastás una fortuna. Te armás una rutina imposible. Y los resultados no llegan porque ninguna ataca la causa real: el tejido dérmico debilitado.\\n\\nCellu es UNA fórmula que trata 5 problemas: celulitis, estrías, arrugas, piel crepé, deshidratación. En cara, cuello, escote, brazos, manos, piernas y glúteos.\\n\\nAprobado por ANMAT. +7.896 reseñas (4.92/5). Envío gratis.\\n\\nTirá las 4. Quedate con una."
+publicoSugerido: "Retargeting caliente (visitó landing, no compró) + mujeres 35-55 con alto gasto en productos de cosmética."
+guion: "N/A (static)"
+razonamiento: "Réplica del patrón ganador de [Competidor X] (ad con 43d corriendo, 6 variantes) que usa 'tirá/reemplazá X productos' como hook de simplificación. Adapto al caso Cellu con 4 cremas específicas que el avatar ya tiene en su baño."
+variableDeTesteo: "hook"
+testHipotesis: "Hook con número concreto (4 cremas) va a bajar CPA vs hook genérico tipo 'simplificá tu rutina'."
+---
+
+**Reglas específicas por campo**:
+- titulo: igual o derivado del hook, ≤ 100 chars. Usa comillas si es el hook literal.
+- estiloVisual: categoría concreta que un director de arte entienda ("Editorial premium" · "UGC testimonial" · "Before/After clínico" · "Flat lay producto" · "Lifestyle aspiracional" · "Ilustrado humor").
+- descripcionImagen: en ESPAÑOL rioplatense, detallada, para el diseñador humano. Si es video, describí la escena clave o la miniatura. Si es carrusel, describí la slide principal.
+- promptGeneradorImagen: en INGLÉS, específico, incluí: estilo fotográfico + composición + iluminación + paleta + aspect ratio. Listo para pegar en Nano Banana/Midjourney/DALL-E sin editar.
+- textoEnImagen: layout del TEXTO SOBRE LA IMAGEN con jerarquía, estilo (bold/italic), colores y tamaños relativos. Separá hook, microcopy, sellos y CTA. Usá \\n para saltos de línea.
+- copyPostMeta: lo que va ARRIBA de la imagen en el feed (NO dentro). Puede ser largo, usar bullets/saltos de línea. Storytelling está OK. Cerrá con un call-to-action o pregunta. Castellano rioplatense.
+- publicoSugerido: targeting concreto. Ej: "cold prospecting: mujeres 30-55 con interés en cosmética natural" o "retargeting: visitantes del último 14d que no compraron".
+- guion: SOLO video → beats numerados (Beat 1, 2...) con timecodes (0-3s, 3-8s...) + duración total + tono de VO. Si es static/carrusel, poné "N/A (static)" o slide-by-slide para carruseles.
+- variableDeTesteo + testHipotesis: para saber qué estás testeando y medir después.
+- iteracionBase: SOLO si tipo=iteracion. Linkeá al adId del ad propio que estás iterando.
 `;
 
 function buildSystemPrompt({ hasPropios, targetCount, formatoMix }) {
@@ -112,34 +142,42 @@ function buildSystemPrompt({ hasPropios, targetCount, formatoMix }) {
   return SYSTEM_PROMPT_BASE + buildMixSection(mix, formatoMix, targetCount) + SHAPE_GUIDANCE;
 }
 
-// Tool schema para structured output. Forzamos a Claude a llamar esta tool
-// y el API valida que matchee el schema. Adiós a parsear JSON frágil.
+// Tool schema para structured output. Cada idea es un brief COMPLETO:
+// concepto estratégico + descripción de imagen en español + prompt en inglés
+// para Nano Banana/Midjourney + layout del texto-en-imagen + copy del post
+// + público sugerido. Listo para producir sin preguntas.
 const SUBMIT_IDEAS_TOOL = {
   name: 'submit_ideas',
-  description: 'Envía el array completo de ideas creativas generadas.',
+  description: 'Envía el array completo de briefs creativos generados.',
   input_schema: {
     type: 'object',
     properties: {
       ideas: {
         type: 'array',
-        description: 'Array de ideas. Respetá la calidad: si tenés contexto para 12 ideas buenas devolvé 12, no fuerces a 40.',
+        description: 'Array de ideas/briefs. Respetá calidad > cantidad.',
         items: {
           type: 'object',
           properties: {
-            titulo: { type: 'string', description: 'Título corto, ≤ 100 chars.' },
+            titulo: { type: 'string', description: 'Título corto del brief ej: "Tirá las 4 cremas del botiquín". ≤ 100 chars.' },
             tipo: { type: 'string', enum: ['replica', 'iteracion', 'diferenciacion', 'desde_cero'] },
-            angulo: { type: 'string' },
-            painPoint: { type: 'string' },
-            hook: { type: 'string', description: 'Primer frame / primeras 3 líneas. Diversificá arquetipos entre ideas.' },
-            copy: { type: 'string' },
-            guion: { type: 'string', description: 'Detallado según formato (video/static/carrusel).' },
             formato: { type: 'string', enum: ['video', 'static', 'carrusel'] },
-            razonamiento: { type: 'string' },
+            estiloVisual: { type: 'string', description: 'Ej: "Editorial premium / conceptual minimalista" · "UGC testimonial" · "Before/After clínico" · "Ilustrado humor" · "Lifestyle aspiracional".' },
+            angulo: { type: 'string', description: 'Ángulo emocional/estratégico central.' },
+            painPoint: { type: 'string', description: 'El pain específico que toca.' },
+            hook: { type: 'string', description: 'Hook principal — 1 línea, ≤ 120 chars. Diversificá arquetipos entre ideas.' },
+            escenarioNarrativo: { type: 'string', description: 'Concepto estratégico: por qué esta pieza comunica lo que comunica, cómo se conecta con el avatar y la oferta. 2-4 oraciones.' },
+            descripcionImagen: { type: 'string', description: 'SPANISH: descripción detallada y visual de la escena para que un diseñador humano la entienda. Composición, elementos, iluminación, mood. 3-6 oraciones.' },
+            promptGeneradorImagen: { type: 'string', description: 'ENGLISH: prompt listo para pegar en Nano Banana / Midjourney / DALL-E. Detallado, con estilo fotográfico, composición, iluminación, paleta, aspect ratio. Ej: "Editorial conceptual composition overhead shot, four generic used cosmetic jars falling into..., photorealistic, soft natural lighting, muted pastel palette, 1:1 square composition".' },
+            textoEnImagen: { type: 'string', description: 'Layout del texto que VA DENTRO de la imagen: hook en bloques (con estilo + color + tamaño relativo), microcopy debajo, sello/badge si aplica, CTA button. Formato legible por humano, ej:\\nHOOK:\\n• Línea 1 (bold granate, GRANDE): "TIRÁ LAS 4 CREMAS"\\n• Línea 2 (bold granate, GRANDE): "DEL BOTIQUÍN."\\n• Línea 3 (italic naranja, más chica): "Con esta sola ya está."\\nMICROCOPY: "5 problemas. 1 fórmula. Aprobado por ANMAT."\\nSELLO: "✅ APROBADO POR ANMAT"\\nCTA: "Quiero simplificar mi rutina →"' },
+            copyPostMeta: { type: 'string', description: 'Texto que va ARRIBA del creativo en el feed de Meta (no va dentro de la imagen). Puede ser largo (200-600 chars), con listas, saltos de línea, storytelling o bullets. En rioplatense.' },
+            publicoSugerido: { type: 'string', description: 'Targeting concreto recomendado para esta pieza. Ej: "Retargeting caliente (visitó landing, no compró) + mujeres 35-55 con alto gasto en cosmética." 1-2 oraciones.' },
+            guion: { type: 'string', description: 'SOLO si formato=video: guión con beats numerados + timecodes + duración total + tono de VO. Ej: "Beat 1 (0-3s): primer plano... Beat 2 (3-8s): ... · Duración: 15s · VO: cálida, femenina." Si formato=static/carrusel, dejalo vacío o poné "N/A".' },
+            razonamiento: { type: 'string', description: 'Por qué esta idea es fuerte. Para réplicas: qué competidor/patrón te inspiró. Para iteración: qué variable cambiás. Para diferenciación: por qué nadie lo hizo.' },
             variableDeTesteo: {
               type: 'string',
               enum: ['hook', 'visual', 'cta', 'formato', 'angulo', 'audience', 'prueba_social', 'oferta', 'mix'],
             },
-            testHipotesis: { type: 'string' },
+            testHipotesis: { type: 'string', description: 'Hipótesis medible. Ej: "Hook con número concreto (4 cremas) va a bajar CPA vs hook genérico".' },
             iteracionBase: {
               type: 'object',
               description: 'OBLIGATORIO solo si tipo=iteracion.',
@@ -150,7 +188,12 @@ const SUBMIT_IDEAS_TOOL = {
               },
             },
           },
-          required: ['titulo', 'tipo', 'angulo', 'hook', 'copy', 'formato', 'razonamiento', 'variableDeTesteo', 'testHipotesis'],
+          required: [
+            'titulo', 'tipo', 'formato', 'estiloVisual', 'angulo', 'painPoint',
+            'hook', 'escenarioNarrativo', 'descripcionImagen', 'promptGeneradorImagen',
+            'textoEnImagen', 'copyPostMeta', 'publicoSugerido',
+            'razonamiento', 'variableDeTesteo', 'testHipotesis',
+          ],
         },
       },
     },
@@ -407,15 +450,21 @@ function sanitizeIdea(i) {
   const variablesValidas = new Set(['hook', 'visual', 'cta', 'formato', 'angulo', 'audience', 'prueba_social', 'oferta', 'mix']);
   if (!i || typeof i.titulo !== 'string' || !tiposValidos.has(i.tipo)) return null;
   const base = {
-    titulo: String(i.titulo).slice(0, 150),
+    titulo: String(i.titulo).slice(0, 200),
     tipo: i.tipo,
+    formato: ['video', 'static', 'carrusel'].includes(i.formato) ? i.formato : 'static',
+    estiloVisual: String(i.estiloVisual || '').slice(0, 250),
     angulo: String(i.angulo || '').slice(0, 500),
     painPoint: String(i.painPoint || '').slice(0, 500),
-    hook: String(i.hook || '').slice(0, 500),
-    copy: String(i.copy || '').slice(0, 1500),
-    guion: String(i.guion || '').slice(0, 3000),
-    formato: ['video', 'static', 'carrusel'].includes(i.formato) ? i.formato : 'static',
-    razonamiento: String(i.razonamiento || '').slice(0, 500),
+    hook: String(i.hook || '').slice(0, 300),
+    escenarioNarrativo: String(i.escenarioNarrativo || '').slice(0, 2000),
+    descripcionImagen: String(i.descripcionImagen || '').slice(0, 2500),
+    promptGeneradorImagen: String(i.promptGeneradorImagen || '').slice(0, 2500),
+    textoEnImagen: String(i.textoEnImagen || '').slice(0, 2000),
+    copyPostMeta: String(i.copyPostMeta || '').slice(0, 3000),
+    publicoSugerido: String(i.publicoSugerido || '').slice(0, 500),
+    guion: String(i.guion || '').slice(0, 3500),
+    razonamiento: String(i.razonamiento || '').slice(0, 700),
     variableDeTesteo: variablesValidas.has(i.variableDeTesteo) ? i.variableDeTesteo : 'mix',
     testHipotesis: String(i.testHipotesis || '').slice(0, 500),
   };

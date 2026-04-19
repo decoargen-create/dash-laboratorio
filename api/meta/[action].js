@@ -17,7 +17,7 @@ import crypto from 'node:crypto';
 import {
   META_API_VERSION, META_COOKIE_MAX_AGE, META_SCOPES,
   verifyState, signState, setMetaCookie, clearMetaCookie,
-  readMetaCookie, getOrigin, respondJSON,
+  readMetaCookie, getOrigin, respondJSON, graphGet,
 } from './_lib.js';
 
 // --- helpers locales ---
@@ -186,6 +186,113 @@ async function handleMe(req, res) {
   });
 }
 
+// Lista las cuentas publicitarias del user conectado. Devuelve id, name,
+// account_status, currency, timezone_name — lo suficiente para que el user
+// elija en un dropdown de "¿cuál usamos?".
+async function handleAdAccounts(req, res) {
+  if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
+  const session = readMetaCookie(req);
+  if (!session?.accessToken) return respondJSON(res, 401, { error: 'Meta no conectado' });
+
+  try {
+    const data = await graphGet('me/adaccounts', session.accessToken, {
+      fields: 'id,account_id,name,account_status,currency,timezone_name,business_name',
+      limit: 100,
+    });
+    // account_status: 1=ACTIVE, 2=DISABLED, 3=UNSETTLED, 7=PENDING_RISK_REVIEW, ...
+    const accounts = (data.data || [])
+      .filter(a => a.account_status === 1)
+      .map(a => ({
+        id: a.id, // con prefijo act_
+        accountId: a.account_id,
+        name: a.name,
+        currency: a.currency,
+        timezone: a.timezone_name,
+        business: a.business_name || null,
+      }));
+    return respondJSON(res, 200, { accounts, total: accounts.length });
+  } catch (err) {
+    return respondJSON(res, err.status || 502, { error: err.message });
+  }
+}
+
+// Devuelve los ads activos de una ad account con su creativo + insights básicos
+// (7 días: impressions, clicks, CTR, spend, cpc, CPM).
+// Usado para que el user seleccione cuáles son del producto que está analizando.
+async function handleAdsWithInsights(req, res) {
+  if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
+  const session = readMetaCookie(req);
+  if (!session?.accessToken) return respondJSON(res, 401, { error: 'Meta no conectado' });
+
+  const origin = getOrigin(req);
+  const url = new URL(req.url, origin);
+  const accountId = url.searchParams.get('account_id');
+  const limit = Math.min(Number(url.searchParams.get('limit') || 50), 100);
+  const datePreset = url.searchParams.get('date_preset') || 'last_7d';
+
+  if (!accountId) return respondJSON(res, 400, { error: 'Falta account_id (con prefijo act_)' });
+
+  try {
+    // Traemos ads activos con creativo + insights inline.
+    // La API de Meta permite expandir creative{...} e insights{...} en un solo call.
+    const data = await graphGet(`${accountId}/ads`, session.accessToken, {
+      fields: [
+        'id,name,status,effective_status,created_time,updated_time',
+        `creative{id,name,title,body,thumbnail_url,image_url,video_id,object_story_spec,effective_object_story_id}`,
+        `insights.date_preset(${datePreset}){impressions,clicks,ctr,spend,cpc,cpm,actions,cost_per_action_type,reach,frequency}`,
+      ].join(','),
+      limit,
+      effective_status: JSON.stringify(['ACTIVE', 'PAUSED']),
+    });
+
+    const ads = (data.data || []).map(ad => {
+      const creative = ad.creative || {};
+      const insightsArr = ad.insights?.data || [];
+      const ins = insightsArr[0] || null;
+      const actions = ins?.actions || [];
+      const purchases = actions.find(a => a.action_type === 'purchase' || a.action_type === 'offsite_conversion.fb_pixel_purchase');
+      return {
+        id: ad.id,
+        name: ad.name,
+        status: ad.status,
+        effectiveStatus: ad.effective_status,
+        createdTime: ad.created_time,
+        updatedTime: ad.updated_time,
+        creative: {
+          id: creative.id,
+          name: creative.name,
+          title: creative.title,
+          body: creative.body,
+          thumbnailUrl: creative.thumbnail_url,
+          imageUrl: creative.image_url,
+          videoId: creative.video_id || null,
+          storyId: creative.effective_object_story_id || null,
+        },
+        insights: ins ? {
+          impressions: Number(ins.impressions || 0),
+          clicks: Number(ins.clicks || 0),
+          ctr: Number(ins.ctr || 0),
+          spend: Number(ins.spend || 0),
+          cpc: Number(ins.cpc || 0),
+          cpm: Number(ins.cpm || 0),
+          reach: Number(ins.reach || 0),
+          frequency: Number(ins.frequency || 0),
+          purchases: purchases ? Number(purchases.value || 0) : 0,
+        } : null,
+      };
+    });
+
+    return respondJSON(res, 200, {
+      accountId,
+      datePreset,
+      total: ads.length,
+      ads,
+    });
+  } catch (err) {
+    return respondJSON(res, err.status || 502, { error: err.message });
+  }
+}
+
 // --- dispatcher ---
 
 const actions = {
@@ -193,6 +300,8 @@ const actions = {
   callback: handleCallback,
   disconnect: handleDisconnect,
   me: handleMe,
+  'ad-accounts': handleAdAccounts,
+  'ads-with-insights': handleAdsWithInsights,
 };
 
 export default async function handler(req, res) {

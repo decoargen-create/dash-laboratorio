@@ -21,6 +21,7 @@ import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas } from './bandejaSto
 
 const PRODUCTOS_KEY = 'viora-marketing-productos-v1';
 const COMPETIDORES_KEY = 'viora-marketing-competidores-v1';
+const META_ACCOUNT_KEY = 'viora-marketing-meta-account-v1';
 
 function loadJSON(key, fallback) {
   try {
@@ -52,6 +53,7 @@ function landingToKeyword(url) {
 export default function ArranqueSection({ addToast, onGoToSection }) {
   const [productos, setProductos] = useState(() => loadJSON(PRODUCTOS_KEY, []));
   const [competidores, setCompetidores] = useState(() => loadJSON(COMPETIDORES_KEY, []));
+  const [metaAccount, setMetaAccount] = useState(() => loadJSON(META_ACCOUNT_KEY, null));
 
   // Wizard product form
   const [showProdForm, setShowProdForm] = useState(false);
@@ -61,6 +63,12 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   const [showCompForm, setShowCompForm] = useState(false);
   const [compDraft, setCompDraft] = useState({ nombre: '', landingUrl: '' });
 
+  // Meta ad account picker
+  const [metaConnected, setMetaConnected] = useState(null); // null = unknown, bool = checked
+  const [availableAccounts, setAvailableAccounts] = useState([]);
+  const [loadingAccounts, setLoadingAccounts] = useState(false);
+  const [loadingAds, setLoadingAds] = useState(false);
+
   // Pipeline runner
   const [running, setRunning] = useState(false);
   const [steps, setSteps] = useState([]); // { id, label, detail, status: 'pending'|'running'|'done'|'error', startedAt, endedAt }
@@ -68,6 +76,64 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
   useEffect(() => { saveJSON(PRODUCTOS_KEY, productos); }, [productos]);
   useEffect(() => { saveJSON(COMPETIDORES_KEY, competidores); }, [competidores]);
+  useEffect(() => { saveJSON(META_ACCOUNT_KEY, metaAccount); }, [metaAccount]);
+
+  // Chequeo rápido de conexión Meta al montar — solo para habilitar/deshabilitar la card.
+  useEffect(() => {
+    let abort = false;
+    fetch('/api/meta/me')
+      .then(r => r.json())
+      .then(d => { if (!abort) setMetaConnected(!!d.connected); })
+      .catch(() => { if (!abort) setMetaConnected(false); });
+    return () => { abort = true; };
+  }, []);
+
+  // Cargar lista de ad accounts disponibles (llama cuando el user abre el picker).
+  const loadAdAccounts = async () => {
+    setLoadingAccounts(true);
+    try {
+      const r = await fetch('/api/meta/ad-accounts');
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      setAvailableAccounts(d.accounts || []);
+      if ((d.accounts || []).length === 0) {
+        addToast?.({ type: 'info', message: 'No se encontraron cuentas publicitarias activas en tu Meta.' });
+      }
+    } catch (err) {
+      addToast?.({ type: 'error', message: `No pude listar cuentas: ${err.message}` });
+    } finally {
+      setLoadingAccounts(false);
+    }
+  };
+
+  // Seleccionar una cuenta + traer sus ads activos con insights 7d.
+  const selectAccount = async (acc) => {
+    setLoadingAds(true);
+    try {
+      const url = `/api/meta/ads-with-insights?account_id=${encodeURIComponent(acc.id)}&limit=50&date_preset=last_7d`;
+      const r = await fetch(url);
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      const metaAcc = {
+        id: acc.id,
+        name: acc.name,
+        currency: acc.currency,
+        ads: d.ads || [],
+        fetchedAt: new Date().toISOString(),
+      };
+      setMetaAccount(metaAcc);
+      addToast?.({ type: 'success', message: `${(d.ads || []).length} ads cargados de ${acc.name}` });
+    } catch (err) {
+      addToast?.({ type: 'error', message: `No pude traer ads: ${err.message}` });
+    } finally {
+      setLoadingAds(false);
+    }
+  };
+
+  const resetMetaAccount = () => {
+    setMetaAccount(null);
+    setAvailableAccounts([]);
+  };
 
   // El producto "principal" es el primero (simplificamos: 1 producto por ahora).
   const producto = productos[0];
@@ -396,9 +462,89 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         )}
       </WizardCard>
 
-      {/* Paso 2 — Competidores */}
+      {/* Paso 2 — Cuenta publicitaria Meta (opcional) */}
       <WizardCard
         num="2"
+        title="Tu cuenta publicitaria (opcional)"
+        done={!!metaAccount}
+        badge={metaAccount ? `${metaAccount.ads?.length || 0} ads activos` : null}
+      >
+        {!metaConnected ? (
+          <p className="text-xs text-gray-500 dark:text-gray-400 italic">
+            Conectá Meta arriba para elegir la cuenta publicitaria del producto.
+            Es opcional — sin esto solo analizamos competencia, no tus propios creativos.
+          </p>
+        ) : metaAccount ? (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-xs">
+              <span className="font-semibold text-gray-900 dark:text-gray-100">{metaAccount.name}</span>
+              <span className="text-gray-400">· {metaAccount.currency}</span>
+              <span className="text-gray-400">· {metaAccount.ads?.length || 0} ads cargados</span>
+              <button onClick={resetMetaAccount}
+                className="ml-auto p-1 text-gray-400 hover:text-red-600 transition" title="Cambiar cuenta">
+                <X size={12} />
+              </button>
+            </div>
+            {metaAccount.ads?.length > 0 && (
+              <details className="bg-gray-50 dark:bg-gray-800/50 rounded-md">
+                <summary className="cursor-pointer px-3 py-2 text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
+                  Ver ads cargados
+                </summary>
+                <ul className="px-3 pb-3 space-y-1 text-xs text-gray-700 dark:text-gray-300 max-h-48 overflow-y-auto">
+                  {metaAccount.ads.slice(0, 20).map(ad => (
+                    <li key={ad.id} className="flex items-center gap-2 py-1 border-b border-gray-100 dark:border-gray-700/50">
+                      <span className={`inline-block w-1.5 h-1.5 rounded-full ${
+                        ad.effectiveStatus === 'ACTIVE' ? 'bg-emerald-500' : 'bg-gray-400'
+                      }`} />
+                      <span className="flex-1 truncate font-semibold">{ad.creative?.title || ad.name}</span>
+                      {ad.insights && (
+                        <span className="text-[10px] text-gray-500 font-mono">
+                          CTR {(ad.insights.ctr).toFixed(2)}% · {ad.insights.impressions.toLocaleString('es-AR')} imp
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                  {metaAccount.ads.length > 20 && (
+                    <li className="text-[10px] text-gray-400 italic pt-1">+ {metaAccount.ads.length - 20} ads más</li>
+                  )}
+                </ul>
+              </details>
+            )}
+            <p className="text-[10px] text-gray-500 dark:text-gray-400 italic">
+              Próximo paso: identificar con IA cuáles de estos ads son del producto "{producto?.nombre || '(sin producto)'}" para generar iteraciones.
+            </p>
+          </div>
+        ) : availableAccounts.length === 0 ? (
+          <button onClick={loadAdAccounts} disabled={loadingAccounts}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-[#0668E1] to-[#1877F2] rounded-md hover:from-[#0556BE] hover:to-[#1668D8] transition disabled:opacity-40">
+            {loadingAccounts ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
+            Ver mis cuentas publicitarias
+          </button>
+        ) : (
+          <div className="space-y-2">
+            <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
+              Elegí qué cuenta usar para este producto
+            </p>
+            <ul className="space-y-1">
+              {availableAccounts.map(acc => (
+                <li key={acc.id}>
+                  <button onClick={() => selectAccount(acc)} disabled={loadingAds}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md hover:border-blue-400 dark:hover:border-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition disabled:opacity-40">
+                    <span className="font-semibold text-gray-900 dark:text-gray-100 flex-1">{acc.name}</span>
+                    <span className="text-[10px] text-gray-500">{acc.currency}</span>
+                    {acc.business && <span className="text-[10px] text-gray-400">· {acc.business}</span>}
+                    {loadingAds && <Loader2 size={12} className="animate-spin text-blue-500" />}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </WizardCard>
+
+      {/* Paso 3 — Competidores */}
+      <WizardCard
+        num="3"
         title="Competidores a analizar"
         done={compsReady}
         badge={compsReady ? `${competidores.length} cargado${competidores.length > 1 ? 's' : ''}` : null}
@@ -455,9 +601,9 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         </div>
       </WizardCard>
 
-      {/* Paso 3 — Correr pipeline */}
+      {/* Paso 4 — Correr pipeline */}
       <WizardCard
-        num="3"
+        num="4"
         title="Correr el pipeline"
         done={false}
         disabled={!compsReady}

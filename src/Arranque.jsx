@@ -42,6 +42,58 @@ function saveJSON(key, value) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
 }
 
+// Consume el stream SSE de /api/marketing/generate y devuelve los docs
+// cuando el stream se completa. onProgress recibe strings de estado para
+// mostrar en el stepper mientras corre.
+async function streamGenerateDocs({ productoNombre, productoUrl, descripcion, onProgress }) {
+  const resp = await fetch('/api/marketing/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ productoNombre, productoUrl, descripcion }),
+  });
+  if (!resp.ok || !resp.body) {
+    throw new Error(`/api/marketing/generate HTTP ${resp.status}`);
+  }
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  const outputs = {};
+  let resumenEjecutivo = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const payload = line.slice(6).trim();
+      if (!payload) continue;
+      try {
+        const ev = JSON.parse(payload);
+        if (ev.type === 'info' && ev.message) onProgress?.(ev.message);
+        else if (ev.type === 'step-start') onProgress?.(`Generando ${ev.label}…`);
+        else if (ev.type === 'step-done') {
+          outputs[ev.key] = ev.content;
+          if (ev.key === 'resumenEjecutivo') resumenEjecutivo = ev.content || '';
+          onProgress?.(`✓ ${ev.label} listo`);
+        } else if (ev.type === 'error') {
+          throw new Error(ev.error || 'Error en el stream de docs');
+        } else if (ev.type === 'complete') {
+          // Nada — seguimos hasta done.
+        }
+      } catch (err) {
+        if (err instanceof SyntaxError) continue; // línea parcial
+        throw err;
+      }
+    }
+  }
+
+  return { docs: outputs, resumenEjecutivo };
+}
+
 // Derivamos keyword para búsqueda en Ad Library (igual que el bookmarklet
 // del user): si es app.dropi, último segmento del path; sino hostname sin www.
 function landingToKeyword(url) {
@@ -65,7 +117,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
   // Wizard product form
   const [showProdForm, setShowProdForm] = useState(false);
-  const [prodDraft, setProdDraft] = useState({ nombre: '', landingUrl: '', descripcion: '', stage: 'problem_aware' });
+  const [prodDraft, setProdDraft] = useState({ nombre: '', landingUrl: '', descripcion: '' });
 
   // Wizard competitors
   const [showCompForm, setShowCompForm] = useState(false);
@@ -254,13 +306,13 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       nombre,
       landingUrl,
       descripcion: prodDraft.descripcion.trim(),
-      stage: prodDraft.stage || 'problem_aware',
       createdAt: new Date().toISOString(),
+      // stage lo infiere el pipeline después de generar el research doc.
     };
     setProductos(prev => [nuevo, ...prev]);
-    setProdDraft({ nombre: '', landingUrl: '', descripcion: '', stage: 'problem_aware' });
+    setProdDraft({ nombre: '', landingUrl: '', descripcion: '' });
     setShowProdForm(false);
-    addToast?.({ type: 'success', message: `Producto "${nombre}" cargado` });
+    addToast?.({ type: 'success', message: `Producto "${nombre}" cargado · ahora corré el pipeline` });
   };
 
   const handleAddCompetidor = () => {
@@ -347,42 +399,209 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   };
 
   const runPipeline = async () => {
-    if (!competidores.length) {
-      addToast?.({ type: 'error', message: 'Primero cargá al menos un competidor' });
+    if (!producto?.nombre) {
+      addToast?.({ type: 'error', message: 'Primero cargá el producto (nombre + landing)' });
       return;
     }
 
     setRunning(true);
     setCancelled(false);
 
-    // Construimos los pasos dinámicamente según cuántos competidores hay.
-    const pasos = [
-      { id: 'prep', label: '🚀 Arrancando', detail: `Vamos a analizar ${competidores.length} competidor${competidores.length > 1 ? 'es' : ''}`, status: 'pending' },
-      ...competidores.map(c => ({
-        id: `scrape-${c.id}`,
-        label: `🔍 Buscando ads de ${c.nombre}`,
-        detail: 'Meta Ad Library vía Apify',
-        status: 'pending',
-      })),
-      ...competidores.map(c => ({
-        id: `analyze-${c.id}`,
-        label: `🧠 Analizando ganadores de ${c.nombre}`,
-        detail: 'Claude Vision + Whisper (si hay video)',
-        status: 'pending',
-      })),
-      { id: 'generate', label: '💡 Generando ideas nuevas con IA', detail: 'Réplicas + diferenciaciones + ideas desde cero', status: 'pending' },
-      { id: 'done', label: '✅ Listo', detail: 'Tenés análisis fresco + ideas nuevas en la Bandeja', status: 'pending' },
+    // Pasos dinámicos según estado:
+    //   - docs-gen: solo si el producto aún no tiene research doc
+    //   - post-research: siempre tras docs (infiere stage + keywords)
+    //   - auto-suggest: solo si NO hay competidores cargados todavía
+    //   - scrape/analyze: uno por competidor (se agregan después del auto-suggest)
+    const necesitaDocs = !producto?.docs?.research;
+    const necesitaSugerencia = competidores.length === 0;
+
+    const pasosIniciales = [
+      { id: 'prep', label: '🚀 Arrancando', detail: `Producto: ${producto.nombre}`, status: 'pending' },
     ];
-    setSteps(pasos);
+    if (necesitaDocs) {
+      pasosIniciales.push(
+        { id: 'docs-gen', label: '📄 Generando documentación del producto', detail: 'Research + avatar + offer brief + creencias + resumen (~3-4 min)', status: 'pending' },
+      );
+    }
+    pasosIniciales.push(
+      { id: 'post-research', label: '🧠 Inferiendo stage + keywords de búsqueda', detail: 'Claude clasifica el awareness del prospect', status: 'pending' },
+    );
+    if (necesitaSugerencia) {
+      pasosIniciales.push(
+        { id: 'auto-suggest', label: '🎯 Sugiriendo competidores con los keywords', detail: 'Buscamos en Meta Ad Library y sumamos los top', status: 'pending' },
+      );
+    }
+    pasosIniciales.push(
+      { id: 'done', label: '✅ Listo', detail: 'Tenés análisis fresco + ideas nuevas en la Bandeja', status: 'pending' },
+    );
+    // Los pasos de scrape/analyze se agregan dinámicamente después del auto-suggest.
+    setSteps(pasosIniciales);
 
     // Paso 1: prep
     updateStep('prep', { status: 'running', startedAt: Date.now() });
-    await new Promise(r => setTimeout(r, 500));
+    await new Promise(r => setTimeout(r, 300));
     updateStep('prep', { status: 'done', endedAt: Date.now() });
 
-    // Paso 2..N+1: scrape de cada competidor
+    // ============================================================
+    // PASO: Generar docs del producto si no los tiene todavía.
+    // ============================================================
+    let productoActualizado = producto;
+    if (necesitaDocs && !cancelled) {
+      updateStep('docs-gen', { status: 'running', startedAt: Date.now() });
+      try {
+        const docs = await streamGenerateDocs({
+          productoNombre: producto.nombre,
+          productoUrl: producto.landingUrl || '',
+          descripcion: producto.descripcion || '',
+          onProgress: (msg) => updateStep('docs-gen', { detail: msg }),
+        });
+        // Guardar los docs en el producto
+        productoActualizado = {
+          ...producto,
+          docs: docs.docs,
+          resumenEjecutivo: docs.resumenEjecutivo,
+          docsGeneratedAt: new Date().toISOString(),
+        };
+        setProductos(prev => prev.map(p => p.id === producto.id ? productoActualizado : p));
+        updateStep('docs-gen', {
+          status: 'done',
+          endedAt: Date.now(),
+          detail: `Research ${(docs.docs?.research || '').length} chars · avatar + offer brief + creencias listos`,
+        });
+      } catch (err) {
+        updateStep('docs-gen', { status: 'error', endedAt: Date.now(), detail: err.message });
+        setRunning(false);
+        return;
+      }
+    }
+
+    // ============================================================
+    // PASO: Post-research analysis — stage + keywords.
+    // ============================================================
+    let searchKeywords = [];
+    if (!cancelled && productoActualizado?.docs?.research) {
+      updateStep('post-research', { status: 'running', startedAt: Date.now() });
+      try {
+        const resp = await fetch('/api/marketing/post-research-analysis', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            producto: {
+              nombre: productoActualizado.nombre,
+              landingUrl: productoActualizado.landingUrl,
+              descripcion: productoActualizado.descripcion,
+            },
+            research: productoActualizado.docs.research,
+            avatar: productoActualizado.docs.avatar,
+          }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+
+        searchKeywords = data.searchKeywords || [];
+        productoActualizado = {
+          ...productoActualizado,
+          stage: data.stage,
+          stageReason: data.stageReason,
+          searchKeywords,
+        };
+        setProductos(prev => prev.map(p => p.id === productoActualizado.id ? productoActualizado : p));
+
+        updateStep('post-research', {
+          status: 'done',
+          endedAt: Date.now(),
+          detail: `Stage: ${data.stage.replace('_', '-')} · ${searchKeywords.length} keywords: ${searchKeywords.slice(0, 3).join(', ')}${searchKeywords.length > 3 ? '…' : ''}`,
+        });
+      } catch (err) {
+        updateStep('post-research', { status: 'error', endedAt: Date.now(), detail: err.message });
+        // No es fatal — seguimos con keywords vacíos.
+      }
+    }
+
+    // ============================================================
+    // PASO: Auto-sugerir competidores si no hay cargados.
+    // Usamos el keyword más potente (primero de la lista) o fallback a landing/nombre.
+    // ============================================================
+    let competidoresLocal = competidores;
+    if (necesitaSugerencia && !cancelled) {
+      updateStep('auto-suggest', { status: 'running', startedAt: Date.now() });
+      try {
+        const keywordAUsar = searchKeywords[0] ||
+          (productoActualizado.landingUrl ? landingToKeyword(productoActualizado.landingUrl) : productoActualizado.nombre);
+        const resp = await fetch('/api/marketing/suggest-competitors', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ searchKeyword: keywordAUsar, country: 'AR', limit: 30 }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+
+        const top5 = (data.suggestions || []).slice(0, 5);
+        if (top5.length === 0) {
+          updateStep('auto-suggest', {
+            status: 'done',
+            endedAt: Date.now(),
+            detail: `No encontramos competidores con keyword "${keywordAUsar}". Agregá a mano en la card de Competidores y re-ejecutá.`,
+          });
+        } else {
+          const nuevos = top5.map(s => ({
+            id: Date.now() + Math.random(),
+            nombre: s.pageName,
+            landingUrl: '',
+            fbPageUrl: s.pageId ? `https://www.facebook.com/${s.pageId}` : '',
+            notas: `Auto-sugerido · ${s.adsCount} ads activos · máx ${s.maxDaysRunning}d corriendo`,
+            imagen: s.sampleImage,
+            descripcion: s.sampleHeadline,
+            ads: [], lastAdsCheck: null,
+            createdAt: new Date().toISOString(),
+          }));
+          setCompetidores(prev => [...nuevos, ...prev]);
+          competidoresLocal = [...nuevos, ...competidoresLocal];
+          updateStep('auto-suggest', {
+            status: 'done',
+            endedAt: Date.now(),
+            detail: `${top5.length} competidores agregados: ${top5.map(s => s.pageName).join(', ')}`,
+          });
+        }
+      } catch (err) {
+        updateStep('auto-suggest', { status: 'error', endedAt: Date.now(), detail: err.message });
+      }
+    }
+
+    // Si sigue sin haber competidores (ni manual ni auto), no tiene sentido
+    // seguir con scrape/analyze.
+    if (competidoresLocal.length === 0) {
+      addToast?.({ type: 'error', message: 'Sin competidores no podemos analizar ganadores. Agregá a mano y reejecutá.' });
+      setRunning(false);
+      return;
+    }
+
+    // Agregamos los pasos de scrape/analyze/generate AHORA que sabemos cuántos
+    // competidores hay (puede haber cambiado con el auto-suggest).
+    setSteps(prev => {
+      const base = prev.filter(p => p.id !== 'done');
+      const nuevos = [
+        ...competidoresLocal.map(c => ({
+          id: `scrape-${c.id}`,
+          label: `🔍 Buscando ads de ${c.nombre}`,
+          detail: 'Meta Ad Library vía Apify',
+          status: 'pending',
+        })),
+        ...competidoresLocal.map(c => ({
+          id: `analyze-${c.id}`,
+          label: `🧠 Analizando ganadores de ${c.nombre}`,
+          detail: 'Claude Vision + Whisper (si hay video)',
+          status: 'pending',
+        })),
+        { id: 'generate', label: '💡 Generando ideas nuevas con IA', detail: 'Réplicas + iteraciones + diferenciaciones + desde cero', status: 'pending' },
+        { id: 'done', label: '✅ Listo', detail: 'Tenés análisis fresco + ideas nuevas en la Bandeja', status: 'pending' },
+      ];
+      return [...base, ...nuevos];
+    });
+
+    // Paso scrape: para cada competidor (incluye los recién auto-sugeridos).
     const compWithAds = []; // { comp, winners }
-    for (const c of competidores) {
+    for (const c of competidoresLocal) {
       if (cancelled) break;
       const stepId = `scrape-${c.id}`;
       updateStep(stepId, { status: 'running', startedAt: Date.now() });
@@ -550,7 +769,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            producto: producto || { nombre: 'Producto sin definir' },
+            producto: productoActualizado || producto || { nombre: 'Producto sin definir' },
             competidoresAnalisis: compAnalisis,
             ideasExistentes,
             propiosAds,
@@ -561,7 +780,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
 
-        const nuevas = addGeneratedIdeas(data.ideas || [], { producto });
+        const nuevas = addGeneratedIdeas(data.ideas || [], { producto: productoActualizado || producto });
         setIdeasToday(countIdeasGeneratedToday());
         updateStep('generate', {
           status: 'done',
@@ -616,7 +835,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   const horasDesdeUltimoRun = lastRun
     ? Math.round((Date.now() - new Date(lastRun).getTime()) / 3600000)
     : null;
-  const ofrecerRun = !running && compsReady && (horasDesdeUltimoRun == null || horasDesdeUltimoRun >= 24);
+  const ofrecerRun = !running && prodReady && (horasDesdeUltimoRun == null || horasDesdeUltimoRun >= 24);
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -670,17 +889,26 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               </a>
             )}
             {producto.descripcion && <p className="text-gray-600 dark:text-gray-400">{producto.descripcion}</p>}
-            {/* Stage del producto — editable inline */}
-            <div className="flex items-center gap-2 mt-1">
-              <label className="text-[10px] font-bold text-gray-500 uppercase">Stage:</label>
-              <select value={producto.stage || 'problem_aware'}
-                onChange={e => setProductos(prev => prev.map(p => p.id === producto.id ? { ...p, stage: e.target.value } : p))}
-                className="px-2 py-0.5 text-[11px] bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-purple-500">
-                <option value="problem_aware">Problem-Aware</option>
-                <option value="solution_aware">Solution-Aware</option>
-                <option value="product_aware">Product-Aware</option>
-              </select>
-            </div>
+            {/* Stage — solo visible si ya se infirió en el pipeline.
+                Editable por si el user quiere override el juicio de la IA. */}
+            {producto.stage && (
+              <div className="flex items-center gap-2 mt-1">
+                <label className="text-[10px] font-bold text-gray-500 uppercase">Stage inferido:</label>
+                <select value={producto.stage}
+                  onChange={e => setProductos(prev => prev.map(p => p.id === producto.id ? { ...p, stage: e.target.value } : p))}
+                  className="px-2 py-0.5 text-[11px] bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-purple-500"
+                  title={producto.stageReason || ''}>
+                  <option value="problem_aware">Problem-Aware</option>
+                  <option value="solution_aware">Solution-Aware</option>
+                  <option value="product_aware">Product-Aware</option>
+                </select>
+                {producto.stageReason && (
+                  <span className="text-[10px] text-gray-500 dark:text-gray-400 truncate flex-1" title={producto.stageReason}>
+                    · {producto.stageReason.slice(0, 80)}{producto.stageReason.length > 80 ? '…' : ''}
+                  </span>
+                )}
+              </div>
+            )}
             {/* Hint de calidad: sugerir correr el pipeline de Documentación si no hay research doc */}
             {(() => {
               const hasResearch = !!(producto.docs?.research || producto.research || producto.docs?.avatar || producto.avatar);
@@ -720,20 +948,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               placeholder="Descripción corta (opcional — qué es, para quién, diferenciales)"
               rows={2}
               className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 resize-y" />
-            <div>
-              <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">Stage del producto (awareness del prospect)</label>
-              <select value={prodDraft.stage} onChange={e => setProdDraft({ ...prodDraft, stage: e.target.value })}
-                className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500">
-                <option value="problem_aware">Problem-Aware — el prospect sabe que tiene el problema, no conoce las soluciones</option>
-                <option value="solution_aware">Solution-Aware — conoce soluciones, no conoce tu producto</option>
-                <option value="product_aware">Product-Aware — ya conoce tu marca/producto, le falta decidir</option>
-              </select>
-              <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">
-                Determina el tipo de hook: problem-aware necesita agitar el dolor, product-aware necesita diferenciación y prueba.
-              </p>
-            </div>
+            <p className="text-[10px] text-gray-500 dark:text-gray-400 italic -mt-1">
+              No te pedimos stage (problem/solution/product-aware) porque lo inferimos solos del research doc cuando corras el pipeline.
+            </p>
             <div className="flex gap-2 justify-end">
-              <button onClick={() => { setShowProdForm(false); setProdDraft({ nombre: '', landingUrl: '', descripcion: '', stage: 'problem_aware' }); }}
+              <button onClick={() => { setShowProdForm(false); setProdDraft({ nombre: '', landingUrl: '', descripcion: '' }); }}
                 className="px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 transition">
                 Cancelar
               </button>
@@ -1055,15 +1274,15 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         num="4"
         title="Correr el pipeline"
         done={false}
-        disabled={!compsReady}
+        disabled={!prodReady}
         badge={null}
       >
-        {!compsReady ? (
-          <p className="text-xs text-gray-500 dark:text-gray-400 italic">Cargá al menos un competidor para habilitar el pipeline.</p>
+        {!prodReady ? (
+          <p className="text-xs text-gray-500 dark:text-gray-400 italic">Primero cargá el producto (nombre + landing) en el paso 1.</p>
         ) : (
           <>
             <p className="text-xs text-gray-600 dark:text-gray-300 mb-3">
-              Va a buscar los ads activos de cada competidor, detectar los ganadores (≥17d o ≥2 variantes) y analizarlos en profundidad con Claude Vision + Whisper. Tarda 2-5 min según cuántos competidores tengas.
+              Si tu producto aún no tiene research doc, el sistema lo genera primero (~4 min). Después infiere el stage del prospect, sugiere competidores si no cargaste ninguno, scrapea los ads, detecta ganadores y genera ideas. Primera corrida: 8-15 min. Corridas siguientes: 2-5 min.
             </p>
 
             {/* Config del generador — colapsable */}

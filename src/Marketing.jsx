@@ -655,6 +655,7 @@ const DASH_TABS = [
   { key: 'resumen',      label: 'Resumen',      icon: BookOpen },
   { key: 'docs',         label: 'Documentos',   icon: FileText },
   { key: 'competencia',  label: 'Competencia',  icon: Target },
+  { key: 'creativos',    label: 'Creativos',    icon: Sparkles },
   { key: 'memoria',      label: 'Memoria',      icon: MessageSquare },
   { key: 'historial',    label: 'Historial',    icon: Clock },
 ];
@@ -665,6 +666,10 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
   const [compName, setCompName] = useState('');
   const [compUrl, setCompUrl] = useState('');
   const [compPageId, setCompPageId] = useState('');
+  const [hooksRunning, setHooksRunning] = useState(false);
+  const [hooksTono, setHooksTono] = useState('argentino coloquial, directo');
+  const [hooksObjetivo, setHooksObjetivo] = useState('TOFU');
+  const [hooksRestricciones, setHooksRestricciones] = useState('');
 
   const tab = activeTab || 'resumen';
   // Si el tab no existe en DASH_TABS (ej: 'research'), mapear a 'docs'
@@ -673,6 +678,52 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
   const memoria = p.memoria || { notas: [], aprendizajes: [] };
   const competidores = p.competidores || [];
   const historial = p.historial || [];
+  const creativos = p.creativos || null;
+
+  const generarHooks = async () => {
+    setHooksRunning(true);
+    try {
+      const resp = await fetch('/api/marketing/creatives', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'hooks',
+          producto: {
+            productoNombre: p.productoNombre,
+            productoUrl: p.productoUrl,
+            descripcion: p.descripcion,
+            resumenEjecutivo: p.resumenEjecutivo,
+            docs: p.docs,
+            competidores: competidores,
+            memoria: memoria,
+          },
+          config: { tono: hooksTono, objetivo: hooksObjetivo, restricciones: hooksRestricciones },
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      const nuevosCreativos = {
+        ...(creativos || {}),
+        fase1: {
+          diagnostico: data.diagnostico,
+          angulosElegidos: data.angulosElegidos,
+          hooks: data.hooks,
+          observaciones: data.observaciones,
+          generatedAt: data.generatedAt,
+          config: { tono: hooksTono, objetivo: hooksObjetivo, restricciones: hooksRestricciones },
+        },
+      };
+      onUpdateProduct({
+        creativos: nuevosCreativos,
+        historial: [...historial, { tipo: 'hooks-generados', at: new Date().toISOString(), meta: `${data.hooks?.length || 0} hooks` }],
+      });
+      addToast?.({ type: 'success', message: `${data.hooks?.length || 0} hooks generados` });
+    } catch (err) {
+      addToast?.({ type: 'error', message: err.message });
+    } finally {
+      setHooksRunning(false);
+    }
+  };
 
   const addNota = () => {
     const texto = noteText.trim();
@@ -771,6 +822,9 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
               )}
               {t.key === 'memoria' && (memoria.notas.length + memoria.aprendizajes.length) > 0 && (
                 <span className="ml-0.5 px-1 py-0 text-[9px] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded">{memoria.notas.length + memoria.aprendizajes.length}</span>
+              )}
+              {t.key === 'creativos' && creativos?.fase1?.hooks?.length > 0 && (
+                <span className="ml-0.5 px-1 py-0 text-[9px] font-bold bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 rounded">{creativos.fase1.hooks.length}</span>
               )}
             </button>
           );
@@ -903,6 +957,159 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
           </div>
         )}
 
+        {/* CREATIVOS */}
+        {effTab === 'creativos' && (
+          <div className="space-y-5">
+            {/* Config + botón generar */}
+            <div className="bg-gradient-to-br from-purple-50 to-violet-50 dark:from-purple-900/20 dark:to-violet-900/20 border border-purple-200 dark:border-purple-800 rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Sparkles size={16} className="text-purple-600 dark:text-purple-400" />
+                <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Fase 1 — Hooks + diagnóstico</h3>
+                <span className="ml-auto text-[10px] text-gray-500 dark:text-gray-400">Generador de creativos Meta Ads</span>
+              </div>
+              <p className="text-xs text-gray-600 dark:text-gray-300 mb-3">
+                Genera 15-25 hooks categorizados por ángulo (sarcasmo, insight, POV, autoridad, testimonio), basándose en el research + avatar + offer brief del producto + competidores + aprendizajes.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">Tono</label>
+                  <input type="text" value={hooksTono} onChange={e => setHooksTono(e.target.value)} placeholder="argentino coloquial, directo"
+                    className="w-full px-2 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-purple-500" />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">Objetivo</label>
+                  <select value={hooksObjetivo} onChange={e => setHooksObjetivo(e.target.value)}
+                    className="w-full px-2 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-purple-500">
+                    <option value="TOFU">TOFU (prospecting)</option>
+                    <option value="MOFU">MOFU (consideración)</option>
+                    <option value="BOFU">BOFU (conversión)</option>
+                    <option value="Retargeting">Retargeting</option>
+                    <option value="Mix">Mix</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">Restricciones</label>
+                  <input type="text" value={hooksRestricciones} onChange={e => setHooksRestricciones(e.target.value)} placeholder="sin palabras gatillo, sin vulgaridad"
+                    className="w-full px-2 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-purple-500" />
+                </div>
+              </div>
+              <button
+                onClick={generarHooks}
+                disabled={hooksRunning}
+                className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-gradient-to-br from-purple-600 to-violet-500 rounded-lg hover:from-purple-700 hover:to-violet-600 shadow-sm transition disabled:opacity-40"
+              >
+                {hooksRunning ? <><Loader2 size={14} className="animate-spin" /> Generando…</> : <><Sparkles size={14} /> {creativos?.fase1 ? 'Regenerar hooks' : 'Generar hooks'}</>}
+              </button>
+              {creativos?.fase1?.generatedAt && (
+                <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-2">Última generación: {new Date(creativos.fase1.generatedAt).toLocaleString('es-AR')}</p>
+              )}
+            </div>
+
+            {/* Resultado: diagnóstico + hooks */}
+            {creativos?.fase1 && (
+              <>
+                {/* Diagnóstico */}
+                {creativos.fase1.diagnostico && (
+                  <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                    <h4 className="text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-2">🔵 Diagnóstico</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                      {creativos.fase1.diagnostico.beneficios && (
+                        <div>
+                          <p className="font-semibold text-gray-600 dark:text-gray-400 mb-1">Beneficios</p>
+                          <ul className="space-y-0.5 list-disc pl-4 text-gray-700 dark:text-gray-300">
+                            {creativos.fase1.diagnostico.beneficios.map((b, i) => <li key={i}>{b}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                      {creativos.fase1.diagnostico.dolores && (
+                        <div>
+                          <p className="font-semibold text-gray-600 dark:text-gray-400 mb-1">Dolores</p>
+                          <ul className="space-y-0.5 list-disc pl-4 text-gray-700 dark:text-gray-300">
+                            {creativos.fase1.diagnostico.dolores.map((d, i) => <li key={i}>{d}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                      {creativos.fase1.diagnostico.vaciosComunicacion && (
+                        <div className="md:col-span-2">
+                          <p className="font-semibold text-amber-700 dark:text-amber-300 mb-1">🔥 Vacíos de comunicación (el oro)</p>
+                          <ul className="space-y-0.5 list-disc pl-4 text-gray-700 dark:text-gray-300">
+                            {creativos.fase1.diagnostico.vaciosComunicacion.map((v, i) => <li key={i}>{v}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Hooks agrupados por ángulo */}
+                {Array.isArray(creativos.fase1.hooks) && creativos.fase1.hooks.length > 0 && (
+                  <div className="space-y-3">
+                    <h4 className="text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">🎣 Hooks ({creativos.fase1.hooks.length})</h4>
+                    {(creativos.fase1.angulosElegidos || []).map(a => {
+                      const hooksDelAngulo = creativos.fase1.hooks.filter(h => h.angulo === a.id);
+                      if (hooksDelAngulo.length === 0) return null;
+                      return (
+                        <div key={a.id} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3">
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="inline-flex items-center justify-center w-6 h-6 rounded bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 font-bold text-xs">{a.id}</span>
+                            <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{a.nombre}</p>
+                            <span className="ml-auto text-[10px] text-gray-500 dark:text-gray-400">{hooksDelAngulo.length} hooks</span>
+                          </div>
+                          {a.porQueSirve && <p className="text-[11px] text-gray-500 dark:text-gray-400 italic mb-2">{a.porQueSirve}</p>}
+                          <ul className="space-y-1.5">
+                            {hooksDelAngulo.map(h => (
+                              <li key={h.id} className="flex items-start gap-2 text-sm">
+                                <span className="text-gray-400 font-mono text-[10px] tabular-nums mt-0.5">#{h.id}</span>
+                                <span className="flex-1 text-gray-800 dark:text-gray-200">
+                                  {h.texto}
+                                  {h.riesgoMeta && (
+                                    <span className="ml-1.5 inline-flex items-center gap-0.5 px-1 py-0 text-[9px] font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 rounded" title={h.motivoRiesgoMeta || ''}>
+                                      ⚠️ Meta
+                                    </span>
+                                  )}
+                                </span>
+                                <button onClick={() => { navigator.clipboard?.writeText(h.texto); addToast?.({ type: 'success', message: 'Hook copiado' }); }} className="p-0.5 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition opacity-0 group-hover:opacity-100" title="Copiar hook">
+                                  <Copy size={11} />
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Observaciones */}
+                {Array.isArray(creativos.fase1.observaciones) && creativos.fase1.observaciones.length > 0 && (
+                  <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3">
+                    <h4 className="text-xs font-bold text-amber-800 dark:text-amber-300 uppercase tracking-wider mb-2">💡 Observaciones estratégicas</h4>
+                    <ul className="space-y-1.5 text-xs text-gray-800 dark:text-gray-200">
+                      {creativos.fase1.observaciones.map((o, i) => (
+                        <li key={i} className="flex gap-2"><span className="text-amber-500">•</span><span>{o}</span></li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                <div className="p-3 bg-gray-50 dark:bg-gray-700/30 border border-dashed border-gray-300 dark:border-gray-600 rounded-lg">
+                  <p className="text-xs text-gray-600 dark:text-gray-400">
+                    <strong>🚧 Próximas fases (en construcción):</strong> seleccionar hooks → dirección visual → plan por pieza (con prompts para Nano Banana / Midjourney) → brief completo en .docx para pasar al diseñador.
+                  </p>
+                </div>
+              </>
+            )}
+
+            {!creativos?.fase1 && !hooksRunning && (
+              <div className="p-8 text-center border-2 border-dashed border-gray-200 dark:border-gray-600 rounded-xl">
+                <Sparkles size={28} className="mx-auto text-gray-300 dark:text-gray-600 mb-2" />
+                <p className="text-sm text-gray-500 dark:text-gray-400">Todavía no generaste hooks para este producto.</p>
+                <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-1">Click en "Generar hooks" arriba — tarda ~60-90 segundos.</p>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* MEMORIA */}
         {effTab === 'memoria' && (
           <div className="space-y-5 max-w-3xl">
@@ -962,6 +1169,7 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
                     {h.tipo === 'aprendizaje' && `🧠 Aprendizaje: ${h.meta || ''}`}
                     {h.tipo === 'competidor-agregado' && `👥 Competidor agregado: ${h.meta || ''}`}
                     {h.tipo === 'ads-check' && `📊 ${h.meta || ''}`}
+                    {h.tipo === 'hooks-generados' && `🎣 Hooks generados: ${h.meta || ''}`}
                   </span>
                 </div>
               ))

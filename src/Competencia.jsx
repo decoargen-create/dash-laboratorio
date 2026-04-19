@@ -8,10 +8,36 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Plus, Trash2, ExternalLink, RefreshCw, Loader2, X, Check,
-  Target, Package, Search, Copy, ChevronDown, AlertTriangle,
+  Target, Package, Search, Copy, ChevronDown, AlertTriangle, Zap,
 } from 'lucide-react';
 
 const STORAGE_KEY = 'viora-marketing-competidores-v1';
+
+// Replica el bookmarklet del user: dada una URL, devuelve el search term
+// que conviene usar en Meta Ad Library.
+//   - app.dropi.* → último segmento del path con guiones como espacios
+//   - cualquier otro → hostname sin www
+function landingToSearchTerm(url) {
+  if (!url || typeof url !== 'string') return '';
+  try {
+    const u = new URL(url);
+    if (u.hostname.includes('app.dropi')) {
+      const parts = u.pathname.split('/').filter(Boolean);
+      const last = parts[parts.length - 1] || '';
+      return last.replace(/-/g, ' ');
+    }
+    return u.hostname.replace(/^www\./, '');
+  } catch {
+    // Fallback: si no parsea como URL, tratamos el string como hostname.
+    return String(url).replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+  }
+}
+
+// Construye la URL de Ad Library para abrir en nueva tab.
+function adLibraryUrl(searchTerm, country = 'ALL') {
+  const q = encodeURIComponent(searchTerm);
+  return `https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=${country}&q=${q}&search_type=keyword_unordered&media_type=all`;
+}
 
 function loadCompetidores() {
   try {
@@ -41,8 +67,28 @@ export default function CompetenciaSection({ addToast }) {
   const [scraping, setScraping] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
   const [checkingId, setCheckingId] = useState(null);
+  const [metaConn, setMetaConn] = useState({ loading: true, connected: false, user: null });
 
   useEffect(() => { saveCompetidores(competidores); }, [competidores]);
+
+  // Estado de conexión Meta para mostrar widget + habilitar "Traer ads".
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch('/api/meta/me');
+        const d = await r.json();
+        if (!cancelled) setMetaConn({ loading: false, connected: !!d.connected, user: d.user || null });
+      } catch {
+        if (!cancelled) setMetaConn({ loading: false, connected: false, user: null });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const handleConnectMeta = () => {
+    window.location.href = `/api/meta/connect?returnTo=${encodeURIComponent('/acceso?section=mk-competencia')}`;
+  };
 
   const handleAdd = async () => {
     const nombre = form.nombre.trim();
@@ -157,6 +203,36 @@ export default function CompetenciaSection({ addToast }) {
         </button>
       </div>
 
+      {/* Widget de conexión Meta */}
+      {!metaConn.loading && (
+        metaConn.connected ? (
+          <div className="flex items-center gap-2 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg">
+            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <p className="text-xs text-emerald-800 dark:text-emerald-200">
+              <span className="font-semibold">Meta conectado</span>
+              {metaConn.user?.name && <> como <span className="font-semibold">{metaConn.user.name}</span></>}.
+              Podés traer los ads directamente desde cada competidor.
+            </p>
+          </div>
+        ) : (
+          <div className="flex items-center gap-3 px-4 py-3 bg-gradient-to-br from-blue-50 to-white dark:from-blue-900/20 dark:to-gray-800 border border-blue-200 dark:border-blue-800 rounded-lg">
+            <div className="shrink-0 w-8 h-8 rounded-lg bg-gradient-to-br from-[#0668E1] to-[#1877F2] flex items-center justify-center text-white">
+              <Zap size={14} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-gray-900 dark:text-gray-100">Conectá Meta para auto-traer ads</p>
+              <p className="text-[11px] text-gray-600 dark:text-gray-300">Sin Meta igual podés abrir Ad Library manualmente. Conectado, los ads se sincronizan solos cada 6h.</p>
+            </div>
+            <button
+              onClick={handleConnectMeta}
+              className="shrink-0 inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-[#0668E1] to-[#1877F2] rounded-md hover:from-[#0556BE] hover:to-[#1668D8] transition"
+            >
+              <Zap size={12} /> Conectar
+            </button>
+          </div>
+        )
+      )}
+
       {/* Form agregar */}
       {showForm && (
         <div className="bg-white dark:bg-gray-800 border-2 border-orange-300 dark:border-orange-700 rounded-xl p-5 space-y-3 animate-fade-in">
@@ -259,10 +335,25 @@ export default function CompetenciaSection({ addToast }) {
                           <ExternalLink size={12} /> Facebook
                         </a>
                       )}
-                      <button onClick={() => handleCheckAds(c)} disabled={isChecking}
-                        className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-white bg-blue-600 rounded-md hover:bg-blue-700 transition disabled:opacity-40">
-                        {isChecking ? <><Loader2 size={12} className="animate-spin" /> Buscando…</> : <><Search size={12} /> Actualizar ads</>}
-                      </button>
+                      {/* SIEMPRE visible: abre Meta Ad Library manualmente con el search term auto-derivado */}
+                      {(c.landingUrl || c.nombre) && (() => {
+                        const searchTerm = landingToSearchTerm(c.landingUrl) || c.nombre;
+                        return (
+                          <a href={adLibraryUrl(searchTerm)} target="_blank" rel="noreferrer"
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-[#0668E1] to-[#1877F2] rounded-md hover:from-[#0556BE] hover:to-[#1668D8] transition"
+                            title={`Buscar "${searchTerm}" en Meta Ad Library`}>
+                            <ExternalLink size={12} /> Ver en Ad Library
+                          </a>
+                        );
+                      })()}
+                      {/* Solo visible si Meta OAuth está conectado: consulta la API automáticamente */}
+                      {metaConn.connected && (
+                        <button onClick={() => handleCheckAds(c)} disabled={isChecking}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-white bg-purple-600 rounded-md hover:bg-purple-700 transition disabled:opacity-40"
+                          title="Trae los ads automáticamente usando Meta Marketing API">
+                          {isChecking ? <><Loader2 size={12} className="animate-spin" /> Buscando…</> : <><Search size={12} /> Traer ads (auto)</>}
+                        </button>
+                      )}
                       <button onClick={() => handleDelete(c.id)}
                         className="ml-auto inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-gray-500 hover:text-red-600 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-red-50 hover:border-red-200 transition">
                         <Trash2 size={12} /> Eliminar

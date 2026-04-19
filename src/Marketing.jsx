@@ -18,12 +18,67 @@ import {
 const STORAGE_KEY = 'viora-marketing-productos-v1';
 
 const STEPS = [
-  { key: 'research',          label: 'Research Doc',        desc: 'Investigación profunda del mercado, avatar, competidores, horror stories, corruption angles.' },
-  { key: 'avatar',            label: 'Avatar Sheet',        desc: 'Ficha completa del cliente ideal con quotes y emotional journey.' },
-  { key: 'offerBrief',        label: 'Offer Brief',         desc: 'Brief para el copywriter: Big Idea, UMP/UMS, headlines, objections, belief chains.' },
-  { key: 'beliefs',           label: 'Creencias',           desc: '6 creencias que el prospect debe adoptar antes de comprar.' },
-  { key: 'resumenEjecutivo',  label: 'Resumen ejecutivo',   desc: 'Síntesis de 2-3 oraciones con lo central del producto.' },
+  {
+    key: 'research',
+    label: 'Research Doc',
+    desc: 'Investigación profunda de 6+ páginas con demographics, attitudes, hopes & dreams, existing solutions, horror stories, curiosity y corruption angles.',
+    bullets: [
+      'Analizando la landing y extrayendo claims reales',
+      'Mapeando demographics + attitudes del avatar',
+      'Buscando hopes/dreams y victories/failures',
+      'Identificando existing solutions y lo que el mercado le gusta/disgusta',
+      'Armando horror stories y curiosity angles',
+    ],
+    etaSec: 180, // ~3 min
+  },
+  {
+    key: 'avatar',
+    label: 'Avatar Sheet',
+    desc: 'Ficha completa del cliente ideal: demographics, pain points, goals, emotional drivers y journey. Incluye quotes realistas en primera persona.',
+    bullets: [
+      'Extrayendo pain points y challenges',
+      'Escribiendo quotes del avatar (primera persona)',
+      'Mapeando awareness → frustración → desesperación → alivio',
+    ],
+    etaSec: 60,
+  },
+  {
+    key: 'offerBrief',
+    label: 'Offer Brief',
+    desc: 'Brief para copywriter: Big Idea, Unique Mechanism of Problem/Solution, guru, headlines, 8+ objections, belief chains y funnel architecture.',
+    bullets: [
+      'Identificando la Big Idea y Metaphor central',
+      'Armando UMP (problema) + UMS (solución) propietarios',
+      'Escribiendo 3-5 headlines candidatos',
+      'Listando objections + belief chains',
+    ],
+    etaSec: 60,
+  },
+  {
+    key: 'beliefs',
+    label: 'Creencias necesarias',
+    desc: '6 creencias "Yo creo que…" que el prospect debe adoptar antes de comprar — la estrella del norte del copy, método E5 de Agora.',
+    bullets: [
+      'Destilando la secuencia de creencias crítica',
+      'Ordenando de fundamental a cercana a la compra',
+      'Explicando por qué cada una es necesaria',
+    ],
+    etaSec: 45,
+  },
+  {
+    key: 'resumenEjecutivo',
+    label: 'Resumen ejecutivo',
+    desc: 'Síntesis en 2-3 oraciones con lo central del producto, avatar y ángulo estratégico. Queda como anclaje rápido del expediente.',
+    bullets: [
+      'Condensando el análisis completo',
+      'Extrayendo el ángulo estratégico central',
+    ],
+    etaSec: 20,
+  },
 ];
+
+// Segundos totales estimados para el pipeline completo.
+const TOTAL_ETA_SEC = STEPS.reduce((s, step) => s + (step.etaSec || 60), 0);
 
 function loadProductos() {
   try {
@@ -60,10 +115,35 @@ export default function MarketingSection({ addToast }) {
   const [liveOutputs, setLiveOutputs] = useState({});
   const [infoMsg, setInfoMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const [startedAt, setStartedAt] = useState(null);   // timestamp del arranque
+  const [elapsedSec, setElapsedSec] = useState(0);    // segundos que lleva
+  const [tickerIdx, setTickerIdx] = useState(0);      // rota entre los bullets del paso activo
 
   const readerRef = useRef(null);
 
   useEffect(() => { saveProductos(productos); }, [productos]);
+
+  // Contador de segundos mientras corre el pipeline.
+  useEffect(() => {
+    if (!running || !startedAt) return;
+    const t = setInterval(() => {
+      setElapsedSec(Math.round((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => clearInterval(t);
+  }, [running, startedAt]);
+
+  // Rotador de bullets dentro del paso activo (muestra cada ~4s uno distinto).
+  useEffect(() => {
+    if (!running || !currentStep) return;
+    setTickerIdx(0);
+    const step = STEPS.find(s => s.key === currentStep);
+    const bullets = step?.bullets || [];
+    if (bullets.length <= 1) return;
+    const t = setInterval(() => {
+      setTickerIdx(i => (i + 1) % bullets.length);
+    }, 4000);
+    return () => clearInterval(t);
+  }, [running, currentStep]);
 
   const activeProduct = productos.find(p => p.id === activeProductId) || null;
 
@@ -73,6 +153,9 @@ export default function MarketingSection({ addToast }) {
     setLiveOutputs({});
     setInfoMsg('');
     setErrorMsg('');
+    setStartedAt(null);
+    setElapsedSec(0);
+    setTickerIdx(0);
   };
 
   const handleGenerate = async () => {
@@ -82,6 +165,7 @@ export default function MarketingSection({ addToast }) {
 
     setRunning(true);
     resetRun();
+    setStartedAt(Date.now());
 
     try {
       const resp = await fetch('/api/marketing/generate', {
@@ -274,23 +358,83 @@ export default function MarketingSection({ addToast }) {
               <p className="text-xs text-red-800 dark:text-red-200">{errorMsg}</p>
             </div>
           )}
-          {/* Stepper */}
+
+          {/* Progress bar global */}
+          {(() => {
+            const doneCount = STEPS.filter(s => stepStatus[s.key] === 'done').length;
+            const totalSteps = STEPS.length;
+            const pct = Math.round((doneCount / totalSteps) * 100);
+            const mm = String(Math.floor(elapsedSec / 60)).padStart(2, '0');
+            const ss = String(elapsedSec % 60).padStart(2, '0');
+            const etaRemainingSec = Math.max(0, TOTAL_ETA_SEC - elapsedSec);
+            const etaMM = String(Math.floor(etaRemainingSec / 60)).padStart(2, '0');
+            const etaSS = String(etaRemainingSec % 60).padStart(2, '0');
+            const currentIdx = STEPS.findIndex(s => s.key === currentStep);
+            const currentStepLabel = currentIdx >= 0 ? STEPS[currentIdx].label : 'Preparando…';
+            return (
+              <div className="mb-4 p-4 rounded-xl bg-gradient-to-br from-purple-50 to-violet-50 dark:from-purple-900/20 dark:to-violet-900/20 border border-purple-200 dark:border-purple-800">
+                <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+                  <div>
+                    <p className="text-xs font-bold text-purple-900 dark:text-purple-200 uppercase tracking-wider">
+                      Paso {Math.max(doneCount, currentIdx < 0 ? 0 : currentIdx + 1)} de {totalSteps} · {currentStepLabel}
+                    </p>
+                    <p className="text-[11px] text-purple-700 dark:text-purple-300 mt-0.5">
+                      Tiempo: {mm}:{ss}
+                      {running && etaRemainingSec > 0 && <> · ~{etaMM}:{etaSS} restante</>}
+                    </p>
+                  </div>
+                  <p className="text-2xl font-bold text-purple-900 dark:text-purple-100 tabular-nums">{pct}%</p>
+                </div>
+                <div className="h-2 bg-purple-200 dark:bg-purple-900/50 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-purple-600 to-violet-500 rounded-full transition-all duration-500"
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Stepper con bullets detallados */}
           <div className="space-y-2">
             {STEPS.map(s => {
               const status = stepStatus[s.key] || 'pending';
               const content = liveOutputs[s.key];
               const isOpen = !!content;
+              const isRunning = status === 'running';
+              const activeBullet = isRunning && s.bullets && s.bullets.length > 0
+                ? s.bullets[tickerIdx % s.bullets.length]
+                : null;
               return (
-                <div key={s.key} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
-                  <div className={`p-3 flex items-center gap-3 ${status === 'running' ? 'bg-purple-50 dark:bg-purple-900/20' : status === 'done' ? 'bg-emerald-50 dark:bg-emerald-900/20' : 'bg-gray-50 dark:bg-gray-800/50'}`}>
-                    <div className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center">
+                <div key={s.key} className={`border rounded-lg overflow-hidden transition-all ${isRunning ? 'border-purple-400 dark:border-purple-600 shadow-sm' : 'border-gray-200 dark:border-gray-700'}`}>
+                  <div className={`p-3 flex items-start gap-3 ${isRunning ? 'bg-purple-50 dark:bg-purple-900/20' : status === 'done' ? 'bg-emerald-50 dark:bg-emerald-900/20' : 'bg-gray-50 dark:bg-gray-800/50'}`}>
+                    <div className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center mt-0.5">
                       {status === 'done' ? <Check size={14} className="text-emerald-600 dark:text-emerald-300" /> :
-                       status === 'running' ? <Loader2 size={14} className="text-purple-600 dark:text-purple-300 animate-spin" /> :
+                       isRunning ? <Loader2 size={14} className="text-purple-600 dark:text-purple-300 animate-spin" /> :
                        <div className="w-2 h-2 rounded-full bg-gray-300 dark:bg-gray-600" />}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{s.label}</p>
-                      <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate">{s.desc}</p>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{s.label}</p>
+                        {status === 'done' && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded">
+                            Listo
+                          </span>
+                        )}
+                        {s.etaSec && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded">
+                            ~{Math.round(s.etaSec / 60 * 10) / 10 < 1 ? `${s.etaSec}s` : `${Math.round(s.etaSec / 60)}min`}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-gray-600 dark:text-gray-400 mt-1 leading-relaxed">{s.desc}</p>
+                      {/* Bullet dinámico mientras el paso está corriendo */}
+                      {activeBullet && (
+                        <div className="mt-2 flex items-center gap-1.5 text-[11px] text-purple-700 dark:text-purple-300">
+                          <div className="w-1 h-1 rounded-full bg-purple-600 dark:bg-purple-400 animate-pulse" />
+                          <span className="italic">{activeBullet}…</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                   {isOpen && (

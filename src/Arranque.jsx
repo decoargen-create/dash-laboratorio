@@ -20,7 +20,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   Package, Target, Play, Check, Loader2, AlertTriangle, ChevronRight, ChevronDown,
-  Plus, X, Sparkles, Link2, Search, Clock,
+  Plus, X, Sparkles, Link2, Search, Clock, Inbox,
 } from 'lucide-react';
 import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGeneratedToday } from './bandejaStore.js';
 import { logCostsFromResponse } from './costsStore.js';
@@ -733,7 +733,19 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             formatoMix,
           }),
         });
-        const data = await resp.json();
+        // Handling defensivo: si Vercel mete timeout o hay un crash, el body
+        // viene como text/html en vez de JSON. Detectamos por content-type.
+        const contentType = resp.headers.get('content-type') || '';
+        let data;
+        if (contentType.includes('application/json')) {
+          data = await resp.json();
+        } else {
+          const text = await resp.text();
+          const isTimeout = /504|timeout|FUNCTION_INVOCATION_TIMEOUT/i.test(text);
+          throw new Error(isTimeout
+            ? 'Timeout: el generador tardó más de 5 min. Probá con menos competidores o subí el cap de ideas.'
+            : `Respuesta inválida del servidor (${resp.status}). Primeros 100 chars: ${text.slice(0, 100)}`);
+        }
         if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
         logCostsFromResponse(data, `generate-ideas · ${(productoActualizado || producto)?.nombre || ''}`);
 
@@ -1291,6 +1303,48 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             </div>
           </>
         )}
+
+        {/* Banner de éxito al terminar — CTA grande para ir a la Bandeja */}
+        {!running && steps.length > 0 && steps[steps.length - 1]?.id === 'done' && steps[steps.length - 1]?.status === 'done' && (() => {
+          // Contamos qué se logró: ganadores totales + ideas nuevas.
+          const winnersTotal = steps
+            .filter(s => s.id.startsWith('scrape-') && s.status === 'done')
+            .reduce((sum, s) => {
+              const m = (s.detail || '').match(/(\d+)\s+ganador/i);
+              return sum + (m ? Number(m[1]) : 0);
+            }, 0);
+          const genStep = steps.find(s => s.id === 'generate');
+          const ideasMatch = genStep?.detail?.match(/(\d+)\s+ideas\s+nuevas/i);
+          const ideasNuevas = ideasMatch ? Number(ideasMatch[1]) : 0;
+          return (
+            <div className="mt-5 p-4 bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 border-2 border-emerald-300 dark:border-emerald-700 rounded-xl">
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="shrink-0 w-10 h-10 rounded-full bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center text-white shadow">
+                  <Check size={20} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-base font-bold text-emerald-900 dark:text-emerald-100">¡Pipeline terminado!</p>
+                  <p className="text-xs text-emerald-700 dark:text-emerald-300">
+                    {winnersTotal > 0 && <><strong>{winnersTotal}</strong> ganador{winnersTotal !== 1 ? 'es' : ''} analizado{winnersTotal !== 1 ? 's' : ''} · </>}
+                    {ideasNuevas > 0 ? <><strong>{ideasNuevas}</strong> idea{ideasNuevas !== 1 ? 's' : ''} nueva{ideasNuevas !== 1 ? 's' : ''} esperándote en la Bandeja</> : 'Todo procesado'}
+                  </p>
+                </div>
+                <button
+                  onClick={() => onGoToSection?.('mk-bandeja')}
+                  className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-bold text-white bg-gradient-to-br from-fuchsia-500 to-pink-500 rounded-lg hover:from-fuchsia-600 hover:to-pink-600 shadow-sm transition"
+                >
+                  <Inbox size={14} /> Ver ideas en la Bandeja <ChevronRight size={14} />
+                </button>
+                <button
+                  onClick={() => onGoToSection?.('mk-competencia')}
+                  className="shrink-0 inline-flex items-center gap-1 px-3 py-2.5 text-xs font-semibold text-purple-700 dark:text-purple-300 bg-white dark:bg-gray-800 border border-purple-200 dark:border-purple-800 rounded-lg hover:bg-purple-50 dark:hover:bg-purple-900/20 transition"
+                >
+                  Ver Competencia <ChevronRight size={12} />
+                </button>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Stepper */}
         {steps.length > 0 && (

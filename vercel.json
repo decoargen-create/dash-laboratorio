@@ -8,7 +8,7 @@
     "api/marketing/generate.js":        { "maxDuration": 300 },
     "api/marketing/apify-ingest.js":    { "maxDuration": 300 },
     "api/marketing/deep-analyze.js":    { "maxDuration": 240 },
-    "api/marketing/generate-ideas.js":  { "maxDuration": 180 },
+    "api/marketing/generate-ideas.js":  { "maxDuration": 300 },
     "api/marketing/match-product-ads.js": { "maxDuration": 60 },
     "api/marketing/suggest-competitors.js": { "maxDuration": 180 },
     "api/marketing/post-research-analysis.js": { "maxDuration": 60 }

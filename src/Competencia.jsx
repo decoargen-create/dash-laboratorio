@@ -173,7 +173,7 @@ export default function CompetenciaSection({ addToast }) {
       } else {
         payload.searchKeyword = comp.nombre;
       }
-      payload.country = 'AR';
+      payload.country = 'ALL';
       payload.limit = 50;
 
       const resp = await fetch('/api/marketing/apify-ingest', {
@@ -185,16 +185,29 @@ export default function CompetenciaSection({ addToast }) {
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
       logCostsFromResponse(data, `apify-ingest · ${comp.nombre}`);
 
-      setCompetidores(prev => prev.map(c =>
-        c.id === comp.id ? {
+      setCompetidores(prev => prev.map(c => {
+        if (c.id !== comp.id) return c;
+        // Historial de corridas: cap últimas 10, para detectar si el
+        // competidor está pautando más o menos con el tiempo.
+        const prevHistory = Array.isArray(c.adsHistory) ? c.adsHistory : [];
+        const history = [
+          ...prevHistory,
+          {
+            ts: new Date().toISOString(),
+            total: data.total || 0,
+            winners: data.winners || 0,
+          },
+        ].slice(-10);
+        return {
           ...c,
           ads: data.ads || [],
           adsTotal: data.total || 0,
           winnersCount: data.winners || 0,
           criteria: data.criteria || { days: 17, variants: 2 },
           lastAdsCheck: new Date().toISOString(),
-        } : c
-      ));
+          adsHistory: history,
+        };
+      }));
       const winners = data.winners || 0;
       const total = data.total || 0;
       addToast?.({ type: 'success', message: `${winners} ganadores de ${total} ads · ${comp.nombre}` });

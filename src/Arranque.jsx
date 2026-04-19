@@ -101,7 +101,10 @@ async function streamGenerateDocs({ productoNombre, productoUrl, descripcion, on
 }
 
 // Derivamos keyword para búsqueda en Ad Library (igual que el bookmarklet
-// del user): si es app.dropi, último segmento del path; sino hostname sin www.
+// del user):
+//   - app.dropi: último segmento del path con guiones como espacios
+//   - resto: hostname completo con TLD (ej: "elova.es" — NO recortar a "elova",
+//     Meta Ad Library da resultados distintos con cada forma).
 function landingToKeyword(url) {
   if (!url) return '';
   try {
@@ -110,7 +113,7 @@ function landingToKeyword(url) {
       const parts = u.pathname.split('/').filter(Boolean);
       return (parts[parts.length - 1] || '').replace(/-/g, ' ');
     }
-    return u.hostname.replace(/^www\./, '').split('.')[0];
+    return u.hostname.replace(/^www\./, '');
   } catch {
     return String(url).replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
   }
@@ -361,7 +364,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       const resp = await fetch('/api/marketing/suggest-competitors', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ searchKeyword: keyword, country: 'AR', limit: 30 }),
+        body: JSON.stringify({ searchKeyword: keyword, country: 'ALL', limit: 30 }),
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
@@ -560,7 +563,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       const stepId = `scrape-${c.id}`;
       updateStep(stepId, { status: 'running', startedAt: Date.now() });
       try {
-        const payload = { country: 'AR', limit: 50 };
+        const payload = { country: 'ALL', limit: 50 };
         if (c.fbPageUrl) {
           payload.fbPageUrl = c.fbPageUrl.startsWith('http') ? c.fbPageUrl : `https://www.facebook.com/${c.fbPageUrl}`;
         } else if (c.landingUrl) {

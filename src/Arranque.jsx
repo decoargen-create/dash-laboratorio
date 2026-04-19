@@ -69,6 +69,9 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   const [loadingAccounts, setLoadingAccounts] = useState(false);
   const [loadingAds, setLoadingAds] = useState(false);
   const [matching, setMatching] = useState(false);
+  // Sugerencia de competidores
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestions, setSuggestions] = useState([]);
 
   // Pipeline runner
   const [running, setRunning] = useState(false);
@@ -225,6 +228,58 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   const handleRemoveCompetidor = (id) => {
     if (!window.confirm('¿Sacar a este competidor de la lista?')) return;
     setCompetidores(prev => prev.filter(c => c.id !== id));
+  };
+
+  // Sugerencia automática de competidores: buscamos en Ad Library por keyword
+  // derivada del producto (landing hostname o nombre) y agrupamos por page.
+  const handleSuggestCompetidores = async () => {
+    const keyword = producto?.landingUrl
+      ? (landingToKeyword(producto.landingUrl) || producto.nombre)
+      : producto?.nombre;
+    if (!keyword) {
+      addToast?.({ type: 'error', message: 'Primero cargá un producto para poder buscar competidores' });
+      return;
+    }
+    setSuggesting(true);
+    setSuggestions([]);
+    try {
+      const resp = await fetch('/api/marketing/suggest-competitors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ searchKeyword: keyword, country: 'AR', limit: 30 }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      // Filtramos los que ya están agregados (por pageName).
+      const existentes = new Set(competidores.map(c => (c.nombre || '').toLowerCase()));
+      const nuevas = (data.suggestions || []).filter(s => !existentes.has((s.pageName || '').toLowerCase()));
+      setSuggestions(nuevas);
+      if (nuevas.length === 0) {
+        addToast?.({ type: 'info', message: data.suggestions?.length ? 'Las sugerencias ya están agregadas' : 'Sin sugerencias para este keyword' });
+      } else {
+        addToast?.({ type: 'success', message: `${nuevas.length} sugerencias encontradas` });
+      }
+    } catch (err) {
+      addToast?.({ type: 'error', message: `Búsqueda falló: ${err.message}` });
+    } finally {
+      setSuggesting(false);
+    }
+  };
+
+  const handleAddSuggestion = (sug) => {
+    setCompetidores(prev => [{
+      id: Date.now() + Math.random(),
+      nombre: sug.pageName,
+      landingUrl: '',
+      fbPageUrl: sug.pageId ? `https://www.facebook.com/${sug.pageId}` : '',
+      notas: `Auto-sugerido · ${sug.adsCount} ads activos · máx ${sug.maxDaysRunning}d corriendo`,
+      imagen: sug.sampleImage,
+      descripcion: sug.sampleHeadline,
+      ads: [], lastAdsCheck: null,
+      createdAt: new Date().toISOString(),
+    }, ...prev]);
+    setSuggestions(prev => prev.filter(s => s.pageId !== sug.pageId));
+    addToast?.({ type: 'success', message: `"${sug.pageName}" agregado` });
   };
 
   // --- Pipeline runner ---
@@ -662,10 +717,19 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           )}
 
           {!showCompForm ? (
-            <button onClick={() => setShowCompForm(true)}
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-md hover:bg-purple-100 transition">
-              <Plus size={11} /> Agregar competidor
-            </button>
+            <div className="flex gap-2 items-center flex-wrap">
+              <button onClick={() => setShowCompForm(true)}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-md hover:bg-purple-100 transition">
+                <Plus size={11} /> Agregar a mano
+              </button>
+              {producto && (
+                <button onClick={handleSuggestCompetidores} disabled={suggesting}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-fuchsia-700 dark:text-fuchsia-300 bg-fuchsia-50 dark:bg-fuchsia-900/20 border border-fuchsia-200 dark:border-fuchsia-800 rounded-md hover:bg-fuchsia-100 transition disabled:opacity-40">
+                  {suggesting ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
+                  Sugerir con IA
+                </button>
+              )}
+            </div>
           ) : (
             <div className="flex flex-col sm:flex-row gap-2 items-stretch">
               <input type="text" value={compDraft.nombre} onChange={e => setCompDraft({ ...compDraft, nombre: e.target.value })}
@@ -684,6 +748,51 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                   <Check size={11} />
                 </button>
               </div>
+            </div>
+          )}
+
+          {/* Sugerencias de la IA */}
+          {suggestions.length > 0 && (
+            <div className="mt-3 p-3 bg-fuchsia-50/50 dark:bg-fuchsia-900/10 border border-fuchsia-200 dark:border-fuchsia-800 rounded-md space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] font-bold text-fuchsia-700 dark:text-fuchsia-300 uppercase tracking-wider">
+                  ✨ Sugerencias · basadas en "{producto?.nombre}"
+                </p>
+                <button onClick={() => setSuggestions([])}
+                  className="text-[10px] text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
+                  Limpiar
+                </button>
+              </div>
+              <ul className="space-y-1.5">
+                {suggestions.map(s => (
+                  <li key={s.pageId} className="flex items-center gap-2 p-2 bg-white dark:bg-gray-800 rounded border border-fuchsia-100 dark:border-fuchsia-900/40">
+                    {s.sampleImage ? (
+                      <img src={s.sampleImage} alt="" className="w-10 h-10 rounded object-cover bg-gray-100 dark:bg-gray-700 shrink-0"
+                        onError={e => { e.target.style.display = 'none'; }} />
+                    ) : (
+                      <div className="w-10 h-10 rounded bg-gradient-to-br from-fuchsia-200 to-pink-200 flex items-center justify-center shrink-0">
+                        <Target size={14} className="text-fuchsia-700" />
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-gray-900 dark:text-gray-100 truncate">{s.pageName}</p>
+                      <p className="text-[10px] text-gray-500 dark:text-gray-400">
+                        {s.adsCount} ads activos · máx {s.maxDaysRunning}d corriendo
+                      </p>
+                    </div>
+                    <button onClick={() => handleAddSuggestion(s)}
+                      className="shrink-0 inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold text-white bg-fuchsia-600 rounded hover:bg-fuchsia-700 transition">
+                      <Plus size={10} /> Agregar
+                    </button>
+                    {s.sampleSnapshotUrl && (
+                      <a href={s.sampleSnapshotUrl} target="_blank" rel="noreferrer"
+                        className="shrink-0 p-1 text-gray-400 hover:text-gray-700 transition" title="Ver ad de ejemplo">
+                        <Search size={12} />
+                      </a>
+                    )}
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
         </div>

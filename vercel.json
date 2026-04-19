@@ -13,7 +13,8 @@
     "api/marketing/apify-ingest.js":    { "maxDuration": 300 },
     "api/marketing/deep-analyze.js":    { "maxDuration": 240 },
     "api/marketing/generate-ideas.js":  { "maxDuration": 120 },
-    "api/marketing/match-product-ads.js": { "maxDuration": 60 }
+    "api/marketing/match-product-ads.js": { "maxDuration": 60 },
+    "api/marketing/suggest-competitors.js": { "maxDuration": 180 }
   },
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/index.html" }

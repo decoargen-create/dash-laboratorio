@@ -147,12 +147,16 @@ async function analyzeAd(ad, transcript, client) {
 
   content.push({ type: 'text', text: adContext });
 
-  const resp = await client.messages.create({
+  // Adaptive thinking: ayuda a sintetizar mejor los signals visuales + texto
+  // en insights accionables. Streaming para evitar timeout con thinking.
+  const stream = await client.messages.stream({
     model: MODEL,
     max_tokens: 4000,
+    thinking: { type: 'adaptive' },
     system: SYSTEM_PROMPT,
     messages: [{ role: 'user', content }],
   });
+  const resp = await stream.finalMessage();
 
   const textBlock = resp.content.find(b => b.type === 'text');
   if (!textBlock) throw new Error('Claude no devolvió texto');

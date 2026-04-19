@@ -285,9 +285,14 @@ export default async function handler(req, res) {
   });
 
   try {
-    const resp = await client.messages.create({
+    // Adaptive thinking: Sonnet 4.6 soporta que Claude decida cuánto pensar
+    // según la complejidad. Para generación creativa ancla mucho mejor las
+    // ideas al research/contexto, a costo de ~15-30s más de latencia.
+    // Streaming evita timeout HTTP en requests largos con thinking.
+    const stream = await client.messages.stream({
       model: MODEL,
       max_tokens: maxTokens,
+      thinking: { type: 'adaptive' },
       system: [
         { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } },
       ],
@@ -295,6 +300,7 @@ export default async function handler(req, res) {
         { role: 'user', content: userContent },
       ],
     });
+    const resp = await stream.finalMessage();
 
     const textBlock = resp.content.find(b => b.type === 'text');
     if (!textBlock) throw new Error('Claude no devolvió texto');

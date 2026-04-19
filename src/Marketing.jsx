@@ -102,7 +102,7 @@ function downloadText(content, filename) {
   URL.revokeObjectURL(url);
 }
 
-export default function MarketingSection({ addToast }) {
+export default function MarketingSection({ addToast, bgAnalysis, onStart, onCancel, onDismiss }) {
   const [productos, setProductos] = useState(() => loadProductos());
   const [form, setForm] = useState({ productoUrl: '', productoNombre: '' });
   const [activeProductId, setActiveProductId] = useState(null);
@@ -163,6 +163,36 @@ export default function MarketingSection({ addToast }) {
     const productoUrl = form.productoUrl.trim();
     if (!productoNombre) { addToast?.({ type: 'error', message: 'Falta el nombre del producto' }); return; }
 
+    // Si el padre (AppShell) nos pasó onStart, delegamos ahí para que el
+    // análisis corra como "bg task" y siga vivo al cambiar de sección.
+    // El padre nos devuelve el resultado vía onComplete, acá lo agregamos
+    // a la lista de productos guardados.
+    if (typeof onStart === 'function') {
+      onStart({
+        productoNombre, productoUrl,
+        onComplete: (result) => {
+          const paquete = {
+            id: Date.now(),
+            productoNombre: result.productoNombre,
+            productoUrl: result.productoUrl,
+            descripcion: result.descripcion || '',
+            imagen: result.ogImage || null,
+            resumenEjecutivo: result.resumenEjecutivo || '',
+            docs: result.docs || { research: '', avatar: '', offerBrief: '', beliefs: '', resumenEjecutivo: '' },
+            memoria: { notas: [], aprendizajes: [] },
+            historial: [{ tipo: 'generacion-inicial', at: new Date().toISOString() }],
+            createdAt: new Date().toISOString(),
+          };
+          setProductos(prev => [paquete, ...prev]);
+          setActiveProductId(paquete.id);
+          setActiveTab('research');
+          setForm({ productoUrl: '', productoNombre: '' });
+        },
+      });
+      return;
+    }
+
+    // Fallback: corre inline (pre-refactor). Útil si el componente se usa standalone.
     setRunning(true);
     resetRun();
     setStartedAt(Date.now());
@@ -278,8 +308,26 @@ export default function MarketingSection({ addToast }) {
     } catch { addToast?.({ type: 'error', message: 'No se pudo copiar' }); }
   };
 
-  // Determina qué mostrar en el viewer: el producto activo o el progreso live.
-  const showingLive = running || Object.keys(liveOutputs).length > 0;
+  // Si el padre gestiona el bgAnalysis, usamos SU state. Si no, el nuestro.
+  const effective = bgAnalysis || {
+    status: running ? 'running' : 'idle',
+    currentStep,
+    stepStatus,
+    liveOutputs,
+    elapsedSec,
+    infoMsg,
+    errorMsg,
+  };
+  const effRunning = effective.status === 'running';
+  const effStepStatus = effective.stepStatus || {};
+  const effLiveOutputs = effective.liveOutputs || {};
+  const effCurrentStep = effective.currentStep;
+  const effElapsedSec = effective.elapsedSec || 0;
+  const effInfoMsg = effective.infoMsg || '';
+  const effErrorMsg = effective.errorMsg || '';
+
+  // Mostrar viewer si hay progreso en vivo O si ya hay outputs (incluido done).
+  const showingLive = effRunning || Object.keys(effLiveOutputs).length > 0;
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -322,10 +370,10 @@ export default function MarketingSection({ addToast }) {
           </div>
           <button
             onClick={handleGenerate}
-            disabled={running || !form.productoNombre.trim()}
+            disabled={effRunning || !form.productoNombre.trim()}
             className="w-full inline-flex items-center justify-center gap-2 px-6 py-3.5 text-sm font-bold text-white bg-gradient-to-br from-purple-600 to-violet-500 rounded-xl hover:from-purple-700 hover:to-violet-600 shadow-sm transition disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            <Sparkles size={18} /> Generar documentación completa
+            <Sparkles size={18} /> {effRunning ? 'Generando… (mirá la pill)' : 'Generar documentación completa'}
           </button>
           <p className="text-[11px] text-center text-gray-500 dark:text-gray-400">Tarda entre 3 y 8 minutos. No cierres la pestaña.</p>
         </div>
@@ -334,42 +382,56 @@ export default function MarketingSection({ addToast }) {
       {/* Progreso en vivo */}
       {showingLive && (
         <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm p-5">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
             <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 uppercase tracking-wider">
-              {running ? 'Generando…' : 'Resultado'}
+              {effRunning ? 'Generando…' : 'Resultado'}
             </h3>
-            {!running && Object.keys(liveOutputs).length > 0 && (
-              <button
-                onClick={() => { resetRun(); setActiveProductId(null); }}
-                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 bg-gray-100 dark:bg-gray-700 rounded-md transition"
-              >
-                <X size={12} /> Cerrar
-              </button>
-            )}
+            <div className="flex items-center gap-2">
+              {effRunning && typeof onCancel === 'function' && (
+                <button
+                  onClick={() => { if (window.confirm('¿Cancelar el análisis en curso?')) onCancel(); }}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-red-700 dark:text-red-300 bg-white dark:bg-gray-700 border border-red-200 dark:border-red-800 hover:bg-red-50 rounded-md transition"
+                >
+                  <X size={12} /> Cancelar análisis
+                </button>
+              )}
+              {!effRunning && Object.keys(effLiveOutputs).length > 0 && (
+                <button
+                  onClick={() => {
+                    if (typeof onDismiss === 'function') onDismiss();
+                    resetRun();
+                    setActiveProductId(null);
+                  }}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 bg-gray-100 dark:bg-gray-700 rounded-md transition"
+                >
+                  <X size={12} /> Cerrar
+                </button>
+              )}
+            </div>
           </div>
-          {infoMsg && !errorMsg && (
+          {effInfoMsg && !effErrorMsg && (
             <div className="mb-3 p-2.5 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-xs text-blue-800 dark:text-blue-200">
-              {infoMsg}
+              {effInfoMsg}
             </div>
           )}
-          {errorMsg && (
+          {effErrorMsg && (
             <div className="mb-3 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex items-start gap-2">
               <AlertTriangle size={16} className="text-red-600 shrink-0 mt-0.5" />
-              <p className="text-xs text-red-800 dark:text-red-200">{errorMsg}</p>
+              <p className="text-xs text-red-800 dark:text-red-200">{effErrorMsg}</p>
             </div>
           )}
 
           {/* Progress bar global */}
           {(() => {
-            const doneCount = STEPS.filter(s => stepStatus[s.key] === 'done').length;
+            const doneCount = STEPS.filter(s => effStepStatus[s.key] === 'done').length;
             const totalSteps = STEPS.length;
             const pct = Math.round((doneCount / totalSteps) * 100);
-            const mm = String(Math.floor(elapsedSec / 60)).padStart(2, '0');
-            const ss = String(elapsedSec % 60).padStart(2, '0');
-            const etaRemainingSec = Math.max(0, TOTAL_ETA_SEC - elapsedSec);
+            const mm = String(Math.floor(effElapsedSec / 60)).padStart(2, '0');
+            const ss = String(effElapsedSec % 60).padStart(2, '0');
+            const etaRemainingSec = Math.max(0, TOTAL_ETA_SEC - effElapsedSec);
             const etaMM = String(Math.floor(etaRemainingSec / 60)).padStart(2, '0');
             const etaSS = String(etaRemainingSec % 60).padStart(2, '0');
-            const currentIdx = STEPS.findIndex(s => s.key === currentStep);
+            const currentIdx = STEPS.findIndex(s => s.key === effCurrentStep);
             const currentStepLabel = currentIdx >= 0 ? STEPS[currentIdx].label : 'Preparando…';
             return (
               <div className="mb-4 p-4 rounded-xl bg-gradient-to-br from-purple-50 to-violet-50 dark:from-purple-900/20 dark:to-violet-900/20 border border-purple-200 dark:border-purple-800">
@@ -380,7 +442,7 @@ export default function MarketingSection({ addToast }) {
                     </p>
                     <p className="text-[11px] text-purple-700 dark:text-purple-300 mt-0.5">
                       Tiempo: {mm}:{ss}
-                      {running && etaRemainingSec > 0 && <> · ~{etaMM}:{etaSS} restante</>}
+                      {effRunning && etaRemainingSec > 0 && <> · ~{etaMM}:{etaSS} restante</>}
                     </p>
                   </div>
                   <p className="text-2xl font-bold text-purple-900 dark:text-purple-100 tabular-nums">{pct}%</p>
@@ -398,8 +460,8 @@ export default function MarketingSection({ addToast }) {
           {/* Stepper con bullets detallados */}
           <div className="space-y-2">
             {STEPS.map(s => {
-              const status = stepStatus[s.key] || 'pending';
-              const content = liveOutputs[s.key];
+              const status = effStepStatus[s.key] || 'pending';
+              const content = effLiveOutputs[s.key];
               const isOpen = !!content;
               const isRunning = status === 'running';
               const activeBullet = isRunning && s.bullets && s.bullets.length > 0

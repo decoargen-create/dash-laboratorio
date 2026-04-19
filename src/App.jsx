@@ -1174,6 +1174,95 @@ function MetaConexionSection() {
   );
 }
 
+// Pill flotante que muestra el progreso del análisis de marketing en curso.
+// Se renderiza arriba a la derecha del main cuando hay un bgAnalysis activo.
+// Siempre visible (incluso si navegás a otra plataforma/sección) para poder
+// ver progreso y cancelar en un click.
+function BgAnalysisPill({ analysis, onView, onCancel, onDismiss }) {
+  if (!analysis) return null;
+  const { productoNombre, currentStep, stepStatus, elapsedSec, status, errorMsg } = analysis;
+
+  // Misma definición de STEPS que Marketing.jsx para el contador de progreso.
+  const TOTAL = 5;
+  const doneCount = Object.values(stepStatus || {}).filter(v => v === 'done').length;
+  const pct = Math.round((doneCount / TOTAL) * 100);
+  const mm = String(Math.floor((elapsedSec || 0) / 60)).padStart(2, '0');
+  const ss = String((elapsedSec || 0) % 60).padStart(2, '0');
+
+  const stepLabels = {
+    research: 'Research Doc',
+    avatar: 'Avatar Sheet',
+    offerBrief: 'Offer Brief',
+    beliefs: 'Creencias',
+    resumenEjecutivo: 'Resumen ejecutivo',
+  };
+  const currentLabel = stepLabels[currentStep] || (status === 'done' ? 'Completado' : status === 'error' ? 'Error' : status === 'cancelled' ? 'Cancelado' : 'Preparando…');
+
+  const isRunning = status === 'running';
+  const isDone = status === 'done';
+  const isError = status === 'error';
+  const isCancelled = status === 'cancelled';
+
+  const borderColor = isError ? 'border-red-400 dark:border-red-600' :
+                      isDone ? 'border-emerald-400 dark:border-emerald-600' :
+                      isCancelled ? 'border-gray-300 dark:border-gray-600' :
+                      'border-purple-400 dark:border-purple-600';
+
+  return (
+    <div className={`fixed top-4 right-4 z-50 w-80 bg-white dark:bg-gray-800 border-2 ${borderColor} rounded-xl shadow-2xl overflow-hidden animate-fade-in-up`}>
+      <div className="p-3">
+        <div className="flex items-start gap-2 mb-2">
+          <div className="shrink-0 w-8 h-8 rounded-lg bg-gradient-to-br from-purple-600 to-violet-500 flex items-center justify-center">
+            {isRunning ? <Loader2 size={14} className="text-white animate-spin" /> :
+             isDone ? <Check size={14} className="text-white" /> :
+             isError ? <AlertCircle size={14} className="text-white" /> :
+             <Sparkles size={14} className="text-white" />}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider leading-none">Marketing · Análisis</p>
+            <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate mt-0.5">{productoNombre}</p>
+          </div>
+          {(isDone || isError || isCancelled) && (
+            <button onClick={onDismiss} className="shrink-0 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition" title="Cerrar">
+              <X size={14} />
+            </button>
+          )}
+        </div>
+        <div className="flex items-center justify-between text-[11px] text-gray-600 dark:text-gray-300 mb-1.5">
+          <span className="font-semibold">{currentLabel}</span>
+          <span className="tabular-nums">{mm}:{ss} · {pct}%</span>
+        </div>
+        <div className="h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all duration-500 ${isError ? 'bg-red-500' : isCancelled ? 'bg-gray-400' : 'bg-gradient-to-r from-purple-600 to-violet-500'}`}
+            style={{ width: `${isDone ? 100 : pct}%` }}
+          />
+        </div>
+        {isError && errorMsg && (
+          <p className="text-[11px] text-red-600 dark:text-red-300 mt-2 line-clamp-2">{errorMsg}</p>
+        )}
+        <div className="flex items-center gap-1.5 mt-3">
+          <button
+            onClick={onView}
+            className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] font-bold text-white bg-gradient-to-br from-purple-600 to-violet-500 hover:from-purple-700 hover:to-violet-600 rounded-md transition"
+          >
+            Ver detalle
+          </button>
+          {isRunning && (
+            <button
+              onClick={() => { if (window.confirm('¿Cancelar el análisis en curso?')) onCancel(); }}
+              className="inline-flex items-center gap-1 px-2 py-1.5 text-[11px] font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 hover:bg-red-50 hover:text-red-600 hover:border-red-200 rounded-md transition"
+              title="Cancelar"
+            >
+              <X size={11} /> Cancelar
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AppShell({ onExit }) {
   const [state, dispatch] = useReducer(appReducer, undefined, loadPersistedState);
 
@@ -1240,6 +1329,138 @@ function AppShell({ onExit }) {
     const id = Date.now() + Math.random();
     setToasts(prev => [...prev, { id, ...toast }]);
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), toast.duration || 3500);
+  };
+
+  // --------- Background analysis del módulo Marketing ---------
+  // Vive a nivel del AppShell (no dentro de MarketingSection) para que siga
+  // corriendo cuando el user navega a otra sección / plataforma. La pill
+  // flotante se renderiza en el main para que sea visible desde cualquier
+  // contexto.
+  const [bgAnalysis, setBgAnalysis] = useState(null);
+  // bgAnalysis = {
+  //   productoNombre, productoUrl, startedAt, currentStep, stepStatus,
+  //   liveOutputs, elapsedSec, tickerIdx, infoMsg, errorMsg,
+  //   ogImage, descripcion, status: 'running' | 'done' | 'error' | 'cancelled'
+  // }
+  const bgAbortRef = useRef(null);
+  const bgTickerRef = useRef(null);
+
+  const runMarketingAnalysis = async ({ productoNombre, productoUrl, onComplete }) => {
+    if (bgAnalysis && bgAnalysis.status === 'running') {
+      addToast({ type: 'error', message: 'Ya hay un análisis en curso. Cancelá ese primero.' });
+      return;
+    }
+    const controller = new AbortController();
+    bgAbortRef.current = controller;
+
+    const startedAt = Date.now();
+    setBgAnalysis({
+      productoNombre, productoUrl, startedAt,
+      currentStep: null, stepStatus: {}, liveOutputs: {},
+      elapsedSec: 0, tickerIdx: 0,
+      infoMsg: '', errorMsg: '',
+      ogImage: null, descripcion: '',
+      status: 'running',
+    });
+
+    // Ticker de tiempo + rotación de bullets.
+    if (bgTickerRef.current) clearInterval(bgTickerRef.current);
+    bgTickerRef.current = setInterval(() => {
+      setBgAnalysis(prev => {
+        if (!prev || prev.status !== 'running') return prev;
+        const elapsed = Math.round((Date.now() - prev.startedAt) / 1000);
+        return { ...prev, elapsedSec: elapsed, tickerIdx: (prev.tickerIdx + 1) % 10 };
+      });
+    }, 1000);
+
+    try {
+      const resp = await fetch('/api/marketing/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productoUrl, productoNombre }),
+        signal: controller.signal,
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${resp.status}`);
+      }
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      const outputs = { research: '', avatar: '', offerBrief: '', beliefs: '', resumenEjecutivo: '' };
+      let ogImage = null;
+      let descripcion = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.startsWith('data:')) continue;
+          const payload = line.substring(5).trim();
+          if (!payload) continue;
+          let ev;
+          try { ev = JSON.parse(payload); } catch { continue; }
+
+          if (ev.type === 'info') {
+            setBgAnalysis(prev => prev ? { ...prev, infoMsg: ev.message || '' } : prev);
+          } else if (ev.type === 'og-image') {
+            ogImage = ev.url || null;
+            setBgAnalysis(prev => prev ? { ...prev, ogImage: ev.url || null } : prev);
+          } else if (ev.type === 'step-start') {
+            setBgAnalysis(prev => prev ? {
+              ...prev, currentStep: ev.key,
+              stepStatus: { ...prev.stepStatus, [ev.key]: 'running' },
+            } : prev);
+          } else if (ev.type === 'step-done') {
+            outputs[ev.key] = ev.content || '';
+            setBgAnalysis(prev => prev ? {
+              ...prev,
+              stepStatus: { ...prev.stepStatus, [ev.key]: 'done' },
+              liveOutputs: { ...prev.liveOutputs, [ev.key]: ev.content || '' },
+            } : prev);
+          } else if (ev.type === 'complete') {
+            descripcion = ev.descripcion || '';
+            const finalOutputs = ev.outputs || outputs;
+            const finalOgImage = ev.ogImage || ogImage;
+            setBgAnalysis(prev => prev ? { ...prev, status: 'done', descripcion } : prev);
+            // Callback: Marketing.jsx lo usa para agregar el producto a la lista.
+            if (onComplete) onComplete({
+              productoNombre, productoUrl,
+              docs: finalOutputs,
+              descripcion,
+              ogImage: finalOgImage,
+              resumenEjecutivo: finalOutputs.resumenEjecutivo || '',
+            });
+            addToast({ type: 'success', message: `"${productoNombre}" — documentación lista` });
+          } else if (ev.type === 'error') {
+            setBgAnalysis(prev => prev ? { ...prev, status: 'error', errorMsg: ev.error || 'Error desconocido' } : prev);
+            addToast({ type: 'error', message: ev.error || 'Error en el análisis' });
+          }
+        }
+      }
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        setBgAnalysis(prev => prev ? { ...prev, status: 'cancelled' } : prev);
+        addToast({ type: 'info', message: 'Análisis cancelado' });
+      } else {
+        setBgAnalysis(prev => prev ? { ...prev, status: 'error', errorMsg: err.message } : prev);
+        addToast({ type: 'error', message: err.message });
+      }
+    } finally {
+      if (bgTickerRef.current) { clearInterval(bgTickerRef.current); bgTickerRef.current = null; }
+      bgAbortRef.current = null;
+    }
+  };
+
+  const cancelMarketingAnalysis = () => {
+    if (bgAbortRef.current) bgAbortRef.current.abort();
+  };
+
+  const dismissBgAnalysis = () => {
+    setBgAnalysis(null);
   };
   const [darkMode, setDarkMode] = useState(() => {
     if (typeof window === 'undefined') return false;
@@ -1782,6 +2003,16 @@ function AppShell({ onExit }) {
 
       {/* Main Content */}
       <main className="flex-1 overflow-auto relative">
+        {/* Pill flotante del análisis en bg: visible desde cualquier sección
+            cuando hay un análisis en curso. Click "Ver" → te lleva a Marketing. */}
+        {bgAnalysis && (
+          <BgAnalysisPill
+            analysis={bgAnalysis}
+            onView={() => { setCurrentPlatform('marketing'); setCurrentSection('mk-docs'); }}
+            onCancel={cancelMarketingAnalysis}
+            onDismiss={dismissBgAnalysis}
+          />
+        )}
         <StickyHeader
           title={getSectionTitle(currentUser, currentSection)}
           subtitle={`Bienvenido, ${currentUser.name}`}
@@ -1807,7 +2038,15 @@ function AppShell({ onExit }) {
           {currentUser.role === 'admin' && currentPlatform === 'viora' && currentSection === 'datos' && <DatosSection state={state} dispatch={dispatch} addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'senydrop' && currentSection === 'seny-productos' && <BocetosSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'metaads' && <MetaAdsPlaceholder section={currentSection} />}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-docs' && <MarketingSection addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-docs' && (
+            <MarketingSection
+              addToast={addToast}
+              bgAnalysis={bgAnalysis}
+              onStart={runMarketingAnalysis}
+              onCancel={cancelMarketingAnalysis}
+              onDismiss={dismissBgAnalysis}
+            />
+          )}
 
           {/* Mentor Views */}
           {currentUser.role === 'mentor' && currentSection === 'inicio' && <EquipoInicioSection currentUser={currentUser} state={state} />}

@@ -17,6 +17,7 @@ import {
   Package, Target, Play, Check, Loader2, AlertTriangle, ChevronRight,
   Plus, X, Sparkles, Link2, Search, Clock,
 } from 'lucide-react';
+import { ideaFromDeepAnalysis } from './bandejaStore.js';
 
 const PRODUCTOS_KEY = 'viora-marketing-productos-v1';
 const COMPETIDORES_KEY = 'viora-marketing-competidores-v1';
@@ -247,6 +248,8 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               },
             } : x
           ));
+          // Empuja la idea a la Bandeja automáticamente.
+          ideaFromDeepAnalysis({ analysis: data.analysis, transcript: data.transcript, ad, competidor: comp });
           analyzed++;
           updateStep(stepId, { detail: `${analyzed}/${winners.length} analizados` });
         } catch (err) {

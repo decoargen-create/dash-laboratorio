@@ -11,6 +11,7 @@ import {
   Target, Search, ChevronDown, AlertTriangle,
   Sparkles, Volume2,
 } from 'lucide-react';
+import { ideaFromDeepAnalysis } from './bandejaStore.js';
 
 const STORAGE_KEY = 'viora-marketing-competidores-v1';
 
@@ -249,8 +250,10 @@ export default function CompetenciaSection({ addToast }) {
           },
         } : c
       ));
+      // Empuja la idea a la Bandeja (dedupea por adId — no duplica si ya existía).
+      ideaFromDeepAnalysis({ analysis: data.analysis, transcript: data.transcript, ad, competidor: comp });
       setDeepOpen({ compId: comp.id, adId: ad.id });
-      addToast?.({ type: 'success', message: 'Análisis profundo listo' });
+      addToast?.({ type: 'success', message: 'Análisis profundo listo · idea agregada a la Bandeja' });
     } catch (err) {
       addToast?.({ type: 'error', message: `No pude analizar: ${err.message}` });
     } finally {

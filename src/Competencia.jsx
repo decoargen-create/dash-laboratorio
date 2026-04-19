@@ -147,25 +147,69 @@ export default function CompetenciaSection({ addToast }) {
     if (expandedId === id) setExpandedId(null);
   };
 
-  const handleCheckAds = async (comp) => {
-    if (!comp.fbPageUrl && !comp.fbPageId) {
-      addToast?.({ type: 'error', message: 'Necesita Facebook Page URL o Page ID para consultar Ad Library' });
+  // Cache de ingesta: si un competidor tiene ads cacheados <6h, reutilizamos.
+  // El user puede forzar refresh con el botón secundario "Forzar".
+  const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 horas
+
+  const handleCheckAds = async (comp, { force = false } = {}) => {
+    if (!comp.fbPageUrl && !comp.landingUrl && !comp.nombre) {
+      addToast?.({ type: 'error', message: 'Este competidor no tiene suficiente info para buscar ads' });
       return;
     }
+
+    // Cache hit: devolvemos data existente si no está vencida.
+    if (!force && comp.lastAdsCheck) {
+      const age = Date.now() - new Date(comp.lastAdsCheck).getTime();
+      if (age < CACHE_TTL_MS && comp.ads && comp.ads.length > 0) {
+        const hoursLeft = Math.round((CACHE_TTL_MS - age) / 3600000 * 10) / 10;
+        addToast?.({ type: 'info', message: `Usando cache (${comp.ads.length} ads, fresco por ${hoursLeft}h más). Click "Forzar" para re-scrapear.` });
+        return;
+      }
+    }
+
     setCheckingId(comp.id);
     try {
-      const pageId = comp.fbPageId || comp.fbPageUrl;
-      const resp = await fetch('/api/meta/ad-library', {
+      // Determinamos el input del actor: preferimos fbPageUrl, sino landing, sino keyword.
+      const payload = {};
+      if (comp.fbPageUrl) {
+        payload.fbPageUrl = comp.fbPageUrl.startsWith('http')
+          ? comp.fbPageUrl
+          : `https://www.facebook.com/${comp.fbPageUrl.replace(/^\/+/, '')}`;
+      } else if (comp.landingUrl) {
+        // Extraemos hostname como keyword (mismo trick que el bookmarklet)
+        try {
+          const u = new URL(comp.landingUrl);
+          payload.searchKeyword = u.hostname.replace(/^www\./, '');
+        } catch {
+          payload.searchKeyword = comp.nombre;
+        }
+      } else {
+        payload.searchKeyword = comp.nombre;
+      }
+      payload.country = 'AR';
+      payload.limit = 50;
+
+      const resp = await fetch('/api/marketing/apify-ingest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pageId, searchTerms: !comp.fbPageId ? comp.nombre : undefined }),
+        body: JSON.stringify(payload),
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+
       setCompetidores(prev => prev.map(c =>
-        c.id === comp.id ? { ...c, ads: data.ads || [], lastAdsCheck: new Date().toISOString() } : c
+        c.id === comp.id ? {
+          ...c,
+          ads: data.ads || [],
+          adsTotal: data.total || 0,
+          winnersCount: data.winners || 0,
+          criteria: data.criteria || { days: 17, variants: 2 },
+          lastAdsCheck: new Date().toISOString(),
+        } : c
       ));
-      addToast?.({ type: 'success', message: `${data.ads?.length || 0} ads encontrados para ${comp.nombre}` });
+      const winners = data.winners || 0;
+      const total = data.total || 0;
+      addToast?.({ type: 'success', message: `${winners} ganadores de ${total} ads · ${comp.nombre}` });
     } catch (err) {
       addToast?.({ type: 'error', message: err.message });
     } finally {
@@ -177,9 +221,24 @@ export default function CompetenciaSection({ addToast }) {
     setCompetidores(prev => prev.map(c => c.id === id ? { ...c, notas } : c));
   };
 
-  const topAds = (ads) => {
+  // Ganadores según el backend: isWinner = daysRunning >= 17 OR variantes >= 2.
+  // Fallback (ads viejos con shape previo sin isWinner): usar el criterio
+  // histórico (daysRunning >= 7) así no quedan invisibles.
+  const winnerAds = (ads) => {
     if (!Array.isArray(ads)) return [];
-    return ads.filter(a => (a.daysRunning || 0) >= 7).sort((a, b) => (b.daysRunning || 0) - (a.daysRunning || 0)).slice(0, 10);
+    const hasNewFlag = ads.some(a => typeof a.isWinner === 'boolean');
+    const filtered = hasNewFlag
+      ? ads.filter(a => a.isWinner)
+      : ads.filter(a => (a.daysRunning || 0) >= 17 || (a.variantes || 0) >= 2);
+    return filtered.sort((a, b) => (b.score || b.daysRunning || 0) - (a.score || a.daysRunning || 0)).slice(0, 15);
+  };
+
+  // Los video URLs de Meta CDN expiran en ~24h. Si los tenemos >12h sin
+  // procesar, advertimos al user para que los transcriba antes que se caigan.
+  const hasExpiringVideos = (comp) => {
+    if (!comp.lastAdsCheck) return false;
+    const hoursOld = (Date.now() - new Date(comp.lastAdsCheck).getTime()) / 3600000;
+    return hoursOld >= 12 && (comp.ads || []).some(a => (a.videoUrls || []).length > 0);
   };
 
   return (
@@ -288,7 +347,8 @@ export default function CompetenciaSection({ addToast }) {
           {competidores.map(c => {
             const isExpanded = expandedId === c.id;
             const isChecking = checkingId === c.id;
-            const top = topAds(c.ads);
+            const top = winnerAds(c.ads);
+            const videoWarning = hasExpiringVideos(c);
             return (
               <div key={c.id} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm overflow-hidden">
                 {/* Header del competidor */}
@@ -346,12 +406,18 @@ export default function CompetenciaSection({ addToast }) {
                           </a>
                         );
                       })()}
-                      {/* Solo visible si Meta OAuth está conectado: consulta la API automáticamente */}
-                      {metaConn.connected && (
-                        <button onClick={() => handleCheckAds(c)} disabled={isChecking}
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-white bg-purple-600 rounded-md hover:bg-purple-700 transition disabled:opacity-40"
-                          title="Trae los ads automáticamente usando Meta Marketing API">
-                          {isChecking ? <><Loader2 size={12} className="animate-spin" /> Buscando…</> : <><Search size={12} /> Traer ads (auto)</>}
+                      {/* Traer ads vía Apify (no requiere Meta OAuth). Usa cache 6h automáticamente. */}
+                      <button onClick={() => handleCheckAds(c)} disabled={isChecking}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-white bg-purple-600 rounded-md hover:bg-purple-700 transition disabled:opacity-40"
+                        title="Trae los ads automáticamente vía Apify. Si fue scrapeado hace <6h usa cache.">
+                        {isChecking ? <><Loader2 size={12} className="animate-spin" /> Buscando…</> : <><Search size={12} /> Traer ads</>}
+                      </button>
+                      {/* Forzar refresh: ignora el cache de 6h */}
+                      {c.ads?.length > 0 && (
+                        <button onClick={() => handleCheckAds(c, { force: true })} disabled={isChecking}
+                          className="inline-flex items-center gap-1 px-2 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 transition disabled:opacity-40"
+                          title="Ignora el cache y re-scrapea ahora (consume 1 run de Apify)">
+                          <RefreshCw size={12} /> Forzar
                         </button>
                       )}
                       <button onClick={() => handleDelete(c.id)}
@@ -372,28 +438,66 @@ export default function CompetenciaSection({ addToast }) {
                       />
                     </div>
 
+                    {/* Warning de videos expirando (Meta CDN 24h) */}
+                    {videoWarning && (
+                      <div className="mx-4 mt-3 p-2.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-800 rounded-md flex items-start gap-2">
+                        <AlertTriangle size={14} className="text-amber-600 shrink-0 mt-0.5" />
+                        <p className="text-[11px] text-amber-900 dark:text-amber-200 leading-snug">
+                          <strong>Videos a punto de expirar</strong> — los URLs de Meta CDN expiran a las 24h del scrape. Si querés transcribir con Whisper, hacelo ahora o <button onClick={() => handleCheckAds(c, { force: true })} className="underline font-semibold">forzar refresh</button>.
+                        </p>
+                      </div>
+                    )}
+
                     {/* Ads top (ganadores) */}
                     <div className="px-4 py-3">
                       {top.length > 0 ? (
                         <>
-                          <h4 className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-2">
-                            🔥 Top ads (por días corriendo) · {top.length} de {c.ads?.length || 0}
-                          </h4>
+                          <div className="flex items-center justify-between mb-2 flex-wrap gap-1">
+                            <h4 className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
+                              🔥 Ganadores · {top.length} de {c.ads?.length || 0}
+                            </h4>
+                            <span className="text-[10px] text-gray-400 italic">
+                              criterio: ≥17d o ≥2 variantes
+                            </span>
+                          </div>
                           <div className="space-y-2">
                             {top.map((ad, idx) => (
                               <div key={ad.id || idx} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3">
                                 <div className="flex items-start gap-3">
                                   <div className="flex-1 min-w-0">
                                     <p className="text-xs text-gray-800 dark:text-gray-200 leading-relaxed">
-                                      {(ad.bodies?.[0] || '(sin copy)').slice(0, 300)}
-                                      {(ad.bodies?.[0] || '').length > 300 && '…'}
+                                      {(ad.body || ad.bodies?.[0] || '(sin copy)').slice(0, 300)}
+                                      {(ad.body || ad.bodies?.[0] || '').length > 300 && '…'}
                                     </p>
-                                    {ad.titles?.[0] && (
-                                      <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1 font-semibold">{ad.titles[0]}</p>
+                                    {(ad.headline || ad.titles?.[0]) && (
+                                      <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1 font-semibold">{ad.headline || ad.titles[0]}</p>
                                     )}
+                                    {/* Badges */}
+                                    <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                                      {ad.isWinner && (
+                                        <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded">
+                                          🏆 Winner
+                                        </span>
+                                      )}
+                                      {typeof ad.score === 'number' && (
+                                        <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-mono bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded">
+                                          score {ad.score}
+                                        </span>
+                                      )}
+                                      {(ad.variantes || 0) > 0 && (
+                                        <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-semibold bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 rounded">
+                                          {ad.variantes} variante{ad.variantes > 1 ? 's' : ''}
+                                        </span>
+                                      )}
+                                      {(ad.videoUrls?.length > 0) && (
+                                        <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-semibold bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded">
+                                          🎬 video
+                                        </span>
+                                      )}
+                                    </div>
                                   </div>
                                   <div className="shrink-0 text-right">
-                                    <p className={`text-sm font-bold tabular-nums ${(ad.daysRunning || 0) >= 30 ? 'text-emerald-600' : (ad.daysRunning || 0) >= 14 ? 'text-amber-600' : 'text-gray-600'}`}>
+                                    <p className={`text-sm font-bold tabular-nums ${(ad.daysRunning || 0) >= 30 ? 'text-emerald-600' : (ad.daysRunning || 0) >= 17 ? 'text-amber-600' : 'text-gray-600'}`}>
                                       {ad.daysRunning || 0}d
                                     </p>
                                     <p className="text-[9px] text-gray-400 uppercase">corriendo</p>
@@ -418,15 +522,15 @@ export default function CompetenciaSection({ addToast }) {
                         </>
                       ) : c.ads?.length > 0 ? (
                         <p className="text-xs text-gray-500 dark:text-gray-400 italic">
-                          {c.ads.length} ads encontrados, pero ninguno con 7+ días corriendo todavía.
+                          {c.ads.length} ads encontrados, pero ninguno cumple el criterio de ganador (≥17d o ≥2 variantes).
                         </p>
                       ) : c.lastAdsCheck ? (
                         <p className="text-xs text-gray-500 dark:text-gray-400 italic">
-                          No se encontraron ads activos para esta página. Verificá el Facebook Page URL o probá con el Page ID.
+                          No se encontraron ads activos. Verificá el URL de la landing o probá con el Facebook Page URL directo.
                         </p>
                       ) : (
                         <p className="text-xs text-gray-500 dark:text-gray-400 italic">
-                          Clickeá "Actualizar ads" para buscar en Ad Library (necesita Meta OAuth conectado).
+                          Click en "Traer ads" para buscar vía Apify (scrapea Meta Ad Library automáticamente).
                         </p>
                       )}
                     </div>

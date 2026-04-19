@@ -13,7 +13,7 @@
 //   APIFY_TOKEN           — obligatoria
 //   APIFY_ACTOR_ID        — opcional (default: apify/facebook-ads-scraper)
 
-import { runActorSync, normalizeAd, scoreAd, buildAdLibraryUrl } from './_apify.js';
+import { runActorSync, normalizeAd, scoreAd, buildAdLibraryUrl, WINNER_CRITERIA } from './_apify.js';
 
 const DEFAULT_ACTOR = 'apify/facebook-ads-scraper';
 
@@ -93,20 +93,22 @@ export default async function handler(req, res) {
       byPage.get(ad.pageId).push(ad);
     }
 
-    // Calcular score — stripeamos _raw antes de mandar al front (es pesado)
+    // Calcular score — stripeamos _raw antes de mandar al front (es pesado).
+    // scoreAd ahora devuelve { score, variantes, isWinner }.
     const scored = normalized.map(ad => {
       const sameGroup = byPage.get(ad.pageId) || [];
       const { _raw, ...clean } = ad;
-      return { ...clean, score: scoreAd(ad, sameGroup) };
+      const scoring = scoreAd(ad, sameGroup);
+      return { ...clean, ...scoring };
     });
     scored.sort((a, b) => b.score - a.score);
 
-    // Ganador confirmado: score ≥ 35 (≈ 30 días corriendo o 7+ días multiplatform con variantes)
-    const winnersCount = scored.filter(a => a.score >= 35).length;
+    const winnersCount = scored.filter(a => a.isWinner).length;
 
     return respondJSON(res, 200, {
       total: scored.length,
       winners: winnersCount,
+      criteria: WINNER_CRITERIA, // { days: 17, variants: 2 }
       generatedAt: new Date().toISOString(),
       source: { actor: actorId, input: { fbPageUrl, searchKeyword, country, limit } },
       ads: scored,

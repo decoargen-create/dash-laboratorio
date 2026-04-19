@@ -143,6 +143,13 @@ function similarBodies(a, b) {
 //  - variantes (están iterando = están escalando)
 //  - pageLikeCount (marca con tracción)
 //  - penalty si pausado temprano
+//
+// Threshold de "isWinner" (según criterio del user):
+//   daysRunning >= 17  ó  variantes >= 2
+// Un ad con esos dos disparadores se marca como ganador confirmado.
+const WINNER_DAYS_THRESHOLD = 17;
+const WINNER_VARIANTS_THRESHOLD = 2;
+
 export function scoreAd(ad, allAdsOfSamePage = []) {
   let score = ad.daysRunning || 0;
   if (ad.isMultiplatform) score += 20;
@@ -158,8 +165,20 @@ export function scoreAd(ad, allAdsOfSamePage = []) {
   // Penalty si parece loser: pausado muy rápido.
   if (ad.daysRunning > 0 && ad.daysRunning < 5) score *= 0.5;
 
-  return Math.round(score * 10) / 10;
+  const isWinner = (ad.daysRunning || 0) >= WINNER_DAYS_THRESHOLD ||
+                   variantes >= WINNER_VARIANTS_THRESHOLD;
+
+  return {
+    score: Math.round(score * 10) / 10,
+    variantes,
+    isWinner,
+  };
 }
+
+export const WINNER_CRITERIA = {
+  days: WINNER_DAYS_THRESHOLD,
+  variants: WINNER_VARIANTS_THRESHOLD,
+};
 
 // Genera el startUrl de Meta Ad Library para un search por keyword.
 // Replica el formato del bookmarklet del user.

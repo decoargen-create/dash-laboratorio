@@ -49,20 +49,37 @@ export default function BandejaSection({ addToast }) {
 
   // Columnas custom del kanban por producto — Trello-like.
   // Las 4 columnas base (pendiente, en_uso, usada, archivada) siempre existen.
-  // El user puede agregar columnas extra después de las base.
+  // El user puede agregar columnas extra Y renombrar las base (persistidas).
   const customColsKey = activeProductoId ? `viora-kanban-cols-${activeProductoId}` : null;
+  const baseTitlesKey = activeProductoId ? `viora-kanban-base-titles-${activeProductoId}` : null;
+  const DEFAULT_BASE_TITLES = { pendiente: 'Pendientes', en_uso: 'En uso', usada: 'Usadas', archivada: 'Archivadas' };
   const [customColumns, setCustomColumns] = useState(() => {
     if (!customColsKey) return [];
     try { const r = localStorage.getItem(customColsKey); return r ? JSON.parse(r) : []; } catch { return []; }
   });
+  const [baseTitles, setBaseTitles] = useState(() => {
+    if (!baseTitlesKey) return DEFAULT_BASE_TITLES;
+    try { const r = localStorage.getItem(baseTitlesKey); return r ? { ...DEFAULT_BASE_TITLES, ...JSON.parse(r) } : DEFAULT_BASE_TITLES; } catch { return DEFAULT_BASE_TITLES; }
+  });
   useEffect(() => {
     if (customColsKey) try { localStorage.setItem(customColsKey, JSON.stringify(customColumns)); } catch {}
   }, [customColumns, customColsKey]);
-  // Reset custom columns when switching product.
   useEffect(() => {
-    if (!customColsKey) { setCustomColumns([]); return; }
+    if (baseTitlesKey) try { localStorage.setItem(baseTitlesKey, JSON.stringify(baseTitles)); } catch {}
+  }, [baseTitles, baseTitlesKey]);
+  // Reset both when switching product.
+  useEffect(() => {
+    if (!customColsKey) { setCustomColumns([]); setBaseTitles(DEFAULT_BASE_TITLES); return; }
     try { const r = localStorage.getItem(customColsKey); setCustomColumns(r ? JSON.parse(r) : []); } catch { setCustomColumns([]); }
-  }, [customColsKey]);
+    try { const r = localStorage.getItem(baseTitlesKey); setBaseTitles(r ? { ...DEFAULT_BASE_TITLES, ...JSON.parse(r) } : DEFAULT_BASE_TITLES); } catch { setBaseTitles(DEFAULT_BASE_TITLES); }
+  }, [customColsKey, baseTitlesKey]);
+
+  const renameBaseColumn = (key) => {
+    const currentName = baseTitles[key] || DEFAULT_BASE_TITLES[key];
+    const name = window.prompt(`Nuevo nombre para "${currentName}":`, currentName);
+    if (!name?.trim()) return;
+    setBaseTitles(prev => ({ ...prev, [key]: name.trim() }));
+  };
 
   const addCustomColumn = () => {
     const name = window.prompt('Nombre de la nueva columna:');
@@ -110,6 +127,8 @@ export default function BandejaSection({ addToast }) {
   const [query, setQuery] = useState('');
   const [editandoNotasId, setEditandoNotasId] = useState(null);
   const [notasDraft, setNotasDraft] = useState('');
+  const [editandoGuionId, setEditandoGuionId] = useState(null);
+  const [guionDraft, setGuionDraft] = useState('');
   const [selected, setSelected] = useState(() => new Set());
 
   // Re-sincronizar cuando otras secciones agregan ideas (event storage no es
@@ -351,6 +370,12 @@ export default function BandejaSection({ addToast }) {
     setNotasDraft('');
   };
 
+  const guardarGuion = (id) => {
+    setIdeas(updateIdea(id, { guion: guionDraft }));
+    setEditandoGuionId(null);
+    setGuionDraft('');
+  };
+
   // Pre-filtro por producto activo — nunca mezclamos ideas entre productos.
   // Si activeProductoId === SIN_PRODUCTO_ID, mostramos solo ideas sin productoId
   // (legacy, de antes de que guardáramos el productoId en cada idea).
@@ -527,24 +552,28 @@ export default function BandejaSection({ addToast }) {
       ) : (
         <div className="flex gap-3 overflow-x-auto pb-2" style={{ minHeight: '200px' }}>
           <div className="min-w-[220px] max-w-[280px] flex-shrink-0 flex-1">
-            <KanbanColumn estado="pendiente" titulo="Pendientes" color="gray" accent
+            <KanbanColumn estado="pendiente" titulo={baseTitles.pendiente} color="gray" accent
               ideas={byEstado.pendiente} selected={selected} onToggleSelect={toggleSelect}
-              onCardClick={(id) => setExpandedId(id)} onDropIdea={(id) => moveToBaseColumn(id, 'pendiente')} />
+              onCardClick={(id) => setExpandedId(id)} onDropIdea={(id) => moveToBaseColumn(id, 'pendiente')}
+              onRename={() => renameBaseColumn('pendiente')} />
           </div>
           <div className="min-w-[220px] max-w-[280px] flex-shrink-0 flex-1">
-            <KanbanColumn estado="en_uso" titulo="En uso" color="amber"
+            <KanbanColumn estado="en_uso" titulo={baseTitles.en_uso} color="amber"
               ideas={byEstado.en_uso} selected={selected} onToggleSelect={toggleSelect}
-              onCardClick={(id) => setExpandedId(id)} onDropIdea={(id) => moveToBaseColumn(id, 'en_uso')} />
+              onCardClick={(id) => setExpandedId(id)} onDropIdea={(id) => moveToBaseColumn(id, 'en_uso')}
+              onRename={() => renameBaseColumn('en_uso')} />
           </div>
           <div className="min-w-[220px] max-w-[280px] flex-shrink-0 flex-1">
-            <KanbanColumn estado="usada" titulo="Usadas" color="emerald"
+            <KanbanColumn estado="usada" titulo={baseTitles.usada} color="emerald"
               ideas={byEstado.usada} selected={selected} onToggleSelect={toggleSelect}
-              onCardClick={(id) => setExpandedId(id)} onDropIdea={(id) => moveToBaseColumn(id, 'usada')} />
+              onCardClick={(id) => setExpandedId(id)} onDropIdea={(id) => moveToBaseColumn(id, 'usada')}
+              onRename={() => renameBaseColumn('usada')} />
           </div>
           <div className="min-w-[220px] max-w-[280px] flex-shrink-0 flex-1">
-            <KanbanColumn estado="archivada" titulo="Archivadas" color="slate"
+            <KanbanColumn estado="archivada" titulo={baseTitles.archivada} color="slate"
               ideas={byEstado.archivada} selected={selected} onToggleSelect={toggleSelect}
-              onCardClick={(id) => setExpandedId(id)} onDropIdea={(id) => moveToBaseColumn(id, 'archivada')} />
+              onCardClick={(id) => setExpandedId(id)} onDropIdea={(id) => moveToBaseColumn(id, 'archivada')}
+              onRename={() => renameBaseColumn('archivada')} />
           </div>
           {customColumns.map(cc => (
             <div key={cc.id} className="min-w-[220px] max-w-[280px] flex-shrink-0 flex-1">
@@ -585,6 +614,12 @@ export default function BandejaSection({ addToast }) {
           setNotasDraft={setNotasDraft}
           onSaveNotas={() => guardarNotas(ideaDetalle.id)}
           onCancelNotas={() => { setEditandoNotasId(null); setNotasDraft(''); }}
+          editandoGuion={editandoGuionId === ideaDetalle.id}
+          onEditGuion={() => { setEditandoGuionId(ideaDetalle.id); setGuionDraft(ideaDetalle.guion || ''); }}
+          guionDraft={guionDraft}
+          setGuionDraft={setGuionDraft}
+          onSaveGuion={() => guardarGuion(ideaDetalle.id)}
+          onCancelGuion={() => { setEditandoGuionId(null); setGuionDraft(''); }}
           isSelected={selected.has(ideaDetalle.id)}
           onToggleSelect={() => toggleSelect(ideaDetalle.id)}
           onFetchPerformance={() => fetchPerformance(ideaDetalle)}
@@ -611,6 +646,7 @@ function CounterCard({ label, value, color, accent = false }) {
 function IdeaCard({
   idea, expanded, onToggle, onEstado, onRemove,
   editandoNotas, onEditNotas, notasDraft, setNotasDraft, onSaveNotas, onCancelNotas,
+  editandoGuion, onEditGuion, guionDraft, setGuionDraft, onSaveGuion, onCancelGuion,
   isSelected, onToggleSelect, onFetchPerformance,
 }) {
   const tipo = TIPO_META[idea.tipo] || TIPO_META.desde_cero;
@@ -702,9 +738,22 @@ function IdeaCard({
             )}
           </div>
 
-          <p className={`text-sm font-semibold ${usada ? 'text-gray-500 dark:text-gray-400 line-through' : 'text-gray-900 dark:text-gray-100'}`}>
-            {idea.titulo}
-          </p>
+          {idea.hook ? (
+            <>
+              <p className={`text-sm font-bold leading-snug ${usada ? 'text-gray-500 dark:text-gray-400 line-through' : 'text-gray-900 dark:text-gray-100'}`}>
+                "{idea.hook}"
+              </p>
+              {idea.titulo && (
+                <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 uppercase tracking-wider">
+                  Concepto: {idea.titulo}
+                </p>
+              )}
+            </>
+          ) : (
+            <p className={`text-sm font-semibold ${usada ? 'text-gray-500 dark:text-gray-400 line-through' : 'text-gray-900 dark:text-gray-100'}`}>
+              {idea.titulo}
+            </p>
+          )}
           {idea.angulo && !expanded && (
             <p className="text-[11px] text-gray-600 dark:text-gray-400 line-clamp-2 mt-0.5">
               {idea.angulo}
@@ -771,13 +820,40 @@ function IdeaCard({
                 </div>
               )}
 
-              {idea.guion && !/^n\/?a/i.test(idea.guion.trim()) && (
-                <details open={idea.formato === 'video'} className="bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700">
-                  <summary className="cursor-pointer px-3 py-2 text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
-                    🎬 Guión {idea.formato === 'video' ? '(beats + VO)' : ''}
-                  </summary>
-                  <p className="px-3 pb-3 text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{idea.guion}</p>
-                </details>
+              {(idea.guion || editandoGuion) && !/^n\/?a/i.test((idea.guion || '').trim()) && (
+                <div className="bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700">
+                  <div className="flex items-center justify-between px-3 py-2">
+                    <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
+                      🎬 Guión {idea.formato === 'video' ? '(beats + VO, porteño)' : '(porteño)'}
+                    </p>
+                    {!editandoGuion && onEditGuion && (
+                      <button onClick={onEditGuion}
+                        className="inline-flex items-center gap-1 text-[10px] text-fuchsia-600 hover:text-fuchsia-700 transition">
+                        <Edit3 size={10} /> Editar
+                      </button>
+                    )}
+                  </div>
+                  {editandoGuion ? (
+                    <div className="px-3 pb-3 space-y-1.5">
+                      <textarea value={guionDraft} onChange={e => setGuionDraft(e.target.value)}
+                        rows={8}
+                        placeholder="Guión en porteño — editá beats, VO, acotaciones visuales…"
+                        className="w-full px-2.5 py-1.5 text-xs font-mono bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-md resize-y focus:outline-none focus:ring-2 focus:ring-fuchsia-500" />
+                      <div className="flex gap-1.5 justify-end">
+                        <button onClick={onCancelGuion}
+                          className="px-2.5 py-1 text-[10px] font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 transition">
+                          Cancelar
+                        </button>
+                        <button onClick={onSaveGuion}
+                          className="px-2.5 py-1 text-[10px] font-bold text-white bg-fuchsia-600 rounded hover:bg-fuchsia-700 transition">
+                          Guardar
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="px-3 pb-3 text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{idea.guion}</p>
+                  )}
+                </div>
               )}
             </div>
 
@@ -1207,13 +1283,13 @@ function KanbanColumn({ estado, titulo, color, accent = false, isCustom = false,
       <div className={`px-3 py-2 border-b flex items-center justify-between gap-1 ${c.header} rounded-t-xl`}>
         <p className="text-[11px] font-bold uppercase tracking-wider truncate">{titulo}</p>
         <div className="flex items-center gap-1 shrink-0">
-          {isCustom && onRename && (
-            <button onClick={onRename} className="p-0.5 hover:text-violet-600 transition" title="Renombrar">
+          {onRename && (
+            <button onClick={onRename} className="p-0.5 opacity-60 hover:opacity-100 hover:text-violet-600 transition" title="Renombrar">
               <Pencil size={11} />
             </button>
           )}
           {isCustom && onDelete && (
-            <button onClick={onDelete} className="p-0.5 hover:text-red-600 transition" title="Eliminar columna">
+            <button onClick={onDelete} className="p-0.5 opacity-60 hover:opacity-100 hover:text-red-600 transition" title="Eliminar columna">
               <Trash2 size={11} />
             </button>
           )}
@@ -1297,8 +1373,8 @@ function KanbanCard({ idea, isSelected = false, onToggleSelect, onClick }) {
           </div>
         )}
         <div className="flex-1 min-w-0">
-          <p className="text-[11px] font-semibold text-gray-900 dark:text-gray-100 leading-tight line-clamp-2">
-            {idea.titulo}
+          <p className="text-[11px] font-bold text-gray-900 dark:text-gray-100 leading-tight line-clamp-3">
+            {idea.hook ? `"${idea.hook}"` : idea.titulo}
           </p>
           <div className="flex items-center gap-1 mt-1 flex-wrap">
             <span className={`inline-flex items-center px-1 py-0 text-[8px] font-bold rounded border ${tipo.color}`}>

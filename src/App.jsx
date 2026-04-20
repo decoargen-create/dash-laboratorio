@@ -19,6 +19,7 @@ import MetaConnectBanner from './MetaConnectBanner.jsx';
 import ArranqueSection from './Arranque.jsx';
 import BandejaSection from './Bandeja.jsx';
 import MetaAdsSection from './MetaAdsSection.jsx';
+import InspiracionSection from './InspiracionSection.jsx';
 import { generateCSV, downloadCSV, parseCSV, toNumber, toBool } from './csv.js';
 
 // Estados del pipeline de producción de una orden
@@ -1844,6 +1845,7 @@ function AppShell({ onExit }) {
               <NavItem icon={Inbox} label="Bandeja de ideas" section="mk-bandeja" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={Target} label="Competencia" section="mk-competencia" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={BarChart3} label="Meta Ads" section="mk-meta-ads" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              <NavItem icon={Sparkles} label="Inspiración" section="mk-inspiracion" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={FileText} label="Documentación" section="mk-docs" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={DollarSign} label="Gastos del stack" section="mk-gastos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
             </>
@@ -1910,6 +1912,7 @@ function AppShell({ onExit }) {
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-bandeja' && <BandejaSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-competencia' && <CompetenciaSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-meta-ads' && <MetaAdsSection addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-inspiracion' && <InspiracionSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-gastos' && <GastosStackSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-docs' && (
             <MarketingSection
@@ -7446,6 +7449,7 @@ function getSectionTitle(user, section) {
     'mk-docs': 'Marketing · Documentación de producto',
     'mk-competencia': 'Marketing · Competencia',
     'mk-meta-ads': 'Marketing · Meta Ads',
+    'mk-inspiracion': 'Marketing · Inspiración',
     'mk-gastos': 'Marketing · Gastos del stack',
   };
   const mentor = {

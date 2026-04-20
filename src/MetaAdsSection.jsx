@@ -13,7 +13,7 @@
 
 import React, { useState, useEffect } from 'react';
 import {
-  BarChart3, Package, ChevronRight, Inbox, ExternalLink, Image as ImageIcon, Play,
+  BarChart3, Package, ChevronRight, Inbox, ExternalLink, Image as ImageIcon, Play, Search,
 } from 'lucide-react';
 
 const PRODUCTOS_KEY = 'viora-marketing-productos-v1';
@@ -168,11 +168,38 @@ export default function MetaAdsSection({ addToast }) {
 // nombre, status/fatigue, badge de matching al producto, y link a FB.
 function AdsGrid({ metaAccount }) {
   const ads = metaAccount.ads || [];
+  const [matchFilter, setMatchFilter] = useState('all'); // 'all' | 'matched' | 'unmatched' | 'high'
+  const [fatigueFilter, setFatigueFilter] = useState('all'); // 'all' | 'healthy' | 'warming' | 'fatiguing' | 'dying'
+  const [query, setQuery] = useState('');
+  const [orderBy, setOrderBy] = useState('spend'); // 'spend' | 'roas' | 'ctr' | 'name'
 
   // Header de resumen
   const total = ads.length;
   const matched = ads.filter(a => a.productMatch).length;
   const matchedHigh = ads.filter(a => a.productMatch?.confidence === 'high').length;
+
+  // Aplicar filtros
+  let filtered = ads;
+  if (matchFilter === 'matched') filtered = filtered.filter(a => a.productMatch);
+  else if (matchFilter === 'unmatched') filtered = filtered.filter(a => !a.productMatch);
+  else if (matchFilter === 'high') filtered = filtered.filter(a => a.productMatch?.confidence === 'high');
+  if (fatigueFilter !== 'all') filtered = filtered.filter(a => (a.fatigue?.status || 'new') === fatigueFilter);
+  if (query.trim()) {
+    const q = query.toLowerCase();
+    filtered = filtered.filter(a => {
+      const hay = `${a.name || ''} ${a.creative?.title || ''} ${a.creative?.body || ''} ${a.campaign?.name || ''}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }
+
+  // Ordenamiento
+  filtered = [...filtered].sort((a, b) => {
+    if (orderBy === 'name') return (a.name || '').localeCompare(b.name || '');
+    if (orderBy === 'ctr') return (b.insights?.ctr || 0) - (a.insights?.ctr || 0);
+    if (orderBy === 'roas') return (b.insights?.roas || 0) - (a.insights?.roas || 0);
+    // default: spend
+    return (b.insights?.spend || 0) - (a.insights?.spend || 0);
+  });
 
   if (total === 0) {
     return (
@@ -213,10 +240,51 @@ function AdsGrid({ metaAccount }) {
         )}
       </div>
 
-      {/* Grilla de ads */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {ads.map(ad => <AdCard key={ad.id} ad={ad} />)}
+      {/* Filtros */}
+      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-3 flex flex-wrap gap-2 items-center">
+        <div className="relative flex-1 min-w-[180px]">
+          <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            type="text" value={query} onChange={e => setQuery(e.target.value)}
+            placeholder="Buscar por nombre, título, campaña…"
+            className="w-full pl-7 pr-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+        <select value={matchFilter} onChange={e => setMatchFilter(e.target.value)}
+          className="px-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md">
+          <option value="all">Match: todos</option>
+          <option value="matched">Solo matcheados</option>
+          <option value="high">Solo confidence "high"</option>
+          <option value="unmatched">Sin matchear</option>
+        </select>
+        <select value={fatigueFilter} onChange={e => setFatigueFilter(e.target.value)}
+          className="px-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md">
+          <option value="all">Estado: todos</option>
+          <option value="healthy">✅ Sanos</option>
+          <option value="warming">📈 Escalando</option>
+          <option value="fatiguing">🔻 Fatigando</option>
+          <option value="dying">💀 Muriendo</option>
+          <option value="new">🆕 Nuevos</option>
+        </select>
+        <select value={orderBy} onChange={e => setOrderBy(e.target.value)}
+          className="px-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md">
+          <option value="spend">Ordenar: gasto</option>
+          <option value="roas">Ordenar: ROAS</option>
+          <option value="ctr">Ordenar: CTR</option>
+          <option value="name">Ordenar: nombre</option>
+        </select>
       </div>
+
+      {/* Grilla de ads */}
+      {filtered.length === 0 ? (
+        <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-8 text-center text-xs text-gray-500 dark:text-gray-400">
+          Ningún ad coincide con el filtro actual.
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filtered.map(ad => <AdCard key={ad.id} ad={ad} />)}
+        </div>
+      )}
     </div>
   );
 }

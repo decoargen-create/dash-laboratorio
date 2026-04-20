@@ -16,6 +16,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Inbox, Search, Filter, ExternalLink, Trash2, Download, Package,
   ChevronDown, Check, Circle, CircleDot, Archive, Edit3, CheckSquare, Square, ChevronRight,
+  Plus, Pencil, GripVertical,
 } from 'lucide-react';
 import {
   loadIdeas, updateIdea, removeIdea, TIPO_META, ESTADO_META, VARIABLE_META, ANGULO_META, CAMPAÑA_META,
@@ -45,6 +46,64 @@ export default function BandejaSection({ addToast }) {
       else localStorage.removeItem(ACTIVE_PRODUCT_KEY);
     } catch {}
   }, [activeProductoId]);
+
+  // Columnas custom del kanban por producto — Trello-like.
+  // Las 4 columnas base (pendiente, en_uso, usada, archivada) siempre existen.
+  // El user puede agregar columnas extra después de las base.
+  const customColsKey = activeProductoId ? `viora-kanban-cols-${activeProductoId}` : null;
+  const [customColumns, setCustomColumns] = useState(() => {
+    if (!customColsKey) return [];
+    try { const r = localStorage.getItem(customColsKey); return r ? JSON.parse(r) : []; } catch { return []; }
+  });
+  useEffect(() => {
+    if (customColsKey) try { localStorage.setItem(customColsKey, JSON.stringify(customColumns)); } catch {}
+  }, [customColumns, customColsKey]);
+  // Reset custom columns when switching product.
+  useEffect(() => {
+    if (!customColsKey) { setCustomColumns([]); return; }
+    try { const r = localStorage.getItem(customColsKey); setCustomColumns(r ? JSON.parse(r) : []); } catch { setCustomColumns([]); }
+  }, [customColsKey]);
+
+  const addCustomColumn = () => {
+    const name = window.prompt('Nombre de la nueva columna:');
+    if (!name?.trim()) return;
+    const COLORS = ['violet', 'rose', 'sky', 'lime', 'orange', 'teal', 'indigo', 'pink'];
+    const color = COLORS[customColumns.length % COLORS.length];
+    setCustomColumns(prev => [...prev, { id: `col-${Date.now()}`, name: name.trim(), color }]);
+  };
+  const renameCustomColumn = (colId) => {
+    const col = customColumns.find(c => c.id === colId);
+    if (!col) return;
+    const name = window.prompt('Nuevo nombre:', col.name);
+    if (!name?.trim()) return;
+    setCustomColumns(prev => prev.map(c => c.id === colId ? { ...c, name: name.trim() } : c));
+  };
+  const removeCustomColumn = (colId) => {
+    if (!window.confirm('¿Eliminar esta columna? Las ideas que estén en ella vuelven a "Pendientes".')) return;
+    // Mover ideas de esa columna a pendiente.
+    const affectedIds = ideas.filter(i => i.customColumnId === colId).map(i => i.id);
+    for (const id of affectedIds) {
+      updateIdea(id, { customColumnId: null, estado: 'pendiente' });
+    }
+    setCustomColumns(prev => prev.filter(c => c.id !== colId));
+    setIdeas(loadIdeas());
+  };
+  const moveToCustomColumn = (ideaId, colId) => {
+    const list = updateIdea(ideaId, { customColumnId: colId });
+    setIdeas(list);
+    addToast?.({ type: 'success', message: `Idea movida` });
+  };
+  const moveToBaseColumn = (ideaId, estado) => {
+    const patch = { customColumnId: null, estado };
+    if (estado === 'usada') {
+      patch.usedAt = new Date().toISOString();
+      const adId = (window.prompt('¿Con qué ad ID de Meta la lanzaste? (opcional)') || '').trim();
+      if (adId) patch.launchedAsAdId = adId;
+    }
+    const list = updateIdea(ideaId, patch);
+    setIdeas(list);
+    addToast?.({ type: 'success', message: `Idea → ${ESTADO_META[estado]?.label || estado}` });
+  };
   const [expandedId, setExpandedId] = useState(null);
   const [filtroTipo, setFiltroTipo] = useState('all');
   const [filtroEstado, setFiltroEstado] = useState('active'); // 'all' | 'active' (pendiente + en_uso) | 'pendiente' | 'en_uso' | 'usada' | 'archivada'
@@ -344,16 +403,22 @@ export default function BandejaSection({ addToast }) {
     />;
   }
 
-  // Agrupar ideas por estado para el kanban — ya vienen ordenadas.
+  // Agrupar ideas: primero sacar las que están en columnas custom,
+  // el resto va a sus columnas base por estado.
   const byEstado = { pendiente: [], en_uso: [], usada: [], archivada: [] };
+  const byCustomCol = {};
+  for (const cc of customColumns) byCustomCol[cc.id] = [];
   for (const i of filtered) {
-    const e = i.estado in byEstado ? i.estado : 'pendiente';
-    byEstado[e].push(i);
+    if (i.customColumnId && byCustomCol[i.customColumnId]) {
+      byCustomCol[i.customColumnId].push(i);
+    } else {
+      const e = i.estado in byEstado ? i.estado : 'pendiente';
+      byEstado[e].push(i);
+    }
   }
-  // Dentro de cada columna, más recientes arriba.
-  for (const e of Object.keys(byEstado)) {
-    byEstado[e].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
-  }
+  const sortCol = (arr) => arr.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  for (const e of Object.keys(byEstado)) sortCol(byEstado[e]);
+  for (const cc of Object.keys(byCustomCol)) sortCol(byCustomCol[cc]);
 
   const ideaDetalle = expandedId ? ideas.find(i => i.id === expandedId) : null;
 
@@ -460,39 +525,49 @@ export default function BandejaSection({ addToast }) {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-          <KanbanColumn
-            estado="pendiente" titulo="Pendientes" color="gray" accent
-            ideas={byEstado.pendiente}
-            selected={selected}
-            onToggleSelect={toggleSelect}
-            onCardClick={(id) => setExpandedId(id)}
-            onDropIdea={(id) => setEstado(id, 'pendiente')}
-          />
-          <KanbanColumn
-            estado="en_uso" titulo="En uso" color="amber"
-            ideas={byEstado.en_uso}
-            selected={selected}
-            onToggleSelect={toggleSelect}
-            onCardClick={(id) => setExpandedId(id)}
-            onDropIdea={(id) => setEstado(id, 'en_uso')}
-          />
-          <KanbanColumn
-            estado="usada" titulo="Usadas" color="emerald"
-            ideas={byEstado.usada}
-            selected={selected}
-            onToggleSelect={toggleSelect}
-            onCardClick={(id) => setExpandedId(id)}
-            onDropIdea={(id) => setEstado(id, 'usada')}
-          />
-          <KanbanColumn
-            estado="archivada" titulo="Archivadas" color="slate"
-            ideas={byEstado.archivada}
-            selected={selected}
-            onToggleSelect={toggleSelect}
-            onCardClick={(id) => setExpandedId(id)}
-            onDropIdea={(id) => setEstado(id, 'archivada')}
-          />
+        <div className="flex gap-3 overflow-x-auto pb-2" style={{ minHeight: '200px' }}>
+          <div className="min-w-[220px] max-w-[280px] flex-shrink-0 flex-1">
+            <KanbanColumn estado="pendiente" titulo="Pendientes" color="gray" accent
+              ideas={byEstado.pendiente} selected={selected} onToggleSelect={toggleSelect}
+              onCardClick={(id) => setExpandedId(id)} onDropIdea={(id) => moveToBaseColumn(id, 'pendiente')} />
+          </div>
+          <div className="min-w-[220px] max-w-[280px] flex-shrink-0 flex-1">
+            <KanbanColumn estado="en_uso" titulo="En uso" color="amber"
+              ideas={byEstado.en_uso} selected={selected} onToggleSelect={toggleSelect}
+              onCardClick={(id) => setExpandedId(id)} onDropIdea={(id) => moveToBaseColumn(id, 'en_uso')} />
+          </div>
+          <div className="min-w-[220px] max-w-[280px] flex-shrink-0 flex-1">
+            <KanbanColumn estado="usada" titulo="Usadas" color="emerald"
+              ideas={byEstado.usada} selected={selected} onToggleSelect={toggleSelect}
+              onCardClick={(id) => setExpandedId(id)} onDropIdea={(id) => moveToBaseColumn(id, 'usada')} />
+          </div>
+          <div className="min-w-[220px] max-w-[280px] flex-shrink-0 flex-1">
+            <KanbanColumn estado="archivada" titulo="Archivadas" color="slate"
+              ideas={byEstado.archivada} selected={selected} onToggleSelect={toggleSelect}
+              onCardClick={(id) => setExpandedId(id)} onDropIdea={(id) => moveToBaseColumn(id, 'archivada')} />
+          </div>
+          {customColumns.map(cc => (
+            <div key={cc.id} className="min-w-[220px] max-w-[280px] flex-shrink-0 flex-1">
+              <KanbanColumn
+                estado={cc.id} titulo={cc.name} color={cc.color || 'violet'} isCustom
+                ideas={byCustomCol[cc.id] || []} selected={selected} onToggleSelect={toggleSelect}
+                onCardClick={(id) => setExpandedId(id)}
+                onDropIdea={(id) => moveToCustomColumn(id, cc.id)}
+                onRename={() => renameCustomColumn(cc.id)}
+                onDelete={() => removeCustomColumn(cc.id)}
+              />
+            </div>
+          ))}
+          <div className="min-w-[80px] flex-shrink-0 flex items-start pt-2">
+            <button
+              onClick={addCustomColumn}
+              className="w-full px-3 py-4 rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-600 text-gray-400 hover:border-fuchsia-400 hover:text-fuchsia-500 transition flex flex-col items-center gap-1"
+              title="Agregar columna"
+            >
+              <Plus size={20} />
+              <span className="text-[10px] font-bold uppercase tracking-wider">Columna</span>
+            </button>
+          </div>
         </div>
       )}
 
@@ -1037,7 +1112,7 @@ function MiniStat({ label, value, color = 'gray', accent = false }) {
 // Columna del kanban — header con color + count, cuerpo scrolleable con cards.
 // Actúa como drop target: al soltar una card encima, llama onDropIdea con el id
 // de la idea, que la mueve a este estado.
-function KanbanColumn({ estado, titulo, color, accent = false, ideas, selected, onToggleSelect, onCardClick, onDropIdea }) {
+function KanbanColumn({ estado, titulo, color, accent = false, isCustom = false, ideas, selected, onToggleSelect, onCardClick, onDropIdea, onRename, onDelete }) {
   const [isDragOver, setIsDragOver] = useState(false);
   const palette = {
     gray: {
@@ -1059,6 +1134,46 @@ function KanbanColumn({ estado, titulo, color, accent = false, ideas, selected, 
       header: 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700',
       body: 'bg-slate-50/30 dark:bg-slate-900/20 border-slate-200 dark:border-slate-800',
       dragOver: 'ring-2 ring-slate-400 dark:ring-slate-500',
+    },
+    violet: {
+      header: 'bg-violet-100 dark:bg-violet-900/40 text-violet-800 dark:text-violet-200 border-violet-300 dark:border-violet-800',
+      body: 'bg-violet-50/30 dark:bg-violet-900/10 border-violet-200 dark:border-violet-900/50',
+      dragOver: 'ring-2 ring-violet-400 dark:ring-violet-500',
+    },
+    rose: {
+      header: 'bg-rose-100 dark:bg-rose-900/40 text-rose-800 dark:text-rose-200 border-rose-300 dark:border-rose-800',
+      body: 'bg-rose-50/30 dark:bg-rose-900/10 border-rose-200 dark:border-rose-900/50',
+      dragOver: 'ring-2 ring-rose-400 dark:ring-rose-500',
+    },
+    sky: {
+      header: 'bg-sky-100 dark:bg-sky-900/40 text-sky-800 dark:text-sky-200 border-sky-300 dark:border-sky-800',
+      body: 'bg-sky-50/30 dark:bg-sky-900/10 border-sky-200 dark:border-sky-900/50',
+      dragOver: 'ring-2 ring-sky-400 dark:ring-sky-500',
+    },
+    lime: {
+      header: 'bg-lime-100 dark:bg-lime-900/40 text-lime-800 dark:text-lime-200 border-lime-300 dark:border-lime-800',
+      body: 'bg-lime-50/30 dark:bg-lime-900/10 border-lime-200 dark:border-lime-900/50',
+      dragOver: 'ring-2 ring-lime-400 dark:ring-lime-500',
+    },
+    orange: {
+      header: 'bg-orange-100 dark:bg-orange-900/40 text-orange-800 dark:text-orange-200 border-orange-300 dark:border-orange-800',
+      body: 'bg-orange-50/30 dark:bg-orange-900/10 border-orange-200 dark:border-orange-900/50',
+      dragOver: 'ring-2 ring-orange-400 dark:ring-orange-500',
+    },
+    teal: {
+      header: 'bg-teal-100 dark:bg-teal-900/40 text-teal-800 dark:text-teal-200 border-teal-300 dark:border-teal-800',
+      body: 'bg-teal-50/30 dark:bg-teal-900/10 border-teal-200 dark:border-teal-900/50',
+      dragOver: 'ring-2 ring-teal-400 dark:ring-teal-500',
+    },
+    indigo: {
+      header: 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-800 dark:text-indigo-200 border-indigo-300 dark:border-indigo-800',
+      body: 'bg-indigo-50/30 dark:bg-indigo-900/10 border-indigo-200 dark:border-indigo-900/50',
+      dragOver: 'ring-2 ring-indigo-400 dark:ring-indigo-500',
+    },
+    pink: {
+      header: 'bg-pink-100 dark:bg-pink-900/40 text-pink-800 dark:text-pink-200 border-pink-300 dark:border-pink-800',
+      body: 'bg-pink-50/30 dark:bg-pink-900/10 border-pink-200 dark:border-pink-900/50',
+      dragOver: 'ring-2 ring-pink-400 dark:ring-pink-500',
     },
   };
   const c = palette[color] || palette.gray;
@@ -1089,9 +1204,21 @@ function KanbanColumn({ estado, titulo, color, accent = false, ideas, selected, 
       onDrop={handleDrop}
       className={`rounded-xl border flex flex-col transition ${c.body} ${accent ? 'ring-2 ring-fuchsia-200 dark:ring-fuchsia-900/40' : ''} ${isDragOver ? c.dragOver : ''}`}
     >
-      <div className={`px-3 py-2 border-b flex items-center justify-between ${c.header} rounded-t-xl`}>
-        <p className="text-[11px] font-bold uppercase tracking-wider">{titulo}</p>
-        <span className="text-xs font-bold tabular-nums">{ideas.length}</span>
+      <div className={`px-3 py-2 border-b flex items-center justify-between gap-1 ${c.header} rounded-t-xl`}>
+        <p className="text-[11px] font-bold uppercase tracking-wider truncate">{titulo}</p>
+        <div className="flex items-center gap-1 shrink-0">
+          {isCustom && onRename && (
+            <button onClick={onRename} className="p-0.5 hover:text-violet-600 transition" title="Renombrar">
+              <Pencil size={11} />
+            </button>
+          )}
+          {isCustom && onDelete && (
+            <button onClick={onDelete} className="p-0.5 hover:text-red-600 transition" title="Eliminar columna">
+              <Trash2 size={11} />
+            </button>
+          )}
+          <span className="text-xs font-bold tabular-nums">{ideas.length}</span>
+        </div>
       </div>
       <div className="p-2 space-y-2 min-h-[120px] max-h-[70vh] overflow-y-auto">
         {ideas.length === 0 ? (

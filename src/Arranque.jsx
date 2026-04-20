@@ -1342,6 +1342,106 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         />
       )}
 
+      {productoTab === 'competencia' && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <Target size={18} className="text-orange-500" />
+            <div className="flex-1">
+              <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Competencia del producto</h3>
+              <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                Marcas que vas a monitorear y de las que extraemos ganadores. Cada corrida del pipeline scrapea sus ads.
+              </p>
+            </div>
+            {!showCompForm && (
+              <button onClick={() => setShowCompForm(true)}
+                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-orange-500 to-red-500 rounded-md hover:from-orange-600 hover:to-red-600 transition">
+                <Plus size={12} /> Agregar competidor
+              </button>
+            )}
+          </div>
+
+          {/* Form de agregar */}
+          {showCompForm && (
+            <div className="bg-white dark:bg-gray-800 border border-orange-300 dark:border-orange-700 rounded-xl p-3 flex flex-col sm:flex-row gap-2 items-stretch">
+              <input type="text" value={compDraft.nombre} onChange={e => setCompDraft({ ...compDraft, nombre: e.target.value })}
+                placeholder="Nombre del competidor"
+                className="flex-1 px-2.5 py-1.5 text-sm bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500" />
+              <input type="url" value={compDraft.landingUrl} onChange={e => setCompDraft({ ...compDraft, landingUrl: e.target.value })}
+                placeholder="https://landing-del-competidor.com (opcional pero recomendado — autodetecta su FB page)"
+                className="flex-1 px-2.5 py-1.5 text-sm bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500" />
+              <div className="flex gap-1">
+                <button onClick={() => { setShowCompForm(false); setCompDraft({ nombre: '', landingUrl: '' }); }}
+                  className="px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 transition">
+                  Cancelar
+                </button>
+                <button onClick={handleAddCompetidor}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-orange-500 to-red-500 rounded-md hover:from-orange-600 hover:to-red-600 transition">
+                  <Check size={12} /> Agregar
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Lista de competidores */}
+          {competidores.length === 0 ? (
+            <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-12 text-center">
+              <Target size={32} className="mx-auto text-gray-300 dark:text-gray-600 mb-2" />
+              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Sin competidores todavía</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Agregá al menos 1 marca con la URL de su landing — el pipeline va a scrapear sus ads activos y extraer ganadores para inspirar las ideas.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {competidores.map(c => {
+                const total = c.adsTotal || c.ads?.length || 0;
+                const winners = c.winnersCount || 0;
+                const history = Array.isArray(c.adsHistory) ? c.adsHistory : [];
+                const prev = history.length >= 2 ? history[history.length - 2] : null;
+                const delta = prev ? total - prev.total : null;
+                return (
+                  <div key={c.id} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-3 flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-orange-400 to-red-400 flex items-center justify-center text-white font-bold text-sm shrink-0">
+                      {c.nombre?.charAt(0)?.toUpperCase() || '?'}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{c.nombre}</p>
+                      <div className="flex items-center gap-2 text-[10px] text-gray-500 dark:text-gray-400 flex-wrap mt-0.5">
+                        {c.landingUrl && (
+                          <a href={c.landingUrl} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline truncate max-w-[280px]">
+                            {c.landingUrl.replace(/^https?:\/\//, '').replace(/^www\./, '')}
+                          </a>
+                        )}
+                        {c.fbPageUrl && <span>· FB: <span className="text-gray-700 dark:text-gray-300">@{c.fbPageUrl.replace(/^.*facebook\.com\//, '').replace(/\/$/, '')}</span></span>}
+                        {c.lastAdsCheck && <span>· Última corrida: {new Date(c.lastAdsCheck).toLocaleDateString('es-AR')}</span>}
+                      </div>
+                    </div>
+                    {total > 0 && (
+                      <div className="shrink-0 flex items-center gap-2 text-xs tabular-nums">
+                        <div className="text-right">
+                          <p className="font-bold text-gray-900 dark:text-gray-100">{total} ads</p>
+                          {winners > 0 && <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">{winners} ganadores 🏆</p>}
+                          {delta != null && delta !== 0 && (
+                            <p className={`text-[10px] font-semibold ${delta > 0 ? 'text-blue-600 dark:text-blue-400' : 'text-red-500'}`}>
+                              {delta > 0 ? `↑${delta}` : `↓${Math.abs(delta)}`} vs corrida anterior
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                    <button onClick={() => handleRemoveCompetidor(c.id)}
+                      className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition shrink-0"
+                      title="Quitar competidor">
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
       {productoTab === 'inspiracion' && (
         <div className="-mx-4">
           <InspiracionSection addToast={addToast} forcedProductoId={String(producto.id)} embedded />
@@ -1703,79 +1803,37 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         )}
       </WizardCard>
 
-      {/* Paso 3 — Competidores */}
+      {/* Paso 3 — Competidores (summary). Gestión completa vive en tab Competencia. */}
       <WizardCard
         num="3"
         title="Competidores a analizar"
         done={compsReady}
         badge={compsReady ? `${competidores.length} cargado${competidores.length > 1 ? 's' : ''}` : null}
       >
-        <div className="space-y-2">
-          {competidores.length > 0 && (
-            <ul className="space-y-1">
-              {competidores.map(c => (
-                <li key={c.id} className="flex items-center gap-2 px-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-800/50 rounded">
-                  <Target size={10} className="text-orange-500 shrink-0" />
-                  <span className="font-semibold text-gray-900 dark:text-gray-100">{c.nombre}</span>
-                  {c.landingUrl && (
-                    <span className="text-[10px] text-gray-500 dark:text-gray-400 truncate max-w-[200px]">{c.landingUrl}</span>
-                  )}
-                  {(c.ads?.length > 0 || c.adsTotal > 0) ? (() => {
-                    const total = c.adsTotal || c.ads?.length || 0;
-                    const winners = c.winnersCount || 0;
-                    const history = Array.isArray(c.adsHistory) ? c.adsHistory : [];
-                    const prev = history.length >= 2 ? history[history.length - 2] : null;
-                    const delta = prev ? total - prev.total : null;
-                    return (
-                      <span className="ml-auto inline-flex items-center gap-1.5 text-[10px] tabular-nums">
-                        <span className="font-bold text-gray-900 dark:text-gray-100">{total} ads</span>
-                        {winners > 0 && <span className="text-emerald-600 dark:text-emerald-400 font-bold">{winners} 🏆</span>}
-                        {delta != null && delta !== 0 && (
-                          <span className={delta > 0 ? 'text-blue-600 dark:text-blue-400' : 'text-red-500'}>
-                            {delta > 0 ? `↑${delta}` : `↓${Math.abs(delta)}`}
-                          </span>
-                        )}
-                      </span>
-                    );
-                  })() : null}
-                  <button onClick={() => handleRemoveCompetidor(c.id)}
-                    className="p-0.5 text-gray-400 hover:text-red-600 transition" title="Sacar">
-                    <X size={10} />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {!showCompForm ? (
-            <div className="flex gap-2 items-center flex-wrap">
-              <button onClick={() => setShowCompForm(true)}
-                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-md hover:bg-purple-100 transition">
-                <Plus size={11} /> Agregar a mano
-              </button>
-            </div>
-          ) : (
-            <div className="flex flex-col sm:flex-row gap-2 items-stretch">
-              <input type="text" value={compDraft.nombre} onChange={e => setCompDraft({ ...compDraft, nombre: e.target.value })}
-                placeholder="Nombre del competidor"
-                className="flex-1 px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500" />
-              <input type="url" value={compDraft.landingUrl} onChange={e => setCompDraft({ ...compDraft, landingUrl: e.target.value })}
-                placeholder="URL landing (opcional)"
-                className="flex-1 px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500" />
-              <div className="flex gap-1">
-                <button onClick={() => { setShowCompForm(false); setCompDraft({ nombre: '', landingUrl: '' }); }}
-                  className="px-2.5 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 transition">
-                  <X size={12} />
-                </button>
-                <button onClick={handleAddCompetidor}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-purple-600 to-violet-600 rounded-md hover:from-purple-700 hover:to-violet-700 transition">
-                  <Check size={11} />
-                </button>
-              </div>
-            </div>
-          )}
-
-        </div>
+        {competidores.length === 0 ? (
+          <p className="text-xs text-gray-500 dark:text-gray-400 italic mb-2">
+            Sin competidores cargados todavía. Andá al tab <strong>Competencia</strong> para agregar.
+          </p>
+        ) : (
+          <div className="text-xs text-gray-600 dark:text-gray-300 mb-2">
+            <p>{competidores.length} competidor{competidores.length !== 1 ? 'es' : ''}: <span className="text-gray-900 dark:text-gray-100 font-semibold">{competidores.slice(0, 3).map(c => c.nombre).join(', ')}{competidores.length > 3 ? `… +${competidores.length - 3}` : ''}</span></p>
+            {compsReady && (() => {
+              const totalAds = competidores.reduce((sum, c) => sum + (c.adsTotal || c.ads?.length || 0), 0);
+              const totalWinners = competidores.reduce((sum, c) => sum + (c.winnersCount || 0), 0);
+              return totalAds > 0 ? (
+                <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-1">
+                  {totalAds.toLocaleString('es-AR')} ads scrapeados · {totalWinners} ganadores 🏆
+                </p>
+              ) : null;
+            })()}
+          </div>
+        )}
+        <button
+          onClick={() => setProductoTab('competencia')}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-orange-500 to-red-500 rounded-md hover:from-orange-600 hover:to-red-600 shadow-sm transition"
+        >
+          <Target size={12} /> Gestionar competencia →
+        </button>
       </WizardCard>
 
       {/* Paso 4 — Correr pipeline */}
@@ -2107,6 +2165,7 @@ function ProductTabs({ activeTab, onChange }) {
   const tabs = [
     { id: 'setup', label: 'Setup', emoji: '⚙️' },
     { id: 'documentos', label: 'Documentos', emoji: '📄' },
+    { id: 'competencia', label: 'Competencia', emoji: '🎯' },
     { id: 'bandeja', label: 'Bandeja', emoji: '📥' },
     { id: 'inspiracion', label: 'Inspiración', emoji: '✨' },
     { id: 'creativos', label: 'Creativos', emoji: '🎨' },

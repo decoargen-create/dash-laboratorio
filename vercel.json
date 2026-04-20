@@ -11,7 +11,10 @@
     "api/marketing/generate-ideas.js":  { "maxDuration": 300 },
     "api/marketing/match-product-ads.js": { "maxDuration": 60 },
     "api/marketing/suggest-competitors.js": { "maxDuration": 180 },
-    "api/marketing/post-research-analysis.js": { "maxDuration": 60 }
+    "api/marketing/post-research-analysis.js": { "maxDuration": 60 },
+    "api/marketing/creatives.js": { "maxDuration": 180 },
+    "api/marketing/adapt-inspiracion.js": { "maxDuration": 120 },
+    "api/marketing/resolve-fb-page.js": { "maxDuration": 30 }
   },
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/index.html" }

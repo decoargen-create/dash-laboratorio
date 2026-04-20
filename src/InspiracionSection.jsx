@@ -24,9 +24,10 @@
 import React, { useState, useEffect } from 'react';
 import {
   Sparkles, Package, ChevronRight, Plus, Trash2, Link2, X,
-  Loader2, Download, Image as ImageIcon, ExternalLink,
+  Loader2, Download, Image as ImageIcon, ExternalLink, Wand2,
 } from 'lucide-react';
 import { logCostsFromResponse } from './costsStore.js';
+import { addGeneratedIdeas } from './bandejaStore.js';
 
 const PRODUCTOS_KEY = 'viora-marketing-productos-v1';
 const ACTIVE_KEY = 'viora-marketing-inspiracion-active-product';
@@ -63,6 +64,8 @@ export default function InspiracionSection({ addToast }) {
   const [scrapingBrandId, setScrapingBrandId] = useState(null);
   // brand.id → array de ads scrapeados de la última corrida (mostrados inline).
   const [adsByBrand, setAdsByBrand] = useState({});
+  // ad.id → bool, true mientras se adapta al producto (loading).
+  const [adaptingAdIds, setAdaptingAdIds] = useState(new Set());
 
   // Polling liviano de productos cada 3s.
   useEffect(() => {
@@ -119,6 +122,56 @@ export default function InspiracionSection({ addToast }) {
     setAdsByBrand(prev => {
       const next = { ...prev }; delete next[id]; return next;
     });
+  };
+
+  // Adapta un ad de inspiración al producto activo: llama al endpoint
+  // adapt-inspiracion (Claude Vision con la imagen + contexto del producto)
+  // y mete las ideas generadas directamente en la Bandeja del producto.
+  const handleAdapt = async (brandNombre, ad) => {
+    if (!producto) return;
+    setAdaptingAdIds(prev => new Set(prev).add(ad.id));
+    try {
+      const resp = await fetch('/api/marketing/adapt-inspiracion', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          producto: {
+            nombre: producto.nombre,
+            descripcion: producto.descripcion,
+            landingUrl: producto.landingUrl,
+            research: producto.docs?.research,
+            avatar: producto.docs?.avatar,
+            activoVisual: producto.activoVisual,
+          },
+          inspiracion: { brandNombre, ad },
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      logCostsFromResponse(data, `adapt-inspiracion · ${brandNombre}`);
+
+      const ideas = (data.ideas || []).map(i => ({
+        ...i,
+        tipo: 'replica',
+        productoId: String(producto.id),
+        productoNombre: producto.nombre,
+        origen: {
+          competidorNombre: `Inspiración: ${brandNombre}`,
+          adId: ad.id,
+          adSnapshotUrl: ad.snapshotUrl,
+          imageUrl: ad.imageUrls?.[0],
+          razonamiento: i.razonamiento,
+        },
+      }));
+      addGeneratedIdeas(ideas);
+
+      addToast?.({ type: 'success', message: `${ideas.length} ideas adaptadas en la Bandeja de ${producto.nombre}` });
+    } catch (err) {
+      addToast?.({ type: 'error', message: `No pude adaptar: ${err.message}` });
+    } finally {
+      setAdaptingAdIds(prev => {
+        const next = new Set(prev); next.delete(ad.id); return next;
+      });
+    }
   };
 
   // Scrapea ads activos de una marca via Apify. Si tiene fbPageUrl, prefiere
@@ -363,7 +416,9 @@ export default function InspiracionSection({ addToast }) {
               brand={brand}
               ads={adsByBrand[brand.id] || []}
               isScraping={scrapingBrandId === brand.id}
+              adaptingAdIds={adaptingAdIds}
               onScrape={() => handleScrapeBrand(brand)}
+              onAdapt={(ad) => handleAdapt(brand.nombre, ad)}
               onRemove={() => handleRemoveBrand(brand.id)}
             />
           ))}
@@ -373,7 +428,7 @@ export default function InspiracionSection({ addToast }) {
   );
 }
 
-function BrandCard({ brand, ads, isScraping, onScrape, onRemove }) {
+function BrandCard({ brand, ads, isScraping, adaptingAdIds, onScrape, onAdapt, onRemove }) {
   return (
     <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 shadow-sm">
       <div className="flex items-start gap-3">
@@ -432,12 +487,12 @@ function BrandCard({ brand, ads, isScraping, onScrape, onRemove }) {
       </div>
 
       {/* Grilla de estáticos scrapeados */}
-      {ads.length > 0 && <BrandAdsGrid ads={ads} brandNombre={brand.nombre} />}
+      {ads.length > 0 && <BrandAdsGrid ads={ads} brandNombre={brand.nombre} adaptingAdIds={adaptingAdIds} onAdapt={onAdapt} />}
     </div>
   );
 }
 
-function BrandAdsGrid({ ads, brandNombre }) {
+function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, onAdapt }) {
   const [showRepeated, setShowRepeated] = useState(false);
   const fresh = ads.filter(a => a.isFresh !== false);
   const repeated = ads.filter(a => a.isFresh === false);
@@ -451,7 +506,7 @@ function BrandAdsGrid({ ads, brandNombre }) {
             ✨ Nuevos del día <span className="text-gray-400 font-normal">({fresh.length})</span>
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            {fresh.slice(0, 30).map(ad => <AdThumb key={ad.id} ad={ad} fresh />)}
+            {fresh.slice(0, 30).map(ad => <AdThumb key={ad.id} ad={ad} fresh adapting={adaptingAdIds?.has(ad.id)} onAdapt={onAdapt ? () => onAdapt(ad) : null} />)}
             {fresh.length > 30 && (
               <div className="aspect-square rounded-md flex items-center justify-center bg-gray-50 dark:bg-gray-900 border-2 border-dashed border-gray-200 dark:border-gray-700 text-[10px] text-gray-500 dark:text-gray-400 italic">
                 +{fresh.length - 30} más
@@ -477,7 +532,7 @@ function BrandAdsGrid({ ads, brandNombre }) {
           </button>
           {showRepeated && (
             <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2 opacity-60">
-              {repeated.slice(0, 30).map(ad => <AdThumb key={ad.id} ad={ad} />)}
+              {repeated.slice(0, 30).map(ad => <AdThumb key={ad.id} ad={ad} adapting={adaptingAdIds?.has(ad.id)} onAdapt={onAdapt ? () => onAdapt(ad) : null} />)}
               {repeated.length > 30 && (
                 <div className="aspect-square rounded-md flex items-center justify-center bg-gray-50 dark:bg-gray-900 border-2 border-dashed border-gray-200 dark:border-gray-700 text-[10px] text-gray-400 italic">
                   +{repeated.length - 30}
@@ -491,12 +546,11 @@ function BrandAdsGrid({ ads, brandNombre }) {
   );
 }
 
-function AdThumb({ ad, fresh = false }) {
+function AdThumb({ ad, fresh = false, adapting = false, onAdapt }) {
   const thumb = ad.imageUrls?.[0];
   const fbUrl = ad.snapshotUrl;
   return (
-    <a
-      href={fbUrl} target="_blank" rel="noreferrer"
+    <div
       className={`group relative aspect-square rounded-md overflow-hidden bg-gray-100 dark:bg-gray-900 border transition ${
         fresh
           ? 'border-emerald-300 dark:border-emerald-700 hover:border-emerald-500'
@@ -512,19 +566,36 @@ function AdThumb({ ad, fresh = false }) {
           <ImageIcon size={20} className="text-gray-300" />
         </div>
       )}
-      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition flex items-end justify-end p-1.5">
-        <ExternalLink size={12} className="text-white opacity-0 group-hover:opacity-100 transition" />
+      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/60 transition flex flex-col items-stretch justify-end gap-1 p-1.5">
+        {onAdapt && (
+          <button
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onAdapt(); }}
+            disabled={adapting}
+            className="opacity-0 group-hover:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-bold text-white bg-amber-500 hover:bg-amber-600 rounded disabled:opacity-70"
+          >
+            {adapting
+              ? <><Loader2 size={10} className="animate-spin" /> Adaptando…</>
+              : <><Wand2 size={10} /> Adaptar al producto</>
+            }
+          </button>
+        )}
+        <a
+          href={fbUrl} target="_blank" rel="noreferrer"
+          className="opacity-0 group-hover:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-black/70 hover:bg-black/90 rounded"
+        >
+          <ExternalLink size={10} /> Ver en FB
+        </a>
       </div>
       {ad.daysRunning > 0 && (
-        <div className="absolute top-1 left-1 px-1.5 py-0.5 text-[9px] font-bold rounded bg-black/60 text-white">
+        <div className="absolute top-1 left-1 px-1.5 py-0.5 text-[9px] font-bold rounded bg-black/60 text-white pointer-events-none">
           {ad.daysRunning}d
         </div>
       )}
       {fresh && (
-        <div className="absolute top-1 right-1 px-1 py-0.5 text-[8px] font-bold rounded bg-emerald-500 text-white">
+        <div className="absolute top-1 right-1 px-1 py-0.5 text-[8px] font-bold rounded bg-emerald-500 text-white pointer-events-none">
           NUEVO
         </div>
       )}
-    </a>
+    </div>
   );
 }

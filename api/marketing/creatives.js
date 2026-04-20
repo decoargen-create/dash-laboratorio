@@ -131,16 +131,57 @@ Generá el JSON de diagnóstico + ángulos + hooks + observaciones.`;
     try {
       const message = await client.messages.create({
         model: MODEL_SONNET,
-        max_tokens: 3072,
+        max_tokens: 8000, // antes 3072 — el JSON con 25 hooks + diagnóstico se pasaba
         system: [{ type: 'text', text: HOOKS_SYSTEM, cache_control: { type: 'ephemeral' } }],
         messages: [{ role: 'user', content: userContent }],
       });
       const text = message.content?.[0]?.type === 'text' ? message.content[0].text : '';
-      const cleaned = text.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
-      let parsed;
-      try { parsed = JSON.parse(cleaned); }
-      catch { return respondJSON(res, 502, { error: 'No pude parsear la respuesta de Claude', raw: text }); }
-      return respondJSON(res, 200, { action, generatedAt: new Date().toISOString(), ...parsed });
+
+      // Extracción robusta: Claude a veces agrega texto antes/después del JSON
+      // o lo envuelve en ```json. Intentamos varias estrategias.
+      let parsed = null;
+      const tryParse = (str) => { try { return JSON.parse(str); } catch { return null; } };
+
+      // 1. Tal cual
+      parsed = tryParse(text.trim());
+      // 2. Strip markdown code fences
+      if (!parsed) {
+        const stripped = text.replace(/^[\s\S]*?```(?:json)?\s*/i, '').replace(/\s*```[\s\S]*$/i, '').trim();
+        parsed = tryParse(stripped);
+      }
+      // 3. Match el primer objeto {...} más grande (greedy)
+      if (!parsed) {
+        const m = text.match(/\{[\s\S]*\}/);
+        if (m) parsed = tryParse(m[0]);
+      }
+      // 4. Stop reason 'max_tokens' indica truncado — JSON quedó incompleto.
+      if (!parsed) {
+        const truncated = message.stop_reason === 'max_tokens';
+        console.error('creatives/hooks: parse falló', {
+          stop_reason: message.stop_reason,
+          textLen: text.length,
+          textPreview: text.slice(0, 500),
+        });
+        return respondJSON(res, 502, {
+          error: truncated
+            ? 'Claude generó más de 8000 tokens y el JSON se cortó. Probá pedir menos hooks (config restricciones).'
+            : 'No pude parsear la respuesta de Claude como JSON.',
+          stopReason: message.stop_reason,
+          rawPreview: text.slice(0, 800),
+        });
+      }
+      const usage = message.usage || {};
+      const anthropicCostUsd = (
+        (usage.input_tokens || 0) * 0.003 +
+        (usage.cache_read_input_tokens || 0) * 0.0003 +
+        (usage.output_tokens || 0) * 0.015
+      ) / 1000;
+      return respondJSON(res, 200, {
+        action,
+        generatedAt: new Date().toISOString(),
+        ...parsed,
+        cost: { anthropic: Math.round(anthropicCostUsd * 10000) / 10000 },
+      });
     } catch (err) {
       console.error('creatives hooks error:', err);
       return respondJSON(res, 500, { error: err?.message || 'Error generando hooks' });

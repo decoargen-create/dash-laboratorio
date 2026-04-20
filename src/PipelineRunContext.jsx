@@ -32,6 +32,9 @@ export function PipelineRunProvider({ children }) {
   const [cancelRequested, setCancelRequested] = useState(false);
   const [startedAt, setStartedAt] = useState(null);
   const [endedAt, setEndedAt] = useState(null);
+  // Suppress overlay floating pill — el setter lo usa Arranque cuando el
+  // user está parado en el tab Setup (el stepper inline ya muestra todo).
+  const [suppressOverlay, setSuppressOverlay] = useState(false);
 
   // Iniciar una corrida — limpia el state previo y marca running=true.
   const startRun = useCallback(({ productoId, productoNombre }) => {
@@ -64,12 +67,12 @@ export function PipelineRunProvider({ children }) {
 
   const value = useMemo(() => ({
     running, productoId, productoNombre, steps, liveIdeas, runCost,
-    cancelRequested, startedAt, endedAt,
+    cancelRequested, startedAt, endedAt, suppressOverlay,
     startRun, finishRun, requestCancel,
-    setSteps, setLiveIdeas, setRunCost, updateStep,
+    setSteps, setLiveIdeas, setRunCost, updateStep, setSuppressOverlay,
   }), [
     running, productoId, productoNombre, steps, liveIdeas, runCost,
-    cancelRequested, startedAt, endedAt,
+    cancelRequested, startedAt, endedAt, suppressOverlay,
     startRun, finishRun, requestCancel, updateStep,
   ]);
 
@@ -96,6 +99,7 @@ export function usePipelineRun() {
       cancelRequested: false,
       startedAt: null,
       endedAt: null,
+      suppressOverlay: false,
       startRun: () => {},
       finishRun: () => {},
       requestCancel: () => {},
@@ -103,6 +107,7 @@ export function usePipelineRun() {
       setLiveIdeas: () => {},
       setRunCost: () => {},
       updateStep: () => {},
+      setSuppressOverlay: () => {},
     };
   }
   return ctx;

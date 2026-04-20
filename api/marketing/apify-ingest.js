@@ -86,6 +86,18 @@ export default async function handler(req, res) {
     items = await runActorSync(actorId, input, token, { timeout: 240 });
   } catch (err) {
     const msg = String(err.message || '');
+
+    // Bloqueos de cuota/facturación de Apify — NO reintentar, es plata.
+    // Mensaje específico para que el user sepa que tiene que pagar/esperar.
+    const esLimiteFacturacion = /platform-feature-disabled|Monthly usage hard limit|limit exceeded|usage-hard-limit|insufficient.*credits|payment/i.test(msg);
+    if (esLimiteFacturacion) {
+      return respondJSON(res, 502, {
+        error: 'Apify llegó al límite mensual de uso',
+        sugerencia: 'Andá a console.apify.com → Billing y subí el plan, o esperá al reset del mes. Mientras tanto el pipeline no puede scrapear ads nuevos.',
+        rawApify: msg.slice(0, 300),
+      });
+    }
+
     const shouldRetry = /ABORTED|run-failed|timeout|memory|400|429|503/i.test(msg);
     if (shouldRetry && usedLimit > 25) {
       const reducedLimit = Math.max(25, Math.floor(usedLimit / 4));

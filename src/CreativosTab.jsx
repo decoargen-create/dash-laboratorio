@@ -12,6 +12,7 @@
 
 import React, { useState } from 'react';
 import { Sparkles, Loader2 } from 'lucide-react';
+import { logCostsFromResponse } from './costsStore.js';
 
 export default function CreativosTab({ producto, onUpdateProducto, addToast }) {
   // Config del generador (defaults razonables para Argentina/cosmética)
@@ -30,8 +31,57 @@ export default function CreativosTab({ producto, onUpdateProducto, addToast }) {
   const yaTieneHooks = !!creativos?.fase1?.hooks?.length;
 
   const generarHooks = async () => {
-    // Implementación en Parte 8.5.2 — por ahora placeholder.
-    addToast?.({ type: 'info', message: 'Generador de hooks: lógica viene en próxima parte (8.5.2)' });
+    if (!producto?.nombre) {
+      addToast?.({ type: 'error', message: 'No hay producto activo' });
+      return;
+    }
+    setHooksRunning(true);
+    try {
+      const resp = await fetch('/api/marketing/creatives', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'hooks',
+          producto: {
+            // Mapeamos el shape del producto del nuevo Arranque al que
+            // espera el endpoint legacy de Marketing.
+            productoNombre: producto.nombre,
+            productoUrl: producto.landingUrl,
+            descripcion: producto.descripcion,
+            resumenEjecutivo: producto.resumenEjecutivo,
+            docs: producto.docs || {},
+            competidores: producto.competidores || [],
+            memoria: producto.memoria || { notas: [], aprendizajes: [] },
+          },
+          config: {
+            tono: hooksTono,
+            objetivo: hooksObjetivo,
+            restricciones: hooksRestricciones,
+          },
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      logCostsFromResponse(data, `creativos/hooks · ${producto.nombre}`);
+
+      const nuevosCreativos = {
+        ...(creativos || {}),
+        fase1: {
+          diagnostico: data.diagnostico,
+          angulosElegidos: data.angulosElegidos,
+          hooks: data.hooks,
+          observaciones: data.observaciones,
+          generatedAt: data.generatedAt,
+          config: { tono: hooksTono, objetivo: hooksObjetivo, restricciones: hooksRestricciones },
+        },
+      };
+      onUpdateProducto?.({ creativos: nuevosCreativos });
+      addToast?.({ type: 'success', message: `${data.hooks?.length || 0} hooks generados` });
+    } catch (err) {
+      addToast?.({ type: 'error', message: `Generador falló: ${err.message}` });
+    } finally {
+      setHooksRunning(false);
+    }
   };
 
   return (

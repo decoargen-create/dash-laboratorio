@@ -577,7 +577,7 @@ export default async function handler(req, res) {
     allCompAds = [],
     ideasExistentes = [],
     propiosAds = [],
-    targetCount = 15,
+    targetCount = 50,
     formatoMix = { static: 0.6, video: 0.4 },
   } = body || {};
 
@@ -585,8 +585,11 @@ export default async function handler(req, res) {
     return respondJSON(res, 400, { error: 'Falta producto.nombre en el body' });
   }
 
-  const clampedTarget = Math.max(1, Math.min(40, Number(targetCount) || 15));
-  const maxTokens = Math.min(16000, 500 + clampedTarget * 500);
+  // Cap 100 — por arriba Claude trunca output, no vale la pena pedir más.
+  const clampedTarget = Math.max(1, Math.min(100, Number(targetCount) || 50));
+  // 400 tokens por idea es realista para las ideas ricas con todos los campos.
+  // 32k es el techo de output de Sonnet 4.6 con thinking apagado.
+  const maxTokens = Math.min(32000, 1000 + clampedTarget * 400);
 
   const client = new Anthropic({ apiKey: anthropicKey });
   const hasPropios = Array.isArray(propiosAds) && propiosAds.length > 0;

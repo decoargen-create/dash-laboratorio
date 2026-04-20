@@ -27,10 +27,14 @@ import { logCostsFromResponse } from './costsStore.js';
 
 const GEN_CONFIG_KEY = 'viora-marketing-gen-config-v1';
 const DEFAULT_GEN_CONFIG = {
-  limiteDiario: 15,
+  limiteDiario: 50,
   formatoStatic: 60, // %
   formatoVideo: 40, // %
 };
+// Tope superior de ideas por corrida — Claude Sonnet 4.6 puede devolver hasta
+// ~100 ideas ricas antes de agotar la budget de output. 100 es un techo
+// realista; más que eso empieza a truncar.
+const MAX_IDEAS_PER_RUN = 100;
 
 const PRODUCTOS_KEY = 'viora-marketing-productos-v1';
 const COMPETIDORES_KEY = 'viora-marketing-competidores-v1';
@@ -890,12 +894,19 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             fatigue: a.fatigue,
           }));
 
-        // Target count: primera vez (bandeja vacía) sin cap duro (hasta 40 con
-        // piso de calidad). Después, cap al límite diario restante.
+        // Target count: primera vez (bandeja vacía) escala con la cantidad
+        // de ads analizados — si la competencia tiene mucho material,
+        // pedimos proporcional (con techo MAX_IDEAS_PER_RUN). Después, cap
+        // al límite diario restante.
         const yaGeneradasHoy = countIdeasGeneratedToday();
         const esPrimeraVez = ideasExistentes.length === 0;
+        const adsTotales = (compWithAds || []).reduce((sum, c) => sum + (c.allAds?.length || 0), 0);
+        const primeraVezTarget = Math.min(
+          MAX_IDEAS_PER_RUN,
+          Math.max(50, Math.round(adsTotales * 0.2))
+        );
         const targetCount = esPrimeraVez
-          ? 40
+          ? primeraVezTarget
           : Math.max(0, genConfig.limiteDiario - yaGeneradasHoy);
 
         if (targetCount === 0) {
@@ -1615,8 +1626,8 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 <div className="mt-3 space-y-3">
                   <div>
                     <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">Límite diario de ideas</label>
-                    <input type="number" min="1" max="40" value={genConfig.limiteDiario}
-                      onChange={e => setGenConfig(c => ({ ...c, limiteDiario: Math.max(1, Math.min(40, Number(e.target.value) || 15)) }))}
+                    <input type="number" min="1" max={MAX_IDEAS_PER_RUN} value={genConfig.limiteDiario}
+                      onChange={e => setGenConfig(c => ({ ...c, limiteDiario: Math.max(1, Math.min(MAX_IDEAS_PER_RUN, Number(e.target.value) || 50)) }))}
                       className="w-24 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-purple-500" />
                     <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">
                       Se resetea a las 00:00 hs Argentina. Primera corrida (bandeja vacía) ignora el límite y genera hasta 40 con piso de calidad.

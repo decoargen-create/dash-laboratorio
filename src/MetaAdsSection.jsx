@@ -221,6 +221,28 @@ function AdsGrid({ metaAccount }) {
   );
 }
 
+function fmtThousands(n) {
+  if (n == null) return '—';
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
+
+function Stat({ label, value, tone = 'neutral' }) {
+  const tones = {
+    good: 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800',
+    mid: 'bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800',
+    bad: 'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800',
+    neutral: 'bg-gray-50 dark:bg-gray-900/40 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700',
+  };
+  return (
+    <div className={`px-1.5 py-1 rounded border ${tones[tone]}`}>
+      <p className="text-[8px] font-bold uppercase tracking-wider opacity-60 leading-none">{label}</p>
+      <p className="text-[11px] font-bold tabular-nums leading-tight mt-0.5">{value}</p>
+    </div>
+  );
+}
+
 function AdCard({ ad }) {
   const thumb = ad.creative?.imageUrl || ad.creative?.thumbnailUrl || null;
   const isVideo = !!ad.creative?.videoId;
@@ -297,6 +319,21 @@ function AdCard({ ad }) {
           <p className="text-[10px] text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 rounded px-2 py-1 line-clamp-2">
             <span className="font-semibold">Match:</span> {m.reason}
           </p>
+        )}
+
+        {/* Insights — CTR, ROAS, gasto, impresiones (si vienen) */}
+        {ad.insights && ad.insights.impressions > 0 && (
+          <div className="grid grid-cols-3 gap-1 text-[10px] mt-1">
+            <Stat label="CTR" value={`${(ad.insights.ctr || 0).toFixed(2)}%`}
+              tone={ad.insights.ctr >= 1.5 ? 'good' : ad.insights.ctr >= 0.8 ? 'mid' : 'bad'} />
+            <Stat label="ROAS" value={(ad.insights.roas || 0).toFixed(2)}
+              tone={ad.insights.roas >= 2 ? 'good' : ad.insights.roas >= 1 ? 'mid' : 'bad'} />
+            <Stat label="CPA" value={`$${(ad.insights.cpa || 0).toFixed(0)}`} />
+            <Stat label="Gasto" value={`$${(ad.insights.spend || 0).toFixed(0)}`} />
+            <Stat label="Imp." value={fmtThousands(ad.insights.impressions)} />
+            <Stat label="Compras" value={ad.insights.purchases || 0}
+              tone={(ad.insights.purchases || 0) > 0 ? 'good' : 'neutral'} />
+          </div>
         )}
 
         {/* Footer con link a FB */}

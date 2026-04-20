@@ -18,10 +18,14 @@ import { usePipelineRun } from './PipelineRunContext.jsx';
 export default function PipelineRunOverlay() {
   const {
     running, steps, runCost, productoNombre, startedAt, endedAt,
-    requestCancel,
+    requestCancel, suppressOverlay,
   } = usePipelineRun();
   const [expanded, setExpanded] = useState(false);
   const [autoHidden, setAutoHidden] = useState(false);
+
+  // Suppress: cuando Arranque está parado en tab Setup, ya muestra el
+  // stepper inline detallado — el pill flotante sería redundante.
+  if (suppressOverlay) return null;
 
   // Auto-ocultar el pill 30s después de que termine la corrida.
   useEffect(() => {

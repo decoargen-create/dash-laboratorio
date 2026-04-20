@@ -183,6 +183,15 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     if (productoTabKey) try { localStorage.setItem(productoTabKey, productoTab); } catch {}
   }, [productoTab, productoTabKey]);
 
+  // Cuando estamos parados en tab Setup, el stepper inline ya muestra el
+  // progreso detallado del pipeline — el pill flotante sería redundante.
+  // En cualquier otro tab (o sin producto activo), dejamos el pill visible.
+  useEffect(() => {
+    const inSetup = !!activeProductoId && productoTab === 'setup';
+    pipelineRun.setSuppressOverlay?.(inSetup);
+    return () => pipelineRun.setSuppressOverlay?.(false);
+  }, [activeProductoId, productoTab]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Producto activo derivado + competidores + cuenta Meta del producto activo.
   const producto = productos.find(p => String(p.id) === String(activeProductoId)) || null;
   const competidores = producto?.competidores || [];

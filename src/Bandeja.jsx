@@ -135,10 +135,24 @@ export default function BandejaSection({ addToast }) {
 
   // Exporta las ideas seleccionadas como Markdown descargable. Lo suficiente
   // para pegarlo en Docs/Notion/Word y entregárselo al diseñador/editor.
+  const exportAll = (ideasAExportar) => {
+    if (!ideasAExportar || ideasAExportar.length === 0) {
+      addToast?.({ type: 'error', message: 'No hay ideas para exportar' });
+      return;
+    }
+    buildBriefMdAndDownload(ideasAExportar);
+    addToast?.({ type: 'success', message: `Brief con ${ideasAExportar.length} ideas descargado` });
+  };
+
   const exportSelected = () => {
     const chosen = ideas.filter(i => selected.has(i.id));
     if (chosen.length === 0) return;
+    buildBriefMdAndDownload(chosen);
+    addToast?.({ type: 'success', message: `Brief con ${chosen.length} ideas descargado` });
+  };
 
+  // Arma el markdown del brief a partir de una lista de ideas y lo descarga.
+  const buildBriefMdAndDownload = (chosen) => {
     const today = new Date().toLocaleDateString('es-AR', { year: 'numeric', month: 'long', day: 'numeric' });
     const byTipo = chosen.reduce((acc, i) => {
       (acc[i.tipo] = acc[i.tipo] || []).push(i);
@@ -252,7 +266,6 @@ export default function BandejaSection({ addToast }) {
     a.download = `brief-creativos-${stamp}.md`;
     a.click();
     URL.revokeObjectURL(url);
-    addToast?.({ type: 'success', message: `Brief con ${chosen.length} ideas descargado` });
   };
 
   const guardarNotas = (id) => {
@@ -350,21 +363,40 @@ export default function BandejaSection({ addToast }) {
             </h2>
           </div>
         </div>
-        {selected.size > 0 && (
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-600 dark:text-gray-300">
-              {selected.size} seleccionada{selected.size > 1 ? 's' : ''}
-            </span>
-            <button onClick={() => setSelected(new Set())}
-              className="px-2.5 py-1.5 text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition">
-              Limpiar
-            </button>
-            <button onClick={exportSelected}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-fuchsia-500 to-pink-500 rounded-lg hover:from-fuchsia-600 hover:to-pink-600 shadow-sm transition">
-              <Download size={12} /> Exportar brief .md
-            </button>
-          </div>
-        )}
+        <div className="flex items-center gap-2">
+          {selected.size > 0 && (
+            <>
+              <span className="text-xs text-gray-600 dark:text-gray-300">
+                {selected.size} seleccionada{selected.size > 1 ? 's' : ''}
+              </span>
+              <button onClick={() => setSelected(new Set())}
+                className="px-2.5 py-1.5 text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition">
+                Limpiar
+              </button>
+              <button onClick={exportSelected}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-fuchsia-500 to-pink-500 rounded-lg hover:from-fuchsia-600 hover:to-pink-600 shadow-sm transition">
+                <Download size={12} /> Exportar {selected.size} .md
+              </button>
+            </>
+          )}
+          {selected.size === 0 && filtered.length > 0 && (
+            <>
+              <button
+                onClick={() => setSelected(new Set(filtered.map(i => i.id)))}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-fuchsia-700 dark:text-fuchsia-300 bg-white dark:bg-gray-800 border border-fuchsia-300 dark:border-fuchsia-700 rounded-lg hover:bg-fuchsia-50 dark:hover:bg-fuchsia-900/20 transition"
+              >
+                <CheckSquare size={12} /> Seleccionar todas ({filtered.length})
+              </button>
+              <button
+                onClick={() => exportAll(filtered)}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-fuchsia-500 to-pink-500 rounded-lg hover:from-fuchsia-600 hover:to-pink-600 shadow-sm transition"
+                title={`Exportar todas las ${filtered.length} ideas visibles`}
+              >
+                <Download size={12} /> Exportar todas ({filtered.length})
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Filtros (solo tipo + búsqueda — estado lo filtran las columnas) */}
@@ -403,24 +435,32 @@ export default function BandejaSection({ addToast }) {
           <KanbanColumn
             estado="pendiente" titulo="Pendientes" color="gray" accent
             ideas={byEstado.pendiente}
+            selected={selected}
+            onToggleSelect={toggleSelect}
             onCardClick={(id) => setExpandedId(id)}
             onDropIdea={(id) => setEstado(id, 'pendiente')}
           />
           <KanbanColumn
             estado="en_uso" titulo="En uso" color="amber"
             ideas={byEstado.en_uso}
+            selected={selected}
+            onToggleSelect={toggleSelect}
             onCardClick={(id) => setExpandedId(id)}
             onDropIdea={(id) => setEstado(id, 'en_uso')}
           />
           <KanbanColumn
             estado="usada" titulo="Usadas" color="emerald"
             ideas={byEstado.usada}
+            selected={selected}
+            onToggleSelect={toggleSelect}
             onCardClick={(id) => setExpandedId(id)}
             onDropIdea={(id) => setEstado(id, 'usada')}
           />
           <KanbanColumn
             estado="archivada" titulo="Archivadas" color="slate"
             ideas={byEstado.archivada}
+            selected={selected}
+            onToggleSelect={toggleSelect}
             onCardClick={(id) => setExpandedId(id)}
             onDropIdea={(id) => setEstado(id, 'archivada')}
           />
@@ -980,7 +1020,7 @@ function MiniStat({ label, value, color = 'gray', accent = false }) {
 // Columna del kanban — header con color + count, cuerpo scrolleable con cards.
 // Actúa como drop target: al soltar una card encima, llama onDropIdea con el id
 // de la idea, que la mueve a este estado.
-function KanbanColumn({ estado, titulo, color, accent = false, ideas, onCardClick, onDropIdea }) {
+function KanbanColumn({ estado, titulo, color, accent = false, ideas, selected, onToggleSelect, onCardClick, onDropIdea }) {
   const [isDragOver, setIsDragOver] = useState(false);
   const palette = {
     gray: {
@@ -1045,7 +1085,13 @@ function KanbanColumn({ estado, titulo, color, accent = false, ideas, onCardClic
           </p>
         ) : (
           ideas.map(idea => (
-            <KanbanCard key={idea.id} idea={idea} onClick={() => onCardClick(idea.id)} />
+            <KanbanCard
+              key={idea.id}
+              idea={idea}
+              isSelected={selected?.has(idea.id)}
+              onToggleSelect={onToggleSelect ? () => onToggleSelect(idea.id) : null}
+              onClick={() => onCardClick(idea.id)}
+            />
           ))
         )}
       </div>
@@ -1056,7 +1102,7 @@ function KanbanColumn({ estado, titulo, color, accent = false, ideas, onCardClic
 // Card compacta del kanban — thumb chico + título + 2-3 badges clave.
 // Todo el detalle se ve al clickear (abre el modal). También es arrastrable
 // entre columnas (drag&drop HTML5 nativo).
-function KanbanCard({ idea, onClick }) {
+function KanbanCard({ idea, isSelected = false, onToggleSelect, onClick }) {
   const tipo = TIPO_META[idea.tipo] || TIPO_META.desde_cero;
   const [isDragging, setIsDragging] = useState(false);
 
@@ -1067,17 +1113,33 @@ function KanbanCard({ idea, onClick }) {
     setIsDragging(true);
   };
   const handleDragEnd = () => setIsDragging(false);
+  const handleCheckboxClick = (e) => {
+    e.stopPropagation();
+    onToggleSelect?.();
+  };
 
   return (
-    <button
+    <div
       onClick={onClick}
       draggable
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
-      className={`w-full text-left bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-2 hover:border-fuchsia-300 dark:hover:border-fuchsia-700 hover:shadow-sm transition group cursor-grab active:cursor-grabbing ${
-        isDragging ? 'opacity-40' : ''
-      }`}
+      className={`relative bg-white dark:bg-gray-800 border rounded-lg p-2 hover:shadow-sm transition group cursor-grab active:cursor-grabbing ${
+        isSelected
+          ? 'border-fuchsia-400 dark:border-fuchsia-600 ring-2 ring-fuchsia-200 dark:ring-fuchsia-900/40'
+          : 'border-gray-200 dark:border-gray-700 hover:border-fuchsia-300 dark:hover:border-fuchsia-700'
+      } ${isDragging ? 'opacity-40' : ''}`}
     >
+      {onToggleSelect && (
+        <button
+          onClick={handleCheckboxClick}
+          className="absolute top-1 right-1 w-5 h-5 flex items-center justify-center rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:border-fuchsia-500 transition opacity-0 group-hover:opacity-100 data-[checked=true]:opacity-100"
+          data-checked={isSelected}
+          title={isSelected ? 'Deseleccionar' : 'Seleccionar para exportar'}
+        >
+          {isSelected ? <CheckSquare size={12} className="text-fuchsia-600" /> : <Square size={12} className="text-gray-400" />}
+        </button>
+      )}
       <div className="flex items-start gap-2">
         {idea.origen?.imageUrl ? (
           <img
@@ -1120,7 +1182,7 @@ function KanbanCard({ idea, onClick }) {
           )}
         </div>
       </div>
-    </button>
+    </div>
   );
 }
 

@@ -388,13 +388,16 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     addToast?.({ type: 'success', message: `Producto "${nombre}" creado — cargá competidores y corré el pipeline` });
   };
 
-  const handleAddCompetidor = () => {
+  const handleAddCompetidor = async () => {
     const nombre = compDraft.nombre.trim();
     if (!nombre) { addToast?.({ type: 'error', message: 'Ponele nombre al competidor' }); return; }
+    const landingUrl = compDraft.landingUrl.trim();
+    const nuevoId = Date.now();
     const nuevo = {
-      id: Date.now(),
+      id: nuevoId,
       nombre,
-      landingUrl: compDraft.landingUrl.trim(),
+      landingUrl,
+      fbPageUrl: '',
       notas: '',
       ads: [],
       lastAdsCheck: null,
@@ -404,6 +407,35 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     setCompDraft({ nombre: '', landingUrl: '' });
     setShowCompForm(false);
     addToast?.({ type: 'success', message: `Competidor "${nombre}" sumado` });
+
+    // Si tiene landing URL, intentamos resolver la Facebook Page en
+    // background — sin bloquear el UI. Si la encontramos, la guardamos
+    // silenciosamente en el competidor. Scrapear por Page es mucho más
+    // confiable que por keyword.
+    if (landingUrl) {
+      resolveFbPageAsync(nuevoId, nombre, landingUrl);
+    }
+  };
+
+  // Dispara el resolve de FB page en background y actualiza el competidor
+  // si lo encuentra. Errores silenciosos — es un best-effort.
+  const resolveFbPageAsync = async (competidorId, competidorNombre, landingUrl) => {
+    try {
+      const resp = await fetch('/api/marketing/resolve-fb-page', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ landingUrl }),
+      });
+      const data = await resp.json();
+      if (data.pageUrl) {
+        setCompetidores(prev => prev.map(x =>
+          x.id === competidorId ? { ...x, fbPageUrl: data.pageUrl } : x
+        ));
+        addToast?.({ type: 'success', message: `FB page de ${competidorNombre} detectada: @${data.handle}` });
+      }
+    } catch {
+      // Silencioso — si no pudimos resolver, el user puede cargarla manual.
+    }
   };
 
   const handleRemoveCompetidor = (id) => {
@@ -644,8 +676,31 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       updateStep(stepId, { status: 'running', startedAt: Date.now() });
       try {
         const payload = { country: 'ALL', limit: 200 };
-        if (c.fbPageUrl) {
-          payload.fbPageUrl = c.fbPageUrl.startsWith('http') ? c.fbPageUrl : `https://www.facebook.com/${c.fbPageUrl}`;
+        // Fallback auto-resolver: si no tenemos fbPageUrl pero sí landing,
+        // intentamos detectar la FB page antes de caer a keyword. Scrapear
+        // por Page es mucho más estable que por keyword (keyword a veces
+        // aborta en Apify). Si no la encontramos, seguimos con keyword.
+        let resolvedFbPage = c.fbPageUrl;
+        if (!resolvedFbPage && c.landingUrl) {
+          updateStep(stepId, { detail: 'Detectando Facebook Page de la landing…' });
+          try {
+            const rr = await fetch('/api/marketing/resolve-fb-page', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ landingUrl: c.landingUrl }),
+            });
+            const rd = await rr.json();
+            if (rd.pageUrl) {
+              resolvedFbPage = rd.pageUrl;
+              setCompetidores(prev => prev.map(x =>
+                x.id === c.id ? { ...x, fbPageUrl: rd.pageUrl } : x
+              ));
+            }
+          } catch { /* silencioso — caemos a keyword */ }
+        }
+
+        if (resolvedFbPage) {
+          payload.fbPageUrl = resolvedFbPage.startsWith('http') ? resolvedFbPage : `https://www.facebook.com/${resolvedFbPage}`;
         } else if (c.landingUrl) {
           payload.searchKeyword = landingToKeyword(c.landingUrl) || c.nombre;
         } else {

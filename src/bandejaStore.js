@@ -180,10 +180,13 @@ function argDate(iso) {
   } catch { return ''; }
 }
 
-export function countIdeasGeneratedToday(ideas = null) {
+export function countIdeasGeneratedToday(ideas = null, productoId = null) {
   const list = ideas || loadIdeas();
   const today = argDate(new Date());
-  return list.filter(i => argDate(i.createdAt) === today).length;
+  return list.filter(i => {
+    if (productoId && String(i.productoId || '') !== String(productoId)) return false;
+    return argDate(i.createdAt) === today;
+  }).length;
 }
 
 // Transforma un resultado de deep-analyze en una idea tipo "replica".

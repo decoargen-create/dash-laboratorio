@@ -263,11 +263,13 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   useEffect(() => { saveJSON(RUN_HISTORY_KEY, runHistory); }, [runHistory]);
 
   // Refrescar contador de ideas del día cada vez que montamos o cambia la bandeja.
+  // Cuando hay producto activo, contamos solo las suyas.
   useEffect(() => {
-    setIdeasToday(countIdeasGeneratedToday());
-    const interval = setInterval(() => setIdeasToday(countIdeasGeneratedToday()), 60 * 1000);
+    const count = () => setIdeasToday(countIdeasGeneratedToday(null, activeProductoId || null));
+    count();
+    const interval = setInterval(count, 60 * 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [activeProductoId]);
 
   // Mix promedio de la competencia (% video vs static) — calculado sobre
   // todos los ads scrapeados de los competidores cargados. Sirve como
@@ -957,7 +959,15 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           }
         }
 
-        const ideasExistentes = loadIdeas().map(i => ({ titulo: i.titulo, angulo: i.angulo, tipo: i.tipo }));
+        // Ideas existentes SOLO del producto activo — para dedup y para
+        // saber si es la "primera vez" generando para este producto.
+        // Antes usábamos todas las ideas globalmente, lo que rompía en
+        // multi-producto (si producto A tenía 30 ideas, producto B se
+        // comportaba como si ya tuviera todas esas).
+        const productoActualId = String(producto.id);
+        const ideasExistentes = loadIdeas()
+          .filter(i => String(i.productoId || '') === productoActualId)
+          .map(i => ({ titulo: i.titulo, angulo: i.angulo, tipo: i.tipo }));
 
         // Ads propios matcheados al producto (solo si ya corrió el matcher IA
         // y son high/medium confidence). Sirven para generar iteraciones.
@@ -975,7 +985,8 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         // de ads analizados — si la competencia tiene mucho material,
         // pedimos proporcional (con techo MAX_IDEAS_PER_RUN). Después, cap
         // al límite diario restante.
-        const yaGeneradasHoy = countIdeasGeneratedToday();
+        // Solo contamos ideas generadas HOY PARA ESTE PRODUCTO — no globales.
+        const yaGeneradasHoy = countIdeasGeneratedToday(null, productoActualId);
         const esPrimeraVez = ideasExistentes.length === 0;
         const adsTotales = (compWithAds || []).reduce((sum, c) => sum + (c.allAds?.length || 0), 0);
         const primeraVezTarget = Math.min(
@@ -2265,7 +2276,7 @@ function WizardCard({ num, title, done, disabled = false, badge, children }) {
   );
 }
 
-function StepRow({ step, liveIdeas }) {
+function StepRow({ step, liveIdeas, onRerun, rerunBusy = false }) {
   const { status, label, detail, startedAt, endedAt } = step;
   const elapsed = startedAt
     ? Math.round(((endedAt || Date.now()) - startedAt) / 1000)
@@ -2295,6 +2306,16 @@ function StepRow({ step, liveIdeas }) {
           }`}>{label}</p>
           <p className="text-[10px] text-gray-600 dark:text-gray-400">{detail}</p>
         </div>
+        {onRerun && (status === 'done' || status === 'error') && (
+          <button
+            onClick={onRerun}
+            disabled={rerunBusy}
+            className="shrink-0 inline-flex items-center gap-1 px-2 py-1 text-[10px] font-semibold text-purple-700 dark:text-purple-300 bg-white dark:bg-gray-700 border border-purple-300 dark:border-purple-700 rounded hover:bg-purple-50 dark:hover:bg-purple-900/30 transition disabled:opacity-50"
+            title="Re-ejecutar este paso solo"
+          >
+            {rerunBusy ? <Loader2 size={10} className="animate-spin" /> : <>↻ Re-ejecutar</>}
+          </button>
+        )}
         {elapsed != null && status !== 'pending' && (
           <span className="text-[10px] font-mono text-gray-400 shrink-0">{elapsed}s</span>
         )}

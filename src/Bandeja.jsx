@@ -401,24 +401,28 @@ export default function BandejaSection({ addToast }) {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
           <KanbanColumn
-            titulo="Pendientes" color="gray" accent
+            estado="pendiente" titulo="Pendientes" color="gray" accent
             ideas={byEstado.pendiente}
             onCardClick={(id) => setExpandedId(id)}
+            onDropIdea={(id) => setEstado(id, 'pendiente')}
           />
           <KanbanColumn
-            titulo="En uso" color="amber"
+            estado="en_uso" titulo="En uso" color="amber"
             ideas={byEstado.en_uso}
             onCardClick={(id) => setExpandedId(id)}
+            onDropIdea={(id) => setEstado(id, 'en_uso')}
           />
           <KanbanColumn
-            titulo="Usadas" color="emerald"
+            estado="usada" titulo="Usadas" color="emerald"
             ideas={byEstado.usada}
             onCardClick={(id) => setExpandedId(id)}
+            onDropIdea={(id) => setEstado(id, 'usada')}
           />
           <KanbanColumn
-            titulo="Archivadas" color="slate"
+            estado="archivada" titulo="Archivadas" color="slate"
             ideas={byEstado.archivada}
             onCardClick={(id) => setExpandedId(id)}
+            onDropIdea={(id) => setEstado(id, 'archivada')}
           />
         </div>
       )}
@@ -974,36 +978,70 @@ function MiniStat({ label, value, color = 'gray', accent = false }) {
 }
 
 // Columna del kanban — header con color + count, cuerpo scrolleable con cards.
-function KanbanColumn({ titulo, color, accent = false, ideas, onCardClick }) {
+// Actúa como drop target: al soltar una card encima, llama onDropIdea con el id
+// de la idea, que la mueve a este estado.
+function KanbanColumn({ estado, titulo, color, accent = false, ideas, onCardClick, onDropIdea }) {
+  const [isDragOver, setIsDragOver] = useState(false);
   const palette = {
     gray: {
       header: 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-700',
       body: 'bg-gray-50/50 dark:bg-gray-900/20 border-gray-200 dark:border-gray-700',
+      dragOver: 'ring-2 ring-gray-400 dark:ring-gray-500',
     },
     amber: {
       header: 'bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 border-amber-300 dark:border-amber-800',
       body: 'bg-amber-50/30 dark:bg-amber-900/10 border-amber-200 dark:border-amber-900/50',
+      dragOver: 'ring-2 ring-amber-400 dark:ring-amber-500',
     },
     emerald: {
       header: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-200 border-emerald-300 dark:border-emerald-800',
       body: 'bg-emerald-50/30 dark:bg-emerald-900/10 border-emerald-200 dark:border-emerald-900/50',
+      dragOver: 'ring-2 ring-emerald-400 dark:ring-emerald-500',
     },
     slate: {
       header: 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700',
       body: 'bg-slate-50/30 dark:bg-slate-900/20 border-slate-200 dark:border-slate-800',
+      dragOver: 'ring-2 ring-slate-400 dark:ring-slate-500',
     },
   };
   const c = palette[color] || palette.gray;
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (!isDragOver) setIsDragOver(true);
+  };
+  const handleDragLeave = (e) => {
+    // Evitar flickers cuando el cursor pasa sobre hijos — solo des-highlight si
+    // salió del contenedor realmente.
+    if (!e.currentTarget.contains(e.relatedTarget)) setIsDragOver(false);
+  };
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    const ideaId = e.dataTransfer.getData('text/idea-id');
+    const fromEstado = e.dataTransfer.getData('text/idea-estado');
+    if (!ideaId || fromEstado === estado) return;
+    onDropIdea?.(ideaId);
+  };
+
   return (
-    <div className={`rounded-xl border flex flex-col ${c.body} ${accent ? 'ring-2 ring-fuchsia-200 dark:ring-fuchsia-900/40' : ''}`}>
+    <div
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      className={`rounded-xl border flex flex-col transition ${c.body} ${accent ? 'ring-2 ring-fuchsia-200 dark:ring-fuchsia-900/40' : ''} ${isDragOver ? c.dragOver : ''}`}
+    >
       <div className={`px-3 py-2 border-b flex items-center justify-between ${c.header} rounded-t-xl`}>
         <p className="text-[11px] font-bold uppercase tracking-wider">{titulo}</p>
         <span className="text-xs font-bold tabular-nums">{ideas.length}</span>
       </div>
       <div className="p-2 space-y-2 min-h-[120px] max-h-[70vh] overflow-y-auto">
         {ideas.length === 0 ? (
-          <p className="text-[10px] italic text-gray-400 dark:text-gray-600 text-center py-6">
-            Sin ideas
+          <p className={`text-[10px] italic text-center py-6 transition ${
+            isDragOver ? 'text-gray-700 dark:text-gray-300 font-semibold' : 'text-gray-400 dark:text-gray-600'
+          }`}>
+            {isDragOver ? 'Soltá acá' : 'Sin ideas'}
           </p>
         ) : (
           ideas.map(idea => (
@@ -1016,13 +1054,29 @@ function KanbanColumn({ titulo, color, accent = false, ideas, onCardClick }) {
 }
 
 // Card compacta del kanban — thumb chico + título + 2-3 badges clave.
-// Todo el detalle se ve al clickear (abre el modal).
+// Todo el detalle se ve al clickear (abre el modal). También es arrastrable
+// entre columnas (drag&drop HTML5 nativo).
 function KanbanCard({ idea, onClick }) {
   const tipo = TIPO_META[idea.tipo] || TIPO_META.desde_cero;
+  const [isDragging, setIsDragging] = useState(false);
+
+  const handleDragStart = (e) => {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/idea-id', idea.id);
+    e.dataTransfer.setData('text/idea-estado', idea.estado || '');
+    setIsDragging(true);
+  };
+  const handleDragEnd = () => setIsDragging(false);
+
   return (
     <button
       onClick={onClick}
-      className="w-full text-left bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-2 hover:border-fuchsia-300 dark:hover:border-fuchsia-700 hover:shadow-sm transition group"
+      draggable
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+      className={`w-full text-left bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-2 hover:border-fuchsia-300 dark:hover:border-fuchsia-700 hover:shadow-sm transition group cursor-grab active:cursor-grabbing ${
+        isDragging ? 'opacity-40' : ''
+      }`}
     >
       <div className="flex items-start gap-2">
         {idea.origen?.imageUrl ? (

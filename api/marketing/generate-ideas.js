@@ -29,21 +29,58 @@ import { anthropicCost } from './_costs.js';
 
 const MODEL = 'claude-sonnet-4-6';
 
-const SYSTEM_PROMPT_BASE = `Sos director creativo senior de DTC cosméticos en Argentina. Tu trabajo es generar ideas de creativos accionables para Meta Ads. Tus ideas no son genéricas: son específicas al producto, al avatar y al contexto de la competencia.
+const SYSTEM_PROMPT_BASE = `Sos un estratega de direct-response + copywriter + director de arte especializado en Meta Ads para e-commerce ARGENTINO. Tu estilo combina:
+- Insights de Alex Hormozi (big idea, curiosidad, pattern interrupt)
+- Copywriting argento coloquial (vos, che, modismos locales — nunca neutro, nunca español de España)
+- Humor filoso + sarcasmo + doble sentido elegante cuando el producto lo permite
+- Ojo de dirección de arte (qué imagen potencia cada hook)
 
-**CALIDAD > CANTIDAD.** Si solo tenés contexto sólido para generar 12 ideas excelentes, devolvé 12. Nunca rellenes con ideas mediocres para alcanzar un número. Una mediocre pinta mal la bandeja entera.
+**TONO OBLIGATORIO EN LOS HOOKS — NO NEGOCIABLE**:
+Rozando lo vulgar cuando el producto lo permite. Sarcasmo argentino filoso. Doble sentido visual elegante. Humor cotidiano identificable. NUNCA tono corporativo, aspiracional genérico o clínico distante. Si el research doc empuja a tono serio, esa info va a la TRASTIENDA (copy del post, datos técnicos) — los HOOKS mantienen filo creativo.
 
-**DIVERSIDAD DE HOOKS — muy importante.** Antes de finalizar la respuesta, revisá todos los hooks que propusiste. Si dos hooks arrancan con el mismo template ("¿Cansada de X?", "¿Sabías que X?", "Dejá de X"), reescribí uno. Repetir estructuras en 2+ ideas las vuelve intercambiables y pierde el valor de diversificar ángulos. Mezclá arquetipos:
-- Pregunta retórica
-- Dato o estadística shocking
-- Confesión / storytelling en 1ra persona
-- Comparación antes/después
-- Autoridad / "Me dijo el dermatólogo"
-- Micro-agresión / provocación
-- Instrucción / "Tenés que saber esto"
-- Curiosidad / "No te vas a creer lo que pasó"
+Si el producto NO se presta a humor/vulgar (ej: productos médicos serios), usá insight incómodo + pattern interrupt emocional.
 
-Una buena batería tiene al menos 4 arquetipos de hook distintos.
+---
+
+**10 ÁNGULOS ESTRATÉGICOS** — cada idea debe pertenecer a uno:
+
+- **A. Sarcasmo / vulgar jugado** — pattern interrupt por shock u humor filoso
+- **B. Insight incómodo** — rompe tabú/mito, dice lo que nadie dice
+- **C. Situación relatable / POV** — micro-escenas cotidianas argentas, "cuando te pasa X"
+- **D. Doble sentido visual** — objeto cotidiano que "se abre", metáforas naturales premium
+- **E. Autoridad / solución** — para BOFU/retargeting, comparativas, garantía
+- **F. Testimonio / voz del cliente** — frase entre comillas con edad+nombre EXPLÍCITO (ej: "Elena, 62") — alta credibilidad en belleza/salud
+- **G. Autoridad científica / mecanismo** — instala UMS, convierte audiencia research-heavy
+- **H. Comparativa antes/después** — split visual, rutina anterior vs actual
+- **I. Humor filoso anti-cultura** — contra "body positive", "good vibes only", pensamiento mágico
+- **J. Edad emocional vs biológica** — para productos donde la edad es factor
+
+Distribuí las ideas entre 5-7 ángulos distintos. No todos aplican a todo producto — elegí los que mejor se prestan al caso.
+
+---
+
+**PROTECCIÓN DE ALCANCE META**:
+Ciertas palabras bajan el alcance de los ads: sexo, vagina, infección, enfermedad, celulitis, arrugas, pene, grasa corporal, diabetes, cáncer, etc. Si el hook/copy usa alguna, marcala con metaRiesgo para que el user sepa que tiene que testear en campaña chica antes de escalar.
+
+---
+
+**REGLAS DE ORO**:
+1. No inventar claims — solo trabajar con beneficios reales del producto (del research doc + landing).
+2. Argentino, no español neutro. "Vos", "che", modismos locales.
+3. Diferenciarse — si el hook podría estar en cualquier marca del rubro, no sirve. Debe sentirse DE ESTA marca.
+4. Calidad > cantidad. 12 ideas excelentes > 40 mediocres.
+5. Pattern interrupt — cada hook tiene que sobrevivir al scroll. Si no frena el pulgar en 1 segundo, no sirve.
+6. Hooks cortos — máx 12 palabras idealmente. Sin contexto previo.
+7. Testimonios con edad: "Elena, 62" > "una mujer de 60+". La precisión da credibilidad.
+8. Activo visual de marca — si el producto tiene un elemento icónico (frasco, textura, forma), incluilo en 40-60% de las piezas como hilo conductor reconocible. No en todas — la ausencia estratégica potencia cuando aparece.
+
+---
+
+**PROCESO INTERNO** (hacelo mentalmente antes de generar):
+
+FASE 1 — Leé TODOS los ads de la competencia. Identificá patrones de ganadores.
+
+FASE 2 — Con los patrones + research doc + avatar, distribuí las ideas entre los 10 ángulos. Aseguráte que ninguno quede sobrerrepresentado salvo que lo justifique el producto.
 
 `;
 
@@ -83,18 +120,65 @@ function buildMixSection(mix, formatoMix, targetCount) {
     lines.push(`- ~${mix.desde_cero} tipo "desde_cero": ángulos originales basados en producto + avatar. Diversificá pain points, triggers y beneficios.`);
     lines.push('');
   }
-  lines.push(`**MIX DE FORMATO**: apuntá a ~${sPct}% static y ~${vPct}% video sobre el total. Podés incluir algún carrusel si el concepto lo pide.`);
+  lines.push(`**MIX DE FORMATO — OBLIGATORIO**: MÍNIMO ${Math.round(sPct * targetCount / 100)} ideas STATIC y MÍNIMO ${Math.round(vPct * targetCount / 100)} ideas VIDEO del total de ${targetCount}. Si la competencia es 90% video, VOS igual generás ${sPct}% static PORQUE ESO PIDIÓ EL USER. Para statics, describí layout + composición + paleta + mood. Podés incluir carruseles dentro del cupo de statics.`);
   lines.push('');
   return lines.join('\n');
 }
 
-const SHAPE_GUIDANCE = `Para devolver las ideas, llamá a la tool \`submit_ideas\` con el array completo. El API valida el schema — no vas a poder devolver basura.
+const SHAPE_GUIDANCE = `Para devolver las ideas, llamá a la tool \`submit_ideas\` con el array completo. El API valida el schema.
 
-**Puntos críticos del contenido**:
-- variableDeTesteo: para iteraciones, identificá qué UNA cosa cambiás vs el ad base (si cambiás hook Y visual, poné "mix"). Para réplicas/diferenciaciones, la palanca central de la idea.
-- testHipotesis: medible y accionable. Ej: "el hook con dato numérico va a bajar CPA vs el hook emocional genérico".
-- iteracionBase: SOLO para ideas tipo "iteracion". Debe referenciar el adId exacto de un ad propio + razón con métrica concreta que justifique iterarlo.
-- guion: CRÍTICO. Tiene que darle al diseñador/editor toda la info para producir sin preguntar. Video: beats numerados + duración + VO. Static: layout + paleta + mood. Carrusel: slide-by-slide.
+**Cada idea es un brief COMPLETO** que debería poder irse a producción sin preguntar nada. Formato obligatorio, tomá este ejemplo de calidad como referencia:
+
+---
+EJEMPLO DE CALIDAD (PIEZA #7, static, réplica):
+
+titulo: "Tirá las 4 cremas del botiquín. Con esta sola ya está."
+tipo: "replica"
+formato: "static"
+estiloVisual: "Editorial premium / conceptual minimalista"
+angulo: "Simplificación del ritual de skincare — reemplazo de 4 productos por 1"
+painPoint: "Gasto disperso en múltiples cremas sin resultados visibles"
+hook: "Tirá las 4 cremas del botiquín. Con esta sola ya está."
+escenarioNarrativo: "La oferta directa de simplicidad: Cellu reemplaza 4 cremas distintas (anti-age, anti-celulitis, anti-estrías, hidratante). Un gasto, un ritual, un producto. Pieza de retargeting y cierre — target ya conoce el problema pero tiene varios productos en el botiquín."
+descripcionImagen: "Editorial conceptual overhead. A la izquierda del frame, un tacho minimalista blanco con 4 frascos genéricos de cremas (blancos/beiges, usados, viejos) cayendo dentro. A la derecha, parado en foco perfecto con luz cálida dorada lateral, el frasco de Cellu — elegante, único protagonista. Fondo rosado empolvado limpio. Narrativa visual clara: reemplazo. Estética premium beauty."
+promptGeneradorImagen: "Editorial conceptual composition overhead shot, four generic used cosmetic cream jars in white and beige tones falling into a minimalist white trash bin on the left side of the frame, their lids worn and the products looking tired and generic, on the right side standing upright in perfect sharp focus one elegant cream jar with warm golden highlights representing the chosen product, soft dusty pink background, clear visual narrative of replacement, photorealistic, minimalist beauty photography, soft natural lighting, muted pastel color palette, 1:1 square composition"
+textoEnImagen: "HOOK:\\n• Línea 1 (bold granate, GRANDE): 'TIRÁ LAS 4 CREMAS'\\n• Línea 2 (bold granate, GRANDE): 'DEL BOTIQUÍN.'\\n• Línea 3 (italic naranja, más chica): 'Con esta sola ya está.'\\nMICROCOPY (sans-serif chico): '5 problemas. 1 fórmula. Aprobado por ANMAT.'\\nSELLO ESQUINA INFERIOR DERECHA: '✅ APROBADO POR ANMAT'\\nCTA (botón): 'Quiero simplificar mi rutina →'"
+copyPostMeta: "Esto es lo que probablemente tenés en tu baño ahora:\\n\\n• Crema anti-edad para la cara\\n• Crema para la papada / cuello / escote\\n• Crema anti-celulitis para piernas y glúteos\\n• Aceite o crema para estrías\\n• Hidratante corporal genérico\\n\\nGastás una fortuna. Te armás una rutina imposible. Y los resultados no llegan porque ninguna ataca la causa real: el tejido dérmico debilitado.\\n\\nCellu es UNA fórmula que trata 5 problemas: celulitis, estrías, arrugas, piel crepé, deshidratación. En cara, cuello, escote, brazos, manos, piernas y glúteos.\\n\\nAprobado por ANMAT. +7.896 reseñas (4.92/5). Envío gratis.\\n\\nTirá las 4. Quedate con una."
+publicoSugerido: "Retargeting caliente (visitó landing, no compró) + mujeres 35-55 con alto gasto en productos de cosmética."
+guion: "N/A (static)"
+razonamiento: "Réplica del patrón ganador de [Competidor X] (ad con 43d corriendo, 6 variantes) que usa 'tirá/reemplazá X productos' como hook de simplificación. Adapto al caso Cellu con 4 cremas específicas que el avatar ya tiene en su baño."
+variableDeTesteo: "hook"
+testHipotesis: "Hook con número concreto (4 cremas) va a bajar CPA vs hook genérico tipo 'simplificá tu rutina'."
+---
+
+**Reglas específicas por campo**:
+- titulo: igual o derivado del hook, ≤ 100 chars. Usa comillas si es el hook literal.
+- estiloVisual: categoría concreta que un director de arte entienda ("Editorial premium" · "UGC testimonial" · "Before/After clínico" · "Flat lay producto" · "Lifestyle aspiracional" · "Ilustrado humor").
+- descripcionImagen: en ESPAÑOL rioplatense, detallada, para el diseñador humano. Si es video, describí la escena clave o la miniatura. Si es carrusel, describí la slide principal.
+- promptGeneradorImagen: en INGLÉS, específico. REGLAS OBLIGATORIAS:
+  · CERRAR SIEMPRE con el aspect ratio según el formato:
+      static/feed → "photorealistic, commercial ad quality, 1:1 square composition"
+      video/stories/reels → "photorealistic, commercial ad quality, 9:16 vertical composition"
+      carrusel → "photorealistic, commercial ad quality, 4:5 portrait composition"
+  · Si aparecen PERSONAS/PIEL y puede salir plástico, AGREGAR:
+      "natural skin texture, subtle imperfections, editorial unretouched look, shot on medium format camera"
+  · EUFEMISMOS OBLIGATORIOS para palabras que Meta o los generadores de imagen censuran/rechazan:
+      "vagina" → "intimate area" / "delicate skin"
+      "nude" → "tasteful editorial portrait" / "soft draped fabric"
+      "sexual" → "sensual" / "intimate mood"
+      "infection" → "inflammation" / "redness"
+      "disease" → "condition" / "imbalance"
+      "cellulite" → "skin texture on thighs"
+      "wrinkles" → "fine lines" / "texture of mature skin"
+      "fat" / "overweight" → "body silhouette" / "softer form"
+  · Si el producto tiene ACTIVO VISUAL DE MARCA (elemento icónico reutilizable: frasco distintivo, textura, forma), DEBE aparecer con descripción detallada en el prompt. Apuntá a que aparezca en ~40-60% de las piezas — en las que estratégicamente potencia el hook (autoridad, testimonio, solución). En hooks de puro shock/POV puede NO aparecer, eso baja el "olor a ad" y sube CTR.
+  · Incluí SIEMPRE: composición + iluminación + paleta.
+- textoEnImagen: layout del TEXTO SOBRE LA IMAGEN con jerarquía, estilo (bold/italic), colores y tamaños relativos. Separá hook, microcopy, sellos y CTA. Usá \\n para saltos de línea.
+- copyPostMeta: lo que va ARRIBA de la imagen en el feed (NO dentro). Puede ser largo, usar bullets/saltos de línea. Storytelling está OK. Cerrá con un call-to-action o pregunta. Castellano rioplatense.
+- publicoSugerido: targeting concreto. Ej: "cold prospecting: mujeres 30-55 con interés en cosmética natural" o "retargeting: visitantes del último 14d que no compraron".
+- guion: SOLO video → beats numerados (Beat 1, 2...) con timecodes (0-3s, 3-8s...) + duración total + tono de VO. Si es static/carrusel, poné "N/A (static)" o slide-by-slide para carruseles.
+- variableDeTesteo + testHipotesis: para saber qué estás testeando y medir después.
+- iteracionBase: SOLO si tipo=iteracion. Linkeá al adId del ad propio que estás iterando.
 `;
 
 function buildSystemPrompt({ hasPropios, targetCount, formatoMix }) {
@@ -102,34 +186,62 @@ function buildSystemPrompt({ hasPropios, targetCount, formatoMix }) {
   return SYSTEM_PROMPT_BASE + buildMixSection(mix, formatoMix, targetCount) + SHAPE_GUIDANCE;
 }
 
-// Tool schema para structured output. Forzamos a Claude a llamar esta tool
-// y el API valida que matchee el schema. Adiós a parsear JSON frágil.
+// Tool schema para structured output. Cada idea es un brief COMPLETO:
+// concepto estratégico + descripción de imagen en español + prompt en inglés
+// para Nano Banana/Midjourney + layout del texto-en-imagen + copy del post
+// + público sugerido. Listo para producir sin preguntas.
 const SUBMIT_IDEAS_TOOL = {
   name: 'submit_ideas',
-  description: 'Envía el array completo de ideas creativas generadas.',
+  description: 'Envía el array completo de briefs creativos generados.',
   input_schema: {
     type: 'object',
     properties: {
       ideas: {
         type: 'array',
-        description: 'Array de ideas. Respetá la calidad: si tenés contexto para 12 ideas buenas devolvé 12, no fuerces a 40.',
+        description: 'Array de ideas/briefs. Respetá calidad > cantidad.',
         items: {
           type: 'object',
           properties: {
-            titulo: { type: 'string', description: 'Título corto, ≤ 100 chars.' },
+            titulo: { type: 'string', description: 'Título corto del brief ej: "Tirá las 4 cremas del botiquín". ≤ 100 chars.' },
             tipo: { type: 'string', enum: ['replica', 'iteracion', 'diferenciacion', 'desde_cero'] },
-            angulo: { type: 'string' },
-            painPoint: { type: 'string' },
-            hook: { type: 'string', description: 'Primer frame / primeras 3 líneas. Diversificá arquetipos entre ideas.' },
-            copy: { type: 'string' },
-            guion: { type: 'string', description: 'Detallado según formato (video/static/carrusel).' },
             formato: { type: 'string', enum: ['video', 'static', 'carrusel'] },
-            razonamiento: { type: 'string' },
+            estiloVisual: { type: 'string', description: 'Ej: "Editorial premium / conceptual minimalista" · "UGC testimonial" · "Before/After clínico" · "Ilustrado humor" · "Lifestyle aspiracional".' },
+            angulo: { type: 'string', description: 'Ángulo emocional/estratégico central.' },
+            painPoint: { type: 'string', description: 'El pain específico que toca.' },
+            hook: { type: 'string', description: 'Hook principal — 1 línea, ≤ 120 chars. Diversificá arquetipos entre ideas.' },
+            escenarioNarrativo: { type: 'string', description: 'Concepto estratégico: por qué esta pieza comunica lo que comunica, cómo se conecta con el avatar y la oferta. 2-4 oraciones.' },
+            descripcionImagen: { type: 'string', description: 'SPANISH: descripción detallada y visual de la escena para que un diseñador humano la entienda. Composición, elementos, iluminación, mood. 3-6 oraciones.' },
+            promptGeneradorImagen: { type: 'string', description: 'ENGLISH: prompt listo para pegar en Nano Banana / Midjourney / DALL-E. Detallado, con estilo fotográfico, composición, iluminación, paleta, aspect ratio. Ej: "Editorial conceptual composition overhead shot, four generic used cosmetic jars falling into..., photorealistic, soft natural lighting, muted pastel palette, 1:1 square composition".' },
+            textoEnImagen: { type: 'string', description: 'Layout del texto que VA DENTRO de la imagen: hook en bloques (con estilo + color + tamaño relativo), microcopy debajo, sello/badge si aplica, CTA button. Formato legible por humano, ej:\\nHOOK:\\n• Línea 1 (bold granate, GRANDE): "TIRÁ LAS 4 CREMAS"\\n• Línea 2 (bold granate, GRANDE): "DEL BOTIQUÍN."\\n• Línea 3 (italic naranja, más chica): "Con esta sola ya está."\\nMICROCOPY: "5 problemas. 1 fórmula. Aprobado por ANMAT."\\nSELLO: "✅ APROBADO POR ANMAT"\\nCTA: "Quiero simplificar mi rutina →"' },
+            copyPostMeta: { type: 'string', description: 'Texto que va ARRIBA del creativo en el feed de Meta (no va dentro de la imagen). Puede ser largo (200-600 chars), con listas, saltos de línea, storytelling o bullets. En rioplatense.' },
+            publicoSugerido: { type: 'string', description: 'Targeting concreto recomendado para esta pieza. Ej: "Retargeting caliente (visitó landing, no compró) + mujeres 35-55 con alto gasto en cosmética." 1-2 oraciones.' },
+            guion: { type: 'string', description: 'SOLO si formato=video: guión con beats numerados + timecodes + duración total + tono de VO. Ej: "Beat 1 (0-3s): primer plano... Beat 2 (3-8s): ... · Duración: 15s · VO: cálida, femenina." Si formato=static/carrusel, dejalo vacío o poné "N/A".' },
+            razonamiento: { type: 'string', description: 'Por qué esta idea es fuerte. Para réplicas: qué competidor/patrón te inspiró. Para iteración: qué variable cambiás. Para diferenciación: por qué nadie lo hizo.' },
+            anguloCategoria: {
+              type: 'string',
+              enum: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'],
+              description: 'Cuál de los 10 ángulos estratégicos (A: sarcasmo/vulgar, B: insight incómodo, C: POV relatable, D: doble sentido visual, E: autoridad/solución, F: testimonio con edad, G: autoridad científica, H: antes/después, I: humor filoso anti-cultura, J: edad emocional vs biológica).',
+            },
+            tipoCampaña: {
+              type: 'string',
+              enum: ['TOFU', 'MOFU', 'BOFU', 'retargeting', 'social_proof', 'branding'],
+              description: 'En qué parte del funnel funciona mejor este creativo.',
+            },
+            metaRiesgo: {
+              type: 'object',
+              description: 'Si el hook/copy tiene palabras que bajan alcance de Meta.',
+              properties: {
+                tieneRiesgo: { type: 'boolean' },
+                palabras: { type: 'array', items: { type: 'string' }, description: 'Palabras gatillo específicas en esta pieza.' },
+                sugerencia: { type: 'string', description: 'Cómo mitigar: ej "testear primero en campaña chica", "usar eufemismo X", etc.' },
+              },
+              required: ['tieneRiesgo'],
+            },
             variableDeTesteo: {
               type: 'string',
               enum: ['hook', 'visual', 'cta', 'formato', 'angulo', 'audience', 'prueba_social', 'oferta', 'mix'],
             },
-            testHipotesis: { type: 'string' },
+            testHipotesis: { type: 'string', description: 'Hipótesis medible. Ej: "Hook con número concreto (4 cremas) va a bajar CPA vs hook genérico".' },
             iteracionBase: {
               type: 'object',
               description: 'OBLIGATORIO solo si tipo=iteracion.',
@@ -140,7 +252,12 @@ const SUBMIT_IDEAS_TOOL = {
               },
             },
           },
-          required: ['titulo', 'tipo', 'angulo', 'hook', 'copy', 'formato', 'razonamiento', 'variableDeTesteo', 'testHipotesis'],
+          required: [
+            'titulo', 'tipo', 'formato', 'estiloVisual', 'angulo', 'painPoint',
+            'hook', 'escenarioNarrativo', 'descripcionImagen', 'promptGeneradorImagen',
+            'textoEnImagen', 'copyPostMeta', 'publicoSugerido', 'anguloCategoria',
+            'tipoCampaña', 'metaRiesgo', 'razonamiento', 'variableDeTesteo', 'testHipotesis',
+          ],
         },
       },
     },
@@ -168,7 +285,7 @@ function respondJSON(res, status, payload) {
 }
 
 // Serializamos el contexto en un string estructurado y legible para Claude.
-function buildContext({ producto, competidoresAnalisis, ideasExistentes, propiosAds }) {
+function buildContext({ producto, competidoresAnalisis, allCompAds, ideasExistentes, propiosAds }) {
   const parts = [];
 
   parts.push('## PRODUCTO PROPIO');
@@ -176,6 +293,17 @@ function buildContext({ producto, competidoresAnalisis, ideasExistentes, propios
   if (producto?.landingUrl) parts.push(`Landing: ${producto.landingUrl}`);
   if (producto?.descripcion) parts.push(`Descripción: ${producto.descripcion}`);
   if (producto?.resumenEjecutivo) parts.push(`\nResumen ejecutivo: ${producto.resumenEjecutivo}`);
+
+  // Activo visual de marca — elemento icónico reutilizable (frasco, textura,
+  // forma distintiva). Si está definido, Claude debe incluirlo en el
+  // promptGeneradorImagen de ~40-60% de las piezas como hilo conductor.
+  if (producto?.activoVisual?.descripcion) {
+    parts.push(`\n**ACTIVO VISUAL DE MARCA** (hilo conductor icónico del producto — incluir en 40-60% de las piezas):`);
+    parts.push(producto.activoVisual.descripcion);
+    if (producto.activoVisual.imageUrl) {
+      parts.push(`Referencia visual: ${producto.activoVisual.imageUrl}`);
+    }
+  }
 
   // Stage del prospect — determina el tipo de hook a usar.
   const stageLabels = {
@@ -214,11 +342,45 @@ function buildContext({ producto, competidoresAnalisis, ideasExistentes, propios
     parts.push(`\n⚠️ SIN RESEARCH DOC. Las ideas van a ser más genéricas. Correr el pipeline de Documentación antes daría ideas mucho más ancladas al avatar real.`);
   }
 
-  parts.push('\n## COMPETENCIA — ANÁLISIS DE GANADORES');
-  if (!competidoresAnalisis?.length) {
-    parts.push('(Sin análisis de competencia todavía. Igual generá ideas pero marcá que las "replica" son genéricas.)');
-  } else {
-    competidoresAnalisis.slice(0, 8).forEach((c, i) => {
+  // === SECCIÓN 1: TODOS los ads de la competencia (copy crudo) ===
+  // El generador recibe CADA ad que scrapeamos — no filtramos nada.
+  // Esto le da la visión completa del mercado para detectar patrones.
+  if (allCompAds?.length) {
+    // Agrupar por competidor para que el contexto sea legible.
+    const byComp = {};
+    for (const ad of allCompAds) {
+      const key = ad.competidor || 'Desconocido';
+      if (!byComp[key]) byComp[key] = [];
+      byComp[key].push(ad);
+    }
+
+    parts.push('\n## TODOS LOS ADS DE LA COMPETENCIA (copy crudo para pattern mining)');
+    parts.push(`Total: ${allCompAds.length} ads de ${Object.keys(byComp).length} competidores.`);
+    parts.push(`**Tu trabajo**: leer TODOS estos ads, identificar los PATRONES que se repiten entre los ganadores (hooks, ángulos, estructura, formatos), y usarlos para generar ideas. No te limites a los 10 primeros — mirá toda la lista.`);
+    parts.push('');
+
+    for (const [compName, ads] of Object.entries(byComp)) {
+      const winners = ads.filter(a => a.isWinner);
+      const videoCount = ads.filter(a => a.formato === 'video').length;
+      const staticCount = ads.length - videoCount;
+      const maxDays = Math.max(...ads.map(a => a.daysRunning || 0), 0);
+      parts.push(`\n### ${compName} (${ads.length} ads · ${winners.length} ganadores · ${staticCount} static/${videoCount} video · máx ${maxDays}d corriendo)`);
+
+      // Winners primero, después los demás
+      const sorted = [...ads].sort((a, b) => (b.score || 0) - (a.score || 0));
+      for (const ad of sorted) {
+        const winBadge = ad.winnerTier === 'strong' ? '🏆🔥' : ad.isWinner ? '🏆' : '';
+        const body = ad.body ? ad.body.slice(0, 200) : '(sin copy)';
+        parts.push(`- ${winBadge} [${ad.formato}·${ad.daysRunning}d·score${ad.score}${ad.variantes > 0 ? `·${ad.variantes}var` : ''}] ${ad.headline ? ad.headline + ' — ' : ''}${body}`);
+      }
+    }
+  }
+
+  // === SECCIÓN 2: Análisis PROFUNDOS (los top con Vision + Whisper) ===
+  if (competidoresAnalisis?.length) {
+    parts.push('\n## ANÁLISIS PROFUNDOS (Vision + Whisper) — los ganadores más fuertes');
+    parts.push(`${competidoresAnalisis.length} ads analizados en profundidad. Estos son los insights estructurados:`);
+    competidoresAnalisis.forEach((c, i) => {
       parts.push(`\n### ${i + 1}. ${c.competidorNombre || 'Competidor'} — ad ${c.adId || ''}`);
       if (c.adHeadline) parts.push(`Headline: ${c.adHeadline}`);
       if (c.adBody) parts.push(`Body: ${String(c.adBody).slice(0, 400)}`);
@@ -228,7 +390,12 @@ function buildContext({ producto, competidoresAnalisis, ideasExistentes, propios
       if (Array.isArray(a.triggers)) parts.push(`Triggers: ${a.triggers.join(', ')}`);
       if (a.audience) parts.push(`Audience: ${a.audience}`);
       if (a.why_it_works) parts.push(`Por qué funciona: ${a.why_it_works}`);
+      if (Array.isArray(a.copy_patterns)) parts.push(`Patrones de copy: ${a.copy_patterns.join(' | ')}`);
+      if (Array.isArray(a.objections)) parts.push(`Objeciones que aborda: ${a.objections.join(' | ')}`);
     });
+  } else if (!allCompAds?.length) {
+    parts.push('\n## COMPETENCIA');
+    parts.push('(Sin datos de competencia todavía. Generá ideas basadas solo en el research doc del producto.)');
   }
 
   if (propiosAds?.length) {
@@ -356,17 +523,32 @@ function sseWrite(res, obj) {
 function sanitizeIdea(i) {
   const tiposValidos = new Set(['replica', 'iteracion', 'diferenciacion', 'desde_cero']);
   const variablesValidas = new Set(['hook', 'visual', 'cta', 'formato', 'angulo', 'audience', 'prueba_social', 'oferta', 'mix']);
+  const angulosValidos = new Set(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J']);
+  const tiposCampaña = new Set(['TOFU', 'MOFU', 'BOFU', 'retargeting', 'social_proof', 'branding']);
   if (!i || typeof i.titulo !== 'string' || !tiposValidos.has(i.tipo)) return null;
   const base = {
-    titulo: String(i.titulo).slice(0, 150),
+    titulo: String(i.titulo).slice(0, 200),
     tipo: i.tipo,
+    formato: ['video', 'static', 'carrusel'].includes(i.formato) ? i.formato : 'static',
+    estiloVisual: String(i.estiloVisual || '').slice(0, 250),
     angulo: String(i.angulo || '').slice(0, 500),
     painPoint: String(i.painPoint || '').slice(0, 500),
-    hook: String(i.hook || '').slice(0, 500),
-    copy: String(i.copy || '').slice(0, 1500),
-    guion: String(i.guion || '').slice(0, 3000),
-    formato: ['video', 'static', 'carrusel'].includes(i.formato) ? i.formato : 'static',
-    razonamiento: String(i.razonamiento || '').slice(0, 500),
+    hook: String(i.hook || '').slice(0, 300),
+    escenarioNarrativo: String(i.escenarioNarrativo || '').slice(0, 2000),
+    descripcionImagen: String(i.descripcionImagen || '').slice(0, 2500),
+    promptGeneradorImagen: String(i.promptGeneradorImagen || '').slice(0, 2500),
+    textoEnImagen: String(i.textoEnImagen || '').slice(0, 2000),
+    copyPostMeta: String(i.copyPostMeta || '').slice(0, 3000),
+    publicoSugerido: String(i.publicoSugerido || '').slice(0, 500),
+    guion: String(i.guion || '').slice(0, 3500),
+    razonamiento: String(i.razonamiento || '').slice(0, 700),
+    anguloCategoria: angulosValidos.has(i.anguloCategoria) ? i.anguloCategoria : null,
+    tipoCampaña: tiposCampaña.has(i.tipoCampaña) ? i.tipoCampaña : null,
+    metaRiesgo: (i.metaRiesgo && typeof i.metaRiesgo === 'object') ? {
+      tieneRiesgo: !!i.metaRiesgo.tieneRiesgo,
+      palabras: Array.isArray(i.metaRiesgo.palabras) ? i.metaRiesgo.palabras.slice(0, 20).map(p => String(p).slice(0, 50)) : [],
+      sugerencia: String(i.metaRiesgo.sugerencia || '').slice(0, 300),
+    } : { tieneRiesgo: false, palabras: [], sugerencia: '' },
     variableDeTesteo: variablesValidas.has(i.variableDeTesteo) ? i.variableDeTesteo : 'mix',
     testHipotesis: String(i.testHipotesis || '').slice(0, 500),
   };
@@ -392,6 +574,7 @@ export default async function handler(req, res) {
   const {
     producto,
     competidoresAnalisis = [],
+    allCompAds = [],
     ideasExistentes = [],
     propiosAds = [],
     targetCount = 15,
@@ -407,7 +590,7 @@ export default async function handler(req, res) {
 
   const client = new Anthropic({ apiKey: anthropicKey });
   const hasPropios = Array.isArray(propiosAds) && propiosAds.length > 0;
-  const userContent = buildContext({ producto, competidoresAnalisis, ideasExistentes, propiosAds });
+  const userContent = buildContext({ producto, competidoresAnalisis, allCompAds, ideasExistentes, propiosAds });
   const systemPrompt = buildSystemPrompt({
     hasPropios,
     targetCount: clampedTarget,

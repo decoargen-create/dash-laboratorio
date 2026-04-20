@@ -120,9 +120,42 @@ function landingToKeyword(url) {
 }
 
 export default function ArranqueSection({ addToast, onGoToSection }) {
-  const [productos, setProductos] = useState(() => loadJSON(PRODUCTOS_KEY, []));
-  const [competidores, setCompetidores] = useState(() => loadJSON(COMPETIDORES_KEY, []));
+  const [productos, setProductos] = useState(() => {
+    const prods = loadJSON(PRODUCTOS_KEY, []);
+    // Migración: si hay competidores globales sueltos y el primer producto
+    // no tiene competidores propios, los migramos al primer producto.
+    const globalComps = loadJSON(COMPETIDORES_KEY, []);
+    if (globalComps.length > 0 && prods.length > 0 && !prods[0].competidores?.length) {
+      prods[0] = { ...prods[0], competidores: globalComps };
+      saveJSON(PRODUCTOS_KEY, prods);
+    }
+    return prods;
+  });
   const [metaAccount, setMetaAccount] = useState(() => loadJSON(META_ACCOUNT_KEY, null));
+
+  // Producto activo — null = vista de lista, id = workspace del producto.
+  const [activeProductoId, setActiveProductoId] = useState(() => {
+    try { return localStorage.getItem('viora-marketing-active-product') || null; } catch { return null; }
+  });
+  useEffect(() => {
+    try {
+      if (activeProductoId) localStorage.setItem('viora-marketing-active-product', activeProductoId);
+      else localStorage.removeItem('viora-marketing-active-product');
+    } catch {}
+  }, [activeProductoId]);
+
+  // Producto activo derivado + competidores del producto activo.
+  const producto = productos.find(p => String(p.id) === String(activeProductoId)) || null;
+  const competidores = producto?.competidores || [];
+  // Setter de competidores que los guarda DENTRO del producto activo.
+  const setCompetidores = (updater) => {
+    setProductos(prev => prev.map(p => {
+      if (String(p.id) !== String(activeProductoId)) return p;
+      const current = p.competidores || [];
+      const next = typeof updater === 'function' ? updater(current) : updater;
+      return { ...p, competidores: next };
+    }));
+  };
 
   // Wizard product form
   const [showProdForm, setShowProdForm] = useState(false);
@@ -154,9 +187,12 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // Ideas generadas en vivo durante el pipeline — se llena por streaming
   // y se muestra debajo del paso "Generando ideas" en el stepper.
   const [liveIdeas, setLiveIdeas] = useState([]);
+  // Costo acumulado de la corrida actual — se resetea al arrancar el pipeline
+  // y va sumando a medida que cada endpoint devuelve su cost{}. Se muestra
+  // en vivo en el stepper.
+  const [runCost, setRunCost] = useState({ anthropic: 0, openai: 0, apify: 0, meta: 0, total: 0 });
 
   useEffect(() => { saveJSON(PRODUCTOS_KEY, productos); }, [productos]);
-  useEffect(() => { saveJSON(COMPETIDORES_KEY, competidores); }, [competidores]);
   useEffect(() => { saveJSON(META_ACCOUNT_KEY, metaAccount); }, [metaAccount]);
   useEffect(() => { saveJSON(GEN_CONFIG_KEY, genConfig); }, [genConfig]);
 
@@ -306,26 +342,27 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     }
   };
 
-  // El producto "principal" es el primero (simplificamos: 1 producto por ahora).
-  const producto = productos[0];
+  // `producto` ahora es el activo (derivado arriba, no productos[0]).
 
   const handleAddProducto = async () => {
     const nombre = prodDraft.nombre.trim();
     const landingUrl = prodDraft.landingUrl.trim();
     if (!nombre) { addToast?.({ type: 'error', message: 'Ponele nombre al producto' }); return; }
 
+    const nuevoId = Date.now();
     const nuevo = {
-      id: Date.now(),
+      id: nuevoId,
       nombre,
       landingUrl,
       descripcion: prodDraft.descripcion.trim(),
+      competidores: [],
       createdAt: new Date().toISOString(),
-      // stage lo infiere el pipeline después de generar el research doc.
     };
     setProductos(prev => [nuevo, ...prev]);
     setProdDraft({ nombre: '', landingUrl: '', descripcion: '' });
     setShowProdForm(false);
-    addToast?.({ type: 'success', message: `Producto "${nombre}" cargado · ahora corré el pipeline` });
+    setActiveProductoId(String(nuevoId));
+    addToast?.({ type: 'success', message: `Producto "${nombre}" creado — cargá competidores y corré el pipeline` });
   };
 
   const handleAddCompetidor = () => {
@@ -421,6 +458,22 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     setRunning(true);
     setCancelled(false);
     setLiveIdeas([]);
+    setRunCost({ anthropic: 0, openai: 0, apify: 0, meta: 0, total: 0 });
+
+    // Wrapper sobre logCostsFromResponse que también suma al runCost local.
+    const trackCost = (data, descripcion) => {
+      const added = logCostsFromResponse(data, descripcion);
+      if (added?.total > 0) {
+        setRunCost(prev => ({
+          anthropic: prev.anthropic + added.anthropic,
+          openai: prev.openai + added.openai,
+          apify: prev.apify + added.apify,
+          meta: prev.meta + added.meta,
+          total: prev.total + added.total,
+        }));
+      }
+      return added;
+    };
 
     // Pasos dinámicos según estado:
     //   - docs-gen: solo si el producto aún no tiene research doc
@@ -506,7 +559,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         });
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-        logCostsFromResponse(data, `post-research-analysis · ${productoActualizado.nombre}`);
+        trackCost(data, `post-research-analysis · ${productoActualizado.nombre}`);
 
         searchKeywords = data.searchKeywords || [];
         productoActualizado = {
@@ -567,7 +620,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       const stepId = `scrape-${c.id}`;
       updateStep(stepId, { status: 'running', startedAt: Date.now() });
       try {
-        const payload = { country: 'ALL', limit: 50 };
+        const payload = { country: 'ALL', limit: 200 };
         if (c.fbPageUrl) {
           payload.fbPageUrl = c.fbPageUrl.startsWith('http') ? c.fbPageUrl : `https://www.facebook.com/${c.fbPageUrl}`;
         } else if (c.landingUrl) {
@@ -582,27 +635,37 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         });
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-        logCostsFromResponse(data, `apify-ingest · ${c.nombre}`);
+        trackCost(data, `apify-ingest · ${c.nombre}`);
 
         const ads = data.ads || [];
-        const winners = ads.filter(a => a.isWinner).slice(0, 3);
+        const allWinners = ads.filter(a => a.isWinner);
 
-        // Guardar en el competidor
-        setCompetidores(prev => prev.map(x =>
-          x.id === c.id ? {
-            ...x,
-            ads,
-            adsTotal: data.total || 0,
-            winnersCount: data.winners || 0,
-            lastAdsCheck: new Date().toISOString(),
-          } : x
-        ));
+        // Guardar en el competidor (con historial de corridas)
+        setCompetidores(prev => prev.map(x => {
+          if (x.id !== c.id) return x;
+          const prevHistory = Array.isArray(x.adsHistory) ? x.adsHistory : [];
+          const history = [...prevHistory, {
+            ts: new Date().toISOString(),
+            total: data.total || 0,
+            winners: data.winners || 0,
+          }].slice(-10);
+          return {
+            ...x, ads, adsTotal: data.total || 0, winnersCount: data.winners || 0,
+            lastAdsCheck: new Date().toISOString(), adsHistory: history,
+          };
+        }));
 
-        compWithAds.push({ comp: c, winners });
+        // Deep-analyze: top 10 winners por score (los más fuertes).
+        // Todos los demás ads (winners o no) llegan al generador con
+        // su copy crudo — no los tiramos.
+        const topWinnersForAnalysis = allWinners
+          .slice().sort((a, b) => (b.score || 0) - (a.score || 0))
+          .slice(0, 10);
+        compWithAds.push({ comp: c, winners: topWinnersForAnalysis, allAds: ads });
         updateStep(stepId, {
           status: 'done',
           endedAt: Date.now(),
-          detail: `${winners.length} ganador${winners.length !== 1 ? 'es' : ''} de ${ads.length} ads`,
+          detail: `${allWinners.length} ganador${allWinners.length !== 1 ? 'es' : ''} de ${ads.length} ads · top ${topWinnersForAnalysis.length} para análisis profundo`,
         });
       } catch (err) {
         updateStep(stepId, { status: 'error', endedAt: Date.now(), detail: err.message });
@@ -617,9 +680,30 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         updateStep(stepId, { status: 'done', endedAt: Date.now(), detail: 'Sin ganadores para analizar todavía' });
         continue;
       }
-      updateStep(stepId, { status: 'running', startedAt: Date.now(), detail: `0/${winners.length} analizados` });
+      // Filtrar: no re-analizar los ads que ya tienen análisis guardado.
+      // Ahorramos tokens + tiempo + evitamos tirar ideas duplicadas en la
+      // bandeja. Solo analizamos ads nuevos que aparecieron en este scrape.
+      const compFresh = loadJSON(COMPETIDORES_KEY, competidores).find(x => x.id === comp.id);
+      const existingAnalyses = compFresh?.adsAnalysis || {};
+      const nuevosParaAnalizar = winners.filter(ad => !existingAnalyses[ad.id]);
+      const yaAnalizados = winners.length - nuevosParaAnalizar.length;
+
+      if (nuevosParaAnalizar.length === 0) {
+        updateStep(stepId, {
+          status: 'done',
+          endedAt: Date.now(),
+          detail: `Todos (${winners.length}) ya analizados en corridas anteriores — nada nuevo.`,
+        });
+        continue;
+      }
+
+      updateStep(stepId, {
+        status: 'running',
+        startedAt: Date.now(),
+        detail: `0/${nuevosParaAnalizar.length} analizados${yaAnalizados > 0 ? ` · ${yaAnalizados} salteados (ya había análisis)` : ''}`,
+      });
       let analyzed = 0;
-      for (const ad of winners) {
+      for (const ad of nuevosParaAnalizar) {
         if (cancelled) break;
         try {
           const resp = await fetch('/api/marketing/deep-analyze', {
@@ -639,7 +723,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           });
           const data = await resp.json();
           if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-          logCostsFromResponse(data, `deep-analyze · ${comp.nombre} · ${ad.id}`);
+          trackCost(data, `deep-analyze · ${comp.nombre} · ${ad.id}`);
 
           setCompetidores(prev => prev.map(x =>
             x.id === comp.id ? {
@@ -659,24 +743,33 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           // Empuja la idea a la Bandeja automáticamente.
           ideaFromDeepAnalysis({ analysis: data.analysis, transcript: data.transcript, ad, competidor: comp });
           analyzed++;
-          updateStep(stepId, { detail: `${analyzed}/${winners.length} analizados` });
+          updateStep(stepId, { detail: `${analyzed}/${nuevosParaAnalizar.length} analizados${yaAnalizados > 0 ? ` · ${yaAnalizados} salteados (ya había análisis)` : ''}` });
         } catch (err) {
           // Un análisis fallido no rompe el resto — seguimos.
           console.error(`deep-analyze falló para ad ${ad.id}:`, err);
         }
       }
-      updateStep(stepId, { status: 'done', endedAt: Date.now(), detail: `${analyzed}/${winners.length} analizados` });
+      updateStep(stepId, {
+        status: 'done',
+        endedAt: Date.now(),
+        detail: `${analyzed} nuevos analizados${yaAnalizados > 0 ? ` · ${yaAnalizados} salteados (ya había análisis)` : ''}`,
+      });
     }
 
     // Paso generate: llamar a generate-ideas con todo el contexto acumulado.
     if (!cancelled) {
       updateStep('generate', { status: 'running', startedAt: Date.now() });
       try {
-        // Armar el array de análisis para el endpoint.
+        // Armar el contexto competitivo COMPLETO para el generador.
+        // 1. compAnalisis: ads con deep-analysis (hooks, ángulo, why_it_works)
+        // 2. allCompAds: TODOS los ads scrapeados (body + headline + score +
+        //    días + formato). El generador ve los 700+ ads crudos para
+        //    identificar patrones que no capturamos con deep-analyze.
         const compAnalisis = [];
-        // Leemos state fresh del localStorage porque setCompetidores es async.
+        const allCompAds = [];
         const compsActualizados = loadJSON(COMPETIDORES_KEY, competidores);
         for (const c of compsActualizados) {
+          // Deep-analyzed (con insights completos)
           const analyses = c.adsAnalysis || {};
           for (const adId of Object.keys(analyses)) {
             const a = analyses[adId];
@@ -687,6 +780,20 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               adHeadline: ad?.headline || '',
               adBody: ad?.body || '',
               analysis: a.analysis,
+            });
+          }
+          // TODOS los ads (copy crudo — para pattern mining)
+          for (const ad of (c.ads || [])) {
+            allCompAds.push({
+              competidor: c.nombre,
+              body: (ad.body || '').slice(0, 300),
+              headline: ad.headline || '',
+              formato: (ad.videoUrls?.length > 0) ? 'video' : 'static',
+              daysRunning: ad.daysRunning || 0,
+              score: ad.score || 0,
+              isWinner: !!ad.isWinner,
+              winnerTier: ad.winnerTier || null,
+              variantes: ad.variantes || 0,
             });
           }
         }
@@ -737,6 +844,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           body: JSON.stringify({
             producto: productoActualizado || producto || { nombre: 'Producto sin definir' },
             competidoresAnalisis: compAnalisis,
+            allCompAds,
             ideasExistentes,
             propiosAds,
             targetCount,
@@ -850,16 +958,119 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     : null;
   const ofrecerRun = !running && prodReady && (horasDesdeUltimoRun == null || horasDesdeUltimoRun >= 24);
 
+  // ====================================================================
+  // VISTA DE LISTA DE PRODUCTOS (si no hay producto activo seleccionado)
+  // ====================================================================
+  if (!producto) {
+    return (
+      <div className="max-w-4xl mx-auto space-y-6">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-600 to-violet-600 flex items-center justify-center text-white shadow-sm">
+              <Package size={20} />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Tus productos</h2>
+              <p className="text-xs text-gray-500 dark:text-gray-400">Cada producto tiene su propia competencia, research y bandeja de ideas.</p>
+            </div>
+          </div>
+          <button onClick={() => setShowProdForm(true)}
+            className="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-bold text-white bg-gradient-to-br from-purple-600 to-violet-600 rounded-lg hover:from-purple-700 hover:to-violet-700 shadow-sm transition">
+            <Plus size={16} /> Nuevo producto
+          </button>
+        </div>
+
+        {/* Form de nuevo producto */}
+        {showProdForm && (
+          <div className="bg-white dark:bg-gray-800 border-2 border-purple-300 dark:border-purple-700 rounded-xl p-5 space-y-3 animate-fade-in">
+            <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Nuevo producto</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <input type="text" value={prodDraft.nombre} onChange={e => setProdDraft({ ...prodDraft, nombre: e.target.value })}
+                placeholder="Nombre del producto"
+                className="px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500" />
+              <input type="url" value={prodDraft.landingUrl} onChange={e => setProdDraft({ ...prodDraft, landingUrl: e.target.value })}
+                placeholder="URL de la landing"
+                className="px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500" />
+            </div>
+            <textarea value={prodDraft.descripcion} onChange={e => setProdDraft({ ...prodDraft, descripcion: e.target.value })}
+              placeholder="Descripción corta (opcional)"
+              rows={2}
+              className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 resize-y" />
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => { setShowProdForm(false); setProdDraft({ nombre: '', landingUrl: '', descripcion: '' }); }}
+                className="px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 transition">
+                Cancelar
+              </button>
+              <button onClick={handleAddProducto}
+                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-purple-600 to-violet-600 rounded-md hover:from-purple-700 hover:to-violet-700 transition">
+                <Check size={12} /> Crear
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Lista de productos existentes */}
+        {productos.length === 0 ? (
+          <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-12 text-center">
+            <Package size={36} className="mx-auto text-gray-300 dark:text-gray-600 mb-3" />
+            <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Sin productos</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Creá tu primer producto para empezar a analizar la competencia y generar ideas.</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {productos.map(p => {
+              const comps = p.competidores || [];
+              const hasResearch = !!(p.docs?.research);
+              const ideasCount = 0; // TODO: contar ideas por producto si queremos
+              return (
+                <button key={p.id}
+                  onClick={() => setActiveProductoId(String(p.id))}
+                  className="w-full flex items-center gap-4 p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm hover:border-purple-300 dark:hover:border-purple-700 hover:shadow-md transition text-left group"
+                >
+                  <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-purple-500 to-violet-500 flex items-center justify-center text-white font-bold text-lg shrink-0 group-hover:scale-105 transition">
+                    {p.nombre?.charAt(0)?.toUpperCase() || 'P'}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{p.nombre}</p>
+                    <div className="flex items-center gap-2 text-[10px] text-gray-500 dark:text-gray-400 mt-0.5 flex-wrap">
+                      {p.landingUrl && <span className="truncate max-w-[200px]">{p.landingUrl}</span>}
+                      <span className={`font-semibold ${hasResearch ? 'text-emerald-600' : 'text-gray-400'}`}>
+                        {hasResearch ? '✓ documentado' : '○ sin research'}
+                      </span>
+                      <span>{comps.length} competidor{comps.length !== 1 ? 'es' : ''}</span>
+                      {p.stage && <span className="text-purple-600 dark:text-purple-400">· {p.stage.replace('_', '-')}</span>}
+                    </div>
+                  </div>
+                  <ChevronRight size={16} className="text-gray-400 group-hover:text-purple-500 transition shrink-0" />
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ====================================================================
+  // WORKSPACE DEL PRODUCTO ACTIVO
+  // ====================================================================
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      {/* Header */}
+      {/* Header con breadcrumb */}
       <div className="flex items-center gap-3">
+        <button onClick={() => setActiveProductoId(null)}
+          className="p-2 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 transition shrink-0"
+          title="Volver a la lista de productos">
+          <ChevronRight size={16} className="rotate-180" />
+        </button>
         <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-600 to-violet-600 flex items-center justify-center text-white shadow-sm">
           <Play size={20} />
         </div>
-        <div>
-          <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Arranque</h2>
-          <p className="text-xs text-gray-500 dark:text-gray-400">Cargá tu producto + competidores una vez y corré el pipeline cuando quieras.</p>
+        <div className="flex-1 min-w-0">
+          <p className="text-[10px] text-gray-500 dark:text-gray-400">
+            <button onClick={() => setActiveProductoId(null)} className="hover:text-purple-500 transition">Productos</button> / {producto.nombre}
+          </p>
+          <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100 truncate">{producto.nombre}</h2>
         </div>
       </div>
 
@@ -939,6 +1150,43 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 </div>
               );
             })()}
+
+            {/* Activo visual de marca — elemento icónico reutilizable que se
+                propaga a todos los prompts de imagen. */}
+            <details className="mt-3 group">
+              <summary className="cursor-pointer inline-flex items-center gap-1 text-[10px] font-semibold text-gray-600 dark:text-gray-300 hover:text-purple-600 dark:hover:text-purple-400">
+                <ChevronDown size={10} className="group-open:rotate-180 transition-transform" />
+                🎨 Activo visual de marca (opcional)
+                {producto.activoVisual?.descripcion && <span className="text-emerald-600 dark:text-emerald-400">✓ definido</span>}
+              </summary>
+              <div className="mt-2 space-y-2 pl-4">
+                <p className="text-[10px] text-gray-500 dark:text-gray-400">
+                  Elemento icónico reutilizable de tu marca (frasco distintivo, textura, forma, empaque). Claude lo va a incluir en 40-60% de los prompts de imagen como hilo conductor visual.
+                </p>
+                <textarea
+                  value={producto.activoVisual?.descripcion || ''}
+                  onChange={e => setProductos(prev => prev.map(p =>
+                    String(p.id) === String(activeProductoId)
+                      ? { ...p, activoVisual: { ...(p.activoVisual || {}), descripcion: e.target.value } }
+                      : p
+                  ))}
+                  placeholder="Ej: Frasco de vidrio ámbar con tapa dorada, textura tallada en el cuerpo, etiqueta minimalista granate con tipografía serif."
+                  rows={3}
+                  className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 resize-y"
+                />
+                <input
+                  type="url"
+                  value={producto.activoVisual?.imageUrl || ''}
+                  onChange={e => setProductos(prev => prev.map(p =>
+                    String(p.id) === String(activeProductoId)
+                      ? { ...p, activoVisual: { ...(p.activoVisual || {}), imageUrl: e.target.value } }
+                      : p
+                  ))}
+                  placeholder="URL de una imagen de referencia (opcional)"
+                  className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+              </div>
+            </details>
           </div>
         ) : !showProdForm ? (
           <button onClick={() => setShowProdForm(true)}
@@ -1384,6 +1632,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                   <p className="text-xs text-emerald-700 dark:text-emerald-300">
                     {winnersTotal > 0 && <><strong>{winnersTotal}</strong> ganador{winnersTotal !== 1 ? 'es' : ''} analizado{winnersTotal !== 1 ? 's' : ''} · </>}
                     {ideasNuevas > 0 ? <><strong>{ideasNuevas}</strong> idea{ideasNuevas !== 1 ? 's' : ''} nueva{ideasNuevas !== 1 ? 's' : ''} esperándote en la Bandeja</> : 'Todo procesado'}
+                    {runCost.total > 0 && <> · gasto total: <strong className="font-mono">${runCost.total.toFixed(4)}</strong></>}
                   </p>
                 </div>
                 <button
@@ -1406,10 +1655,19 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         {/* Stepper */}
         {steps.length > 0 && (
           <div className="mt-5 space-y-3">
-            {/* Barra de progreso */}
+            {/* Barra de progreso + costo en vivo */}
             <div className="space-y-1">
-              <div className="flex items-center justify-between text-[10px] text-gray-600 dark:text-gray-400">
+              <div className="flex items-center justify-between text-[10px] text-gray-600 dark:text-gray-400 flex-wrap gap-2">
                 <span>{stepsDone} de {stepsTotal} pasos</span>
+                {runCost.total > 0 && (
+                  <span className="inline-flex items-center gap-1.5 font-mono">
+                    <span className="text-purple-600 dark:text-purple-400 font-bold">💰 ${runCost.total.toFixed(4)}</span>
+                    <span className="text-gray-400">·</span>
+                    {runCost.anthropic > 0 && <span className="text-violet-600 dark:text-violet-400">🧠 ${runCost.anthropic.toFixed(4)}</span>}
+                    {runCost.openai > 0 && <span className="text-emerald-600 dark:text-emerald-400">🎤 ${runCost.openai.toFixed(4)}</span>}
+                    {runCost.apify > 0 && <span className="text-amber-600 dark:text-amber-400">🔍 ${runCost.apify.toFixed(4)}</span>}
+                  </span>
+                )}
                 <span className="font-mono">{progress}%</span>
               </div>
               <div className="h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">

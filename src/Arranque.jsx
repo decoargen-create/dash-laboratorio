@@ -20,7 +20,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   Package, Target, Play, Check, Loader2, AlertTriangle, ChevronRight, ChevronDown,
-  Plus, X, Sparkles, Link2, Search, Clock, Inbox,
+  Plus, X, Sparkles, Link2, Search, Clock, Inbox, Trash2,
 } from 'lucide-react';
 import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGeneratedToday } from './bandejaStore.js';
 import { logCostsFromResponse } from './costsStore.js';
@@ -1046,26 +1046,41 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               const hasResearch = !!(p.docs?.research);
               const ideasCount = 0; // TODO: contar ideas por producto si queremos
               return (
-                <button key={p.id}
-                  onClick={() => setActiveProductoId(String(p.id))}
-                  className="w-full flex items-center gap-4 p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm hover:border-purple-300 dark:hover:border-purple-700 hover:shadow-md transition text-left group"
-                >
-                  <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-purple-500 to-violet-500 flex items-center justify-center text-white font-bold text-lg shrink-0 group-hover:scale-105 transition">
-                    {p.nombre?.charAt(0)?.toUpperCase() || 'P'}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{p.nombre}</p>
-                    <div className="flex items-center gap-2 text-[10px] text-gray-500 dark:text-gray-400 mt-0.5 flex-wrap">
-                      {p.landingUrl && <span className="truncate max-w-[200px]">{p.landingUrl}</span>}
-                      <span className={`font-semibold ${hasResearch ? 'text-emerald-600' : 'text-gray-400'}`}>
-                        {hasResearch ? '✓ documentado' : '○ sin research'}
-                      </span>
-                      <span>{comps.length} competidor{comps.length !== 1 ? 'es' : ''}</span>
-                      {p.stage && <span className="text-purple-600 dark:text-purple-400">· {p.stage.replace('_', '-')}</span>}
+                <div key={p.id} className="flex items-center gap-2">
+                  <button
+                    onClick={() => setActiveProductoId(String(p.id))}
+                    className="flex-1 flex items-center gap-4 p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm hover:border-purple-300 dark:hover:border-purple-700 hover:shadow-md transition text-left group"
+                  >
+                    <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-purple-500 to-violet-500 flex items-center justify-center text-white font-bold text-lg shrink-0 group-hover:scale-105 transition">
+                      {p.nombre?.charAt(0)?.toUpperCase() || 'P'}
                     </div>
-                  </div>
-                  <ChevronRight size={16} className="text-gray-400 group-hover:text-purple-500 transition shrink-0" />
-                </button>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{p.nombre}</p>
+                      <div className="flex items-center gap-2 text-[10px] text-gray-500 dark:text-gray-400 mt-0.5 flex-wrap">
+                        {p.landingUrl && <span className="truncate max-w-[200px]">{p.landingUrl}</span>}
+                        <span className={`font-semibold ${hasResearch ? 'text-emerald-600' : 'text-gray-400'}`}>
+                          {hasResearch ? '✓ documentado' : '○ sin research'}
+                        </span>
+                        <span>{comps.length} competidor{comps.length !== 1 ? 'es' : ''}</span>
+                        {p.stage && <span className="text-purple-600 dark:text-purple-400">· {p.stage.replace('_', '-')}</span>}
+                      </div>
+                    </div>
+                    <ChevronRight size={16} className="text-gray-400 group-hover:text-purple-500 transition shrink-0" />
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (window.confirm(`¿Eliminar "${p.nombre}"? Se borran sus competidores, cuenta Meta y research. No se pueden recuperar.`)) {
+                        setProductos(prev => prev.filter(x => x.id !== p.id));
+                        if (String(p.id) === String(activeProductoId)) setActiveProductoId(null);
+                      }
+                    }}
+                    className="p-2.5 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition shrink-0"
+                    title="Eliminar producto"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
               );
             })}
           </div>

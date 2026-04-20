@@ -728,7 +728,10 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       return [...base, ...nuevos];
     });
 
-    // Paso scrape: para cada competidor (incluye los recién auto-sugeridos).
+    // Paso scrape: siempre re-scrapeamos para detectar ads nuevos en la
+    // biblioteca. Los ads que ya deep-analizamos en corridas previas se
+    // saltean en el paso de análisis (no gastan Claude de nuevo). El user
+    // quiere ver la diff: cuántos son nuevos vs ya vistos.
     const compWithAds = []; // { comp, winners }
     for (const c of competidoresLocal) {
       if (cancelled) break;
@@ -789,6 +792,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         const ads = data.ads || [];
         const allWinners = ads.filter(a => a.isWinner);
 
+        // Calcular cuántos ads son NUEVOS vs ya vistos (para transparencia).
+        const prevAdIds = new Set((c.ads || []).map(a => a.id));
+        const newAds = ads.filter(a => !prevAdIds.has(a.id));
+        const seenAds = ads.filter(a => prevAdIds.has(a.id));
+
         // Guardar en el competidor (con historial de corridas)
         setCompetidores(prev => prev.map(x => {
           if (x.id !== c.id) return x;
@@ -797,6 +805,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             ts: new Date().toISOString(),
             total: data.total || 0,
             winners: data.winners || 0,
+            newAds: newAds.length,
           }].slice(-10);
           return {
             ...x, ads, adsTotal: data.total || 0, winnersCount: data.winners || 0,
@@ -811,10 +820,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           .slice().sort((a, b) => (b.score || 0) - (a.score || 0))
           .slice(0, 10);
         compWithAds.push({ comp: c, winners: topWinnersForAnalysis, allAds: ads });
+        const newWinners = topWinnersForAnalysis.filter(a => !prevAdIds.has(a.id));
         updateStep(stepId, {
           status: 'done',
           endedAt: Date.now(),
-          detail: `${allWinners.length} ganador${allWinners.length !== 1 ? 'es' : ''} de ${ads.length} ads · top ${topWinnersForAnalysis.length} para análisis profundo`,
+          detail: `${ads.length} ads (${newAds.length} nuevos · ${seenAds.length} ya vistos) · ${allWinners.length} ganadores · ${newWinners.length} nuevos para analizar`,
         });
       } catch (err) {
         updateStep(stepId, { status: 'error', endedAt: Date.now(), detail: err.message });

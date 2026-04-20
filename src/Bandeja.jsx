@@ -14,15 +14,36 @@
 
 import React, { useState, useEffect } from 'react';
 import {
-  Inbox, Search, Filter, ExternalLink, Trash2, Download,
-  ChevronDown, Check, Circle, CircleDot, Archive, Edit3, CheckSquare, Square,
+  Inbox, Search, Filter, ExternalLink, Trash2, Download, Package,
+  ChevronDown, Check, Circle, CircleDot, Archive, Edit3, CheckSquare, Square, ChevronRight,
 } from 'lucide-react';
 import {
   loadIdeas, updateIdea, removeIdea, TIPO_META, ESTADO_META, VARIABLE_META, ANGULO_META, CAMPAÑA_META,
 } from './bandejaStore.js';
 
+const PRODUCTOS_KEY = 'viora-marketing-productos-v1';
+const ACTIVE_PRODUCT_KEY = 'viora-marketing-bandeja-active-product';
+const SIN_PRODUCTO_ID = '__sin_producto__';
+
+function loadProductos() {
+  try {
+    const raw = localStorage.getItem(PRODUCTOS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
 export default function BandejaSection({ addToast }) {
   const [ideas, setIdeas] = useState(() => loadIdeas());
+  const [productos, setProductos] = useState(() => loadProductos());
+  const [activeProductoId, setActiveProductoId] = useState(() => {
+    try { return localStorage.getItem(ACTIVE_PRODUCT_KEY) || null; } catch { return null; }
+  });
+  useEffect(() => {
+    try {
+      if (activeProductoId) localStorage.setItem(ACTIVE_PRODUCT_KEY, activeProductoId);
+      else localStorage.removeItem(ACTIVE_PRODUCT_KEY);
+    } catch {}
+  }, [activeProductoId]);
   const [expandedId, setExpandedId] = useState(null);
   const [filtroTipo, setFiltroTipo] = useState('all');
   const [filtroEstado, setFiltroEstado] = useState('active'); // 'all' | 'active' (pendiente + en_uso) | 'pendiente' | 'en_uso' | 'usada' | 'archivada'
@@ -38,6 +59,8 @@ export default function BandejaSection({ addToast }) {
     const interval = setInterval(() => {
       const fresh = loadIdeas();
       setIdeas(prev => (prev.length !== fresh.length ? fresh : prev));
+      const freshProds = loadProductos();
+      setProductos(prev => (prev.length !== freshProds.length ? freshProds : prev));
     }, 3000);
     return () => clearInterval(interval);
   }, []);
@@ -238,8 +261,18 @@ export default function BandejaSection({ addToast }) {
     setNotasDraft('');
   };
 
+  // Pre-filtro por producto activo — nunca mezclamos ideas entre productos.
+  // Si activeProductoId === SIN_PRODUCTO_ID, mostramos solo ideas sin productoId
+  // (legacy, de antes de que guardáramos el productoId en cada idea).
+  const ideasDelProducto = activeProductoId
+    ? ideas.filter(i => {
+        if (activeProductoId === SIN_PRODUCTO_ID) return !i.productoId;
+        return String(i.productoId || '') === String(activeProductoId);
+      })
+    : ideas;
+
   // Filtrar
-  const filtered = ideas.filter(i => {
+  const filtered = ideasDelProducto.filter(i => {
     if (filtroTipo !== 'all' && i.tipo !== filtroTipo) return false;
     if (filtroEstado === 'active' && !['pendiente', 'en_uso'].includes(i.estado)) return false;
     if (filtroEstado !== 'all' && filtroEstado !== 'active' && i.estado !== filtroEstado) return false;
@@ -259,23 +292,49 @@ export default function BandejaSection({ addToast }) {
     return (b.createdAt || '').localeCompare(a.createdAt || '');
   });
 
-  // Counters por estado (sobre TODO el set, no el filtrado)
-  const counts = ideas.reduce((acc, i) => {
+  // Counters por estado (sobre el subset del producto activo — no mezcla).
+  const counts = ideasDelProducto.reduce((acc, i) => {
     acc[i.estado] = (acc[i.estado] || 0) + 1;
     return acc;
   }, {});
 
+  const productoActivo = activeProductoId === SIN_PRODUCTO_ID
+    ? { id: SIN_PRODUCTO_ID, nombre: 'Sin producto asignado' }
+    : productos.find(p => String(p.id) === String(activeProductoId)) || null;
+
+  // ====================================================================
+  // VISTA 1: SELECTOR DE PRODUCTOS (sin producto activo)
+  // ====================================================================
+  if (!activeProductoId) {
+    return <ProductoSelectorView
+      productos={productos}
+      ideas={ideas}
+      onSelect={setActiveProductoId}
+    />;
+  }
+
   return (
     <div className="max-w-5xl mx-auto space-y-5">
-      {/* Header */}
+      {/* Header con breadcrumb de producto */}
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-fuchsia-500 to-pink-500 flex items-center justify-center text-white shadow-sm">
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          <button
+            onClick={() => setActiveProductoId(null)}
+            className="p-2 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 transition shrink-0"
+            title="Volver al selector de productos"
+          >
+            <ChevronRight size={16} className="rotate-180" />
+          </button>
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-fuchsia-500 to-pink-500 flex items-center justify-center text-white shadow-sm shrink-0">
             <Inbox size={20} />
           </div>
-          <div>
-            <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Bandeja de ideas</h2>
-            <p className="text-xs text-gray-500 dark:text-gray-400">Lista continua de renovaciones — se va llenando con cada análisis.</p>
+          <div className="min-w-0">
+            <p className="text-[10px] text-gray-500 dark:text-gray-400">
+              <button onClick={() => setActiveProductoId(null)} className="hover:text-fuchsia-500 transition">Bandeja</button> / {productoActivo?.nombre || 'Producto'}
+            </p>
+            <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100 truncate">
+              {productoActivo?.nombre || 'Bandeja de ideas'}
+            </h2>
           </div>
         </div>
         {selected.size > 0 && (
@@ -786,5 +845,125 @@ function EstadoButton({ active, onClick, icon, label, color }) {
       className={`inline-flex items-center gap-1 px-2 py-1 text-[10px] font-semibold rounded transition ${colors[color || 'default']} hover:opacity-90`}>
       {icon} {label}
     </button>
+  );
+}
+
+// Vista inicial de Bandeja: grid de productos para elegir uno.
+// Cada card muestra contadores por estado + total. Al final, si hay ideas
+// sin productoId (legacy, de antes del multi-producto), se muestra un bucket
+// "Sin producto asignado" para no perderlas de vista.
+function ProductoSelectorView({ productos, ideas, onSelect }) {
+  // Contamos ideas por producto + un bucket "sin producto" para legacy.
+  const countsByProducto = new Map();
+  const countsSin = { pendiente: 0, en_uso: 0, usada: 0, archivada: 0, total: 0 };
+  for (const i of ideas) {
+    const key = i.productoId ? String(i.productoId) : SIN_PRODUCTO_ID;
+    if (key === SIN_PRODUCTO_ID) {
+      countsSin[i.estado] = (countsSin[i.estado] || 0) + 1;
+      countsSin.total++;
+      continue;
+    }
+    if (!countsByProducto.has(key)) {
+      countsByProducto.set(key, { pendiente: 0, en_uso: 0, usada: 0, archivada: 0, total: 0 });
+    }
+    const c = countsByProducto.get(key);
+    c[i.estado] = (c[i.estado] || 0) + 1;
+    c.total++;
+  }
+
+  const tieneAlgo = productos.length > 0 || countsSin.total > 0;
+
+  return (
+    <div className="max-w-5xl mx-auto space-y-5">
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-fuchsia-500 to-pink-500 flex items-center justify-center text-white shadow-sm">
+          <Inbox size={20} />
+        </div>
+        <div>
+          <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Bandeja de ideas</h2>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Elegí un producto para ver su bandeja — cada uno es independiente.</p>
+        </div>
+      </div>
+
+      {!tieneAlgo ? (
+        <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-12 text-center">
+          <Package size={36} className="mx-auto text-gray-300 dark:text-gray-600 mb-3" />
+          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Sin productos ni ideas todavía</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            Andá a "Arranque", creá un producto y corré el pipeline — las ideas van a aparecer acá agrupadas por producto.
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {productos.map(p => {
+            const c = countsByProducto.get(String(p.id)) || { pendiente: 0, en_uso: 0, usada: 0, archivada: 0, total: 0 };
+            return (
+              <ProductoBandejaCard
+                key={p.id}
+                producto={p}
+                counts={c}
+                onClick={() => onSelect(String(p.id))}
+              />
+            );
+          })}
+          {countsSin.total > 0 && (
+            <ProductoBandejaCard
+              producto={{ id: SIN_PRODUCTO_ID, nombre: 'Sin producto asignado', legacy: true }}
+              counts={countsSin}
+              onClick={() => onSelect(SIN_PRODUCTO_ID)}
+            />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProductoBandejaCard({ producto, counts, onClick }) {
+  const { pendiente = 0, en_uso = 0, usada = 0, archivada = 0, total } = counts;
+  const inicial = producto.nombre?.charAt(0)?.toUpperCase() || '?';
+  return (
+    <button
+      onClick={onClick}
+      className="text-left p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm hover:border-fuchsia-300 dark:hover:border-fuchsia-700 hover:shadow-md transition group"
+    >
+      <div className="flex items-center gap-3 mb-3">
+        <div className={`w-12 h-12 rounded-lg flex items-center justify-center text-white font-bold text-lg shrink-0 group-hover:scale-105 transition ${
+          producto.legacy
+            ? 'bg-gradient-to-br from-gray-400 to-gray-500'
+            : 'bg-gradient-to-br from-fuchsia-500 to-pink-500'
+        }`}>
+          {producto.legacy ? '?' : inicial}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{producto.nombre}</p>
+          <p className="text-[10px] text-gray-500 dark:text-gray-400">
+            {total} idea{total !== 1 ? 's' : ''} total{total !== 1 ? 'es' : ''}
+          </p>
+        </div>
+        <ChevronRight size={16} className="text-gray-400 group-hover:text-fuchsia-500 transition shrink-0" />
+      </div>
+      <div className="grid grid-cols-4 gap-1.5">
+        <MiniStat label="Pendientes" value={pendiente} accent />
+        <MiniStat label="En uso" value={en_uso} color="amber" />
+        <MiniStat label="Usadas" value={usada} color="emerald" />
+        <MiniStat label="Archivadas" value={archivada} color="gray" />
+      </div>
+    </button>
+  );
+}
+
+function MiniStat({ label, value, color = 'gray', accent = false }) {
+  const colors = {
+    gray: 'bg-gray-50 dark:bg-gray-900/40 text-gray-900 dark:text-gray-100 border-gray-200 dark:border-gray-700',
+    amber: 'bg-amber-50 dark:bg-amber-900/30 text-amber-900 dark:text-amber-200 border-amber-200 dark:border-amber-800',
+    emerald: 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-900 dark:text-emerald-200 border-emerald-200 dark:border-emerald-800',
+  };
+  return (
+    <div className={`px-2 py-1.5 rounded-md border ${colors[color]} ${accent ? 'ring-1 ring-fuchsia-300 dark:ring-fuchsia-700' : ''}`}>
+      <p className="text-[9px] font-bold uppercase tracking-wider opacity-60 leading-none">{label}</p>
+      <p className="text-base font-bold tabular-nums leading-tight mt-0.5">{value}</p>
+    </div>
   );
 }

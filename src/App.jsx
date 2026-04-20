@@ -20,6 +20,7 @@ import ArranqueSection from './Arranque.jsx';
 import BandejaSection from './Bandeja.jsx';
 import MetaAdsSection from './MetaAdsSection.jsx';
 import InspiracionSection from './InspiracionSection.jsx';
+import { PipelineRunProvider } from './PipelineRunContext.jsx';
 import { generateCSV, downloadCSV, parseCSV, toNumber, toBool } from './csv.js';
 
 // Estados del pipeline de producción de una orden
@@ -8049,7 +8050,11 @@ export default function App() {
 
   const normalized = path.replace(/\/+$/, '') || '/';
   if (normalized === '/acceso') {
-    return <AppShell onExit={() => navigate('/')} />;
+    return (
+      <PipelineRunProvider>
+        <AppShell onExit={() => navigate('/')} />
+      </PipelineRunProvider>
+    );
   }
   return <LandingPage onAccess={() => navigate('/acceso')} />;
 }

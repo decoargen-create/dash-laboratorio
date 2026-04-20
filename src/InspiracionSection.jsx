@@ -24,7 +24,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   Sparkles, Package, ChevronRight, Plus, Trash2, Link2, X,
-  Loader2, Download, Image as ImageIcon, ExternalLink, Wand2,
+  Loader2, Download, Image as ImageIcon, ExternalLink, Wand2, Search,
 } from 'lucide-react';
 import { logCostsFromResponse } from './costsStore.js';
 import { addGeneratedIdeas } from './bandejaStore.js';
@@ -74,6 +74,12 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   const [adsByBrand, setAdsByBrand] = useState({});
   // ad.id → bool, true mientras se adapta al producto (loading).
   const [adaptingAdIds, setAdaptingAdIds] = useState(new Set());
+
+  // Filtros + ordenamiento (vistas)
+  const [query, setQuery] = useState('');
+  const [tipoFiltro, setTipoFiltro] = useState('all'); // 'all' | 'competidor' | 'custom'
+  const [estadoFiltro, setEstadoFiltro] = useState('all'); // 'all' | 'con-ads' | 'sin-scrapear'
+  const [orderBy, setOrderBy] = useState('reciente'); // 'reciente' | 'nombre' | 'ads-count'
 
   // Polling liviano de productos cada 3s.
   useEffect(() => {
@@ -418,76 +424,114 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         </div>
       )}
 
-      {/* SECCIÓN 1: Tus competidores (derivados del producto) — ya tienen
-          ads scrapeados desde Setup, mostramos sus estáticos como inspiración
-          también, pero NO se editan/borran desde acá (eso vive en Setup). */}
-      {(producto.competidores || []).filter(c => (c.ads || []).some(a => (a.imageUrls?.length || 0) > 0)).length > 0 && (
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <h3 className="text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">🎯 Tus competidores</h3>
-            <span className="text-[10px] text-gray-500 dark:text-gray-400 italic">
-              Reutilizamos los ads que ya scrapeamos en Setup. Adaptá los que te inspiren.
-            </span>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {producto.competidores.map(c => {
-              // Filtramos a estáticos ya scrapeados.
-              const staticAds = (c.ads || []).filter(a => (a.imageUrls?.length || 0) > 0 && (a.videoUrls?.length || 0) === 0);
-              if (staticAds.length === 0) return null;
-              const compBrand = {
-                id: `comp-${c.id}`,
-                nombre: c.nombre,
-                landingUrl: c.landingUrl,
-                fbPageUrl: c.fbPageUrl,
-                lastScraped: c.lastAdsCheck,
-                seenAdIds: c._inspirationSeenIds || [],
-                isCompetidor: true,
-              };
-              return (
-                <BrandCard
-                  key={compBrand.id}
-                  brand={compBrand}
-                  ads={staticAds}
-                  isScraping={false}
-                  adaptingAdIds={adaptingAdIds}
-                  onScrape={null}
-                  onAdapt={(ad) => handleAdapt(c.nombre, ad)}
-                  onRemove={null}
-                />
-              );
-            })}
-          </div>
-        </div>
-      )}
+      {/* Unificamos competidores (auto) + brands manuales en una sola lista
+          aplicando los filtros de la barra de vistas. */}
+      {(() => {
+        // Construimos array unificado.
+        const competidoresUnif = (producto.competidores || []).map(c => {
+          const staticAds = (c.ads || []).filter(a => (a.imageUrls?.length || 0) > 0 && (a.videoUrls?.length || 0) === 0);
+          return {
+            id: `comp-${c.id}`,
+            nombre: c.nombre,
+            landingUrl: c.landingUrl,
+            fbPageUrl: c.fbPageUrl,
+            lastScraped: c.lastAdsCheck,
+            seenAdIds: c._inspirationSeenIds || [],
+            isCompetidor: true,
+            __ads: staticAds,
+            __sourceComp: c,
+          };
+        }).filter(b => b.__ads.length > 0); // competidores sin ads no aparecen
+        const customUnif = brands.map(b => ({
+          ...b,
+          isCompetidor: false,
+          __ads: adsByBrand[b.id] || [],
+        }));
+        let unif = [...competidoresUnif, ...customUnif];
 
-      {/* SECCIÓN 2: Marcas de inspiración manuales */}
-      <div className="space-y-3">
-        <h3 className="text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">✨ Inspiración custom</h3>
-      {brands.length === 0 ? (
-        <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-12 text-center">
-          <Sparkles size={32} className="mx-auto text-gray-300 dark:text-gray-600 mb-2" />
-          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Sin marcas de inspiración custom todavía</p>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            Agregá marcas (de cualquier rubro) que hagan estáticos que te gusten.
-          </p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {brands.map(brand => (
-            <BrandCard
-              key={brand.id}
-              brand={brand}
-              ads={adsByBrand[brand.id] || []}
-              isScraping={scrapingBrandId === brand.id}
-              adaptingAdIds={adaptingAdIds}
-              onScrape={() => handleScrapeBrand(brand)}
-              onAdapt={(ad) => handleAdapt(brand.nombre, ad)}
-              onRemove={() => handleRemoveBrand(brand.id)}
-            />
-          ))}
-        </div>
-      )}
-      </div>
+        // Filtros
+        if (tipoFiltro === 'competidor') unif = unif.filter(b => b.isCompetidor);
+        else if (tipoFiltro === 'custom') unif = unif.filter(b => !b.isCompetidor);
+        if (estadoFiltro === 'con-ads') unif = unif.filter(b => b.__ads.length > 0);
+        else if (estadoFiltro === 'sin-scrapear') unif = unif.filter(b => !b.lastScraped && b.__ads.length === 0);
+        if (query.trim()) {
+          const q = query.toLowerCase();
+          unif = unif.filter(b => `${b.nombre} ${b.landingUrl || ''} ${b.notas || ''}`.toLowerCase().includes(q));
+        }
+
+        // Ordenamiento
+        unif = [...unif].sort((a, b) => {
+          if (orderBy === 'nombre') return (a.nombre || '').localeCompare(b.nombre || '');
+          if (orderBy === 'ads-count') return (b.__ads?.length || 0) - (a.__ads?.length || 0);
+          // default 'reciente': lastScraped desc, sin scrape al final
+          const aT = a.lastScraped ? new Date(a.lastScraped).getTime() : 0;
+          const bT = b.lastScraped ? new Date(b.lastScraped).getTime() : 0;
+          return bT - aT;
+        });
+
+        return (
+          <div className="space-y-4">
+            {/* Barra de filtros + ordenamiento */}
+            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-3 flex flex-wrap gap-2 items-center">
+              <div className="relative flex-1 min-w-[180px]">
+                <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text" value={query} onChange={e => setQuery(e.target.value)}
+                  placeholder="Buscar por nombre, URL, notas…"
+                  className="w-full pl-7 pr-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md focus:outline-none focus:ring-2 focus:ring-amber-500"
+                />
+              </div>
+              <select value={tipoFiltro} onChange={e => setTipoFiltro(e.target.value)}
+                className="px-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md">
+                <option value="all">Tipo: todos</option>
+                <option value="competidor">Solo competidores</option>
+                <option value="custom">Solo custom</option>
+              </select>
+              <select value={estadoFiltro} onChange={e => setEstadoFiltro(e.target.value)}
+                className="px-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md">
+                <option value="all">Estado: todos</option>
+                <option value="con-ads">Con ads cargados</option>
+                <option value="sin-scrapear">Sin scrapear</option>
+              </select>
+              <select value={orderBy} onChange={e => setOrderBy(e.target.value)}
+                className="px-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md">
+                <option value="reciente">Ordenar: más reciente</option>
+                <option value="ads-count">Ordenar: más ads</option>
+                <option value="nombre">Ordenar: nombre</option>
+              </select>
+              <span className="text-[10px] text-gray-500 dark:text-gray-400 ml-auto">
+                {unif.length} marca{unif.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+
+            {/* Grilla unificada */}
+            {unif.length === 0 ? (
+              <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-12 text-center">
+                <Sparkles size={32} className="mx-auto text-gray-300 dark:text-gray-600 mb-2" />
+                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Ninguna marca coincide con el filtro</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Probá ajustar los filtros o agregá marcas custom con el botón de arriba.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {unif.map(b => (
+                  <BrandCard
+                    key={b.id}
+                    brand={b}
+                    ads={b.__ads}
+                    isScraping={!b.isCompetidor && scrapingBrandId === b.id}
+                    adaptingAdIds={adaptingAdIds}
+                    onScrape={b.isCompetidor ? null : () => handleScrapeBrand(b)}
+                    onAdapt={(ad) => handleAdapt(b.nombre, ad)}
+                    onRemove={b.isCompetidor ? null : () => handleRemoveBrand(b.id)}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }

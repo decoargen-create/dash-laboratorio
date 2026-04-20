@@ -93,6 +93,33 @@ export default async function handler(req, res) {
   const ad = inspiracion.ad;
   const imageUrl = ad.imageUrls?.[0];
 
+  // Bajamos la imagen y la convertimos a base64. Claude rechaza URLs
+  // remotas si el sitio bloquea por robots.txt (caso fbcdn pasa a veces).
+  // Base64 server-side evita ese problema completamente.
+  let imageBlock = null;
+  if (imageUrl) {
+    try {
+      const r = await fetch(imageUrl, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; VioraBot/1.0)' },
+      });
+      if (r.ok) {
+        const buf = Buffer.from(await r.arrayBuffer());
+        // Cap 4MB — Claude permite 5MB por imagen, dejamos margen.
+        if (buf.length <= 4 * 1024 * 1024) {
+          const ct = r.headers.get('content-type') || 'image/jpeg';
+          const mediaType = /^image\/(jpeg|png|gif|webp)$/.test(ct) ? ct : 'image/jpeg';
+          imageBlock = {
+            type: 'image',
+            source: { type: 'base64', media_type: mediaType, data: buf.toString('base64') },
+          };
+        }
+      }
+    } catch (e) {
+      // Silencioso — sin imagen Claude trabaja solo con texto del ad.
+      console.warn('adapt-inspiracion: no pude bajar imagen:', e.message);
+    }
+  }
+
   // Armamos el contexto del producto.
   const productoCtx = [
     `## PRODUCTO DEL CLIENTE`,
@@ -113,14 +140,11 @@ export default async function handler(req, res) {
     ad.snapshotUrl ? `Link Ad Library: ${ad.snapshotUrl}` : null,
   ].filter(Boolean).join('\n');
 
-  // Si tenemos image URL, la mandamos como bloque de imagen para que
+  // Si pudimos bajar la imagen, la mandamos como bloque base64 para que
   // Claude la analice visualmente (paleta, composición, mood).
   const userContent = [];
-  if (imageUrl) {
-    userContent.push({
-      type: 'image',
-      source: { type: 'url', url: imageUrl },
-    });
+  if (imageBlock) {
+    userContent.push(imageBlock);
   }
   userContent.push({
     type: 'text',

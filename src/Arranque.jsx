@@ -27,6 +27,7 @@ import { logCostsFromResponse } from './costsStore.js';
 import BandejaSection from './Bandeja.jsx';
 import InspiracionSection from './InspiracionSection.jsx';
 import CreativosTab from './CreativosTab.jsx';
+import { usePipelineRun } from './PipelineRunContext.jsx';
 
 const GEN_CONFIG_KEY = 'viora-marketing-gen-config-v1';
 const DEFAULT_GEN_CONFIG = {
@@ -228,17 +229,20 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   const [showGenConfig, setShowGenConfig] = useState(false);
   const [ideasToday, setIdeasToday] = useState(() => countIdeasGeneratedToday());
 
-  // Pipeline runner
-  const [running, setRunning] = useState(false);
-  const [steps, setSteps] = useState([]); // { id, label, detail, status: 'pending'|'running'|'done'|'error', startedAt, endedAt }
-  const [cancelled, setCancelled] = useState(false);
-  // Ideas generadas en vivo durante el pipeline — se llena por streaming
-  // y se muestra debajo del paso "Generando ideas" en el stepper.
-  const [liveIdeas, setLiveIdeas] = useState([]);
-  // Costo acumulado de la corrida actual — se resetea al arrancar el pipeline
-  // y va sumando a medida que cada endpoint devuelve su cost{}. Se muestra
-  // en vivo en el stepper.
-  const [runCost, setRunCost] = useState({ anthropic: 0, openai: 0, apify: 0, meta: 0, total: 0 });
+  // Pipeline runner — el state vive en el PipelineRunContext global para
+  // que sobreviva al cambio de sección (corre en background mientras
+  // navegás). Wrap los setters acá para keep API existente.
+  const pipelineRun = usePipelineRun();
+  const running = pipelineRun.running;
+  const setRunning = (v) => { if (!v) pipelineRun.finishRun(); /* startRun se llama abajo con productoId */ };
+  const steps = pipelineRun.steps;
+  const setSteps = pipelineRun.setSteps;
+  const liveIdeas = pipelineRun.liveIdeas;
+  const setLiveIdeas = pipelineRun.setLiveIdeas;
+  const runCost = pipelineRun.runCost;
+  const setRunCost = pipelineRun.setRunCost;
+  const cancelled = pipelineRun.cancelRequested;
+  const setCancelled = (v) => { if (v) pipelineRun.requestCancel(); };
   // Historial de corridas — persistido. Al completar un run, pusheamos un
   // resumen (productoId, timestamps, steps, stats, costo). Luego se muestra
   // en la UI como colapsable para que el user vea qué se ejecutó antes.
@@ -539,10 +543,13 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       return;
     }
 
-    setRunning(true);
-    setCancelled(false);
-    setLiveIdeas([]);
-    setRunCost({ anthropic: 0, openai: 0, apify: 0, meta: 0, total: 0 });
+    // Iniciar corrida en el context global — limpia state previo y marca
+    // running=true. Así el pipeline sigue vivo aunque el user salga de
+    // Arranque (Bandeja, Meta Ads, etc.).
+    pipelineRun.startRun({
+      productoId: String(producto.id),
+      productoNombre: producto.nombre,
+    });
 
     // Wrapper sobre logCostsFromResponse que también suma al runCost local.
     const trackCost = (data, descripcion) => {

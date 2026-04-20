@@ -20,6 +20,7 @@ import {
 import {
   loadIdeas, updateIdea, removeIdea, TIPO_META, ESTADO_META, VARIABLE_META, ANGULO_META, CAMPAÑA_META,
 } from './bandejaStore.js';
+import { exportBriefDocx } from './exportDocx.js';
 
 const PRODUCTOS_KEY = 'viora-marketing-productos-v1';
 const ACTIVE_PRODUCT_KEY = 'viora-marketing-bandeja-active-product';
@@ -135,20 +136,37 @@ export default function BandejaSection({ addToast }) {
 
   // Exporta las ideas seleccionadas como Markdown descargable. Lo suficiente
   // para pegarlo en Docs/Notion/Word y entregárselo al diseñador/editor.
-  const exportAll = (ideasAExportar) => {
+  const exportAll = (ideasAExportar, formato = 'md') => {
     if (!ideasAExportar || ideasAExportar.length === 0) {
       addToast?.({ type: 'error', message: 'No hay ideas para exportar' });
       return;
     }
-    buildBriefMdAndDownload(ideasAExportar);
-    addToast?.({ type: 'success', message: `Brief con ${ideasAExportar.length} ideas descargado` });
+    if (formato === 'docx') {
+      exportDocxFlow(ideasAExportar);
+    } else {
+      buildBriefMdAndDownload(ideasAExportar);
+      addToast?.({ type: 'success', message: `Brief con ${ideasAExportar.length} ideas descargado (.md)` });
+    }
   };
 
-  const exportSelected = () => {
+  const exportSelected = (formato = 'md') => {
     const chosen = ideas.filter(i => selected.has(i.id));
     if (chosen.length === 0) return;
-    buildBriefMdAndDownload(chosen);
-    addToast?.({ type: 'success', message: `Brief con ${chosen.length} ideas descargado` });
+    if (formato === 'docx') {
+      exportDocxFlow(chosen);
+    } else {
+      buildBriefMdAndDownload(chosen);
+      addToast?.({ type: 'success', message: `Brief con ${chosen.length} ideas descargado (.md)` });
+    }
+  };
+
+  const exportDocxFlow = async (lista) => {
+    try {
+      await exportBriefDocx(lista, productoActivo?.legacy ? null : productoActivo);
+      addToast?.({ type: 'success', message: `Brief .docx con ${lista.length} ideas descargado` });
+    } catch (err) {
+      addToast?.({ type: 'error', message: `Error al generar .docx: ${err.message}` });
+    }
   };
 
   // Arma el markdown del brief a partir de una lista de ideas y lo descarga.
@@ -363,7 +381,7 @@ export default function BandejaSection({ addToast }) {
             </h2>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {selected.size > 0 && (
             <>
               <span className="text-xs text-gray-600 dark:text-gray-300">
@@ -373,9 +391,13 @@ export default function BandejaSection({ addToast }) {
                 className="px-2.5 py-1.5 text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition">
                 Limpiar
               </button>
-              <button onClick={exportSelected}
+              <button onClick={() => exportSelected('docx')}
                 className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-fuchsia-500 to-pink-500 rounded-lg hover:from-fuchsia-600 hover:to-pink-600 shadow-sm transition">
-                <Download size={12} /> Exportar {selected.size} .md
+                <Download size={12} /> Exportar {selected.size} .docx
+              </button>
+              <button onClick={() => exportSelected('md')}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-fuchsia-700 dark:text-fuchsia-300 bg-white dark:bg-gray-800 border border-fuchsia-300 dark:border-fuchsia-700 rounded-lg hover:bg-fuchsia-50 dark:hover:bg-fuchsia-900/20 transition">
+                .md
               </button>
             </>
           )}
@@ -388,11 +410,18 @@ export default function BandejaSection({ addToast }) {
                 <CheckSquare size={12} /> Seleccionar todas ({filtered.length})
               </button>
               <button
-                onClick={() => exportAll(filtered)}
+                onClick={() => exportAll(filtered, 'docx')}
                 className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-fuchsia-500 to-pink-500 rounded-lg hover:from-fuchsia-600 hover:to-pink-600 shadow-sm transition"
-                title={`Exportar todas las ${filtered.length} ideas visibles`}
+                title={`Exportar todas las ${filtered.length} ideas visibles como .docx`}
               >
-                <Download size={12} /> Exportar todas ({filtered.length})
+                <Download size={12} /> Exportar todas .docx ({filtered.length})
+              </button>
+              <button
+                onClick={() => exportAll(filtered, 'md')}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-fuchsia-700 dark:text-fuchsia-300 bg-white dark:bg-gray-800 border border-fuchsia-300 dark:border-fuchsia-700 rounded-lg hover:bg-fuchsia-50 dark:hover:bg-fuchsia-900/20 transition"
+                title={`Exportar todas las ${filtered.length} ideas visibles como .md`}
+              >
+                .md
               </button>
             </>
           )}

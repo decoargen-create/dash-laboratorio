@@ -24,7 +24,9 @@
 import React, { useState, useEffect } from 'react';
 import {
   Sparkles, Package, ChevronRight, Plus, Trash2, Link2, X,
+  Loader2, Download, Image as ImageIcon, ExternalLink,
 } from 'lucide-react';
+import { logCostsFromResponse } from './costsStore.js';
 
 const PRODUCTOS_KEY = 'viora-marketing-productos-v1';
 const ACTIVE_KEY = 'viora-marketing-inspiracion-active-product';
@@ -58,6 +60,9 @@ export default function InspiracionSection({ addToast }) {
   const [brands, setBrands] = useState(() => loadBrands(activeProductoId));
   const [showAddForm, setShowAddForm] = useState(false);
   const [draft, setDraft] = useState({ nombre: '', landingUrl: '', fbPageUrl: '', notas: '' });
+  const [scrapingBrandId, setScrapingBrandId] = useState(null);
+  // brand.id → array de ads scrapeados de la última corrida (mostrados inline).
+  const [adsByBrand, setAdsByBrand] = useState({});
 
   // Polling liviano de productos cada 3s.
   useEffect(() => {
@@ -111,6 +116,64 @@ export default function InspiracionSection({ addToast }) {
     if (!b) return;
     if (!window.confirm(`¿Eliminar "${b.nombre}" de inspiración?`)) return;
     setBrands(prev => prev.filter(x => x.id !== id));
+    setAdsByBrand(prev => {
+      const next = { ...prev }; delete next[id]; return next;
+    });
+  };
+
+  // Scrapea ads activos de una marca via Apify. Si tiene fbPageUrl, prefiere
+  // eso (más estable). Sino, deriva keyword del landingUrl.
+  const handleScrapeBrand = async (brand) => {
+    setScrapingBrandId(brand.id);
+    try {
+      const payload = { country: 'ALL', limit: 100 };
+      if (brand.fbPageUrl) {
+        payload.fbPageUrl = brand.fbPageUrl.startsWith('http') ? brand.fbPageUrl : `https://www.facebook.com/${brand.fbPageUrl}`;
+      } else if (brand.landingUrl) {
+        // Reusamos el resolver de FB page primero — más confiable.
+        try {
+          const r = await fetch('/api/marketing/resolve-fb-page', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ landingUrl: brand.landingUrl }),
+          });
+          const d = await r.json();
+          if (d.pageUrl) {
+            payload.fbPageUrl = d.pageUrl;
+            // Persistimos el fbPageUrl encontrado.
+            setBrands(prev => prev.map(x => x.id === brand.id ? { ...x, fbPageUrl: d.pageUrl } : x));
+          } else {
+            payload.searchKeyword = brand.nombre;
+          }
+        } catch {
+          payload.searchKeyword = brand.nombre;
+        }
+      } else {
+        payload.searchKeyword = brand.nombre;
+      }
+
+      const resp = await fetch('/api/marketing/apify-ingest', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      logCostsFromResponse(data, `inspiracion · ${brand.nombre}`);
+
+      const allAds = data.ads || [];
+      // Solo statics (sin video) — para Inspiración nos interesan los estáticos.
+      const staticAds = allAds.filter(a => (a.imageUrls?.length || 0) > 0 && (a.videoUrls?.length || 0) === 0);
+
+      // Marcamos como vistos los ya scrapeados antes (dedup en Parte 7.3).
+      // Por ahora simplemente guardamos en estado + actualizamos lastScraped.
+      setAdsByBrand(prev => ({ ...prev, [brand.id]: staticAds }));
+      setBrands(prev => prev.map(x => x.id === brand.id ? { ...x, lastScraped: new Date().toISOString() } : x));
+
+      addToast?.({ type: 'success', message: `${staticAds.length} estáticos de ${brand.nombre} cargados` });
+    } catch (err) {
+      addToast?.({ type: 'error', message: `No pude scrapear ${brand.nombre}: ${err.message}` });
+    } finally {
+      setScrapingBrandId(null);
+    }
   };
 
   // ====================================================================
@@ -279,6 +342,9 @@ export default function InspiracionSection({ addToast }) {
             <BrandCard
               key={brand.id}
               brand={brand}
+              ads={adsByBrand[brand.id] || []}
+              isScraping={scrapingBrandId === brand.id}
+              onScrape={() => handleScrapeBrand(brand)}
               onRemove={() => handleRemoveBrand(brand.id)}
             />
           ))}
@@ -288,7 +354,7 @@ export default function InspiracionSection({ addToast }) {
   );
 }
 
-function BrandCard({ brand, onRemove }) {
+function BrandCard({ brand, ads, isScraping, onScrape, onRemove }) {
   return (
     <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 shadow-sm">
       <div className="flex items-start gap-3">
@@ -326,12 +392,69 @@ function BrandCard({ brand, onRemove }) {
           <Trash2 size={14} />
         </button>
       </div>
-      {/* Placeholder para Parte 7.2: botón "Scrapear ads" + grilla */}
-      <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
-        <p className="text-[10px] text-gray-400 italic">
-          Próximo paso (7.2): scrapear ads activos + ver estáticos en grilla con dedup día a día.
-        </p>
+
+      {/* Botón scrapear */}
+      <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700 flex items-center gap-2">
+        <button
+          onClick={onScrape}
+          disabled={isScraping}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-amber-500 to-orange-500 rounded-md hover:from-amber-600 hover:to-orange-600 transition disabled:opacity-50"
+        >
+          {isScraping
+            ? <><Loader2 size={12} className="animate-spin" /> Scrapeando…</>
+            : <><Download size={12} /> {brand.lastScraped ? 'Re-scrapear ads' : 'Scrapear ads'}</>
+          }
+        </button>
+        {ads.length > 0 && (
+          <span className="text-[10px] text-gray-500 dark:text-gray-400">
+            {ads.length} estáticos cargados
+          </span>
+        )}
       </div>
+
+      {/* Grilla de estáticos scrapeados */}
+      {ads.length > 0 && <BrandAdsGrid ads={ads} brandNombre={brand.nombre} />}
+    </div>
+  );
+}
+
+function BrandAdsGrid({ ads, brandNombre }) {
+  return (
+    <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2">
+      {ads.slice(0, 30).map(ad => {
+        const thumb = ad.imageUrls?.[0];
+        const fbUrl = ad.snapshotUrl;
+        return (
+          <a
+            key={ad.id}
+            href={fbUrl} target="_blank" rel="noreferrer"
+            className="group relative aspect-square rounded-md overflow-hidden bg-gray-100 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 hover:border-amber-400 transition"
+            title={ad.body?.slice(0, 200) || ad.headline || ''}
+          >
+            {thumb ? (
+              <img src={thumb} alt="" className="w-full h-full object-cover"
+                onError={(e) => { e.target.style.display = 'none'; }} />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center">
+                <ImageIcon size={20} className="text-gray-300" />
+              </div>
+            )}
+            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition flex items-end justify-end p-1.5">
+              <ExternalLink size={12} className="text-white opacity-0 group-hover:opacity-100 transition" />
+            </div>
+            {ad.daysRunning > 0 && (
+              <div className="absolute top-1 left-1 px-1.5 py-0.5 text-[9px] font-bold rounded bg-black/60 text-white">
+                {ad.daysRunning}d
+              </div>
+            )}
+          </a>
+        );
+      })}
+      {ads.length > 30 && (
+        <div className="aspect-square rounded-md flex items-center justify-center bg-gray-50 dark:bg-gray-900 border-2 border-dashed border-gray-200 dark:border-gray-700 text-[10px] text-gray-500 dark:text-gray-400 italic">
+          +{ads.length - 30} más
+        </div>
+      )}
     </div>
   );
 }

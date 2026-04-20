@@ -418,13 +418,57 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         </div>
       )}
 
-      {/* Lista de brands */}
+      {/* SECCIÓN 1: Tus competidores (derivados del producto) — ya tienen
+          ads scrapeados desde Setup, mostramos sus estáticos como inspiración
+          también, pero NO se editan/borran desde acá (eso vive en Setup). */}
+      {(producto.competidores || []).filter(c => (c.ads || []).some(a => (a.imageUrls?.length || 0) > 0)).length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <h3 className="text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">🎯 Tus competidores</h3>
+            <span className="text-[10px] text-gray-500 dark:text-gray-400 italic">
+              Reutilizamos los ads que ya scrapeamos en Setup. Adaptá los que te inspiren.
+            </span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {producto.competidores.map(c => {
+              // Filtramos a estáticos ya scrapeados.
+              const staticAds = (c.ads || []).filter(a => (a.imageUrls?.length || 0) > 0 && (a.videoUrls?.length || 0) === 0);
+              if (staticAds.length === 0) return null;
+              const compBrand = {
+                id: `comp-${c.id}`,
+                nombre: c.nombre,
+                landingUrl: c.landingUrl,
+                fbPageUrl: c.fbPageUrl,
+                lastScraped: c.lastAdsCheck,
+                seenAdIds: c._inspirationSeenIds || [],
+                isCompetidor: true,
+              };
+              return (
+                <BrandCard
+                  key={compBrand.id}
+                  brand={compBrand}
+                  ads={staticAds}
+                  isScraping={false}
+                  adaptingAdIds={adaptingAdIds}
+                  onScrape={null}
+                  onAdapt={(ad) => handleAdapt(c.nombre, ad)}
+                  onRemove={null}
+                />
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* SECCIÓN 2: Marcas de inspiración manuales */}
+      <div className="space-y-3">
+        <h3 className="text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">✨ Inspiración custom</h3>
       {brands.length === 0 ? (
         <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-12 text-center">
           <Sparkles size={32} className="mx-auto text-gray-300 dark:text-gray-600 mb-2" />
-          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Sin marcas de inspiración todavía</p>
+          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Sin marcas de inspiración custom todavía</p>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            Agregá marcas que hagan estáticos que te gusten — de cualquier rubro.
+            Agregá marcas (de cualquier rubro) que hagan estáticos que te gusten.
           </p>
         </div>
       ) : (
@@ -443,19 +487,32 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           ))}
         </div>
       )}
+      </div>
     </div>
   );
 }
 
 function BrandCard({ brand, ads, isScraping, adaptingAdIds, onScrape, onAdapt, onRemove }) {
+  const isCompetidor = !!brand.isCompetidor;
   return (
     <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 shadow-sm">
       <div className="flex items-start gap-3">
-        <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-amber-400 to-orange-400 flex items-center justify-center text-white font-bold text-lg shrink-0">
+        <div className={`w-12 h-12 rounded-lg flex items-center justify-center text-white font-bold text-lg shrink-0 ${
+          isCompetidor
+            ? 'bg-gradient-to-br from-purple-500 to-violet-500'
+            : 'bg-gradient-to-br from-amber-400 to-orange-400'
+        }`}>
           {brand.nombre?.charAt(0)?.toUpperCase() || '?'}
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{brand.nombre}</p>
+          <div className="flex items-center gap-1.5">
+            <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{brand.nombre}</p>
+            {isCompetidor && (
+              <span className="px-1.5 py-0.5 text-[9px] font-bold bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 rounded">
+                competidor
+              </span>
+            )}
+          </div>
           {brand.landingUrl && (
             <a href={brand.landingUrl} target="_blank" rel="noreferrer"
               className="inline-flex items-center gap-1 text-[10px] text-blue-600 hover:underline truncate max-w-full">
@@ -479,31 +536,42 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, onScrape, onAdapt, o
             )}
           </div>
         </div>
-        <button onClick={onRemove}
-          className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition shrink-0"
-          title="Eliminar marca">
-          <Trash2 size={14} />
-        </button>
-      </div>
-
-      {/* Botón scrapear */}
-      <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700 flex items-center gap-2">
-        <button
-          onClick={onScrape}
-          disabled={isScraping}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-amber-500 to-orange-500 rounded-md hover:from-amber-600 hover:to-orange-600 transition disabled:opacity-50"
-        >
-          {isScraping
-            ? <><Loader2 size={12} className="animate-spin" /> Scrapeando…</>
-            : <><Download size={12} /> {brand.lastScraped ? 'Re-scrapear ads' : 'Scrapear ads'}</>
-          }
-        </button>
-        {ads.length > 0 && (
-          <span className="text-[10px] text-gray-500 dark:text-gray-400">
-            {ads.length} estáticos cargados
-          </span>
+        {onRemove && (
+          <button onClick={onRemove}
+            className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition shrink-0"
+            title="Eliminar marca">
+            <Trash2 size={14} />
+          </button>
         )}
       </div>
+
+      {/* Botón scrapear (solo brands custom; competidores se manejan en Setup) */}
+      {onScrape && (
+        <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700 flex items-center gap-2">
+          <button
+            onClick={onScrape}
+            disabled={isScraping}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-amber-500 to-orange-500 rounded-md hover:from-amber-600 hover:to-orange-600 transition disabled:opacity-50"
+          >
+            {isScraping
+              ? <><Loader2 size={12} className="animate-spin" /> Scrapeando…</>
+              : <><Download size={12} /> {brand.lastScraped ? 'Re-scrapear ads' : 'Scrapear ads'}</>
+            }
+          </button>
+          {ads.length > 0 && (
+            <span className="text-[10px] text-gray-500 dark:text-gray-400">
+              {ads.length} estáticos cargados
+            </span>
+          )}
+        </div>
+      )}
+      {!onScrape && ads.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
+          <span className="text-[10px] text-gray-500 dark:text-gray-400">
+            {ads.length} estáticos · scrapeados desde Setup
+          </span>
+        </div>
+      )}
 
       {/* Grilla de estáticos scrapeados */}
       {ads.length > 0 && <BrandAdsGrid ads={ads} brandNombre={brand.nombre} adaptingAdIds={adaptingAdIds} onAdapt={onAdapt} />}

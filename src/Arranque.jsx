@@ -27,6 +27,7 @@ import { logCostsFromResponse } from './costsStore.js';
 import BandejaSection from './Bandeja.jsx';
 import InspiracionSection from './InspiracionSection.jsx';
 import CreativosTab from './CreativosTab.jsx';
+import { usePipelineRun } from './PipelineRunContext.jsx';
 
 const GEN_CONFIG_KEY = 'viora-marketing-gen-config-v1';
 const DEFAULT_GEN_CONFIG = {
@@ -228,17 +229,20 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   const [showGenConfig, setShowGenConfig] = useState(false);
   const [ideasToday, setIdeasToday] = useState(() => countIdeasGeneratedToday());
 
-  // Pipeline runner
-  const [running, setRunning] = useState(false);
-  const [steps, setSteps] = useState([]); // { id, label, detail, status: 'pending'|'running'|'done'|'error', startedAt, endedAt }
-  const [cancelled, setCancelled] = useState(false);
-  // Ideas generadas en vivo durante el pipeline — se llena por streaming
-  // y se muestra debajo del paso "Generando ideas" en el stepper.
-  const [liveIdeas, setLiveIdeas] = useState([]);
-  // Costo acumulado de la corrida actual — se resetea al arrancar el pipeline
-  // y va sumando a medida que cada endpoint devuelve su cost{}. Se muestra
-  // en vivo en el stepper.
-  const [runCost, setRunCost] = useState({ anthropic: 0, openai: 0, apify: 0, meta: 0, total: 0 });
+  // Pipeline runner — el state vive en el PipelineRunContext global para
+  // que sobreviva al cambio de sección (corre en background mientras
+  // navegás). Wrap los setters acá para keep API existente.
+  const pipelineRun = usePipelineRun();
+  const running = pipelineRun.running;
+  const setRunning = (v) => { if (!v) pipelineRun.finishRun(); /* startRun se llama abajo con productoId */ };
+  const steps = pipelineRun.steps;
+  const setSteps = pipelineRun.setSteps;
+  const liveIdeas = pipelineRun.liveIdeas;
+  const setLiveIdeas = pipelineRun.setLiveIdeas;
+  const runCost = pipelineRun.runCost;
+  const setRunCost = pipelineRun.setRunCost;
+  const cancelled = pipelineRun.cancelRequested;
+  const setCancelled = (v) => { if (v) pipelineRun.requestCancel(); };
   // Historial de corridas — persistido. Al completar un run, pusheamos un
   // resumen (productoId, timestamps, steps, stats, costo). Luego se muestra
   // en la UI como colapsable para que el user vea qué se ejecutó antes.
@@ -539,10 +543,13 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       return;
     }
 
-    setRunning(true);
-    setCancelled(false);
-    setLiveIdeas([]);
-    setRunCost({ anthropic: 0, openai: 0, apify: 0, meta: 0, total: 0 });
+    // Iniciar corrida en el context global — limpia state previo y marca
+    // running=true. Así el pipeline sigue vivo aunque el user salga de
+    // Arranque (Bandeja, Meta Ads, etc.).
+    pipelineRun.startRun({
+      productoId: String(producto.id),
+      productoNombre: producto.nombre,
+    });
 
     // Wrapper sobre logCostsFromResponse que también suma al runCost local.
     const trackCost = (data, descripcion) => {
@@ -570,11 +577,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     const pasosIniciales = [
       { id: 'prep', label: '🚀 Arrancando', detail: `Producto: ${producto.nombre}`, status: 'pending' },
     ];
-    if (necesitaDocs) {
-      pasosIniciales.push(
-        { id: 'docs-gen', label: '📄 Generando documentación del producto', detail: 'Research + avatar + offer brief + creencias + resumen (~3-4 min)', status: 'pending' },
-      );
-    }
+    pasosIniciales.push(
+      necesitaDocs
+        ? { id: 'docs-gen', label: '📄 Generando documentación del producto', detail: 'Research + avatar + offer brief + creencias + resumen (~3-4 min)', status: 'pending' }
+        : { id: 'docs-gen', label: '📄 Documentación del producto', detail: '↻ Reusada de corrida previa (skip · ahorra ~3 min)', status: 'pending' },
+    );
     pasosIniciales.push(
       { id: 'post-research', label: '🧠 Inferiendo stage del prospect', detail: 'Claude clasifica el awareness según el research', status: 'pending' },
     );
@@ -590,9 +597,13 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
     // ============================================================
     // PASO: Generar docs del producto si no los tiene todavía.
+    // Si ya están, el step se marca como done con label '↻ Reusada'
+    // y saltamos directo al post-research.
     // ============================================================
     let productoActualizado = producto;
-    if (necesitaDocs && !cancelled) {
+    if (!necesitaDocs) {
+      updateStep('docs-gen', { status: 'done', endedAt: Date.now() });
+    } else if (necesitaDocs && !cancelled) {
       updateStep('docs-gen', { status: 'running', startedAt: Date.now() });
       try {
         const docs = await streamGenerateDocs({
@@ -623,9 +634,12 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
     // ============================================================
     // PASO: Post-research analysis — stage + keywords.
+    // Skip si el producto YA tiene stage inferido y keywords guardadas
+    // (corridas previas). Reutilizamos lo que ya está. Ahorra ~30-60s.
     // ============================================================
-    let searchKeywords = [];
-    if (!cancelled && productoActualizado?.docs?.research) {
+    let searchKeywords = productoActualizado?.searchKeywords || [];
+    const yaTienePostResearch = !!productoActualizado?.stage && searchKeywords.length > 0;
+    if (!cancelled && productoActualizado?.docs?.research && !yaTienePostResearch) {
       updateStep('post-research', { status: 'running', startedAt: Date.now() });
       try {
         const resp = await fetch('/api/marketing/post-research-analysis', {
@@ -663,6 +677,13 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         updateStep('post-research', { status: 'error', endedAt: Date.now(), detail: err.message });
         // No es fatal — seguimos con keywords vacíos.
       }
+    } else if (yaTienePostResearch) {
+      // Skip: ya tenemos stage + keywords de una corrida previa.
+      updateStep('post-research', {
+        status: 'done',
+        endedAt: Date.now(),
+        detail: `↻ Reusado · Stage: ${productoActualizado.stage.replace('_', '-')} · ${searchKeywords.length} keywords (sin re-llamar a Claude)`,
+      });
     }
 
     // La competencia la carga el user a mano — sin auto-sugerencia

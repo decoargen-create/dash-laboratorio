@@ -313,8 +313,21 @@ export default function BandejaSection({ addToast }) {
     />;
   }
 
+  // Agrupar ideas por estado para el kanban — ya vienen ordenadas.
+  const byEstado = { pendiente: [], en_uso: [], usada: [], archivada: [] };
+  for (const i of filtered) {
+    const e = i.estado in byEstado ? i.estado : 'pendiente';
+    byEstado[e].push(i);
+  }
+  // Dentro de cada columna, más recientes arriba.
+  for (const e of Object.keys(byEstado)) {
+    byEstado[e].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  }
+
+  const ideaDetalle = expandedId ? ideas.find(i => i.id === expandedId) : null;
+
   return (
-    <div className="max-w-5xl mx-auto space-y-5">
+    <div className="max-w-7xl mx-auto space-y-5">
       {/* Header con breadcrumb de producto */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -354,15 +367,7 @@ export default function BandejaSection({ addToast }) {
         )}
       </div>
 
-      {/* Contadores */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <CounterCard label="Pendientes" value={counts.pendiente || 0} color="gray" accent />
-        <CounterCard label="En uso" value={counts.en_uso || 0} color="amber" />
-        <CounterCard label="Usadas" value={counts.usada || 0} color="emerald" />
-        <CounterCard label="Archivadas" value={counts.archivada || 0} color="gray" />
-      </div>
-
-      {/* Filtros */}
+      {/* Filtros (solo tipo + búsqueda — estado lo filtran las columnas) */}
       <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-3 flex flex-wrap gap-2 items-center">
         <div className="relative flex-1 min-w-[200px]">
           <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -377,65 +382,65 @@ export default function BandejaSection({ addToast }) {
             <option key={k} value={k}>{t.emoji} {t.label}</option>
           ))}
         </select>
-        <select value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)}
-          className="px-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md">
-          <option value="active">Activas (pend + en uso)</option>
-          <option value="all">Todas</option>
-          <option value="pendiente">Pendientes</option>
-          <option value="en_uso">En uso</option>
-          <option value="usada">Usadas</option>
-          <option value="archivada">Archivadas</option>
-        </select>
       </div>
 
-      {/* Lista */}
-      {sorted.length === 0 ? (
+      {/* Kanban — 4 columnas, una por estado. Click en card → abre modal de detalle. */}
+      {filtered.length === 0 ? (
         <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-12 text-center">
           <Inbox size={32} className="mx-auto text-gray-300 dark:text-gray-600 mb-2" />
           <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-            {ideas.length === 0 ? 'Sin ideas todavía' : 'Ninguna idea coincide con el filtro'}
+            {ideasDelProducto.length === 0 ? 'Sin ideas para este producto todavía' : 'Ninguna idea coincide con el filtro'}
           </p>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            {ideas.length === 0
-              ? 'Andá a "Arranque" y corré el pipeline — las ideas se van a poblar acá.'
-              : 'Ajustá los filtros de arriba o limpiá la búsqueda.'
+            {ideasDelProducto.length === 0
+              ? 'Corré el pipeline desde "Arranque" — las ideas aparecen acá en "Pendientes".'
+              : 'Ajustá el buscador o el filtro de tipo.'
             }
           </p>
         </div>
       ) : (
-        <div className="space-y-2">
-          {/* Toolbar de selección masiva */}
-          <div className="flex items-center gap-2 text-[10px] text-gray-500 dark:text-gray-400">
-            <button
-              onClick={() => toggleSelectAllFiltered(sorted.map(i => i.id))}
-              className="inline-flex items-center gap-1 hover:text-fuchsia-600 transition"
-            >
-              {sorted.every(i => selected.has(i.id))
-                ? <><CheckSquare size={12} /> Deseleccionar todas las visibles</>
-                : <><Square size={12} /> Seleccionar todas las visibles ({sorted.length})</>
-              }
-            </button>
-          </div>
-          {sorted.map(idea => (
-            <IdeaCard
-              key={idea.id}
-              idea={idea}
-              expanded={expandedId === idea.id}
-              onToggle={() => setExpandedId(expandedId === idea.id ? null : idea.id)}
-              onEstado={(estado) => setEstado(idea.id, estado)}
-              onRemove={() => handleRemove(idea.id)}
-              editandoNotas={editandoNotasId === idea.id}
-              onEditNotas={() => { setEditandoNotasId(idea.id); setNotasDraft(idea.notas || ''); }}
-              notasDraft={notasDraft}
-              setNotasDraft={setNotasDraft}
-              onSaveNotas={() => guardarNotas(idea.id)}
-              onCancelNotas={() => { setEditandoNotasId(null); setNotasDraft(''); }}
-              isSelected={selected.has(idea.id)}
-              onToggleSelect={() => toggleSelect(idea.id)}
-              onFetchPerformance={() => fetchPerformance(idea)}
-            />
-          ))}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+          <KanbanColumn
+            titulo="Pendientes" color="gray" accent
+            ideas={byEstado.pendiente}
+            onCardClick={(id) => setExpandedId(id)}
+          />
+          <KanbanColumn
+            titulo="En uso" color="amber"
+            ideas={byEstado.en_uso}
+            onCardClick={(id) => setExpandedId(id)}
+          />
+          <KanbanColumn
+            titulo="Usadas" color="emerald"
+            ideas={byEstado.usada}
+            onCardClick={(id) => setExpandedId(id)}
+          />
+          <KanbanColumn
+            titulo="Archivadas" color="slate"
+            ideas={byEstado.archivada}
+            onCardClick={(id) => setExpandedId(id)}
+          />
         </div>
+      )}
+
+      {/* Modal de detalle — placeholder para Parte 2b.4.
+          Por ahora, envolvemos el IdeaCard expandido en un overlay fullscreen. */}
+      {ideaDetalle && (
+        <IdeaDetailModal
+          idea={ideaDetalle}
+          onClose={() => setExpandedId(null)}
+          onEstado={(estado) => setEstado(ideaDetalle.id, estado)}
+          onRemove={() => { handleRemove(ideaDetalle.id); setExpandedId(null); }}
+          editandoNotas={editandoNotasId === ideaDetalle.id}
+          onEditNotas={() => { setEditandoNotasId(ideaDetalle.id); setNotasDraft(ideaDetalle.notas || ''); }}
+          notasDraft={notasDraft}
+          setNotasDraft={setNotasDraft}
+          onSaveNotas={() => guardarNotas(ideaDetalle.id)}
+          onCancelNotas={() => { setEditandoNotasId(null); setNotasDraft(''); }}
+          isSelected={selected.has(ideaDetalle.id)}
+          onToggleSelect={() => toggleSelect(ideaDetalle.id)}
+          onFetchPerformance={() => fetchPerformance(ideaDetalle)}
+        />
       )}
     </div>
   );
@@ -964,6 +969,141 @@ function MiniStat({ label, value, color = 'gray', accent = false }) {
     <div className={`px-2 py-1.5 rounded-md border ${colors[color]} ${accent ? 'ring-1 ring-fuchsia-300 dark:ring-fuchsia-700' : ''}`}>
       <p className="text-[9px] font-bold uppercase tracking-wider opacity-60 leading-none">{label}</p>
       <p className="text-base font-bold tabular-nums leading-tight mt-0.5">{value}</p>
+    </div>
+  );
+}
+
+// Columna del kanban — header con color + count, cuerpo scrolleable con cards.
+function KanbanColumn({ titulo, color, accent = false, ideas, onCardClick }) {
+  const palette = {
+    gray: {
+      header: 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-700',
+      body: 'bg-gray-50/50 dark:bg-gray-900/20 border-gray-200 dark:border-gray-700',
+    },
+    amber: {
+      header: 'bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 border-amber-300 dark:border-amber-800',
+      body: 'bg-amber-50/30 dark:bg-amber-900/10 border-amber-200 dark:border-amber-900/50',
+    },
+    emerald: {
+      header: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-200 border-emerald-300 dark:border-emerald-800',
+      body: 'bg-emerald-50/30 dark:bg-emerald-900/10 border-emerald-200 dark:border-emerald-900/50',
+    },
+    slate: {
+      header: 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700',
+      body: 'bg-slate-50/30 dark:bg-slate-900/20 border-slate-200 dark:border-slate-800',
+    },
+  };
+  const c = palette[color] || palette.gray;
+  return (
+    <div className={`rounded-xl border flex flex-col ${c.body} ${accent ? 'ring-2 ring-fuchsia-200 dark:ring-fuchsia-900/40' : ''}`}>
+      <div className={`px-3 py-2 border-b flex items-center justify-between ${c.header} rounded-t-xl`}>
+        <p className="text-[11px] font-bold uppercase tracking-wider">{titulo}</p>
+        <span className="text-xs font-bold tabular-nums">{ideas.length}</span>
+      </div>
+      <div className="p-2 space-y-2 min-h-[120px] max-h-[70vh] overflow-y-auto">
+        {ideas.length === 0 ? (
+          <p className="text-[10px] italic text-gray-400 dark:text-gray-600 text-center py-6">
+            Sin ideas
+          </p>
+        ) : (
+          ideas.map(idea => (
+            <KanbanCard key={idea.id} idea={idea} onClick={() => onCardClick(idea.id)} />
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Card compacta del kanban — thumb chico + título + 2-3 badges clave.
+// Todo el detalle se ve al clickear (abre el modal).
+function KanbanCard({ idea, onClick }) {
+  const tipo = TIPO_META[idea.tipo] || TIPO_META.desde_cero;
+  return (
+    <button
+      onClick={onClick}
+      className="w-full text-left bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-2 hover:border-fuchsia-300 dark:hover:border-fuchsia-700 hover:shadow-sm transition group"
+    >
+      <div className="flex items-start gap-2">
+        {idea.origen?.imageUrl ? (
+          <img
+            src={idea.origen.imageUrl} alt=""
+            className="w-10 h-10 rounded object-cover bg-gray-100 dark:bg-gray-700 shrink-0 border border-gray-200 dark:border-gray-700"
+            onError={e => { e.target.style.display = 'none'; }}
+          />
+        ) : (
+          <div className="w-10 h-10 rounded bg-gradient-to-br from-fuchsia-200 to-pink-200 dark:from-fuchsia-900/40 dark:to-pink-900/40 flex items-center justify-center shrink-0">
+            <span className="text-lg">{tipo.emoji}</span>
+          </div>
+        )}
+        <div className="flex-1 min-w-0">
+          <p className="text-[11px] font-semibold text-gray-900 dark:text-gray-100 leading-tight line-clamp-2">
+            {idea.titulo}
+          </p>
+          <div className="flex items-center gap-1 mt-1 flex-wrap">
+            <span className={`inline-flex items-center px-1 py-0 text-[8px] font-bold rounded border ${tipo.color}`}>
+              {tipo.emoji} {tipo.label}
+            </span>
+            {idea.formato && (
+              <span className="text-[9px] text-gray-400">
+                {idea.formato === 'video' ? '🎬' : idea.formato === 'static' ? '🖼️' : '📑'}
+              </span>
+            )}
+            {idea.anguloCategoria && ANGULO_META[idea.anguloCategoria] && (
+              <span className={`inline-flex items-center px-1 py-0 text-[8px] font-bold rounded ${ANGULO_META[idea.anguloCategoria].color}`}
+                title={`Ángulo ${idea.anguloCategoria}`}>
+                {ANGULO_META[idea.anguloCategoria].emoji}
+              </span>
+            )}
+            {idea.metaRiesgo?.tieneRiesgo && (
+              <span className="text-[9px]" title="Riesgo de alcance en Meta">⚠</span>
+            )}
+          </div>
+          {idea.origen?.competidorNombre && (
+            <p className="text-[9px] text-gray-500 dark:text-gray-400 mt-0.5 truncate">
+              de {idea.origen.competidorNombre}
+            </p>
+          )}
+        </div>
+      </div>
+    </button>
+  );
+}
+
+// Modal simple que muestra el detalle completo de una idea.
+// En Parte 2b.4 se pule: tabs, mejor layout, keyboard shortcuts.
+// Por ahora reutiliza el IdeaCard expandido envuelto en un overlay.
+function IdeaDetailModal({ idea, onClose, ...cardProps }) {
+  // Cerrar con ESC.
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center px-4 py-8 bg-black/50 backdrop-blur-sm overflow-y-auto"
+      onClick={onClose}
+    >
+      <div
+        className="relative w-full max-w-3xl"
+        onClick={e => e.stopPropagation()}
+      >
+        <button
+          onClick={onClose}
+          className="absolute -top-2 -right-2 z-10 w-8 h-8 rounded-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 shadow-md flex items-center justify-center text-gray-600 dark:text-gray-300 hover:text-red-600 transition"
+          title="Cerrar (ESC)"
+        >
+          ✕
+        </button>
+        <IdeaCard
+          idea={idea}
+          expanded={true}
+          onToggle={onClose}
+          {...cardProps}
+        />
+      </div>
     </div>
   );
 }

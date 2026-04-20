@@ -26,6 +26,7 @@ import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGenerated
 import { logCostsFromResponse } from './costsStore.js';
 import BandejaSection from './Bandeja.jsx';
 import InspiracionSection from './InspiracionSection.jsx';
+import CreativosTab from './CreativosTab.jsx';
 
 const GEN_CONFIG_KEY = 'viora-marketing-gen-config-v1';
 const DEFAULT_GEN_CONFIG = {
@@ -1294,12 +1295,15 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       )}
 
       {productoTab === 'creativos' && (
-        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-6 text-center">
-          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Creativos (Generar hooks)</p>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 italic">
-            Migración del módulo "Creativos" de Marketing.jsx pendiente — Parte 8.5.
-          </p>
-        </div>
+        <CreativosTab
+          producto={producto}
+          addToast={addToast}
+          onUpdateProducto={(patch) => {
+            setProductos(prev => prev.map(p =>
+              String(p.id) === String(producto.id) ? { ...p, ...patch } : p
+            ));
+          }}
+        />
       )}
 
       {productoTab === 'setup' && <>

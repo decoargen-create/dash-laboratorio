@@ -21,6 +21,7 @@ import BandejaSection from './Bandeja.jsx';
 import MetaAdsSection from './MetaAdsSection.jsx';
 import InspiracionSection from './InspiracionSection.jsx';
 import { PipelineRunProvider } from './PipelineRunContext.jsx';
+import PipelineRunOverlay from './PipelineRunOverlay.jsx';
 import { generateCSV, downloadCSV, parseCSV, toNumber, toBool } from './csv.js';
 
 // Estados del pipeline de producción de una orden
@@ -8053,6 +8054,7 @@ export default function App() {
     return (
       <PipelineRunProvider>
         <AppShell onExit={() => navigate('/')} />
+        <PipelineRunOverlay />
       </PipelineRunProvider>
     );
   }

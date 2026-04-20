@@ -34,12 +34,23 @@ function loadProductos() {
   } catch { return []; }
 }
 
-export default function BandejaSection({ addToast }) {
+// Props:
+//   addToast: callback de toasts
+//   forcedProductoId: cuando viene seteado (ej: embebida en Arranque tabs),
+//     fuerza el producto activo y skipea el selector inicial.
+//   embedded: cuando true, oculta el header con breadcrumb (porque el padre
+//     ya tiene su propio header de producto).
+export default function BandejaSection({ addToast, forcedProductoId, embedded = false }) {
   const [ideas, setIdeas] = useState(() => loadIdeas());
   const [productos, setProductos] = useState(() => loadProductos());
-  const [activeProductoId, setActiveProductoId] = useState(() => {
+  const [activeProductoIdRaw, setActiveProductoIdRaw] = useState(() => {
     try { return localStorage.getItem(ACTIVE_PRODUCT_KEY) || null; } catch { return null; }
   });
+  // Si viene forzado por el padre (embebida), siempre pisamos el state local.
+  const activeProductoId = forcedProductoId != null ? forcedProductoId : activeProductoIdRaw;
+  const setActiveProductoId = forcedProductoId != null
+    ? () => { /* no-op cuando viene forzado */ }
+    : setActiveProductoIdRaw;
   useEffect(() => {
     try {
       if (activeProductoId) localStorage.setItem(ACTIVE_PRODUCT_KEY, activeProductoId);
@@ -449,7 +460,9 @@ export default function BandejaSection({ addToast }) {
 
   return (
     <div className="max-w-7xl mx-auto space-y-5">
-      {/* Header con breadcrumb de producto */}
+      {/* Header con breadcrumb de producto — se oculta cuando estamos
+          embebidos en otro padre que ya tiene su propio header. */}
+      {!embedded && (
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3 min-w-0 flex-1">
           <button
@@ -517,6 +530,7 @@ export default function BandejaSection({ addToast }) {
           )}
         </div>
       </div>
+      )}
 
       {/* Filtros (solo tipo + búsqueda — estado lo filtran las columnas) */}
       <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-3 flex flex-wrap gap-2 items-center">

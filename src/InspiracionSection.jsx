@@ -53,11 +53,19 @@ function saveBrands(productoId, brands) {
   try { localStorage.setItem(brandsKey(productoId), JSON.stringify(brands)); } catch {}
 }
 
-export default function InspiracionSection({ addToast }) {
+// Props:
+//   forcedProductoId: pisar el selector con un producto específico (cuando
+//     vivimos embebidos en otra pantalla con tabs).
+//   embedded: ocultar header con breadcrumb cuando el padre ya lo tiene.
+export default function InspiracionSection({ addToast, forcedProductoId, embedded = false }) {
   const [productos, setProductos] = useState(() => loadProductos());
-  const [activeProductoId, setActiveProductoId] = useState(() => {
+  const [activeProductoIdRaw, setActiveProductoIdRaw] = useState(() => {
     try { return localStorage.getItem(ACTIVE_KEY) || null; } catch { return null; }
   });
+  const activeProductoId = forcedProductoId != null ? forcedProductoId : activeProductoIdRaw;
+  const setActiveProductoId = forcedProductoId != null
+    ? () => {}
+    : setActiveProductoIdRaw;
   const [brands, setBrands] = useState(() => loadBrands(activeProductoId));
   const [showAddForm, setShowAddForm] = useState(false);
   const [draft, setDraft] = useState({ nombre: '', landingUrl: '', fbPageUrl: '', notas: '' });
@@ -313,31 +321,42 @@ export default function InspiracionSection({ addToast }) {
   // ====================================================================
   return (
     <div className="max-w-5xl mx-auto space-y-5">
-      {/* Header con breadcrumb */}
-      <div className="flex items-center gap-3">
-        <button
-          onClick={() => setActiveProductoId(null)}
-          className="p-2 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 transition shrink-0"
-          title="Volver al selector"
-        >
-          <ChevronRight size={16} className="rotate-180" />
-        </button>
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center text-white shadow-sm shrink-0">
-          <Sparkles size={20} />
+      {/* Header con breadcrumb — se oculta cuando estamos embebidos. */}
+      {!embedded ? (
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setActiveProductoId(null)}
+            className="p-2 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 transition shrink-0"
+            title="Volver al selector"
+          >
+            <ChevronRight size={16} className="rotate-180" />
+          </button>
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center text-white shadow-sm shrink-0">
+            <Sparkles size={20} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-[10px] text-gray-500 dark:text-gray-400">
+              <button onClick={() => setActiveProductoId(null)} className="hover:text-amber-500 transition">Inspiración</button> / {producto.nombre}
+            </p>
+            <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100 truncate">{producto.nombre}</h2>
+          </div>
+          <button
+            onClick={() => setShowAddForm(s => !s)}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-amber-500 to-orange-500 rounded-lg hover:from-amber-600 hover:to-orange-600 shadow-sm transition"
+          >
+            <Plus size={12} /> Agregar marca
+          </button>
         </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-[10px] text-gray-500 dark:text-gray-400">
-            <button onClick={() => setActiveProductoId(null)} className="hover:text-amber-500 transition">Inspiración</button> / {producto.nombre}
-          </p>
-          <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100 truncate">{producto.nombre}</h2>
+      ) : (
+        <div className="flex justify-end">
+          <button
+            onClick={() => setShowAddForm(s => !s)}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-amber-500 to-orange-500 rounded-lg hover:from-amber-600 hover:to-orange-600 shadow-sm transition"
+          >
+            <Plus size={12} /> Agregar marca
+          </button>
         </div>
-        <button
-          onClick={() => setShowAddForm(s => !s)}
-          className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-amber-500 to-orange-500 rounded-lg hover:from-amber-600 hover:to-orange-600 shadow-sm transition"
-        >
-          <Plus size={12} /> Agregar marca
-        </button>
-      </div>
+      )}
 
       {/* Form de agregar marca */}
       {showAddForm && (

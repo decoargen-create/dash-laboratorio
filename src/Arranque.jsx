@@ -24,6 +24,8 @@ import {
 } from 'lucide-react';
 import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGeneratedToday } from './bandejaStore.js';
 import { logCostsFromResponse } from './costsStore.js';
+import BandejaSection from './Bandeja.jsx';
+import InspiracionSection from './InspiracionSection.jsx';
 
 const GEN_CONFIG_KEY = 'viora-marketing-gen-config-v1';
 const DEFAULT_GEN_CONFIG = {
@@ -164,6 +166,19 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       else localStorage.removeItem('viora-marketing-active-product');
     } catch {}
   }, [activeProductoId]);
+
+  // Tab activo dentro del workspace del producto (Setup / Bandeja / Inspiración / Creativos).
+  // Se persiste por producto para que volver al mismo producto te lleve al
+  // último tab que estabas viendo.
+  const productoTabKey = activeProductoId ? `viora-marketing-prod-tab-${activeProductoId}` : null;
+  const [productoTab, setProductoTab] = useState('setup');
+  useEffect(() => {
+    if (!productoTabKey) { setProductoTab('setup'); return; }
+    try { setProductoTab(localStorage.getItem(productoTabKey) || 'setup'); } catch { setProductoTab('setup'); }
+  }, [productoTabKey]);
+  useEffect(() => {
+    if (productoTabKey) try { localStorage.setItem(productoTabKey, productoTab); } catch {}
+  }, [productoTab, productoTabKey]);
 
   // Producto activo derivado + competidores + cuenta Meta del producto activo.
   const producto = productos.find(p => String(p.id) === String(activeProductoId)) || null;
@@ -1263,6 +1278,32 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         </div>
       </div>
 
+      {/* Tabs del workspace — Setup, Bandeja, Inspiración, Creativos */}
+      <ProductTabs activeTab={productoTab} onChange={setProductoTab} />
+
+      {productoTab === 'bandeja' && (
+        <div className="-mx-4">
+          <BandejaSection addToast={addToast} forcedProductoId={String(producto.id)} embedded />
+        </div>
+      )}
+
+      {productoTab === 'inspiracion' && (
+        <div className="-mx-4">
+          <InspiracionSection addToast={addToast} forcedProductoId={String(producto.id)} embedded />
+        </div>
+      )}
+
+      {productoTab === 'creativos' && (
+        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-6 text-center">
+          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Creativos (Generar hooks)</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 italic">
+            Migración del módulo "Creativos" de Marketing.jsx pendiente — Parte 8.5.
+          </p>
+        </div>
+      )}
+
+      {productoTab === 'setup' && <>
+
       {/* Nudge de auto-run: si pasaron > 24h y el user no está corriendo ahora */}
       {ofrecerRun && (
         <div className="px-4 py-3 bg-gradient-to-br from-fuchsia-50 to-purple-50 dark:from-fuchsia-900/20 dark:to-purple-900/20 border border-fuchsia-200 dark:border-fuchsia-800 rounded-lg flex items-center gap-3">
@@ -1886,6 +1927,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           }
         }}
       />
+      </>}
     </div>
   );
 }
@@ -1998,6 +2040,38 @@ function RunHistoryCard({ history, onClear }) {
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+// Tabs del workspace de un producto: Setup / Bandeja / Inspiración / Creativos.
+function ProductTabs({ activeTab, onChange }) {
+  const tabs = [
+    { id: 'setup', label: 'Setup', emoji: '⚙️' },
+    { id: 'bandeja', label: 'Bandeja', emoji: '📥' },
+    { id: 'inspiracion', label: 'Inspiración', emoji: '✨' },
+    { id: 'creativos', label: 'Creativos', emoji: '🎨' },
+  ];
+  return (
+    <div className="border-b border-gray-200 dark:border-gray-700 -mt-2">
+      <div className="flex items-center gap-1 overflow-x-auto">
+        {tabs.map(t => (
+          <button
+            key={t.id}
+            onClick={() => onChange(t.id)}
+            className={`px-3 py-2 text-xs font-bold transition relative shrink-0 ${
+              activeTab === t.id
+                ? 'text-purple-700 dark:text-purple-300'
+                : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+            }`}
+          >
+            <span className="mr-1">{t.emoji}</span>{t.label}
+            {activeTab === t.id && (
+              <span className="absolute bottom-0 left-2 right-2 h-0.5 bg-gradient-to-r from-purple-500 to-violet-500 rounded-t" />
+            )}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

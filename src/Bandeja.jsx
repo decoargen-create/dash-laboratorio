@@ -646,175 +646,162 @@ function IdeaCard({
         </div>
       </div>
 
-      {/* Detalle expandido */}
+      {/* Detalle expandido — 2 columnas: izquierda = output creativo, derecha = estrategia + contexto */}
       {expanded && (
-        <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 px-4 py-3 space-y-3">
-          {/* Razón de iteración — destacado arriba para iteraciones */}
-          {idea.tipo === 'iteracion' && idea.origen?.razonIteracion && (
-            <div className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md">
-              <p className="text-[10px] font-bold text-amber-800 dark:text-amber-300 uppercase tracking-wider mb-1">
-                🔄 ¿Por qué iterar este ad?
-              </p>
-              <p className="text-xs text-amber-900 dark:text-amber-200">
-                <span className="font-semibold">Ad base:</span> {idea.origen.adNombre || '(sin nombre)'}
-              </p>
-              <p className="text-xs text-amber-900 dark:text-amber-200 mt-1">{idea.origen.razonIteracion}</p>
-            </div>
-          )}
-          {/* Razonamiento general para réplicas/diferenciaciones/desde-cero */}
-          {idea.tipo !== 'iteracion' && idea.origen?.razonamiento && (
-            <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md">
-              <p className="text-[10px] font-bold text-blue-800 dark:text-blue-300 uppercase tracking-wider mb-1">
-                💡 Por qué esta idea
-              </p>
-              <p className="text-xs text-blue-900 dark:text-blue-200">{idea.origen.razonamiento}</p>
-            </div>
-          )}
-
-          {/* Hipótesis a validar — crítico para el loop de aprendizaje */}
-          {idea.testHipotesis && (
-            <div className="p-3 bg-cyan-50 dark:bg-cyan-900/20 border border-cyan-200 dark:border-cyan-800 rounded-md">
-              <p className="text-[10px] font-bold text-cyan-800 dark:text-cyan-300 uppercase tracking-wider mb-1">
-                🔬 Hipótesis a validar
-              </p>
-              {VARIABLE_META[idea.variableDeTesteo] && (
-                <p className="text-[10px] text-cyan-700 dark:text-cyan-400 mb-1">
-                  Variable: <strong>{VARIABLE_META[idea.variableDeTesteo].emoji} {VARIABLE_META[idea.variableDeTesteo].label}</strong> · {VARIABLE_META[idea.variableDeTesteo].descripcion}
-                </p>
+        <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 px-4 py-3">
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+            {/* COLUMNA IZQUIERDA — output creativo (3/5 del espacio) */}
+            <div className="lg:col-span-3 space-y-3">
+              {idea.hook && (
+                <Field label="🎯 Hook" text={idea.hook} highlight />
               )}
-              <p className="text-xs text-cyan-900 dark:text-cyan-200">{idea.testHipotesis}</p>
-            </div>
-          )}
 
-          {/* ⚠ Riesgo de alcance Meta — palabras gatillo */}
-          {idea.metaRiesgo?.tieneRiesgo && (
-            <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md">
-              <p className="text-[10px] font-bold text-red-800 dark:text-red-300 uppercase tracking-wider mb-1">
-                ⚠ Riesgo de alcance en Meta
-              </p>
-              {idea.metaRiesgo.palabras?.length > 0 && (
-                <p className="text-[10px] text-red-700 dark:text-red-400 mb-1">
-                  Palabras gatillo detectadas: <strong>{idea.metaRiesgo.palabras.join(', ')}</strong>
-                </p>
+              {idea.escenarioNarrativo && (
+                <Field label="📖 Escenario narrativo" text={idea.escenarioNarrativo} />
               )}
-              {idea.metaRiesgo.sugerencia && (
-                <p className="text-xs text-red-900 dark:text-red-200">{idea.metaRiesgo.sugerencia}</p>
-              )}
-              <p className="text-[10px] text-red-600 dark:text-red-400 italic mt-1">
-                Recomendación: testear primero en campaña chica antes de escalar.
-              </p>
-            </div>
-          )}
 
-          {/* Performance real del ad lanzado — cierra el loop de aprendizaje */}
-          {idea.launchedAsAdId && (
-            <div className="p-3 bg-fuchsia-50 dark:bg-fuchsia-900/20 border border-fuchsia-200 dark:border-fuchsia-800 rounded-md">
-              <div className="flex items-center justify-between mb-1.5">
-                <p className="text-[10px] font-bold text-fuchsia-800 dark:text-fuchsia-300 uppercase tracking-wider">
-                  🚀 Lanzada en Meta
-                </p>
-                <button onClick={onFetchPerformance}
-                  className="text-[10px] font-semibold text-fuchsia-600 dark:text-fuchsia-400 hover:underline inline-flex items-center gap-1">
-                  <Download size={10} /> Traer métricas
-                </button>
-              </div>
-              <p className="text-[10px] text-fuchsia-700 dark:text-fuchsia-400 mb-1 font-mono">
-                Ad: {idea.launchedAsAdName || idea.launchedAsAdId}
-              </p>
-              {idea.performance ? (
-                <div className="grid grid-cols-2 gap-2 mt-2">
-                  <PerformanceStat label="CTR" val={idea.performance.recent?.ctr} fmt={v => `${v.toFixed(2)}%`} />
-                  <PerformanceStat label="ROAS" val={idea.performance.recent?.roas} fmt={v => v.toFixed(2)}
-                    semaforo={v => v >= 2 ? 'good' : v >= 1 ? 'mid' : 'bad'} />
-                  <PerformanceStat label="CPA" val={idea.performance.recent?.cpa} fmt={v => `$${v.toFixed(2)}`} />
-                  <PerformanceStat label="Thumb-stop" val={idea.performance.recent?.thumbStopRate} fmt={v => `${v.toFixed(1)}%`} />
-                  <PerformanceStat label="Impressions" val={idea.performance.recent?.impressions} fmt={v => v.toLocaleString('es-AR')} />
-                  <PerformanceStat label="Compras" val={idea.performance.recent?.purchases} fmt={v => v.toLocaleString('es-AR')} />
-                  <p className="col-span-2 text-[9px] text-fuchsia-500 dark:text-fuchsia-400 text-right italic">
-                    Últimos 14d · actualizado {new Date(idea.performance.fetchedAt).toLocaleString('es-AR')}
-                  </p>
+              {idea.descripcionImagen && (
+                <Field label="🖼 Descripción de imagen (para el diseñador)" text={idea.descripcionImagen} />
+              )}
+
+              {idea.promptGeneradorImagen && (
+                <details open className="bg-indigo-50 dark:bg-indigo-900/20 rounded-md border border-indigo-200 dark:border-indigo-800">
+                  <summary className="cursor-pointer px-3 py-2 text-[10px] font-bold text-indigo-700 dark:text-indigo-300 uppercase tracking-wider flex items-center justify-between">
+                    <span>🤖 Prompt para Nano Banana / Midjourney (inglés)</span>
+                    <button
+                      onClick={(e) => {
+                        e.preventDefault();
+                        navigator.clipboard?.writeText(idea.promptGeneradorImagen);
+                      }}
+                      className="text-[10px] font-normal text-indigo-600 dark:text-indigo-400 hover:underline"
+                    >
+                      📋 copiar
+                    </button>
+                  </summary>
+                  <p className="px-3 pb-3 text-xs font-mono text-indigo-900 dark:text-indigo-200 whitespace-pre-wrap break-words">{idea.promptGeneradorImagen}</p>
+                </details>
+              )}
+
+              {idea.textoEnImagen && (
+                <div>
+                  <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1">✍️ Texto dentro de la imagen (layout)</p>
+                  <pre className="text-[11px] font-mono whitespace-pre-wrap bg-gray-50 dark:bg-gray-800/50 rounded-md px-3 py-2 text-gray-800 dark:text-gray-200 border border-gray-200 dark:border-gray-700">{idea.textoEnImagen}</pre>
                 </div>
-              ) : (
-                <p className="text-xs text-fuchsia-700 dark:text-fuchsia-300 italic">
-                  Click "Traer métricas" para ver cómo está funcionando.
-                </p>
+              )}
+
+              {idea.copyPostMeta && (
+                <div>
+                  <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1">📱 Copy del post en Meta (arriba del creativo)</p>
+                  <div className="text-xs text-gray-800 dark:text-gray-200 whitespace-pre-wrap bg-gray-50 dark:bg-gray-800/50 rounded-md px-3 py-2 border border-gray-200 dark:border-gray-700">{idea.copyPostMeta}</div>
+                </div>
+              )}
+
+              {idea.guion && !/^n\/?a/i.test(idea.guion.trim()) && (
+                <details open={idea.formato === 'video'} className="bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700">
+                  <summary className="cursor-pointer px-3 py-2 text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
+                    🎬 Guión {idea.formato === 'video' ? '(beats + VO)' : ''}
+                  </summary>
+                  <p className="px-3 pb-3 text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{idea.guion}</p>
+                </details>
               )}
             </div>
-          )}
 
-          {/* Grid superior: ángulo, hook, formato/estilo */}
-          {idea.hook && (
-            <Field label="🎯 Hook" text={idea.hook} highlight />
-          )}
-          {idea.angulo && (
-            <Field label="📐 Ángulo" text={idea.angulo} />
-          )}
-          {idea.painPoint && (
-            <Field label="💥 Pain point" text={idea.painPoint} />
-          )}
-          {idea.estiloVisual && (
-            <Field label="🎨 Estilo visual" text={idea.estiloVisual} />
-          )}
+            {/* COLUMNA DERECHA — contexto estratégico + metadata (2/5 del espacio) */}
+            <div className="lg:col-span-2 space-y-3">
+              {idea.tipo === 'iteracion' && idea.origen?.razonIteracion && (
+                <div className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md">
+                  <p className="text-[10px] font-bold text-amber-800 dark:text-amber-300 uppercase tracking-wider mb-1">
+                    🔄 ¿Por qué iterar?
+                  </p>
+                  <p className="text-xs text-amber-900 dark:text-amber-200">
+                    <span className="font-semibold">Ad base:</span> {idea.origen.adNombre || '(sin nombre)'}
+                  </p>
+                  <p className="text-xs text-amber-900 dark:text-amber-200 mt-1">{idea.origen.razonIteracion}</p>
+                </div>
+              )}
+              {idea.tipo !== 'iteracion' && idea.origen?.razonamiento && (
+                <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md">
+                  <p className="text-[10px] font-bold text-blue-800 dark:text-blue-300 uppercase tracking-wider mb-1">
+                    💡 Por qué esta idea
+                  </p>
+                  <p className="text-xs text-blue-900 dark:text-blue-200">{idea.origen.razonamiento}</p>
+                </div>
+              )}
 
-          {/* 📖 Escenario narrativo — concepto estratégico */}
-          {idea.escenarioNarrativo && (
-            <Field label="📖 Escenario narrativo" text={idea.escenarioNarrativo} />
-          )}
+              {idea.angulo && <Field label="📐 Ángulo" text={idea.angulo} />}
+              {idea.painPoint && <Field label="💥 Pain point" text={idea.painPoint} />}
+              {idea.estiloVisual && <Field label="🎨 Estilo visual" text={idea.estiloVisual} />}
 
-          {/* 🖼 Descripción de imagen en español */}
-          {idea.descripcionImagen && (
-            <Field label="🖼 Descripción de imagen (para el diseñador)" text={idea.descripcionImagen} />
-          )}
+              {idea.testHipotesis && (
+                <div className="p-3 bg-cyan-50 dark:bg-cyan-900/20 border border-cyan-200 dark:border-cyan-800 rounded-md">
+                  <p className="text-[10px] font-bold text-cyan-800 dark:text-cyan-300 uppercase tracking-wider mb-1">
+                    🔬 Hipótesis a validar
+                  </p>
+                  {VARIABLE_META[idea.variableDeTesteo] && (
+                    <p className="text-[10px] text-cyan-700 dark:text-cyan-400 mb-1">
+                      Variable: <strong>{VARIABLE_META[idea.variableDeTesteo].emoji} {VARIABLE_META[idea.variableDeTesteo].label}</strong>
+                    </p>
+                  )}
+                  <p className="text-xs text-cyan-900 dark:text-cyan-200">{idea.testHipotesis}</p>
+                </div>
+              )}
 
-          {/* 🤖 Prompt en inglés para Nano Banana / Midjourney */}
-          {idea.promptGeneradorImagen && (
-            <details open className="bg-indigo-50 dark:bg-indigo-900/20 rounded-md border border-indigo-200 dark:border-indigo-800">
-              <summary className="cursor-pointer px-3 py-2 text-[10px] font-bold text-indigo-700 dark:text-indigo-300 uppercase tracking-wider flex items-center justify-between">
-                <span>🤖 Prompt para Nano Banana / Midjourney (inglés)</span>
-                <button
-                  onClick={(e) => {
-                    e.preventDefault();
-                    navigator.clipboard?.writeText(idea.promptGeneradorImagen);
-                  }}
-                  className="text-[10px] font-normal text-indigo-600 dark:text-indigo-400 hover:underline"
-                >
-                  📋 copiar
-                </button>
-              </summary>
-              <p className="px-3 pb-3 text-xs font-mono text-indigo-900 dark:text-indigo-200 whitespace-pre-wrap break-words">{idea.promptGeneradorImagen}</p>
-            </details>
-          )}
+              {idea.metaRiesgo?.tieneRiesgo && (
+                <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md">
+                  <p className="text-[10px] font-bold text-red-800 dark:text-red-300 uppercase tracking-wider mb-1">
+                    ⚠ Riesgo Meta
+                  </p>
+                  {idea.metaRiesgo.palabras?.length > 0 && (
+                    <p className="text-[10px] text-red-700 dark:text-red-400 mb-1">
+                      Palabras: <strong>{idea.metaRiesgo.palabras.join(', ')}</strong>
+                    </p>
+                  )}
+                  {idea.metaRiesgo.sugerencia && (
+                    <p className="text-xs text-red-900 dark:text-red-200">{idea.metaRiesgo.sugerencia}</p>
+                  )}
+                </div>
+              )}
 
-          {/* ✍️ Texto que va DENTRO de la imagen */}
-          {idea.textoEnImagen && (
-            <div>
-              <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1">✍️ Texto dentro de la imagen (layout)</p>
-              <pre className="text-[11px] font-mono whitespace-pre-wrap bg-gray-50 dark:bg-gray-800/50 rounded-md px-3 py-2 text-gray-800 dark:text-gray-200 border border-gray-200 dark:border-gray-700">{idea.textoEnImagen}</pre>
+              {idea.publicoSugerido && (
+                <Field label="🎯 Público sugerido" text={idea.publicoSugerido} />
+              )}
+
+              {idea.launchedAsAdId && (
+                <div className="p-3 bg-fuchsia-50 dark:bg-fuchsia-900/20 border border-fuchsia-200 dark:border-fuchsia-800 rounded-md">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <p className="text-[10px] font-bold text-fuchsia-800 dark:text-fuchsia-300 uppercase tracking-wider">
+                      🚀 Performance
+                    </p>
+                    <button onClick={onFetchPerformance}
+                      className="text-[10px] font-semibold text-fuchsia-600 dark:text-fuchsia-400 hover:underline inline-flex items-center gap-1">
+                      <Download size={10} /> Métricas
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-fuchsia-700 dark:text-fuchsia-400 mb-1 font-mono truncate">
+                    Ad: {idea.launchedAsAdName || idea.launchedAsAdId}
+                  </p>
+                  {idea.performance ? (
+                    <div className="grid grid-cols-2 gap-2 mt-2">
+                      <PerformanceStat label="CTR" val={idea.performance.recent?.ctr} fmt={v => `${v.toFixed(2)}%`} />
+                      <PerformanceStat label="ROAS" val={idea.performance.recent?.roas} fmt={v => v.toFixed(2)}
+                        semaforo={v => v >= 2 ? 'good' : v >= 1 ? 'mid' : 'bad'} />
+                      <PerformanceStat label="CPA" val={idea.performance.recent?.cpa} fmt={v => `$${v.toFixed(2)}`} />
+                      <PerformanceStat label="Thumb-stop" val={idea.performance.recent?.thumbStopRate} fmt={v => `${v.toFixed(1)}%`} />
+                      <PerformanceStat label="Impressions" val={idea.performance.recent?.impressions} fmt={v => v.toLocaleString('es-AR')} />
+                      <PerformanceStat label="Compras" val={idea.performance.recent?.purchases} fmt={v => v.toLocaleString('es-AR')} />
+                    </div>
+                  ) : (
+                    <p className="text-[10px] text-fuchsia-700 dark:text-fuchsia-300 italic">
+                      Click "Métricas" para ver cómo rinde.
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
-          )}
+          </div>
 
-          {/* 📱 Copy del post en Meta (va arriba del creativo en el feed) */}
-          {idea.copyPostMeta && (
-            <div>
-              <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1">📱 Copy del post en Meta (arriba del creativo)</p>
-              <div className="text-xs text-gray-800 dark:text-gray-200 whitespace-pre-wrap bg-gray-50 dark:bg-gray-800/50 rounded-md px-3 py-2 border border-gray-200 dark:border-gray-700">{idea.copyPostMeta}</div>
-            </div>
-          )}
-
-          {/* 🎯 Público sugerido */}
-          {idea.publicoSugerido && (
-            <Field label="🎯 Público sugerido" text={idea.publicoSugerido} />
-          )}
-
-          {/* 🎬 Guión (solo si es video o carrusel detallado) */}
-          {idea.guion && !/^n\/?a/i.test(idea.guion.trim()) && (
-            <details open={idea.formato === 'video'} className="bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700">
-              <summary className="cursor-pointer px-3 py-2 text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
-                🎬 Guión {idea.formato === 'video' ? '(beats + VO)' : ''}
-              </summary>
-              <p className="px-3 pb-3 text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{idea.guion}</p>
-            </details>
-          )}
+          {/* Sección inferior full-width: notas + acciones */}
+          <div className="mt-4 pt-3 border-t border-gray-200 dark:border-gray-700 space-y-3">
 
           {/* Notas */}
           <div>
@@ -870,6 +857,7 @@ function IdeaCard({
               </button>
             </div>
           </div>
+        </div>
         </div>
       )}
     </div>
@@ -1232,7 +1220,7 @@ function IdeaDetailModal({ idea, onClose, ...cardProps }) {
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-3xl"
+        className="relative w-full max-w-5xl"
         onClick={e => e.stopPropagation()}
       >
         <button

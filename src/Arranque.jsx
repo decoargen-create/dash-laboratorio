@@ -1146,33 +1146,77 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Creá tu primer producto para empezar a analizar la competencia y generar ideas.</p>
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-3">
             {productos.map(p => {
               const comps = p.competidores || [];
               const hasResearch = !!(p.docs?.research);
-              const ideasCount = loadIdeas().filter(i => String(i.productoId || '') === String(p.id)).length;
+              const ideasDelProducto = loadIdeas().filter(i => String(i.productoId || '') === String(p.id));
+              const ideasCount = ideasDelProducto.length;
+              const ideasByEstado = ideasDelProducto.reduce((acc, i) => {
+                acc[i.estado || 'pendiente'] = (acc[i.estado || 'pendiente'] || 0) + 1;
+                return acc;
+              }, {});
+              const adsScrapeados = comps.reduce((sum, c) => sum + (c.ads?.length || 0), 0);
+              const competidoresConAds = comps.filter(c => (c.ads?.length || 0) > 0).length;
+              const deepAnalyses = comps.reduce((sum, c) => sum + Object.keys(c.deepAnalyses || {}).length, 0);
+              const adsMatched = (p.metaAccount?.ads || []).filter(a => a.productMatch).length;
+              const runsDelProducto = runHistory.filter(r => String(r.productoId || '') === String(p.id));
+              const ultimoRun = runsDelProducto[0];
+              const costoTotal = runsDelProducto.reduce((sum, r) => sum + (r.cost?.total || 0), 0);
               return (
-                <div key={p.id} className="flex items-center gap-2">
+                <div key={p.id} className="flex items-stretch gap-2">
                   <button
                     onClick={() => setActiveProductoId(String(p.id))}
-                    className="flex-1 flex items-center gap-4 p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm hover:border-purple-300 dark:hover:border-purple-700 hover:shadow-md transition text-left group"
+                    className="flex-1 text-left p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm hover:border-purple-300 dark:hover:border-purple-700 hover:shadow-md transition group"
                   >
-                    <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-purple-500 to-violet-500 flex items-center justify-center text-white font-bold text-lg shrink-0 group-hover:scale-105 transition">
-                      {p.nombre?.charAt(0)?.toUpperCase() || 'P'}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{p.nombre}</p>
-                      <div className="flex items-center gap-2 text-[10px] text-gray-500 dark:text-gray-400 mt-0.5 flex-wrap">
-                        {p.landingUrl && <span className="truncate max-w-[200px]">{p.landingUrl}</span>}
-                        <span className={`font-semibold ${hasResearch ? 'text-emerald-600' : 'text-gray-400'}`}>
-                          {hasResearch ? '✓ documentado' : '○ sin research'}
-                        </span>
-                        <span>{comps.length} competidor{comps.length !== 1 ? 'es' : ''}</span>
-                      {ideasCount > 0 && <span className="text-fuchsia-600 dark:text-fuchsia-400 font-semibold">· {ideasCount} idea{ideasCount !== 1 ? 's' : ''}</span>}
-                        {p.stage && <span className="text-purple-600 dark:text-purple-400">· {p.stage.replace('_', '-')}</span>}
+                    {/* Header */}
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-purple-500 to-violet-500 flex items-center justify-center text-white font-bold text-lg shrink-0 group-hover:scale-105 transition">
+                        {p.nombre?.charAt(0)?.toUpperCase() || 'P'}
                       </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{p.nombre}</p>
+                        <div className="flex items-center gap-2 text-[10px] text-gray-500 dark:text-gray-400 mt-0.5 flex-wrap">
+                          {p.landingUrl && <span className="truncate max-w-[200px]">{p.landingUrl}</span>}
+                          <span className={`font-semibold ${hasResearch ? 'text-emerald-600' : 'text-gray-400'}`}>
+                            {hasResearch ? '✓ documentado' : '○ sin research'}
+                          </span>
+                          {p.stage && <span className="text-purple-600 dark:text-purple-400">· {p.stage.replace('_', '-')}</span>}
+                        </div>
+                      </div>
+                      <ChevronRight size={16} className="text-gray-400 group-hover:text-purple-500 transition shrink-0" />
                     </div>
-                    <ChevronRight size={16} className="text-gray-400 group-hover:text-purple-500 transition shrink-0" />
+
+                    {/* Bandeja: contadores por estado (igual que Bandeja) */}
+                    <div className="grid grid-cols-4 gap-1.5 mb-2">
+                      <ProdMiniStat label="Pendientes" value={ideasByEstado.pendiente || 0} accent />
+                      <ProdMiniStat label="En uso" value={ideasByEstado.en_uso || 0} color="amber" />
+                      <ProdMiniStat label="Usadas" value={ideasByEstado.usada || 0} color="emerald" />
+                      <ProdMiniStat label="Archivadas" value={ideasByEstado.archivada || 0} color="slate" />
+                    </div>
+
+                    {/* Reporting: stats del producto */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5 text-[9px]">
+                      <ProdReportStat label="Competidores" value={`${comps.length}${competidoresConAds > 0 ? ` · ${competidoresConAds} con ads` : ''}`} />
+                      <ProdReportStat label="Ads scrapeados" value={adsScrapeados.toLocaleString('es-AR')} />
+                      <ProdReportStat label="Análisis IA" value={deepAnalyses} />
+                      <ProdReportStat label="Ideas totales" value={ideasCount} highlight={ideasCount > 0} />
+                    </div>
+
+                    {/* Footer: cuenta Meta + último run + costo */}
+                    <div className="flex items-center gap-3 text-[9px] text-gray-500 dark:text-gray-400 flex-wrap mt-2 pt-2 border-t border-gray-100 dark:border-gray-700">
+                      {p.metaAccount ? (
+                        <span>📊 Meta: <strong className="text-gray-700 dark:text-gray-300">{p.metaAccount.name}</strong> · {p.metaAccount.ads?.length || 0} ads{adsMatched > 0 ? ` · ${adsMatched} matched` : ''}</span>
+                      ) : (
+                        <span className="italic text-gray-400">Sin cuenta Meta conectada</span>
+                      )}
+                      {ultimoRun && (
+                        <span>· ⏱ Último run: <strong className="text-gray-700 dark:text-gray-300">{new Date(ultimoRun.startedAt).toLocaleDateString('es-AR')}</strong></span>
+                      )}
+                      {costoTotal > 0 && (
+                        <span className="text-purple-600 dark:text-purple-400 font-mono">· 💰 ${costoTotal.toFixed(4)} acumulado</span>
+                      )}
+                    </div>
                   </button>
                   <button
                     onClick={(e) => {
@@ -1954,6 +1998,36 @@ function RunHistoryCard({ history, onClear }) {
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+// Mini-stat para los contadores de Bandeja en la card del producto.
+function ProdMiniStat({ label, value, color = 'gray', accent = false }) {
+  const colors = {
+    gray: 'bg-gray-50 dark:bg-gray-900/40 text-gray-900 dark:text-gray-100 border-gray-200 dark:border-gray-700',
+    amber: 'bg-amber-50 dark:bg-amber-900/30 text-amber-900 dark:text-amber-200 border-amber-200 dark:border-amber-800',
+    emerald: 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-900 dark:text-emerald-200 border-emerald-200 dark:border-emerald-800',
+    slate: 'bg-slate-50 dark:bg-slate-900/40 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800',
+  };
+  return (
+    <div className={`px-2 py-1.5 rounded-md border ${colors[color]} ${accent ? 'ring-1 ring-fuchsia-300 dark:ring-fuchsia-700' : ''}`}>
+      <p className="text-[8px] font-bold uppercase tracking-wider opacity-60 leading-none">{label}</p>
+      <p className="text-base font-bold tabular-nums leading-tight mt-0.5">{value}</p>
+    </div>
+  );
+}
+
+// Stat plano de reporte para la sección de stats del producto.
+function ProdReportStat({ label, value, highlight = false }) {
+  return (
+    <div className={`px-2 py-1.5 rounded border ${
+      highlight
+        ? 'bg-fuchsia-50 dark:bg-fuchsia-900/20 border-fuchsia-200 dark:border-fuchsia-800 text-fuchsia-900 dark:text-fuchsia-200'
+        : 'bg-gray-50 dark:bg-gray-900/30 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300'
+    }`}>
+      <p className="text-[8px] font-bold uppercase tracking-wider opacity-60 leading-none">{label}</p>
+      <p className="text-[11px] font-semibold leading-tight mt-0.5">{value}</p>
     </div>
   );
 }

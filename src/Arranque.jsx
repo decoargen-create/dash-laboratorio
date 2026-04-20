@@ -27,6 +27,7 @@ import { logCostsFromResponse } from './costsStore.js';
 import BandejaSection from './Bandeja.jsx';
 import InspiracionSection from './InspiracionSection.jsx';
 import CreativosTab from './CreativosTab.jsx';
+import DocumentacionTab from './DocumentacionTab.jsx';
 import { usePipelineRun } from './PipelineRunContext.jsx';
 
 const GEN_CONFIG_KEY = 'viora-marketing-gen-config-v1';
@@ -1320,6 +1321,18 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         </div>
       )}
 
+      {productoTab === 'documentos' && (
+        <DocumentacionTab
+          producto={producto}
+          addToast={addToast}
+          onUpdateProducto={(patch) => {
+            setProductos(prev => prev.map(p =>
+              String(p.id) === String(producto.id) ? { ...p, ...patch } : p
+            ));
+          }}
+        />
+      )}
+
       {productoTab === 'inspiracion' && (
         <div className="-mx-4">
           <InspiracionSection addToast={addToast} forcedProductoId={String(producto.id)} embedded />
@@ -2084,6 +2097,7 @@ function RunHistoryCard({ history, onClear }) {
 function ProductTabs({ activeTab, onChange }) {
   const tabs = [
     { id: 'setup', label: 'Setup', emoji: '⚙️' },
+    { id: 'documentos', label: 'Documentos', emoji: '📄' },
     { id: 'bandeja', label: 'Bandeja', emoji: '📥' },
     { id: 'inspiracion', label: 'Inspiración', emoji: '✨' },
     { id: 'creativos', label: 'Creativos', emoji: '🎨' },

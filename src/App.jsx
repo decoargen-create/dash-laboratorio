@@ -7,7 +7,7 @@ import {
   Menu, LogOut, Home, ShoppingCart, Package, Users, AlertCircle, CreditCard,
   UserCheck, TrendingUp, Plus, Filter, Eye, Edit2, Trash2, Calendar, DollarSign,
   Moon, Sun, ChevronDown, ChevronRight, Search, X, Command, Check, Bell,
-  AlignJustify, LayoutGrid, Columns3, Sparkles, Bot, Zap, Activity, FileText, Settings, Loader2, Calculator, Copy, Save, RotateCcw, Target, Play, Inbox
+  AlignJustify, LayoutGrid, Columns3, Sparkles, Bot, Zap, Activity, FileText, Settings, Loader2, Calculator, Copy, Save, RotateCcw, Target, Play, Inbox, BarChart3
 } from 'lucide-react';
 import { VioraLogo, VioraMark } from './logo.jsx';
 import LandingPage from './LandingPage.jsx';
@@ -18,6 +18,8 @@ import GastosStackSection from './GastosStack.jsx';
 import MetaConnectBanner from './MetaConnectBanner.jsx';
 import ArranqueSection from './Arranque.jsx';
 import BandejaSection from './Bandeja.jsx';
+import MetaAdsSection from './MetaAdsSection.jsx';
+import InspiracionSection from './InspiracionSection.jsx';
 import { generateCSV, downloadCSV, parseCSV, toNumber, toBool } from './csv.js';
 
 // Estados del pipeline de producción de una orden
@@ -1839,10 +1841,12 @@ function AppShell({ onExit }) {
           )}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (
             <>
-              <NavItem icon={Play} label="Arranque" section="mk-arranque" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={Inbox} label="Bandeja de ideas" section="mk-bandeja" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={Target} label="Competencia" section="mk-competencia" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={FileText} label="Documentación" section="mk-docs" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              {/* Sidebar simplificado: Marketing (= productos) + Meta Ads
+                  (aparte por pedido) + Gastos. Bandeja, Inspiración,
+                  Competencia y Creativos viven como tabs adentro de cada
+                  producto en Arranque. */}
+              <NavItem icon={Play} label="Marketing" section="mk-arranque" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              <NavItem icon={BarChart3} label="Meta Ads" section="mk-meta-ads" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={DollarSign} label="Gastos del stack" section="mk-gastos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
             </>
           )}
@@ -1907,6 +1911,8 @@ function AppShell({ onExit }) {
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-arranque' && <ArranqueSection addToast={addToast} onGoToSection={setCurrentSection} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-bandeja' && <BandejaSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-competencia' && <CompetenciaSection addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-meta-ads' && <MetaAdsSection addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-inspiracion' && <InspiracionSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-gastos' && <GastosStackSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-docs' && (
             <MarketingSection
@@ -7442,6 +7448,8 @@ function getSectionTitle(user, section) {
     'mk-bandeja': 'Marketing · Bandeja de ideas',
     'mk-docs': 'Marketing · Documentación de producto',
     'mk-competencia': 'Marketing · Competencia',
+    'mk-meta-ads': 'Marketing · Meta Ads',
+    'mk-inspiracion': 'Marketing · Inspiración',
     'mk-gastos': 'Marketing · Gastos del stack',
   };
   const mentor = {

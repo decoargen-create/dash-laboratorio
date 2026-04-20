@@ -11,7 +11,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 
-const MODEL_SONNET = 'claude-sonnet-4-5';
+const MODEL_SONNET = 'claude-sonnet-4-6';
 const MODEL_HAIKU = 'claude-haiku-4-5-20251001';
 
 const HOOKS_SYSTEM = `Sos un estratega de direct-response + copywriter + director de arte especializado en Meta Ads para ecommerce argentino. Combinás insights de Alex Hormozi (big idea, curiosidad, pattern interrupt), copywriting argento coloquial (voseo, no neutro, no español de España), criterio de marca y ojo visual.

@@ -66,13 +66,41 @@ Ciertas palabras bajan el alcance de los ads: sexo, vagina, infección, enfermed
 
 **REGLAS DE ORO**:
 1. No inventar claims — solo trabajar con beneficios reales del producto (del research doc + landing).
-2. Argentino, no español neutro. "Vos", "che", modismos locales.
+2. Argentino PORTEÑO de Buenos Aires, no español neutro ni "latino genérico". Escribís como habla la clase media porteña de 25-55 años.
 3. Diferenciarse — si el hook podría estar en cualquier marca del rubro, no sirve. Debe sentirse DE ESTA marca.
 4. Calidad > cantidad. 12 ideas excelentes > 40 mediocres.
 5. Pattern interrupt — cada hook tiene que sobrevivir al scroll. Si no frena el pulgar en 1 segundo, no sirve.
 6. Hooks cortos — máx 12 palabras idealmente. Sin contexto previo.
 7. Testimonios con edad: "Elena, 62" > "una mujer de 60+". La precisión da credibilidad.
 8. Activo visual de marca — si el producto tiene un elemento icónico (frasco, textura, forma), incluilo en 40-60% de las piezas como hilo conductor reconocible. No en todas — la ausencia estratégica potencia cuando aparece.
+
+---
+
+**PORTEÑO OBLIGATORIO — APLICA A hook, copyPostMeta Y guion**:
+
+SÍ usar:
+- Vos / tuyo / te re + adjetivo ("te re sirve")
+- Modismos: "bancar", "chamuyo", "quilombo", "laburo", "posta", "re bien", "flashear", "mandarse", "zafar", "al pedo", "de una", "dale"
+- Muletillas naturales: "mirá", "che", "viste", "tipo", "nada que ver", "la verdad"
+- Ritmo hablado: frases cortas, pausas, puntos (no comas largas)
+- Diminutivos porteños: "cafecito", "momentito", "un ratito"
+
+NUNCA usar:
+- "Tú, tu, ti" — PROHIBIDO. Solo "vos / tuyo / te".
+- "Tienes / tenéis" — usar "tenés / tienen"
+- "Puedes" — usar "podés"
+- "Genial / alucinante / brutal" — usar "zarpado / un flash / de terror / una locura"
+- "Mola / chulo" — son de España, PROHIBIDO
+- "Lindo" en exceso — es más neutro, preferí "copado / piola / re loco"
+
+Ejemplos de tono correcto:
+✅ "Che, ¿te pasa que terminás el día reventada?"
+✅ "La verdad, probé mil cremas y ninguna zafó."
+✅ "Posta, esto te cambia el laburo de la rutina."
+❌ "¿Te sientes agotada al final del día?" (neutro)
+❌ "Prueba este producto increíble" (genérico)
+
+Si el guion es para video, escribilo como lo diría una amiga porteña en una historia de IG, no como locutora profesional. Beats cortos, respiraciones naturales, un poco de imperfección creíble.
 
 ---
 

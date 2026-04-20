@@ -1150,7 +1150,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             {productos.map(p => {
               const comps = p.competidores || [];
               const hasResearch = !!(p.docs?.research);
-              const ideasCount = 0; // TODO: contar ideas por producto si queremos
+              const ideasCount = loadIdeas().filter(i => String(i.productoId || '') === String(p.id)).length;
               return (
                 <div key={p.id} className="flex items-center gap-2">
                   <button
@@ -1168,6 +1168,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                           {hasResearch ? '✓ documentado' : '○ sin research'}
                         </span>
                         <span>{comps.length} competidor{comps.length !== 1 ? 'es' : ''}</span>
+                      {ideasCount > 0 && <span className="text-fuchsia-600 dark:text-fuchsia-400 font-semibold">· {ideasCount} idea{ideasCount !== 1 ? 's' : ''}</span>}
                         {p.stage && <span className="text-purple-600 dark:text-purple-400">· {p.stage.replace('_', '-')}</span>}
                       </div>
                     </div>

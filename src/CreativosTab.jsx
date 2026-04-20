@@ -11,7 +11,7 @@
 //   addToast: para feedback al user
 
 import React, { useState } from 'react';
-import { Sparkles, Loader2 } from 'lucide-react';
+import { Sparkles, Loader2, AlertTriangle, Copy, Check } from 'lucide-react';
 import { logCostsFromResponse } from './costsStore.js';
 
 export default function CreativosTab({ producto, onUpdateProducto, addToast }) {
@@ -159,9 +159,118 @@ export default function CreativosTab({ producto, onUpdateProducto, addToast }) {
         </div>
       )}
 
-      {yaTieneHooks && (
-        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 text-center text-xs text-gray-500 dark:text-gray-400 italic">
-          {creativos.fase1.hooks.length} hooks ya generados — display detallado viene en Parte 8.5.3.
+      {yaTieneHooks && <HooksDisplay fase1={creativos.fase1} addToast={addToast} />}
+    </div>
+  );
+}
+
+// Display de los resultados de la Fase 1: diagnóstico (beneficios, dolores,
+// vacíos), hooks agrupados por ángulo, observaciones estratégicas.
+function HooksDisplay({ fase1, addToast }) {
+  const { diagnostico, angulosElegidos = [], hooks = [], observaciones = [] } = fase1;
+  const [copiedId, setCopiedId] = useState(null);
+
+  const copy = (text, id) => {
+    navigator.clipboard?.writeText(text);
+    setCopiedId(id);
+    addToast?.({ type: 'success', message: 'Hook copiado' });
+    setTimeout(() => setCopiedId(prev => prev === id ? null : prev), 1500);
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Diagnóstico */}
+      {diagnostico && (
+        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
+          <h4 className="text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3">🔍 Diagnóstico</h4>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+            {diagnostico.beneficios?.length > 0 && (
+              <div>
+                <p className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 uppercase mb-1">Beneficios reales</p>
+                <ul className="list-disc list-inside space-y-0.5 text-gray-700 dark:text-gray-300">
+                  {diagnostico.beneficios.map((b, i) => <li key={i}>{b}</li>)}
+                </ul>
+              </div>
+            )}
+            {diagnostico.dolores?.length > 0 && (
+              <div>
+                <p className="text-[10px] font-bold text-red-700 dark:text-red-400 uppercase mb-1">Dolores del avatar</p>
+                <ul className="list-disc list-inside space-y-0.5 text-gray-700 dark:text-gray-300">
+                  {diagnostico.dolores.map((d, i) => <li key={i}>{d}</li>)}
+                </ul>
+              </div>
+            )}
+            {diagnostico.vaciosComunicacion?.length > 0 && (
+              <div>
+                <p className="text-[10px] font-bold text-amber-700 dark:text-amber-400 uppercase mb-1">Vacíos de comunicación</p>
+                <ul className="list-disc list-inside space-y-0.5 text-gray-700 dark:text-gray-300">
+                  {diagnostico.vaciosComunicacion.map((v, i) => <li key={i}>{v}</li>)}
+                </ul>
+              </div>
+            )}
+          </div>
+          {diagnostico.tonoActual && (
+            <p className="text-[11px] text-gray-500 dark:text-gray-400 italic mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
+              <span className="font-semibold">Tono actual de la marca:</span> {diagnostico.tonoActual}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Hooks agrupados por ángulo elegido */}
+      {hooks.length > 0 && (
+        <div className="space-y-3">
+          <h4 className="text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
+            🎣 Hooks ({hooks.length})
+          </h4>
+          {angulosElegidos.map(angulo => {
+            const hooksDelAngulo = hooks.filter(h => h.angulo === angulo.id);
+            if (hooksDelAngulo.length === 0) return null;
+            return (
+              <div key={angulo.id} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="px-2 py-0.5 text-[11px] font-bold bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 rounded">
+                    {angulo.id}
+                  </span>
+                  <h5 className="text-sm font-bold text-gray-900 dark:text-gray-100">{angulo.nombre}</h5>
+                  <span className="text-[10px] text-gray-500 dark:text-gray-400">· {hooksDelAngulo.length} hook{hooksDelAngulo.length > 1 ? 's' : ''}</span>
+                </div>
+                {angulo.porQueSirve && (
+                  <p className="text-[11px] text-gray-500 dark:text-gray-400 italic mb-3">{angulo.porQueSirve}</p>
+                )}
+                <ul className="space-y-1.5">
+                  {hooksDelAngulo.map(h => (
+                    <li key={h.id} className="group flex items-start gap-2 px-2 py-1.5 bg-gray-50 dark:bg-gray-900/40 rounded-md hover:bg-purple-50 dark:hover:bg-purple-900/20 transition">
+                      <span className="text-[10px] text-gray-400 font-mono shrink-0 mt-0.5">#{h.id}</span>
+                      <p className="flex-1 text-xs text-gray-800 dark:text-gray-200 leading-snug">{h.texto}</p>
+                      {h.riesgoMeta && (
+                        <span className="shrink-0 inline-flex items-center gap-0.5 text-[9px] font-bold text-amber-700 dark:text-amber-400" title={h.motivoRiesgoMeta || 'Palabra gatillo Meta'}>
+                          <AlertTriangle size={10} /> Meta
+                        </span>
+                      )}
+                      <button
+                        onClick={() => copy(h.texto, h.id)}
+                        className="opacity-0 group-hover:opacity-100 transition shrink-0 p-1 text-gray-400 hover:text-purple-600"
+                        title="Copiar hook"
+                      >
+                        {copiedId === h.id ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Observaciones estratégicas */}
+      {observaciones.length > 0 && (
+        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
+          <h4 className="text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-2">📝 Observaciones estratégicas</h4>
+          <ul className="space-y-1 text-xs text-gray-700 dark:text-gray-300 list-disc list-inside">
+            {observaciones.map((o, i) => <li key={i}>{o}</li>)}
+          </ul>
         </div>
       )}
     </div>

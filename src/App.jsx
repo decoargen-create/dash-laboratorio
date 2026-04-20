@@ -1841,12 +1841,12 @@ function AppShell({ onExit }) {
           )}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (
             <>
-              <NavItem icon={Play} label="Arranque" section="mk-arranque" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={Inbox} label="Bandeja de ideas" section="mk-bandeja" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={Target} label="Competencia" section="mk-competencia" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              {/* Sidebar simplificado: Marketing (= productos) + Meta Ads
+                  (aparte por pedido) + Gastos. Bandeja, Inspiración,
+                  Competencia y Creativos viven como tabs adentro de cada
+                  producto en Arranque. */}
+              <NavItem icon={Play} label="Marketing" section="mk-arranque" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={BarChart3} label="Meta Ads" section="mk-meta-ads" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={Sparkles} label="Inspiración" section="mk-inspiracion" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={FileText} label="Documentación" section="mk-docs" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               <NavItem icon={DollarSign} label="Gastos del stack" section="mk-gastos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
             </>
           )}

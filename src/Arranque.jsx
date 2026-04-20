@@ -570,11 +570,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     const pasosIniciales = [
       { id: 'prep', label: '🚀 Arrancando', detail: `Producto: ${producto.nombre}`, status: 'pending' },
     ];
-    if (necesitaDocs) {
-      pasosIniciales.push(
-        { id: 'docs-gen', label: '📄 Generando documentación del producto', detail: 'Research + avatar + offer brief + creencias + resumen (~3-4 min)', status: 'pending' },
-      );
-    }
+    pasosIniciales.push(
+      necesitaDocs
+        ? { id: 'docs-gen', label: '📄 Generando documentación del producto', detail: 'Research + avatar + offer brief + creencias + resumen (~3-4 min)', status: 'pending' }
+        : { id: 'docs-gen', label: '📄 Documentación del producto', detail: '↻ Reusada de corrida previa (skip · ahorra ~3 min)', status: 'pending' },
+    );
     pasosIniciales.push(
       { id: 'post-research', label: '🧠 Inferiendo stage del prospect', detail: 'Claude clasifica el awareness según el research', status: 'pending' },
     );
@@ -590,9 +590,13 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
     // ============================================================
     // PASO: Generar docs del producto si no los tiene todavía.
+    // Si ya están, el step se marca como done con label '↻ Reusada'
+    // y saltamos directo al post-research.
     // ============================================================
     let productoActualizado = producto;
-    if (necesitaDocs && !cancelled) {
+    if (!necesitaDocs) {
+      updateStep('docs-gen', { status: 'done', endedAt: Date.now() });
+    } else if (necesitaDocs && !cancelled) {
       updateStep('docs-gen', { status: 'running', startedAt: Date.now() });
       try {
         const docs = await streamGenerateDocs({
@@ -623,9 +627,12 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
     // ============================================================
     // PASO: Post-research analysis — stage + keywords.
+    // Skip si el producto YA tiene stage inferido y keywords guardadas
+    // (corridas previas). Reutilizamos lo que ya está. Ahorra ~30-60s.
     // ============================================================
-    let searchKeywords = [];
-    if (!cancelled && productoActualizado?.docs?.research) {
+    let searchKeywords = productoActualizado?.searchKeywords || [];
+    const yaTienePostResearch = !!productoActualizado?.stage && searchKeywords.length > 0;
+    if (!cancelled && productoActualizado?.docs?.research && !yaTienePostResearch) {
       updateStep('post-research', { status: 'running', startedAt: Date.now() });
       try {
         const resp = await fetch('/api/marketing/post-research-analysis', {
@@ -663,6 +670,13 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         updateStep('post-research', { status: 'error', endedAt: Date.now(), detail: err.message });
         // No es fatal — seguimos con keywords vacíos.
       }
+    } else if (yaTienePostResearch) {
+      // Skip: ya tenemos stage + keywords de una corrida previa.
+      updateStep('post-research', {
+        status: 'done',
+        endedAt: Date.now(),
+        detail: `↻ Reusado · Stage: ${productoActualizado.stage.replace('_', '-')} · ${searchKeywords.length} keywords (sin re-llamar a Claude)`,
+      });
     }
 
     // La competencia la carga el user a mano — sin auto-sugerencia

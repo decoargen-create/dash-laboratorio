@@ -122,16 +122,29 @@ function landingToKeyword(url) {
 export default function ArranqueSection({ addToast, onGoToSection }) {
   const [productos, setProductos] = useState(() => {
     const prods = loadJSON(PRODUCTOS_KEY, []);
+    let mutated = false;
     // Migración: si hay competidores globales sueltos y el primer producto
     // no tiene competidores propios, los migramos al primer producto.
     const globalComps = loadJSON(COMPETIDORES_KEY, []);
     if (globalComps.length > 0 && prods.length > 0 && !prods[0].competidores?.length) {
       prods[0] = { ...prods[0], competidores: globalComps };
+      mutated = true;
+    }
+    // Migración: cuenta Meta global → al primer producto si no tiene una.
+    const globalMeta = loadJSON(META_ACCOUNT_KEY, null);
+    if (globalMeta && prods.length > 0 && !prods[0].metaAccount) {
+      prods[0] = { ...prods[0], metaAccount: globalMeta };
+      mutated = true;
+    }
+    if (mutated) {
       saveJSON(PRODUCTOS_KEY, prods);
+      // Limpiamos las keys globales ya migradas para que no vuelvan a
+      // contaminar a otros productos en corridas futuras.
+      try { localStorage.removeItem(COMPETIDORES_KEY); } catch {}
+      try { localStorage.removeItem(META_ACCOUNT_KEY); } catch {}
     }
     return prods;
   });
-  const [metaAccount, setMetaAccount] = useState(() => loadJSON(META_ACCOUNT_KEY, null));
 
   // Producto activo — null = vista de lista, id = workspace del producto.
   const [activeProductoId, setActiveProductoId] = useState(() => {
@@ -144,9 +157,10 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     } catch {}
   }, [activeProductoId]);
 
-  // Producto activo derivado + competidores del producto activo.
+  // Producto activo derivado + competidores + cuenta Meta del producto activo.
   const producto = productos.find(p => String(p.id) === String(activeProductoId)) || null;
   const competidores = producto?.competidores || [];
+  const metaAccount = producto?.metaAccount || null;
   // Setter de competidores que los guarda DENTRO del producto activo.
   const setCompetidores = (updater) => {
     setProductos(prev => prev.map(p => {
@@ -154,6 +168,16 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       const current = p.competidores || [];
       const next = typeof updater === 'function' ? updater(current) : updater;
       return { ...p, competidores: next };
+    }));
+  };
+  // Setter de cuenta Meta que la guarda DENTRO del producto activo — cada
+  // producto tiene su propio metaAccount con sus ads + su productMatched.
+  const setMetaAccount = (updater) => {
+    setProductos(prev => prev.map(p => {
+      if (String(p.id) !== String(activeProductoId)) return p;
+      const current = p.metaAccount || null;
+      const next = typeof updater === 'function' ? updater(current) : updater;
+      return { ...p, metaAccount: next };
     }));
   };
 
@@ -193,7 +217,6 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   const [runCost, setRunCost] = useState({ anthropic: 0, openai: 0, apify: 0, meta: 0, total: 0 });
 
   useEffect(() => { saveJSON(PRODUCTOS_KEY, productos); }, [productos]);
-  useEffect(() => { saveJSON(META_ACCOUNT_KEY, metaAccount); }, [metaAccount]);
   useEffect(() => { saveJSON(GEN_CONFIG_KEY, genConfig); }, [genConfig]);
 
   // Refrescar contador de ideas del día cada vez que montamos o cambia la bandeja.

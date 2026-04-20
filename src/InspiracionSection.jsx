@@ -163,12 +163,31 @@ export default function InspiracionSection({ addToast }) {
       // Solo statics (sin video) — para Inspiración nos interesan los estáticos.
       const staticAds = allAds.filter(a => (a.imageUrls?.length || 0) > 0 && (a.videoUrls?.length || 0) === 0);
 
-      // Marcamos como vistos los ya scrapeados antes (dedup en Parte 7.3).
-      // Por ahora simplemente guardamos en estado + actualizamos lastScraped.
-      setAdsByBrand(prev => ({ ...prev, [brand.id]: staticAds }));
-      setBrands(prev => prev.map(x => x.id === brand.id ? { ...x, lastScraped: new Date().toISOString() } : x));
+      // Dedup día a día: marcamos como "fresh" los ads cuyo id NO estaba
+      // en seenAdIds. El resto son repetidos de corridas anteriores —
+      // los mostramos pero secundarios (collapsed por default en el UI).
+      const seenSet = new Set(brand.seenAdIds || []);
+      const enriched = staticAds.map(a => ({ ...a, isFresh: !seenSet.has(a.id) }));
 
-      addToast?.({ type: 'success', message: `${staticAds.length} estáticos de ${brand.nombre} cargados` });
+      // Actualizamos seenAdIds con los ids de esta corrida (todos quedan
+      // como vistos para la próxima).
+      const newSeenIds = Array.from(new Set([...(brand.seenAdIds || []), ...staticAds.map(a => a.id)]));
+      // Capamos a 1000 ids para no inflar localStorage.
+      const cappedSeenIds = newSeenIds.slice(-1000);
+
+      setAdsByBrand(prev => ({ ...prev, [brand.id]: enriched }));
+      setBrands(prev => prev.map(x => x.id === brand.id ? {
+        ...x,
+        lastScraped: new Date().toISOString(),
+        seenAdIds: cappedSeenIds,
+      } : x));
+
+      const freshCount = enriched.filter(a => a.isFresh).length;
+      const repeatedCount = enriched.length - freshCount;
+      const msg = freshCount > 0
+        ? `${freshCount} estáticos NUEVOS de ${brand.nombre}${repeatedCount > 0 ? ` (+${repeatedCount} repetidos)` : ''}`
+        : `${repeatedCount} estáticos de ${brand.nombre} (todos ya vistos antes)`;
+      addToast?.({ type: 'success', message: msg });
     } catch (err) {
       addToast?.({ type: 'error', message: `No pude scrapear ${brand.nombre}: ${err.message}` });
     } finally {
@@ -419,42 +438,93 @@ function BrandCard({ brand, ads, isScraping, onScrape, onRemove }) {
 }
 
 function BrandAdsGrid({ ads, brandNombre }) {
+  const [showRepeated, setShowRepeated] = useState(false);
+  const fresh = ads.filter(a => a.isFresh !== false);
+  const repeated = ads.filter(a => a.isFresh === false);
+
   return (
-    <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2">
-      {ads.slice(0, 30).map(ad => {
-        const thumb = ad.imageUrls?.[0];
-        const fbUrl = ad.snapshotUrl;
-        return (
-          <a
-            key={ad.id}
-            href={fbUrl} target="_blank" rel="noreferrer"
-            className="group relative aspect-square rounded-md overflow-hidden bg-gray-100 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 hover:border-amber-400 transition"
-            title={ad.body?.slice(0, 200) || ad.headline || ''}
+    <div className="mt-3 space-y-3">
+      {/* Frescos del día */}
+      {fresh.length > 0 ? (
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400 mb-1.5 flex items-center gap-1">
+            ✨ Nuevos del día <span className="text-gray-400 font-normal">({fresh.length})</span>
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {fresh.slice(0, 30).map(ad => <AdThumb key={ad.id} ad={ad} fresh />)}
+            {fresh.length > 30 && (
+              <div className="aspect-square rounded-md flex items-center justify-center bg-gray-50 dark:bg-gray-900 border-2 border-dashed border-gray-200 dark:border-gray-700 text-[10px] text-gray-500 dark:text-gray-400 italic">
+                +{fresh.length - 30} más
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        <p className="text-[10px] italic text-gray-500 dark:text-gray-400 text-center py-2 bg-gray-50 dark:bg-gray-900/30 rounded">
+          Sin estáticos nuevos hoy — todos ya los habías visto.
+        </p>
+      )}
+
+      {/* Repetidos colapsables */}
+      {repeated.length > 0 && (
+        <div>
+          <button
+            onClick={() => setShowRepeated(s => !s)}
+            className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition flex items-center gap-1"
           >
-            {thumb ? (
-              <img src={thumb} alt="" className="w-full h-full object-cover"
-                onError={(e) => { e.target.style.display = 'none'; }} />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center">
-                <ImageIcon size={20} className="text-gray-300" />
-              </div>
-            )}
-            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition flex items-end justify-end p-1.5">
-              <ExternalLink size={12} className="text-white opacity-0 group-hover:opacity-100 transition" />
+            <ChevronRight size={10} className={`transition-transform ${showRepeated ? 'rotate-90' : ''}`} />
+            Ya vistos ({repeated.length})
+          </button>
+          {showRepeated && (
+            <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2 opacity-60">
+              {repeated.slice(0, 30).map(ad => <AdThumb key={ad.id} ad={ad} />)}
+              {repeated.length > 30 && (
+                <div className="aspect-square rounded-md flex items-center justify-center bg-gray-50 dark:bg-gray-900 border-2 border-dashed border-gray-200 dark:border-gray-700 text-[10px] text-gray-400 italic">
+                  +{repeated.length - 30}
+                </div>
+              )}
             </div>
-            {ad.daysRunning > 0 && (
-              <div className="absolute top-1 left-1 px-1.5 py-0.5 text-[9px] font-bold rounded bg-black/60 text-white">
-                {ad.daysRunning}d
-              </div>
-            )}
-          </a>
-        );
-      })}
-      {ads.length > 30 && (
-        <div className="aspect-square rounded-md flex items-center justify-center bg-gray-50 dark:bg-gray-900 border-2 border-dashed border-gray-200 dark:border-gray-700 text-[10px] text-gray-500 dark:text-gray-400 italic">
-          +{ads.length - 30} más
+          )}
         </div>
       )}
     </div>
+  );
+}
+
+function AdThumb({ ad, fresh = false }) {
+  const thumb = ad.imageUrls?.[0];
+  const fbUrl = ad.snapshotUrl;
+  return (
+    <a
+      href={fbUrl} target="_blank" rel="noreferrer"
+      className={`group relative aspect-square rounded-md overflow-hidden bg-gray-100 dark:bg-gray-900 border transition ${
+        fresh
+          ? 'border-emerald-300 dark:border-emerald-700 hover:border-emerald-500'
+          : 'border-gray-200 dark:border-gray-700 hover:border-amber-400'
+      }`}
+      title={ad.body?.slice(0, 200) || ad.headline || ''}
+    >
+      {thumb ? (
+        <img src={thumb} alt="" className="w-full h-full object-cover"
+          onError={(e) => { e.target.style.display = 'none'; }} />
+      ) : (
+        <div className="w-full h-full flex items-center justify-center">
+          <ImageIcon size={20} className="text-gray-300" />
+        </div>
+      )}
+      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition flex items-end justify-end p-1.5">
+        <ExternalLink size={12} className="text-white opacity-0 group-hover:opacity-100 transition" />
+      </div>
+      {ad.daysRunning > 0 && (
+        <div className="absolute top-1 left-1 px-1.5 py-0.5 text-[9px] font-bold rounded bg-black/60 text-white">
+          {ad.daysRunning}d
+        </div>
+      )}
+      {fresh && (
+        <div className="absolute top-1 right-1 px-1 py-0.5 text-[8px] font-bold rounded bg-emerald-500 text-white">
+          NUEVO
+        </div>
+      )}
+    </a>
   );
 }

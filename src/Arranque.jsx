@@ -40,6 +40,10 @@ const PRODUCTOS_KEY = 'viora-marketing-productos-v1';
 const COMPETIDORES_KEY = 'viora-marketing-competidores-v1';
 const META_ACCOUNT_KEY = 'viora-marketing-meta-account-v1';
 const LAST_RUN_KEY = 'viora-marketing-last-pipeline-run-v1';
+const RUN_HISTORY_KEY = 'viora-marketing-run-history-v1';
+// Cap del historial guardado — cada entry tiene los steps + stats + cost.
+// 20 corridas cubren ~3 semanas a 1 run/día, sin explotar localStorage.
+const RUN_HISTORY_CAP = 20;
 
 function loadJSON(key, fallback) {
   try {
@@ -219,9 +223,14 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // y va sumando a medida que cada endpoint devuelve su cost{}. Se muestra
   // en vivo en el stepper.
   const [runCost, setRunCost] = useState({ anthropic: 0, openai: 0, apify: 0, meta: 0, total: 0 });
+  // Historial de corridas — persistido. Al completar un run, pusheamos un
+  // resumen (productoId, timestamps, steps, stats, costo). Luego se muestra
+  // en la UI como colapsable para que el user vea qué se ejecutó antes.
+  const [runHistory, setRunHistory] = useState(() => loadJSON(RUN_HISTORY_KEY, []));
 
   useEffect(() => { saveJSON(PRODUCTOS_KEY, productos); }, [productos]);
   useEffect(() => { saveJSON(GEN_CONFIG_KEY, genConfig); }, [genConfig]);
+  useEffect(() => { saveJSON(RUN_HISTORY_KEY, runHistory); }, [runHistory]);
 
   // Refrescar contador de ideas del día cada vez que montamos o cambia la bandeja.
   useEffect(() => {
@@ -1013,6 +1022,37 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     setRunning(false);
     if (!cancelled) {
       try { localStorage.setItem(LAST_RUN_KEY, new Date().toISOString()); } catch {}
+      // Persistir el resumen de esta corrida al historial del producto.
+      setSteps(currentSteps => {
+        const endedAt = Date.now();
+        const startedAt = currentSteps.find(s => s.startedAt)?.startedAt || endedAt;
+        const runEntry = {
+          id: `run-${endedAt}`,
+          productoId: producto?.id ? String(producto.id) : null,
+          productoNombre: producto?.nombre || '',
+          startedAt: new Date(startedAt).toISOString(),
+          endedAt: new Date(endedAt).toISOString(),
+          durationMs: endedAt - startedAt,
+          cost: { ...runCost },
+          // Guardamos los steps (sin Date timestamps grandes) — sirve para
+          // mostrar el detalle de qué pasó.
+          steps: currentSteps.map(s => ({
+            id: s.id,
+            label: s.label,
+            detail: s.detail,
+            status: s.status,
+            startedAt: s.startedAt || null,
+            endedAt: s.endedAt || null,
+          })),
+          stats: {
+            competidoresCount: (currentSteps.filter(s => s.id.startsWith('scrape-')).length),
+            competidoresOk: (currentSteps.filter(s => s.id.startsWith('scrape-') && s.status === 'done').length),
+            stepsError: currentSteps.filter(s => s.status === 'error').length,
+          },
+        };
+        setRunHistory(prev => [runEntry, ...prev].slice(0, RUN_HISTORY_CAP));
+        return currentSteps;
+      });
       addToast?.({ type: 'success', message: '¡Listo! Mirá los análisis + ideas en la Bandeja.' });
     }
   };
@@ -1791,6 +1831,128 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           </div>
         )}
       </WizardCard>
+
+      {/* Historial de corridas del producto activo — persistido. */}
+      <RunHistoryCard
+        history={runHistory.filter(r => String(r.productoId || '') === String(producto?.id || ''))}
+        onClear={() => {
+          if (window.confirm('¿Borrar el historial de corridas de este producto?')) {
+            setRunHistory(prev => prev.filter(r => String(r.productoId || '') !== String(producto?.id || '')));
+          }
+        }}
+      />
+    </div>
+  );
+}
+
+// Card colapsable que muestra las últimas corridas del pipeline para el
+// producto activo. Cada corrida se puede expandir para ver el detalle de
+// pasos, duración y costo. Así el user no pierde info al refrescar o
+// cambiar de sección.
+function RunHistoryCard({ history, onClear }) {
+  const [collapsed, setCollapsed] = useState(true);
+  const [expandedRunId, setExpandedRunId] = useState(null);
+
+  if (!history || history.length === 0) return null;
+
+  return (
+    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-5 shadow-sm">
+      <button
+        onClick={() => setCollapsed(c => !c)}
+        className="w-full flex items-center gap-3 text-left"
+      >
+        <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
+          <Clock size={14} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">
+            Historial de corridas
+            <span className="ml-2 text-[10px] font-normal text-gray-500 dark:text-gray-400">
+              {history.length} corrida{history.length !== 1 ? 's' : ''} guardada{history.length !== 1 ? 's' : ''}
+            </span>
+          </h3>
+          <p className="text-[10px] text-gray-500 dark:text-gray-400">
+            Lo que ejecutaste antes no se pierde — click para ver cuándo corriste + qué pasó + cuánto costó.
+          </p>
+        </div>
+        <ChevronDown
+          size={16}
+          className={`text-gray-400 transition-transform shrink-0 ${collapsed ? '' : 'rotate-180'}`}
+        />
+      </button>
+
+      {!collapsed && (
+        <div className="mt-4 space-y-2">
+          {history.map(run => {
+            const fecha = new Date(run.startedAt).toLocaleString('es-AR', {
+              year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+            });
+            const durMin = run.durationMs ? Math.round(run.durationMs / 60000) : 0;
+            const durSec = run.durationMs ? Math.round((run.durationMs % 60000) / 1000) : 0;
+            const dur = durMin > 0 ? `${durMin}m ${durSec}s` : `${durSec}s`;
+            const isExpanded = expandedRunId === run.id;
+            const hasErrors = (run.stats?.stepsError || 0) > 0;
+
+            return (
+              <div key={run.id} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                <button
+                  onClick={() => setExpandedRunId(isExpanded ? null : run.id)}
+                  className="w-full px-3 py-2 flex items-center gap-3 hover:bg-gray-50 dark:hover:bg-gray-700/30 transition text-left"
+                >
+                  <ChevronRight size={14} className={`text-gray-400 transition-transform shrink-0 ${isExpanded ? 'rotate-90' : ''}`} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold text-gray-900 dark:text-gray-100 truncate">
+                      {fecha}
+                      {hasErrors && <span className="ml-2 text-[10px] text-amber-600 dark:text-amber-400 font-bold">⚠ {run.stats.stepsError} error{run.stats.stepsError !== 1 ? 'es' : ''}</span>}
+                    </p>
+                    <div className="flex items-center gap-2 text-[10px] text-gray-500 dark:text-gray-400 flex-wrap mt-0.5">
+                      <span>⏱ {dur}</span>
+                      {run.stats?.competidoresCount > 0 && (
+                        <span>· {run.stats.competidoresOk}/{run.stats.competidoresCount} competidores ok</span>
+                      )}
+                      {run.cost?.total > 0 && (
+                        <span className="text-purple-600 dark:text-purple-400 font-mono">· 💰 ${run.cost.total.toFixed(4)}</span>
+                      )}
+                    </div>
+                  </div>
+                </button>
+
+                {isExpanded && (
+                  <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 px-3 py-2">
+                    <ul className="space-y-0.5 text-[10px]">
+                      {(run.steps || []).map((s, idx) => (
+                        <li key={idx} className="flex items-start gap-2">
+                          <span className="shrink-0 w-4 text-center">
+                            {s.status === 'done' ? '✓' : s.status === 'error' ? '✗' : '○'}
+                          </span>
+                          <span className={`flex-1 min-w-0 ${s.status === 'error' ? 'text-red-600 dark:text-red-400' : 'text-gray-700 dark:text-gray-300'}`}>
+                            <span className="font-semibold">{s.label}</span>
+                            {s.detail && <span className="block text-gray-500 dark:text-gray-400 ml-0">{s.detail}</span>}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    {run.cost && run.cost.total > 0 && (
+                      <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700 text-[10px] font-mono text-gray-600 dark:text-gray-400 flex flex-wrap gap-2">
+                        <span className="text-purple-600 dark:text-purple-400 font-bold">💰 ${run.cost.total.toFixed(4)}</span>
+                        {run.cost.anthropic > 0 && <span>🧠 ${run.cost.anthropic.toFixed(4)}</span>}
+                        {run.cost.openai > 0 && <span>🎤 ${run.cost.openai.toFixed(4)}</span>}
+                        {run.cost.apify > 0 && <span>🔍 ${run.cost.apify.toFixed(4)}</span>}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          <button
+            onClick={onClear}
+            className="mt-2 text-[10px] text-gray-400 hover:text-red-500 transition"
+          >
+            Borrar historial
+          </button>
+        </div>
+      )}
     </div>
   );
 }

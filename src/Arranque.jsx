@@ -762,8 +762,19 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           body: JSON.stringify(payload),
         });
         const data = await resp.json();
-        if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+        if (!resp.ok) {
+          // Si el endpoint sugiere algo (ej: cargar fbPageUrl manual), lo
+          // mostramos al user — más útil que el error crudo de Apify.
+          const errMsg = data.sugerencia
+            ? `${data.error || `HTTP ${resp.status}`} — ${data.sugerencia}`
+            : (data.error || `HTTP ${resp.status}`);
+          throw new Error(errMsg);
+        }
         trackCost(data, `apify-ingest · ${c.nombre}`);
+        // Si hubo retry transparente, lo mostramos como nota al user.
+        if (data.attemptNote) {
+          addToast?.({ type: 'info', message: `${c.nombre}: ${data.attemptNote}` });
+        }
 
         const ads = data.ads || [];
         const allWinners = ads.filter(a => a.isWinner);

@@ -76,8 +76,41 @@ export default async function handler(req, res) {
     onlyTotal: false,
   };
 
+  // Retry helper: si Apify aborta el run (memoria/timeout/keyword genérico),
+  // reintentamos automáticamente con limit reducido. Suele resolverse así.
+  // Si el segundo intento también falla, devolvemos error con sugerencia.
+  let items;
+  let usedLimit = input.resultsLimit;
+  let attemptNote = null;
   try {
-    const items = await runActorSync(actorId, input, token, { timeout: 240 });
+    items = await runActorSync(actorId, input, token, { timeout: 240 });
+  } catch (err) {
+    const msg = String(err.message || '');
+    const shouldRetry = /ABORTED|run-failed|timeout|memory|400|429|503/i.test(msg);
+    if (shouldRetry && usedLimit > 25) {
+      const reducedLimit = Math.max(25, Math.floor(usedLimit / 4));
+      console.warn(`apify-ingest: primer intento falló (${msg.slice(0, 100)}). Retry con limit ${reducedLimit}.`);
+      try {
+        items = await runActorSync(actorId, { ...input, resultsLimit: reducedLimit }, token, { timeout: 240 });
+        usedLimit = reducedLimit;
+        attemptNote = `Apify abortó con limit ${input.resultsLimit}. Reintentado con limit ${reducedLimit} y funcionó.`;
+      } catch (err2) {
+        const sugerencia = fbPageUrl
+          ? 'Probá si la URL de Facebook page es correcta (debería ser https://www.facebook.com/<handle>).'
+          : 'El keyword "' + searchKeyword + '" puede ser muy ambiguo. Probá cargar la URL de Facebook page del competidor a mano (más estable que keyword).';
+        return respondJSON(res, 502, {
+          error: `Apify falló dos veces (limit ${input.resultsLimit} y ${reducedLimit}). ${err2.message || ''}`,
+          sugerencia,
+        });
+      }
+    } else {
+      const sugerencia = fbPageUrl
+        ? 'Verificá la URL de Facebook page (formato: https://www.facebook.com/<handle>).'
+        : 'Probá cargar la fbPageUrl del competidor a mano — el search por keyword en Apify es menos estable.';
+      return respondJSON(res, 502, { error: msg, sugerencia });
+    }
+  }
+  try {
     if (!Array.isArray(items)) {
       return respondJSON(res, 502, {
         error: 'Apify devolvió un formato inesperado',
@@ -114,14 +147,15 @@ export default async function handler(req, res) {
       winners: winnersCount,
       criteria: WINNER_CRITERIA, // { days: 17, variants: 2 }
       generatedAt: new Date().toISOString(),
-      source: { actor: actorId, input: { fbPageUrl, searchKeyword, country, limit } },
+      source: { actor: actorId, input: { fbPageUrl, searchKeyword, country, limit: usedLimit } },
+      attemptNote, // null si pegó al primer intento; mensaje si hubo retry
       ads: scored,
       cost: { apify: Math.round(apifyCost * 10000) / 10000 },
     });
   } catch (err) {
     console.error('apify-ingest error:', err);
     return respondJSON(res, 502, {
-      error: err.message || 'Error corriendo el actor de Apify',
+      error: err.message || 'Error procesando ads',
     });
   }
 }

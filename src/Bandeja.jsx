@@ -14,15 +14,96 @@
 
 import React, { useState, useEffect } from 'react';
 import {
-  Inbox, Search, Filter, ExternalLink, Trash2, Download,
-  ChevronDown, Check, Circle, CircleDot, Archive, Edit3, CheckSquare, Square,
+  Inbox, Search, Filter, ExternalLink, Trash2, Download, Package,
+  ChevronDown, Check, Circle, CircleDot, Archive, Edit3, CheckSquare, Square, ChevronRight,
+  Plus, Pencil, GripVertical,
 } from 'lucide-react';
 import {
   loadIdeas, updateIdea, removeIdea, TIPO_META, ESTADO_META, VARIABLE_META, ANGULO_META, CAMPAÑA_META,
 } from './bandejaStore.js';
+import { exportBriefDocx } from './exportDocx.js';
+
+const PRODUCTOS_KEY = 'viora-marketing-productos-v1';
+const ACTIVE_PRODUCT_KEY = 'viora-marketing-bandeja-active-product';
+const SIN_PRODUCTO_ID = '__sin_producto__';
+
+function loadProductos() {
+  try {
+    const raw = localStorage.getItem(PRODUCTOS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
 
 export default function BandejaSection({ addToast }) {
   const [ideas, setIdeas] = useState(() => loadIdeas());
+  const [productos, setProductos] = useState(() => loadProductos());
+  const [activeProductoId, setActiveProductoId] = useState(() => {
+    try { return localStorage.getItem(ACTIVE_PRODUCT_KEY) || null; } catch { return null; }
+  });
+  useEffect(() => {
+    try {
+      if (activeProductoId) localStorage.setItem(ACTIVE_PRODUCT_KEY, activeProductoId);
+      else localStorage.removeItem(ACTIVE_PRODUCT_KEY);
+    } catch {}
+  }, [activeProductoId]);
+
+  // Columnas custom del kanban por producto — Trello-like.
+  // Las 4 columnas base (pendiente, en_uso, usada, archivada) siempre existen.
+  // El user puede agregar columnas extra después de las base.
+  const customColsKey = activeProductoId ? `viora-kanban-cols-${activeProductoId}` : null;
+  const [customColumns, setCustomColumns] = useState(() => {
+    if (!customColsKey) return [];
+    try { const r = localStorage.getItem(customColsKey); return r ? JSON.parse(r) : []; } catch { return []; }
+  });
+  useEffect(() => {
+    if (customColsKey) try { localStorage.setItem(customColsKey, JSON.stringify(customColumns)); } catch {}
+  }, [customColumns, customColsKey]);
+  // Reset custom columns when switching product.
+  useEffect(() => {
+    if (!customColsKey) { setCustomColumns([]); return; }
+    try { const r = localStorage.getItem(customColsKey); setCustomColumns(r ? JSON.parse(r) : []); } catch { setCustomColumns([]); }
+  }, [customColsKey]);
+
+  const addCustomColumn = () => {
+    const name = window.prompt('Nombre de la nueva columna:');
+    if (!name?.trim()) return;
+    const COLORS = ['violet', 'rose', 'sky', 'lime', 'orange', 'teal', 'indigo', 'pink'];
+    const color = COLORS[customColumns.length % COLORS.length];
+    setCustomColumns(prev => [...prev, { id: `col-${Date.now()}`, name: name.trim(), color }]);
+  };
+  const renameCustomColumn = (colId) => {
+    const col = customColumns.find(c => c.id === colId);
+    if (!col) return;
+    const name = window.prompt('Nuevo nombre:', col.name);
+    if (!name?.trim()) return;
+    setCustomColumns(prev => prev.map(c => c.id === colId ? { ...c, name: name.trim() } : c));
+  };
+  const removeCustomColumn = (colId) => {
+    if (!window.confirm('¿Eliminar esta columna? Las ideas que estén en ella vuelven a "Pendientes".')) return;
+    // Mover ideas de esa columna a pendiente.
+    const affectedIds = ideas.filter(i => i.customColumnId === colId).map(i => i.id);
+    for (const id of affectedIds) {
+      updateIdea(id, { customColumnId: null, estado: 'pendiente' });
+    }
+    setCustomColumns(prev => prev.filter(c => c.id !== colId));
+    setIdeas(loadIdeas());
+  };
+  const moveToCustomColumn = (ideaId, colId) => {
+    const list = updateIdea(ideaId, { customColumnId: colId });
+    setIdeas(list);
+    addToast?.({ type: 'success', message: `Idea movida` });
+  };
+  const moveToBaseColumn = (ideaId, estado) => {
+    const patch = { customColumnId: null, estado };
+    if (estado === 'usada') {
+      patch.usedAt = new Date().toISOString();
+      const adId = (window.prompt('¿Con qué ad ID de Meta la lanzaste? (opcional)') || '').trim();
+      if (adId) patch.launchedAsAdId = adId;
+    }
+    const list = updateIdea(ideaId, patch);
+    setIdeas(list);
+    addToast?.({ type: 'success', message: `Idea → ${ESTADO_META[estado]?.label || estado}` });
+  };
   const [expandedId, setExpandedId] = useState(null);
   const [filtroTipo, setFiltroTipo] = useState('all');
   const [filtroEstado, setFiltroEstado] = useState('active'); // 'all' | 'active' (pendiente + en_uso) | 'pendiente' | 'en_uso' | 'usada' | 'archivada'
@@ -38,6 +119,8 @@ export default function BandejaSection({ addToast }) {
     const interval = setInterval(() => {
       const fresh = loadIdeas();
       setIdeas(prev => (prev.length !== fresh.length ? fresh : prev));
+      const freshProds = loadProductos();
+      setProductos(prev => (prev.length !== freshProds.length ? freshProds : prev));
     }, 3000);
     return () => clearInterval(interval);
   }, []);
@@ -112,10 +195,41 @@ export default function BandejaSection({ addToast }) {
 
   // Exporta las ideas seleccionadas como Markdown descargable. Lo suficiente
   // para pegarlo en Docs/Notion/Word y entregárselo al diseñador/editor.
-  const exportSelected = () => {
+  const exportAll = (ideasAExportar, formato = 'md') => {
+    if (!ideasAExportar || ideasAExportar.length === 0) {
+      addToast?.({ type: 'error', message: 'No hay ideas para exportar' });
+      return;
+    }
+    if (formato === 'docx') {
+      exportDocxFlow(ideasAExportar);
+    } else {
+      buildBriefMdAndDownload(ideasAExportar);
+      addToast?.({ type: 'success', message: `Brief con ${ideasAExportar.length} ideas descargado (.md)` });
+    }
+  };
+
+  const exportSelected = (formato = 'md') => {
     const chosen = ideas.filter(i => selected.has(i.id));
     if (chosen.length === 0) return;
+    if (formato === 'docx') {
+      exportDocxFlow(chosen);
+    } else {
+      buildBriefMdAndDownload(chosen);
+      addToast?.({ type: 'success', message: `Brief con ${chosen.length} ideas descargado (.md)` });
+    }
+  };
 
+  const exportDocxFlow = async (lista) => {
+    try {
+      await exportBriefDocx(lista, productoActivo?.legacy ? null : productoActivo);
+      addToast?.({ type: 'success', message: `Brief .docx con ${lista.length} ideas descargado` });
+    } catch (err) {
+      addToast?.({ type: 'error', message: `Error al generar .docx: ${err.message}` });
+    }
+  };
+
+  // Arma el markdown del brief a partir de una lista de ideas y lo descarga.
+  const buildBriefMdAndDownload = (chosen) => {
     const today = new Date().toLocaleDateString('es-AR', { year: 'numeric', month: 'long', day: 'numeric' });
     const byTipo = chosen.reduce((acc, i) => {
       (acc[i.tipo] = acc[i.tipo] || []).push(i);
@@ -229,7 +343,6 @@ export default function BandejaSection({ addToast }) {
     a.download = `brief-creativos-${stamp}.md`;
     a.click();
     URL.revokeObjectURL(url);
-    addToast?.({ type: 'success', message: `Brief con ${chosen.length} ideas descargado` });
   };
 
   const guardarNotas = (id) => {
@@ -238,8 +351,18 @@ export default function BandejaSection({ addToast }) {
     setNotasDraft('');
   };
 
+  // Pre-filtro por producto activo — nunca mezclamos ideas entre productos.
+  // Si activeProductoId === SIN_PRODUCTO_ID, mostramos solo ideas sin productoId
+  // (legacy, de antes de que guardáramos el productoId en cada idea).
+  const ideasDelProducto = activeProductoId
+    ? ideas.filter(i => {
+        if (activeProductoId === SIN_PRODUCTO_ID) return !i.productoId;
+        return String(i.productoId || '') === String(activeProductoId);
+      })
+    : ideas;
+
   // Filtrar
-  const filtered = ideas.filter(i => {
+  const filtered = ideasDelProducto.filter(i => {
     if (filtroTipo !== 'all' && i.tipo !== filtroTipo) return false;
     if (filtroEstado === 'active' && !['pendiente', 'en_uso'].includes(i.estado)) return false;
     if (filtroEstado !== 'all' && filtroEstado !== 'active' && i.estado !== filtroEstado) return false;
@@ -259,51 +382,118 @@ export default function BandejaSection({ addToast }) {
     return (b.createdAt || '').localeCompare(a.createdAt || '');
   });
 
-  // Counters por estado (sobre TODO el set, no el filtrado)
-  const counts = ideas.reduce((acc, i) => {
+  // Counters por estado (sobre el subset del producto activo — no mezcla).
+  const counts = ideasDelProducto.reduce((acc, i) => {
     acc[i.estado] = (acc[i.estado] || 0) + 1;
     return acc;
   }, {});
 
+  const productoActivo = activeProductoId === SIN_PRODUCTO_ID
+    ? { id: SIN_PRODUCTO_ID, nombre: 'Sin producto asignado' }
+    : productos.find(p => String(p.id) === String(activeProductoId)) || null;
+
+  // ====================================================================
+  // VISTA 1: SELECTOR DE PRODUCTOS (sin producto activo)
+  // ====================================================================
+  if (!activeProductoId) {
+    return <ProductoSelectorView
+      productos={productos}
+      ideas={ideas}
+      onSelect={setActiveProductoId}
+    />;
+  }
+
+  // Agrupar ideas: primero sacar las que están en columnas custom,
+  // el resto va a sus columnas base por estado.
+  const byEstado = { pendiente: [], en_uso: [], usada: [], archivada: [] };
+  const byCustomCol = {};
+  for (const cc of customColumns) byCustomCol[cc.id] = [];
+  for (const i of filtered) {
+    if (i.customColumnId && byCustomCol[i.customColumnId]) {
+      byCustomCol[i.customColumnId].push(i);
+    } else {
+      const e = i.estado in byEstado ? i.estado : 'pendiente';
+      byEstado[e].push(i);
+    }
+  }
+  const sortCol = (arr) => arr.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  for (const e of Object.keys(byEstado)) sortCol(byEstado[e]);
+  for (const cc of Object.keys(byCustomCol)) sortCol(byCustomCol[cc]);
+
+  const ideaDetalle = expandedId ? ideas.find(i => i.id === expandedId) : null;
+
   return (
-    <div className="max-w-5xl mx-auto space-y-5">
-      {/* Header */}
+    <div className="max-w-7xl mx-auto space-y-5">
+      {/* Header con breadcrumb de producto */}
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-fuchsia-500 to-pink-500 flex items-center justify-center text-white shadow-sm">
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          <button
+            onClick={() => setActiveProductoId(null)}
+            className="p-2 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 transition shrink-0"
+            title="Volver al selector de productos"
+          >
+            <ChevronRight size={16} className="rotate-180" />
+          </button>
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-fuchsia-500 to-pink-500 flex items-center justify-center text-white shadow-sm shrink-0">
             <Inbox size={20} />
           </div>
-          <div>
-            <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Bandeja de ideas</h2>
-            <p className="text-xs text-gray-500 dark:text-gray-400">Lista continua de renovaciones — se va llenando con cada análisis.</p>
+          <div className="min-w-0">
+            <p className="text-[10px] text-gray-500 dark:text-gray-400">
+              <button onClick={() => setActiveProductoId(null)} className="hover:text-fuchsia-500 transition">Bandeja</button> / {productoActivo?.nombre || 'Producto'}
+            </p>
+            <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100 truncate">
+              {productoActivo?.nombre || 'Bandeja de ideas'}
+            </h2>
           </div>
         </div>
-        {selected.size > 0 && (
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-600 dark:text-gray-300">
-              {selected.size} seleccionada{selected.size > 1 ? 's' : ''}
-            </span>
-            <button onClick={() => setSelected(new Set())}
-              className="px-2.5 py-1.5 text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition">
-              Limpiar
-            </button>
-            <button onClick={exportSelected}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-fuchsia-500 to-pink-500 rounded-lg hover:from-fuchsia-600 hover:to-pink-600 shadow-sm transition">
-              <Download size={12} /> Exportar brief .md
-            </button>
-          </div>
-        )}
+        <div className="flex items-center gap-2 flex-wrap">
+          {selected.size > 0 && (
+            <>
+              <span className="text-xs text-gray-600 dark:text-gray-300">
+                {selected.size} seleccionada{selected.size > 1 ? 's' : ''}
+              </span>
+              <button onClick={() => setSelected(new Set())}
+                className="px-2.5 py-1.5 text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition">
+                Limpiar
+              </button>
+              <button onClick={() => exportSelected('docx')}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-fuchsia-500 to-pink-500 rounded-lg hover:from-fuchsia-600 hover:to-pink-600 shadow-sm transition">
+                <Download size={12} /> Exportar {selected.size} .docx
+              </button>
+              <button onClick={() => exportSelected('md')}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-fuchsia-700 dark:text-fuchsia-300 bg-white dark:bg-gray-800 border border-fuchsia-300 dark:border-fuchsia-700 rounded-lg hover:bg-fuchsia-50 dark:hover:bg-fuchsia-900/20 transition">
+                .md
+              </button>
+            </>
+          )}
+          {selected.size === 0 && filtered.length > 0 && (
+            <>
+              <button
+                onClick={() => setSelected(new Set(filtered.map(i => i.id)))}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-fuchsia-700 dark:text-fuchsia-300 bg-white dark:bg-gray-800 border border-fuchsia-300 dark:border-fuchsia-700 rounded-lg hover:bg-fuchsia-50 dark:hover:bg-fuchsia-900/20 transition"
+              >
+                <CheckSquare size={12} /> Seleccionar todas ({filtered.length})
+              </button>
+              <button
+                onClick={() => exportAll(filtered, 'docx')}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-fuchsia-500 to-pink-500 rounded-lg hover:from-fuchsia-600 hover:to-pink-600 shadow-sm transition"
+                title={`Exportar todas las ${filtered.length} ideas visibles como .docx`}
+              >
+                <Download size={12} /> Exportar todas .docx ({filtered.length})
+              </button>
+              <button
+                onClick={() => exportAll(filtered, 'md')}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-fuchsia-700 dark:text-fuchsia-300 bg-white dark:bg-gray-800 border border-fuchsia-300 dark:border-fuchsia-700 rounded-lg hover:bg-fuchsia-50 dark:hover:bg-fuchsia-900/20 transition"
+                title={`Exportar todas las ${filtered.length} ideas visibles como .md`}
+              >
+                .md
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
-      {/* Contadores */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <CounterCard label="Pendientes" value={counts.pendiente || 0} color="gray" accent />
-        <CounterCard label="En uso" value={counts.en_uso || 0} color="amber" />
-        <CounterCard label="Usadas" value={counts.usada || 0} color="emerald" />
-        <CounterCard label="Archivadas" value={counts.archivada || 0} color="gray" />
-      </div>
-
-      {/* Filtros */}
+      {/* Filtros (solo tipo + búsqueda — estado lo filtran las columnas) */}
       <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-3 flex flex-wrap gap-2 items-center">
         <div className="relative flex-1 min-w-[200px]">
           <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -318,65 +508,87 @@ export default function BandejaSection({ addToast }) {
             <option key={k} value={k}>{t.emoji} {t.label}</option>
           ))}
         </select>
-        <select value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)}
-          className="px-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md">
-          <option value="active">Activas (pend + en uso)</option>
-          <option value="all">Todas</option>
-          <option value="pendiente">Pendientes</option>
-          <option value="en_uso">En uso</option>
-          <option value="usada">Usadas</option>
-          <option value="archivada">Archivadas</option>
-        </select>
       </div>
 
-      {/* Lista */}
-      {sorted.length === 0 ? (
+      {/* Kanban — 4 columnas, una por estado. Click en card → abre modal de detalle. */}
+      {filtered.length === 0 ? (
         <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-12 text-center">
           <Inbox size={32} className="mx-auto text-gray-300 dark:text-gray-600 mb-2" />
           <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-            {ideas.length === 0 ? 'Sin ideas todavía' : 'Ninguna idea coincide con el filtro'}
+            {ideasDelProducto.length === 0 ? 'Sin ideas para este producto todavía' : 'Ninguna idea coincide con el filtro'}
           </p>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            {ideas.length === 0
-              ? 'Andá a "Arranque" y corré el pipeline — las ideas se van a poblar acá.'
-              : 'Ajustá los filtros de arriba o limpiá la búsqueda.'
+            {ideasDelProducto.length === 0
+              ? 'Corré el pipeline desde "Arranque" — las ideas aparecen acá en "Pendientes".'
+              : 'Ajustá el buscador o el filtro de tipo.'
             }
           </p>
         </div>
       ) : (
-        <div className="space-y-2">
-          {/* Toolbar de selección masiva */}
-          <div className="flex items-center gap-2 text-[10px] text-gray-500 dark:text-gray-400">
+        <div className="flex gap-3 overflow-x-auto pb-2" style={{ minHeight: '200px' }}>
+          <div className="min-w-[220px] max-w-[280px] flex-shrink-0 flex-1">
+            <KanbanColumn estado="pendiente" titulo="Pendientes" color="gray" accent
+              ideas={byEstado.pendiente} selected={selected} onToggleSelect={toggleSelect}
+              onCardClick={(id) => setExpandedId(id)} onDropIdea={(id) => moveToBaseColumn(id, 'pendiente')} />
+          </div>
+          <div className="min-w-[220px] max-w-[280px] flex-shrink-0 flex-1">
+            <KanbanColumn estado="en_uso" titulo="En uso" color="amber"
+              ideas={byEstado.en_uso} selected={selected} onToggleSelect={toggleSelect}
+              onCardClick={(id) => setExpandedId(id)} onDropIdea={(id) => moveToBaseColumn(id, 'en_uso')} />
+          </div>
+          <div className="min-w-[220px] max-w-[280px] flex-shrink-0 flex-1">
+            <KanbanColumn estado="usada" titulo="Usadas" color="emerald"
+              ideas={byEstado.usada} selected={selected} onToggleSelect={toggleSelect}
+              onCardClick={(id) => setExpandedId(id)} onDropIdea={(id) => moveToBaseColumn(id, 'usada')} />
+          </div>
+          <div className="min-w-[220px] max-w-[280px] flex-shrink-0 flex-1">
+            <KanbanColumn estado="archivada" titulo="Archivadas" color="slate"
+              ideas={byEstado.archivada} selected={selected} onToggleSelect={toggleSelect}
+              onCardClick={(id) => setExpandedId(id)} onDropIdea={(id) => moveToBaseColumn(id, 'archivada')} />
+          </div>
+          {customColumns.map(cc => (
+            <div key={cc.id} className="min-w-[220px] max-w-[280px] flex-shrink-0 flex-1">
+              <KanbanColumn
+                estado={cc.id} titulo={cc.name} color={cc.color || 'violet'} isCustom
+                ideas={byCustomCol[cc.id] || []} selected={selected} onToggleSelect={toggleSelect}
+                onCardClick={(id) => setExpandedId(id)}
+                onDropIdea={(id) => moveToCustomColumn(id, cc.id)}
+                onRename={() => renameCustomColumn(cc.id)}
+                onDelete={() => removeCustomColumn(cc.id)}
+              />
+            </div>
+          ))}
+          <div className="min-w-[80px] flex-shrink-0 flex items-start pt-2">
             <button
-              onClick={() => toggleSelectAllFiltered(sorted.map(i => i.id))}
-              className="inline-flex items-center gap-1 hover:text-fuchsia-600 transition"
+              onClick={addCustomColumn}
+              className="w-full px-3 py-4 rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-600 text-gray-400 hover:border-fuchsia-400 hover:text-fuchsia-500 transition flex flex-col items-center gap-1"
+              title="Agregar columna"
             >
-              {sorted.every(i => selected.has(i.id))
-                ? <><CheckSquare size={12} /> Deseleccionar todas las visibles</>
-                : <><Square size={12} /> Seleccionar todas las visibles ({sorted.length})</>
-              }
+              <Plus size={20} />
+              <span className="text-[10px] font-bold uppercase tracking-wider">Columna</span>
             </button>
           </div>
-          {sorted.map(idea => (
-            <IdeaCard
-              key={idea.id}
-              idea={idea}
-              expanded={expandedId === idea.id}
-              onToggle={() => setExpandedId(expandedId === idea.id ? null : idea.id)}
-              onEstado={(estado) => setEstado(idea.id, estado)}
-              onRemove={() => handleRemove(idea.id)}
-              editandoNotas={editandoNotasId === idea.id}
-              onEditNotas={() => { setEditandoNotasId(idea.id); setNotasDraft(idea.notas || ''); }}
-              notasDraft={notasDraft}
-              setNotasDraft={setNotasDraft}
-              onSaveNotas={() => guardarNotas(idea.id)}
-              onCancelNotas={() => { setEditandoNotasId(null); setNotasDraft(''); }}
-              isSelected={selected.has(idea.id)}
-              onToggleSelect={() => toggleSelect(idea.id)}
-              onFetchPerformance={() => fetchPerformance(idea)}
-            />
-          ))}
         </div>
+      )}
+
+      {/* Modal de detalle — placeholder para Parte 2b.4.
+          Por ahora, envolvemos el IdeaCard expandido en un overlay fullscreen. */}
+      {ideaDetalle && (
+        <IdeaDetailModal
+          idea={ideaDetalle}
+          onClose={() => setExpandedId(null)}
+          onEstado={(estado) => setEstado(ideaDetalle.id, estado)}
+          onRemove={() => { handleRemove(ideaDetalle.id); setExpandedId(null); }}
+          editandoNotas={editandoNotasId === ideaDetalle.id}
+          onEditNotas={() => { setEditandoNotasId(ideaDetalle.id); setNotasDraft(ideaDetalle.notas || ''); }}
+          notasDraft={notasDraft}
+          setNotasDraft={setNotasDraft}
+          onSaveNotas={() => guardarNotas(ideaDetalle.id)}
+          onCancelNotas={() => { setEditandoNotasId(null); setNotasDraft(''); }}
+          isSelected={selected.has(ideaDetalle.id)}
+          onToggleSelect={() => toggleSelect(ideaDetalle.id)}
+          onFetchPerformance={() => fetchPerformance(ideaDetalle)}
+        />
       )}
     </div>
   );
@@ -509,175 +721,162 @@ function IdeaCard({
         </div>
       </div>
 
-      {/* Detalle expandido */}
+      {/* Detalle expandido — 2 columnas: izquierda = output creativo, derecha = estrategia + contexto */}
       {expanded && (
-        <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 px-4 py-3 space-y-3">
-          {/* Razón de iteración — destacado arriba para iteraciones */}
-          {idea.tipo === 'iteracion' && idea.origen?.razonIteracion && (
-            <div className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md">
-              <p className="text-[10px] font-bold text-amber-800 dark:text-amber-300 uppercase tracking-wider mb-1">
-                🔄 ¿Por qué iterar este ad?
-              </p>
-              <p className="text-xs text-amber-900 dark:text-amber-200">
-                <span className="font-semibold">Ad base:</span> {idea.origen.adNombre || '(sin nombre)'}
-              </p>
-              <p className="text-xs text-amber-900 dark:text-amber-200 mt-1">{idea.origen.razonIteracion}</p>
-            </div>
-          )}
-          {/* Razonamiento general para réplicas/diferenciaciones/desde-cero */}
-          {idea.tipo !== 'iteracion' && idea.origen?.razonamiento && (
-            <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md">
-              <p className="text-[10px] font-bold text-blue-800 dark:text-blue-300 uppercase tracking-wider mb-1">
-                💡 Por qué esta idea
-              </p>
-              <p className="text-xs text-blue-900 dark:text-blue-200">{idea.origen.razonamiento}</p>
-            </div>
-          )}
-
-          {/* Hipótesis a validar — crítico para el loop de aprendizaje */}
-          {idea.testHipotesis && (
-            <div className="p-3 bg-cyan-50 dark:bg-cyan-900/20 border border-cyan-200 dark:border-cyan-800 rounded-md">
-              <p className="text-[10px] font-bold text-cyan-800 dark:text-cyan-300 uppercase tracking-wider mb-1">
-                🔬 Hipótesis a validar
-              </p>
-              {VARIABLE_META[idea.variableDeTesteo] && (
-                <p className="text-[10px] text-cyan-700 dark:text-cyan-400 mb-1">
-                  Variable: <strong>{VARIABLE_META[idea.variableDeTesteo].emoji} {VARIABLE_META[idea.variableDeTesteo].label}</strong> · {VARIABLE_META[idea.variableDeTesteo].descripcion}
-                </p>
+        <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 px-4 py-3">
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+            {/* COLUMNA IZQUIERDA — output creativo (3/5 del espacio) */}
+            <div className="lg:col-span-3 space-y-3">
+              {idea.hook && (
+                <Field label="🎯 Hook" text={idea.hook} highlight />
               )}
-              <p className="text-xs text-cyan-900 dark:text-cyan-200">{idea.testHipotesis}</p>
-            </div>
-          )}
 
-          {/* ⚠ Riesgo de alcance Meta — palabras gatillo */}
-          {idea.metaRiesgo?.tieneRiesgo && (
-            <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md">
-              <p className="text-[10px] font-bold text-red-800 dark:text-red-300 uppercase tracking-wider mb-1">
-                ⚠ Riesgo de alcance en Meta
-              </p>
-              {idea.metaRiesgo.palabras?.length > 0 && (
-                <p className="text-[10px] text-red-700 dark:text-red-400 mb-1">
-                  Palabras gatillo detectadas: <strong>{idea.metaRiesgo.palabras.join(', ')}</strong>
-                </p>
+              {idea.escenarioNarrativo && (
+                <Field label="📖 Escenario narrativo" text={idea.escenarioNarrativo} />
               )}
-              {idea.metaRiesgo.sugerencia && (
-                <p className="text-xs text-red-900 dark:text-red-200">{idea.metaRiesgo.sugerencia}</p>
-              )}
-              <p className="text-[10px] text-red-600 dark:text-red-400 italic mt-1">
-                Recomendación: testear primero en campaña chica antes de escalar.
-              </p>
-            </div>
-          )}
 
-          {/* Performance real del ad lanzado — cierra el loop de aprendizaje */}
-          {idea.launchedAsAdId && (
-            <div className="p-3 bg-fuchsia-50 dark:bg-fuchsia-900/20 border border-fuchsia-200 dark:border-fuchsia-800 rounded-md">
-              <div className="flex items-center justify-between mb-1.5">
-                <p className="text-[10px] font-bold text-fuchsia-800 dark:text-fuchsia-300 uppercase tracking-wider">
-                  🚀 Lanzada en Meta
-                </p>
-                <button onClick={onFetchPerformance}
-                  className="text-[10px] font-semibold text-fuchsia-600 dark:text-fuchsia-400 hover:underline inline-flex items-center gap-1">
-                  <Download size={10} /> Traer métricas
-                </button>
-              </div>
-              <p className="text-[10px] text-fuchsia-700 dark:text-fuchsia-400 mb-1 font-mono">
-                Ad: {idea.launchedAsAdName || idea.launchedAsAdId}
-              </p>
-              {idea.performance ? (
-                <div className="grid grid-cols-2 gap-2 mt-2">
-                  <PerformanceStat label="CTR" val={idea.performance.recent?.ctr} fmt={v => `${v.toFixed(2)}%`} />
-                  <PerformanceStat label="ROAS" val={idea.performance.recent?.roas} fmt={v => v.toFixed(2)}
-                    semaforo={v => v >= 2 ? 'good' : v >= 1 ? 'mid' : 'bad'} />
-                  <PerformanceStat label="CPA" val={idea.performance.recent?.cpa} fmt={v => `$${v.toFixed(2)}`} />
-                  <PerformanceStat label="Thumb-stop" val={idea.performance.recent?.thumbStopRate} fmt={v => `${v.toFixed(1)}%`} />
-                  <PerformanceStat label="Impressions" val={idea.performance.recent?.impressions} fmt={v => v.toLocaleString('es-AR')} />
-                  <PerformanceStat label="Compras" val={idea.performance.recent?.purchases} fmt={v => v.toLocaleString('es-AR')} />
-                  <p className="col-span-2 text-[9px] text-fuchsia-500 dark:text-fuchsia-400 text-right italic">
-                    Últimos 14d · actualizado {new Date(idea.performance.fetchedAt).toLocaleString('es-AR')}
-                  </p>
+              {idea.descripcionImagen && (
+                <Field label="🖼 Descripción de imagen (para el diseñador)" text={idea.descripcionImagen} />
+              )}
+
+              {idea.promptGeneradorImagen && (
+                <details open className="bg-indigo-50 dark:bg-indigo-900/20 rounded-md border border-indigo-200 dark:border-indigo-800">
+                  <summary className="cursor-pointer px-3 py-2 text-[10px] font-bold text-indigo-700 dark:text-indigo-300 uppercase tracking-wider flex items-center justify-between">
+                    <span>🤖 Prompt para Nano Banana / Midjourney (inglés)</span>
+                    <button
+                      onClick={(e) => {
+                        e.preventDefault();
+                        navigator.clipboard?.writeText(idea.promptGeneradorImagen);
+                      }}
+                      className="text-[10px] font-normal text-indigo-600 dark:text-indigo-400 hover:underline"
+                    >
+                      📋 copiar
+                    </button>
+                  </summary>
+                  <p className="px-3 pb-3 text-xs font-mono text-indigo-900 dark:text-indigo-200 whitespace-pre-wrap break-words">{idea.promptGeneradorImagen}</p>
+                </details>
+              )}
+
+              {idea.textoEnImagen && (
+                <div>
+                  <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1">✍️ Texto dentro de la imagen (layout)</p>
+                  <pre className="text-[11px] font-mono whitespace-pre-wrap bg-gray-50 dark:bg-gray-800/50 rounded-md px-3 py-2 text-gray-800 dark:text-gray-200 border border-gray-200 dark:border-gray-700">{idea.textoEnImagen}</pre>
                 </div>
-              ) : (
-                <p className="text-xs text-fuchsia-700 dark:text-fuchsia-300 italic">
-                  Click "Traer métricas" para ver cómo está funcionando.
-                </p>
+              )}
+
+              {idea.copyPostMeta && (
+                <div>
+                  <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1">📱 Copy del post en Meta (arriba del creativo)</p>
+                  <div className="text-xs text-gray-800 dark:text-gray-200 whitespace-pre-wrap bg-gray-50 dark:bg-gray-800/50 rounded-md px-3 py-2 border border-gray-200 dark:border-gray-700">{idea.copyPostMeta}</div>
+                </div>
+              )}
+
+              {idea.guion && !/^n\/?a/i.test(idea.guion.trim()) && (
+                <details open={idea.formato === 'video'} className="bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700">
+                  <summary className="cursor-pointer px-3 py-2 text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
+                    🎬 Guión {idea.formato === 'video' ? '(beats + VO)' : ''}
+                  </summary>
+                  <p className="px-3 pb-3 text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{idea.guion}</p>
+                </details>
               )}
             </div>
-          )}
 
-          {/* Grid superior: ángulo, hook, formato/estilo */}
-          {idea.hook && (
-            <Field label="🎯 Hook" text={idea.hook} highlight />
-          )}
-          {idea.angulo && (
-            <Field label="📐 Ángulo" text={idea.angulo} />
-          )}
-          {idea.painPoint && (
-            <Field label="💥 Pain point" text={idea.painPoint} />
-          )}
-          {idea.estiloVisual && (
-            <Field label="🎨 Estilo visual" text={idea.estiloVisual} />
-          )}
+            {/* COLUMNA DERECHA — contexto estratégico + metadata (2/5 del espacio) */}
+            <div className="lg:col-span-2 space-y-3">
+              {idea.tipo === 'iteracion' && idea.origen?.razonIteracion && (
+                <div className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md">
+                  <p className="text-[10px] font-bold text-amber-800 dark:text-amber-300 uppercase tracking-wider mb-1">
+                    🔄 ¿Por qué iterar?
+                  </p>
+                  <p className="text-xs text-amber-900 dark:text-amber-200">
+                    <span className="font-semibold">Ad base:</span> {idea.origen.adNombre || '(sin nombre)'}
+                  </p>
+                  <p className="text-xs text-amber-900 dark:text-amber-200 mt-1">{idea.origen.razonIteracion}</p>
+                </div>
+              )}
+              {idea.tipo !== 'iteracion' && idea.origen?.razonamiento && (
+                <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md">
+                  <p className="text-[10px] font-bold text-blue-800 dark:text-blue-300 uppercase tracking-wider mb-1">
+                    💡 Por qué esta idea
+                  </p>
+                  <p className="text-xs text-blue-900 dark:text-blue-200">{idea.origen.razonamiento}</p>
+                </div>
+              )}
 
-          {/* 📖 Escenario narrativo — concepto estratégico */}
-          {idea.escenarioNarrativo && (
-            <Field label="📖 Escenario narrativo" text={idea.escenarioNarrativo} />
-          )}
+              {idea.angulo && <Field label="📐 Ángulo" text={idea.angulo} />}
+              {idea.painPoint && <Field label="💥 Pain point" text={idea.painPoint} />}
+              {idea.estiloVisual && <Field label="🎨 Estilo visual" text={idea.estiloVisual} />}
 
-          {/* 🖼 Descripción de imagen en español */}
-          {idea.descripcionImagen && (
-            <Field label="🖼 Descripción de imagen (para el diseñador)" text={idea.descripcionImagen} />
-          )}
+              {idea.testHipotesis && (
+                <div className="p-3 bg-cyan-50 dark:bg-cyan-900/20 border border-cyan-200 dark:border-cyan-800 rounded-md">
+                  <p className="text-[10px] font-bold text-cyan-800 dark:text-cyan-300 uppercase tracking-wider mb-1">
+                    🔬 Hipótesis a validar
+                  </p>
+                  {VARIABLE_META[idea.variableDeTesteo] && (
+                    <p className="text-[10px] text-cyan-700 dark:text-cyan-400 mb-1">
+                      Variable: <strong>{VARIABLE_META[idea.variableDeTesteo].emoji} {VARIABLE_META[idea.variableDeTesteo].label}</strong>
+                    </p>
+                  )}
+                  <p className="text-xs text-cyan-900 dark:text-cyan-200">{idea.testHipotesis}</p>
+                </div>
+              )}
 
-          {/* 🤖 Prompt en inglés para Nano Banana / Midjourney */}
-          {idea.promptGeneradorImagen && (
-            <details open className="bg-indigo-50 dark:bg-indigo-900/20 rounded-md border border-indigo-200 dark:border-indigo-800">
-              <summary className="cursor-pointer px-3 py-2 text-[10px] font-bold text-indigo-700 dark:text-indigo-300 uppercase tracking-wider flex items-center justify-between">
-                <span>🤖 Prompt para Nano Banana / Midjourney (inglés)</span>
-                <button
-                  onClick={(e) => {
-                    e.preventDefault();
-                    navigator.clipboard?.writeText(idea.promptGeneradorImagen);
-                  }}
-                  className="text-[10px] font-normal text-indigo-600 dark:text-indigo-400 hover:underline"
-                >
-                  📋 copiar
-                </button>
-              </summary>
-              <p className="px-3 pb-3 text-xs font-mono text-indigo-900 dark:text-indigo-200 whitespace-pre-wrap break-words">{idea.promptGeneradorImagen}</p>
-            </details>
-          )}
+              {idea.metaRiesgo?.tieneRiesgo && (
+                <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md">
+                  <p className="text-[10px] font-bold text-red-800 dark:text-red-300 uppercase tracking-wider mb-1">
+                    ⚠ Riesgo Meta
+                  </p>
+                  {idea.metaRiesgo.palabras?.length > 0 && (
+                    <p className="text-[10px] text-red-700 dark:text-red-400 mb-1">
+                      Palabras: <strong>{idea.metaRiesgo.palabras.join(', ')}</strong>
+                    </p>
+                  )}
+                  {idea.metaRiesgo.sugerencia && (
+                    <p className="text-xs text-red-900 dark:text-red-200">{idea.metaRiesgo.sugerencia}</p>
+                  )}
+                </div>
+              )}
 
-          {/* ✍️ Texto que va DENTRO de la imagen */}
-          {idea.textoEnImagen && (
-            <div>
-              <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1">✍️ Texto dentro de la imagen (layout)</p>
-              <pre className="text-[11px] font-mono whitespace-pre-wrap bg-gray-50 dark:bg-gray-800/50 rounded-md px-3 py-2 text-gray-800 dark:text-gray-200 border border-gray-200 dark:border-gray-700">{idea.textoEnImagen}</pre>
+              {idea.publicoSugerido && (
+                <Field label="🎯 Público sugerido" text={idea.publicoSugerido} />
+              )}
+
+              {idea.launchedAsAdId && (
+                <div className="p-3 bg-fuchsia-50 dark:bg-fuchsia-900/20 border border-fuchsia-200 dark:border-fuchsia-800 rounded-md">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <p className="text-[10px] font-bold text-fuchsia-800 dark:text-fuchsia-300 uppercase tracking-wider">
+                      🚀 Performance
+                    </p>
+                    <button onClick={onFetchPerformance}
+                      className="text-[10px] font-semibold text-fuchsia-600 dark:text-fuchsia-400 hover:underline inline-flex items-center gap-1">
+                      <Download size={10} /> Métricas
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-fuchsia-700 dark:text-fuchsia-400 mb-1 font-mono truncate">
+                    Ad: {idea.launchedAsAdName || idea.launchedAsAdId}
+                  </p>
+                  {idea.performance ? (
+                    <div className="grid grid-cols-2 gap-2 mt-2">
+                      <PerformanceStat label="CTR" val={idea.performance.recent?.ctr} fmt={v => `${v.toFixed(2)}%`} />
+                      <PerformanceStat label="ROAS" val={idea.performance.recent?.roas} fmt={v => v.toFixed(2)}
+                        semaforo={v => v >= 2 ? 'good' : v >= 1 ? 'mid' : 'bad'} />
+                      <PerformanceStat label="CPA" val={idea.performance.recent?.cpa} fmt={v => `$${v.toFixed(2)}`} />
+                      <PerformanceStat label="Thumb-stop" val={idea.performance.recent?.thumbStopRate} fmt={v => `${v.toFixed(1)}%`} />
+                      <PerformanceStat label="Impressions" val={idea.performance.recent?.impressions} fmt={v => v.toLocaleString('es-AR')} />
+                      <PerformanceStat label="Compras" val={idea.performance.recent?.purchases} fmt={v => v.toLocaleString('es-AR')} />
+                    </div>
+                  ) : (
+                    <p className="text-[10px] text-fuchsia-700 dark:text-fuchsia-300 italic">
+                      Click "Métricas" para ver cómo rinde.
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
-          )}
+          </div>
 
-          {/* 📱 Copy del post en Meta (va arriba del creativo en el feed) */}
-          {idea.copyPostMeta && (
-            <div>
-              <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1">📱 Copy del post en Meta (arriba del creativo)</p>
-              <div className="text-xs text-gray-800 dark:text-gray-200 whitespace-pre-wrap bg-gray-50 dark:bg-gray-800/50 rounded-md px-3 py-2 border border-gray-200 dark:border-gray-700">{idea.copyPostMeta}</div>
-            </div>
-          )}
-
-          {/* 🎯 Público sugerido */}
-          {idea.publicoSugerido && (
-            <Field label="🎯 Público sugerido" text={idea.publicoSugerido} />
-          )}
-
-          {/* 🎬 Guión (solo si es video o carrusel detallado) */}
-          {idea.guion && !/^n\/?a/i.test(idea.guion.trim()) && (
-            <details open={idea.formato === 'video'} className="bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700">
-              <summary className="cursor-pointer px-3 py-2 text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
-                🎬 Guión {idea.formato === 'video' ? '(beats + VO)' : ''}
-              </summary>
-              <p className="px-3 pb-3 text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{idea.guion}</p>
-            </details>
-          )}
+          {/* Sección inferior full-width: notas + acciones */}
+          <div className="mt-4 pt-3 border-t border-gray-200 dark:border-gray-700 space-y-3">
 
           {/* Notas */}
           <div>
@@ -734,6 +933,7 @@ function IdeaCard({
             </div>
           </div>
         </div>
+        </div>
       )}
     </div>
   );
@@ -786,5 +986,384 @@ function EstadoButton({ active, onClick, icon, label, color }) {
       className={`inline-flex items-center gap-1 px-2 py-1 text-[10px] font-semibold rounded transition ${colors[color || 'default']} hover:opacity-90`}>
       {icon} {label}
     </button>
+  );
+}
+
+// Vista inicial de Bandeja: grid de productos para elegir uno.
+// Cada card muestra contadores por estado + total. Al final, si hay ideas
+// sin productoId (legacy, de antes del multi-producto), se muestra un bucket
+// "Sin producto asignado" para no perderlas de vista.
+function ProductoSelectorView({ productos, ideas, onSelect }) {
+  // Contamos ideas por producto + un bucket "sin producto" para legacy.
+  const countsByProducto = new Map();
+  const countsSin = { pendiente: 0, en_uso: 0, usada: 0, archivada: 0, total: 0 };
+  for (const i of ideas) {
+    const key = i.productoId ? String(i.productoId) : SIN_PRODUCTO_ID;
+    if (key === SIN_PRODUCTO_ID) {
+      countsSin[i.estado] = (countsSin[i.estado] || 0) + 1;
+      countsSin.total++;
+      continue;
+    }
+    if (!countsByProducto.has(key)) {
+      countsByProducto.set(key, { pendiente: 0, en_uso: 0, usada: 0, archivada: 0, total: 0 });
+    }
+    const c = countsByProducto.get(key);
+    c[i.estado] = (c[i.estado] || 0) + 1;
+    c.total++;
+  }
+
+  const tieneAlgo = productos.length > 0 || countsSin.total > 0;
+
+  return (
+    <div className="max-w-5xl mx-auto space-y-5">
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-fuchsia-500 to-pink-500 flex items-center justify-center text-white shadow-sm">
+          <Inbox size={20} />
+        </div>
+        <div>
+          <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Bandeja de ideas</h2>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Elegí un producto para ver su bandeja — cada uno es independiente.</p>
+        </div>
+      </div>
+
+      {!tieneAlgo ? (
+        <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-12 text-center">
+          <Package size={36} className="mx-auto text-gray-300 dark:text-gray-600 mb-3" />
+          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Sin productos ni ideas todavía</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            Andá a "Arranque", creá un producto y corré el pipeline — las ideas van a aparecer acá agrupadas por producto.
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {productos.map(p => {
+            const c = countsByProducto.get(String(p.id)) || { pendiente: 0, en_uso: 0, usada: 0, archivada: 0, total: 0 };
+            return (
+              <ProductoBandejaCard
+                key={p.id}
+                producto={p}
+                counts={c}
+                onClick={() => onSelect(String(p.id))}
+              />
+            );
+          })}
+          {countsSin.total > 0 && (
+            <ProductoBandejaCard
+              producto={{ id: SIN_PRODUCTO_ID, nombre: 'Sin producto asignado', legacy: true }}
+              counts={countsSin}
+              onClick={() => onSelect(SIN_PRODUCTO_ID)}
+            />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProductoBandejaCard({ producto, counts, onClick }) {
+  const { pendiente = 0, en_uso = 0, usada = 0, archivada = 0, total } = counts;
+  const inicial = producto.nombre?.charAt(0)?.toUpperCase() || '?';
+  return (
+    <button
+      onClick={onClick}
+      className="text-left p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm hover:border-fuchsia-300 dark:hover:border-fuchsia-700 hover:shadow-md transition group"
+    >
+      <div className="flex items-center gap-3 mb-3">
+        <div className={`w-12 h-12 rounded-lg flex items-center justify-center text-white font-bold text-lg shrink-0 group-hover:scale-105 transition ${
+          producto.legacy
+            ? 'bg-gradient-to-br from-gray-400 to-gray-500'
+            : 'bg-gradient-to-br from-fuchsia-500 to-pink-500'
+        }`}>
+          {producto.legacy ? '?' : inicial}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{producto.nombre}</p>
+          <p className="text-[10px] text-gray-500 dark:text-gray-400">
+            {total} idea{total !== 1 ? 's' : ''} total{total !== 1 ? 'es' : ''}
+          </p>
+        </div>
+        <ChevronRight size={16} className="text-gray-400 group-hover:text-fuchsia-500 transition shrink-0" />
+      </div>
+      <div className="grid grid-cols-4 gap-1.5">
+        <MiniStat label="Pendientes" value={pendiente} accent />
+        <MiniStat label="En uso" value={en_uso} color="amber" />
+        <MiniStat label="Usadas" value={usada} color="emerald" />
+        <MiniStat label="Archivadas" value={archivada} color="gray" />
+      </div>
+    </button>
+  );
+}
+
+function MiniStat({ label, value, color = 'gray', accent = false }) {
+  const colors = {
+    gray: 'bg-gray-50 dark:bg-gray-900/40 text-gray-900 dark:text-gray-100 border-gray-200 dark:border-gray-700',
+    amber: 'bg-amber-50 dark:bg-amber-900/30 text-amber-900 dark:text-amber-200 border-amber-200 dark:border-amber-800',
+    emerald: 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-900 dark:text-emerald-200 border-emerald-200 dark:border-emerald-800',
+  };
+  return (
+    <div className={`px-2 py-1.5 rounded-md border ${colors[color]} ${accent ? 'ring-1 ring-fuchsia-300 dark:ring-fuchsia-700' : ''}`}>
+      <p className="text-[9px] font-bold uppercase tracking-wider opacity-60 leading-none">{label}</p>
+      <p className="text-base font-bold tabular-nums leading-tight mt-0.5">{value}</p>
+    </div>
+  );
+}
+
+// Columna del kanban — header con color + count, cuerpo scrolleable con cards.
+// Actúa como drop target: al soltar una card encima, llama onDropIdea con el id
+// de la idea, que la mueve a este estado.
+function KanbanColumn({ estado, titulo, color, accent = false, isCustom = false, ideas, selected, onToggleSelect, onCardClick, onDropIdea, onRename, onDelete }) {
+  const [isDragOver, setIsDragOver] = useState(false);
+  const palette = {
+    gray: {
+      header: 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-700',
+      body: 'bg-gray-50/50 dark:bg-gray-900/20 border-gray-200 dark:border-gray-700',
+      dragOver: 'ring-2 ring-gray-400 dark:ring-gray-500',
+    },
+    amber: {
+      header: 'bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 border-amber-300 dark:border-amber-800',
+      body: 'bg-amber-50/30 dark:bg-amber-900/10 border-amber-200 dark:border-amber-900/50',
+      dragOver: 'ring-2 ring-amber-400 dark:ring-amber-500',
+    },
+    emerald: {
+      header: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-200 border-emerald-300 dark:border-emerald-800',
+      body: 'bg-emerald-50/30 dark:bg-emerald-900/10 border-emerald-200 dark:border-emerald-900/50',
+      dragOver: 'ring-2 ring-emerald-400 dark:ring-emerald-500',
+    },
+    slate: {
+      header: 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700',
+      body: 'bg-slate-50/30 dark:bg-slate-900/20 border-slate-200 dark:border-slate-800',
+      dragOver: 'ring-2 ring-slate-400 dark:ring-slate-500',
+    },
+    violet: {
+      header: 'bg-violet-100 dark:bg-violet-900/40 text-violet-800 dark:text-violet-200 border-violet-300 dark:border-violet-800',
+      body: 'bg-violet-50/30 dark:bg-violet-900/10 border-violet-200 dark:border-violet-900/50',
+      dragOver: 'ring-2 ring-violet-400 dark:ring-violet-500',
+    },
+    rose: {
+      header: 'bg-rose-100 dark:bg-rose-900/40 text-rose-800 dark:text-rose-200 border-rose-300 dark:border-rose-800',
+      body: 'bg-rose-50/30 dark:bg-rose-900/10 border-rose-200 dark:border-rose-900/50',
+      dragOver: 'ring-2 ring-rose-400 dark:ring-rose-500',
+    },
+    sky: {
+      header: 'bg-sky-100 dark:bg-sky-900/40 text-sky-800 dark:text-sky-200 border-sky-300 dark:border-sky-800',
+      body: 'bg-sky-50/30 dark:bg-sky-900/10 border-sky-200 dark:border-sky-900/50',
+      dragOver: 'ring-2 ring-sky-400 dark:ring-sky-500',
+    },
+    lime: {
+      header: 'bg-lime-100 dark:bg-lime-900/40 text-lime-800 dark:text-lime-200 border-lime-300 dark:border-lime-800',
+      body: 'bg-lime-50/30 dark:bg-lime-900/10 border-lime-200 dark:border-lime-900/50',
+      dragOver: 'ring-2 ring-lime-400 dark:ring-lime-500',
+    },
+    orange: {
+      header: 'bg-orange-100 dark:bg-orange-900/40 text-orange-800 dark:text-orange-200 border-orange-300 dark:border-orange-800',
+      body: 'bg-orange-50/30 dark:bg-orange-900/10 border-orange-200 dark:border-orange-900/50',
+      dragOver: 'ring-2 ring-orange-400 dark:ring-orange-500',
+    },
+    teal: {
+      header: 'bg-teal-100 dark:bg-teal-900/40 text-teal-800 dark:text-teal-200 border-teal-300 dark:border-teal-800',
+      body: 'bg-teal-50/30 dark:bg-teal-900/10 border-teal-200 dark:border-teal-900/50',
+      dragOver: 'ring-2 ring-teal-400 dark:ring-teal-500',
+    },
+    indigo: {
+      header: 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-800 dark:text-indigo-200 border-indigo-300 dark:border-indigo-800',
+      body: 'bg-indigo-50/30 dark:bg-indigo-900/10 border-indigo-200 dark:border-indigo-900/50',
+      dragOver: 'ring-2 ring-indigo-400 dark:ring-indigo-500',
+    },
+    pink: {
+      header: 'bg-pink-100 dark:bg-pink-900/40 text-pink-800 dark:text-pink-200 border-pink-300 dark:border-pink-800',
+      body: 'bg-pink-50/30 dark:bg-pink-900/10 border-pink-200 dark:border-pink-900/50',
+      dragOver: 'ring-2 ring-pink-400 dark:ring-pink-500',
+    },
+  };
+  const c = palette[color] || palette.gray;
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (!isDragOver) setIsDragOver(true);
+  };
+  const handleDragLeave = (e) => {
+    // Evitar flickers cuando el cursor pasa sobre hijos — solo des-highlight si
+    // salió del contenedor realmente.
+    if (!e.currentTarget.contains(e.relatedTarget)) setIsDragOver(false);
+  };
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    const ideaId = e.dataTransfer.getData('text/idea-id');
+    const fromEstado = e.dataTransfer.getData('text/idea-estado');
+    if (!ideaId || fromEstado === estado) return;
+    onDropIdea?.(ideaId);
+  };
+
+  return (
+    <div
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      className={`rounded-xl border flex flex-col transition ${c.body} ${accent ? 'ring-2 ring-fuchsia-200 dark:ring-fuchsia-900/40' : ''} ${isDragOver ? c.dragOver : ''}`}
+    >
+      <div className={`px-3 py-2 border-b flex items-center justify-between gap-1 ${c.header} rounded-t-xl`}>
+        <p className="text-[11px] font-bold uppercase tracking-wider truncate">{titulo}</p>
+        <div className="flex items-center gap-1 shrink-0">
+          {isCustom && onRename && (
+            <button onClick={onRename} className="p-0.5 hover:text-violet-600 transition" title="Renombrar">
+              <Pencil size={11} />
+            </button>
+          )}
+          {isCustom && onDelete && (
+            <button onClick={onDelete} className="p-0.5 hover:text-red-600 transition" title="Eliminar columna">
+              <Trash2 size={11} />
+            </button>
+          )}
+          <span className="text-xs font-bold tabular-nums">{ideas.length}</span>
+        </div>
+      </div>
+      <div className="p-2 space-y-2 min-h-[120px] max-h-[70vh] overflow-y-auto">
+        {ideas.length === 0 ? (
+          <p className={`text-[10px] italic text-center py-6 transition ${
+            isDragOver ? 'text-gray-700 dark:text-gray-300 font-semibold' : 'text-gray-400 dark:text-gray-600'
+          }`}>
+            {isDragOver ? 'Soltá acá' : 'Sin ideas'}
+          </p>
+        ) : (
+          ideas.map(idea => (
+            <KanbanCard
+              key={idea.id}
+              idea={idea}
+              isSelected={selected?.has(idea.id)}
+              onToggleSelect={onToggleSelect ? () => onToggleSelect(idea.id) : null}
+              onClick={() => onCardClick(idea.id)}
+            />
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Card compacta del kanban — thumb chico + título + 2-3 badges clave.
+// Todo el detalle se ve al clickear (abre el modal). También es arrastrable
+// entre columnas (drag&drop HTML5 nativo).
+function KanbanCard({ idea, isSelected = false, onToggleSelect, onClick }) {
+  const tipo = TIPO_META[idea.tipo] || TIPO_META.desde_cero;
+  const [isDragging, setIsDragging] = useState(false);
+
+  const handleDragStart = (e) => {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/idea-id', idea.id);
+    e.dataTransfer.setData('text/idea-estado', idea.estado || '');
+    setIsDragging(true);
+  };
+  const handleDragEnd = () => setIsDragging(false);
+  const handleCheckboxClick = (e) => {
+    e.stopPropagation();
+    onToggleSelect?.();
+  };
+
+  return (
+    <div
+      onClick={onClick}
+      draggable
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+      className={`relative bg-white dark:bg-gray-800 border rounded-lg p-2 hover:shadow-sm transition group cursor-grab active:cursor-grabbing ${
+        isSelected
+          ? 'border-fuchsia-400 dark:border-fuchsia-600 ring-2 ring-fuchsia-200 dark:ring-fuchsia-900/40'
+          : 'border-gray-200 dark:border-gray-700 hover:border-fuchsia-300 dark:hover:border-fuchsia-700'
+      } ${isDragging ? 'opacity-40' : ''}`}
+    >
+      {onToggleSelect && (
+        <button
+          onClick={handleCheckboxClick}
+          className="absolute top-1 right-1 w-5 h-5 flex items-center justify-center rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:border-fuchsia-500 transition opacity-0 group-hover:opacity-100 data-[checked=true]:opacity-100"
+          data-checked={isSelected}
+          title={isSelected ? 'Deseleccionar' : 'Seleccionar para exportar'}
+        >
+          {isSelected ? <CheckSquare size={12} className="text-fuchsia-600" /> : <Square size={12} className="text-gray-400" />}
+        </button>
+      )}
+      <div className="flex items-start gap-2">
+        {idea.origen?.imageUrl ? (
+          <img
+            src={idea.origen.imageUrl} alt=""
+            className="w-10 h-10 rounded object-cover bg-gray-100 dark:bg-gray-700 shrink-0 border border-gray-200 dark:border-gray-700"
+            onError={e => { e.target.style.display = 'none'; }}
+          />
+        ) : (
+          <div className="w-10 h-10 rounded bg-gradient-to-br from-fuchsia-200 to-pink-200 dark:from-fuchsia-900/40 dark:to-pink-900/40 flex items-center justify-center shrink-0">
+            <span className="text-lg">{tipo.emoji}</span>
+          </div>
+        )}
+        <div className="flex-1 min-w-0">
+          <p className="text-[11px] font-semibold text-gray-900 dark:text-gray-100 leading-tight line-clamp-2">
+            {idea.titulo}
+          </p>
+          <div className="flex items-center gap-1 mt-1 flex-wrap">
+            <span className={`inline-flex items-center px-1 py-0 text-[8px] font-bold rounded border ${tipo.color}`}>
+              {tipo.emoji} {tipo.label}
+            </span>
+            {idea.formato && (
+              <span className="text-[9px] text-gray-400">
+                {idea.formato === 'video' ? '🎬' : idea.formato === 'static' ? '🖼️' : '📑'}
+              </span>
+            )}
+            {idea.anguloCategoria && ANGULO_META[idea.anguloCategoria] && (
+              <span className={`inline-flex items-center px-1 py-0 text-[8px] font-bold rounded ${ANGULO_META[idea.anguloCategoria].color}`}
+                title={`Ángulo ${idea.anguloCategoria}`}>
+                {ANGULO_META[idea.anguloCategoria].emoji}
+              </span>
+            )}
+            {idea.metaRiesgo?.tieneRiesgo && (
+              <span className="text-[9px]" title="Riesgo de alcance en Meta">⚠</span>
+            )}
+          </div>
+          {idea.origen?.competidorNombre && (
+            <p className="text-[9px] text-gray-500 dark:text-gray-400 mt-0.5 truncate">
+              de {idea.origen.competidorNombre}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Modal simple que muestra el detalle completo de una idea.
+// En Parte 2b.4 se pule: tabs, mejor layout, keyboard shortcuts.
+// Por ahora reutiliza el IdeaCard expandido envuelto en un overlay.
+function IdeaDetailModal({ idea, onClose, ...cardProps }) {
+  // Cerrar con ESC.
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center px-4 py-8 bg-black/50 backdrop-blur-sm overflow-y-auto"
+      onClick={onClose}
+    >
+      <div
+        className="relative w-full max-w-5xl"
+        onClick={e => e.stopPropagation()}
+      >
+        <button
+          onClick={onClose}
+          className="absolute -top-2 -right-2 z-10 w-8 h-8 rounded-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 shadow-md flex items-center justify-center text-gray-600 dark:text-gray-300 hover:text-red-600 transition"
+          title="Cerrar (ESC)"
+        >
+          ✕
+        </button>
+        <IdeaCard
+          idea={idea}
+          expanded={true}
+          onToggle={onClose}
+          {...cardProps}
+        />
+      </div>
+    </div>
   );
 }

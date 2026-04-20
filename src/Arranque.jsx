@@ -20,22 +20,30 @@
 import React, { useState, useEffect } from 'react';
 import {
   Package, Target, Play, Check, Loader2, AlertTriangle, ChevronRight, ChevronDown,
-  Plus, X, Sparkles, Link2, Search, Clock, Inbox,
+  Plus, X, Sparkles, Link2, Search, Clock, Inbox, Trash2,
 } from 'lucide-react';
 import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGeneratedToday } from './bandejaStore.js';
 import { logCostsFromResponse } from './costsStore.js';
 
 const GEN_CONFIG_KEY = 'viora-marketing-gen-config-v1';
 const DEFAULT_GEN_CONFIG = {
-  limiteDiario: 15,
+  limiteDiario: 50,
   formatoStatic: 60, // %
   formatoVideo: 40, // %
 };
+// Tope superior de ideas por corrida — Claude Sonnet 4.6 puede devolver hasta
+// ~100 ideas ricas antes de agotar la budget de output. 100 es un techo
+// realista; más que eso empieza a truncar.
+const MAX_IDEAS_PER_RUN = 100;
 
 const PRODUCTOS_KEY = 'viora-marketing-productos-v1';
 const COMPETIDORES_KEY = 'viora-marketing-competidores-v1';
 const META_ACCOUNT_KEY = 'viora-marketing-meta-account-v1';
 const LAST_RUN_KEY = 'viora-marketing-last-pipeline-run-v1';
+const RUN_HISTORY_KEY = 'viora-marketing-run-history-v1';
+// Cap del historial guardado — cada entry tiene los steps + stats + cost.
+// 20 corridas cubren ~3 semanas a 1 run/día, sin explotar localStorage.
+const RUN_HISTORY_CAP = 20;
 
 function loadJSON(key, fallback) {
   try {
@@ -122,16 +130,29 @@ function landingToKeyword(url) {
 export default function ArranqueSection({ addToast, onGoToSection }) {
   const [productos, setProductos] = useState(() => {
     const prods = loadJSON(PRODUCTOS_KEY, []);
+    let mutated = false;
     // Migración: si hay competidores globales sueltos y el primer producto
     // no tiene competidores propios, los migramos al primer producto.
     const globalComps = loadJSON(COMPETIDORES_KEY, []);
     if (globalComps.length > 0 && prods.length > 0 && !prods[0].competidores?.length) {
       prods[0] = { ...prods[0], competidores: globalComps };
+      mutated = true;
+    }
+    // Migración: cuenta Meta global → al primer producto si no tiene una.
+    const globalMeta = loadJSON(META_ACCOUNT_KEY, null);
+    if (globalMeta && prods.length > 0 && !prods[0].metaAccount) {
+      prods[0] = { ...prods[0], metaAccount: globalMeta };
+      mutated = true;
+    }
+    if (mutated) {
       saveJSON(PRODUCTOS_KEY, prods);
+      // Limpiamos las keys globales ya migradas para que no vuelvan a
+      // contaminar a otros productos en corridas futuras.
+      try { localStorage.removeItem(COMPETIDORES_KEY); } catch {}
+      try { localStorage.removeItem(META_ACCOUNT_KEY); } catch {}
     }
     return prods;
   });
-  const [metaAccount, setMetaAccount] = useState(() => loadJSON(META_ACCOUNT_KEY, null));
 
   // Producto activo — null = vista de lista, id = workspace del producto.
   const [activeProductoId, setActiveProductoId] = useState(() => {
@@ -144,9 +165,10 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     } catch {}
   }, [activeProductoId]);
 
-  // Producto activo derivado + competidores del producto activo.
+  // Producto activo derivado + competidores + cuenta Meta del producto activo.
   const producto = productos.find(p => String(p.id) === String(activeProductoId)) || null;
   const competidores = producto?.competidores || [];
+  const metaAccount = producto?.metaAccount || null;
   // Setter de competidores que los guarda DENTRO del producto activo.
   const setCompetidores = (updater) => {
     setProductos(prev => prev.map(p => {
@@ -154,6 +176,16 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       const current = p.competidores || [];
       const next = typeof updater === 'function' ? updater(current) : updater;
       return { ...p, competidores: next };
+    }));
+  };
+  // Setter de cuenta Meta que la guarda DENTRO del producto activo — cada
+  // producto tiene su propio metaAccount con sus ads + su productMatched.
+  const setMetaAccount = (updater) => {
+    setProductos(prev => prev.map(p => {
+      if (String(p.id) !== String(activeProductoId)) return p;
+      const current = p.metaAccount || null;
+      const next = typeof updater === 'function' ? updater(current) : updater;
+      return { ...p, metaAccount: next };
     }));
   };
 
@@ -191,10 +223,14 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // y va sumando a medida que cada endpoint devuelve su cost{}. Se muestra
   // en vivo en el stepper.
   const [runCost, setRunCost] = useState({ anthropic: 0, openai: 0, apify: 0, meta: 0, total: 0 });
+  // Historial de corridas — persistido. Al completar un run, pusheamos un
+  // resumen (productoId, timestamps, steps, stats, costo). Luego se muestra
+  // en la UI como colapsable para que el user vea qué se ejecutó antes.
+  const [runHistory, setRunHistory] = useState(() => loadJSON(RUN_HISTORY_KEY, []));
 
   useEffect(() => { saveJSON(PRODUCTOS_KEY, productos); }, [productos]);
-  useEffect(() => { saveJSON(META_ACCOUNT_KEY, metaAccount); }, [metaAccount]);
   useEffect(() => { saveJSON(GEN_CONFIG_KEY, genConfig); }, [genConfig]);
+  useEffect(() => { saveJSON(RUN_HISTORY_KEY, runHistory); }, [runHistory]);
 
   // Refrescar contador de ideas del día cada vez que montamos o cambia la bandeja.
   useEffect(() => {
@@ -365,13 +401,16 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     addToast?.({ type: 'success', message: `Producto "${nombre}" creado — cargá competidores y corré el pipeline` });
   };
 
-  const handleAddCompetidor = () => {
+  const handleAddCompetidor = async () => {
     const nombre = compDraft.nombre.trim();
     if (!nombre) { addToast?.({ type: 'error', message: 'Ponele nombre al competidor' }); return; }
+    const landingUrl = compDraft.landingUrl.trim();
+    const nuevoId = Date.now();
     const nuevo = {
-      id: Date.now(),
+      id: nuevoId,
       nombre,
-      landingUrl: compDraft.landingUrl.trim(),
+      landingUrl,
+      fbPageUrl: '',
       notas: '',
       ads: [],
       lastAdsCheck: null,
@@ -381,6 +420,35 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     setCompDraft({ nombre: '', landingUrl: '' });
     setShowCompForm(false);
     addToast?.({ type: 'success', message: `Competidor "${nombre}" sumado` });
+
+    // Si tiene landing URL, intentamos resolver la Facebook Page en
+    // background — sin bloquear el UI. Si la encontramos, la guardamos
+    // silenciosamente en el competidor. Scrapear por Page es mucho más
+    // confiable que por keyword.
+    if (landingUrl) {
+      resolveFbPageAsync(nuevoId, nombre, landingUrl);
+    }
+  };
+
+  // Dispara el resolve de FB page en background y actualiza el competidor
+  // si lo encuentra. Errores silenciosos — es un best-effort.
+  const resolveFbPageAsync = async (competidorId, competidorNombre, landingUrl) => {
+    try {
+      const resp = await fetch('/api/marketing/resolve-fb-page', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ landingUrl }),
+      });
+      const data = await resp.json();
+      if (data.pageUrl) {
+        setCompetidores(prev => prev.map(x =>
+          x.id === competidorId ? { ...x, fbPageUrl: data.pageUrl } : x
+        ));
+        addToast?.({ type: 'success', message: `FB page de ${competidorNombre} detectada: @${data.handle}` });
+      }
+    } catch {
+      // Silencioso — si no pudimos resolver, el user puede cargarla manual.
+    }
   };
 
   const handleRemoveCompetidor = (id) => {
@@ -621,8 +689,31 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       updateStep(stepId, { status: 'running', startedAt: Date.now() });
       try {
         const payload = { country: 'ALL', limit: 200 };
-        if (c.fbPageUrl) {
-          payload.fbPageUrl = c.fbPageUrl.startsWith('http') ? c.fbPageUrl : `https://www.facebook.com/${c.fbPageUrl}`;
+        // Fallback auto-resolver: si no tenemos fbPageUrl pero sí landing,
+        // intentamos detectar la FB page antes de caer a keyword. Scrapear
+        // por Page es mucho más estable que por keyword (keyword a veces
+        // aborta en Apify). Si no la encontramos, seguimos con keyword.
+        let resolvedFbPage = c.fbPageUrl;
+        if (!resolvedFbPage && c.landingUrl) {
+          updateStep(stepId, { detail: 'Detectando Facebook Page de la landing…' });
+          try {
+            const rr = await fetch('/api/marketing/resolve-fb-page', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ landingUrl: c.landingUrl }),
+            });
+            const rd = await rr.json();
+            if (rd.pageUrl) {
+              resolvedFbPage = rd.pageUrl;
+              setCompetidores(prev => prev.map(x =>
+                x.id === c.id ? { ...x, fbPageUrl: rd.pageUrl } : x
+              ));
+            }
+          } catch { /* silencioso — caemos a keyword */ }
+        }
+
+        if (resolvedFbPage) {
+          payload.fbPageUrl = resolvedFbPage.startsWith('http') ? resolvedFbPage : `https://www.facebook.com/${resolvedFbPage}`;
         } else if (c.landingUrl) {
           payload.searchKeyword = landingToKeyword(c.landingUrl) || c.nombre;
         } else {
@@ -741,7 +832,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             } : x
           ));
           // Empuja la idea a la Bandeja automáticamente.
-          ideaFromDeepAnalysis({ analysis: data.analysis, transcript: data.transcript, ad, competidor: comp });
+          ideaFromDeepAnalysis({ analysis: data.analysis, transcript: data.transcript, ad, competidor: comp, producto });
           analyzed++;
           updateStep(stepId, { detail: `${analyzed}/${nuevosParaAnalizar.length} analizados${yaAnalizados > 0 ? ` · ${yaAnalizados} salteados (ya había análisis)` : ''}` });
         } catch (err) {
@@ -812,12 +903,19 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             fatigue: a.fatigue,
           }));
 
-        // Target count: primera vez (bandeja vacía) sin cap duro (hasta 40 con
-        // piso de calidad). Después, cap al límite diario restante.
+        // Target count: primera vez (bandeja vacía) escala con la cantidad
+        // de ads analizados — si la competencia tiene mucho material,
+        // pedimos proporcional (con techo MAX_IDEAS_PER_RUN). Después, cap
+        // al límite diario restante.
         const yaGeneradasHoy = countIdeasGeneratedToday();
         const esPrimeraVez = ideasExistentes.length === 0;
+        const adsTotales = (compWithAds || []).reduce((sum, c) => sum + (c.allAds?.length || 0), 0);
+        const primeraVezTarget = Math.min(
+          MAX_IDEAS_PER_RUN,
+          Math.max(50, Math.round(adsTotales * 0.2))
+        );
         const targetCount = esPrimeraVez
-          ? 40
+          ? primeraVezTarget
           : Math.max(0, genConfig.limiteDiario - yaGeneradasHoy);
 
         if (targetCount === 0) {
@@ -924,6 +1022,37 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     setRunning(false);
     if (!cancelled) {
       try { localStorage.setItem(LAST_RUN_KEY, new Date().toISOString()); } catch {}
+      // Persistir el resumen de esta corrida al historial del producto.
+      setSteps(currentSteps => {
+        const endedAt = Date.now();
+        const startedAt = currentSteps.find(s => s.startedAt)?.startedAt || endedAt;
+        const runEntry = {
+          id: `run-${endedAt}`,
+          productoId: producto?.id ? String(producto.id) : null,
+          productoNombre: producto?.nombre || '',
+          startedAt: new Date(startedAt).toISOString(),
+          endedAt: new Date(endedAt).toISOString(),
+          durationMs: endedAt - startedAt,
+          cost: { ...runCost },
+          // Guardamos los steps (sin Date timestamps grandes) — sirve para
+          // mostrar el detalle de qué pasó.
+          steps: currentSteps.map(s => ({
+            id: s.id,
+            label: s.label,
+            detail: s.detail,
+            status: s.status,
+            startedAt: s.startedAt || null,
+            endedAt: s.endedAt || null,
+          })),
+          stats: {
+            competidoresCount: (currentSteps.filter(s => s.id.startsWith('scrape-')).length),
+            competidoresOk: (currentSteps.filter(s => s.id.startsWith('scrape-') && s.status === 'done').length),
+            stepsError: currentSteps.filter(s => s.status === 'error').length,
+          },
+        };
+        setRunHistory(prev => [runEntry, ...prev].slice(0, RUN_HISTORY_CAP));
+        return currentSteps;
+      });
       addToast?.({ type: 'success', message: '¡Listo! Mirá los análisis + ideas en la Bandeja.' });
     }
   };
@@ -1021,28 +1150,44 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             {productos.map(p => {
               const comps = p.competidores || [];
               const hasResearch = !!(p.docs?.research);
-              const ideasCount = 0; // TODO: contar ideas por producto si queremos
+              const ideasCount = loadIdeas().filter(i => String(i.productoId || '') === String(p.id)).length;
               return (
-                <button key={p.id}
-                  onClick={() => setActiveProductoId(String(p.id))}
-                  className="w-full flex items-center gap-4 p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm hover:border-purple-300 dark:hover:border-purple-700 hover:shadow-md transition text-left group"
-                >
-                  <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-purple-500 to-violet-500 flex items-center justify-center text-white font-bold text-lg shrink-0 group-hover:scale-105 transition">
-                    {p.nombre?.charAt(0)?.toUpperCase() || 'P'}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{p.nombre}</p>
-                    <div className="flex items-center gap-2 text-[10px] text-gray-500 dark:text-gray-400 mt-0.5 flex-wrap">
-                      {p.landingUrl && <span className="truncate max-w-[200px]">{p.landingUrl}</span>}
-                      <span className={`font-semibold ${hasResearch ? 'text-emerald-600' : 'text-gray-400'}`}>
-                        {hasResearch ? '✓ documentado' : '○ sin research'}
-                      </span>
-                      <span>{comps.length} competidor{comps.length !== 1 ? 'es' : ''}</span>
-                      {p.stage && <span className="text-purple-600 dark:text-purple-400">· {p.stage.replace('_', '-')}</span>}
+                <div key={p.id} className="flex items-center gap-2">
+                  <button
+                    onClick={() => setActiveProductoId(String(p.id))}
+                    className="flex-1 flex items-center gap-4 p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm hover:border-purple-300 dark:hover:border-purple-700 hover:shadow-md transition text-left group"
+                  >
+                    <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-purple-500 to-violet-500 flex items-center justify-center text-white font-bold text-lg shrink-0 group-hover:scale-105 transition">
+                      {p.nombre?.charAt(0)?.toUpperCase() || 'P'}
                     </div>
-                  </div>
-                  <ChevronRight size={16} className="text-gray-400 group-hover:text-purple-500 transition shrink-0" />
-                </button>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{p.nombre}</p>
+                      <div className="flex items-center gap-2 text-[10px] text-gray-500 dark:text-gray-400 mt-0.5 flex-wrap">
+                        {p.landingUrl && <span className="truncate max-w-[200px]">{p.landingUrl}</span>}
+                        <span className={`font-semibold ${hasResearch ? 'text-emerald-600' : 'text-gray-400'}`}>
+                          {hasResearch ? '✓ documentado' : '○ sin research'}
+                        </span>
+                        <span>{comps.length} competidor{comps.length !== 1 ? 'es' : ''}</span>
+                      {ideasCount > 0 && <span className="text-fuchsia-600 dark:text-fuchsia-400 font-semibold">· {ideasCount} idea{ideasCount !== 1 ? 's' : ''}</span>}
+                        {p.stage && <span className="text-purple-600 dark:text-purple-400">· {p.stage.replace('_', '-')}</span>}
+                      </div>
+                    </div>
+                    <ChevronRight size={16} className="text-gray-400 group-hover:text-purple-500 transition shrink-0" />
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (window.confirm(`¿Eliminar "${p.nombre}"? Se borran sus competidores, cuenta Meta y research. No se pueden recuperar.`)) {
+                        setProductos(prev => prev.filter(x => x.id !== p.id));
+                        if (String(p.id) === String(activeProductoId)) setActiveProductoId(null);
+                      }
+                    }}
+                    className="p-2.5 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition shrink-0"
+                    title="Eliminar producto"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
               );
             })}
           </div>
@@ -1522,8 +1667,8 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 <div className="mt-3 space-y-3">
                   <div>
                     <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">Límite diario de ideas</label>
-                    <input type="number" min="1" max="40" value={genConfig.limiteDiario}
-                      onChange={e => setGenConfig(c => ({ ...c, limiteDiario: Math.max(1, Math.min(40, Number(e.target.value) || 15)) }))}
+                    <input type="number" min="1" max={MAX_IDEAS_PER_RUN} value={genConfig.limiteDiario}
+                      onChange={e => setGenConfig(c => ({ ...c, limiteDiario: Math.max(1, Math.min(MAX_IDEAS_PER_RUN, Number(e.target.value) || 50)) }))}
                       className="w-24 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-purple-500" />
                     <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">
                       Se resetea a las 00:00 hs Argentina. Primera corrida (bandeja vacía) ignora el límite y genera hasta 40 con piso de calidad.
@@ -1687,6 +1832,128 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           </div>
         )}
       </WizardCard>
+
+      {/* Historial de corridas del producto activo — persistido. */}
+      <RunHistoryCard
+        history={runHistory.filter(r => String(r.productoId || '') === String(producto?.id || ''))}
+        onClear={() => {
+          if (window.confirm('¿Borrar el historial de corridas de este producto?')) {
+            setRunHistory(prev => prev.filter(r => String(r.productoId || '') !== String(producto?.id || '')));
+          }
+        }}
+      />
+    </div>
+  );
+}
+
+// Card colapsable que muestra las últimas corridas del pipeline para el
+// producto activo. Cada corrida se puede expandir para ver el detalle de
+// pasos, duración y costo. Así el user no pierde info al refrescar o
+// cambiar de sección.
+function RunHistoryCard({ history, onClear }) {
+  const [collapsed, setCollapsed] = useState(true);
+  const [expandedRunId, setExpandedRunId] = useState(null);
+
+  if (!history || history.length === 0) return null;
+
+  return (
+    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-5 shadow-sm">
+      <button
+        onClick={() => setCollapsed(c => !c)}
+        className="w-full flex items-center gap-3 text-left"
+      >
+        <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
+          <Clock size={14} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">
+            Historial de corridas
+            <span className="ml-2 text-[10px] font-normal text-gray-500 dark:text-gray-400">
+              {history.length} corrida{history.length !== 1 ? 's' : ''} guardada{history.length !== 1 ? 's' : ''}
+            </span>
+          </h3>
+          <p className="text-[10px] text-gray-500 dark:text-gray-400">
+            Lo que ejecutaste antes no se pierde — click para ver cuándo corriste + qué pasó + cuánto costó.
+          </p>
+        </div>
+        <ChevronDown
+          size={16}
+          className={`text-gray-400 transition-transform shrink-0 ${collapsed ? '' : 'rotate-180'}`}
+        />
+      </button>
+
+      {!collapsed && (
+        <div className="mt-4 space-y-2">
+          {history.map(run => {
+            const fecha = new Date(run.startedAt).toLocaleString('es-AR', {
+              year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+            });
+            const durMin = run.durationMs ? Math.round(run.durationMs / 60000) : 0;
+            const durSec = run.durationMs ? Math.round((run.durationMs % 60000) / 1000) : 0;
+            const dur = durMin > 0 ? `${durMin}m ${durSec}s` : `${durSec}s`;
+            const isExpanded = expandedRunId === run.id;
+            const hasErrors = (run.stats?.stepsError || 0) > 0;
+
+            return (
+              <div key={run.id} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                <button
+                  onClick={() => setExpandedRunId(isExpanded ? null : run.id)}
+                  className="w-full px-3 py-2 flex items-center gap-3 hover:bg-gray-50 dark:hover:bg-gray-700/30 transition text-left"
+                >
+                  <ChevronRight size={14} className={`text-gray-400 transition-transform shrink-0 ${isExpanded ? 'rotate-90' : ''}`} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold text-gray-900 dark:text-gray-100 truncate">
+                      {fecha}
+                      {hasErrors && <span className="ml-2 text-[10px] text-amber-600 dark:text-amber-400 font-bold">⚠ {run.stats.stepsError} error{run.stats.stepsError !== 1 ? 'es' : ''}</span>}
+                    </p>
+                    <div className="flex items-center gap-2 text-[10px] text-gray-500 dark:text-gray-400 flex-wrap mt-0.5">
+                      <span>⏱ {dur}</span>
+                      {run.stats?.competidoresCount > 0 && (
+                        <span>· {run.stats.competidoresOk}/{run.stats.competidoresCount} competidores ok</span>
+                      )}
+                      {run.cost?.total > 0 && (
+                        <span className="text-purple-600 dark:text-purple-400 font-mono">· 💰 ${run.cost.total.toFixed(4)}</span>
+                      )}
+                    </div>
+                  </div>
+                </button>
+
+                {isExpanded && (
+                  <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 px-3 py-2">
+                    <ul className="space-y-0.5 text-[10px]">
+                      {(run.steps || []).map((s, idx) => (
+                        <li key={idx} className="flex items-start gap-2">
+                          <span className="shrink-0 w-4 text-center">
+                            {s.status === 'done' ? '✓' : s.status === 'error' ? '✗' : '○'}
+                          </span>
+                          <span className={`flex-1 min-w-0 ${s.status === 'error' ? 'text-red-600 dark:text-red-400' : 'text-gray-700 dark:text-gray-300'}`}>
+                            <span className="font-semibold">{s.label}</span>
+                            {s.detail && <span className="block text-gray-500 dark:text-gray-400 ml-0">{s.detail}</span>}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    {run.cost && run.cost.total > 0 && (
+                      <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700 text-[10px] font-mono text-gray-600 dark:text-gray-400 flex flex-wrap gap-2">
+                        <span className="text-purple-600 dark:text-purple-400 font-bold">💰 ${run.cost.total.toFixed(4)}</span>
+                        {run.cost.anthropic > 0 && <span>🧠 ${run.cost.anthropic.toFixed(4)}</span>}
+                        {run.cost.openai > 0 && <span>🎤 ${run.cost.openai.toFixed(4)}</span>}
+                        {run.cost.apify > 0 && <span>🔍 ${run.cost.apify.toFixed(4)}</span>}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          <button
+            onClick={onClear}
+            className="mt-2 text-[10px] text-gray-400 hover:text-red-500 transition"
+          >
+            Borrar historial
+          </button>
+        </div>
+      )}
     </div>
   );
 }

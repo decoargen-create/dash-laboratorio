@@ -764,7 +764,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             } : x
           ));
           // Empuja la idea a la Bandeja automáticamente.
-          ideaFromDeepAnalysis({ analysis: data.analysis, transcript: data.transcript, ad, competidor: comp });
+          ideaFromDeepAnalysis({ analysis: data.analysis, transcript: data.transcript, ad, competidor: comp, producto });
           analyzed++;
           updateStep(stepId, { detail: `${analyzed}/${nuevosParaAnalizar.length} analizados${yaAnalizados > 0 ? ` · ${yaAnalizados} salteados (ya había análisis)` : ''}` });
         } catch (err) {

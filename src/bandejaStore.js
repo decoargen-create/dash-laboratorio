@@ -57,6 +57,8 @@ export function addIdea(idea) {
     createdAt: new Date().toISOString(),
     usedAt: null,
     notas: '',
+    productoId: null,
+    productoNombre: null,
     ...idea,
   };
   saveIdeas([nueva, ...list]);
@@ -81,6 +83,8 @@ function hookSignature(hook) {
 // idénticos (primeras 3 palabras significativas iguales) — si el generator
 // repite un patrón, se loggea warning pero no se bloquea.
 export function addGeneratedIdeas(rawIdeas, { producto } = {}) {
+  const prodId = producto?.id ? String(producto.id) : null;
+  const prodNombre = producto?.nombre || null;
   if (!Array.isArray(rawIdeas)) return [];
   const nuevas = [];
   const existentes = loadIdeas();
@@ -125,6 +129,8 @@ export function addGeneratedIdeas(rawIdeas, { producto } = {}) {
     if (sig) newHookSigs.add(sig);
 
     const idea = addIdea({
+      productoId: prodId,
+      productoNombre: prodNombre,
       titulo: r.titulo,
       tipo: r.tipo,
       origen,
@@ -183,7 +189,7 @@ export function countIdeasGeneratedToday(ideas = null) {
 // Transforma un resultado de deep-analyze en una idea tipo "replica".
 // Pensada para llamarse desde Competencia.jsx y Arranque.jsx justo después
 // de que vuelva el análisis, así se puebla la bandeja de forma pasiva.
-export function ideaFromDeepAnalysis({ analysis, transcript, ad, competidor }) {
+export function ideaFromDeepAnalysis({ analysis, transcript, ad, competidor, producto }) {
   if (!analysis || !ad) return null;
 
   const formato = (ad.videoUrls?.length > 0) ? 'video' :
@@ -198,6 +204,8 @@ export function ideaFromDeepAnalysis({ analysis, transcript, ad, competidor }) {
     : '';
 
   return addIdea({
+    productoId: producto?.id ? String(producto.id) : null,
+    productoNombre: producto?.nombre || null,
     titulo,
     tipo: 'replica',
     origen: {

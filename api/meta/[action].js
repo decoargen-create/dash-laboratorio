@@ -681,7 +681,7 @@ async function handleCampaigns(req, res) {
       for (const c of data.data || []) all.push(c);
       next = data.paging?.cursors?.after && data.paging?.next ? data.paging.cursors.after : null;
       guard++;
-    } while (next && guard < 10); // máx ~1000 campañas — suficiente; más tarda demasiado
+    } while (next && guard < 3); // máx ~300 campañas — cap bajo para no quemar rate limit de Meta
 
     const campaigns = all.map(c => ({
       id: c.id,
@@ -731,7 +731,7 @@ async function handleCampaignAdsets(req, res) {
       for (const s of data.data || []) all.push(s);
       next = data.paging?.cursors?.after && data.paging?.next ? data.paging.cursors.after : null;
       guard++;
-    } while (next && guard < 10);
+    } while (next && guard < 3); // máx ~300 ad sets — cap bajo para proteger rate limit
 
     const adsets = all.map(s => {
       const ads = s.ads?.data || [];

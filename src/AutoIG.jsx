@@ -27,6 +27,8 @@ import {
 } from 'lucide-react';
 
 const STORAGE_KEY = 'viora-auto-ig-automations-v1';
+const CACHE_PREFIX = 'viora-auto-ig-cache-';
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 min — balance entre frescura y rate limit
 
 function loadAutomations() {
   try {
@@ -37,6 +39,29 @@ function loadAutomations() {
 
 function saveAutomations(list) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); } catch {}
+}
+
+// Cache con TTL para no quemar el rate limit de Meta al abrir/cerrar el form
+// múltiples veces. Si el resultado cacheado tiene <5 min, lo devolvemos sin
+// ir al server. Si pasó más, fetch real y actualizamos.
+function cacheGet(key) {
+  try {
+    const raw = localStorage.getItem(CACHE_PREFIX + key);
+    if (!raw) return null;
+    const { ts, data } = JSON.parse(raw);
+    if (!ts || Date.now() - ts > CACHE_TTL_MS) return null;
+    return data;
+  } catch { return null; }
+}
+
+function cacheSet(key, data) {
+  try {
+    localStorage.setItem(CACHE_PREFIX + key, JSON.stringify({ ts: Date.now(), data }));
+  } catch {}
+}
+
+function cacheInvalidate(key) {
+  try { localStorage.removeItem(CACHE_PREFIX + key); } catch {}
 }
 
 const EMPTY_FORM = {
@@ -262,14 +287,23 @@ function AutomationForm({ initial, onCancel, onSave, addToast }) {
     if (msg.includes('Meta no conectado') || msg.includes('expired')) {
       return 'Tu sesión de Meta expiró. Reconectá desde el banner de arriba.';
     }
+    if (/too many calls|rate limit|limit.*ad-account|call.*limit/i.test(msg)) {
+      return 'Meta cortó por rate limit. Esperá 2-5 minutos y reintentá — mientras tanto el caché local te evita volver a pegar.';
+    }
     return msg || 'Error desconocido';
   };
 
-  const loadAdAccounts = async () => {
+  const loadAdAccounts = async ({ force = false } = {}) => {
+    if (!force) {
+      const cached = cacheGet('ad-accounts');
+      if (cached) { setAdAccounts(cached); return; }
+    }
     setLoadingAccs(true); setErrorAccs(null);
     try {
       const d = await fetchWithTimeout('/api/meta/ad-accounts');
-      setAdAccounts(d.accounts || []);
+      const accs = d.accounts || [];
+      setAdAccounts(accs);
+      cacheSet('ad-accounts', accs);
     } catch (err) {
       const msg = friendlyError(err);
       setErrorAccs(msg);
@@ -279,11 +313,18 @@ function AutomationForm({ initial, onCancel, onSave, addToast }) {
     }
   };
 
-  const loadCampaigns = async (accountId) => {
+  const loadCampaigns = async (accountId, { force = false } = {}) => {
+    const key = `campaigns-${accountId}`;
+    if (!force) {
+      const cached = cacheGet(key);
+      if (cached) { setCampaigns(cached); return; }
+    }
     setLoadingCmp(true); setErrorCmp(null);
     try {
       const d = await fetchWithTimeout(`/api/meta/campaigns?account_id=${encodeURIComponent(accountId)}`);
-      setCampaigns(d.campaigns || []);
+      const list = d.campaigns || [];
+      setCampaigns(list);
+      cacheSet(key, list);
     } catch (err) {
       const msg = friendlyError(err);
       setErrorCmp(msg);
@@ -293,11 +334,18 @@ function AutomationForm({ initial, onCancel, onSave, addToast }) {
     }
   };
 
-  const loadAdsets = async (campaignId) => {
+  const loadAdsets = async (campaignId, { force = false } = {}) => {
+    const key = `adsets-${campaignId}`;
+    if (!force) {
+      const cached = cacheGet(key);
+      if (cached) { setAdsets(cached); return; }
+    }
     setLoadingAds(true); setErrorAds(null);
     try {
       const d = await fetchWithTimeout(`/api/meta/campaign-adsets?campaign_id=${encodeURIComponent(campaignId)}`);
-      setAdsets(d.adsets || []);
+      const list = d.adsets || [];
+      setAdsets(list);
+      cacheSet(key, list);
     } catch (err) {
       const msg = friendlyError(err);
       setErrorAds(msg);
@@ -400,7 +448,7 @@ function AutomationForm({ initial, onCancel, onSave, addToast }) {
           {loadingAccs ? (
             <Spinner />
           ) : errorAccs ? (
-            <ErrorLine msg={errorAccs} onRetry={loadAdAccounts} />
+            <ErrorLine msg={errorAccs} onRetry={() => loadAdAccounts({ force: true })} />
           ) : (
             <SearchableSelect
               value={form.adAccountId}
@@ -417,7 +465,7 @@ function AutomationForm({ initial, onCancel, onSave, addToast }) {
           {!form.adAccountId ? (
             <div className="text-xs text-gray-400 italic">Primero elegí la cuenta.</div>
           ) : loadingCmp ? <Spinner /> : errorCmp ? (
-            <ErrorLine msg={errorCmp} onRetry={() => loadCampaigns(form.adAccountId)} />
+            <ErrorLine msg={errorCmp} onRetry={() => loadCampaigns(form.adAccountId, { force: true })} />
           ) : (
             <SearchableSelect
               value={form.campaignId}
@@ -434,7 +482,7 @@ function AutomationForm({ initial, onCancel, onSave, addToast }) {
           {!form.campaignId ? (
             <div className="text-xs text-gray-400 italic">Primero elegí la campaña.</div>
           ) : loadingAds ? <Spinner /> : errorAds ? (
-            <ErrorLine msg={errorAds} onRetry={() => loadAdsets(form.campaignId)} />
+            <ErrorLine msg={errorAds} onRetry={() => loadAdsets(form.campaignId, { force: true })} />
           ) : (
             <SearchableSelect
               value={form.baseAdsetId}

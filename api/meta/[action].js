@@ -657,11 +657,13 @@ async function handleCampaigns(req, res) {
   const accountId = url.searchParams.get('account_id');
   if (!accountId) return respondJSON(res, 400, { error: 'Falta account_id' });
 
-  // Estados que queremos ver (excluimos DELETED y ARCHIVED).
+  // Estados que queremos ver. Meta sólo acepta estos valores en el filter
+  // `effective_status` para CAMPAIGN (otros como DELETED_PENDING o SCHEDULED
+  // rompen el endpoint con error 400). Con estos cubrimos todas las activas,
+  // pausadas y las que están bajo review.
   const effectiveStatus = JSON.stringify([
-    'ACTIVE', 'PAUSED', 'DELETED_PENDING', 'PENDING_REVIEW', 'DISAPPROVED',
-    'PREAPPROVED', 'PENDING_BILLING_INFO', 'CAMPAIGN_PAUSED',
-    'ADSET_PAUSED', 'IN_PROCESS', 'WITH_ISSUES', 'SCHEDULED',
+    'ACTIVE', 'PAUSED', 'IN_PROCESS', 'WITH_ISSUES',
+    'PENDING_REVIEW', 'DISAPPROVED', 'PREAPPROVED',
   ]);
 
   try {
@@ -679,7 +681,7 @@ async function handleCampaigns(req, res) {
       for (const c of data.data || []) all.push(c);
       next = data.paging?.cursors?.after && data.paging?.next ? data.paging.cursors.after : null;
       guard++;
-    } while (next && guard < 20); // máx 2000 campañas — suficiente
+    } while (next && guard < 10); // máx ~1000 campañas — suficiente; más tarda demasiado
 
     const campaigns = all.map(c => ({
       id: c.id,
@@ -697,8 +699,12 @@ async function handleCampaigns(req, res) {
   }
 }
 
-// Lista los conjuntos (ad sets) de una campaña, con el ad principal y su
-// creativo para identificar qué post promueve cada uno. Pagina hasta agotar.
+// Lista los conjuntos (ad sets) de una campaña. Por default trae fields
+// mínimos (id, name, status, created_time) — suficiente para que el combobox
+// del form de Auto IG pueda mostrarlos. Si el caller pide `with_ads=1`
+// (p. ej. alguna vista que muestre el creative actual), agrega la expansión
+// `ads{...creative{...}}` — esa expansión es costosa en Meta y puede tardar
+// varios segundos si hay muchos ad sets.
 async function handleCampaignAdsets(req, res) {
   if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
   const session = readMetaCookie(req);
@@ -707,26 +713,25 @@ async function handleCampaignAdsets(req, res) {
   const origin = getOrigin(req);
   const url = new URL(req.url, origin);
   const campaignId = url.searchParams.get('campaign_id');
+  const withAds = url.searchParams.get('with_ads') === '1';
   if (!campaignId) return respondJSON(res, 400, { error: 'Falta campaign_id' });
+
+  const fieldsMinimal = 'id,name,status,effective_status,created_time,updated_time';
+  const fieldsHeavy = fieldsMinimal + ',ads{id,name,status,effective_status,creative{id,name,object_story_id,instagram_permalink_url,thumbnail_url,effective_instagram_media_id}}';
+  const fields = withAds ? fieldsHeavy : fieldsMinimal;
 
   try {
     const all = [];
     let next = null;
     let guard = 0;
     do {
-      const params = {
-        fields: [
-          'id,name,status,effective_status,created_time,updated_time',
-          'ads{id,name,status,effective_status,creative{id,name,object_story_id,instagram_permalink_url,thumbnail_url,effective_instagram_media_id}}',
-        ].join(','),
-        limit: 100,
-      };
+      const params = { fields, limit: 100 };
       if (next) params.after = next;
       const data = await graphGet(`${campaignId}/adsets`, session.accessToken, params);
       for (const s of data.data || []) all.push(s);
       next = data.paging?.cursors?.after && data.paging?.next ? data.paging.cursors.after : null;
       guard++;
-    } while (next && guard < 20);
+    } while (next && guard < 10);
 
     const adsets = all.map(s => {
       const ads = s.ads?.data || [];

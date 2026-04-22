@@ -1117,6 +1117,74 @@ async function handleCronCreativeRefresh(req, res) {
   return handleRunCreativeRefresh(synthReq, res);
 }
 
+// Resuelve una URL pública de Instagram (ej. https://www.instagram.com/xyz/)
+// a un { igUserId, pageId, username, pageName } buscando entre las IG
+// Business Accounts conectadas a las Pages del user.
+//
+// Nota: para crear un ad con un post de IG necesitamos sí o sí que esa
+// cuenta esté conectada a una Page del Business Manager del user. La URL
+// pública nos sirve para identificarla sin pedirle al user que "conecte IG"
+// explícitamente — pero la cuenta tiene que existir en su Business.
+async function handleResolveIgUrl(req, res) {
+  if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
+  const session = readMetaCookie(req);
+  if (!session?.accessToken) return respondJSON(res, 401, { error: 'Meta no conectado' });
+
+  const origin = getOrigin(req);
+  const url = new URL(req.url, origin);
+  const igUrl = url.searchParams.get('ig_url');
+  if (!igUrl) return respondJSON(res, 400, { error: 'Falta ig_url' });
+
+  // Parse username desde la URL. Formatos aceptados:
+  //   https://www.instagram.com/username/
+  //   https://instagram.com/username
+  //   instagram.com/username
+  //   @username
+  //   username
+  let username;
+  try {
+    const raw = igUrl.trim();
+    if (raw.startsWith('@')) {
+      username = raw.slice(1);
+    } else if (raw.includes('instagram.com')) {
+      const u = new URL(raw.startsWith('http') ? raw : `https://${raw}`);
+      const parts = u.pathname.split('/').filter(Boolean);
+      username = parts[0] || '';
+    } else {
+      username = raw;
+    }
+    username = username.toLowerCase().replace(/[^a-z0-9._]/g, '');
+    if (!username) throw new Error('vacío');
+  } catch {
+    return respondJSON(res, 400, { error: 'No pude extraer el username de la URL' });
+  }
+
+  try {
+    const data = await graphGet('me/accounts', session.accessToken, {
+      fields: 'id,name,instagram_business_account{id,username}',
+      limit: 100,
+    });
+    const pages = data.data || [];
+    const match = pages.find(p => {
+      const u = p.instagram_business_account?.username;
+      return u && String(u).toLowerCase() === username;
+    });
+    if (!match) {
+      return respondJSON(res, 404, {
+        error: `No encontré @${username} entre las IG Business vinculadas a tus Pages. Asegurate de que esa cuenta esté convertida a Business y linkeada a una Page de tu Business Manager.`,
+      });
+    }
+    return respondJSON(res, 200, {
+      igUserId: match.instagram_business_account.id,
+      pageId: match.id,
+      username,
+      pageName: match.name,
+    });
+  } catch (err) {
+    return respondJSON(res, err.status || 502, { error: err.message });
+  }
+}
+
 // --- dispatcher ---
 
 const actions = {
@@ -1133,6 +1201,7 @@ const actions = {
   'campaign-adsets': handleCampaignAdsets,
   'run-creative-refresh': handleRunCreativeRefresh,
   'cron-creative-refresh': handleCronCreativeRefresh,
+  'resolve-ig-url': handleResolveIgUrl,
 };
 
 export default async function handler(req, res) {

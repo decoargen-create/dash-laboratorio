@@ -20,10 +20,10 @@
 // Parte 2 (próximo): botones Previsualizar/Ejecutar conectados al backend.
 // Parte 3: cron diario sobre múltiples automatizaciones.
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Instagram, Plus, Pencil, Trash2, Check, X, Loader2, AlertTriangle,
-  ChevronLeft, Link2, RefreshCw, ExternalLink,
+  ChevronLeft, Link2, RefreshCw, ExternalLink, Search, ChevronDown,
 } from 'lucide-react';
 
 const STORAGE_KEY = 'viora-auto-ig-automations-v1';
@@ -379,16 +379,14 @@ function AutomationForm({ initial, onCancel, onSave, addToast }) {
           {loadingAccs ? (
             <Spinner />
           ) : (
-            <select
+            <SearchableSelect
               value={form.adAccountId}
-              onChange={(e) => patch({ adAccountId: e.target.value, campaignId: '', baseAdsetId: '' })}
-              className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm"
-            >
-              <option value="">— Elegí una —</option>
-              {adAccounts.map(a => (
-                <option key={a.id} value={a.id}>{a.name} · {a.currency}</option>
-              ))}
-            </select>
+              onChange={(val, option) => patch({ adAccountId: val, adAccountName: option?.label || '', campaignId: '', baseAdsetId: '' })}
+              options={adAccounts.map(a => ({ value: a.id, label: `${a.name} · ${a.currency}` }))}
+              placeholder="— Elegí una —"
+              searchPlaceholder="Buscar por nombre o moneda…"
+              emptyMessage="No hay cuentas que matcheen."
+            />
           )}
         </Field>
 
@@ -396,16 +394,14 @@ function AutomationForm({ initial, onCancel, onSave, addToast }) {
           {!form.adAccountId ? (
             <div className="text-xs text-gray-400 italic">Primero elegí la cuenta.</div>
           ) : loadingCmp ? <Spinner /> : (
-            <select
+            <SearchableSelect
               value={form.campaignId}
-              onChange={(e) => patch({ campaignId: e.target.value, baseAdsetId: '' })}
-              className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm"
-            >
-              <option value="">— Elegí una —</option>
-              {campaigns.map(c => (
-                <option key={c.id} value={c.id}>{c.name} · {c.objective} · {c.effectiveStatus}</option>
-              ))}
-            </select>
+              onChange={(val, option) => patch({ campaignId: val, campaignName: option?.label || '', baseAdsetId: '' })}
+              options={campaigns.map(c => ({ value: c.id, label: `${c.name} · ${c.objective} · ${c.effectiveStatus}` }))}
+              placeholder="— Elegí una —"
+              searchPlaceholder="Buscar por nombre, objective o status…"
+              emptyMessage="No hay campañas que matcheen."
+            />
           )}
         </Field>
 
@@ -413,16 +409,14 @@ function AutomationForm({ initial, onCancel, onSave, addToast }) {
           {!form.campaignId ? (
             <div className="text-xs text-gray-400 italic">Primero elegí la campaña.</div>
           ) : loadingAds ? <Spinner /> : (
-            <select
+            <SearchableSelect
               value={form.baseAdsetId}
-              onChange={(e) => patch({ baseAdsetId: e.target.value })}
-              className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm"
-            >
-              <option value="">— Elegí uno —</option>
-              {adsets.map(s => (
-                <option key={s.id} value={s.id}>{s.name} · {s.effectiveStatus}</option>
-              ))}
-            </select>
+              onChange={(val, option) => patch({ baseAdsetId: val, baseAdsetName: option?.label || '' })}
+              options={adsets.map(s => ({ value: s.id, label: `${s.name} · ${s.effectiveStatus}` }))}
+              placeholder="— Elegí uno —"
+              searchPlaceholder="Buscar por nombre o status…"
+              emptyMessage="No hay ad sets que matcheen."
+            />
           )}
         </Field>
 
@@ -520,6 +514,97 @@ function Spinner() {
   return (
     <div className="flex items-center gap-2 text-xs text-gray-500">
       <Loader2 size={14} className="animate-spin" /> Cargando…
+    </div>
+  );
+}
+
+// Select buscable — input arriba para filtrar + lista desplegable clickeable.
+// No trae una lib aparte; es una combobox artesanal.
+function SearchableSelect({ value, onChange, options, placeholder, searchPlaceholder, emptyMessage }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const containerRef = useRef(null);
+  const inputRef = useRef(null);
+
+  const selected = options.find(o => o.value === value) || null;
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return options;
+    return options.filter(o => o.label.toLowerCase().includes(q));
+  }, [options, query]);
+
+  // Cerrar al clickear afuera.
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e) => {
+      if (!containerRef.current?.contains(e.target)) {
+        setOpen(false); setQuery('');
+      }
+    };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, [open]);
+
+  useEffect(() => {
+    if (open) setTimeout(() => inputRef.current?.focus(), 20);
+  }, [open]);
+
+  const pick = (opt) => {
+    onChange(opt.value, opt);
+    setOpen(false); setQuery('');
+  };
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className={`w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-left flex items-center justify-between gap-2 ${
+          selected ? 'text-gray-900 dark:text-gray-100' : 'text-gray-400'
+        }`}
+      >
+        <span className="truncate">{selected?.label || placeholder}</span>
+        <ChevronDown size={14} className={`shrink-0 transition ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && (
+        <div className="absolute z-20 left-0 right-0 mt-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg overflow-hidden">
+          <div className="p-2 border-b border-gray-200 dark:border-gray-700">
+            <div className="relative">
+              <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                ref={inputRef}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={searchPlaceholder || 'Buscar…'}
+                className="w-full pl-7 pr-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md focus:outline-none focus:ring-2 focus:ring-pink-500"
+              />
+            </div>
+          </div>
+          <div className="max-h-60 overflow-auto">
+            {filtered.length === 0 ? (
+              <div className="px-3 py-4 text-center text-xs text-gray-500 dark:text-gray-400">
+                {emptyMessage || 'Sin resultados.'}
+              </div>
+            ) : (
+              filtered.map(opt => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => pick(opt)}
+                  className={`w-full px-3 py-2 text-left text-xs flex items-center gap-2 hover:bg-gray-50 dark:hover:bg-gray-700/50 ${
+                    opt.value === value ? 'bg-pink-50 dark:bg-pink-900/20 text-pink-700 dark:text-pink-300' : 'text-gray-700 dark:text-gray-300'
+                  }`}
+                >
+                  {opt.value === value ? <Check size={12} className="shrink-0" /> : <span className="w-3 shrink-0" />}
+                  <span className="truncate">{opt.label}</span>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

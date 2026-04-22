@@ -14,7 +14,9 @@
 import React, { useState, useEffect } from 'react';
 import {
   BarChart3, Package, ChevronRight, Inbox, ExternalLink, Image as ImageIcon, Play, Search,
+  RefreshCw,
 } from 'lucide-react';
+import CreativeRefreshPanel from './CreativeRefreshPanel.jsx';
 
 const PRODUCTOS_KEY = 'viora-marketing-productos-v1';
 const ACTIVE_KEY = 'viora-marketing-meta-ads-active-product';
@@ -31,6 +33,7 @@ export default function MetaAdsSection({ addToast }) {
   const [activeProductoId, setActiveProductoId] = useState(() => {
     try { return localStorage.getItem(ACTIVE_KEY) || null; } catch { return null; }
   });
+  const [activeTab, setActiveTab] = useState('ads'); // 'ads' | 'refresh'
 
   // Refrescamos productos cada 3s — si el user agrega/edita en Arranque,
   // se refleja acá sin recargar.
@@ -158,9 +161,37 @@ export default function MetaAdsSection({ addToast }) {
           </p>
         </div>
       ) : (
-        <AdsGrid metaAccount={producto.metaAccount} />
+        <>
+          {/* Sub-tabs: Ads (explorador) | Automatización (renovación de creativos) */}
+          <div className="flex items-center gap-1 border-b border-gray-200 dark:border-gray-700">
+            <TabButton active={activeTab === 'ads'} onClick={() => setActiveTab('ads')} icon={<BarChart3 size={12} />}>
+              Ads ({producto.metaAccount.ads?.length || 0})
+            </TabButton>
+            <TabButton active={activeTab === 'refresh'} onClick={() => setActiveTab('refresh')} icon={<RefreshCw size={12} />}>
+              Automatización
+            </TabButton>
+          </div>
+
+          {activeTab === 'ads' && <AdsGrid metaAccount={producto.metaAccount} />}
+          {activeTab === 'refresh' && <CreativeRefreshPanel producto={producto} addToast={addToast} />}
+        </>
       )}
     </div>
+  );
+}
+
+function TabButton({ active, onClick, icon, children }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold border-b-2 transition -mb-px ${
+        active
+          ? 'text-blue-600 dark:text-blue-400 border-blue-500'
+          : 'text-gray-500 dark:text-gray-400 border-transparent hover:text-gray-800 dark:hover:text-gray-200'
+      }`}
+    >
+      {icon} {children}
+    </button>
   );
 }
 

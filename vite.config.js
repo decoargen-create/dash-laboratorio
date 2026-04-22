@@ -21,9 +21,28 @@ function apiDevPlugin(env) {
 
       server.middlewares.use(async (req, res, next) => {
         if (!req.url || !req.url.startsWith('/api/')) return next()
-        const urlPath = req.url.split('?')[0]
-        const name = urlPath.replace(/^\/api\//, '').replace(/\/$/, '')
-        const filePath = path.resolve(process.cwd(), 'api', `${name}.js`)
+        const fullUrl = req.url
+        const urlPath = fullUrl.split('?')[0]
+        const segs = urlPath.replace(/^\/api\//, '').replace(/\/$/, '').split('/')
+
+        // Resolvemos el archivo del handler. Primero intentamos match exacto
+        // (api/foo/bar.js). Si no existe, buscamos una ruta dinámica en el
+        // directorio padre — archivo con nombre `[param].js` — para imitar
+        // el routing de Vercel (ej. /api/meta/ad-accounts → api/meta/[action].js).
+        let filePath = path.resolve(process.cwd(), 'api', `${segs.join('/')}.js`)
+        let dynamicParam = null
+        let dynamicValue = null
+        if (!fs.existsSync(filePath) && segs.length >= 2) {
+          const dir = path.resolve(process.cwd(), 'api', ...segs.slice(0, -1))
+          if (fs.existsSync(dir)) {
+            const dyn = fs.readdirSync(dir).find(f => /^\[[^\]]+\]\.js$/.test(f))
+            if (dyn) {
+              filePath = path.join(dir, dyn)
+              dynamicParam = dyn.replace(/^\[|\]\.js$/g, '')
+              dynamicValue = segs[segs.length - 1]
+            }
+          }
+        }
         if (!fs.existsSync(filePath)) return next()
 
         try {
@@ -33,7 +52,18 @@ function apiDevPlugin(env) {
           const raw = Buffer.concat(chunks).toString('utf-8')
           req.body = raw ? (safeJSON(raw) ?? raw) : undefined
 
-          const mod = await server.ssrLoadModule(`/api/${name}.js`)
+          // Armamos req.query con querystring + param dinámico de la ruta.
+          // Vercel hace esto automáticamente; en dev lo hacemos a mano.
+          const qs = fullUrl.includes('?') ? fullUrl.split('?')[1] : ''
+          const query = {}
+          if (qs) {
+            for (const [k, v] of new URLSearchParams(qs)) query[k] = v
+          }
+          if (dynamicParam) query[dynamicParam] = dynamicValue
+          req.query = query
+
+          const relPath = '/' + path.relative(process.cwd(), filePath).replace(/\\/g, '/')
+          const mod = await server.ssrLoadModule(relPath)
           const handler = mod.default
           if (typeof handler !== 'function') {
             res.statusCode = 500

@@ -255,15 +255,23 @@ function AutomationForm({ initial, onCancel, onSave, addToast }) {
     }
   };
 
+  // Traduce errores genéricos a mensajes útiles para el user.
+  const friendlyError = (err) => {
+    if (err.name === 'AbortError') return 'La API de Meta tardó demasiado. Reintentá.';
+    const msg = err.message || '';
+    if (msg.includes('Meta no conectado') || msg.includes('expired')) {
+      return 'Tu sesión de Meta expiró. Reconectá desde el banner de arriba.';
+    }
+    return msg || 'Error desconocido';
+  };
+
   const loadAdAccounts = async () => {
     setLoadingAccs(true); setErrorAccs(null);
     try {
       const d = await fetchWithTimeout('/api/meta/ad-accounts');
       setAdAccounts(d.accounts || []);
     } catch (err) {
-      const msg = err.name === 'AbortError'
-        ? 'La API de Meta tardó demasiado. Reintentá.'
-        : err.message;
+      const msg = friendlyError(err);
       setErrorAccs(msg);
       addToast?.(`No pude listar cuentas publicitarias: ${msg}`, 'error');
     } finally {
@@ -277,9 +285,7 @@ function AutomationForm({ initial, onCancel, onSave, addToast }) {
       const d = await fetchWithTimeout(`/api/meta/campaigns?account_id=${encodeURIComponent(accountId)}`);
       setCampaigns(d.campaigns || []);
     } catch (err) {
-      const msg = err.name === 'AbortError'
-        ? 'La API de Meta tardó demasiado. Reintentá.'
-        : err.message;
+      const msg = friendlyError(err);
       setErrorCmp(msg);
       addToast?.(`No pude listar campañas: ${msg}`, 'error');
     } finally {
@@ -293,9 +299,7 @@ function AutomationForm({ initial, onCancel, onSave, addToast }) {
       const d = await fetchWithTimeout(`/api/meta/campaign-adsets?campaign_id=${encodeURIComponent(campaignId)}`);
       setAdsets(d.adsets || []);
     } catch (err) {
-      const msg = err.name === 'AbortError'
-        ? 'La API de Meta tardó demasiado. Reintentá.'
-        : err.message;
+      const msg = friendlyError(err);
       setErrorAds(msg);
       addToast?.(`No pude listar ad sets: ${msg}`, 'error');
     } finally {
@@ -321,9 +325,7 @@ function AutomationForm({ initial, onCancel, onSave, addToast }) {
     setIgError(null);
     setIgVerified(false);
     try {
-      const r = await fetch(`/api/meta/resolve-ig-url?ig_url=${encodeURIComponent(form.igUrl)}`);
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error || 'error');
+      const d = await fetchWithTimeout(`/api/meta/resolve-ig-url?ig_url=${encodeURIComponent(form.igUrl)}`);
       patch({
         igUsername: d.username,
         igUserId: d.igUserId,
@@ -332,7 +334,7 @@ function AutomationForm({ initial, onCancel, onSave, addToast }) {
       setIgVerified(true);
       addToast?.(`Resuelto @${d.username} (Page: ${d.pageName})`, 'success');
     } catch (err) {
-      setIgError(err.message);
+      setIgError(friendlyError(err));
     } finally {
       setVerifying(false);
     }

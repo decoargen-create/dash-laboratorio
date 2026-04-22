@@ -644,6 +644,9 @@ async function fetchIgPostLikes(igMediaId, accessToken) {
 }
 
 // Lista campañas de una ad account — para que el user elija cuál renovar.
+// Pagina hasta agotar (Meta devuelve 25-100 por página). Incluye explícitamente
+// todos los effective_status no-archivados — por default Meta omite algunos
+// transitorios como IN_PROCESS o WITH_ISSUES.
 async function handleCampaigns(req, res) {
   if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
   const session = readMetaCookie(req);
@@ -654,12 +657,31 @@ async function handleCampaigns(req, res) {
   const accountId = url.searchParams.get('account_id');
   if (!accountId) return respondJSON(res, 400, { error: 'Falta account_id' });
 
+  // Estados que queremos ver (excluimos DELETED y ARCHIVED).
+  const effectiveStatus = JSON.stringify([
+    'ACTIVE', 'PAUSED', 'DELETED_PENDING', 'PENDING_REVIEW', 'DISAPPROVED',
+    'PREAPPROVED', 'PENDING_BILLING_INFO', 'CAMPAIGN_PAUSED',
+    'ADSET_PAUSED', 'IN_PROCESS', 'WITH_ISSUES', 'SCHEDULED',
+  ]);
+
   try {
-    const data = await graphGet(`${accountId}/campaigns`, session.accessToken, {
-      fields: 'id,name,objective,status,effective_status,created_time',
-      limit: 100,
-    });
-    const campaigns = (data.data || []).map(c => ({
+    const all = [];
+    let next = null;
+    let guard = 0;
+    do {
+      const params = {
+        fields: 'id,name,objective,status,effective_status,created_time',
+        limit: 100,
+        effective_status: effectiveStatus,
+      };
+      if (next) params.after = next;
+      const data = await graphGet(`${accountId}/campaigns`, session.accessToken, params);
+      for (const c of data.data || []) all.push(c);
+      next = data.paging?.cursors?.after && data.paging?.next ? data.paging.cursors.after : null;
+      guard++;
+    } while (next && guard < 20); // máx 2000 campañas — suficiente
+
+    const campaigns = all.map(c => ({
       id: c.id,
       name: c.name,
       objective: c.objective,
@@ -667,6 +689,8 @@ async function handleCampaigns(req, res) {
       effectiveStatus: c.effective_status,
       createdTime: c.created_time,
     }));
+    // Orden: más recientes primero (útil para el combobox buscable).
+    campaigns.sort((a, b) => new Date(b.createdTime || 0) - new Date(a.createdTime || 0));
     return respondJSON(res, 200, { campaigns, total: campaigns.length });
   } catch (err) {
     return respondJSON(res, err.status || 502, { error: err.message });
@@ -674,7 +698,7 @@ async function handleCampaigns(req, res) {
 }
 
 // Lista los conjuntos (ad sets) de una campaña, con el ad principal y su
-// creativo para identificar qué post promueve cada uno.
+// creativo para identificar qué post promueve cada uno. Pagina hasta agotar.
 async function handleCampaignAdsets(req, res) {
   if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
   const session = readMetaCookie(req);
@@ -686,14 +710,25 @@ async function handleCampaignAdsets(req, res) {
   if (!campaignId) return respondJSON(res, 400, { error: 'Falta campaign_id' });
 
   try {
-    const data = await graphGet(`${campaignId}/adsets`, session.accessToken, {
-      fields: [
-        'id,name,status,effective_status,created_time,updated_time',
-        'ads{id,name,status,effective_status,creative{id,name,object_story_id,instagram_permalink_url,thumbnail_url,effective_instagram_media_id}}',
-      ].join(','),
-      limit: 100,
-    });
-    const adsets = (data.data || []).map(s => {
+    const all = [];
+    let next = null;
+    let guard = 0;
+    do {
+      const params = {
+        fields: [
+          'id,name,status,effective_status,created_time,updated_time',
+          'ads{id,name,status,effective_status,creative{id,name,object_story_id,instagram_permalink_url,thumbnail_url,effective_instagram_media_id}}',
+        ].join(','),
+        limit: 100,
+      };
+      if (next) params.after = next;
+      const data = await graphGet(`${campaignId}/adsets`, session.accessToken, params);
+      for (const s of data.data || []) all.push(s);
+      next = data.paging?.cursors?.after && data.paging?.next ? data.paging.cursors.after : null;
+      guard++;
+    } while (next && guard < 20);
+
+    const adsets = all.map(s => {
       const ads = s.ads?.data || [];
       const mainAd = ads[0] || null;
       const creative = mainAd?.creative || null;
@@ -720,6 +755,7 @@ async function handleCampaignAdsets(req, res) {
         } : null,
       };
     });
+    adsets.sort((a, b) => new Date(b.createdTime || 0) - new Date(a.createdTime || 0));
     return respondJSON(res, 200, { adsets, total: adsets.length });
   } catch (err) {
     return respondJSON(res, err.status || 502, { error: err.message });

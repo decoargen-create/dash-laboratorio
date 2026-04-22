@@ -28,15 +28,17 @@ export const META_COOKIE_MAX_AGE = 60 * 60 * 24 * 55; // 55 días (el long-lived
 // en la Meta Developer app (pero los scopes se piden en la URL del OAuth, no
 // están hardcodeados en el dashboard de Meta — salvo los que requieren review).
 //
-// NOTA: `instagram_basic` fue deprecated por Meta. Para leer posts/media de
-// Instagram hay que agregar el producto "Instagram" en la app Meta y usar
-// `instagram_content_publish` / `instagram_manage_insights`, que requieren
-// App Review en modo Live. Lo dejamos afuera por ahora.
+// `instagram_basic` + `pages_read_engagement` son necesarios para el módulo
+// IG-sync: leer el IG business account vinculado a una Page y listar sus
+// últimos posts. Ambos están en Standard Access (no requieren App Review
+// para uso con cuentas del propio admin de la app).
 export const META_SCOPES = [
   'ads_read',
   'ads_management',
   'business_management',
   'pages_show_list',
+  'pages_read_engagement',
+  'instagram_basic',
 ].join(',');
 
 function b64url(input) {

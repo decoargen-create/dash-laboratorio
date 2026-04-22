@@ -28,17 +28,18 @@ export const META_COOKIE_MAX_AGE = 60 * 60 * 24 * 55; // 55 días (el long-lived
 // en la Meta Developer app (pero los scopes se piden en la URL del OAuth, no
 // están hardcodeados en el dashboard de Meta — salvo los que requieren review).
 //
-// `instagram_basic` + `pages_read_engagement` son necesarios para el módulo
-// IG-sync: leer el IG business account vinculado a una Page y listar sus
-// últimos posts. Ambos están en Standard Access (no requieren App Review
-// para uso con cuentas del propio admin de la app).
+// Para el módulo IG-sync NO pedimos `instagram_basic` directamente: ese scope
+// requiere que la app tenga el producto "Instagram" agregado y aprobado, y
+// Meta rechaza la consent screen si no lo tiene ("Invalid Scopes:
+// instagram_basic"). En su lugar, leemos los posts de IG a través del Page
+// Access Token de la Page vinculada (hereda permisos de la Page sin pedir
+// el scope por separado). Los scopes de Pages alcanzan para eso.
 export const META_SCOPES = [
   'ads_read',
   'ads_management',
   'business_management',
   'pages_show_list',
   'pages_read_engagement',
-  'instagram_basic',
 ].join(',');
 
 function b64url(input) {

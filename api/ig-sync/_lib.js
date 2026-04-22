@@ -112,6 +112,26 @@ export async function graphPost(path, accessToken, body = {}) {
 
 // ---------- IG + Meta Marketing helpers ----------
 
+// Resuelve el Page Access Token de una Page a partir de un User Access Token
+// con scope `pages_show_list`. Meta entrega los page tokens en /me/accounts.
+// Con Page Access Token podemos leer el IG business account vinculado y su
+// media SIN necesitar `instagram_basic` (el scope problemático que falla en
+// la consent screen si la app no tiene el producto Instagram aprobado).
+//
+// Devuelve null si no se encuentra la Page (user no admin de esa Page).
+export async function resolvePageToken(pageId, userToken) {
+  try {
+    const data = await graphGet('me/accounts', userToken, {
+      fields: 'id,access_token',
+      limit: 100,
+    });
+    const match = (data.data || []).find(p => String(p.id) === String(pageId));
+    return match?.access_token || null;
+  } catch {
+    return null;
+  }
+}
+
 // Último post publicado en el IG business indicado. Usamos /media (no
 // /stories) porque queremos feed posts que se puedan promocionar como ads.
 // Filtramos por timestamp descendente (Meta ya lo devuelve así por default).
@@ -246,11 +266,19 @@ export async function activateAdSet({ adsetId, token }) {
 
 // Plan: inspecciona el estado actual y devuelve qué debería pasar.
 // No escribe nada en Meta.
+//
+// `token` es el User Access Token (desde cookie) o System User Token (cron).
+// Para leer IG media necesitamos el Page Access Token — lo resolvemos acá.
+// Si no se puede resolver, igualmente intentamos con `token` directo (System
+// User tokens tienen acceso hereditario y funcionan sin page token).
 export async function buildSyncPlan(config, token) {
   const { campaignId, igUserId, pageId, adAccountId } = config;
 
+  const pageToken = await resolvePageToken(pageId, token);
+  const igToken = pageToken || token;
+
   const [latest, ads] = await Promise.all([
-    fetchLatestIgPost(igUserId, token),
+    fetchLatestIgPost(igUserId, igToken),
     fetchActiveAdsInCampaign(campaignId, token),
   ]);
 

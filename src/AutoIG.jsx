@@ -231,70 +231,89 @@ function AutomationForm({ initial, onCancel, onSave, addToast }) {
   const [loadingAccs, setLoadingAccs] = useState(false);
   const [loadingCmp, setLoadingCmp] = useState(false);
   const [loadingAds, setLoadingAds] = useState(false);
+  const [errorAccs, setErrorAccs] = useState(null);
+  const [errorCmp, setErrorCmp] = useState(null);
+  const [errorAds, setErrorAds] = useState(null);
   const [verifying, setVerifying] = useState(false);
   const [igVerified, setIgVerified] = useState(!!initial.igUserId && !!initial.pageId);
   const [igError, setIgError] = useState(null);
 
   const patch = (delta) => setForm(f => ({ ...f, ...delta }));
 
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      setLoadingAccs(true);
-      try {
-        const r = await fetch('/api/meta/ad-accounts');
-        const d = await r.json();
-        if (!alive) return;
-        if (!r.ok) throw new Error(d.error || 'error');
-        setAdAccounts(d.accounts || []);
-      } catch (err) {
-        addToast?.(`No pude listar cuentas publicitarias: ${err.message}`, 'error');
-      } finally {
-        if (alive) setLoadingAccs(false);
-      }
-    })();
-    return () => { alive = false; };
-  }, [addToast]);
+  // Fetch con timeout — Meta puede tardar si hay muchas campañas. 25s es
+  // suficiente para casos razonables; si pasa, mostramos error con retry.
+  const fetchWithTimeout = async (url, ms = 25000) => {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), ms);
+    try {
+      const r = await fetch(url, { signal: ctrl.signal });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      return d;
+    } finally {
+      clearTimeout(t);
+    }
+  };
 
+  const loadAdAccounts = async () => {
+    setLoadingAccs(true); setErrorAccs(null);
+    try {
+      const d = await fetchWithTimeout('/api/meta/ad-accounts');
+      setAdAccounts(d.accounts || []);
+    } catch (err) {
+      const msg = err.name === 'AbortError'
+        ? 'La API de Meta tardó demasiado. Reintentá.'
+        : err.message;
+      setErrorAccs(msg);
+      addToast?.(`No pude listar cuentas publicitarias: ${msg}`, 'error');
+    } finally {
+      setLoadingAccs(false);
+    }
+  };
+
+  const loadCampaigns = async (accountId) => {
+    setLoadingCmp(true); setErrorCmp(null);
+    try {
+      const d = await fetchWithTimeout(`/api/meta/campaigns?account_id=${encodeURIComponent(accountId)}`);
+      setCampaigns(d.campaigns || []);
+    } catch (err) {
+      const msg = err.name === 'AbortError'
+        ? 'La API de Meta tardó demasiado. Reintentá.'
+        : err.message;
+      setErrorCmp(msg);
+      addToast?.(`No pude listar campañas: ${msg}`, 'error');
+    } finally {
+      setLoadingCmp(false);
+    }
+  };
+
+  const loadAdsets = async (campaignId) => {
+    setLoadingAds(true); setErrorAds(null);
+    try {
+      const d = await fetchWithTimeout(`/api/meta/campaign-adsets?campaign_id=${encodeURIComponent(campaignId)}`);
+      setAdsets(d.adsets || []);
+    } catch (err) {
+      const msg = err.name === 'AbortError'
+        ? 'La API de Meta tardó demasiado. Reintentá.'
+        : err.message;
+      setErrorAds(msg);
+      addToast?.(`No pude listar ad sets: ${msg}`, 'error');
+    } finally {
+      setLoadingAds(false);
+    }
+  };
+
+  useEffect(() => { loadAdAccounts(); /* eslint-disable-next-line */ }, []);
   useEffect(() => {
     if (!form.adAccountId) { setCampaigns([]); return; }
-    let alive = true;
-    (async () => {
-      setLoadingCmp(true);
-      try {
-        const r = await fetch(`/api/meta/campaigns?account_id=${encodeURIComponent(form.adAccountId)}`);
-        const d = await r.json();
-        if (!alive) return;
-        if (!r.ok) throw new Error(d.error || 'error');
-        setCampaigns(d.campaigns || []);
-      } catch (err) {
-        addToast?.(`No pude listar campañas: ${err.message}`, 'error');
-      } finally {
-        if (alive) setLoadingCmp(false);
-      }
-    })();
-    return () => { alive = false; };
-  }, [form.adAccountId, addToast]);
-
+    loadCampaigns(form.adAccountId);
+    /* eslint-disable-next-line */
+  }, [form.adAccountId]);
   useEffect(() => {
     if (!form.campaignId) { setAdsets([]); return; }
-    let alive = true;
-    (async () => {
-      setLoadingAds(true);
-      try {
-        const r = await fetch(`/api/meta/campaign-adsets?campaign_id=${encodeURIComponent(form.campaignId)}`);
-        const d = await r.json();
-        if (!alive) return;
-        if (!r.ok) throw new Error(d.error || 'error');
-        setAdsets(d.adsets || []);
-      } catch (err) {
-        addToast?.(`No pude listar ad sets: ${err.message}`, 'error');
-      } finally {
-        if (alive) setLoadingAds(false);
-      }
-    })();
-    return () => { alive = false; };
-  }, [form.campaignId, addToast]);
+    loadAdsets(form.campaignId);
+    /* eslint-disable-next-line */
+  }, [form.campaignId]);
 
   const verifyIgUrl = async () => {
     if (!form.igUrl) return;
@@ -378,6 +397,8 @@ function AutomationForm({ initial, onCancel, onSave, addToast }) {
         <Field label="Cuenta publicitaria">
           {loadingAccs ? (
             <Spinner />
+          ) : errorAccs ? (
+            <ErrorLine msg={errorAccs} onRetry={loadAdAccounts} />
           ) : (
             <SearchableSelect
               value={form.adAccountId}
@@ -393,7 +414,9 @@ function AutomationForm({ initial, onCancel, onSave, addToast }) {
         <Field label="Campaña">
           {!form.adAccountId ? (
             <div className="text-xs text-gray-400 italic">Primero elegí la cuenta.</div>
-          ) : loadingCmp ? <Spinner /> : (
+          ) : loadingCmp ? <Spinner /> : errorCmp ? (
+            <ErrorLine msg={errorCmp} onRetry={() => loadCampaigns(form.adAccountId)} />
+          ) : (
             <SearchableSelect
               value={form.campaignId}
               onChange={(val, option) => patch({ campaignId: val, campaignName: option?.label || '', baseAdsetId: '' })}
@@ -408,7 +431,9 @@ function AutomationForm({ initial, onCancel, onSave, addToast }) {
         <Field label="Ad set base (el que se va a duplicar)">
           {!form.campaignId ? (
             <div className="text-xs text-gray-400 italic">Primero elegí la campaña.</div>
-          ) : loadingAds ? <Spinner /> : (
+          ) : loadingAds ? <Spinner /> : errorAds ? (
+            <ErrorLine msg={errorAds} onRetry={() => loadAdsets(form.campaignId)} />
+          ) : (
             <SearchableSelect
               value={form.baseAdsetId}
               onChange={(val, option) => patch({ baseAdsetId: val, baseAdsetName: option?.label || '' })}
@@ -514,6 +539,26 @@ function Spinner() {
   return (
     <div className="flex items-center gap-2 text-xs text-gray-500">
       <Loader2 size={14} className="animate-spin" /> Cargando…
+    </div>
+  );
+}
+
+function ErrorLine({ msg, onRetry }) {
+  return (
+    <div className="flex items-start gap-2 text-xs text-rose-600 dark:text-rose-400">
+      <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+      <div className="flex-1">
+        <div>{msg}</div>
+        {onRetry && (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="mt-1 inline-flex items-center gap-1 px-2 py-1 rounded border border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-900/20"
+          >
+            <RefreshCw size={11} /> Reintentar
+          </button>
+        )}
+      </div>
     </div>
   );
 }

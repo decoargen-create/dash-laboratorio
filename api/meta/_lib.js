@@ -28,18 +28,18 @@ export const META_COOKIE_MAX_AGE = 60 * 60 * 24 * 55; // 55 días (el long-lived
 // en la Meta Developer app (pero los scopes se piden en la URL del OAuth, no
 // están hardcodeados en el dashboard de Meta — salvo los que requieren review).
 //
-// `instagram_basic` + `pages_read_engagement` los usa la automatización de
-// renovación de creativos: leer el feed de IG Business asociado a la Page y
-// obtener `like_count` de los posts ya promovidos. En apps en modo Development
-// funcionan solo para los users agregados como Tester en la Meta App; para
-// producción requieren App Review.
+// Para la automatización de renovación de creativos leemos el feed de IG
+// Business y `like_count` de posts vía Page Access Token (hereda permisos
+// de la Page sin necesitar el scope `instagram_basic`). Ese scope requería
+// agregar el producto "Instagram" a la app Meta y habilitarlo en la consent
+// screen, y Meta rechaza el OAuth con "Invalid Scopes" si no está aprobado.
+// `pages_show_list` + `pages_read_engagement` alcanzan.
 export const META_SCOPES = [
   'ads_read',
   'ads_management',
   'business_management',
   'pages_show_list',
   'pages_read_engagement',
-  'instagram_basic',
 ].join(',');
 
 function b64url(input) {

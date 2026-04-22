@@ -520,7 +520,27 @@ async function handleAdPerformance(req, res) {
 //   - campaigns         → campañas de una ad account
 //   - campaign-adsets   → conjuntos (ad sets) de una campaña + ad principal
 //   - run-creative-refresh → motor: detecta, duplica, asigna creativo, pausa
+//   - cron-creative-refresh → cron diario: misma lógica, config via env
 // ------------------------------------------------------------------------
+
+// Resuelve el Page Access Token de la Page indicada a partir de un User
+// Access Token con scope `pages_show_list`. Con el page token podemos leer
+// el IG Business vinculado y su media SIN necesitar el scope `instagram_basic`
+// (que Meta rechaza en la consent screen si la app no tiene el producto
+// Instagram aprobado). Si no se puede resolver, devolvemos el token original
+// (los System User Tokens tienen acceso hereditario y funcionan igual).
+async function resolvePageToken(pageId, userToken) {
+  try {
+    const data = await graphGet('me/accounts', userToken, {
+      fields: 'id,access_token',
+      limit: 100,
+    });
+    const match = (data.data || []).find(p => String(p.id) === String(pageId));
+    return match?.access_token || userToken;
+  } catch {
+    return userToken;
+  }
+}
 
 // Lista las cuentas de Instagram Business conectadas a las Pages del user.
 // IG Business sólo se puede leer via Pages — cada Page tiene 0 o 1 IG
@@ -561,6 +581,9 @@ async function handleIgAccounts(req, res) {
 // Último post del feed de una IG Business Account, saltando los N fijados.
 // IG Graph API devuelve los posts ordenados por fecha desc, con los fijados
 // primero. Por eso pedimos N+3 y salteamos los primeros N (configurable).
+//
+// Query params: ig_id, pinned, page_id (recomendado — habilita Page Access
+// Token, que es lo que permite leer IG media sin el scope instagram_basic).
 async function handleLatestIgPost(req, res) {
   if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
   const session = readMetaCookie(req);
@@ -569,11 +592,15 @@ async function handleLatestIgPost(req, res) {
   const origin = getOrigin(req);
   const url = new URL(req.url, origin);
   const igId = url.searchParams.get('ig_id');
+  const pageId = url.searchParams.get('page_id');
   const pinned = Math.max(0, Math.min(Number(url.searchParams.get('pinned') || 0), 10));
   if (!igId) return respondJSON(res, 400, { error: 'Falta ig_id' });
 
   try {
-    const data = await graphGet(`${igId}/media`, session.accessToken, {
+    const igToken = pageId
+      ? await resolvePageToken(pageId, session.accessToken)
+      : session.accessToken;
+    const data = await graphGet(`${igId}/media`, igToken, {
       fields: 'id,caption,permalink,timestamp,media_type,media_url,thumbnail_url,like_count,comments_count',
       limit: pinned + 5,
     });
@@ -734,8 +761,30 @@ async function handleCampaignAdsets(req, res) {
 //   }
 async function handleRunCreativeRefresh(req, res) {
   if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
-  const session = readMetaCookie(req);
-  if (!session?.accessToken) return respondJSON(res, 401, { error: 'Meta no conectado' });
+
+  // Dual-auth: cookie de user (UI manual) o header de cron (Vercel Cron).
+  // Vercel envía `x-vercel-cron: 1`; además aceptamos un Bearer secret para
+  // disparar el cron desde un scheduler externo. En modo cron usamos
+  // META_SYSTEM_ACCESS_TOKEN (long-lived, idealmente System User de Business
+  // Manager — no expira).
+  const cronAuth =
+    req.headers['x-vercel-cron'] === '1' ||
+    (process.env.IG_REFRESH_CRON_SECRET &&
+      req.headers.authorization === `Bearer ${process.env.IG_REFRESH_CRON_SECRET}`);
+
+  let accessToken;
+  if (cronAuth) {
+    accessToken = process.env.META_SYSTEM_ACCESS_TOKEN || process.env.META_LONG_LIVED_TOKEN;
+    if (!accessToken) {
+      return respondJSON(res, 500, {
+        error: 'Cron sin META_SYSTEM_ACCESS_TOKEN — seteá el env var antes de agendar.',
+      });
+    }
+  } else {
+    const session = readMetaCookie(req);
+    if (!session?.accessToken) return respondJSON(res, 401, { error: 'Meta no conectado' });
+    accessToken = session.accessToken;
+  }
 
   // Parsear body JSON (Vercel no lo auto-parsea siempre para POST).
   let body;
@@ -765,7 +814,11 @@ async function handleRunCreativeRefresh(req, res) {
   if (!pageId) missing.push('pageId');
   if (missing.length) return respondJSON(res, 400, { error: `Faltan campos: ${missing.join(', ')}` });
 
-  const token = session.accessToken;
+  const token = accessToken;
+  // Page Access Token para todo lo que sea IG API (media list + likes).
+  // `instagram_basic` no está en el scope; el page token hereda permisos
+  // de la Page y alcanza para leer el IG Business vinculado.
+  const igToken = await resolvePageToken(pageId, token);
   const log = [];
   const paused = [];
   let created = null;
@@ -777,7 +830,7 @@ async function handleRunCreativeRefresh(req, res) {
 
   try {
     // --- Paso 1: último post del feed IG ---
-    const feed = await graphGet(`${igId}/media`, token, {
+    const feed = await graphGet(`${igId}/media`, igToken, {
       fields: 'id,caption,permalink,timestamp,like_count,media_type',
       limit: pinnedPosts + 5,
     });
@@ -806,7 +859,7 @@ async function handleRunCreativeRefresh(req, res) {
     const adsetsChecked = [];
     for (const entry of activeAdsets) {
       if (!entry.postId) continue;
-      const { likes, permalink, error } = await fetchIgPostLikes(entry.postId, token);
+      const { likes, permalink, error } = await fetchIgPostLikes(entry.postId, igToken);
       adsetsChecked.push({
         adsetId: entry.adsetId,
         postId: entry.postId,
@@ -957,6 +1010,113 @@ async function handleRunCreativeRefresh(req, res) {
   }
 }
 
+// ========================================================================
+// CRON CREATIVE REFRESH — dispara run-creative-refresh todos los días
+// ========================================================================
+// Vercel Cron llama GET /api/meta/cron-creative-refresh con header
+// `x-vercel-cron: 1`. Este handler:
+//   1. Verifica autorización (header Vercel o Bearer secret).
+//   2. Lee la config del producto desde env var CREATIVE_REFRESH_CONFIG
+//      (JSON con accountId, campaignId, baseAdsetId, igId, pageId,
+//      threshold, pinnedPosts, webhookUrl, enabled).
+//   3. Deriva el `state` leyendo los adsets activos de la campaña (no hay
+//      KV server-side, entonces el "estado" vive en Meta).
+//   4. Construye un req sintético con headers de cron + body y llama al
+//      handler existente de run-creative-refresh.
+async function handleCronCreativeRefresh(req, res) {
+  if (req.method !== 'GET' && req.method !== 'POST') {
+    return respondJSON(res, 405, { error: 'Method not allowed' });
+  }
+
+  // Autorización: header Vercel Cron o Bearer secret.
+  const cronAuth =
+    req.headers['x-vercel-cron'] === '1' ||
+    (process.env.IG_REFRESH_CRON_SECRET &&
+      req.headers.authorization === `Bearer ${process.env.IG_REFRESH_CRON_SECRET}`);
+  if (!cronAuth) return respondJSON(res, 401, { error: 'Cron no autorizado' });
+
+  // Config desde env var.
+  const raw = process.env.CREATIVE_REFRESH_CONFIG;
+  if (!raw) {
+    return respondJSON(res, 200, { skipped: true, reason: 'CREATIVE_REFRESH_CONFIG no configurada' });
+  }
+  let cfg;
+  try { cfg = JSON.parse(raw); } catch {
+    return respondJSON(res, 500, { error: 'CREATIVE_REFRESH_CONFIG inválida (JSON)' });
+  }
+  if (cfg.enabled === false) {
+    return respondJSON(res, 200, { skipped: true, reason: 'CREATIVE_REFRESH_CONFIG.enabled=false' });
+  }
+
+  const required = ['accountId', 'campaignId', 'baseAdsetId', 'igId', 'pageId'];
+  const missing = required.filter(k => !cfg[k]);
+  if (missing.length) {
+    return respondJSON(res, 500, { error: `CREATIVE_REFRESH_CONFIG incompleta: ${missing.join(', ')}` });
+  }
+
+  const accessToken = process.env.META_SYSTEM_ACCESS_TOKEN || process.env.META_LONG_LIVED_TOKEN;
+  if (!accessToken) {
+    return respondJSON(res, 500, { error: 'Falta META_SYSTEM_ACCESS_TOKEN para el cron' });
+  }
+
+  // Derivar state desde la campaña (stateless — no usamos KV). Listamos los
+  // adsets ACTIVOS con el IG media que tiene cada uno; así el handler de
+  // refresh puede saber si el último post ya está publicado y qué adsets
+  // candidatos hay para pausar.
+  let derivedState = { lastPostId: null, activeAdsets: [] };
+  try {
+    const adsetsData = await graphGet(`${cfg.campaignId}/adsets`, accessToken, {
+      fields: 'id,status,effective_status,ads{id,status,effective_status,creative{id,effective_instagram_media_id}}',
+      limit: 100,
+    });
+    const active = (adsetsData.data || []).filter(
+      s => s.effective_status === 'ACTIVE' || s.status === 'ACTIVE'
+    );
+    const activeAdsets = [];
+    for (const s of active) {
+      const ad = (s.ads?.data || [])[0];
+      const postId = ad?.creative?.effective_instagram_media_id || null;
+      if (postId) activeAdsets.push({ adsetId: s.id, postId, createdAt: null, postPermalink: null });
+    }
+    // lastPostId: usamos el postId del adset más reciente como proxy (si
+    // coincide con el último de IG, no hay cambio). Si hay empate o no hay
+    // data, null hace que el handler trate cualquier post como "nuevo".
+    derivedState.activeAdsets = activeAdsets;
+    derivedState.lastPostId = activeAdsets[0]?.postId || null;
+  } catch (err) {
+    console.warn('[cron-creative-refresh] no pude derivar state:', err.message);
+  }
+
+  // Construir req sintético para re-entrar por handleRunCreativeRefresh con
+  // las mismas headers de cron (así toma el branch de auth de cron).
+  const synthReq = {
+    method: 'POST',
+    headers: {
+      'x-vercel-cron': req.headers['x-vercel-cron'] || '1',
+      authorization: req.headers.authorization || '',
+      host: req.headers.host,
+      'x-forwarded-proto': req.headers['x-forwarded-proto'] || 'https',
+      'x-forwarded-host': req.headers['x-forwarded-host'],
+    },
+    body: {
+      accountId: cfg.accountId,
+      campaignId: cfg.campaignId,
+      baseAdsetId: cfg.baseAdsetId,
+      igId: cfg.igId,
+      pageId: cfg.pageId,
+      threshold: Number(cfg.threshold || 50),
+      pinnedPosts: Number(cfg.pinnedPosts || 0),
+      webhookUrl: cfg.webhookUrl || null,
+      state: derivedState,
+      dryRun: false,
+    },
+    query: { action: 'run-creative-refresh' },
+    url: '/api/meta/run-creative-refresh',
+    on() {},
+  };
+  return handleRunCreativeRefresh(synthReq, res);
+}
+
 // --- dispatcher ---
 
 const actions = {
@@ -972,6 +1132,7 @@ const actions = {
   'campaigns': handleCampaigns,
   'campaign-adsets': handleCampaignAdsets,
   'run-creative-refresh': handleRunCreativeRefresh,
+  'cron-creative-refresh': handleCronCreativeRefresh,
 };
 
 export default async function handler(req, res) {

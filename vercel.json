@@ -14,8 +14,12 @@
     "api/marketing/post-research-analysis.js": { "maxDuration": 60 },
     "api/marketing/creatives.js": { "maxDuration": 180 },
     "api/marketing/adapt-inspiracion.js": { "maxDuration": 120 },
-    "api/marketing/resolve-fb-page.js": { "maxDuration": 30 }
+    "api/marketing/resolve-fb-page.js": { "maxDuration": 30 },
+    "api/meta/[action].js": { "maxDuration": 60 }
   },
+  "crons": [
+    { "path": "/api/meta/cron-creative-refresh", "schedule": "0 12 * * *" }
+  ],
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],

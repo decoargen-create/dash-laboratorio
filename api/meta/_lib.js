@@ -28,15 +28,18 @@ export const META_COOKIE_MAX_AGE = 60 * 60 * 24 * 55; // 55 días (el long-lived
 // en la Meta Developer app (pero los scopes se piden en la URL del OAuth, no
 // están hardcodeados en el dashboard de Meta — salvo los que requieren review).
 //
-// NOTA: `instagram_basic` fue deprecated por Meta. Para leer posts/media de
-// Instagram hay que agregar el producto "Instagram" en la app Meta y usar
-// `instagram_content_publish` / `instagram_manage_insights`, que requieren
-// App Review en modo Live. Lo dejamos afuera por ahora.
+// `instagram_basic` + `pages_read_engagement` los usa la automatización de
+// renovación de creativos: leer el feed de IG Business asociado a la Page y
+// obtener `like_count` de los posts ya promovidos. En apps en modo Development
+// funcionan solo para los users agregados como Tester en la Meta App; para
+// producción requieren App Review.
 export const META_SCOPES = [
   'ads_read',
   'ads_management',
   'business_management',
   'pages_show_list',
+  'pages_read_engagement',
+  'instagram_basic',
 ].join(',');
 
 function b64url(input) {
@@ -128,6 +131,33 @@ export async function graphGet(path, accessToken, params = {}) {
   }
   url.searchParams.set('access_token', accessToken);
   const resp = await fetch(url.toString());
+  const data = await resp.json();
+  if (!resp.ok || data.error) {
+    const msg = data.error?.message || `HTTP ${resp.status}`;
+    const err = new Error(msg);
+    err.status = resp.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
+}
+
+// POST contra Graph API. Meta acepta tanto JSON como form-url-encoded;
+// usamos form-url-encoded porque algunos endpoints de Marketing API
+// (p.ej. /{adset-id}/copies) son explícitos en pedirlo así.
+export async function graphPost(path, accessToken, body = {}) {
+  const url = `https://graph.facebook.com/${META_API_VERSION}/${path.replace(/^\//, '')}`;
+  const form = new URLSearchParams();
+  for (const [k, v] of Object.entries(body)) {
+    if (v == null) continue;
+    form.set(k, typeof v === 'string' ? v : JSON.stringify(v));
+  }
+  form.set('access_token', accessToken);
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: form.toString(),
+  });
   const data = await resp.json();
   if (!resp.ok || data.error) {
     const msg = data.error?.message || `HTTP ${resp.status}`;

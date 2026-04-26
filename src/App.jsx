@@ -969,7 +969,7 @@ function CalculadoraSection({ state, addToast }) {
                     <td className="py-2 px-2 text-right text-gray-700 dark:text-gray-200 tabular-nums">{f(e.calc.precioVentaTotal)}</td>
                     <td className="py-2 px-2 text-right text-emerald-600 dark:text-emerald-400 tabular-nums">{f(e.calc.comisionPartner)}</td>
                     <td className={`py-2 px-2 text-right font-bold tabular-nums ${e.calc.profitReal >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>{f(e.calc.profitReal)}</td>
-                    <td className="py-2 px-2 text-right text-xs text-gray-500 dark:text-gray-400 tabular-nums">{e.calc.margenPct.toFixed(1)}%</td>
+                    <td className="py-2 px-2 text-right text-xs text-gray-500 dark:text-gray-400 tabular-nums">{(Number(e.calc?.margenPct) || 0).toFixed(1)}%</td>
                     <td className="py-2 px-2 text-right">
                       <button onClick={() => handleLoad(e)} className="p-1 text-gray-500 hover:text-pink-600 transition" title="Cargar"><Copy size={12} /></button>
                       <button onClick={() => handleDelete(e.id)} className="p-1 text-gray-500 hover:text-red-600 transition" title="Borrar"><Trash2 size={12} /></button>
@@ -3839,9 +3839,11 @@ function EditOrderModal({ order, state, onSave, onClose }) {
       mentorId: formData.mentorId ? parseInt(formData.mentorId) : null,
       estado: formData.estado,
       // costoInformado ya es POR UNIDAD — el form lo muestra y acepta así.
-      costoInformado: formData.mentorId && formData.costoInformado !== ''
-        ? parseFloat(formData.costoInformado)
-        : null,
+      costoInformado: (() => {
+        if (!formData.mentorId || formData.costoInformado === '') return null;
+        const n = parseFloat(formData.costoInformado);
+        return Number.isFinite(n) ? n : null;
+      })(),
     };
     onSave(patch);
   };

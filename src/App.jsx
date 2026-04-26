@@ -1648,7 +1648,7 @@ function AppShell({ onExit }) {
     if (user.role === 'admin') {
       id = 'admin';
     } else {
-      const matched = state.mentors.find(m => m.nombre.toLowerCase() === (user.name || '').toLowerCase());
+      const matched = state.mentors.find(m => (m.nombre || '').toLowerCase() === (user.name || '').toLowerCase());
       if (matched) id = matched.id;
     }
     setCurrentUser({
@@ -1781,16 +1781,16 @@ function AppShell({ onExit }) {
   const getPendingCommissions = () => {
     return state.sales
       .filter(s => s.estadoComision === 'pendiente')
-      .reduce((sum, s) => sum + (s.montoTotal * 0.5), 0);
+      .reduce((sum, s) => sum + ((Number(s.montoTotal) || 0) * 0.5), 0);
   };
 
   const getActiveClients = () => state.clients.length;
 
   const getMentorStats = (mentorId) => {
     const mentorSales = state.sales.filter(s => s.mentorId === mentorId);
-    const totalSales = mentorSales.reduce((sum, s) => sum + s.montoTotal, 0);
+    const totalSales = mentorSales.reduce((sum, s) => sum + (Number(s.montoTotal) || 0), 0);
     const totalCommission = totalSales * 0.5;
-    const paidCommission = mentorSales.filter(s => s.estadoComision === 'pagada').reduce((sum, s) => sum + (s.montoTotal * 0.5), 0);
+    const paidCommission = mentorSales.filter(s => s.estadoComision === 'pagada').reduce((sum, s) => sum + ((Number(s.montoTotal) || 0) * 0.5), 0);
     const pendingCommission = totalCommission - paidCommission;
     return { totalSales, totalCommission, paidCommission, pendingCommission };
   };
@@ -3708,7 +3708,7 @@ function QuickConsultaModal({ state, onSubmit, onQuickAddClient, onClose }) {
   const filteredClients = useMemo(() => {
     const q = clientName.trim().toLowerCase();
     if (!q) return state.clients.slice(0, 8);
-    return state.clients.filter(c => c.nombre.toLowerCase().includes(q)).slice(0, 8);
+    return state.clients.filter(c => (c.nombre || '').toLowerCase().includes(q)).slice(0, 8);
   }, [clientName, state.clients]);
 
   const handleSelectClient = (client) => {
@@ -3767,7 +3767,7 @@ function QuickConsultaModal({ state, onSubmit, onQuickAddClient, onClose }) {
                   {c.nombre}
                 </button>
               ))}
-              {clientName.trim() && !state.clients.some(c => c.nombre.toLowerCase() === clientName.trim().toLowerCase()) && (
+              {clientName.trim() && !state.clients.some(c => (c.nombre || '').toLowerCase() === clientName.trim().toLowerCase()) && (
                 <div className="px-4 py-2 text-xs text-gray-500 dark:text-gray-400 border-t border-gray-100 dark:border-gray-700">
                   Se creará el cliente "{clientName.trim()}" al guardar
                 </div>

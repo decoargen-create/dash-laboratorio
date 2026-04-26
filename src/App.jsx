@@ -24,6 +24,7 @@ import InspiracionSection from './InspiracionSection.jsx';
 import { PipelineRunProvider } from './PipelineRunContext.jsx';
 import PipelineRunOverlay from './PipelineRunOverlay.jsx';
 import { generateCSV, downloadCSV, parseCSV, toNumber, toBool } from './csv.js';
+import { loadVioraState, saveVioraState, clearVioraState, createBackup } from './vioraStorage.js';
 
 // Estados del pipeline de producción de una orden
 export const ORDER_STATES = [
@@ -117,6 +118,11 @@ const DEMO_STATE = {
 
 function appReducer(state, action) {
   switch (action.type) {
+    case 'HYDRATE':
+      // Reemplaza el state con uno cargado desde IndexedDB (boot).
+      // Hace merge con el state actual por si en el medio se modificó algo
+      // (poco probable porque el render espera a hydrated, pero defensivo).
+      return { ...state, ...action.payload };
     case 'ADD_SALE':
       return { ...state, sales: [...state.sales, action.payload] };
     case 'ADD_CLIENT':
@@ -1273,18 +1279,64 @@ function BgAnalysisPill({ analysis, onView, onCancel, onDismiss }) {
 }
 
 function AppShell({ onExit }) {
-  const [state, dispatch] = useReducer(appReducer, undefined, loadPersistedState);
+  // Arrancamos con INITIAL_STATE y luego hidratamos desde IndexedDB. Eso
+  // protege los datos de Viora de cualquier `localStorage.clear()` que el
+  // módulo Marketing pueda hacer al resetear su propio state.
+  const [state, dispatch] = useReducer(appReducer, INITIAL_STATE);
+  const [hydrated, setHydrated] = useState(false);
 
-  // Persistimos el state en localStorage cada vez que cambia. Si falla
-  // (quota llena, modo privado), silenciamos el error — no queremos
-  // que una falla de persistencia rompa la app.
+  // Hidratación inicial — async porque IndexedDB.
   useEffect(() => {
-    try {
-      localStorage.setItem(STATE_STORAGE_KEY, JSON.stringify(state));
-    } catch (err) {
-      console.warn('[persist] no pude guardar state', err);
-    }
-  }, [state]);
+    let alive = true;
+    loadVioraState()
+      .then(loaded => {
+        if (!alive) return;
+        if (loaded && typeof loaded === 'object') {
+          // Migración de estados viejos (pre-pipeline actual).
+          const STATE_MIGRATION = {
+            'pendiente-cotizacion': 'consulta-recibida',
+            'cotizado': 'aprobado',
+          };
+          const rawSales = Array.isArray(loaded.sales) ? loaded.sales : INITIAL_STATE.sales;
+          const sales = rawSales.map(s => STATE_MIGRATION[s.estado] ? { ...s, estado: STATE_MIGRATION[s.estado] } : s);
+          dispatch({
+            type: 'HYDRATE',
+            payload: {
+              products: Array.isArray(loaded.products) ? loaded.products : INITIAL_STATE.products,
+              clients: Array.isArray(loaded.clients) ? loaded.clients : INITIAL_STATE.clients,
+              mentors: Array.isArray(loaded.mentors) ? loaded.mentors : INITIAL_STATE.mentors,
+              sales,
+            },
+          });
+        }
+        setHydrated(true);
+      })
+      .catch(err => {
+        console.warn('[viora] hydrate falló, arranco con INITIAL_STATE:', err?.message);
+        setHydrated(true);
+      });
+    return () => { alive = false; };
+  }, []);
+
+  // Persistimos el state en IndexedDB cada vez que cambia, debounced 200ms
+  // para no saturar con cada keystroke. Solo después de hydrated para no
+  // sobreescribir lo cargado con el INITIAL_STATE inicial.
+  useEffect(() => {
+    if (!hydrated) return;
+    const id = setTimeout(() => {
+      saveVioraState(state).catch(err => console.warn('[viora] save falló:', err?.message));
+    }, 200);
+    return () => clearTimeout(id);
+  }, [state, hydrated]);
+
+  // Backup automático cada hora — red de seguridad ante state corrupto.
+  useEffect(() => {
+    if (!hydrated) return;
+    const id = setInterval(() => {
+      createBackup(state).catch(() => {});
+    }, 60 * 60 * 1000);
+    return () => clearInterval(id);
+  }, [state, hydrated]);
   const [currentUser, setCurrentUser] = useState(null);
   // Plataforma actual (switcher en el tope del sidebar). Cada plataforma tiene
   // su propio sidebar (logo, colores, secciones) y sus datos aislados.
@@ -1762,6 +1814,20 @@ function AppShell({ onExit }) {
   // sentido el modo colapsado en un overlay). Forzamos sidebarOpen=true
   // visualmente cuando se abre el menú mobile.
   const effectiveSidebarOpen = mobileMenuOpen ? true : sidebarOpen;
+
+  // Mientras hidratamos desde IndexedDB no renderizamos la app — sino
+  // mostraríamos un flash de INITIAL_STATE (con datos demo) antes del
+  // estado real. Es ~50ms en máquinas modernas.
+  if (!hydrated) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-50 dark:bg-gray-900">
+        <div className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-2">
+          <Loader2 size={16} className="animate-spin" />
+          Cargando datos…
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
@@ -7683,8 +7749,10 @@ function UserMenu({ currentUser, sidebarOpen, state, onLogout }) {
               Cambiar mi nombre de display
             </button>
             <button
-              onClick={() => {
+              onClick={async () => {
                 if (window.confirm('¿Borrar todos los datos cargados? Esta acción no se puede deshacer. Si tenés info importante, exportá primero desde la sección Datos.')) {
+                  try { await clearVioraState(); } catch {}
+                  // Limpiamos también la key legacy de localStorage por si quedó.
                   try { localStorage.removeItem(STATE_STORAGE_KEY); } catch {}
                   window.location.reload();
                 }
@@ -7696,11 +7764,9 @@ function UserMenu({ currentUser, sidebarOpen, state, onLogout }) {
               Vaciar todos los datos
             </button>
             <button
-              onClick={() => {
+              onClick={async () => {
                 if (window.confirm('¿Cargar datos de ejemplo? Esto reemplaza lo que tengas cargado por los datos demo (5 productos, 8 clientes, 2 mentores, 15 órdenes).')) {
-                  try {
-                    localStorage.setItem(STATE_STORAGE_KEY, JSON.stringify(DEMO_STATE));
-                  } catch {}
+                  try { await saveVioraState(DEMO_STATE); } catch {}
                   window.location.reload();
                 }
               }}

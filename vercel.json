@@ -15,10 +15,12 @@
     "api/marketing/creatives.js": { "maxDuration": 180 },
     "api/marketing/adapt-inspiracion.js": { "maxDuration": 120 },
     "api/marketing/resolve-fb-page.js": { "maxDuration": 30 },
+    "api/marketing/meta-ads-publisher.js": { "maxDuration": 300 },
     "api/meta/[action].js": { "maxDuration": 60 }
   },
   "crons": [
-    { "path": "/api/meta/cron-creative-refresh", "schedule": "0 12 * * *" }
+    { "path": "/api/meta/cron-creative-refresh", "schedule": "0 12 * * *" },
+    { "path": "/api/marketing/meta-ads-publisher", "schedule": "0 1,7,13,19 * * *" }
   ],
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/index.html" }

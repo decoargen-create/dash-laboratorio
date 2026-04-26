@@ -97,14 +97,35 @@ async function idbKeys() {
   });
 }
 
+// Valida que un state tenga la forma esperada. No es schema validation
+// estricto — sólo verifica que sea un objeto con los arrays principales.
+// Si vienen como otro tipo, los reemplazamos por arrays vacíos para que
+// `state.X.map/filter/reduce` no crashee.
+function sanitizeState(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  return {
+    products: Array.isArray(raw.products) ? raw.products : [],
+    clients: Array.isArray(raw.clients) ? raw.clients : [],
+    mentors: Array.isArray(raw.mentors) ? raw.mentors : [],
+    sales: Array.isArray(raw.sales) ? raw.sales : [],
+  };
+}
+
 // Carga el state. Si IndexedDB tiene algo, lo devolvemos. Si no, miramos
 // localStorage por compat (migración) — si encontramos el state legacy lo
 // copiamos a IndexedDB y limpiamos la key vieja, así el próximo
 // localStorage.clear() (de un reset de dev) ya no nos pisa los datos.
+//
+// Siempre saneamos el shape antes de devolver, así un state corrupto
+// (escrito a mano en DevTools, restauración mala) no rompe la app.
 export async function loadVioraState() {
   try {
     const stored = await idbGet(STATE_KEY);
-    if (stored) return stored;
+    if (stored) {
+      const safe = sanitizeState(stored);
+      if (safe) return safe;
+      console.warn('[vioraStorage] state en IndexedDB con shape inválido — descarto');
+    }
   } catch (err) {
     console.warn('[vioraStorage] IndexedDB load falló:', err.message);
   }
@@ -115,15 +136,16 @@ export async function loadVioraState() {
       const legacy = localStorage.getItem(LEGACY_LOCALSTORAGE_KEY);
       if (legacy) {
         const parsed = JSON.parse(legacy);
-        if (parsed && typeof parsed === 'object') {
-          await idbPut(STATE_KEY, parsed).catch(() => {});
+        const safe = sanitizeState(parsed);
+        if (safe) {
+          await idbPut(STATE_KEY, safe).catch(() => {});
           // Limpiamos la key legacy SOLO después de confirmar que se guardó.
           // Si el put falló silenciosamente, dejamos la key vieja intacta.
           const verified = await idbGet(STATE_KEY).catch(() => null);
           if (verified) {
             try { localStorage.removeItem(LEGACY_LOCALSTORAGE_KEY); } catch {}
           }
-          return parsed;
+          return safe;
         }
       }
     }
@@ -181,5 +203,7 @@ export async function listBackups() {
 
 export async function restoreBackup(ts) {
   const key = `${BACKUP_PREFIX}${ts}`;
-  return await idbGet(key);
+  const raw = await idbGet(key);
+  // Saneamos el shape también acá — un backup viejo puede tener forma rara.
+  return sanitizeState(raw);
 }

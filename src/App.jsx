@@ -1762,8 +1762,9 @@ function AppShell({ onExit }) {
   const getMonthlySalesData = () => {
     const months = {};
     state.sales.forEach(sale => {
-      const month = sale.fecha.substring(0, 7);
-      months[month] = (months[month] || 0) + sale.montoTotal;
+      const month = (sale.fecha || '').substring(0, 7);
+      if (!month) return;
+      months[month] = (months[month] || 0) + (sale.montoTotal || 0);
     });
     return Object.entries(months)
       .sort()
@@ -1772,7 +1773,9 @@ function AppShell({ onExit }) {
 
   const getCurrentMonthSales = () => {
     const currentMonth = new Date().toISOString().substring(0, 7);
-    return state.sales.filter(s => s.fecha.startsWith(currentMonth)).reduce((sum, s) => sum + s.montoTotal, 0);
+    return state.sales
+      .filter(s => (s.fecha || '').startsWith(currentMonth))
+      .reduce((sum, s) => sum + (s.montoTotal || 0), 0);
   };
 
   const getPendingCommissions = () => {
@@ -4004,7 +4007,7 @@ function VentasSection({ state, onAddSale, onQuickAddClient, onQuickAddProduct, 
                   <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100">{getClientName(sale.clienteId)}</td>
                   <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100">{getProductName(sale.productoId)}</td>
                   <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100">{sale.cantidad}</td>
-                  <td className="px-6 py-4 text-sm font-semibold text-gray-900 dark:text-gray-100">${sale.montoTotal.toLocaleString()}</td>
+                  <td className="px-6 py-4 text-sm font-semibold text-gray-900 dark:text-gray-100">${(Number(sale.montoTotal) || 0).toLocaleString()}</td>
                   <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100">{getMentorName(sale.mentorId)}</td>
                   <td className="px-6 py-4 text-sm"><Badge text={sale.estadoComision} type={sale.estadoComision === 'pagada' ? 'success' : 'warning'} /></td>
                 </tr>
@@ -5761,12 +5764,12 @@ function MentorResumenSection({ currentUser, state, getMentorStats }) {
 
 function MentorComisionesSection({ currentUser, state, filterMonth, setFilterMonth }) {
   const mentorSales = state.sales.filter(s => s.mentorId === currentUser.id);
-  const months = [...new Set(mentorSales.map(s => s.fecha.substring(0, 7)))].sort().reverse();
+  const months = [...new Set(mentorSales.map(s => (s.fecha || '').substring(0, 7)).filter(Boolean))].sort().reverse();
 
   const getClientName = (clienteId) => state.clients.find(c => c.id === clienteId)?.nombre || '-';
   const getProductName = (productoId) => state.products.find(p => p.id === productoId)?.nombre || '-';
 
-  const filteredSales = filterMonth ? mentorSales.filter(s => s.fecha.startsWith(filterMonth)) : mentorSales;
+  const filteredSales = filterMonth ? mentorSales.filter(s => (s.fecha || '').startsWith(filterMonth)) : mentorSales;
 
   return (
     <div className="space-y-6">
@@ -5802,16 +5805,25 @@ function MentorComisionesSection({ currentUser, state, filterMonth, setFilterMon
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-              {filteredSales.map(sale => (
-                <tr key={sale.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition">
-                  <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100">{sale.fecha}</td>
-                  <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100">{getClientName(sale.clienteId)}</td>
-                  <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100">{getProductName(sale.productoId)}</td>
-                  <td className="px-6 py-4 text-sm font-semibold text-gray-900 dark:text-gray-100">${sale.montoTotal.toLocaleString()}</td>
-                  <td className="px-6 py-4 text-sm font-bold text-green-600">${(sale.montoTotal * 0.5).toLocaleString()}</td>
-                  <td className="px-6 py-4 text-sm"><Badge text={sale.estadoComision} type={sale.estadoComision === 'pagada' ? 'success' : 'warning'} /></td>
+              {filteredSales.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-6 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+                    Sin órdenes en este período.
+                  </td>
                 </tr>
-              ))}
+              ) : filteredSales.map(sale => {
+                const monto = Number(sale.montoTotal) || 0;
+                return (
+                  <tr key={sale.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition">
+                    <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100">{sale.fecha || '-'}</td>
+                    <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100">{getClientName(sale.clienteId)}</td>
+                    <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100">{getProductName(sale.productoId)}</td>
+                    <td className="px-6 py-4 text-sm font-semibold text-gray-900 dark:text-gray-100">${monto.toLocaleString()}</td>
+                    <td className="px-6 py-4 text-sm font-bold text-green-600">${(monto * 0.5).toLocaleString()}</td>
+                    <td className="px-6 py-4 text-sm"><Badge text={sale.estadoComision} type={sale.estadoComision === 'pagada' ? 'success' : 'warning'} /></td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

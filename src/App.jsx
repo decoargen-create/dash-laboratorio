@@ -6178,21 +6178,38 @@ function CostBreakdownCell({ order, product, costs, isTotal, onUpdateProduct, on
   );
 }
 
-// Editor del modo "sin discriminar": un único input con el costo total
-// unitario. El valor que se guarda es siempre unitario; si el toggle del
-// listado está en modo Total, se convierte al guardar.
+// Editor del modo "sin discriminar": un único input. El valor visible es
+// total o unitario según `isTotal`; internamente se guarda SIEMPRE unitario
+// (para que cambiar la cantidad no rompa los cálculos).
+//
+// Sutileza importante: el `draft` que ve el user representa lo TIPEADO en
+// la unidad activa (total si isTotal, unitario si no). Cuando el user tipea
+// "4400" en modo Total con cantidad 500, internamente guardamos 8.8 unitario
+// — pero el field sigue mostrando "4400" mientras edita.
+//
+// Bug histórico: una versión anterior usaba el valueUnit como draft inicial
+// y refrescaba el draft cada vez que cambiaba valueUnit, lo cual disparaba
+// una cascada (cada keystroke se re-dividía por la cantidad). Ahora el draft
+// es la fuente de verdad mientras el user edita y solo se sincroniza al
+// blur o cuando el valueUnit cambia desde afuera estando inactivo.
 function FlatCostEditor({ valueUnit, cantidad, isTotal, onChange }) {
-  const [draft, setDraft] = useState(String(valueUnit || 0));
-  useEffect(() => { setDraft(String(valueUnit || 0)); }, [valueUnit]);
+  const cant = cantidad > 0 ? cantidad : 1;
+  const display = isTotal ? (valueUnit || 0) * cant : (valueUnit || 0);
+  const [draft, setDraft] = useState(() => formatNum(display));
+  const [editing, setEditing] = useState(false);
 
-  const commit = (raw) => {
+  // Sincronizamos el draft con el valor externo solo si el user NO está
+  // editando — sino le rompemos lo que viene tipeando.
+  useEffect(() => {
+    if (!editing) setDraft(formatNum(display));
+  }, [display, editing]);
+
+  const handleChange = (raw) => {
+    setDraft(raw);
     const v = parseFloat(raw);
     if (Number.isNaN(v)) return;
-    // Si estamos en modo Total, dividimos por cantidad para guardar unitario
-    onChange(isTotal ? v / cantidad : v);
+    onChange(isTotal ? v / cant : v);
   };
-
-  const display = isTotal ? valueUnit * cantidad : valueUnit;
 
   return (
     <div>
@@ -6206,7 +6223,9 @@ function FlatCostEditor({ valueUnit, cantidad, isTotal, onChange }) {
           min="0"
           step="any"
           value={draft}
-          onChange={(e) => { setDraft(e.target.value); commit(e.target.value); }}
+          onFocus={() => setEditing(true)}
+          onBlur={() => setEditing(false)}
+          onChange={(e) => handleChange(e.target.value)}
           className="w-full pl-6 pr-2 py-2 text-sm font-semibold text-right border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 text-gray-900 dark:text-gray-100 rounded-md focus:outline-none focus:ring-2 focus:ring-amber-500 tabular-nums"
         />
       </div>
@@ -6215,10 +6234,20 @@ function FlatCostEditor({ valueUnit, cantidad, isTotal, onChange }) {
         El cálculo del profit usa este número como costo total.
       </p>
       {!isTotal && (
-        <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1">Total ×{cantidad}: <span className="font-semibold">${Math.round(display).toLocaleString()}</span></p>
+        <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1">Total ×{cant}: <span className="font-semibold">${Math.round((valueUnit || 0) * cant).toLocaleString()}</span></p>
       )}
     </div>
   );
+}
+
+// Helper local: convertir un número a string sin notación científica para no
+// asustar al user con "8.4e-6" en el input.
+function formatNum(n) {
+  if (n == null || Number.isNaN(n)) return '0';
+  if (Number.isInteger(n)) return String(n);
+  // toFixed(6) y limpiamos los ceros finales sin perder precisión razonable.
+  const s = Number(n).toFixed(6).replace(/\.?0+$/, '');
+  return s || '0';
 }
 
 // Editor del modo "desglosado": ingredientes (fórmula del producto) +

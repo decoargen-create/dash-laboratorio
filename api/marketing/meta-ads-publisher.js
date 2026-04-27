@@ -32,8 +32,14 @@
 // carpetas ya están renombradas, no hay doble publicación.
 
 import { checkAuth } from '../../lib/meta-publisher/auth.js';
-import { loadConfigFromEnv } from '../../lib/meta-publisher/config.js';
+import {
+  loadConfigFromEnv,
+  loadConfigFromAutomation,
+} from '../../lib/meta-publisher/config.js';
 import { loadState, saveState, findReferenceAdId } from '../../lib/meta-publisher/state.js';
+import { listEnabledAutomations } from '../../lib/automations/store.js';
+import { loadMetaToken } from '../../lib/tokens/meta.js';
+import { loadGoogleToken } from '../../lib/tokens/google.js';
 import {
   getDriveClient,
   listChildren,
@@ -428,6 +434,154 @@ async function runForTenant(cfg, { runIso, hour }) {
   };
 }
 
+/**
+ * Para una automation dada, resuelve los tokens del owner desde KV y
+ * arma la PublisherConfig. Si falta el Meta token, devuelve null
+ * (skipea ese tenant). Si falta el Google token, hace fallback al
+ * Service Account global (GOOGLE_SA_JSON) — Fase 5 va a llenar el
+ * storage de Google y este fallback va a quedar como compat para
+ * laboratorios que no migraron.
+ *
+ * @returns {Promise<{ cfg: object } | { skipReason: string }>}
+ */
+async function resolveTenantConfig(automation) {
+  const metaTok = await loadMetaToken(automation.userId);
+  if (!metaTok?.accessToken) {
+    return { skipReason: `user ${automation.userId} no tiene Meta token (no conectó o expiró)` };
+  }
+
+  const googleTok = await loadGoogleToken(automation.userId);
+  let cfg;
+  if (googleTok?.accessToken) {
+    cfg = loadConfigFromAutomation(automation, {
+      metaAccessToken: metaTok.accessToken,
+      googleToken: {
+        accessToken: googleTok.accessToken,
+        refreshToken: googleTok.refreshToken || undefined,
+      },
+    });
+  } else {
+    // Fallback: usar la SA global del laboratorio. Solo funciona si el
+    // user compartió su Drive root con el SA email. Cuando Fase 5
+    // (Google OAuth) esté lista, este branch deja de ser necesario.
+    const saJson = process.env.GOOGLE_SA_JSON;
+    if (!saJson) {
+      return { skipReason: `user ${automation.userId} no tiene Google token y no hay GOOGLE_SA_JSON fallback` };
+    }
+    cfg = {
+      tenantId: automation.id,
+      metaAccessToken: metaTok.accessToken,
+      adAccountId: automation.adAccountId,
+      pageId: automation.pageId,
+      pixelId: automation.pixelId,
+      igUserId: automation.igUserId,
+      productLink: automation.productLink,
+      driveAuth: { kind: 'service-account', json: saJson },
+      driveRootFolderId: automation.driveRootFolderId,
+      discordWebhookUrl: automation.discordWebhookUrl || null,
+      dailyBudgetCents: automation.dailyBudgetCents || 4000,
+      campaignNameTemplate: automation.campaignNameTemplate,
+    };
+  }
+
+  return { cfg };
+}
+
+/**
+ * Orchestrator: itera todas las automations enabled y procesa cada una.
+ * Time budget global: maxDuration ≈ 300s. Damos 280s usables, divididos
+ * por N tenants, con un mínimo de 30s y un máximo de 280s.
+ *
+ * Si una automation se pasa de su slot, no abortamos el resto — solo
+ * loggeamos warning (Vercel va a matar la function igual cuando llegue
+ * a maxDuration; la lógica de slot es para detectar problemas, no
+ * para enforcement).
+ *
+ * @returns {Promise<{ runs: object[], skipped: object[] }>}
+ */
+async function runOrchestrator({ runIso, hour, automations }) {
+  const adminWebhook = process.env.META_PUBLISHER_DISCORD_WEBHOOK || null;
+  const runs = [];
+  const skipped = [];
+
+  const slotMs = Math.max(30_000, Math.min(280_000, Math.floor(280_000 / automations.length)));
+  const startedAt = Date.now();
+
+  for (const automation of automations) {
+    const tenantStart = Date.now();
+    const resolved = await resolveTenantConfig(automation);
+
+    if (resolved.skipReason) {
+      skipped.push({ automationId: automation.id, userId: automation.userId, reason: resolved.skipReason });
+      // Si la automation tiene su propio webhook, avisarle al user que su
+      // token de Meta venció / no está conectado. Si no, log al admin.
+      const userHook = automation.discordWebhookUrl;
+      try {
+        await reportFatalError(userHook || adminWebhook, {
+          message: `Tu automation "${automation.name}" no se ejecutó: ${resolved.skipReason}`,
+          hour,
+          hint: 'Reconectá Meta desde el panel.',
+        });
+      } catch (err) { console.warn('[orchestrator] no pude reportar skip', err.message); }
+      continue;
+    }
+
+    let result;
+    try {
+      result = await runForTenant(resolved.cfg, { runIso, hour });
+    } catch (err) {
+      console.error(`[orchestrator] tenant ${automation.id} (${automation.userId}) falló`, err);
+      result = { ok: false, error: err.message };
+    }
+    const tenantMs = Date.now() - tenantStart;
+    if (tenantMs > slotMs) {
+      console.warn(`[orchestrator] tenant ${automation.id} se pasó del slot: ${tenantMs}ms vs ${slotMs}ms`);
+    }
+    runs.push({
+      automationId: automation.id,
+      automationName: automation.name,
+      userId: automation.userId,
+      durationMs: tenantMs,
+      result,
+    });
+  }
+
+  // Reporte agregado al admin webhook (si existe). NO al usuario — cada
+  // automation ya reportó al suyo dentro de runForTenant.
+  if (adminWebhook && (runs.length > 0 || skipped.length > 0)) {
+    const ok = runs.filter(r => r.result?.ok !== false).length;
+    const failed = runs.length - ok;
+    const totalDuration = Math.round((Date.now() - startedAt) / 1000);
+    const lines = [
+      `🔁 **Publisher orchestrator — ${hour} ART**`,
+      `📊 ${automations.length} automations enabled · ${ok} OK · ${failed} fallidas · ${skipped.length} skipped`,
+      `⏱️ Total: ${totalDuration}s`,
+    ];
+    if (skipped.length) {
+      lines.push('');
+      lines.push('⏭️ Skipped:');
+      for (const s of skipped.slice(0, 10)) {
+        lines.push(`  • ${s.userId} (${s.automationId}): ${s.reason.slice(0, 120)}`);
+      }
+      if (skipped.length > 10) lines.push(`  … y ${skipped.length - 10} más`);
+    }
+    try {
+      await fetch(adminWebhook, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: lines.join('\n').slice(0, 1900),
+          allowed_mentions: { parse: [] },
+        }),
+      });
+    } catch (err) {
+      console.warn('[orchestrator] admin webhook falló', err.message);
+    }
+  }
+
+  return { runs, skipped };
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'GET' && req.method !== 'POST') {
     return respondJSON(res, 405, { error: 'Method not allowed' });
@@ -442,22 +596,54 @@ export default async function handler(req, res) {
   const runIso = new Date().toISOString();
   const hour = currentRunHourAR();
 
-  // 2. Cargar config legacy desde env (Cellu single-tenant).
+  // 2. Si hay automations enabled en KV → modo multi-tenant.
+  //    Si no → fallback a Cellu legacy (lee config de env).
+  let automations = [];
+  try {
+    automations = await listEnabledAutomations();
+  } catch (err) {
+    console.warn('[publisher] listEnabledAutomations falló (KV?)', err.message);
+    // Si KV está caído, igual intentamos el legacy mode más abajo.
+  }
+
+  if (automations.length > 0) {
+    const { runs, skipped } = await runOrchestrator({ runIso, hour, automations });
+    return respondJSON(res, 200, {
+      ok: true,
+      mode: 'multi-tenant',
+      run_at: runIso,
+      auth_source: auth.source,
+      total_automations: automations.length,
+      runs: runs.map(r => ({
+        automationId: r.automationId,
+        automationName: r.automationName,
+        userId: r.userId,
+        durationMs: r.durationMs,
+        ok: r.result?.ok !== false,
+        published: typeof r.result?.published === 'number' ? r.result.published : (r.result?.summary?.length || 0),
+        skipped: Array.isArray(r.result?.skipped) ? r.result.skipped.length : 0,
+        error: r.result?.error,
+      })),
+      skipped,
+    });
+  }
+
+  // Modo legacy single-tenant (Cellu). Cuando el laboratorio cree su
+  // primera automation enabled, este branch deja de ejecutarse.
   let cfg;
   try {
     cfg = loadConfigFromEnv();
   } catch (err) {
-    // Reportamos al webhook si está configurado, sino solo logueamos.
     const fallbackHook = process.env.META_PUBLISHER_DISCORD_WEBHOOK || null;
     await reportFatalError(fallbackHook, { message: err.message, hour });
     return respondJSON(res, 500, { error: err.message, missing: err.missing });
   }
 
-  // 3-9. Ejecutar publisher para esta config.
   const result = await runForTenant(cfg, { runIso, hour });
 
   return respondJSON(res, result.ok === false ? 500 : 200, {
     ok: result.ok !== false,
+    mode: 'legacy',
     run_at: runIso,
     auth_source: auth.source,
     tenant_id: cfg.tenantId,
@@ -474,5 +660,5 @@ export default async function handler(req, res) {
   });
 }
 
-// Re-export para que la Fase 4 (cron orchestrator) lo pueda importar.
+// Re-export por si algún otro endpoint lo necesita (test manual, etc.).
 export { runForTenant };

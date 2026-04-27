@@ -19,6 +19,8 @@ import {
   verifyState, signState, setMetaCookie, clearMetaCookie,
   readMetaCookie, getOrigin, respondJSON, graphGet, graphPost,
 } from './_lib.js';
+import { validateSession } from '../../lib/auth/session.js';
+import { saveMetaToken } from '../../lib/tokens/meta.js';
 
 // --- helpers locales ---
 
@@ -70,9 +72,8 @@ function handleConnect(req, res) {
   if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
 
   const origin = getOrigin(req);
-  let returnTo = req.url?.includes('?')
-    ? new URL(req.url, origin).searchParams.get('returnTo') || '/acceso'
-    : '/acceso';
+  const reqUrl = req.url?.includes('?') ? new URL(req.url, origin) : null;
+  let returnTo = reqUrl?.searchParams.get('returnTo') || '/acceso';
   if (!returnTo.startsWith('/')) returnTo = '/acceso';
 
   const appId = process.env.META_APP_ID;
@@ -80,12 +81,30 @@ function handleConnect(req, res) {
   if (!appId) return redirectWithError(res, origin, returnTo, 'META_APP_ID no está configurada en el servidor. Agregala en Vercel → Settings → Environment Variables y redeployá.');
   if (!secret) return redirectWithError(res, origin, returnTo, 'AUTH_SECRET no configurada en el servidor');
 
+  // Si el front pasó la session viora en query (?viora_session=…), validamos
+  // y metemos el userId en el state firmado. Eso permite que el callback,
+  // tras el intercambio del long-lived token, lo guarde en KV namespaceado
+  // por user (multi-tenant). Si NO viene session, comportamiento legacy:
+  // solo se setea la cookie viora-meta-session (single-tenant Cellu).
+  let vioraUserId = null;
+  const vioraSessionRaw = reqUrl?.searchParams.get('viora_session');
+  if (vioraSessionRaw) {
+    const sessionRes = validateSession(
+      { headers: { authorization: `Bearer ${vioraSessionRaw}` } },
+      null,
+    );
+    if (sessionRes.ok) vioraUserId = sessionRes.user.id;
+    // Si la session vino pero es inválida, ignoramos silenciosamente —
+    // mejor que romper el flow OAuth con un error.
+  }
+
   const redirectUri = `${origin}/api/meta/callback`;
 
   const state = signState({
     nonce: crypto.randomBytes(16).toString('hex'),
     ts: Date.now(),
     returnTo,
+    vioraUserId, // null en legacy
   }, secret);
 
   const authUrl = new URL(`https://www.facebook.com/${META_API_VERSION}/dialog/oauth`);
@@ -131,11 +150,12 @@ async function handleCallback(req, res) {
   const redirectUri = `${origin}/api/meta/callback`;
   const returnTo = (state.returnTo || '/acceso').startsWith('/') ? state.returnTo : '/acceso';
 
-  let longToken, me;
+  let longToken, longExpiresIn, me;
   try {
     const short = await exchangeCodeForToken(appId, appSecret, code, redirectUri);
     const long = await exchangeForLongLived(appId, appSecret, short.access_token);
     longToken = long.access_token;
+    longExpiresIn = Number(long.expires_in) || null; // segundos hasta expirar
     me = await fetchMe(longToken);
   } catch (err) {
     console.error('meta/callback exchange error:', err);
@@ -151,6 +171,23 @@ async function handleCallback(req, res) {
   };
   const signed = signState(cookiePayload, authSecret);
   setMetaCookie(res, signed);
+
+  // Multi-tenant: si el connect vino con vioraUserId en el state, guardamos
+  // el long-lived token en KV para que el cron orchestrator pueda usarlo
+  // sin la cookie del navegador. Si no, comportamiento legacy: solo cookie.
+  if (state.vioraUserId) {
+    try {
+      await saveMetaToken(state.vioraUserId, {
+        accessToken: longToken,
+        expiresInSeconds: longExpiresIn || undefined,
+        metaUserId: me?.id || null,
+        metaUserName: me?.name || null,
+      });
+    } catch (err) {
+      console.warn('[meta/callback] saveMetaToken falló', state.vioraUserId, err.message);
+      // No abortamos el flow — la cookie ya se seteó y el panel funciona.
+    }
+  }
 
   res.statusCode = 302;
   res.setHeader('Location', `${returnTo}?meta=connected`);

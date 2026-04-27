@@ -249,10 +249,16 @@ function appReducer(state, action) {
 // (porque ese es el precio realmente cobrado/cotizado), y fallback al producto.
 export function getOrderEffectiveUnit(order, product) {
   const ov = order?.costsOverride || {};
-  const cantidad = order?.cantidad || 1;
-  const precioVentaUnit = order?.montoTotal != null && cantidad > 0
-    ? (order.montoTotal / cantidad)
-    : (product?.precioVenta || 0);
+  // Coerce explícito a Number en todas las propiedades aritméticas — si una
+  // orden viene con strings (CSV import, JSON corrupto), evitamos coerción
+  // implícita rara en el resto del cálculo.
+  const cantidadRaw = Number(order?.cantidad);
+  const cantidad = Number.isFinite(cantidadRaw) && cantidadRaw > 0 ? cantidadRaw : 1;
+  const montoTotalRaw = Number(order?.montoTotal);
+  const productoPrecio = Number(product?.precioVenta) || 0;
+  const precioVentaUnit = Number.isFinite(montoTotalRaw) && cantidad > 0
+    ? montoTotalRaw / cantidad
+    : productoPrecio;
 
   // Modo "sin discriminar": si la orden tiene costoSinDesglosar (override
   // por orden) o el producto lo tiene como default, ese único número
@@ -277,9 +283,9 @@ export function getOrderEffectiveUnit(order, product) {
     // Si la orden pisó el costo de contenido (override por orden), ese gana.
     // Si no, usamos el costo calculado por la fórmula del producto
     // (que cae a costoContenido plano si no hay fórmula).
-    costoContenido: ov.contenido != null ? ov.contenido : getContenidoUnitCost(product),
-    costoEnvase:    ov.envase    != null ? ov.envase    : (product?.costoEnvase    || 0),
-    costoEtiqueta:  ov.etiqueta  != null ? ov.etiqueta  : (product?.costoEtiqueta  || 0),
+    costoContenido: ov.contenido != null ? Number(ov.contenido) || 0 : getContenidoUnitCost(product),
+    costoEnvase:    ov.envase    != null ? Number(ov.envase) || 0    : (Number(product?.costoEnvase) || 0),
+    costoEtiqueta:  ov.etiqueta  != null ? Number(ov.etiqueta) || 0  : (Number(product?.costoEtiqueta) || 0),
     precioVenta:    precioVentaUnit,
     isFlat: false,
   };
@@ -303,16 +309,20 @@ export function getProductUnitCost(product) {
 
 export function getOrderCosts(order, product) {
   const eff = getOrderEffectiveUnit(order, product);
-  const unit = eff.costoContenido + eff.costoEnvase + eff.costoEtiqueta;
-  const cantidad = order?.cantidad || 0;
+  const cont = Number(eff.costoContenido) || 0;
+  const env = Number(eff.costoEnvase) || 0;
+  const etiq = Number(eff.costoEtiqueta) || 0;
+  const unit = cont + env + etiq;
+  const cantidadRaw = Number(order?.cantidad);
+  const cantidad = Number.isFinite(cantidadRaw) && cantidadRaw > 0 ? cantidadRaw : 0;
   return {
-    contenidoUnit: eff.costoContenido,
-    envaseUnit: eff.costoEnvase,
-    etiquetaUnit: eff.costoEtiqueta,
+    contenidoUnit: cont,
+    envaseUnit: env,
+    etiquetaUnit: etiq,
     costoUnit: unit,
-    contenidoTotal: eff.costoContenido * cantidad,
-    envaseTotal: eff.costoEnvase * cantidad,
-    etiquetaTotal: eff.costoEtiqueta * cantidad,
+    contenidoTotal: cont * cantidad,
+    envaseTotal: env * cantidad,
+    etiquetaTotal: etiq * cantidad,
     costoTotal: unit * cantidad,
   };
 }
@@ -322,9 +332,10 @@ export function getOrderProfit(order, product) {
   // Este es el "profit antes de descontar comisión del partner".
   // Para el profit real que queda para el lab, usar getLabRealProfit.
   const eff = getOrderEffectiveUnit(order, product);
-  const unitCost = eff.costoContenido + eff.costoEnvase + eff.costoEtiqueta;
-  const cantidad = order?.cantidad || 0;
-  return (eff.precioVenta - unitCost) * cantidad;
+  const unitCost = (Number(eff.costoContenido) || 0) + (Number(eff.costoEnvase) || 0) + (Number(eff.costoEtiqueta) || 0);
+  const cantidadRaw = Number(order?.cantidad);
+  const cantidad = Number.isFinite(cantidadRaw) && cantidadRaw > 0 ? cantidadRaw : 0;
+  return ((Number(eff.precioVenta) || 0) - unitCost) * cantidad;
 }
 
 // Costo INFORMADO al partner/cliente (por unidad). Puede ser distinto al
@@ -6176,12 +6187,38 @@ function CostBreakdownCell({ order, product, costs, isTotal, onUpdateProduct, on
 
           {/* Contenido según modo */}
           {isFlat ? (
-            <FlatCostEditor
-              valueUnit={parseFloat(order.costoSinDesglosar) || 0}
-              cantidad={cantidad}
-              isTotal={isTotal}
-              onChange={(v) => onSetFlat(v)}
-            />
+            <>
+              <FlatCostEditor
+                valueUnit={parseFloat(order.costoSinDesglosar) || 0}
+                cantidad={cantidad}
+                isTotal={isTotal}
+                onChange={(v) => onSetFlat(v)}
+              />
+              {/* Aviso si el costo de la orden parece sospechosamente bajo
+                  comparado con el del producto (puede ser data corrupta de
+                  versiones viejas con bug de cascada en FlatCostEditor). */}
+              {(() => {
+                const orderUnit = parseFloat(order.costoSinDesglosar) || 0;
+                const productUnit = parseFloat(product?.costoSinDesglosar) || 0;
+                const sospechoso = productUnit > 0 && orderUnit > 0 && orderUnit < productUnit * 0.1;
+                if (!sospechoso) return null;
+                return (
+                  <div className="mt-3 p-2 rounded bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/40">
+                    <p className="text-[10px] text-amber-800 dark:text-amber-200 leading-tight">
+                      ⚠ El costo de esta orden ({fmtMoney(orderUnit)}) es mucho menor al del producto ({fmtMoney(productUnit)}). Puede ser data vieja con bug. Tocá "Restaurar del producto" para usar el del producto.
+                    </p>
+                  </div>
+                );
+              })()}
+              <button
+                type="button"
+                onClick={() => { onClearFlat(); }}
+                className="mt-2 w-full px-2 py-1.5 text-[10px] font-semibold text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition"
+                title="Borra el override de la orden y vuelve a usar el costo del producto"
+              >
+                ↺ Restaurar costo del producto
+              </button>
+            </>
           ) : (
             <DesgloseEditor
               order={order}

@@ -18,6 +18,7 @@
     "api/marketing/meta-ads-publisher.js": { "maxDuration": 300 },
     "api/automations/[action].js": { "maxDuration": 30 },
     "api/google/[action].js": { "maxDuration": 30 },
+    "api/auth/[action].js": { "maxDuration": 30 },
     "api/meta/[action].js": { "maxDuration": 60 }
   },
   "crons": [

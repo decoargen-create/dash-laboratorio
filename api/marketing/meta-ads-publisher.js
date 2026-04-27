@@ -39,7 +39,7 @@ import {
 import { loadState, saveState, findReferenceAdId } from '../../lib/meta-publisher/state.js';
 import { listEnabledAutomations } from '../../lib/automations/store.js';
 import { loadMetaToken } from '../../lib/tokens/meta.js';
-import { loadGoogleToken } from '../../lib/tokens/google.js';
+import { getValidGoogleToken } from '../../lib/google/tokens.js';
 import {
   getDriveClient,
   listChildren,
@@ -290,7 +290,7 @@ async function runForTenant(cfg, { runIso, hour }) {
 
   let drive;
   try {
-    drive = await getDriveClient(cfg.driveAuth);
+    drive = await getDriveClient(cfg.driveAuth, { userId: cfg.userId });
   } catch (err) {
     await reportFatalError(webhookUrl, { message: `Drive auth falló: ${err.message}`, hour, hint: 'Revisar config Drive (SA o OAuth)' });
     return { ok: false, error: 'Drive auth failed', detail: err.message };
@@ -450,7 +450,16 @@ async function resolveTenantConfig(automation) {
     return { skipReason: `user ${automation.userId} no tiene Meta token (no conectó o expiró)` };
   }
 
-  const googleTok = await loadGoogleToken(automation.userId);
+  // getValidGoogleToken refresca con refresh_token si está vencido y
+  // persiste el resultado a KV antes de devolverlo. Si retorna null, no
+  // hay token válido (no conectado o invalid_grant).
+  let googleTok = null;
+  try {
+    googleTok = await getValidGoogleToken(automation.userId);
+  } catch (err) {
+    console.warn(`[orchestrator] getValidGoogleToken ${automation.userId} falló`, err.message);
+  }
+
   let cfg;
   if (googleTok?.accessToken) {
     cfg = loadConfigFromAutomation(automation, {
@@ -470,6 +479,7 @@ async function resolveTenantConfig(automation) {
     }
     cfg = {
       tenantId: automation.id,
+      userId: automation.userId,
       metaAccessToken: metaTok.accessToken,
       adAccountId: automation.adAccountId,
       pageId: automation.pageId,

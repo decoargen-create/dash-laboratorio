@@ -3484,16 +3484,22 @@ function NewSaleModal({ state, onAddSale, onQuickAddClient, onQuickAddProduct, o
   const cantidadNum = parseInt(formData.cantidad) || 0;
 
   // Auto-calcular monto total sugerido
-  const montoSugerido = productoSel ? productoSel.precioVenta * cantidadNum : 0;
-  const montoTotal = parseFloat(formData.montoTotal) || montoSugerido;
+  const montoSugerido = productoSel ? (Number(productoSel.precioVenta) || 0) * cantidadNum : 0;
+  // Para que el user pueda forzar "0" sin que se le sustituya por el sugerido,
+  // usamos Number.isFinite — sólo caemos al sugerido si el campo está vacío
+  // o no parsea a número.
+  const montoParsed = parseFloat(formData.montoTotal);
+  const montoTotal = Number.isFinite(montoParsed) ? montoParsed : montoSugerido;
 
   // Auto-sugerir costo informado del producto (POR UNIDAD — el form acepta
   // valor por unidad y se guarda tal cual, sin dividir por cantidad).
+  // Usamos `??` para respetar 0 explícito como costo informado del producto.
   const costoInfProducto = productoSel?.costoInformado ?? productoSel?.costoSinDesglosar ?? getProductUnitCost(productoSel);
-  const costoInfSugerido = costoInfProducto || 0;
+  const costoInfSugerido = Number.isFinite(Number(costoInfProducto)) ? Number(costoInfProducto) : 0;
 
   // Cálculos de preview para el partner (comisión sobre TOTALES).
-  const costoInfParsed = parseFloat(formData.costoInformado) || costoInfSugerido;
+  const costoInfParsedRaw = parseFloat(formData.costoInformado);
+  const costoInfParsed = Number.isFinite(costoInfParsedRaw) ? costoInfParsedRaw : costoInfSugerido;
   const costoInfTotal = costoInfParsed * cantidadNum;
   const gananciaInformada = Math.max(0, montoTotal - costoInfTotal);
   const pctPartner = mentorSel?.porcentajeComision ?? 50;
@@ -4078,7 +4084,7 @@ function ProductosSection({ state, onAddProduct, showModal, setShowModal, calcul
     const payload = {
       nombre: formData.nombre,
       descripcion: formData.descripcion,
-      precioVenta: parseInt(formData.precioVenta) || 0,
+      precioVenta: parseFloat(formData.precioVenta) || 0,
     };
     if (formData.modoCosto === 'total') {
       // Modo simple: un único número. Se guarda en costoSinDesglosar y los
@@ -4089,9 +4095,11 @@ function ProductosSection({ state, onAddProduct, showModal, setShowModal, calcul
       payload.costoEtiqueta = 0;
     } else {
       // Modo desglose: los 3 campos separados, costoSinDesglosar queda null.
-      payload.costoContenido = parseInt(formData.costoContenido) || 0;
-      payload.costoEnvase = parseInt(formData.costoEnvase) || 0;
-      payload.costoEtiqueta = parseInt(formData.costoEtiqueta) || 0;
+      // Usamos parseFloat (no parseInt) para preservar decimales — los
+      // proveedores a veces facturan con centavos.
+      payload.costoContenido = parseFloat(formData.costoContenido) || 0;
+      payload.costoEnvase = parseFloat(formData.costoEnvase) || 0;
+      payload.costoEtiqueta = parseFloat(formData.costoEtiqueta) || 0;
       payload.costoSinDesglosar = null;
     }
     // Costo informado: si no se activó el toggle, queda null (= el mentor ve
@@ -7330,7 +7338,7 @@ function QuickProductModal({ onClose, onCreate }) {
     const payload = {
       nombre: data.nombre.trim(),
       descripcion: data.descripcion.trim(),
-      precioVenta: parseInt(data.precioVenta) || 0,
+      precioVenta: parseFloat(data.precioVenta) || 0,
     };
     if (data.modoCosto === 'total') {
       payload.costoSinDesglosar = parseFloat(data.costoTotal) || 0;
@@ -7338,9 +7346,9 @@ function QuickProductModal({ onClose, onCreate }) {
       payload.costoEnvase = 0;
       payload.costoEtiqueta = 0;
     } else {
-      payload.costoContenido = parseInt(data.costoContenido) || 0;
-      payload.costoEnvase = parseInt(data.costoEnvase) || 0;
-      payload.costoEtiqueta = parseInt(data.costoEtiqueta) || 0;
+      payload.costoContenido = parseFloat(data.costoContenido) || 0;
+      payload.costoEnvase = parseFloat(data.costoEnvase) || 0;
+      payload.costoEtiqueta = parseFloat(data.costoEtiqueta) || 0;
       payload.costoSinDesglosar = null;
     }
     onCreate(payload);

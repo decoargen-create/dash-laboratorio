@@ -3001,7 +3001,17 @@ function OrdersList({ state, dispatch, orders, onEditOrder }) {
                     </td>
                   )}
                   {isColVisible('profit') && (
-                    <td className="px-4 py-3 text-right font-bold text-emerald-600 dark:text-emerald-400">{fmtMoney(isTotal ? profitTotal : profitUnit)}</td>
+                    <td className="px-4 py-3 text-right font-bold text-emerald-600 dark:text-emerald-400">
+                      <ProfitCellWithAudit
+                        order={order}
+                        product={product}
+                        mentor={mentor}
+                        profitTotal={profitTotal}
+                        profitUnit={profitUnit}
+                        commissionTotal={commissionTotal}
+                        isTotal={isTotal}
+                      />
+                    </td>
                   )}
                   {isColVisible('estado') && (
                     <td className="px-4 py-3">
@@ -6091,6 +6101,73 @@ function ClientDetailPanel({ stats, products }) {
 //   2) Sin discriminar: un único monto plano (cuando el proveedor pasó
 //      el costo final con todo y no tenemos breakdown).
 // El toggle entre modos es por orden — cada orden puede decidir.
+// Celda de profit con popover de auditoría. Muestra el resultado normal,
+// pero si es negativo o muy distinto al "esperado simple" (precio − costo)
+// expone un ícono ⚠ y al hover/click muestra todos los componentes del
+// cálculo. Sirve para diagnosticar datos corruptos en órdenes viejas.
+function ProfitCellWithAudit({ order, product, mentor, profitTotal, profitUnit, commissionTotal, isTotal }) {
+  const [open, setOpen] = useState(false);
+  const fmtMoney = (n) => `$${Math.round(Number(n) || 0).toLocaleString()}`;
+  const cantidad = Number(order?.cantidad) || 0;
+  const eff = getOrderEffectiveUnit(order, product);
+  const informedUnit = getInformedCostUnit(order, product);
+  const unitCost = (Number(eff.costoContenido) || 0) + (Number(eff.costoEnvase) || 0) + (Number(eff.costoEtiqueta) || 0);
+  const profitInterno = (Number(eff.precioVenta) || 0) * cantidad - unitCost * cantidad;
+  // Heurística: si el profit es muy distinto al "simple" (precio - costo),
+  // probablemente hay data corrupta o cálculo raro.
+  const sospechoso = profitTotal < 0 || (profitInterno !== 0 && Math.abs(profitTotal) > Math.abs(profitInterno) * 3);
+
+  return (
+    <div className="relative inline-block">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className={`inline-flex items-center gap-1 cursor-help ${
+          profitTotal < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'
+        }`}
+        title={sospechoso ? 'Profit sospechoso — click para ver el desglose' : 'Click para ver el desglose'}
+      >
+        <span>{fmtMoney(isTotal ? profitTotal : profitUnit)}</span>
+        {sospechoso && <AlertTriangle size={12} className="text-amber-500" />}
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-[90]" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-full mt-1 w-72 z-[100] rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-2xl p-3 text-left animate-scale-in">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">Auditoría del profit</p>
+            <table className="w-full text-[11px] tabular-nums">
+              <tbody>
+                <tr><td className="py-0.5 text-gray-500 dark:text-gray-400">Cantidad</td><td className="py-0.5 text-right text-gray-900 dark:text-gray-100">{cantidad}</td></tr>
+                <tr><td className="py-0.5 text-gray-500 dark:text-gray-400">Precio venta unit.</td><td className="py-0.5 text-right">{fmtMoney(eff.precioVenta)}</td></tr>
+                <tr><td className="py-0.5 text-gray-500 dark:text-gray-400">Precio venta total</td><td className="py-0.5 text-right font-semibold">{fmtMoney((Number(eff.precioVenta) || 0) * cantidad)}</td></tr>
+                <tr><td className="py-0.5 text-gray-500 dark:text-gray-400">Costo unit. (real)</td><td className="py-0.5 text-right">{fmtMoney(unitCost)}{eff.isFlat && <span className="ml-1 text-[9px] text-amber-600">flat</span>}</td></tr>
+                <tr><td className="py-0.5 text-gray-500 dark:text-gray-400">Costo total (real)</td><td className="py-0.5 text-right font-semibold">{fmtMoney(unitCost * cantidad)}</td></tr>
+                <tr className="border-t border-gray-200 dark:border-gray-700"><td className="py-0.5 text-gray-500 dark:text-gray-400 pt-1.5">Profit bruto</td><td className="py-0.5 text-right font-semibold pt-1.5">{fmtMoney(profitInterno)}</td></tr>
+                {mentor && (
+                  <>
+                    <tr><td className="py-0.5 text-gray-500 dark:text-gray-400">Costo informado unit.</td><td className="py-0.5 text-right">{fmtMoney(informedUnit)}</td></tr>
+                    <tr><td className="py-0.5 text-gray-500 dark:text-gray-400">% partner</td><td className="py-0.5 text-right">{Number(mentor.porcentajeComision) || 0}%</td></tr>
+                    <tr><td className="py-0.5 text-gray-500 dark:text-gray-400">Comisión partner</td><td className="py-0.5 text-right">−{fmtMoney(commissionTotal)}</td></tr>
+                  </>
+                )}
+                <tr className="border-t border-gray-200 dark:border-gray-700">
+                  <td className={`py-0.5 font-bold pt-1.5 ${profitTotal < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-700 dark:text-emerald-400'}`}>Profit neto</td>
+                  <td className={`py-0.5 text-right font-bold pt-1.5 ${profitTotal < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-700 dark:text-emerald-400'}`}>{fmtMoney(profitTotal)}</td>
+                </tr>
+              </tbody>
+            </table>
+            {sospechoso && (
+              <p className="mt-2 text-[10px] text-amber-700 dark:text-amber-300 leading-tight">
+                ⚠ Resultado raro. Revisá: cantidad, costo del producto, override de la orden y el % del partner.
+              </p>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function CostBreakdownCell({ order, product, costs, isTotal, onUpdateProduct, onOverrideContenido, onOverrideEnvase, onOverrideEtiqueta, onSetFlat, onClearFlat }) {
   const [open, setOpen] = useState(false);
   const fmtMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;

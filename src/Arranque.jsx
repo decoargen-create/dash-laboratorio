@@ -17,12 +17,12 @@
 // para continuidad entre Arranque, Documentación (viewer), Competencia,
 // Bandeja y Gastos.
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Package, Target, Play, Check, Loader2, AlertTriangle, ChevronRight, ChevronDown,
   Plus, X, Sparkles, Link2, Search, Clock, Inbox, Trash2,
 } from 'lucide-react';
-import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGeneratedToday } from './bandejaStore.js';
+import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGeneratedToday, updateIdea } from './bandejaStore.js';
 import { logCostsFromResponse } from './costsStore.js';
 import BandejaSection from './Bandeja.jsx';
 import InspiracionSection from './InspiracionSection.jsx';
@@ -49,6 +49,11 @@ const RUN_HISTORY_KEY = 'viora-marketing-run-history-v1';
 // Cap del historial guardado — cada entry tiene los steps + stats + cost.
 // 20 corridas cubren ~3 semanas a 1 run/día, sin explotar localStorage.
 const RUN_HISTORY_CAP = 20;
+// Marker que seteamos mientras corre el pipeline. Si al montar Arranque lo
+// encontramos pero `running=false`, significa que el user cerró/refreshó la
+// pestaña a medio run. Sirve para no dejar al user sin aviso de que quedaron
+// docs/ads/análisis a medias en el storage.
+const PIPELINE_RUNNING_KEY = 'viora-marketing-pipeline-running-v1';
 
 function loadJSON(key, fallback) {
   try {
@@ -58,13 +63,27 @@ function loadJSON(key, fallback) {
 }
 
 function saveJSON(key, value) {
-  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+  try { localStorage.setItem(key, JSON.stringify(value)); return true; }
+  catch (err) {
+    // Quota exceeded es lo único que vamos a surface — el resto de errores
+    // (storage disabled en navegadores raros) no son accionables y mantienen
+    // el comportamiento previo de fallar silencioso.
+    if (err && (err.name === 'QuotaExceededError' || err.code === 22 || err.code === 1014)) {
+      try {
+        // Notificamos vía CustomEvent así el componente puede mostrar toast
+        // sin tener que pasar `addToast` a esta función pura.
+        window.dispatchEvent(new CustomEvent('viora-storage-quota-exceeded', { detail: { key } }));
+      } catch {}
+    }
+    return false;
+  }
 }
 
 // Consume el stream SSE de /api/marketing/generate y devuelve los docs
 // cuando el stream se completa. onProgress recibe strings de estado para
-// mostrar en el stepper mientras corre.
-async function streamGenerateDocs({ productoNombre, productoUrl, descripcion, onProgress }) {
+// mostrar en el stepper mientras corre. onCost recibe el breakdown { anthropic, total }
+// emitido por el server por step (incremental) y al final como total.
+async function streamGenerateDocs({ productoNombre, productoUrl, descripcion, onProgress, onCost }) {
   const resp = await fetch('/api/marketing/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -98,16 +117,34 @@ async function streamGenerateDocs({ productoNombre, productoUrl, descripcion, on
           outputs[ev.key] = ev.content;
           if (ev.key === 'resumenEjecutivo') resumenEjecutivo = ev.content || '';
           onProgress?.(`✓ ${ev.label} listo`);
+        } else if (ev.type === 'step-cost' && ev.cost) {
+          // Cost incremental por paso — lo reportamos al runner para que
+          // se vea en vivo en el display "💰 $X" sin esperar al complete.
+          onCost?.(ev.cost, `docs · ${ev.label || ev.key || ''}`);
         } else if (ev.type === 'error') {
           throw new Error(ev.error || 'Error en el stream de docs');
         } else if (ev.type === 'complete') {
-          // Nada — seguimos hasta done.
+          // El cliente ya recibió los step-cost incrementales — el cost
+          // total del `complete` es solo para validación del lado del
+          // server, NO lo volvemos a sumar (sería doble contabilización).
         }
       } catch (err) {
         if (err instanceof SyntaxError) continue; // línea parcial
         throw err;
       }
     }
+  }
+
+  // Validamos que todos los docs hayan llegado completos. Si el stream
+  // se cortó a mitad (red flap, 503 transitorio del proveedor) podemos
+  // tener `research` listo pero `avatar` vacío — y la condición de skip
+  // downstream (`!docs?.research`) nos haría tratar al producto como
+  // documentado cuando le falta material crítico para el generador.
+  // Mejor fallar acá explícitamente y que el user reintente.
+  const REQUIRED_DOCS = ['research', 'avatar', 'offerBrief', 'beliefs'];
+  const incomplete = REQUIRED_DOCS.filter(k => !outputs[k] || String(outputs[k]).trim().length < 200);
+  if (incomplete.length > 0) {
+    throw new Error(`Documentación incompleta: faltan ${incomplete.join(', ')}. El stream se cortó a mitad — reintentá el pipeline.`);
   }
 
   return { docs: outputs, resumenEjecutivo };
@@ -237,7 +274,15 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // Config del generador de ideas (límite diario + mix de formato)
   const [genConfig, setGenConfig] = useState(() => ({ ...DEFAULT_GEN_CONFIG, ...loadJSON(GEN_CONFIG_KEY, {}) }));
   const [showGenConfig, setShowGenConfig] = useState(false);
-  const [ideasToday, setIdeasToday] = useState(() => countIdeasGeneratedToday());
+  // Inicializamos el contador de ideas del día YA filtrado por el producto
+  // activo (si lo hay). Antes lo inicializábamos global y el effect lo
+  // corregía después → flicker en pantalla con un número que no se respeta.
+  const [ideasToday, setIdeasToday] = useState(() => {
+    try {
+      const aid = localStorage.getItem('viora-marketing-active-product');
+      return countIdeasGeneratedToday(null, aid || null);
+    } catch { return 0; }
+  });
 
   // Pipeline runner — el state vive en el PipelineRunContext global para
   // que sobreviva al cambio de sección (corre en background mientras
@@ -258,9 +303,61 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // en la UI como colapsable para que el user vea qué se ejecutó antes.
   const [runHistory, setRunHistory] = useState(() => loadJSON(RUN_HISTORY_KEY, []));
 
+  // Ref siempre actualizado al state más reciente de productos. Lo usamos
+  // adentro del runner del pipeline para evitar leer snapshots stale del
+  // closure cuando llamamos a pasos asincrónicos. Antes el runner leía de
+  // `loadJSON(COMPETIDORES_KEY, ...)` que está borrado tras la migración,
+  // y caía a un fallback que perdía actualizaciones recientes.
+  const productosRef = useRef(productos);
+  useEffect(() => { productosRef.current = productos; }, [productos]);
+
   useEffect(() => { saveJSON(PRODUCTOS_KEY, productos); }, [productos]);
   useEffect(() => { saveJSON(GEN_CONFIG_KEY, genConfig); }, [genConfig]);
   useEffect(() => { saveJSON(RUN_HISTORY_KEY, runHistory); }, [runHistory]);
+
+  // Surface de quota exceeded — saveJSON dispara este event si el navegador
+  // rechaza el write por límite (~5MB). El user necesita saber que dejamos
+  // de persistir, sino podría perder docs/análisis al refrescar.
+  useEffect(() => {
+    const onQuota = (e) => {
+      addToast?.({
+        type: 'error',
+        message: `Storage del navegador lleno (clave: ${e.detail?.key || '—'}). Limpiá historial o productos viejos para liberar espacio.`,
+      });
+    };
+    window.addEventListener('viora-storage-quota-exceeded', onQuota);
+    return () => window.removeEventListener('viora-storage-quota-exceeded', onQuota);
+  }, [addToast]);
+
+  // Detectar pipeline a medias: si al montar Arranque encontramos el marker
+  // de "running" pero acá running=false, significa que el user cerró/refreshó
+  // la pestaña a mitad de un run. Avisamos para que reinicie a mano.
+  useEffect(() => {
+    const stale = loadJSON(PIPELINE_RUNNING_KEY, null);
+    if (stale && Date.now() - stale.startedAt < 30 * 60 * 1000 && !running) {
+      addToast?.({
+        type: 'warning',
+        message: `Detecté un pipeline a medias de "${stale.productoNombre || 'un producto'}". Re-corré el pipeline para terminar lo que faltó.`,
+      });
+      try { localStorage.removeItem(PIPELINE_RUNNING_KEY); } catch {}
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // solo al mount
+
+  // Mientras corre el pipeline, mantenemos un marker persistido. Si el user
+  // cierra la pestaña a medio run, el efecto de arriba lo va a detectar al
+  // próximo mount.
+  useEffect(() => {
+    if (running) {
+      saveJSON(PIPELINE_RUNNING_KEY, {
+        startedAt: Date.now(),
+        productoId: pipelineRun.productoId,
+        productoNombre: pipelineRun.productoNombre,
+      });
+    } else {
+      try { localStorage.removeItem(PIPELINE_RUNNING_KEY); } catch {}
+    }
+  }, [running, pipelineRun.productoId, pipelineRun.productoNombre]);
 
   // Refrescar contador de ideas del día cada vez que montamos o cambia la bandeja.
   // Cuando hay producto activo, contamos solo las suyas.
@@ -274,7 +371,8 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // Mix promedio de la competencia (% video vs static) — calculado sobre
   // todos los ads scrapeados de los competidores cargados. Sirve como
   // sugerencia del default: "tu competencia usa X% video, te recomendamos eso".
-  const competitorMix = (() => {
+  // useMemo: con muchos ads (700+) iterar en cada render lagueaba el setup.
+  const competitorMix = useMemo(() => {
     let totalAds = 0, videoAds = 0, staticAds = 0;
     for (const c of competidores) {
       for (const ad of (c.ads || [])) {
@@ -293,7 +391,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       staticPct: Math.round((staticAds / totalAds) * 100),
       competidoresConAds: competidores.filter(c => (c.ads || []).length > 0).length,
     };
-  })();
+  }, [competidores]);
 
   const usarMixCompetencia = () => {
     if (!competitorMix) return;
@@ -554,6 +652,14 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       addToast?.({ type: 'error', message: 'Primero cargá el producto (nombre + landing)' });
       return;
     }
+    // Guard contra double-run. Aunque el botón se oculta cuando running=true,
+    // hay paths concurrentes (auto-run pill, Enter rápido, otra pestaña) que
+    // pueden disparar dos invocaciones en paralelo y pisarse setProductos /
+    // setCompetidores sin orden definido.
+    if (running) {
+      addToast?.({ type: 'info', message: 'Ya hay un pipeline corriendo. Esperá a que termine o cancelá primero.' });
+      return;
+    }
 
     // Iniciar corrida en el context global — limpia state previo y marca
     // running=true. Así el pipeline sigue vivo aunque el user salga de
@@ -563,7 +669,23 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       productoNombre: producto.nombre,
     });
 
-    // Wrapper sobre logCostsFromResponse que también suma al runCost local.
+    // Acumulador local del costo del run. Antes leíamos `runCost` del closure
+    // al final del run para persistir, pero ese valor era el snapshot inicial
+    // (cero), no el final — el costo guardado en runHistory salía siempre 0.
+    // Usamos una local mutable y la consultamos al persistir.
+    const acumuladoLocal = { anthropic: 0, openai: 0, apify: 0, meta: 0, total: 0 };
+    // Contadores en vivo del run — los persistimos al final. Reemplazan los
+    // regex frágiles que parseaban el detail string del stepper para sacar
+    // ganadores e ideas (cualquier cambio de copy rompía el banner).
+    const liveStats = { winnersAnalyzed: 0, ideasInsertadas: 0, ideasGeneradas: 0, hooksLowScore: 0 };
+    // Ideas realmente insertadas en la bandeja durante este run, con su id
+    // del store. Se llena en el loop SSE del generator y se manda al step
+    // `score-hooks` después para que Haiku puntúe cada una y marquemos las
+    // <6 con flag `lowScore` (el user las puede archivar de un click).
+    const insertedIdeasForScoring = [];
+
+    // Wrapper sobre logCostsFromResponse que también suma al runCost (display
+    // en vivo) y al acumulado local (persistencia final).
     const trackCost = (data, descripcion) => {
       const added = logCostsFromResponse(data, descripcion);
       if (added?.total > 0) {
@@ -574,6 +696,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           meta: prev.meta + added.meta,
           total: prev.total + added.total,
         }));
+        acumuladoLocal.anthropic += added.anthropic || 0;
+        acumuladoLocal.openai += added.openai || 0;
+        acumuladoLocal.apify += added.apify || 0;
+        acumuladoLocal.meta += added.meta || 0;
+        acumuladoLocal.total += added.total || 0;
       }
       return added;
     };
@@ -623,6 +750,15 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           productoUrl: producto.landingUrl || '',
           descripcion: producto.descripcion || '',
           onProgress: (msg) => updateStep('docs-gen', { detail: msg }),
+          // Cada step-cost del SSE se traduce en un trackCost para que el
+          // gasto del docs-gen aparezca en vivo en "💰 $X" y persista en
+          // runHistory. Antes este endpoint no devolvía cost → el run
+          // mostraba $0 mientras gastaba lo más caro del pipeline.
+          onCost: (costBreakdown, descripcion) => {
+            // trackCost espera shape `{ cost: { anthropic, ... } }` igual
+            // que un response del backend → wrapeamos el breakdown.
+            trackCost({ cost: costBreakdown }, descripcion);
+          },
         });
         // Guardar los docs en el producto
         productoActualizado = {
@@ -631,7 +767,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           resumenEjecutivo: docs.resumenEjecutivo,
           docsGeneratedAt: new Date().toISOString(),
         };
-        setProductos(prev => prev.map(p => p.id === producto.id ? productoActualizado : p));
+        setProductos(prev => prev.map(p => String(p.id) === String(producto.id) ? productoActualizado : p));
         updateStep('docs-gen', {
           status: 'done',
           endedAt: Date.now(),
@@ -650,7 +786,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     // (corridas previas). Reutilizamos lo que ya está. Ahorra ~30-60s.
     // ============================================================
     let searchKeywords = productoActualizado?.searchKeywords || [];
-    const yaTienePostResearch = !!productoActualizado?.stage && searchKeywords.length > 0;
+    // Mín 3 keywords para considerar "ya hecho". Antes con 1 sola keyword el
+    // skip se activaba y nunca regenerábamos — quedabas atascado con keywords
+    // pobres salvo que borraras el producto. 3 es el mínimo que da una mezcla
+    // viable de problema + categoría + ángulo.
+    const yaTienePostResearch = !!productoActualizado?.stage && searchKeywords.length >= 3;
     if (!cancelled && productoActualizado?.docs?.research && !yaTienePostResearch) {
       updateStep('post-research', { status: 'running', startedAt: Date.now() });
       try {
@@ -678,7 +818,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           stageReason: data.stageReason,
           searchKeywords,
         };
-        setProductos(prev => prev.map(p => p.id === productoActualizado.id ? productoActualizado : p));
+        setProductos(prev => prev.map(p => String(p.id) === String(productoActualizado.id) ? productoActualizado : p));
 
         updateStep('post-research', {
           status: 'done',
@@ -725,6 +865,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           status: 'pending',
         })),
         { id: 'generate', label: '💡 Generando ideas nuevas con IA', detail: 'Réplicas + iteraciones + diferenciaciones + desde cero', status: 'pending' },
+        { id: 'score-hooks', label: '🎯 Filtrando hooks flojos', detail: 'Haiku scorea cada hook 1-10 y marca los <6 para que los archives', status: 'pending' },
         { id: 'done', label: '✅ Listo', detail: 'Tenés análisis fresco + ideas nuevas en la Bandeja', status: 'pending' },
       ];
       return [...base, ...nuevos];
@@ -735,8 +876,20 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     // saltean en el paso de análisis (no gastan Claude de nuevo). El user
     // quiere ver la diff: cuántos son nuevos vs ya vistos.
     const compWithAds = []; // { comp, winners }
+    let apifyQuotaExhausted = false;
     for (const c of competidoresLocal) {
       if (cancelled) break;
+      if (apifyQuotaExhausted) {
+        // Si Apify se quedó sin quota mensual no tiene sentido seguir —
+        // todos los siguientes van a tirar el mismo error. Marcamos como
+        // pending → done con nota.
+        updateStep(`scrape-${c.id}`, {
+          status: 'error',
+          endedAt: Date.now(),
+          detail: 'Salteado · Apify sin quota mensual',
+        });
+        continue;
+      }
       const stepId = `scrape-${c.id}`;
       updateStep(stepId, { status: 'running', startedAt: Date.now() });
       try {
@@ -830,6 +983,16 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         });
       } catch (err) {
         updateStep(stepId, { status: 'error', endedAt: Date.now(), detail: err.message });
+        // Detectar quota mensual de Apify para abortar el resto del loop.
+        // Sin esto, los 7 competidores restantes mandan requests inútiles
+        // que igual van a fallar.
+        if (/usage hard limit|monthly|platform-feature-disabled|quota/i.test(err.message || '')) {
+          apifyQuotaExhausted = true;
+          addToast?.({
+            type: 'error',
+            message: 'Apify se quedó sin quota mensual. Cancelando los competidores restantes — corré el pipeline cuando renueve la cuota.',
+          });
+        }
       }
     }
 
@@ -844,7 +1007,10 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       // Filtrar: no re-analizar los ads que ya tienen análisis guardado.
       // Ahorramos tokens + tiempo + evitamos tirar ideas duplicadas en la
       // bandeja. Solo analizamos ads nuevos que aparecieron en este scrape.
-      const compFresh = loadJSON(COMPETIDORES_KEY, competidores).find(x => x.id === comp.id);
+      // Leemos del ref del state global de productos — la key vieja
+      // COMPETIDORES_KEY está borrada tras la migración inicial.
+      const productoFresh = productosRef.current.find(p => String(p.id) === String(producto.id));
+      const compFresh = (productoFresh?.competidores || []).find(x => x.id === comp.id);
       const existingAnalyses = compFresh?.adsAnalysis || {};
       const nuevosParaAnalizar = winners.filter(ad => !existingAnalyses[ad.id]);
       const yaAnalizados = winners.length - nuevosParaAnalizar.length;
@@ -904,6 +1070,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           // Empuja la idea a la Bandeja automáticamente.
           ideaFromDeepAnalysis({ analysis: data.analysis, transcript: data.transcript, ad, competidor: comp, producto });
           analyzed++;
+          liveStats.winnersAnalyzed++;
           updateStep(stepId, { detail: `${analyzed}/${nuevosParaAnalizar.length} analizados${yaAnalizados > 0 ? ` · ${yaAnalizados} salteados (ya había análisis)` : ''}` });
         } catch (err) {
           // Un análisis fallido no rompe el resto — seguimos.
@@ -928,7 +1095,12 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         //    identificar patrones que no capturamos con deep-analyze.
         const compAnalisis = [];
         const allCompAds = [];
-        const compsActualizados = loadJSON(COMPETIDORES_KEY, competidores);
+        // Releemos los competidores desde el ref del state — así capturamos
+        // los `adsAnalysis` recién guardados por el deep-analyze loop. Antes
+        // leíamos `loadJSON(COMPETIDORES_KEY, ...)` que está borrada tras la
+        // migración → caía al fallback del closure y perdía análisis frescos.
+        const productoFreshGen = productosRef.current.find(p => String(p.id) === String(producto.id));
+        const compsActualizados = productoFreshGen?.competidores || competidores;
         for (const c of compsActualizados) {
           // Deep-analyzed (con insights completos)
           const analyses = c.adsAnalysis || {};
@@ -964,10 +1136,21 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         // Antes usábamos todas las ideas globalmente, lo que rompía en
         // multi-producto (si producto A tenía 30 ideas, producto B se
         // comportaba como si ya tuviera todas esas).
+        // Ahora también pasamos el `estado` y el `hook` para que el generator
+        // pueda usar las ideas usadas como ejemplos POSITIVOS y las
+        // archivadas como ejemplos NEGATIVOS (feedback loop). Antes solo
+        // mandábamos titulo/angulo/tipo y el generador no sabía qué se
+        // había aprobado.
         const productoActualId = String(producto.id);
         const ideasExistentes = loadIdeas()
           .filter(i => String(i.productoId || '') === productoActualId)
-          .map(i => ({ titulo: i.titulo, angulo: i.angulo, tipo: i.tipo }));
+          .map(i => ({
+            titulo: i.titulo,
+            angulo: i.angulo,
+            tipo: i.tipo,
+            hook: i.hook || '',
+            estado: i.estado || 'pendiente',
+          }));
 
         // Ads propios matcheados al producto (solo si ya corrió el matcher IA
         // y son high/medium confidence). Sirven para generar iteraciones.
@@ -1015,26 +1198,44 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         // Consumimos SSE stream. Cada evento 'idea' llega en vivo apenas
         // Claude termina de escribirla → la empujamos a la Bandeja y al
         // stepper al toque. Al final viene 'complete' con el costo total.
-        const resp = await fetch('/api/marketing/generate-ideas', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            producto: productoActualizado || producto || { nombre: 'Producto sin definir' },
-            competidoresAnalisis: compAnalisis,
-            allCompAds,
-            ideasExistentes,
-            propiosAds,
-            targetCount,
-            formatoMix,
-          }),
-        });
+        // Si el primer hit timeoutea, reintentamos UNA vez con la mitad del
+        // target (Apify hace retry parecido). Sin esto, todas las ideas que
+        // se podrían haber pedido en chunks más chicos se pierden.
+        const generateBody = {
+          producto: productoActualizado || producto || { nombre: 'Producto sin definir' },
+          competidoresAnalisis: compAnalisis,
+          allCompAds,
+          ideasExistentes,
+          propiosAds,
+          targetCount,
+          formatoMix,
+        };
+        const fetchGenerate = async (body) => {
+          const r = await fetch('/api/marketing/generate-ideas', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          return r;
+        };
+        let resp = await fetchGenerate(generateBody);
+        if (!resp.ok || !resp.body) {
+          const text = await resp.text().catch(() => '');
+          const isTimeout = /504|timeout|FUNCTION_INVOCATION_TIMEOUT/i.test(text) || resp.status === 504;
+          if (isTimeout && generateBody.targetCount > 12) {
+            const reduced = Math.max(12, Math.floor(generateBody.targetCount / 2));
+            updateStep('generate', { detail: `Timeout — reintentando con ${reduced} ideas (la mitad)…` });
+            generateBody.targetCount = reduced;
+            resp = await fetchGenerate(generateBody);
+          }
+        }
         if (!resp.ok || !resp.body) {
           // Error antes de que arranque el stream — lo leemos como text y
           // damos un mensaje accionable.
           const text = await resp.text().catch(() => '');
-          const isTimeout = /504|timeout|FUNCTION_INVOCATION_TIMEOUT/i.test(text);
+          const isTimeout = /504|timeout|FUNCTION_INVOCATION_TIMEOUT/i.test(text) || resp.status === 504;
           throw new Error(isTimeout
-            ? 'Timeout: el generador tardó más de 5 min. Probá con menos competidores o menos ideas.'
+            ? 'Timeout del generador (incluyendo reintento con menos ideas). Probá con menos competidores o pedí < 30 ideas.'
             : `HTTP ${resp.status}${text ? ': ' + text.slice(0, 120) : ''}`);
         }
 
@@ -1061,7 +1262,24 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 // Empujamos a la Bandeja — addGeneratedIdeas dedupea
                 // por (tipo, titulo), así que si ya existe no molesta.
                 const nuevas = addGeneratedIdeas([ev.idea], { producto: productoActualizado || producto });
-                if (nuevas.length > 0) insertadas++;
+                if (nuevas.length > 0) {
+                  insertadas++;
+                  liveStats.ideasInsertadas++;
+                  // Acumulamos las ideas REALMENTE insertadas (con su id
+                  // del store) para mandar al scoring después. Si llegó
+                  // duplicada, addGeneratedIdeas devuelve [] y no la
+                  // re-scoreamos.
+                  for (const n of nuevas) {
+                    insertedIdeasForScoring.push({
+                      id: n.id,
+                      titulo: n.titulo,
+                      hook: n.hook || '',
+                      tipo: n.tipo,
+                      anguloCategoria: n.anguloCategoria || null,
+                    });
+                  }
+                }
+                liveStats.ideasGeneradas++;
                 setLiveIdeas(prev => [...prev, ev.idea]);
                 updateStep('generate', {
                   detail: `${insertadas} ideas nuevas en la Bandeja · generando…`,
@@ -1078,8 +1296,15 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         }
 
         if (streamErr) throw streamErr;
-        if (costPayload) logCostsFromResponse(costPayload, `generate-ideas · ${(productoActualizado || producto)?.nombre || ''}`);
-        setIdeasToday(countIdeasGeneratedToday());
+        // trackCost en lugar de logCostsFromResponse directo: así el costo
+        // del generador (Sonnet 4.6 + thinking, suele ser ~50% del run total)
+        // también se suma al display "💰" en vivo y al acumulado local que
+        // persistimos en runHistory.
+        if (costPayload) trackCost(costPayload, `generate-ideas · ${(productoActualizado || producto)?.nombre || ''}`);
+        // Recontamos las ideas del día PARA ESTE PRODUCTO — no global.
+        // Antes esto era global y choreaba con la lógica del effect que sí
+        // filtra por producto.
+        setIdeasToday(countIdeasGeneratedToday(null, productoActualId));
         updateStep('generate', {
           status: 'done',
           endedAt: Date.now(),
@@ -1093,6 +1318,67 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       }
     }
 
+    // ============================================================
+    // PASO: Score de hooks con Haiku — descarta los flojos.
+    // Haiku barato puntúa 1-10 cada hook contra criterios fijos
+    // (pattern-interrupt, especificidad, porteño, claims). Las ideas
+    // con score <6 quedan en la bandeja con flag `lowScore` para que
+    // el user las archive de un click. Antes ningún piso de calidad
+    // existía → la bandeja se llenaba de hooks genéricos.
+    // ============================================================
+    if (!cancelled && insertedIdeasForScoring.length > 0) {
+      updateStep('score-hooks', {
+        status: 'running',
+        startedAt: Date.now(),
+        detail: `Scorando ${insertedIdeasForScoring.length} hooks con Haiku…`,
+      });
+      try {
+        const scoreResp = await fetch('/api/marketing/score-hooks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ideas: insertedIdeasForScoring }),
+        });
+        const scoreData = await scoreResp.json();
+        if (!scoreResp.ok) throw new Error(scoreData.error || `HTTP ${scoreResp.status}`);
+        trackCost(scoreData, `score-hooks · ${insertedIdeasForScoring.length} hooks`);
+
+        const scoresMap = new Map((scoreData.scores || []).map(s => [s.id, s]));
+        let lowScored = 0;
+        let scoredOk = 0;
+        for (const idea of insertedIdeasForScoring) {
+          const s = scoresMap.get(idea.id);
+          if (!s) continue;
+          if (s.score < 6) {
+            updateIdea(idea.id, { lowScore: true, scoreValue: s.score, scoreReason: s.reason });
+            lowScored++;
+          } else {
+            updateIdea(idea.id, { lowScore: false, scoreValue: s.score, scoreReason: s.reason });
+            scoredOk++;
+          }
+        }
+        liveStats.hooksLowScore = lowScored;
+        updateStep('score-hooks', {
+          status: 'done',
+          endedAt: Date.now(),
+          detail: `${scoredOk} hooks pasaron · ${lowScored} marcados como flojos (revisá y archivá si querés)`,
+        });
+      } catch (err) {
+        // No es fatal — las ideas ya están en la bandeja sin scoring.
+        updateStep('score-hooks', {
+          status: 'error',
+          endedAt: Date.now(),
+          detail: `Scoring falló: ${err.message}. Las ideas igual están en la Bandeja.`,
+        });
+      }
+    } else if (!cancelled) {
+      // No hay ideas nuevas para scorear — skip silencioso.
+      updateStep('score-hooks', {
+        status: 'done',
+        endedAt: Date.now(),
+        detail: 'Sin hooks nuevos para scorear (no se generaron ideas).',
+      });
+    }
+
     // Paso final
     updateStep('done', { status: 'running', startedAt: Date.now() });
     await new Promise(r => setTimeout(r, 400));
@@ -1101,37 +1387,52 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     setRunning(false);
     if (!cancelled) {
       try { localStorage.setItem(LAST_RUN_KEY, new Date().toISOString()); } catch {}
-      // Persistir el resumen de esta corrida al historial del producto.
-      setSteps(currentSteps => {
-        const endedAt = Date.now();
-        const startedAt = currentSteps.find(s => s.startedAt)?.startedAt || endedAt;
-        const runEntry = {
-          id: `run-${endedAt}`,
-          productoId: producto?.id ? String(producto.id) : null,
-          productoNombre: producto?.nombre || '',
-          startedAt: new Date(startedAt).toISOString(),
-          endedAt: new Date(endedAt).toISOString(),
-          durationMs: endedAt - startedAt,
-          cost: { ...runCost },
-          // Guardamos los steps (sin Date timestamps grandes) — sirve para
-          // mostrar el detalle de qué pasó.
-          steps: currentSteps.map(s => ({
-            id: s.id,
-            label: s.label,
-            detail: s.detail,
-            status: s.status,
-            startedAt: s.startedAt || null,
-            endedAt: s.endedAt || null,
-          })),
-          stats: {
-            competidoresCount: (currentSteps.filter(s => s.id.startsWith('scrape-')).length),
-            competidoresOk: (currentSteps.filter(s => s.id.startsWith('scrape-') && s.status === 'done').length),
-            stepsError: currentSteps.filter(s => s.status === 'error').length,
-          },
-        };
-        setRunHistory(prev => [runEntry, ...prev].slice(0, RUN_HISTORY_CAP));
-        return currentSteps;
-      });
+    }
+    // Siempre persistimos el resumen al historial — incluso runs cancelados
+    // o con errores, para que el user tenga traza completa de qué pasó.
+    // Antes solo guardábamos los runs exitosos y se perdía el debug de
+    // los que se rompieron.
+    setSteps(currentSteps => {
+      const endedAt = Date.now();
+      const startedAt = currentSteps.find(s => s.startedAt)?.startedAt || endedAt;
+      const stepsError = currentSteps.filter(s => s.status === 'error').length;
+      const runEntry = {
+        id: `run-${endedAt}`,
+        productoId: producto?.id ? String(producto.id) : null,
+        productoNombre: producto?.nombre || '',
+        startedAt: new Date(startedAt).toISOString(),
+        endedAt: new Date(endedAt).toISOString(),
+        durationMs: endedAt - startedAt,
+        cancelled,
+        // Cost del run = acumulado local. Antes guardábamos `{ ...runCost }`
+        // que cerraba sobre el snapshot inicial del state (siempre 0).
+        cost: { ...acumuladoLocal },
+        // Guardamos los steps (sin Date timestamps grandes) — sirve para
+        // mostrar el detalle de qué pasó.
+        steps: currentSteps.map(s => ({
+          id: s.id,
+          label: s.label,
+          detail: s.detail,
+          status: s.status,
+          startedAt: s.startedAt || null,
+          endedAt: s.endedAt || null,
+        })),
+        stats: {
+          competidoresCount: (currentSteps.filter(s => s.id.startsWith('scrape-')).length),
+          competidoresOk: (currentSteps.filter(s => s.id.startsWith('scrape-') && s.status === 'done').length),
+          stepsError,
+          // Contadores reales — no parseados con regex sobre el detail
+          // string que rompía cualquier cambio de copy.
+          winnersAnalyzed: liveStats.winnersAnalyzed,
+          ideasInsertadas: liveStats.ideasInsertadas,
+          ideasGeneradas: liveStats.ideasGeneradas,
+          hooksLowScore: liveStats.hooksLowScore,
+        },
+      };
+      setRunHistory(prev => [runEntry, ...prev].slice(0, RUN_HISTORY_CAP));
+      return currentSteps;
+    });
+    if (!cancelled) {
       addToast?.({ type: 'success', message: '¡Listo! Mirá los análisis + ideas en la Bandeja.' });
     }
   };
@@ -1301,7 +1602,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                     onClick={(e) => {
                       e.stopPropagation();
                       if (window.confirm(`¿Eliminar "${p.nombre}"? Se borran sus competidores, cuenta Meta y research. No se pueden recuperar.`)) {
-                        setProductos(prev => prev.filter(x => x.id !== p.id));
+                        setProductos(prev => prev.filter(x => String(x.id) !== String(p.id)));
                         if (String(p.id) === String(activeProductoId)) setActiveProductoId(null);
                       }
                     }}
@@ -1528,7 +1829,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               <div className="flex items-center gap-2 mt-1">
                 <label className="text-[10px] font-bold text-gray-500 uppercase">Stage inferido:</label>
                 <select value={producto.stage}
-                  onChange={e => setProductos(prev => prev.map(p => p.id === producto.id ? { ...p, stage: e.target.value } : p))}
+                  onChange={e => setProductos(prev => prev.map(p => String(p.id) === String(producto.id) ? { ...p, stage: e.target.value } : p))}
                   className="px-2 py-0.5 text-[11px] bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-purple-500"
                   title={producto.stageReason || ''}>
                   <option value="problem_aware">Problem-Aware</option>
@@ -1893,7 +2194,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                       onChange={e => setGenConfig(c => ({ ...c, limiteDiario: Math.max(1, Math.min(MAX_IDEAS_PER_RUN, Number(e.target.value) || 50)) }))}
                       className="w-24 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-purple-500" />
                     <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">
-                      Se resetea a las 00:00 hs Argentina. Primera corrida (bandeja vacía) ignora el límite y genera hasta 40 con piso de calidad.
+                      Se resetea a las 00:00 hs Argentina. Primera corrida (bandeja vacía) ignora el límite y genera entre 50 y {MAX_IDEAS_PER_RUN} ideas según cuántos ads tenga la competencia.
                     </p>
                   </div>
                   <div>
@@ -1962,11 +2263,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               )}
               {!running && steps.length > 0 && (
                 <>
-                  <button onClick={() => onGoToSection?.('mk-bandeja')}
+                  <button onClick={() => setProductoTab('bandeja')}
                     className="inline-flex items-center gap-1 px-3 py-2 text-xs font-bold text-fuchsia-700 dark:text-fuchsia-300 hover:bg-fuchsia-50 dark:hover:bg-fuchsia-900/20 rounded transition">
                       Ver Bandeja de ideas <ChevronRight size={12} />
                   </button>
-                  <button onClick={() => onGoToSection?.('mk-competencia')}
+                  <button onClick={() => setProductoTab('competencia')}
                     className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded transition">
                       Ver Competencia <ChevronRight size={12} />
                   </button>
@@ -1978,16 +2279,12 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
         {/* Banner de éxito al terminar — CTA grande para ir a la Bandeja */}
         {!running && steps.length > 0 && steps[steps.length - 1]?.id === 'done' && steps[steps.length - 1]?.status === 'done' && (() => {
-          // Contamos qué se logró: ganadores totales + ideas nuevas.
-          const winnersTotal = steps
-            .filter(s => s.id.startsWith('scrape-') && s.status === 'done')
-            .reduce((sum, s) => {
-              const m = (s.detail || '').match(/(\d+)\s+ganador/i);
-              return sum + (m ? Number(m[1]) : 0);
-            }, 0);
-          const genStep = steps.find(s => s.id === 'generate');
-          const ideasMatch = genStep?.detail?.match(/(\d+)\s+ideas\s+nuevas/i);
-          const ideasNuevas = ideasMatch ? Number(ideasMatch[1]) : 0;
+          // Contadores reales del último run del producto activo, persistidos
+          // en runHistory por el runner. Antes parseábamos con regex sobre el
+          // detail string del stepper — frágil a cualquier cambio de copy.
+          const ultimoRun = runHistory.find(r => String(r.productoId || '') === String(producto?.id || ''));
+          const winnersTotal = ultimoRun?.stats?.winnersAnalyzed || 0;
+          const ideasNuevas = ultimoRun?.stats?.ideasInsertadas || 0;
           return (
             <div className="mt-5 p-4 bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 border-2 border-emerald-300 dark:border-emerald-700 rounded-xl">
               <div className="flex items-center gap-3 flex-wrap">
@@ -2003,13 +2300,13 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                   </p>
                 </div>
                 <button
-                  onClick={() => onGoToSection?.('mk-bandeja')}
+                  onClick={() => setProductoTab('bandeja')}
                   className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-bold text-white bg-gradient-to-br from-fuchsia-500 to-pink-500 rounded-lg hover:from-fuchsia-600 hover:to-pink-600 shadow-sm transition"
                 >
                   <Inbox size={14} /> Ver ideas en la Bandeja <ChevronRight size={14} />
                 </button>
                 <button
-                  onClick={() => onGoToSection?.('mk-competencia')}
+                  onClick={() => setProductoTab('competencia')}
                   className="shrink-0 inline-flex items-center gap-1 px-3 py-2.5 text-xs font-semibold text-purple-700 dark:text-purple-300 bg-white dark:bg-gray-800 border border-purple-200 dark:border-purple-800 rounded-lg hover:bg-purple-50 dark:hover:bg-purple-900/20 transition"
                 >
                   Ver Competencia <ChevronRight size={12} />

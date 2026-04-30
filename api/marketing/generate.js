@@ -21,6 +21,7 @@ import {
   OFFER_BRIEF_SYSTEM, OFFER_BRIEF_TEMPLATE,
   BELIEFS_SYSTEM, PIPELINE_STEPS,
 } from './_lib.js';
+import { anthropicCost } from './_costs.js';
 
 const MODEL_SONNET = 'claude-sonnet-4-5';
 const MODEL_HAIKU = 'claude-haiku-4-5-20251001';
@@ -148,6 +149,18 @@ export default async function handler(req, res) {
   const outputs = { research: '', avatar: '', offerBrief: '', beliefs: '', resumenEjecutivo: '' };
   let descripcion = (descripcionManual && typeof descripcionManual === 'string') ? descripcionManual.trim() : '';
   let ogImage = null;
+  // Acumulador del costo total — emitido en el evento `complete` y también
+  // por step para que el cliente pueda mostrar gasto en vivo. Antes este
+  // endpoint no devolvía cost → la primera corrida del pipeline (que es la
+  // más cara: research Sonnet + 4 calls Haiku) salía con $0.0000 en el
+  // display y en runHistory subestimaba el gasto en ~50-70%.
+  let totalAnthropic = 0;
+  const trackStepCost = (usage, model, key, label) => {
+    const c = anthropicCost(usage, model);
+    totalAnthropic += c;
+    sseWrite(res, { type: 'step-cost', key, label, cost: { anthropic: c, total: c } });
+    return c;
+  };
 
   try {
     // ------ Pre-paso: scrape de la landing ------
@@ -176,6 +189,7 @@ export default async function handler(req, res) {
           messages: [{ role: 'user', content: `Nombre: ${productoNombre}\n\nLanding:\n${landingText.slice(0, 3000) || '(sin landing)'}` }],
         });
         descripcion = descResp.content?.[0]?.type === 'text' ? descResp.content[0].text.trim() : '';
+        trackStepCost(descResp.usage, MODEL_HAIKU, 'descripcion-auto', 'Descripción auto');
         if (descripcion) sseWrite(res, { type: 'info', message: `Descripción: ${descripcion.slice(0, 120)}${descripcion.length > 120 ? '…' : ''}` });
       } catch (err) {
         console.error('auto-descripcion error:', err?.message);
@@ -205,6 +219,7 @@ ${landingText ? `\n---LANDING PAGE (texto extraído)---\n${landingText}\n---FIN 
       }],
     });
     outputs.research = researchResp.content?.[0]?.type === 'text' ? researchResp.content[0].text : '';
+    trackStepCost(researchResp.usage, MODEL_SONNET, 'research', 'Research Doc');
     sseWrite(res, { type: 'step-done', key: 'research', label: 'Research Doc', content: outputs.research });
 
     // ------ Paso 2: Avatar ------
@@ -219,6 +234,7 @@ ${landingText ? `\n---LANDING PAGE (texto extraído)---\n${landingText}\n---FIN 
       }],
     });
     outputs.avatar = avatarResp.content?.[0]?.type === 'text' ? avatarResp.content[0].text : '';
+    trackStepCost(avatarResp.usage, MODEL_HAIKU, 'avatar', 'Avatar Sheet');
     sseWrite(res, { type: 'step-done', key: 'avatar', label: 'Avatar Sheet', content: outputs.avatar });
 
     // ------ Paso 3: Offer Brief ------
@@ -233,6 +249,7 @@ ${landingText ? `\n---LANDING PAGE (texto extraído)---\n${landingText}\n---FIN 
       }],
     });
     outputs.offerBrief = offerResp.content?.[0]?.type === 'text' ? offerResp.content[0].text : '';
+    trackStepCost(offerResp.usage, MODEL_HAIKU, 'offerBrief', 'Offer Brief');
     sseWrite(res, { type: 'step-done', key: 'offerBrief', label: 'Offer Brief', content: outputs.offerBrief });
 
     // ------ Paso 4: Beliefs ------
@@ -247,6 +264,7 @@ ${landingText ? `\n---LANDING PAGE (texto extraído)---\n${landingText}\n---FIN 
       }],
     });
     outputs.beliefs = beliefsResp.content?.[0]?.type === 'text' ? beliefsResp.content[0].text : '';
+    trackStepCost(beliefsResp.usage, MODEL_HAIKU, 'beliefs', 'Creencias necesarias');
     sseWrite(res, { type: 'step-done', key: 'beliefs', label: 'Creencias necesarias', content: outputs.beliefs });
 
     // ------ Paso 5 (bonus): Resumen ejecutivo ------
@@ -262,6 +280,7 @@ ${landingText ? `\n---LANDING PAGE (texto extraído)---\n${landingText}\n---FIN 
         messages: [{ role: 'user', content: `RESEARCH:\n${outputs.research.slice(0, 3000)}\n\nAVATAR:\n${outputs.avatar.slice(0, 1500)}\n\nOFFER BRIEF:\n${outputs.offerBrief.slice(0, 1500)}\n\nCREENCIAS:\n${outputs.beliefs.slice(0, 800)}` }],
       });
       outputs.resumenEjecutivo = resumenResp.content?.[0]?.type === 'text' ? resumenResp.content[0].text.trim() : '';
+      trackStepCost(resumenResp.usage, MODEL_HAIKU, 'resumenEjecutivo', 'Resumen ejecutivo');
     } catch (err) {
       console.error('resumen-ejecutivo error:', err?.message);
     }
@@ -273,6 +292,9 @@ ${landingText ? `\n---LANDING PAGE (texto extraído)---\n${landingText}\n---FIN 
       outputs,
       descripcion,
       ogImage,
+      // Cost total del run de docs — el cliente lo suma a `runCost`
+      // (display en vivo) y `acumuladoLocal` (persistido en runHistory).
+      cost: { anthropic: Math.round(totalAnthropic * 10000) / 10000, total: Math.round(totalAnthropic * 10000) / 10000 },
     });
     sseEnd(res);
   } catch (err) {

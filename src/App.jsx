@@ -13,7 +13,11 @@ import { VioraLogo, VioraMark } from './logo.jsx';
 import LandingPage from './LandingPage.jsx';
 import BocetosSection from './Bocetos.jsx';
 import MarketingSection from './Marketing.jsx';
-import CompetenciaSection from './Competencia.jsx';
+// CompetenciaSection (./Competencia.jsx) fue deprecada — la fuente de verdad
+// vive en productos[].competidores (Arranque). Su key vieja
+// `viora-marketing-competidores-v1` se borra al primer mount de Arranque
+// tras la migración. La sección quedó huérfana; cualquier deep-link a
+// `mk-competencia` ahora redirige a `mk-arranque` (workspace del producto).
 import GastosStackSection from './GastosStack.jsx';
 import MetaConnectBanner from './MetaConnectBanner.jsx';
 import ArranqueSection from './Arranque.jsx';
@@ -1994,7 +1998,10 @@ function AppShell({ onExit }) {
           )}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-arranque' && <ArranqueSection addToast={addToast} onGoToSection={setCurrentSection} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-bandeja' && <BandejaSection addToast={addToast} />}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-competencia' && <CompetenciaSection addToast={addToast} />}
+          {/* Deep-link legacy: mk-competencia ahora redirige al workspace del
+              producto en Arranque (donde el tab "Competencia" maneja la
+              fuente de verdad por-producto). */}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-competencia' && <ArranqueSection addToast={addToast} onGoToSection={setCurrentSection} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-meta-ads' && <MetaAdsSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-auto-ig' && <AutoIGSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-inspiracion' && <InspiracionSection addToast={addToast} />}

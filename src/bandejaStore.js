@@ -151,6 +151,9 @@ export function addGeneratedIdeas(rawIdeas, { producto } = {}) {
       metaRiesgo: r.metaRiesgo || { tieneRiesgo: false, palabras: [], sugerencia: '' },
       variableDeTesteo: r.variableDeTesteo || 'mix',
       testHipotesis: r.testHipotesis || '',
+      // Cuál de las 6 creencias del Offer Brief tumba esta idea — el
+      // generador la declara explícitamente. Si no vino, queda undefined.
+      creenciaApalancada: r.creenciaApalancada || null,
       hookDuplicado,
     });
     if (loadIdeas().length > existingCount + nuevas.length) nuevas.push(idea);

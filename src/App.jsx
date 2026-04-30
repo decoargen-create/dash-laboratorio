@@ -1367,6 +1367,13 @@ function AppShell({ onExit }) {
   useEffect(() => {
     try { localStorage.setItem('viora-last-section', currentSection); } catch {}
   }, [currentSection]);
+  // Redirect de la sección legacy `mk-competencia` (sidebar global, ahora
+  // viviendo como tab dentro del workspace de cada producto) → `mk-arranque`.
+  // Hacemos el cambio efectivo del state así el header tampoco muestra el
+  // título "Marketing · Competencia" desfasado del contenido.
+  useEffect(() => {
+    if (currentSection === 'mk-competencia') setCurrentSection('mk-arranque');
+  }, [currentSection]);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   // Estado del menú mobile (sidebar como overlay deslizante en pantallas chicas).
   // En desktop el sidebar siempre está visible (gestionado por sidebarOpen + Tailwind md:).
@@ -1998,10 +2005,8 @@ function AppShell({ onExit }) {
           )}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-arranque' && <ArranqueSection addToast={addToast} onGoToSection={setCurrentSection} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-bandeja' && <BandejaSection addToast={addToast} />}
-          {/* Deep-link legacy: mk-competencia ahora redirige al workspace del
-              producto en Arranque (donde el tab "Competencia" maneja la
-              fuente de verdad por-producto). */}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-competencia' && <ArranqueSection addToast={addToast} onGoToSection={setCurrentSection} />}
+          {/* mk-competencia (sidebar legacy) está redirigido por el effect
+              de arriba a mk-arranque — no necesita su propio render. */}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-meta-ads' && <MetaAdsSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-auto-ig' && <AutoIGSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-inspiracion' && <InspiracionSection addToast={addToast} />}
@@ -7690,7 +7695,6 @@ function getSectionTitle(user, section) {
     'mk-arranque': 'Marketing · Arranque',
     'mk-bandeja': 'Marketing · Bandeja de ideas',
     'mk-docs': 'Marketing · Documentación de producto',
-    'mk-competencia': 'Marketing · Competencia',
     'mk-meta-ads': 'Marketing · Meta Ads',
     'mk-auto-ig': 'Marketing · Automatización IG',
     'mk-inspiracion': 'Marketing · Inspiración',

@@ -209,9 +209,43 @@ testHipotesis: "Hook con número concreto (4 cremas) va a bajar CPA vs hook gen�
 - iteracionBase: SOLO si tipo=iteracion. Linkeá al adId del ad propio que estás iterando.
 `;
 
-function buildSystemPrompt({ hasPropios, targetCount, formatoMix }) {
+// El stage del prospect (problem/solution/product-aware) condiciona qué
+// ángulos dominan en la corrida. Antes esto se mandaba SOLO en el contexto
+// (buildContext) pero el system prompt no lo forzaba — Claude podía ignorar
+// el stage y caer al humor/sarcasmo default. Forzamos distribución por stage
+// para que un BOFU (product-aware) tire testimonios + autoridad y un TOFU
+// (problem-aware) tire agitación + POV.
+function stageInstructions(stage) {
+  if (stage === 'product_aware') {
+    return `\n**STAGE = PRODUCT-AWARE (BOFU) — DISTRIBUCIÓN OBLIGATORIA**:
+El prospect ya conoce tu marca y casi compra. Necesita REMOVER OBJECIONES + APILAR PRUEBA.
+Mínimo 60% de las ideas debe usar ángulos E (autoridad/solución), F (testimonios con edad explícita), G (autoridad científica/mecanismo) o H (antes/después).
+Máximo 20% en ángulos puros A/I (sarcasmo/humor anti-cultura).
+tipoCampaña preferida: BOFU, retargeting, social_proof.
+NO empieces los hooks agitando el dolor — ya lo conoce. Empezá con la prueba.
+`;
+  }
+  if (stage === 'solution_aware') {
+    return `\n**STAGE = SOLUTION-AWARE (MOFU) — DISTRIBUCIÓN OBLIGATORIA**:
+El prospect ya probó otras soluciones (cremas, suplementos, rutinas, etc) y quedó decepcionado. Necesita ENTENDER POR QUÉ ESTA es DISTINTA.
+Mínimo 60% de las ideas debe usar ángulos D (doble sentido visual / metáfora del mecanismo único), G (autoridad científica con UMS — Unique Mechanism Story), H (antes/después o comparativa con la solución vieja).
+Hooks típicos: "probaste X, Y y Z. Ninguno hace ESTO", "el problema no era el producto, era el mecanismo", "lo que hacen las cremas vs lo que hace este serum".
+tipoCampaña preferida: MOFU, retargeting tibio, branding diferenciador.
+`;
+  }
+  // problem_aware (default)
+  return `\n**STAGE = PROBLEM-AWARE (TOFU) — DISTRIBUCIÓN OBLIGATORIA**:
+El prospect siente el problema pero NO conoce las soluciones. Necesita DIAGNÓSTICO + AGITACIÓN + ASOMO de salida.
+Mínimo 60% de las ideas debe usar ángulos B (insight incómodo / rompe-mito), C (POV relatable / "cuando te pasa X"), I (humor filoso anti-cultura), J (edad emocional).
+Los primeros 3 segundos del hook NO mencionan el producto — agitan el dolor o nombran el problema con palabras del avatar (lenguaje del research doc).
+tipoCampaña preferida: TOFU, prospecting frío.
+NO arranques con testimonios ni con autoridad científica — el prospect todavía no compró el problema, mucho menos la solución.
+`;
+}
+
+function buildSystemPrompt({ hasPropios, targetCount, formatoMix, stage }) {
   const mix = buildTypeMix(targetCount, hasPropios);
-  return SYSTEM_PROMPT_BASE + buildMixSection(mix, formatoMix, targetCount) + SHAPE_GUIDANCE;
+  return SYSTEM_PROMPT_BASE + stageInstructions(stage) + buildMixSection(mix, formatoMix, targetCount) + SHAPE_GUIDANCE;
 }
 
 // Tool schema para structured output. Cada idea es un brief COMPLETO:
@@ -279,12 +313,18 @@ const SUBMIT_IDEAS_TOOL = {
                 razon: { type: 'string' },
               },
             },
+            creenciaApalancada: {
+              type: 'string',
+              enum: ['1', '2', '3', '4', '5', '6'],
+              description: 'OBLIGATORIO. Cuál de las 6 creencias necesarias del Offer Brief tumba/instala esta idea. Numerada 1-6 según el orden en que aparecen en el doc de creencias del producto. Si no se mandó doc de creencias, poné "1" como default.',
+            },
           },
           required: [
             'titulo', 'tipo', 'formato', 'estiloVisual', 'angulo', 'painPoint',
             'hook', 'escenarioNarrativo', 'descripcionImagen', 'promptGeneradorImagen',
             'textoEnImagen', 'copyPostMeta', 'publicoSugerido', 'anguloCategoria',
             'tipoCampaña', 'metaRiesgo', 'razonamiento', 'variableDeTesteo', 'testHipotesis',
+            'creenciaApalancada',
           ],
         },
       },
@@ -363,7 +403,7 @@ function buildContext({ producto, competidoresAnalisis, allCompAds, ideasExisten
     parts.push(`\n### Offer Brief (Big Idea, UMP/UMS, objections, belief chains)\n${offerBrief}`);
   }
   if (beliefs) {
-    parts.push(`\n### Creencias necesarias (las 6 "Yo creo que..." que el prospect debe adoptar antes de comprar)\n${beliefs}\n\nIMPORTANTE: cada idea debería empujar una de estas creencias. En "razonamiento" indicá cuál creencia apalanca.`);
+    parts.push(`\n### Creencias necesarias (las 6 "Yo creo que..." que el prospect debe adoptar antes de comprar)\n${beliefs}\n\nIMPORTANTE: cada idea DEBE declarar el campo \`creenciaApalancada\` con el número (1-6) de la creencia que tumba/instala, en el orden en que aparecen arriba. La idea entera (hook + escenario + copy) tiene que estar al servicio de empujar esa creencia.`);
   }
 
   if (!research && !avatar && !offerBrief && !beliefs) {
@@ -485,10 +525,37 @@ function buildContext({ producto, competidoresAnalisis, allCompAds, ideasExisten
   }
 
   if (ideasExistentes?.length) {
-    parts.push('\n## IDEAS YA EN LA BANDEJA (NO repitas, generá nuevas)');
-    ideasExistentes.slice(0, 30).forEach(i => {
-      parts.push(`- [${i.tipo}] ${i.titulo}${i.angulo ? ' — ' + String(i.angulo).slice(0, 100) : ''}`);
-    });
+    // Feedback loop: separamos por estado para que el generador APRENDA del
+    // user. `usada` y `en_uso` son señal positiva ("esto te aprobó/escaló");
+    // `archivada` es señal negativa ("esto descartaste, no insistas").
+    // `pendiente` solo sirve para dedup. Antes mandábamos todo plano sin
+    // estado y Claude no sabía qué replicar ni qué evitar.
+    const usadas = ideasExistentes.filter(i => i.estado === 'usada' || i.estado === 'en_uso');
+    const archivadas = ideasExistentes.filter(i => i.estado === 'archivada');
+    const pendientes = ideasExistentes.filter(i => !i.estado || i.estado === 'pendiente');
+
+    if (usadas.length > 0) {
+      parts.push('\n## ✅ IDEAS APROBADAS POR EL USER (ejemplos POSITIVOS — replicá ESTE estilo)');
+      parts.push(`Estas ${usadas.length} ideas pasaron a producción o están en uso. El user las eligió por algo. Mantené el TIPO de ángulo, el ARQUETIPO de hook y el FORMATO en al menos 30% de las ideas nuevas que generes (sin repetir literal).`);
+      usadas.slice(0, 15).forEach(i => {
+        parts.push(`- [${i.tipo}] ${i.titulo}${i.hook ? ` · hook: "${String(i.hook).slice(0, 120)}"` : ''}${i.angulo ? ` · ángulo: ${String(i.angulo).slice(0, 80)}` : ''}`);
+      });
+    }
+
+    if (archivadas.length > 0) {
+      parts.push('\n## ❌ IDEAS DESCARTADAS (ejemplos NEGATIVOS — NO generes algo así)');
+      parts.push(`Estas ${archivadas.length} ideas el user las archivó. Probablemente: ángulo flojo, hook genérico, no encaja con la marca, o ya probó algo similar y no funcionó. Evitá patrones parecidos.`);
+      archivadas.slice(0, 15).forEach(i => {
+        parts.push(`- [${i.tipo}] ${i.titulo}${i.hook ? ` · hook descartado: "${String(i.hook).slice(0, 120)}"` : ''}`);
+      });
+    }
+
+    if (pendientes.length > 0) {
+      parts.push('\n## 📥 IDEAS YA EN BANDEJA SIN REVISAR (NO repitas estos títulos / hooks)');
+      pendientes.slice(0, 30).forEach(i => {
+        parts.push(`- [${i.tipo}] ${i.titulo}${i.angulo ? ' — ' + String(i.angulo).slice(0, 80) : ''}`);
+      });
+    }
   }
 
   parts.push('\n## INSTRUCCIÓN');
@@ -553,6 +620,7 @@ function sanitizeIdea(i) {
   const variablesValidas = new Set(['hook', 'visual', 'cta', 'formato', 'angulo', 'audience', 'prueba_social', 'oferta', 'mix']);
   const angulosValidos = new Set(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J']);
   const tiposCampaña = new Set(['TOFU', 'MOFU', 'BOFU', 'retargeting', 'social_proof', 'branding']);
+  const creenciasValidas = new Set(['1', '2', '3', '4', '5', '6']);
   if (!i || typeof i.titulo !== 'string' || !tiposValidos.has(i.tipo)) return null;
   const base = {
     titulo: String(i.titulo).slice(0, 200),
@@ -579,6 +647,15 @@ function sanitizeIdea(i) {
     } : { tieneRiesgo: false, palabras: [], sugerencia: '' },
     variableDeTesteo: variablesValidas.has(i.variableDeTesteo) ? i.variableDeTesteo : 'mix',
     testHipotesis: String(i.testHipotesis || '').slice(0, 500),
+    // Creencia apalancada (1..6 del doc de Beliefs). Si Claude devuelve
+    // un valor fuera del enum (ej "1." o "creencia 1") logueamos warning
+    // para no ocultar errores del modelo en silencio.
+    creenciaApalancada: (() => {
+      const raw = String(i.creenciaApalancada ?? '').trim();
+      if (creenciasValidas.has(raw)) return raw;
+      if (raw) console.warn('[generate-ideas] creenciaApalancada inválida, fallback a "1":', raw);
+      return '1';
+    })(),
   };
   if (i.tipo === 'iteracion' && i.iteracionBase) {
     base.iteracionBase = {
@@ -629,6 +706,7 @@ export default async function handler(req, res) {
       static: Number(formatoMix?.static) || 0.6,
       video: Number(formatoMix?.video) || 0.4,
     },
+    stage: producto?.stage || 'problem_aware',
   });
 
   // Stream SSE: emitimos cada idea apenas Claude termina de escribirla.

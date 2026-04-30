@@ -22,7 +22,7 @@ import {
   Package, Target, Play, Check, Loader2, AlertTriangle, ChevronRight, ChevronDown,
   Plus, X, Sparkles, Link2, Search, Clock, Inbox, Trash2,
 } from 'lucide-react';
-import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGeneratedToday } from './bandejaStore.js';
+import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGeneratedToday, updateIdea } from './bandejaStore.js';
 import { logCostsFromResponse } from './costsStore.js';
 import BandejaSection from './Bandeja.jsx';
 import InspiracionSection from './InspiracionSection.jsx';
@@ -81,8 +81,9 @@ function saveJSON(key, value) {
 
 // Consume el stream SSE de /api/marketing/generate y devuelve los docs
 // cuando el stream se completa. onProgress recibe strings de estado para
-// mostrar en el stepper mientras corre.
-async function streamGenerateDocs({ productoNombre, productoUrl, descripcion, onProgress }) {
+// mostrar en el stepper mientras corre. onCost recibe el breakdown { anthropic, total }
+// emitido por el server por step (incremental) y al final como total.
+async function streamGenerateDocs({ productoNombre, productoUrl, descripcion, onProgress, onCost }) {
   const resp = await fetch('/api/marketing/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -116,10 +117,16 @@ async function streamGenerateDocs({ productoNombre, productoUrl, descripcion, on
           outputs[ev.key] = ev.content;
           if (ev.key === 'resumenEjecutivo') resumenEjecutivo = ev.content || '';
           onProgress?.(`✓ ${ev.label} listo`);
+        } else if (ev.type === 'step-cost' && ev.cost) {
+          // Cost incremental por paso — lo reportamos al runner para que
+          // se vea en vivo en el display "💰 $X" sin esperar al complete.
+          onCost?.(ev.cost, `docs · ${ev.label || ev.key || ''}`);
         } else if (ev.type === 'error') {
           throw new Error(ev.error || 'Error en el stream de docs');
         } else if (ev.type === 'complete') {
-          // Nada — seguimos hasta done.
+          // El cliente ya recibió los step-cost incrementales — el cost
+          // total del `complete` es solo para validación del lado del
+          // server, NO lo volvemos a sumar (sería doble contabilización).
         }
       } catch (err) {
         if (err instanceof SyntaxError) continue; // línea parcial
@@ -670,7 +677,12 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     // Contadores en vivo del run — los persistimos al final. Reemplazan los
     // regex frágiles que parseaban el detail string del stepper para sacar
     // ganadores e ideas (cualquier cambio de copy rompía el banner).
-    const liveStats = { winnersAnalyzed: 0, ideasInsertadas: 0, ideasGeneradas: 0 };
+    const liveStats = { winnersAnalyzed: 0, ideasInsertadas: 0, ideasGeneradas: 0, hooksLowScore: 0 };
+    // Ideas realmente insertadas en la bandeja durante este run, con su id
+    // del store. Se llena en el loop SSE del generator y se manda al step
+    // `score-hooks` después para que Haiku puntúe cada una y marquemos las
+    // <6 con flag `lowScore` (el user las puede archivar de un click).
+    const insertedIdeasForScoring = [];
 
     // Wrapper sobre logCostsFromResponse que también suma al runCost (display
     // en vivo) y al acumulado local (persistencia final).
@@ -738,6 +750,15 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           productoUrl: producto.landingUrl || '',
           descripcion: producto.descripcion || '',
           onProgress: (msg) => updateStep('docs-gen', { detail: msg }),
+          // Cada step-cost del SSE se traduce en un trackCost para que el
+          // gasto del docs-gen aparezca en vivo en "💰 $X" y persista en
+          // runHistory. Antes este endpoint no devolvía cost → el run
+          // mostraba $0 mientras gastaba lo más caro del pipeline.
+          onCost: (costBreakdown, descripcion) => {
+            // trackCost espera shape `{ cost: { anthropic, ... } }` igual
+            // que un response del backend → wrapeamos el breakdown.
+            trackCost({ cost: costBreakdown }, descripcion);
+          },
         });
         // Guardar los docs en el producto
         productoActualizado = {
@@ -844,6 +865,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           status: 'pending',
         })),
         { id: 'generate', label: '💡 Generando ideas nuevas con IA', detail: 'Réplicas + iteraciones + diferenciaciones + desde cero', status: 'pending' },
+        { id: 'score-hooks', label: '🎯 Filtrando hooks flojos', detail: 'Haiku scorea cada hook 1-10 y marca los <6 para que los archives', status: 'pending' },
         { id: 'done', label: '✅ Listo', detail: 'Tenés análisis fresco + ideas nuevas en la Bandeja', status: 'pending' },
       ];
       return [...base, ...nuevos];
@@ -1114,10 +1136,21 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         // Antes usábamos todas las ideas globalmente, lo que rompía en
         // multi-producto (si producto A tenía 30 ideas, producto B se
         // comportaba como si ya tuviera todas esas).
+        // Ahora también pasamos el `estado` y el `hook` para que el generator
+        // pueda usar las ideas usadas como ejemplos POSITIVOS y las
+        // archivadas como ejemplos NEGATIVOS (feedback loop). Antes solo
+        // mandábamos titulo/angulo/tipo y el generador no sabía qué se
+        // había aprobado.
         const productoActualId = String(producto.id);
         const ideasExistentes = loadIdeas()
           .filter(i => String(i.productoId || '') === productoActualId)
-          .map(i => ({ titulo: i.titulo, angulo: i.angulo, tipo: i.tipo }));
+          .map(i => ({
+            titulo: i.titulo,
+            angulo: i.angulo,
+            tipo: i.tipo,
+            hook: i.hook || '',
+            estado: i.estado || 'pendiente',
+          }));
 
         // Ads propios matcheados al producto (solo si ya corrió el matcher IA
         // y son high/medium confidence). Sirven para generar iteraciones.
@@ -1232,6 +1265,19 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 if (nuevas.length > 0) {
                   insertadas++;
                   liveStats.ideasInsertadas++;
+                  // Acumulamos las ideas REALMENTE insertadas (con su id
+                  // del store) para mandar al scoring después. Si llegó
+                  // duplicada, addGeneratedIdeas devuelve [] y no la
+                  // re-scoreamos.
+                  for (const n of nuevas) {
+                    insertedIdeasForScoring.push({
+                      id: n.id,
+                      titulo: n.titulo,
+                      hook: n.hook || '',
+                      tipo: n.tipo,
+                      anguloCategoria: n.anguloCategoria || null,
+                    });
+                  }
                 }
                 liveStats.ideasGeneradas++;
                 setLiveIdeas(prev => [...prev, ev.idea]);
@@ -1270,6 +1316,67 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           updateStep('generate', { status: 'error', endedAt: Date.now(), detail: err.message });
         }
       }
+    }
+
+    // ============================================================
+    // PASO: Score de hooks con Haiku — descarta los flojos.
+    // Haiku barato puntúa 1-10 cada hook contra criterios fijos
+    // (pattern-interrupt, especificidad, porteño, claims). Las ideas
+    // con score <6 quedan en la bandeja con flag `lowScore` para que
+    // el user las archive de un click. Antes ningún piso de calidad
+    // existía → la bandeja se llenaba de hooks genéricos.
+    // ============================================================
+    if (!cancelled && insertedIdeasForScoring.length > 0) {
+      updateStep('score-hooks', {
+        status: 'running',
+        startedAt: Date.now(),
+        detail: `Scorando ${insertedIdeasForScoring.length} hooks con Haiku…`,
+      });
+      try {
+        const scoreResp = await fetch('/api/marketing/score-hooks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ideas: insertedIdeasForScoring }),
+        });
+        const scoreData = await scoreResp.json();
+        if (!scoreResp.ok) throw new Error(scoreData.error || `HTTP ${scoreResp.status}`);
+        trackCost(scoreData, `score-hooks · ${insertedIdeasForScoring.length} hooks`);
+
+        const scoresMap = new Map((scoreData.scores || []).map(s => [s.id, s]));
+        let lowScored = 0;
+        let scoredOk = 0;
+        for (const idea of insertedIdeasForScoring) {
+          const s = scoresMap.get(idea.id);
+          if (!s) continue;
+          if (s.score < 6) {
+            updateIdea(idea.id, { lowScore: true, scoreValue: s.score, scoreReason: s.reason });
+            lowScored++;
+          } else {
+            updateIdea(idea.id, { lowScore: false, scoreValue: s.score, scoreReason: s.reason });
+            scoredOk++;
+          }
+        }
+        liveStats.hooksLowScore = lowScored;
+        updateStep('score-hooks', {
+          status: 'done',
+          endedAt: Date.now(),
+          detail: `${scoredOk} hooks pasaron · ${lowScored} marcados como flojos (revisá y archivá si querés)`,
+        });
+      } catch (err) {
+        // No es fatal — las ideas ya están en la bandeja sin scoring.
+        updateStep('score-hooks', {
+          status: 'error',
+          endedAt: Date.now(),
+          detail: `Scoring falló: ${err.message}. Las ideas igual están en la Bandeja.`,
+        });
+      }
+    } else if (!cancelled) {
+      // No hay ideas nuevas para scorear — skip silencioso.
+      updateStep('score-hooks', {
+        status: 'done',
+        endedAt: Date.now(),
+        detail: 'Sin hooks nuevos para scorear (no se generaron ideas).',
+      });
     }
 
     // Paso final
@@ -1319,6 +1426,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           winnersAnalyzed: liveStats.winnersAnalyzed,
           ideasInsertadas: liveStats.ideasInsertadas,
           ideasGeneradas: liveStats.ideasGeneradas,
+          hooksLowScore: liveStats.hooksLowScore,
         },
       };
       setRunHistory(prev => [runEntry, ...prev].slice(0, RUN_HISTORY_CAP));

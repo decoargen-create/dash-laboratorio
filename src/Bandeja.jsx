@@ -745,6 +745,30 @@ function IdeaCard({
                 ⚠ hook similar
               </span>
             )}
+            {/* Score del hook (1-10) — Haiku puntúa cada hook después de
+                generarlo. Las <6 quedan marcadas como flojas: el user las
+                puede archivar de un click. Las >=8 son las "fuertes". */}
+            {typeof idea.scoreValue === 'number' && (
+              <span className={`inline-flex items-center px-1.5 py-0.5 text-[9px] font-bold rounded ${
+                idea.lowScore
+                  ? 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300'
+                  : idea.scoreValue >= 8
+                    ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300'
+                    : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+              }`}
+                title={idea.scoreReason ? `Score ${idea.scoreValue}/10 — ${idea.scoreReason}` : `Score ${idea.scoreValue}/10`}>
+                {idea.lowScore ? '🟥' : idea.scoreValue >= 8 ? '🟩' : '⬜'} {idea.scoreValue}/10
+              </span>
+            )}
+            {/* Creencia apalancada — qué creencia del Offer Brief tumba
+                esta pieza (1-6). Útil para verificar que la bandeja cubra
+                las 6 sin sobre-representar una sola. */}
+            {idea.creenciaApalancada && (
+              <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-semibold bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 rounded"
+                title={`Tumba la creencia #${idea.creenciaApalancada} del Offer Brief`}>
+                💭 cr.{idea.creenciaApalancada}
+              </span>
+            )}
             {idea.formato && (
               <span className="text-[10px] text-gray-400 ml-auto">
                 {idea.formato === 'video' ? '🎬' : idea.formato === 'static' ? '🖼️' : '📑'} {idea.formato}

@@ -23,11 +23,11 @@ export default function PipelineRunOverlay() {
   const [expanded, setExpanded] = useState(false);
   const [autoHidden, setAutoHidden] = useState(false);
 
-  // Suppress: cuando Arranque está parado en tab Setup, ya muestra el
-  // stepper inline detallado — el pill flotante sería redundante.
-  if (suppressOverlay) return null;
-
   // Auto-ocultar el pill 30s después de que termine la corrida.
+  // IMPORTANTE: este useEffect debe ir ANTES de cualquier early return —
+  // sino React tira "Rendered fewer hooks than expected" cuando
+  // suppressOverlay alterna (ej. al cambiar de tab Setup a otro tab durante
+  // una corrida activa) y desmonta el árbol.
   useEffect(() => {
     if (running) {
       setAutoHidden(false);
@@ -37,6 +37,10 @@ export default function PipelineRunOverlay() {
     const t = setTimeout(() => setAutoHidden(true), 30000);
     return () => clearTimeout(t);
   }, [running, endedAt]);
+
+  // Suppress: cuando Arranque está parado en tab Setup, ya muestra el
+  // stepper inline detallado — el pill flotante sería redundante.
+  if (suppressOverlay) return null;
 
   // Si no hubo corrida nunca o ya pasaron > 30s del fin, no mostramos nada.
   if (steps.length === 0 || (!running && autoHidden)) return null;

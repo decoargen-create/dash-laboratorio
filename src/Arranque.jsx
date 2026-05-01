@@ -296,7 +296,14 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   const setLiveIdeas = pipelineRun.setLiveIdeas;
   const runCost = pipelineRun.runCost;
   const setRunCost = pipelineRun.setRunCost;
-  const cancelled = pipelineRun.cancelRequested;
+  // Ref que sigue al `cancelRequested` del context. Antes leíamos el valor
+  // como `const cancelled = pipelineRun.cancelRequested` y eso queda como
+  // snapshot en el closure del `runPipeline()` — si el user clickea Cancelar
+  // a mitad del run, los `if (cancelled) break` nunca disparan porque la
+  // variable local no se actualiza. Usando un ref síncronizado con un effect
+  // sí leemos el valor actual en cada chequeo.
+  const cancelledRef = useRef(false);
+  useEffect(() => { cancelledRef.current = pipelineRun.cancelRequested; }, [pipelineRun.cancelRequested]);
   const setCancelled = (v) => { if (v) pipelineRun.requestCancel(); };
   // Historial de corridas — persistido. Al completar un run, pusheamos un
   // resumen (productoId, timestamps, steps, stats, costo). Luego se muestra
@@ -742,7 +749,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     let productoActualizado = producto;
     if (!necesitaDocs) {
       updateStep('docs-gen', { status: 'done', endedAt: Date.now() });
-    } else if (necesitaDocs && !cancelled) {
+    } else if (necesitaDocs && !cancelledRef.current) {
       updateStep('docs-gen', { status: 'running', startedAt: Date.now() });
       try {
         const docs = await streamGenerateDocs({
@@ -791,7 +798,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     // pobres salvo que borraras el producto. 3 es el mínimo que da una mezcla
     // viable de problema + categoría + ángulo.
     const yaTienePostResearch = !!productoActualizado?.stage && searchKeywords.length >= 3;
-    if (!cancelled && productoActualizado?.docs?.research && !yaTienePostResearch) {
+    if (!cancelledRef.current && productoActualizado?.docs?.research && !yaTienePostResearch) {
       updateStep('post-research', { status: 'running', startedAt: Date.now() });
       try {
         const resp = await fetch('/api/marketing/post-research-analysis', {
@@ -878,7 +885,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     const compWithAds = []; // { comp, winners }
     let apifyQuotaExhausted = false;
     for (const c of competidoresLocal) {
-      if (cancelled) break;
+      if (cancelledRef.current) break;
       if (apifyQuotaExhausted) {
         // Si Apify se quedó sin quota mensual no tiene sentido seguir —
         // todos los siguientes van a tirar el mismo error. Marcamos como
@@ -998,7 +1005,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
     // Paso N+2..2N+1: deep-analyze de winners de cada competidor
     for (const { comp, winners } of compWithAds) {
-      if (cancelled) break;
+      if (cancelledRef.current) break;
       const stepId = `analyze-${comp.id}`;
       if (winners.length === 0) {
         updateStep(stepId, { status: 'done', endedAt: Date.now(), detail: 'Sin ganadores para analizar todavía' });
@@ -1031,7 +1038,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       });
       let analyzed = 0;
       for (const ad of nuevosParaAnalizar) {
-        if (cancelled) break;
+        if (cancelledRef.current) break;
         try {
           const resp = await fetch('/api/marketing/deep-analyze', {
             method: 'POST',
@@ -1085,7 +1092,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     }
 
     // Paso generate: llamar a generate-ideas con todo el contexto acumulado.
-    if (!cancelled) {
+    if (!cancelledRef.current) {
       updateStep('generate', { status: 'running', startedAt: Date.now() });
       try {
         // Armar el contexto competitivo COMPLETO para el generador.
@@ -1326,7 +1333,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     // el user las archive de un click. Antes ningún piso de calidad
     // existía → la bandeja se llenaba de hooks genéricos.
     // ============================================================
-    if (!cancelled && insertedIdeasForScoring.length > 0) {
+    if (!cancelledRef.current && insertedIdeasForScoring.length > 0) {
       updateStep('score-hooks', {
         status: 'running',
         startedAt: Date.now(),
@@ -1370,7 +1377,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           detail: `Scoring falló: ${err.message}. Las ideas igual están en la Bandeja.`,
         });
       }
-    } else if (!cancelled) {
+    } else if (!cancelledRef.current) {
       // No hay ideas nuevas para scorear — skip silencioso.
       updateStep('score-hooks', {
         status: 'done',
@@ -1385,7 +1392,8 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     updateStep('done', { status: 'done', endedAt: Date.now() });
 
     setRunning(false);
-    if (!cancelled) {
+    const wasCancelled = cancelledRef.current;
+    if (!wasCancelled) {
       try { localStorage.setItem(LAST_RUN_KEY, new Date().toISOString()); } catch {}
     }
     // Siempre persistimos el resumen al historial — incluso runs cancelados
@@ -1403,7 +1411,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         startedAt: new Date(startedAt).toISOString(),
         endedAt: new Date(endedAt).toISOString(),
         durationMs: endedAt - startedAt,
-        cancelled,
+        cancelled: wasCancelled,
         // Cost del run = acumulado local. Antes guardábamos `{ ...runCost }`
         // que cerraba sobre el snapshot inicial del state (siempre 0).
         cost: { ...acumuladoLocal },
@@ -1432,7 +1440,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       setRunHistory(prev => [runEntry, ...prev].slice(0, RUN_HISTORY_CAP));
       return currentSteps;
     });
-    if (!cancelled) {
+    if (!wasCancelled) {
       addToast?.({ type: 'success', message: '¡Listo! Mirá los análisis + ideas en la Bandeja.' });
     }
   };
@@ -1538,7 +1546,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               }, {});
               const adsScrapeados = comps.reduce((sum, c) => sum + (c.ads?.length || 0), 0);
               const competidoresConAds = comps.filter(c => (c.ads?.length || 0) > 0).length;
-              const deepAnalyses = comps.reduce((sum, c) => sum + Object.keys(c.deepAnalyses || {}).length, 0);
+              // El runner persiste los deep-analyses en `c.adsAnalysis` (no
+              // `c.deepAnalyses`). Antes esta lectura usaba el nombre viejo
+              // y el stat siempre mostraba 0 sin importar cuántos análisis
+              // se corrieran.
+              const deepAnalyses = comps.reduce((sum, c) => sum + Object.keys(c.adsAnalysis || {}).length, 0);
               const adsMatched = (p.metaAccount?.ads || []).filter(a => a.productMatch).length;
               const runsDelProducto = runHistory.filter(r => String(r.productoId || '') === String(p.id));
               const ultimoRun = runsDelProducto[0];

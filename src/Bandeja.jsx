@@ -16,12 +16,14 @@ import React, { useState, useEffect } from 'react';
 import {
   Inbox, Search, Filter, ExternalLink, Trash2, Download, Package,
   ChevronDown, Check, Circle, CircleDot, Archive, Edit3, CheckSquare, Square, ChevronRight,
-  Plus, Pencil, GripVertical,
+  Plus, Pencil, GripVertical, Loader2, RefreshCw, Sparkles,
 } from 'lucide-react';
 import {
   loadIdeas, updateIdea, removeIdea, TIPO_META, ESTADO_META, VARIABLE_META, ANGULO_META, CAMPAÑA_META,
 } from './bandejaStore.js';
 import { exportBriefDocx } from './exportDocx.js';
+import { saveCreativo, getCreativo, deleteCreativo } from './creativosStorage.js';
+import { logCostsFromResponse } from './costsStore.js';
 
 const PRODUCTOS_KEY = 'viora-marketing-productos-v1';
 const ACTIVE_PRODUCT_KEY = 'viora-marketing-bandeja-active-product';
@@ -851,6 +853,12 @@ function IdeaCard({
                 </div>
               )}
 
+              {/* Generación del creativo final — produce la imagen estática
+                  con gpt-image-1 a partir del brief. On-demand. */}
+              {(idea.promptGeneradorImagen || idea.descripcionImagen) && (
+                <CreativoPanel idea={idea} />
+              )}
+
               {idea.copyPostMeta && (
                 <div>
                   <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1">📱 Copy del post en Meta (arriba del creativo)</p>
@@ -1477,6 +1485,165 @@ function IdeaDetailModal({ idea, onClose, ...cardProps }) {
           onToggle={onClose}
           {...cardProps}
         />
+      </div>
+    </div>
+  );
+}
+
+// Panel de generación del creativo estático final. Vive dentro del card
+// expandido de cada idea. On-demand: el user genera la imagen solo para
+// las ideas que va a producir. El creativo se guarda en IndexedDB (no en
+// localStorage — las imágenes base64 pesan demasiado).
+function CreativoPanel({ idea }) {
+  const [creativo, setCreativo] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [quality, setQuality] = useState('medium');
+  const [checked, setChecked] = useState(false);
+
+  // Al montar, miramos si esta idea ya tiene un creativo producido.
+  useEffect(() => {
+    let abort = false;
+    getCreativo(idea.id).then(c => {
+      if (!abort) { setCreativo(c); setChecked(true); }
+    }).catch(() => { if (!abort) setChecked(true); });
+    return () => { abort = true; };
+  }, [idea.id]);
+
+  const handleGenerate = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const resp = await fetch('/api/marketing/generate-creative', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          quality,
+          idea: {
+            promptGeneradorImagen: idea.promptGeneradorImagen,
+            descripcionImagen: idea.descripcionImagen,
+            textoEnImagen: idea.textoEnImagen,
+            hook: idea.hook,
+            formato: idea.formato,
+            estiloVisual: idea.estiloVisual,
+          },
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      logCostsFromResponse(data, `generate-creative · ${(idea.titulo || idea.hook || '').slice(0, 60)}`);
+
+      const nuevo = {
+        imageBase64: data.imageBase64,
+        mimeType: data.mimeType || 'image/png',
+        formato: data.formato || idea.formato || 'static',
+        size: data.size,
+        quality: data.quality,
+        model: data.model,
+        generatedAt: data.generatedAt,
+      };
+      await saveCreativo(idea.id, nuevo);
+      setCreativo(nuevo);
+    } catch (err) {
+      setError(err.message || 'Error generando el creativo');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRegenerate = async () => {
+    await deleteCreativo(idea.id);
+    setCreativo(null);
+    handleGenerate();
+  };
+
+  const dataUrl = creativo
+    ? `data:${creativo.mimeType || 'image/png'};base64,${creativo.imageBase64}`
+    : null;
+
+  return (
+    <div className="bg-violet-50 dark:bg-violet-900/20 rounded-md border border-violet-200 dark:border-violet-800">
+      <div className="px-3 py-2 flex items-center justify-between gap-2">
+        <p className="text-[10px] font-bold text-violet-700 dark:text-violet-300 uppercase tracking-wider">
+          🎨 Creativo estático
+        </p>
+        {creativo && (
+          <span className="text-[9px] text-violet-500 dark:text-violet-400 font-mono">
+            {creativo.model} · {creativo.quality} · {creativo.size}
+          </span>
+        )}
+      </div>
+
+      <div className="px-3 pb-3">
+        {/* Imagen generada */}
+        {dataUrl && (
+          <div className="space-y-2">
+            <img
+              src={dataUrl}
+              alt={idea.titulo || 'Creativo generado'}
+              className="w-full rounded-lg border border-violet-200 dark:border-violet-800 bg-white"
+            />
+            <div className="flex flex-wrap gap-1.5">
+              <a
+                href={dataUrl}
+                download={`creativo-${(idea.titulo || 'idea').replace(/[^a-z0-9]+/gi, '-').slice(0, 40).toLowerCase()}.png`}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-bold text-white bg-violet-600 rounded hover:bg-violet-700 transition"
+              >
+                <Download size={11} /> Descargar PNG
+              </a>
+              <button
+                onClick={handleRegenerate}
+                disabled={loading}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-semibold text-violet-700 dark:text-violet-300 bg-white dark:bg-gray-800 border border-violet-300 dark:border-violet-700 rounded hover:bg-violet-50 dark:hover:bg-violet-900/30 transition disabled:opacity-50"
+              >
+                {loading ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+                Regenerar
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Loading */}
+        {loading && !dataUrl && (
+          <div className="flex items-center gap-2 px-2 py-3 text-xs text-violet-700 dark:text-violet-300">
+            <Loader2 size={14} className="animate-spin" />
+            Generando el creativo con IA… puede tardar 30-60s.
+          </div>
+        )}
+
+        {/* Estado inicial: botón generar */}
+        {!loading && !dataUrl && checked && (
+          <div className="space-y-2">
+            <p className="text-[11px] text-violet-700 dark:text-violet-300">
+              Generá la imagen final del ad a partir del brief (escena + texto-en-imagen).
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={quality}
+                onChange={e => setQuality(e.target.value)}
+                className="px-2 py-1 text-[10px] bg-white dark:bg-gray-800 border border-violet-300 dark:border-violet-700 rounded focus:outline-none focus:ring-1 focus:ring-violet-500"
+                title="Calidad de la imagen — más calidad = más costo"
+              >
+                <option value="low">Calidad baja (~$0.01)</option>
+                <option value="medium">Calidad media (~$0.05)</option>
+                <option value="high">Calidad alta (~$0.17-0.25)</option>
+              </select>
+              <button
+                onClick={handleGenerate}
+                className="inline-flex items-center gap-1 px-3 py-1.5 text-[11px] font-bold text-white bg-gradient-to-br from-violet-600 to-purple-600 rounded hover:from-violet-700 hover:to-purple-700 transition"
+              >
+                <Sparkles size={12} /> Generar creativo
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Error */}
+        {error && (
+          <p className="mt-2 text-[10px] text-red-600 dark:text-red-400">
+            ⚠ {error}
+          </p>
+        )}
       </div>
     </div>
   );

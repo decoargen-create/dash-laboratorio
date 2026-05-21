@@ -1,0 +1,149 @@
+// Generación del creativo estático final a partir de un brief de la Bandeja.
+//
+// POST /api/marketing/generate-creative
+// Body: { idea: { promptGeneradorImagen, descripcionImagen, textoEnImagen,
+//                  hook, formato, estiloVisual } }
+//
+// Usa gpt-image-1 de OpenAI (la misma OPENAI_API_KEY que ya usa Whisper en
+// deep-analyze.js → no suma setup). Devuelve la imagen en base64 + el costo.
+//
+// On-demand: el cliente lo llama solo para las ideas que el user quiere
+// producir (no en bulk durante el pipeline — sería caro y la mayoría de las
+// ideas no se usan).
+
+// gpt-image-1 cobra por imagen según tamaño + calidad. Tabla de costo
+// estimado en USD (referencia pública de OpenAI). La usamos para loguear en
+// GastosStack — el endpoint igual devuelve `usage` crudo por si más adelante
+// queremos costo exacto por tokens.
+const COST_TABLE = {
+  '1024x1024': { low: 0.011, medium: 0.042, high: 0.167 },
+  '1024x1536': { low: 0.016, medium: 0.063, high: 0.25 },
+  '1536x1024': { low: 0.016, medium: 0.063, high: 0.25 },
+};
+
+async function readBody(req) {
+  if (req.body && typeof req.body === 'object') return req.body;
+  if (typeof req.body === 'string') {
+    try { return JSON.parse(req.body); } catch { return {}; }
+  }
+  return await new Promise(resolve => {
+    let data = '';
+    req.on('data', c => data += c);
+    req.on('end', () => { try { resolve(JSON.parse(data || '{}')); } catch { resolve({}); } });
+  });
+}
+
+function respondJSON(res, status, payload) {
+  res.statusCode = status;
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Cache-Control', 'no-store');
+  res.end(JSON.stringify(payload));
+}
+
+// El formato del brief define el aspect ratio del creativo:
+//   static  → 1:1 cuadrado (feed)
+//   carrusel→ 1:1 cuadrado (cada slide)
+//   video   → 9:16 vertical (placeholder/thumbnail de stories/reels)
+function sizeForFormato(formato) {
+  if (formato === 'video') return '1024x1536';
+  return '1024x1024';
+}
+
+// Construimos el prompt para gpt-image-1 combinando la escena
+// (promptGeneradorImagen, ya pensada para generadores de imagen) con
+// instrucciones explícitas para que renderice el texto-en-imagen del ad
+// con jerarquía tipográfica. gpt-image-1 renderiza texto razonablemente
+// bien — le damos el layout exacto del hook + microcopy + CTA.
+function buildImagePrompt(idea) {
+  const escena = (idea.promptGeneradorImagen || idea.descripcionImagen || '').trim();
+  const textoEnImagen = (idea.textoEnImagen || '').trim();
+  const estilo = (idea.estiloVisual || '').trim();
+
+  const parts = [];
+  parts.push('Diseño de creativo publicitario para Meta Ads (Facebook/Instagram), calidad de producción profesional.');
+  if (estilo) parts.push(`Estilo visual: ${estilo}.`);
+  parts.push('');
+  parts.push('ESCENA / IMAGEN BASE:');
+  parts.push(escena || 'Composición de producto premium, fondo limpio, iluminación suave.');
+
+  if (textoEnImagen) {
+    parts.push('');
+    parts.push('TEXTO SOBRE LA IMAGEN — renderizá este texto integrado al diseño, con jerarquía tipográfica clara (títulos grandes y bold, microcopy chico, CTA en botón). El texto debe ser legible, bien compuesto y SIN errores de ortografía. Respetá este layout:');
+    parts.push(textoEnImagen);
+    parts.push('');
+    parts.push('El texto va en ESPAÑOL exactamente como está escrito arriba. No traduzcas, no inventes texto extra.');
+  }
+
+  parts.push('');
+  parts.push('Resultado: una sola pieza publicitaria terminada, lista para subir a Meta Ads. Composición equilibrada, colores coherentes, aspecto profesional de agencia.');
+
+  return parts.join('\n');
+}
+
+export default async function handler(req, res) {
+  if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
+
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    return respondJSON(res, 500, {
+      error: 'OPENAI_API_KEY no configurada en el servidor. Agregala en Vercel → Settings → Environment Variables.',
+    });
+  }
+
+  const body = await readBody(req);
+  const idea = body?.idea;
+  if (!idea || (!idea.promptGeneradorImagen && !idea.descripcionImagen)) {
+    return respondJSON(res, 400, { error: 'Falta idea.promptGeneradorImagen (o descripcionImagen) en el body' });
+  }
+
+  // Calidad: 'medium' es el default — buen balance calidad/costo (~$0.04-0.06).
+  // El cliente puede pedir 'high' para las ideas que va a producir en serio.
+  const quality = ['low', 'medium', 'high'].includes(body?.quality) ? body.quality : 'medium';
+  const size = sizeForFormato(idea.formato);
+  const prompt = buildImagePrompt(idea);
+
+  try {
+    const resp = await fetch('https://api.openai.com/v1/images/generations', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'gpt-image-1',
+        prompt,
+        size,
+        quality,
+        n: 1,
+      }),
+    });
+
+    const data = await resp.json();
+    if (!resp.ok) {
+      const msg = data?.error?.message || `HTTP ${resp.status}`;
+      return respondJSON(res, resp.status === 429 ? 429 : 502, { error: `OpenAI rechazó la generación: ${msg}` });
+    }
+
+    const b64 = data?.data?.[0]?.b64_json;
+    if (!b64) {
+      return respondJSON(res, 502, { error: 'OpenAI no devolvió imagen (b64_json ausente)' });
+    }
+
+    const costEstimado = COST_TABLE[size]?.[quality] ?? 0.05;
+
+    return respondJSON(res, 200, {
+      imageBase64: b64,
+      mimeType: 'image/png',
+      size,
+      quality,
+      formato: idea.formato || 'static',
+      model: 'gpt-image-1',
+      generatedAt: new Date().toISOString(),
+      usage: data?.usage || null,
+      cost: { openai: costEstimado },
+    });
+  } catch (err) {
+    console.error('generate-creative error:', err);
+    return respondJSON(res, 500, { error: err?.message || 'Error generando el creativo' });
+  }
+}

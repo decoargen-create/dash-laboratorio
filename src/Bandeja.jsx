@@ -1500,21 +1500,69 @@ function IdeaDetailModal({ idea, onClose, ...cardProps }) {
 // expandido de cada idea. On-demand: el user genera la imagen solo para
 // las ideas que va a producir. El creativo se guarda en IndexedDB (no en
 // localStorage — las imágenes base64 pesan demasiado).
+// Veredictos del QA visual → estilo del badge.
+const QA_VEREDICTO = {
+  aprobado:  { emoji: '🟢', label: 'Aprobado',  cls: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700' },
+  revisar:   { emoji: '🟡', label: 'Revisar',   cls: 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-700' },
+  regenerar: { emoji: '🔴', label: 'Regenerar', cls: 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 border-red-300 dark:border-red-700' },
+};
+
 function CreativoPanel({ idea }) {
   const [creativo, setCreativo] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [quality, setQuality] = useState('medium');
   const [checked, setChecked] = useState(false);
+  const [qa, setQa] = useState(null);
+  const [qaLoading, setQaLoading] = useState(false);
+  const [editInstruccion, setEditInstruccion] = useState('');
+  const [editLoading, setEditLoading] = useState(false);
 
-  // Al montar, miramos si esta idea ya tiene un creativo producido.
+  // Al montar, miramos si esta idea ya tiene un creativo producido (y su QA).
   useEffect(() => {
     let abort = false;
     getCreativo(idea.id).then(c => {
-      if (!abort) { setCreativo(c); setChecked(true); }
+      if (abort) return;
+      setCreativo(c);
+      setQa(c?.qa || null);
+      setChecked(true);
     }).catch(() => { if (!abort) setChecked(true); });
     return () => { abort = true; };
   }, [idea.id]);
+
+  // QA visual con Claude Vision — best-effort: si falla, no rompe nada.
+  const runQa = async (imageBase64, mimeType) => {
+    setQaLoading(true);
+    try {
+      const resp = await fetch('/api/marketing/qa-creative', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64, mimeType, hook: idea.hook, textoEnImagen: idea.textoEnImagen }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      logCostsFromResponse(data, `qa-creative · ${(idea.titulo || '').slice(0, 50)}`);
+      return data.qa || null;
+    } catch {
+      return null;
+    } finally {
+      setQaLoading(false);
+    }
+  };
+
+  // Guarda el creativo + corre el QA + re-guarda con el resultado del QA.
+  const persistirYqa = async (nuevo) => {
+    await saveCreativo(idea.id, nuevo);
+    setCreativo(nuevo);
+    setQa(null);
+    const qaResult = await runQa(nuevo.imageBase64, nuevo.mimeType);
+    if (qaResult) {
+      const conQa = { ...nuevo, qa: qaResult };
+      await saveCreativo(idea.id, conQa);
+      setCreativo(conQa);
+      setQa(qaResult);
+    }
+  };
 
   const handleGenerate = async () => {
     setLoading(true);
@@ -1539,7 +1587,7 @@ function CreativoPanel({ idea }) {
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
       logCostsFromResponse(data, `generate-creative · ${(idea.titulo || idea.hook || '').slice(0, 60)}`);
 
-      const nuevo = {
+      await persistirYqa({
         imageBase64: data.imageBase64,
         mimeType: data.mimeType || 'image/png',
         formato: data.formato || idea.formato || 'static',
@@ -1547,9 +1595,7 @@ function CreativoPanel({ idea }) {
         quality: data.quality,
         model: data.model,
         generatedAt: data.generatedAt,
-      };
-      await saveCreativo(idea.id, nuevo);
-      setCreativo(nuevo);
+      });
     } catch (err) {
       setError(err.message || 'Error generando el creativo');
     } finally {
@@ -1560,12 +1606,55 @@ function CreativoPanel({ idea }) {
   const handleRegenerate = async () => {
     await deleteCreativo(idea.id);
     setCreativo(null);
+    setQa(null);
     await handleGenerate();
+  };
+
+  // Edición conversacional: el user describe un cambio y gpt-image-1 lo
+  // aplica sobre el creativo actual, sin tirar todo y empezar de cero.
+  const handleEdit = async () => {
+    const instruccion = editInstruccion.trim();
+    if (!instruccion || !creativo) return;
+    setEditLoading(true);
+    setError('');
+    try {
+      const resp = await fetch('/api/marketing/edit-creative', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageBase64: creativo.imageBase64,
+          mimeType: creativo.mimeType,
+          instruccion,
+          formato: creativo.formato,
+          quality: creativo.quality,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      logCostsFromResponse(data, `edit-creative · ${(idea.titulo || '').slice(0, 50)}`);
+
+      setEditInstruccion('');
+      await persistirYqa({
+        imageBase64: data.imageBase64,
+        mimeType: data.mimeType || 'image/png',
+        formato: data.formato || creativo.formato || 'static',
+        size: data.size,
+        quality: data.quality,
+        model: data.model,
+        generatedAt: data.generatedAt,
+      });
+    } catch (err) {
+      setError(err.message || 'Error editando el creativo');
+    } finally {
+      setEditLoading(false);
+    }
   };
 
   const dataUrl = creativo
     ? `data:${creativo.mimeType || 'image/png'};base64,${creativo.imageBase64}`
     : null;
+  const busy = loading || editLoading;
+  const ver = qa ? (QA_VEREDICTO[qa.veredicto] || QA_VEREDICTO.revisar) : null;
 
   return (
     <div className="bg-violet-50 dark:bg-violet-900/20 rounded-md border border-violet-200 dark:border-violet-800">
@@ -1589,6 +1678,32 @@ function CreativoPanel({ idea }) {
               alt={idea.titulo || 'Creativo generado'}
               className="w-full rounded-lg border border-violet-200 dark:border-violet-800 bg-white"
             />
+
+            {/* QA visual */}
+            {qaLoading && (
+              <div className="flex items-center gap-1.5 text-[10px] text-violet-600 dark:text-violet-400">
+                <Loader2 size={11} className="animate-spin" /> Revisando calidad con IA…
+              </div>
+            )}
+            {!qaLoading && ver && (
+              <div className={`rounded-md border px-2.5 py-2 text-[10px] ${ver.cls}`}>
+                <div className="flex items-center gap-1.5 font-bold">
+                  <span>{ver.emoji} QA: {ver.label}</span>
+                  <span className="font-mono opacity-80">· {qa.score}/10</span>
+                  {!qa.textoLegible && <span className="font-normal opacity-90">· ⚠ texto con problemas de render</span>}
+                </div>
+                {qa.problemas?.length > 0 && (
+                  <ul className="mt-1 space-y-0.5 list-disc list-inside opacity-90 font-normal">
+                    {qa.problemas.map((p, i) => <li key={i}>{p}</li>)}
+                  </ul>
+                )}
+                {qa.sugerencia && (
+                  <p className="mt-1 font-normal opacity-90"><span className="font-semibold">Sugerencia:</span> {qa.sugerencia}</p>
+                )}
+              </div>
+            )}
+
+            {/* Acciones */}
             <div className="flex flex-wrap gap-1.5">
               <a
                 href={dataUrl}
@@ -1599,17 +1714,41 @@ function CreativoPanel({ idea }) {
               </a>
               <button
                 onClick={handleRegenerate}
-                disabled={loading}
+                disabled={busy}
                 className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-semibold text-violet-700 dark:text-violet-300 bg-white dark:bg-gray-800 border border-violet-300 dark:border-violet-700 rounded hover:bg-violet-50 dark:hover:bg-violet-900/30 transition disabled:opacity-50"
               >
                 {loading ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
                 Regenerar
               </button>
             </div>
+
+            {/* Edición conversacional */}
+            <div className="pt-1">
+              <p className="text-[10px] font-semibold text-violet-700 dark:text-violet-300 mb-1">✏️ Pedí un cambio puntual:</p>
+              <div className="flex gap-1.5">
+                <input
+                  type="text"
+                  value={editInstruccion}
+                  onChange={e => setEditInstruccion(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && !busy) handleEdit(); }}
+                  placeholder='Ej: "el hook más grande", "fondo más claro", "sacá el sello de abajo"'
+                  disabled={busy}
+                  className="flex-1 px-2.5 py-1.5 text-[11px] bg-white dark:bg-gray-800 border border-violet-300 dark:border-violet-700 rounded focus:outline-none focus:ring-1 focus:ring-violet-500 disabled:opacity-50"
+                />
+                <button
+                  onClick={handleEdit}
+                  disabled={busy || !editInstruccion.trim()}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-[11px] font-bold text-white bg-gradient-to-br from-violet-600 to-purple-600 rounded hover:from-violet-700 hover:to-purple-700 transition disabled:opacity-40"
+                >
+                  {editLoading ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
+                  Aplicar
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
-        {/* Loading */}
+        {/* Loading inicial */}
         {loading && !dataUrl && (
           <div className="flex items-center gap-2 px-2 py-3 text-xs text-violet-700 dark:text-violet-300">
             <Loader2 size={14} className="animate-spin" />
@@ -1621,7 +1760,7 @@ function CreativoPanel({ idea }) {
         {!loading && !dataUrl && checked && (
           <div className="space-y-2">
             <p className="text-[11px] text-violet-700 dark:text-violet-300">
-              Generá la imagen final del ad a partir del brief (escena + texto-en-imagen).
+              Generá la imagen final del ad a partir del brief. Después la IA revisa la calidad y podés pedir ajustes.
             </p>
             <div className="flex flex-wrap items-center gap-2">
               <select

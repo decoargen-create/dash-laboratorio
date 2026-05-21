@@ -28,6 +28,7 @@ import BandejaSection from './Bandeja.jsx';
 import InspiracionSection from './InspiracionSection.jsx';
 import CreativosTab from './CreativosTab.jsx';
 import DocumentacionTab from './DocumentacionTab.jsx';
+import CopilotoTab from './CopilotoTab.jsx';
 import { usePipelineRun } from './PipelineRunContext.jsx';
 
 const GEN_CONFIG_KEY = 'viora-marketing-gen-config-v1';
@@ -1895,6 +1896,10 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         />
       )}
 
+      {productoTab === 'copiloto' && (
+        <CopilotoTab producto={producto} addToast={addToast} />
+      )}
+
       {productoTab === 'setup' && <>
 
       {/* Nudge de auto-run: si pasaron > 24h y el user no está corriendo ahora */}
@@ -2600,6 +2605,7 @@ function ProductTabs({ activeTab, onChange }) {
     { id: 'bandeja', label: 'Bandeja', emoji: '📥' },
     { id: 'inspiracion', label: 'Inspiración', emoji: '✨' },
     { id: 'creativos', label: 'Creativos', emoji: '🎨' },
+    { id: 'copiloto', label: 'Copiloto', emoji: '🤖' },
   ];
   return (
     <div className="border-b border-gray-200 dark:border-gray-700 -mt-2">

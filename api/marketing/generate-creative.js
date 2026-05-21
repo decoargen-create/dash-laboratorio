@@ -118,7 +118,18 @@ export default async function handler(req, res) {
       }),
     });
 
-    const data = await resp.json();
+    // Parseo defensivo: si OpenAI devuelve un 502/503 de gateway con HTML
+    // o texto plano (pasa en picos de carga), resp.json() explotaría con
+    // un SyntaxError críptico. Leemos como texto y parseamos con guarda.
+    const raw = await resp.text();
+    let data;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      return respondJSON(res, 502, {
+        error: `OpenAI devolvió una respuesta no-JSON (HTTP ${resp.status}) — probablemente un error transitorio del servicio. Reintentá en un momento.`,
+      });
+    }
     if (!resp.ok) {
       const msg = data?.error?.message || `HTTP ${resp.status}`;
       return respondJSON(res, resp.status === 429 ? 429 : 502, { error: `OpenAI rechazó la generación: ${msg}` });

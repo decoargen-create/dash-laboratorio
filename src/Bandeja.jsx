@@ -144,13 +144,16 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
   const [guionDraft, setGuionDraft] = useState('');
   const [selected, setSelected] = useState(() => new Set());
 
-  // Re-sincronizar cuando otras secciones agregan ideas (event storage no es
-  // ideal para same-tab — usamos un polling liviano cada 3s mientras la
-  // sección está montada). Aceptable para bandeja que no escala a miles.
+  // Re-sincronizar cuando otras secciones agregan o MODIFICAN ideas (event
+  // storage no es ideal para same-tab — usamos un polling liviano cada 3s).
+  // Comparamos un signature de id+estado+score+columna: si solo mirábamos
+  // la longitud, los cambios de estado/score (ej. el scoring del pipeline
+  // marcando lowScore) nunca se reflejaban hasta recargar.
   useEffect(() => {
+    const sig = (list) => list.map(i => `${i.id}:${i.estado || ''}:${i.lowScore ? 1 : 0}:${i.scoreValue || ''}:${i.customColumnId || ''}`).join('|');
     const interval = setInterval(() => {
       const fresh = loadIdeas();
-      setIdeas(prev => (prev.length !== fresh.length ? fresh : prev));
+      setIdeas(prev => (sig(prev) !== sig(fresh) ? fresh : prev));
       const freshProds = loadProductos();
       setProductos(prev => (prev.length !== freshProds.length ? freshProds : prev));
     }, 3000);
@@ -202,6 +205,9 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
   const handleRemove = (id) => {
     if (!window.confirm('¿Borrar esta idea? No se puede deshacer.')) return;
     setIdeas(removeIdea(id));
+    // Borramos también el creativo de IndexedDB — sino quedaba huérfano
+    // ocupando espacio para siempre (cada imagen pesa ~1-2 MB).
+    deleteCreativo(id);
     setSelected(prev => {
       const next = new Set(prev); next.delete(id); return next;
     });
@@ -1554,7 +1560,7 @@ function CreativoPanel({ idea }) {
   const handleRegenerate = async () => {
     await deleteCreativo(idea.id);
     setCreativo(null);
-    handleGenerate();
+    await handleGenerate();
   };
 
   const dataUrl = creativo

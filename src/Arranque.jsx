@@ -362,6 +362,13 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   const productosRef = useRef(productos);
   useEffect(() => { productosRef.current = productos; }, [productos]);
 
+  // Ref a los steps del pipeline — para construir el resumen del run al
+  // final SIN tener que leer `currentSteps` desde adentro del updater de
+  // setSteps (donde meter un setRunHistory duplicaba la entrada si React
+  // re-ejecutaba el updater).
+  const stepsRef = useRef(pipelineRun.steps);
+  useEffect(() => { stepsRef.current = pipelineRun.steps; }, [pipelineRun.steps]);
+
   useEffect(() => { saveJSON(PRODUCTOS_KEY, productos); }, [productos]);
   useEffect(() => { saveJSON(GEN_CONFIG_KEY, genConfig); }, [genConfig]);
   useEffect(() => { saveJSON(RUN_HISTORY_KEY, runHistory); }, [runHistory]);
@@ -1317,6 +1324,9 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         let costPayload = null;
 
         while (true) {
+          // Si el user cancela durante el stream, dejamos de procesar —
+          // sin esto las ideas seguían cayendo a la Bandeja post-cancel.
+          if (cancelledRef.current) { try { await reader.cancel(); } catch {} break; }
           const { done, value } = await reader.read();
           if (done) break;
           sseBuffer += decoder.decode(value, { stream: true });
@@ -1461,48 +1471,47 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     }
     // Siempre persistimos el resumen al historial — incluso runs cancelados
     // o con errores, para que el user tenga traza completa de qué pasó.
-    // Antes solo guardábamos los runs exitosos y se perdía el debug de
-    // los que se rompieron.
-    setSteps(currentSteps => {
-      const endedAt = Date.now();
-      const startedAt = currentSteps.find(s => s.startedAt)?.startedAt || endedAt;
-      const stepsError = currentSteps.filter(s => s.status === 'error').length;
-      const runEntry = {
-        id: `run-${endedAt}`,
-        productoId: producto?.id ? String(producto.id) : null,
-        productoNombre: producto?.nombre || '',
-        startedAt: new Date(startedAt).toISOString(),
-        endedAt: new Date(endedAt).toISOString(),
-        durationMs: endedAt - startedAt,
-        cancelled: wasCancelled,
-        // Cost del run = acumulado local. Antes guardábamos `{ ...runCost }`
-        // que cerraba sobre el snapshot inicial del state (siempre 0).
-        cost: { ...acumuladoLocal },
-        // Guardamos los steps (sin Date timestamps grandes) — sirve para
-        // mostrar el detalle de qué pasó.
-        steps: currentSteps.map(s => ({
-          id: s.id,
-          label: s.label,
-          detail: s.detail,
-          status: s.status,
-          startedAt: s.startedAt || null,
-          endedAt: s.endedAt || null,
-        })),
-        stats: {
-          competidoresCount: (currentSteps.filter(s => s.id.startsWith('scrape-')).length),
-          competidoresOk: (currentSteps.filter(s => s.id.startsWith('scrape-') && s.status === 'done').length),
-          stepsError,
-          // Contadores reales — no parseados con regex sobre el detail
-          // string que rompía cualquier cambio de copy.
-          winnersAnalyzed: liveStats.winnersAnalyzed,
-          ideasInsertadas: liveStats.ideasInsertadas,
-          ideasGeneradas: liveStats.ideasGeneradas,
-          hooksLowScore: liveStats.hooksLowScore,
-        },
-      };
-      setRunHistory(prev => [runEntry, ...prev].slice(0, RUN_HISTORY_CAP));
-      return currentSteps;
-    });
+    // Leemos los steps del ref (no desde adentro del updater de setSteps):
+    // meter setRunHistory dentro del updater duplicaba la entrada si React
+    // re-ejecutaba el updater (StrictMode / re-render).
+    const finalSteps = stepsRef.current || [];
+    const endedAt = Date.now();
+    const startedAt = finalSteps.find(s => s.startedAt)?.startedAt || endedAt;
+    const stepsError = finalSteps.filter(s => s.status === 'error').length;
+    const runEntry = {
+      id: `run-${endedAt}`,
+      productoId: producto?.id ? String(producto.id) : null,
+      productoNombre: producto?.nombre || '',
+      startedAt: new Date(startedAt).toISOString(),
+      endedAt: new Date(endedAt).toISOString(),
+      durationMs: endedAt - startedAt,
+      cancelled: wasCancelled,
+      // Cost del run = acumulado local. Antes guardábamos `{ ...runCost }`
+      // que cerraba sobre el snapshot inicial del state (siempre 0).
+      cost: { ...acumuladoLocal },
+      // Guardamos los steps (sin Date timestamps grandes) — sirve para
+      // mostrar el detalle de qué pasó.
+      steps: finalSteps.map(s => ({
+        id: s.id,
+        label: s.label,
+        detail: s.detail,
+        status: s.status,
+        startedAt: s.startedAt || null,
+        endedAt: s.endedAt || null,
+      })),
+      stats: {
+        competidoresCount: (finalSteps.filter(s => s.id.startsWith('scrape-')).length),
+        competidoresOk: (finalSteps.filter(s => s.id.startsWith('scrape-') && s.status === 'done').length),
+        stepsError,
+        // Contadores reales — no parseados con regex sobre el detail
+        // string que rompía cualquier cambio de copy.
+        winnersAnalyzed: liveStats.winnersAnalyzed,
+        ideasInsertadas: liveStats.ideasInsertadas,
+        ideasGeneradas: liveStats.ideasGeneradas,
+        hooksLowScore: liveStats.hooksLowScore,
+      },
+    };
+    setRunHistory(prev => [runEntry, ...prev].slice(0, RUN_HISTORY_CAP));
     if (!wasCancelled) {
       addToast?.({ type: 'success', message: '¡Listo! Mirá los análisis + ideas en la Bandeja.' });
     }
@@ -2275,7 +2284,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         ) : (
           <>
             <p className="text-xs text-gray-600 dark:text-gray-300 mb-3">
-              Si tu producto aún no tiene research doc, el sistema lo genera primero (~4 min). Después infiere el stage del prospect, sugiere competidores si no cargaste ninguno, scrapea los ads, detecta ganadores y genera ideas. Primera corrida: 8-15 min. Corridas siguientes: 2-5 min.
+              Si tu producto aún no tiene research doc, el sistema lo genera primero (~4 min). Después infiere el stage del prospect, scrapea los ads de los competidores que cargaste, detecta ganadores, genera ideas y scorea los hooks. Primera corrida: 8-15 min. Corridas siguientes: 2-5 min. Necesitás al menos 1 competidor cargado.
             </p>
 
             {/* Config del generador — colapsable */}

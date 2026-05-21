@@ -862,7 +862,7 @@ function IdeaCard({
               {/* Generación del creativo final — produce la imagen estática
                   con gpt-image-1 a partir del brief. On-demand. */}
               {(idea.promptGeneradorImagen || idea.descripcionImagen) && (
-                <CreativoPanel idea={idea} />
+                <CreativoPanel key={idea.id} idea={idea} />
               )}
 
               {idea.copyPostMeta && (
@@ -1627,6 +1627,9 @@ function CreativoPanel({ idea }) {
           instruccion,
           formato: creativo.formato,
           quality: creativo.quality,
+          // Mandamos el size REAL del creativo original — sino la edición
+          // re-derivaba el tamaño del formato y podía re-encuadrar.
+          size: creativo.size,
         }),
       });
       const data = await resp.json();

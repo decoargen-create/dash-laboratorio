@@ -194,6 +194,25 @@ function brandFromUrl(url) {
   return main.charAt(0).toUpperCase() + main.slice(1);
 }
 
+// Parsea la respuesta de un endpoint de forma defensiva. Si NO es JSON
+// válido —típicamente cuando una serverless function de Vercel crashea o
+// timeoutea y Vercel devuelve su página de error en texto plano ("An error
+// occurred...")— tiramos un mensaje claro en lugar del críptico
+// "Unexpected token 'A'... is not valid JSON".
+async function parseJsonResponse(resp, contextLabel) {
+  const raw = await resp.text();
+  try {
+    return JSON.parse(raw);
+  } catch {
+    const isTimeout = /timeout|FUNCTION_INVOCATION|gateway/i.test(raw)
+      || resp.status === 504 || resp.status === 502;
+    const detalle = isTimeout
+      ? 'el servidor tardó demasiado y cortó la conexión (timeout) — reintentá en la próxima corrida'
+      : `el servidor devolvió un error inesperado (HTTP ${resp.status})`;
+    throw new Error(`${contextLabel}: ${detalle}`);
+  }
+}
+
 export default function ArranqueSection({ addToast, onGoToSection }) {
   const [productos, setProductos] = useState(() => {
     const prods = loadJSON(PRODUCTOS_KEY, []);
@@ -858,7 +877,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             avatar: productoActualizado.docs.avatar,
           }),
         });
-        const data = await resp.json();
+        const data = await parseJsonResponse(resp, 'Inferir stage del prospect');
         if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
         trackCost(data, `post-research-analysis · ${productoActualizado.nombre}`);
 
@@ -980,7 +999,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
-        const data = await resp.json();
+        const data = await parseJsonResponse(resp, `Scrape de ${c.nombre}`);
         if (!resp.ok) {
           // Si el endpoint sugiere algo (ej: cargar fbPageUrl manual), lo
           // mostramos al user — más útil que el error crudo de Apify.
@@ -1099,7 +1118,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               transcribe: true,
             }),
           });
-          const data = await resp.json();
+          const data = await parseJsonResponse(resp, `Análisis de ad de ${comp.nombre}`);
           if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
           trackCost(data, `deep-analyze · ${comp.nombre} · ${ad.id}`);
 
@@ -1389,7 +1408,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ ideas: insertedIdeasForScoring }),
         });
-        const scoreData = await scoreResp.json();
+        const scoreData = await parseJsonResponse(scoreResp, 'Scoring de hooks');
         if (!scoreResp.ok) throw new Error(scoreData.error || `HTTP ${scoreResp.status}`);
         trackCost(scoreData, `score-hooks · ${insertedIdeasForScoring.length} hooks`);
 

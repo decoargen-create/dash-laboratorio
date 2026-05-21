@@ -1377,6 +1377,14 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         }
 
         if (streamErr) throw streamErr;
+        // Stream truncado: si nunca llegó el evento `complete` (costPayload)
+        // y no se insertó ninguna idea, el stream se cortó a mitad (timeout
+        // de la function, proxy, red). Antes esto se marcaba como "done · 0
+        // ideas" — un éxito vacío que confundía. Ahora lo tratamos como
+        // error explícito para que el user sepa que tiene que reintentar.
+        if (!costPayload && insertadas === 0 && !cancelledRef.current) {
+          throw new Error('El generador cerró la conexión sin completar (probable timeout). Reintentá — o bajá el límite diario de ideas para pedir tandas más chicas.');
+        }
         // trackCost en lugar de logCostsFromResponse directo: así el costo
         // del generador (Sonnet 4.6 + thinking, suele ser ~50% del run total)
         // también se suma al display "💰" en vivo y al acumulado local que
@@ -1730,6 +1738,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
       {/* Tabs del workspace — Setup, Bandeja, Inspiración, Creativos */}
       <ProductTabs activeTab={productoTab} onChange={setProductoTab} />
+      <TabsGuide />
 
       {productoTab === 'bandeja' && (
         <div className="-mx-4">
@@ -2397,12 +2406,19 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
         {/* Banner de éxito al terminar — CTA grande para ir a la Bandeja */}
         {!running && steps.length > 0 && steps[steps.length - 1]?.id === 'done' && steps[steps.length - 1]?.status === 'done' && (() => {
-          // Contadores reales del último run del producto activo, persistidos
-          // en runHistory por el runner. Antes parseábamos con regex sobre el
-          // detail string del stepper — frágil a cualquier cambio de copy.
           const ultimoRun = runHistory.find(r => String(r.productoId || '') === String(producto?.id || ''));
           const winnersTotal = ultimoRun?.stats?.winnersAnalyzed || 0;
-          const ideasNuevas = ultimoRun?.stats?.ideasInsertadas || 0;
+          // Total REAL de ideas nuevas = todas las del producto creadas
+          // durante el run (réplicas del deep-analyze + las del generador).
+          // Antes mostrábamos solo stats.ideasInsertadas (del generador) →
+          // decía "0 ideas" aunque hubiera 14 réplicas. Eso confundía.
+          const runStart = ultimoRun ? new Date(ultimoRun.startedAt).getTime() : 0;
+          const ideasNuevas = runStart
+            ? loadIdeas().filter(i =>
+                String(i.productoId || '') === String(producto?.id || '') &&
+                new Date(i.createdAt).getTime() >= runStart - 5000
+              ).length
+            : (ultimoRun?.stats?.ideasInsertadas || 0);
           return (
             <div className="mt-5 p-4 bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 border-2 border-emerald-300 dark:border-emerald-700 rounded-xl">
               <div className="flex items-center gap-3 flex-wrap">
@@ -2592,6 +2608,30 @@ function RunHistoryCard({ history, onClear }) {
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+// Guía corta del flujo del módulo — se muestra debajo de los tabs para
+// que el user nuevo sepa el orden. Dismissable y persistido.
+function TabsGuide() {
+  const [hidden, setHidden] = useState(() => {
+    try { return localStorage.getItem('viora-tabs-guide-hidden') === '1'; } catch { return false; }
+  });
+  if (hidden) return null;
+  return (
+    <div className="flex items-center gap-2 px-3 py-2 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg text-[11px] text-purple-800 dark:text-purple-300">
+      <span className="shrink-0">🗺️</span>
+      <span className="flex-1 min-w-0">
+        <strong>Cómo va el flujo:</strong> ⚙️ Setup (cargá producto + competidores) → ▶️ Correr pipeline → 📥 Bandeja (revisá las ideas y generá el creativo en cada una) → 🤖 Copiloto para pedir más.
+      </span>
+      <button
+        onClick={() => { try { localStorage.setItem('viora-tabs-guide-hidden', '1'); } catch {} setHidden(true); }}
+        className="shrink-0 text-purple-400 hover:text-purple-700 dark:hover:text-purple-200 transition"
+        title="Ocultar guía"
+      >
+        <X size={13} />
+      </button>
     </div>
   );
 }

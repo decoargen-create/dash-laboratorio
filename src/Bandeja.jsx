@@ -887,7 +887,7 @@ function IdeaCard({
                   - video → brief para mandar a producción humana.
                   - imagen/carrusel → generación del creativo con gpt-image-1. */}
               {idea.formato === 'video' ? (
-                <VideoBriefPanel idea={idea} />
+                <VideoBriefPanel key={idea.id} idea={idea} />
               ) : (idea.hook || idea.titulo || idea.promptGeneradorImagen || idea.descripcionImagen) ? (
                 <CreativoPanel key={idea.id} idea={idea} />
               ) : null}
@@ -1860,10 +1860,14 @@ function VideoBriefPanel({ idea }) {
   const [refOpen, setRefOpen] = useState(false);
 
   const handleGenerar = async () => {
+    const prod = loadProductos().find(p => String(p.id) === String(idea.productoId));
+    if (!prod) {
+      setError('No encontré el producto de esta idea — el guión saldría sin tu research. Recargá la página.');
+      return;
+    }
     setLoading(true);
     setError('');
     try {
-      const prod = loadProductos().find(p => String(p.id) === String(idea.productoId)) || {};
       const resp = await fetch('/api/marketing/adapt-guion', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1942,8 +1946,8 @@ function VideoBriefPanel({ idea }) {
               </p>
             )}
             <ol className="space-y-1.5">
-              {(guion.beats || []).map(b => (
-                <li key={b.n} className="bg-white dark:bg-gray-800/60 rounded border border-rose-100 dark:border-rose-900/40 px-2.5 py-1.5">
+              {(guion.beats || []).map((b, i) => (
+                <li key={b.n ?? i} className="bg-white dark:bg-gray-800/60 rounded border border-rose-100 dark:border-rose-900/40 px-2.5 py-1.5">
                   <p className="text-[10px] font-bold text-rose-600 dark:text-rose-400">BEAT {b.n} · {b.timecode}</p>
                   {b.visual && <p className="text-[11px] text-gray-700 dark:text-gray-300 mt-0.5"><span className="font-semibold">🎥</span> {b.visual}</p>}
                   {b.voz && <p className="text-[11px] text-gray-700 dark:text-gray-300 mt-0.5"><span className="font-semibold">🎙</span> "{b.voz}"</p>}

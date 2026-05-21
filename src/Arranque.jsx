@@ -1273,131 +1273,129 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           video: genConfig.formatoVideo / sumaMix,
         };
 
-        // Consumimos SSE stream. Cada evento 'idea' llega en vivo apenas
-        // Claude termina de escribirla → la empujamos a la Bandeja y al
-        // stepper al toque. Al final viene 'complete' con el costo total.
-        // Si el primer hit timeoutea, reintentamos UNA vez con la mitad del
-        // target (Apify hace retry parecido). Sin esto, todas las ideas que
-        // se podrían haber pedido en chunks más chicos se pierden.
-        const generateBody = {
-          producto: productoActualizado || producto || { nombre: 'Producto sin definir' },
-          competidoresAnalisis: compAnalisis,
-          allCompAds,
-          ideasExistentes,
-          propiosAds,
-          targetCount,
-          formatoMix,
-        };
-        const fetchGenerate = async (body) => {
-          const r = await fetch('/api/marketing/generate-ideas', {
+        // CHUNKING: pedimos las ideas en TANDAS chicas en vez de una sola
+        // request grande. Una request de 50-100 ideas se trunca por el
+        // timeout de Vercel (5 min) mientras Sonnet escribe briefs largos
+        // → 0 ideas. Tandas de ~12 son rápidas, no se truncan, y si una
+        // falla las anteriores ya quedaron guardadas en la Bandeja.
+        const CHUNK_SIZE = 12;
+        const totalTandas = Math.max(1, Math.ceil(targetCount / CHUNK_SIZE));
+        let insertadas = 0;
+        let tandaNum = 0;
+        let tandasFallidasSeguidas = 0;
+
+        // Corre UNA tanda del generador: pide `chunkTarget` ideas, consume
+        // el stream SSE e inserta en la Bandeja. Devuelve cuántas insertó.
+        const correrTanda = async (chunkTarget) => {
+          // ideasExistentes fresco — incluye lo insertado en tandas
+          // anteriores para que Claude no repita.
+          const ideasExist = loadIdeas()
+            .filter(i => String(i.productoId || '') === productoActualId)
+            .map(i => ({ titulo: i.titulo, angulo: i.angulo, tipo: i.tipo, hook: i.hook || '', estado: i.estado || 'pendiente' }));
+          const resp = await fetch('/api/marketing/generate-ideas', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
+            body: JSON.stringify({
+              producto: productoActualizado || producto || { nombre: 'Producto sin definir' },
+              competidoresAnalisis: compAnalisis,
+              allCompAds,
+              ideasExistentes: ideasExist,
+              propiosAds,
+              targetCount: chunkTarget,
+              formatoMix,
+            }),
           });
-          return r;
-        };
-        let resp = await fetchGenerate(generateBody);
-        if (!resp.ok || !resp.body) {
-          const text = await resp.text().catch(() => '');
-          const isTimeout = /504|timeout|FUNCTION_INVOCATION_TIMEOUT/i.test(text) || resp.status === 504;
-          if (isTimeout && generateBody.targetCount > 12) {
-            const reduced = Math.max(12, Math.floor(generateBody.targetCount / 2));
-            updateStep('generate', { detail: `Timeout — reintentando con ${reduced} ideas (la mitad)…` });
-            generateBody.targetCount = reduced;
-            resp = await fetchGenerate(generateBody);
+          if (!resp.ok || !resp.body) {
+            const text = await resp.text().catch(() => '');
+            throw new Error(`generate-ideas HTTP ${resp.status}${text ? ': ' + text.slice(0, 100) : ''}`);
           }
-        }
-        if (!resp.ok || !resp.body) {
-          // Error antes de que arranque el stream — lo leemos como text y
-          // damos un mensaje accionable.
-          const text = await resp.text().catch(() => '');
-          const isTimeout = /504|timeout|FUNCTION_INVOCATION_TIMEOUT/i.test(text) || resp.status === 504;
-          throw new Error(isTimeout
-            ? 'Timeout del generador (incluyendo reintento con menos ideas). Probá con menos competidores o pedí < 30 ideas.'
-            : `HTTP ${resp.status}${text ? ': ' + text.slice(0, 120) : ''}`);
-        }
-
-        const reader = resp.body.getReader();
-        const decoder = new TextDecoder();
-        let sseBuffer = '';
-        let insertadas = 0;
-        let streamErr = null;
-        let costPayload = null;
-
-        while (true) {
-          // Si el user cancela durante el stream, dejamos de procesar —
-          // sin esto las ideas seguían cayendo a la Bandeja post-cancel.
-          if (cancelledRef.current) { try { await reader.cancel(); } catch {} break; }
-          const { done, value } = await reader.read();
-          if (done) break;
-          sseBuffer += decoder.decode(value, { stream: true });
-          const lines = sseBuffer.split('\n');
-          sseBuffer = lines.pop() || '';
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            const payload = line.slice(6).trim();
-            if (!payload) continue;
-            try {
-              const ev = JSON.parse(payload);
-              if (ev.type === 'idea' && ev.idea) {
-                // Empujamos a la Bandeja — addGeneratedIdeas dedupea
-                // por (tipo, titulo), así que si ya existe no molesta.
-                const nuevas = addGeneratedIdeas([ev.idea], { producto: productoActualizado || producto });
-                if (nuevas.length > 0) {
-                  insertadas++;
-                  liveStats.ideasInsertadas++;
-                  // Acumulamos las ideas REALMENTE insertadas (con su id
-                  // del store) para mandar al scoring después. Si llegó
-                  // duplicada, addGeneratedIdeas devuelve [] y no la
-                  // re-scoreamos.
-                  for (const n of nuevas) {
-                    insertedIdeasForScoring.push({
-                      id: n.id,
-                      titulo: n.titulo,
-                      hook: n.hook || '',
-                      tipo: n.tipo,
-                      anguloCategoria: n.anguloCategoria || null,
-                    });
+          const reader = resp.body.getReader();
+          const decoder = new TextDecoder();
+          let sseBuffer = '';
+          let streamErr = null;
+          let costPayload = null;
+          let insertadasTanda = 0;
+          while (true) {
+            if (cancelledRef.current) { try { await reader.cancel(); } catch {} break; }
+            const { done, value } = await reader.read();
+            if (done) break;
+            sseBuffer += decoder.decode(value, { stream: true });
+            const lines = sseBuffer.split('\n');
+            sseBuffer = lines.pop() || '';
+            for (const line of lines) {
+              if (!line.startsWith('data: ')) continue;
+              const payload = line.slice(6).trim();
+              if (!payload) continue;
+              try {
+                const ev = JSON.parse(payload);
+                if (ev.type === 'idea' && ev.idea) {
+                  const nuevas = addGeneratedIdeas([ev.idea], { producto: productoActualizado || producto });
+                  if (nuevas.length > 0) {
+                    insertadas++;
+                    insertadasTanda++;
+                    liveStats.ideasInsertadas++;
+                    for (const n of nuevas) {
+                      insertedIdeasForScoring.push({
+                        id: n.id, titulo: n.titulo, hook: n.hook || '',
+                        tipo: n.tipo, anguloCategoria: n.anguloCategoria || null,
+                      });
+                    }
                   }
+                  liveStats.ideasGeneradas++;
+                  setLiveIdeas(prev => [...prev, ev.idea]);
+                  updateStep('generate', { detail: `Tanda ${tandaNum}/${totalTandas} · ${insertadas} ideas en la Bandeja…` });
+                } else if (ev.type === 'complete') {
+                  costPayload = ev;
+                } else if (ev.type === 'error') {
+                  streamErr = new Error(ev.error || 'Error del stream');
                 }
-                liveStats.ideasGeneradas++;
-                setLiveIdeas(prev => [...prev, ev.idea]);
-                updateStep('generate', {
-                  detail: `${insertadas} ideas nuevas en la Bandeja · generando…`,
-                });
-              } else if (ev.type === 'complete') {
-                costPayload = ev;
-              } else if (ev.type === 'error') {
-                streamErr = new Error(ev.error || 'Error desconocido del stream');
-              }
-            } catch {
-              // Línea parcial / no-JSON: ignoramos.
+              } catch { /* línea parcial */ }
             }
           }
+          if (streamErr) throw streamErr;
+          if (costPayload) trackCost(costPayload, `generate-ideas tanda ${tandaNum} · ${(productoActualizado || producto)?.nombre || ''}`);
+          // Tanda truncada: 0 ideas y sin `complete` = se cortó a mitad.
+          if (!costPayload && insertadasTanda === 0 && !cancelledRef.current) {
+            throw new Error('tanda truncada (timeout)');
+          }
+          return insertadasTanda;
+        };
+
+        // Loop de tandas hasta cubrir el target (o agotar reintentos).
+        let restante = targetCount;
+        let tandasOk = 0;
+        while (restante > 0 && !cancelledRef.current) {
+          tandaNum++;
+          const chunkTarget = Math.min(CHUNK_SIZE, restante);
+          updateStep('generate', { detail: `Tanda ${tandaNum}/${totalTandas} · generando…` });
+          try {
+            await correrTanda(chunkTarget);
+            tandasOk++;
+            tandasFallidasSeguidas = 0;
+          } catch (err) {
+            tandasFallidasSeguidas++;
+            console.error(`generate tanda ${tandaNum} falló:`, err);
+            // 2 tandas seguidas fallidas → cortamos, pero conservamos lo
+            // que ya se insertó en las tandas anteriores.
+            if (tandasFallidasSeguidas >= 2) break;
+          }
+          restante -= chunkTarget;
         }
 
-        if (streamErr) throw streamErr;
-        // Stream truncado: si nunca llegó el evento `complete` (costPayload)
-        // y no se insertó ninguna idea, el stream se cortó a mitad (timeout
-        // de la function, proxy, red). Antes esto se marcaba como "done · 0
-        // ideas" — un éxito vacío que confundía. Ahora lo tratamos como
-        // error explícito para que el user sepa que tiene que reintentar.
-        if (!costPayload && insertadas === 0 && !cancelledRef.current) {
-          throw new Error('El generador cerró la conexión sin completar (probable timeout). Reintentá — o bajá el límite diario de ideas para pedir tandas más chicas.');
+        // Fallo real = NINGUNA tanda completó (todas truncadas / timeout).
+        // OJO: insertadas === 0 con tandas OK NO es error — es que el
+        // generador devolvió solo ideas que ya estaban en la Bandeja
+        // (dedup). Eso pasa con bandejas saturadas y NO debe marcar error.
+        if (tandasOk === 0 && !cancelledRef.current) {
+          throw new Error('El generador no pudo producir ideas (tandas truncadas o timeout). Reintentá el pipeline.');
         }
-        // trackCost en lugar de logCostsFromResponse directo: así el costo
-        // del generador (Sonnet 4.6 + thinking, suele ser ~50% del run total)
-        // también se suma al display "💰" en vivo y al acumulado local que
-        // persistimos en runHistory.
-        if (costPayload) trackCost(costPayload, `generate-ideas · ${(productoActualizado || producto)?.nombre || ''}`);
-        // Recontamos las ideas del día PARA ESTE PRODUCTO — no global.
-        // Antes esto era global y choreaba con la lógica del effect que sí
-        // filtra por producto.
         setIdeasToday(countIdeasGeneratedToday(null, productoActualId));
         updateStep('generate', {
           status: 'done',
           endedAt: Date.now(),
-          detail: `${insertadas} ideas nuevas agregadas${costPayload?.count ? ` (${costPayload.count} generadas)` : ''}`,
+          detail: insertadas > 0
+            ? `${insertadas} ideas nuevas agregadas en ${tandasOk} tanda${tandasOk !== 1 ? 's' : ''}`
+            : 'El generador no encontró ideas nuevas — las que generó ya estaban en la Bandeja.',
         });
       } catch (err) {
         // SKIP_GENERATE es un soft-skip (ya avisamos en updateStep), no error.
@@ -2416,7 +2414,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           const ideasNuevas = runStart
             ? loadIdeas().filter(i =>
                 String(i.productoId || '') === String(producto?.id || '') &&
-                new Date(i.createdAt).getTime() >= runStart - 5000
+                i.createdAt && new Date(i.createdAt).getTime() >= runStart - 5000
               ).length
             : (ultimoRun?.stats?.ideasInsertadas || 0);
           return (

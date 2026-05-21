@@ -55,8 +55,14 @@ export default async function handler(req, res) {
   if (!instruccion) return respondJSON(res, 400, { error: 'Falta la instrucción de edición' });
 
   const quality = ['low', 'medium', 'high'].includes(body?.quality) ? body.quality : 'medium';
-  const size = sizeForFormato(body?.formato);
+  // Usamos el size REAL del creativo original si vino — sino lo derivamos
+  // del formato. Re-derivar a ciegas hacía que /v1/images/edits reescale.
+  const VALID_SIZES = ['1024x1024', '1024x1536', '1536x1024'];
+  const size = VALID_SIZES.includes(body?.size) ? body.size : sizeForFormato(body?.formato);
   const mimeType = ['image/png', 'image/jpeg', 'image/webp'].includes(body?.mimeType) ? body.mimeType : 'image/png';
+  // Filename coherente con el mime — gpt-image-1 en /edits es quisquilloso
+  // si el nombre del archivo no matchea el tipo real.
+  const ext = mimeType === 'image/jpeg' ? 'jpg' : mimeType === 'image/webp' ? 'webp' : 'png';
 
   // El prompt de edición: la instrucción del user + un marco para que
   // gpt-image-1 mantenga el resto del creativo intacto.
@@ -66,7 +72,7 @@ export default async function handler(req, res) {
     const imageBuffer = Buffer.from(imageBase64, 'base64');
     const form = new FormData();
     form.append('model', 'gpt-image-1');
-    form.append('image', new Blob([imageBuffer], { type: mimeType }), 'creativo.png');
+    form.append('image', new Blob([imageBuffer], { type: mimeType }), `creativo.${ext}`);
     form.append('prompt', prompt);
     form.append('size', size);
     form.append('quality', quality);

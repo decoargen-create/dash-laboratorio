@@ -27,7 +27,10 @@ Cómo respondés:
 
 Podés ayudar con: ideas de hooks y ángulos, análisis de la competencia, qué testear, copy de ads, estrategia de funnel (TOFU/MOFU/BOFU), interpretación del avatar, y feedback sobre ideas que el user te traiga.`;
 
-function buildContextBlock(ctx) {
+// Contexto ESTABLE del producto (research, avatar, etc) — va en el system
+// prompt con cache_control. No cambia entre turnos → se cachea y los turnos
+// siguientes pagan barato.
+function buildEstableBlock(ctx) {
   if (!ctx || typeof ctx !== 'object') return '';
   const parts = ['\n\n=== CONTEXTO DEL PRODUCTO ==='];
   if (ctx.nombre) parts.push(`Producto: ${ctx.nombre}`);
@@ -37,12 +40,21 @@ function buildContextBlock(ctx) {
   if (ctx.avatar) parts.push(`\n--- AVATAR ---\n${String(ctx.avatar).slice(0, 8000)}`);
   if (ctx.offerBrief) parts.push(`\n--- OFFER BRIEF ---\n${String(ctx.offerBrief).slice(0, 8000)}`);
   if (ctx.beliefs) parts.push(`\n--- CREENCIAS NECESARIAS ---\n${String(ctx.beliefs).slice(0, 4000)}`);
-  if (ctx.competidoresResumen) parts.push(`\n--- COMPETENCIA ---\n${String(ctx.competidoresResumen).slice(0, 4000)}`);
-  if (ctx.ideasResumen) parts.push(`\n--- BANDEJA DE IDEAS (estado actual) ---\n${String(ctx.ideasResumen).slice(0, 3000)}`);
   if (parts.length === 1) {
-    parts.push('(El producto todavía no tiene research ni análisis. Corré el pipeline para que el copiloto tenga material — por ahora respondé con criterio general.)');
+    parts.push('(El producto todavía no tiene research. Corré el pipeline para que el copiloto tenga material — por ahora respondé con criterio general.)');
   }
   return parts.join('\n');
+}
+
+// Contexto VOLÁTIL (competencia, ideas) — cambia a medida que el user
+// trabaja. Va anexado al último mensaje del user, NO al system, para no
+// invalidar el cache del system prompt en cada turno.
+function buildVolatilBlock(ctx) {
+  if (!ctx || typeof ctx !== 'object') return '';
+  const parts = [];
+  if (ctx.competidoresResumen) parts.push(`--- COMPETENCIA (estado actual) ---\n${String(ctx.competidoresResumen).slice(0, 4000)}`);
+  if (ctx.ideasResumen) parts.push(`--- BANDEJA DE IDEAS (estado actual) ---\n${String(ctx.ideasResumen).slice(0, 3000)}`);
+  return parts.length ? `\n\n[Contexto actualizado — no respondas a esto, solo usalo como referencia]\n${parts.join('\n\n')}` : '';
 }
 
 async function readBody(req) {
@@ -84,16 +96,27 @@ export default async function handler(req, res) {
     return respondJSON(res, 400, { error: 'El último mensaje debe ser del user' });
   }
 
-  const systemText = SYSTEM_BASE + buildContextBlock(body?.productoContext);
+  const ctx = body?.productoContext;
+  // System = base + contexto estable (research/avatar/etc) → cacheable.
+  const systemText = SYSTEM_BASE + buildEstableBlock(ctx);
+  // El contexto volátil (competencia/ideas) se anexa al último mensaje del
+  // user, así no invalida el cache del system en cada turno.
+  const volatil = buildVolatilBlock(ctx);
+  const finalMessages = messages.map((m, i) =>
+    (volatil && i === messages.length - 1)
+      ? { ...m, content: m.content + volatil }
+      : m
+  );
   const client = new Anthropic({ apiKey });
 
   try {
     const resp = await client.messages.create({
       model: MODEL,
       max_tokens: 2048,
-      // El contexto del producto es pesado y estable entre turnos → cache.
+      // El contexto estable del producto es pesado y no cambia entre turnos
+      // → cache_control lo abarata a partir del 2do turno.
       system: [{ type: 'text', text: systemText, cache_control: { type: 'ephemeral' } }],
-      messages,
+      messages: finalMessages,
     });
 
     const textBlock = (resp.content || []).find(c => c.type === 'text');

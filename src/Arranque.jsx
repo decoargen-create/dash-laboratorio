@@ -169,6 +169,31 @@ function landingToKeyword(url) {
   }
 }
 
+// Hostname normalizado (sin www) — para detectar competidores duplicados:
+// dos landings del mismo dominio son la misma marca, no importa el path.
+function hostnameOf(url) {
+  if (!url) return '';
+  try {
+    return new URL(url).hostname.replace(/^www\./, '').toLowerCase();
+  } catch {
+    return String(url).replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0].toLowerCase();
+  }
+}
+
+// Deriva el nombre de la marca desde la URL de la landing.
+// Ej: "https://femprobiotics.co/products/x" → "Femprobiotics".
+// Saca los segmentos de TLD comunes y se queda con el más largo de lo
+// que resta (ej. "app.dropi.com.ar" → "Dropi").
+function brandFromUrl(url) {
+  const host = hostnameOf(url);
+  if (!host) return '';
+  const TLDS = new Set(['com', 'co', 'net', 'org', 'io', 'ar', 'es', 'mx', 'cl', 'pe', 'uy', 'br', 'app', 'shop', 'store', 'online', 'me']);
+  const segments = host.split('.').filter(s => s && !TLDS.has(s));
+  if (segments.length === 0) return '';
+  const main = segments.reduce((a, b) => (b.length > a.length ? b : a), '');
+  return main.charAt(0).toUpperCase() + main.slice(1);
+}
+
 export default function ArranqueSection({ addToast, onGoToSection }) {
   const [productos, setProductos] = useState(() => {
     const prods = loadJSON(PRODUCTOS_KEY, []);
@@ -539,9 +564,28 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   };
 
   const handleAddCompetidor = async () => {
-    const nombre = compDraft.nombre.trim();
-    if (!nombre) { addToast?.({ type: 'error', message: 'Ponele nombre al competidor' }); return; }
     const landingUrl = compDraft.landingUrl.trim();
+    // Nombre: si el user no puso uno, o puso algo poco descriptivo (vacío o
+    // puramente numérico tipo "5"), lo derivamos de la URL de la landing.
+    // Así la lista muestra "Femprobiotics" en vez de "5".
+    let nombre = compDraft.nombre.trim();
+    if (!nombre || /^\d+$/.test(nombre)) {
+      nombre = brandFromUrl(landingUrl) || nombre;
+    }
+    if (!nombre) {
+      addToast?.({ type: 'error', message: 'Ponele nombre al competidor o cargá su landing URL' });
+      return;
+    }
+    // Anti-duplicado: si ya hay un competidor con el mismo dominio, es la
+    // misma marca — scrapearla dos veces gasta de más y duplica ideas.
+    if (landingUrl) {
+      const host = hostnameOf(landingUrl);
+      const dup = competidores.find(c => c.landingUrl && hostnameOf(c.landingUrl) === host);
+      if (dup) {
+        addToast?.({ type: 'error', message: `Ya tenés esa marca cargada: "${dup.nombre}". No la agregamos de nuevo.` });
+        return;
+      }
+    }
     const nuevoId = Date.now();
     const nuevo = {
       id: nuevoId,
@@ -1698,10 +1742,10 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           {showCompForm && (
             <div className="bg-white dark:bg-gray-800 border border-orange-300 dark:border-orange-700 rounded-xl p-3 flex flex-col sm:flex-row gap-2 items-stretch">
               <input type="text" value={compDraft.nombre} onChange={e => setCompDraft({ ...compDraft, nombre: e.target.value })}
-                placeholder="Nombre del competidor"
+                placeholder="Nombre de la marca (opcional — se autocompleta de la URL)"
                 className="flex-1 px-2.5 py-1.5 text-sm bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500" />
               <input type="url" value={compDraft.landingUrl} onChange={e => setCompDraft({ ...compDraft, landingUrl: e.target.value })}
-                placeholder="https://landing-del-competidor.com (opcional pero recomendado — autodetecta su FB page)"
+                placeholder="https://landing-del-competidor.com (recomendado — autodetecta marca + FB page)"
                 className="flex-1 px-2.5 py-1.5 text-sm bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500" />
               <div className="flex gap-1">
                 <button onClick={() => { setShowCompForm(false); setCompDraft({ nombre: '', landingUrl: '' }); }}
@@ -1733,10 +1777,22 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 const history = Array.isArray(c.adsHistory) ? c.adsHistory : [];
                 const prev = history.length >= 2 ? history[history.length - 2] : null;
                 const delta = prev ? total - prev.total : null;
+                const analizado = !!c.lastAdsCheck;
+                const favHost = hostnameOf(c.landingUrl);
                 return (
                   <div key={c.id} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-3 flex items-start gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-orange-400 to-red-400 flex items-center justify-center text-white font-bold text-sm shrink-0">
+                    {/* Avatar: favicon del sitio, con fallback a la inicial
+                        de la marca si el favicon no carga. */}
+                    <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-orange-400 to-red-400 flex items-center justify-center text-white font-bold text-sm shrink-0 relative overflow-hidden">
                       {c.nombre?.charAt(0)?.toUpperCase() || '?'}
+                      {favHost && (
+                        <img
+                          src={`https://www.google.com/s2/favicons?domain=${favHost}&sz=64`}
+                          alt=""
+                          className="absolute inset-0 w-full h-full object-contain bg-white p-1.5"
+                          onError={e => { e.currentTarget.style.display = 'none'; }}
+                        />
+                      )}
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{c.nombre}</p>
@@ -1748,6 +1804,23 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                         )}
                         {c.fbPageUrl && <span>· FB: <span className="text-gray-700 dark:text-gray-300">@{c.fbPageUrl.replace(/^.*facebook\.com\//, '').replace(/\/$/, '')}</span></span>}
                         {c.lastAdsCheck && <span>· Última corrida: {new Date(c.lastAdsCheck).toLocaleDateString('es-AR')}</span>}
+                      </div>
+                      {/* Estado del scrapeo — sin esto la card no decía si el
+                          competidor ya había sido analizado o no. */}
+                      <div className="mt-1.5">
+                        {!analizado ? (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-semibold bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded">
+                            ○ Sin analizar — la próxima corrida del pipeline scrapea sus ads
+                          </span>
+                        ) : total === 0 ? (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-semibold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 rounded">
+                            ⚠ Analizado pero sin ads activos encontrados
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-semibold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded">
+                            ✓ Analizado
+                          </span>
+                        )}
                       </div>
                     </div>
                     {total > 0 && (

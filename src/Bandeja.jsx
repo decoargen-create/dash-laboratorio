@@ -137,6 +137,10 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
   const [expandedId, setExpandedId] = useState(null);
   const [filtroTipo, setFiltroTipo] = useState('all');
   const [filtroEstado, setFiltroEstado] = useState('active'); // 'all' | 'active' (pendiente + en_uso) | 'pendiente' | 'en_uso' | 'usada' | 'archivada'
+  // Filtro por formato: 'all' | 'imagen' (static+carrusel) | 'video'.
+  // Sirve para separar lo que producís vos (imagen) de lo que mandás a
+  // producción de video.
+  const [filtroFormato, setFiltroFormato] = useState('all');
   const [query, setQuery] = useState('');
   const [editandoNotasId, setEditandoNotasId] = useState(null);
   const [notasDraft, setNotasDraft] = useState('');
@@ -410,6 +414,8 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
     if (filtroTipo !== 'all' && i.tipo !== filtroTipo) return false;
     if (filtroEstado === 'active' && !['pendiente', 'en_uso'].includes(i.estado)) return false;
     if (filtroEstado !== 'all' && filtroEstado !== 'active' && i.estado !== filtroEstado) return false;
+    if (filtroFormato === 'video' && i.formato !== 'video') return false;
+    if (filtroFormato === 'imagen' && i.formato === 'video') return false;
     if (query) {
       const q = query.toLowerCase();
       const hay = `${i.titulo} ${i.angulo} ${i.hook} ${i.origen?.competidorNombre || ''}`.toLowerCase();
@@ -555,6 +561,24 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
             <option key={k} value={k}>{t.emoji} {t.label}</option>
           ))}
         </select>
+        {/* Filtro de formato — separa lo que producís vos (imagen) de lo
+            que mandás a producción de video. */}
+        <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-900 rounded-md p-0.5">
+          {[
+            { id: 'all', label: 'Todo' },
+            { id: 'imagen', label: '🖼️ Imagen' },
+            { id: 'video', label: '🎬 Video' },
+          ].map(f => (
+            <button key={f.id} onClick={() => setFiltroFormato(f.id)}
+              className={`px-2.5 py-1 text-[11px] font-semibold rounded transition ${
+                filtroFormato === f.id
+                  ? 'bg-white dark:bg-gray-700 text-fuchsia-700 dark:text-fuchsia-300 shadow-sm'
+                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+              }`}>
+              {f.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Kanban — 4 columnas, una por estado. Click en card → abre modal de detalle. */}
@@ -859,13 +883,14 @@ function IdeaCard({
                 </div>
               )}
 
-              {/* Generación del creativo final — produce la imagen estática
-                  con gpt-image-1. Disponible para CUALQUIER idea: si no
-                  tiene prompt de imagen (ej. una réplica), el backend la
-                  arma desde el hook + ángulo. */}
-              {(idea.hook || idea.titulo || idea.promptGeneradorImagen || idea.descripcionImagen) && (
+              {/* Output según formato:
+                  - video → brief para mandar a producción humana.
+                  - imagen/carrusel → generación del creativo con gpt-image-1. */}
+              {idea.formato === 'video' ? (
+                <VideoBriefPanel idea={idea} />
+              ) : (idea.hook || idea.titulo || idea.promptGeneradorImagen || idea.descripcionImagen) ? (
                 <CreativoPanel key={idea.id} idea={idea} />
-              )}
+              ) : null}
 
               {idea.copyPostMeta && (
                 <div>
@@ -1800,6 +1825,166 @@ function CreativoPanel({ idea }) {
             ⚠ {error}
           </p>
         )}
+      </div>
+    </div>
+  );
+}
+
+// Arma el texto plano del guión para copiar y mandar a los editores.
+function formatGuionText(g, idea) {
+  const L = [];
+  L.push(`🎬 GUIÓN DE VIDEO — ${idea.titulo || idea.hook || ''}`);
+  L.push(`Duración: ${g.duracionSegundos}s · Tono: ${g.tono} · Formato: 9:16 vertical`);
+  if (g.ganchoVisual) L.push(`\nGANCHO (primer segundo): ${g.ganchoVisual}`);
+  L.push('');
+  (g.beats || []).forEach(b => {
+    L.push(`BEAT ${b.n} (${b.timecode})`);
+    if (b.visual) L.push(`  🎥 Visual: ${b.visual}`);
+    if (b.voz) L.push(`  🎙 Voz: ${b.voz}`);
+    if (b.textoEnPantalla) L.push(`  📝 Texto en pantalla: ${b.textoEnPantalla}`);
+    L.push('');
+  });
+  if (g.musicaSugerida) L.push(`🎵 Música: ${g.musicaSugerida}`);
+  if (g.notasParaEditor) L.push(`📋 Notas para el editor: ${g.notasParaEditor}`);
+  return L.join('\n');
+}
+
+// Panel de las ideas tipo VIDEO. El video va a producción humana — este
+// panel adapta el guión del ganador de referencia al producto del user
+// (en rioplatense, claro para los editores) y lo deja listo para copiar.
+function VideoBriefPanel({ idea }) {
+  const [guion, setGuion] = useState(idea.guionAdaptado || null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [copied, setCopied] = useState(false);
+  const [refOpen, setRefOpen] = useState(false);
+
+  const handleGenerar = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const prod = loadProductos().find(p => String(p.id) === String(idea.productoId)) || {};
+      const resp = await fetch('/api/marketing/adapt-guion', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          idea: {
+            titulo: idea.titulo,
+            hook: idea.hook,
+            angulo: idea.angulo,
+            painPoint: idea.painPoint,
+            copy: idea.copyPostMeta || idea.copy,
+            guionReferencia: idea.guion,
+            formato: idea.formato,
+          },
+          producto: {
+            nombre: prod.nombre,
+            descripcion: prod.descripcion,
+            research: prod.docs?.research || prod.research,
+            avatar: prod.docs?.avatar || prod.avatar,
+            stage: prod.stage,
+          },
+          competidorRef: idea.origen?.competidorNombre,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      logCostsFromResponse(data, `adapt-guion · ${(idea.titulo || '').slice(0, 50)}`);
+      setGuion(data.guion);
+      updateIdea(idea.id, { guionAdaptado: data.guion });
+    } catch (err) {
+      setError(err.message || 'Error adaptando el guión');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const copiar = () => {
+    if (!guion) return;
+    try {
+      navigator.clipboard?.writeText(formatGuionText(guion, idea));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {}
+  };
+
+  return (
+    <div className="bg-rose-50 dark:bg-rose-900/20 rounded-md border border-rose-200 dark:border-rose-800">
+      <div className="px-3 py-2">
+        <p className="text-[10px] font-bold text-rose-700 dark:text-rose-300 uppercase tracking-wider">
+          🎬 Pieza de video — para tus editores
+        </p>
+      </div>
+
+      <div className="px-3 pb-3 space-y-2">
+        {/* Guión de referencia del competidor (colapsado) */}
+        {idea.guion && !/^n\/?a/i.test((idea.guion || '').trim()) && (
+          <details open={refOpen} onToggle={e => setRefOpen(e.currentTarget.open)}
+            className="bg-white dark:bg-gray-800/50 rounded border border-rose-200 dark:border-rose-800">
+            <summary className="cursor-pointer px-2.5 py-1.5 text-[10px] font-semibold text-rose-600 dark:text-rose-400">
+              📼 Guión del ganador de referencia (transcripción)
+            </summary>
+            <p className="px-2.5 pb-2 text-[11px] text-gray-600 dark:text-gray-400 whitespace-pre-wrap">{idea.guion}</p>
+          </details>
+        )}
+
+        {/* Guión adaptado */}
+        {guion ? (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 flex-wrap text-[10px] text-rose-700 dark:text-rose-300">
+              <span className="font-bold">✓ Guión adaptado para tu producto</span>
+              <span className="font-mono">· {guion.duracionSegundos}s · 9:16</span>
+              {guion.tono && <span className="opacity-80">· {guion.tono}</span>}
+            </div>
+            {guion.ganchoVisual && (
+              <p className="text-[11px] text-gray-700 dark:text-gray-300">
+                <span className="font-semibold text-rose-700 dark:text-rose-300">Gancho (1er segundo):</span> {guion.ganchoVisual}
+              </p>
+            )}
+            <ol className="space-y-1.5">
+              {(guion.beats || []).map(b => (
+                <li key={b.n} className="bg-white dark:bg-gray-800/60 rounded border border-rose-100 dark:border-rose-900/40 px-2.5 py-1.5">
+                  <p className="text-[10px] font-bold text-rose-600 dark:text-rose-400">BEAT {b.n} · {b.timecode}</p>
+                  {b.visual && <p className="text-[11px] text-gray-700 dark:text-gray-300 mt-0.5"><span className="font-semibold">🎥</span> {b.visual}</p>}
+                  {b.voz && <p className="text-[11px] text-gray-700 dark:text-gray-300 mt-0.5"><span className="font-semibold">🎙</span> "{b.voz}"</p>}
+                  {b.textoEnPantalla && <p className="text-[11px] text-gray-700 dark:text-gray-300 mt-0.5"><span className="font-semibold">📝</span> {b.textoEnPantalla}</p>}
+                </li>
+              ))}
+            </ol>
+            {guion.musicaSugerida && (
+              <p className="text-[10px] text-gray-600 dark:text-gray-400">🎵 <span className="font-semibold">Música:</span> {guion.musicaSugerida}</p>
+            )}
+            {guion.notasParaEditor && (
+              <p className="text-[10px] text-gray-600 dark:text-gray-400">📋 <span className="font-semibold">Notas:</span> {guion.notasParaEditor}</p>
+            )}
+            <div className="flex flex-wrap gap-1.5 pt-0.5">
+              <button onClick={copiar}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-bold text-white bg-rose-600 rounded hover:bg-rose-700 transition">
+                {copied ? <Check size={11} /> : <Download size={11} />} {copied ? 'Copiado' : 'Copiar guión para los editores'}
+              </button>
+              <button onClick={handleGenerar} disabled={loading}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-semibold text-rose-700 dark:text-rose-300 bg-white dark:bg-gray-800 border border-rose-300 dark:border-rose-700 rounded hover:bg-rose-50 dark:hover:bg-rose-900/30 transition disabled:opacity-50">
+                {loading ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />} Regenerar
+              </button>
+            </div>
+          </div>
+        ) : loading ? (
+          <div className="flex items-center gap-2 px-1 py-2 text-xs text-rose-700 dark:text-rose-300">
+            <Loader2 size={14} className="animate-spin" /> Adaptando el guión para tu producto…
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            <p className="text-[11px] text-rose-700 dark:text-rose-300">
+              Generá un guión claro y adaptado a tu producto (en argentino, listo para que tus editores lo produzcan), basado en el patrón del ganador de la competencia.
+            </p>
+            <button onClick={handleGenerar}
+              className="inline-flex items-center gap-1 px-3 py-1.5 text-[11px] font-bold text-white bg-gradient-to-br from-rose-600 to-pink-600 rounded hover:from-rose-700 hover:to-pink-700 transition">
+              <Sparkles size={12} /> Generar guión para mis editores
+            </button>
+          </div>
+        )}
+
+        {error && <p className="text-[10px] text-red-600 dark:text-red-400">⚠ {error}</p>}
       </div>
     </div>
   );

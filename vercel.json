@@ -12,6 +12,7 @@
     "api/marketing/generate-creative.js": { "maxDuration": 120 },
     "api/marketing/edit-creative.js":   { "maxDuration": 120 },
     "api/marketing/qa-creative.js":     { "maxDuration": 60 },
+    "api/marketing/adapt-guion.js":     { "maxDuration": 60 },
     "api/marketing/copilot.js":         { "maxDuration": 60 },
     "api/marketing/score-hooks.js":     { "maxDuration": 60 },
     "api/marketing/match-product-ads.js": { "maxDuration": 60 },

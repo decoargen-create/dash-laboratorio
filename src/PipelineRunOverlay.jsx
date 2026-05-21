@@ -160,12 +160,20 @@ export default function PipelineRunOverlay() {
             })}
           </ul>
 
-          {/* Footer con cancelar */}
-          {running && (
+          {/* Footer: cancelar mientras corre, o ir a los resultados al terminar */}
+          {running ? (
             <div className="px-3 py-2 border-t border-gray-100 dark:border-gray-700">
               <button onClick={requestCancel}
                 className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition">
                 <X size={12} /> Cancelar pipeline
+              </button>
+            </div>
+          ) : (
+            <div className="px-3 py-2 border-t border-gray-100 dark:border-gray-700">
+              <button
+                onClick={() => window.dispatchEvent(new CustomEvent('viora-goto-marketing'))}
+                className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-[11px] font-bold text-white bg-gradient-to-br from-fuchsia-600 to-purple-600 rounded hover:from-fuchsia-700 hover:to-purple-700 transition">
+                <Play size={12} /> Ver resultados en Marketing
               </button>
             </div>
           )}

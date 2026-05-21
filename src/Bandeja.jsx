@@ -860,8 +860,10 @@ function IdeaCard({
               )}
 
               {/* Generación del creativo final — produce la imagen estática
-                  con gpt-image-1 a partir del brief. On-demand. */}
-              {(idea.promptGeneradorImagen || idea.descripcionImagen) && (
+                  con gpt-image-1. Disponible para CUALQUIER idea: si no
+                  tiene prompt de imagen (ej. una réplica), el backend la
+                  arma desde el hook + ángulo. */}
+              {(idea.hook || idea.titulo || idea.promptGeneradorImagen || idea.descripcionImagen) && (
                 <CreativoPanel key={idea.id} idea={idea} />
               )}
 
@@ -1578,8 +1580,14 @@ function CreativoPanel({ idea }) {
             descripcionImagen: idea.descripcionImagen,
             textoEnImagen: idea.textoEnImagen,
             hook: idea.hook,
+            titulo: idea.titulo,
             formato: idea.formato,
             estiloVisual: idea.estiloVisual,
+            // Campos extra para que el backend pueda armar la escena cuando
+            // la idea no tiene promptGeneradorImagen (caso réplica).
+            angulo: idea.angulo,
+            painPoint: idea.painPoint,
+            copyPostMeta: idea.copyPostMeta || idea.copy,
           },
         }),
       });

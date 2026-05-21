@@ -49,22 +49,38 @@ function sizeForFormato(formato) {
   return '1024x1024';
 }
 
-// Construimos el prompt para gpt-image-1 combinando la escena
-// (promptGeneradorImagen, ya pensada para generadores de imagen) con
-// instrucciones explícitas para que renderice el texto-en-imagen del ad
-// con jerarquía tipográfica. gpt-image-1 renderiza texto razonablemente
-// bien — le damos el layout exacto del hook + microcopy + CTA.
+// Construimos el prompt para gpt-image-1. Preferimos el prompt rico del
+// generador (promptGeneradorImagen); si la idea no lo tiene —caso típico
+// de una idea "réplica" del deep-analyze— armamos la escena desde el
+// hook + ángulo + copy. Así el creativo se puede generar para CUALQUIER
+// idea de la Bandeja, no solo las del generador.
 function buildImagePrompt(idea) {
-  const escena = (idea.promptGeneradorImagen || idea.descripcionImagen || '').trim();
-  const textoEnImagen = (idea.textoEnImagen || '').trim();
   const estilo = (idea.estiloVisual || '').trim();
+  const hook = (idea.hook || '').trim();
+  let textoEnImagen = (idea.textoEnImagen || '').trim();
+  // Si no hay layout de texto explícito, usamos el hook como texto del ad.
+  if (!textoEnImagen && hook) {
+    textoEnImagen = `HOOK (texto principal, grande y bold): "${hook}"`;
+  }
+
+  let escena = (idea.promptGeneradorImagen || idea.descripcionImagen || '').trim();
+  if (!escena) {
+    const piezas = [];
+    if (hook) piezas.push(`El creativo comunica: "${hook}"`);
+    if (idea.angulo) piezas.push(`Ángulo: ${idea.angulo}`);
+    if (idea.painPoint) piezas.push(`Punto de dolor del cliente: ${idea.painPoint}`);
+    const copy = idea.copyPostMeta || idea.copy;
+    if (copy) piezas.push(`Contexto del mensaje: ${String(copy).slice(0, 400)}`);
+    escena = piezas.join('. ') || idea.titulo
+      || 'Producto premium sobre fondo limpio, iluminación suave de estudio.';
+  }
 
   const parts = [];
   parts.push('Diseño de creativo publicitario para Meta Ads (Facebook/Instagram), calidad de producción profesional.');
   if (estilo) parts.push(`Estilo visual: ${estilo}.`);
   parts.push('');
   parts.push('ESCENA / IMAGEN BASE:');
-  parts.push(escena || 'Composición de producto premium, fondo limpio, iluminación suave.');
+  parts.push(escena);
 
   if (textoEnImagen) {
     parts.push('');
@@ -92,8 +108,11 @@ export default async function handler(req, res) {
 
   const body = await readBody(req);
   const idea = body?.idea;
-  if (!idea || (!idea.promptGeneradorImagen && !idea.descripcionImagen)) {
-    return respondJSON(res, 400, { error: 'Falta idea.promptGeneradorImagen (o descripcionImagen) en el body' });
+  // Requiere AL MENOS algo con qué armar la escena. Las ideas del generador
+  // traen promptGeneradorImagen; las réplicas del deep-analyze traen hook +
+  // ángulo. Cualquiera de esos sirve.
+  if (!idea || !(idea.promptGeneradorImagen || idea.descripcionImagen || idea.hook || idea.titulo)) {
+    return respondJSON(res, 400, { error: 'La idea no tiene contenido suficiente para generar el creativo (falta hook/título/descripción)' });
   }
 
   // Calidad: 'medium' es el default — buen balance calidad/costo (~$0.04-0.06).

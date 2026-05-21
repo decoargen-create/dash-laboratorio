@@ -1374,6 +1374,13 @@ function AppShell({ onExit }) {
   useEffect(() => {
     if (currentSection === 'mk-competencia') setCurrentSection('mk-arranque');
   }, [currentSection]);
+  // El overlay del pipeline dispara este evento al terminar — lleva al user
+  // directo a Marketing para ver los resultados.
+  useEffect(() => {
+    const onGoto = () => { setCurrentPlatform('marketing'); setCurrentSection('mk-arranque'); };
+    window.addEventListener('viora-goto-marketing', onGoto);
+    return () => window.removeEventListener('viora-goto-marketing', onGoto);
+  }, []);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   // Estado del menú mobile (sidebar como overlay deslizante en pantallas chicas).
   // En desktop el sidebar siempre está visible (gestionado por sidebarOpen + Tailwind md:).

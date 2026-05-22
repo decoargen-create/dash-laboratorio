@@ -22,7 +22,7 @@ import {
   Package, Target, Play, Check, Loader2, AlertTriangle, ChevronRight, ChevronDown,
   Plus, X, Sparkles, Link2, Search, Clock, Inbox, Trash2,
 } from 'lucide-react';
-import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGeneratedToday, updateIdea, formatoDeAd } from './bandejaStore.js';
+import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGeneradorHoy, esIdeaDelGenerador, updateIdea, formatoDeAd } from './bandejaStore.js';
 import { logCostsFromResponse } from './costsStore.js';
 import BandejaSection from './Bandeja.jsx';
 import InspiracionSection from './InspiracionSection.jsx';
@@ -326,7 +326,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   const [ideasToday, setIdeasToday] = useState(() => {
     try {
       const aid = localStorage.getItem('viora-marketing-active-product');
-      return countIdeasGeneratedToday(null, aid || null);
+      return countIdeasGeneradorHoy(aid || null);
     } catch { return 0; }
   });
 
@@ -422,7 +422,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // Refrescar contador de ideas del día cada vez que montamos o cambia la bandeja.
   // Cuando hay producto activo, contamos solo las suyas.
   useEffect(() => {
-    const count = () => setIdeasToday(countIdeasGeneratedToday(null, activeProductoId || null));
+    const count = () => setIdeasToday(countIdeasGeneradorHoy(activeProductoId || null));
     count();
     const interval = setInterval(count, 60 * 1000);
     return () => clearInterval(interval);
@@ -1255,13 +1255,17 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             fatigue: a.fatigue,
           }));
 
-        // Target count: primera vez (bandeja vacía) escala con la cantidad
-        // de ads analizados — si la competencia tiene mucho material,
-        // pedimos proporcional (con techo MAX_IDEAS_PER_RUN). Después, cap
-        // al límite diario restante.
-        // Solo contamos ideas generadas HOY PARA ESTE PRODUCTO — no globales.
-        const yaGeneradasHoy = countIdeasGeneratedToday(null, productoActualId);
-        const esPrimeraVez = ideasExistentes.length === 0;
+        // Target count: primera vez (sin ideas del GENERADOR todavía)
+        // escala con la cantidad de ads analizados. Después, cap al límite
+        // diario restante.
+        // CLAVE: contamos solo las ideas del GENERADOR — NO las réplicas
+        // del deep-analyze. Antes las réplicas le comían el cupo: con 80+
+        // réplicas y límite 50, el cupo daba 0 y el generador se salteaba
+        // (todas las ideas terminaban siendo réplicas).
+        const yaGeneradasHoy = countIdeasGeneradorHoy(productoActualId);
+        const esPrimeraVez = loadIdeas()
+          .filter(i => String(i.productoId || '') === productoActualId && esIdeaDelGenerador(i))
+          .length === 0;
         const adsTotales = (compWithAds || []).reduce((sum, c) => sum + (c.allAds?.length || 0), 0);
         const primeraVezTarget = Math.min(
           MAX_IDEAS_PER_RUN,
@@ -1407,7 +1411,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         if (tandasOk === 0 && !cancelledRef.current) {
           throw new Error('El generador no pudo producir ideas (tandas truncadas o timeout). Reintentá el pipeline.');
         }
-        setIdeasToday(countIdeasGeneratedToday(null, productoActualId));
+        setIdeasToday(countIdeasGeneradorHoy(productoActualId));
         updateStep('generate', {
           status: 'done',
           endedAt: Date.now(),

@@ -192,6 +192,27 @@ export function countIdeasGeneratedToday(ideas = null, productoId = null) {
   }).length;
 }
 
+// Una idea es "del generador" si NO es una réplica creada por el
+// deep-analyze. Esas réplicas tienen origen.tipo === 'competidor'.
+// Todo lo demás (iteración, diferenciación, desde-cero, réplicas que
+// arma el generador) viene del generador.
+export function esIdeaDelGenerador(idea) {
+  return idea?.origen?.tipo !== 'competidor';
+}
+
+// Cuenta SOLO las ideas del generador creadas hoy para un producto. El
+// límite diario del generador se mide contra esto — NO contra las
+// réplicas del deep-analyze, que antes le comían el cupo y hacían que
+// el generador se salteara (todas las ideas terminaban siendo réplicas).
+export function countIdeasGeneradorHoy(productoId = null) {
+  const today = argDate(new Date());
+  return loadIdeas().filter(i => {
+    if (productoId && String(i.productoId || '') !== String(productoId)) return false;
+    if (!esIdeaDelGenerador(i)) return false;
+    return argDate(i.createdAt) === today;
+  }).length;
+}
+
 // Transforma un resultado de deep-analyze en una idea tipo "replica".
 // Pensada para llamarse desde Competencia.jsx y Arranque.jsx justo después
 // de que vuelva el análisis, así se puebla la bandeja de forma pasiva.

@@ -13,11 +13,11 @@
     <meta name="description" content="Laboratorio Viora — Panel de gestión de órdenes, clientes, comisiones y pagos." />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Allura&family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Allura&family=Montserrat:wght@300;400;500;600;700&family=Nunito:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <title>Laboratorio Viora</title>
     <script>
-      // Aplica dark mode antes del render para evitar flash de tema claro
-      // cuando el user tiene preferencia oscura (propia o del sistema).
+      // Aplica dark mode + preferencias de apariencia (tamaño, fuente) antes
+      // del render para evitar flash de tema/tamaño viejo.
       (function () {
         try {
           var stored = localStorage.getItem('dash-dark-mode');
@@ -25,6 +25,12 @@
             ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)
             : stored === 'true';
           if (isDark) document.documentElement.classList.add('dark');
+          var de = document.documentElement;
+          var sz = localStorage.getItem('dash-text-size') || 'mediano';
+          de.style.zoom = ({ chico: 1, mediano: 1.1, grande: 1.22 })[sz] || 1.1;
+          var font = localStorage.getItem('dash-ui-font');
+          if (font === 'montserrat') de.style.fontFamily = "'Montserrat', system-ui, -apple-system, sans-serif";
+          else if (font === 'nunito') de.style.fontFamily = "'Nunito', system-ui, -apple-system, sans-serif";
         } catch (e) {}
       })();
     </script>

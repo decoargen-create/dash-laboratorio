@@ -7,7 +7,7 @@ import {
   Menu, LogOut, Home, ShoppingCart, Package, Users, AlertCircle, CreditCard,
   UserCheck, TrendingUp, Plus, Filter, Eye, Edit2, Trash2, Calendar, DollarSign,
   Moon, Sun, ChevronDown, ChevronRight, Search, X, Command, Check, Bell,
-  AlignJustify, LayoutGrid, Columns3, Sparkles, Bot, Zap, Activity, FileText, Settings, Loader2, Calculator, Copy, Save, RotateCcw, Target, Play, Inbox, BarChart3, Instagram
+  AlignJustify, LayoutGrid, Columns3, Sparkles, Bot, Zap, Activity, FileText, Settings, Loader2, Calculator, Copy, Save, RotateCcw, Target, Play, Inbox, BarChart3, Instagram, SlidersHorizontal
 } from 'lucide-react';
 import { VioraLogo, VioraMark } from './logo.jsx';
 import LandingPage from './LandingPage.jsx';
@@ -555,6 +555,27 @@ function loadPersistedState() {
     return INITIAL_STATE;
   }
 }
+
+// Opciones de personalización de apariencia (panel "Apariencia" del header).
+// Tamaño aplica un zoom al root; fuente, una font-family; color, el gradiente
+// del menú lateral. Todo se persiste en localStorage.
+const UI_FONTS = {
+  sistema:    { label: 'Sistema',    stack: '' },
+  montserrat: { label: 'Montserrat', stack: "'Montserrat', system-ui, -apple-system, sans-serif" },
+  nunito:     { label: 'Nunito',     stack: "'Nunito', system-ui, -apple-system, sans-serif" },
+};
+const TEXT_ZOOM = { chico: 1, mediano: 1.1, grande: 1.22 };
+// Presets de color del menú lateral. `null` = usa el gradiente propio de la
+// plataforma. Los demás son gradientes verticales pensados para texto blanco.
+const SIDEBAR_PRESETS = {
+  default:   { label: 'Plataforma', gradient: null },
+  violeta:   { label: 'Violeta',    gradient: 'linear-gradient(to bottom, #4c1d95, #6d28d9, #5b21b6)' },
+  indigo:    { label: 'Índigo',     gradient: 'linear-gradient(to bottom, #1e1b4b, #3730a3, #312e81)' },
+  oceano:    { label: 'Océano',     gradient: 'linear-gradient(to bottom, #0c4a6e, #0369a1, #075985)' },
+  esmeralda: { label: 'Esmeralda',  gradient: 'linear-gradient(to bottom, #064e3b, #047857, #065f46)' },
+  borravino: { label: 'Borravino',  gradient: 'linear-gradient(to bottom, #4a0f22, #831843, #3f0c1e)' },
+  grafito:   { label: 'Grafito',    gradient: 'linear-gradient(to bottom, #111827, #1f2937, #0b0f19)' },
+};
 
 // Definición de plataformas disponibles en el dashboard. Cada una tiene su
 // propio look (sidebar gradient + acento) y sus datos aislados.
@@ -1549,6 +1570,36 @@ function AppShell({ onExit }) {
 
   const toggleDarkMode = () => setDarkMode(prev => !prev);
 
+  // Personalización de apariencia — tamaño de texto, fuente y color del menú.
+  // Cada una se persiste y se aplica al root de la app.
+  const [textSize, setTextSize] = useState(() => {
+    if (typeof window === 'undefined') return 'mediano';
+    return localStorage.getItem('dash-text-size') || 'mediano';
+  });
+  const [uiFont, setUiFont] = useState(() => {
+    if (typeof window === 'undefined') return 'sistema';
+    return localStorage.getItem('dash-ui-font') || 'sistema';
+  });
+  const [sidebarColor, setSidebarColor] = useState(() => {
+    if (typeof window === 'undefined') return 'default';
+    return localStorage.getItem('dash-sidebar-color') || 'default';
+  });
+  // Tamaño: zoom al <html> → escala TODO de forma uniforme (texto + UI).
+  // Se aplica al documentElement (no a #root) para ser consistente con el
+  // script inline de index.html que lo setea antes del render (sin flash).
+  useEffect(() => {
+    document.documentElement.style.zoom = String(TEXT_ZOOM[textSize] ?? 1.1);
+    try { localStorage.setItem('dash-text-size', textSize); } catch {}
+  }, [textSize]);
+  // Fuente: font-family al <html>.
+  useEffect(() => {
+    document.documentElement.style.fontFamily = UI_FONTS[uiFont]?.stack || '';
+    try { localStorage.setItem('dash-ui-font', uiFont); } catch {}
+  }, [uiFont]);
+  useEffect(() => {
+    try { localStorage.setItem('dash-sidebar-color', sidebarColor); } catch {}
+  }, [sidebarColor]);
+
   // Atajo global Cmd+K / Ctrl+K para abrir la command palette
   useEffect(() => {
     const onKey = (e) => {
@@ -1872,10 +1923,13 @@ function AppShell({ onExit }) {
         />
       )}
       {/* Sidebar — desktop: lateral fijo. Mobile: overlay deslizante.
-          El gradient cambia según la plataforma activa. */}
-      <aside className={`
+          El gradient sale de la plataforma activa, salvo que el user haya
+          elegido un color propio en el panel de Apariencia. */}
+      <aside
+        style={SIDEBAR_PRESETS[sidebarColor]?.gradient ? { backgroundImage: SIDEBAR_PRESETS[sidebarColor].gradient } : undefined}
+        className={`
         ${effectiveSidebarOpen ? 'w-64' : 'w-20'}
-        relative bg-gradient-to-b ${getPlatform(currentPlatform).sidebarGradient} text-white shadow-2xl
+        relative ${SIDEBAR_PRESETS[sidebarColor]?.gradient ? '' : `bg-gradient-to-b ${getPlatform(currentPlatform).sidebarGradient}`} text-white shadow-2xl
         transition-all duration-500 ease-out flex flex-col
         max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 max-md:w-72
         max-md:transform max-md:transition-transform
@@ -1991,6 +2045,12 @@ function AppShell({ onExit }) {
           subtitle={`Bienvenido, ${currentUser.name}`}
           darkMode={darkMode}
           toggleDarkMode={toggleDarkMode}
+          textSize={textSize}
+          setTextSize={setTextSize}
+          uiFont={uiFont}
+          setUiFont={setUiFont}
+          sidebarColor={sidebarColor}
+          setSidebarColor={setSidebarColor}
           onOpenCommand={() => setCmdOpen(true)}
           onOpenMobileMenu={() => setMobileMenuOpen(true)}
         />
@@ -7991,7 +8051,81 @@ function StatMini({ label, value, accent = 'neutral', small = false }) {
   );
 }
 
-function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, onOpenCommand, onOpenMobileMenu, bgTasks = [] }) {
+// Panel "Apariencia" — popover en el header para personalizar tamaño de
+// texto, fuente y color del menú lateral. Cada usuario lo ajusta a su gusto.
+function AppearanceMenu({ textSize, setTextSize, uiFont, setUiFont, sidebarColor, setSidebarColor }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const onEsc = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onClick);
+    document.addEventListener('keydown', onEsc);
+    return () => { document.removeEventListener('mousedown', onClick); document.removeEventListener('keydown', onEsc); };
+  }, [open]);
+
+  const Opt = ({ active, onClick, children }) => (
+    <button onClick={onClick}
+      className={`flex-1 px-2 py-1.5 text-[11px] font-bold rounded-md border transition ${
+        active
+          ? 'bg-pink-500 border-pink-500 text-white shadow-sm'
+          : 'bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:border-pink-300 dark:hover:border-pink-700'
+      }`}>
+      {children}
+    </button>
+  );
+
+  return (
+    <div className="relative" ref={ref}>
+      <button onClick={() => setOpen(o => !o)}
+        className="p-2 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 transition-all duration-200 hover:scale-105 active:scale-95 shrink-0"
+        title="Personalizar apariencia" aria-label="Personalizar apariencia">
+        <SlidersHorizontal size={18} />
+      </button>
+      {open && (
+        <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl p-3 z-50 space-y-3">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">Apariencia</p>
+
+          <div>
+            <p className="text-[11px] font-semibold text-gray-600 dark:text-gray-300 mb-1">Tamaño de texto</p>
+            <div className="flex gap-1">
+              {[['chico', 'A−'], ['mediano', 'A'], ['grande', 'A+']].map(([k, lbl]) => (
+                <Opt key={k} active={textSize === k} onClick={() => setTextSize(k)}>{lbl}</Opt>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <p className="text-[11px] font-semibold text-gray-600 dark:text-gray-300 mb-1">Fuente</p>
+            <div className="flex gap-1">
+              {Object.entries(UI_FONTS).map(([k, f]) => (
+                <Opt key={k} active={uiFont === k} onClick={() => setUiFont(k)}>{f.label}</Opt>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <p className="text-[11px] font-semibold text-gray-600 dark:text-gray-300 mb-1">Color del menú lateral</p>
+            <div className="grid grid-cols-4 gap-1.5">
+              {Object.entries(SIDEBAR_PRESETS).map(([k, p]) => (
+                <button key={k} onClick={() => setSidebarColor(k)} title={p.label}
+                  className={`h-8 rounded-md border-2 flex items-center justify-center transition ${
+                    sidebarColor === k ? 'border-pink-500 scale-105' : 'border-transparent hover:scale-105'
+                  }`}
+                  style={{ background: p.gradient || 'linear-gradient(to bottom, #6b7280, #374151)' }}>
+                  {sidebarColor === k && <Check size={13} className="text-white" style={{ filter: 'drop-shadow(0 1px 1px rgba(0,0,0,0.6))' }} />}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, textSize, setTextSize, uiFont, setUiFont, sidebarColor, setSidebarColor, onOpenCommand, onOpenMobileMenu, bgTasks = [] }) {
   const [scrolled, setScrolled] = useState(false);
   const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform);
 
@@ -8057,6 +8191,14 @@ function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, onOpenCommand
             <span>{bgTasks[0]}{bgTasks.length > 1 ? ` +${bgTasks.length - 1}` : ''}</span>
           </div>
         )}
+        <AppearanceMenu
+          textSize={textSize}
+          setTextSize={setTextSize}
+          uiFont={uiFont}
+          setUiFont={setUiFont}
+          sidebarColor={sidebarColor}
+          setSidebarColor={setSidebarColor}
+        />
         <button
           onClick={toggleDarkMode}
           className="p-2 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 transition-all duration-200 hover:scale-105 active:scale-95 shrink-0"

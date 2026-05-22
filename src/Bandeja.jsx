@@ -25,6 +25,7 @@ import { exportBriefDocx } from './exportDocx.js';
 import { saveCreativo, getCreativo, deleteCreativo, getAllCreativoIds } from './creativosStorage.js';
 import { logCostsFromResponse } from './costsStore.js';
 import { getProductoImagen, getPaletaMarca } from './productoImagen.js';
+import { componerCreativo, extraerCTA } from './componerCreativo.js';
 
 const PRODUCTOS_KEY = 'viora-marketing-productos-v1';
 const ACTIVE_PRODUCT_KEY = 'viora-marketing-bandeja-active-product';
@@ -1776,6 +1777,13 @@ function CreativoPanel({ idea }) {
     }
     setLoading(true);
     const paletaMarca = getPaletaMarca(idea.productoId);
+    // Texto del aviso — lo dibuja el código sobre la imagen (la IA genera
+    // SIN texto), así nunca sale con typos ni letras inventadas.
+    const overlay = {
+      headline: (idea.hook || idea.titulo || '').trim(),
+      cta: extraerCTA(idea.textoEnImagen) || 'Quiero saber más',
+    };
+    const colorCta = paletaMarca[0] || '#b8895a';
     // Payload de la idea — constante entre intentos.
     const ideaPayload = {
       promptGeneradorImagen: idea.promptGeneradorImagen,
@@ -1811,9 +1819,18 @@ function CreativoPanel({ idea }) {
         if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
         logCostsFromResponse(data, `generate-creative · intento ${intento} · ${(idea.titulo || idea.hook || '').slice(0, 50)}`);
 
+        // La IA devolvió la imagen SIN texto — componemos el titular y el CTA.
+        setFaseAuto('Componiendo el texto…');
+        const baseB64 = data.imageBase64;
+        const finalUrl = await componerCreativo(
+          `data:${data.mimeType || 'image/png'};base64,${baseB64}`,
+          { ...overlay, colorCta }
+        );
         const nuevo = {
-          imageBase64: data.imageBase64,
-          mimeType: data.mimeType || 'image/png',
+          imageBase64: finalUrl.includes(',') ? finalUrl.split(',')[1] : finalUrl,
+          baseBase64: baseB64,
+          overlay,
+          mimeType: 'image/png',
           formato: data.formato || idea.formato || 'static',
           size: data.size,
           quality: data.quality,
@@ -1866,8 +1883,10 @@ function CreativoPanel({ idea }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          imageBase64: creativo.imageBase64,
-          mimeType: creativo.mimeType,
+          // Editamos la imagen BASE (sin texto) — el texto se re-compone
+          // después, así no se degrada al editar.
+          imageBase64: creativo.baseBase64 || creativo.imageBase64,
+          mimeType: 'image/png',
           instruccion,
           formato: creativo.formato,
           quality: creativo.quality,
@@ -1880,10 +1899,21 @@ function CreativoPanel({ idea }) {
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
       logCostsFromResponse(data, `edit-creative · ${(idea.titulo || '').slice(0, 50)}`);
 
+      // Re-componemos el texto sobre la base editada.
+      const newBase = data.imageBase64;
+      const overlay = creativo.overlay || {
+        headline: (idea.hook || idea.titulo || '').trim(),
+        cta: extraerCTA(idea.textoEnImagen) || 'Quiero saber más',
+      };
+      const colorCta = getPaletaMarca(idea.productoId)[0] || '#b8895a';
+      const finalUrl = await componerCreativo(`data:image/png;base64,${newBase}`, { ...overlay, colorCta });
+
       setEditInstruccion('');
       await persistirYqa({
-        imageBase64: data.imageBase64,
-        mimeType: data.mimeType || 'image/png',
+        imageBase64: finalUrl.includes(',') ? finalUrl.split(',')[1] : finalUrl,
+        baseBase64: newBase,
+        overlay,
+        mimeType: 'image/png',
         formato: data.formato || creativo.formato || 'static',
         size: data.size,
         quality: data.quality,

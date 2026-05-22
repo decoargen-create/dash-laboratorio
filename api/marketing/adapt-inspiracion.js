@@ -79,6 +79,18 @@ function respondJSON(res, status, payload) {
   res.end(JSON.stringify(payload));
 }
 
+// Detecta el tipo de imagen por los magic bytes — más confiable que el
+// header content-type del servidor, que a veces miente.
+function detectImageType(buf) {
+  if (!buf || buf.length < 12) return null;
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'image/png';
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
+  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x38) return 'image/gif';
+  if (buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 &&
+      buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50) return 'image/webp';
+  return null;
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
 
@@ -106,8 +118,12 @@ export default async function handler(req, res) {
         const buf = Buffer.from(await r.arrayBuffer());
         // Cap 4MB — Claude permite 5MB por imagen, dejamos margen.
         if (buf.length <= 4 * 1024 * 1024) {
-          const ct = r.headers.get('content-type') || 'image/jpeg';
-          const mediaType = /^image\/(jpeg|png|gif|webp)$/.test(ct) ? ct : 'image/jpeg';
+          // Detectamos el tipo REAL por los magic bytes — el header
+          // content-type del CDN a veces miente (dice jpeg y es png) y
+          // Claude rechaza la request si media_type no coincide con los datos.
+          const ct = r.headers.get('content-type') || '';
+          const mediaType = detectImageType(buf)
+            || (/^image\/(jpeg|png|gif|webp)$/.test(ct) ? ct : 'image/jpeg');
           imageBlock = {
             type: 'image',
             source: { type: 'base64', media_type: mediaType, data: buf.toString('base64') },

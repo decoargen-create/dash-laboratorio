@@ -1255,14 +1255,13 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             fatigue: a.fatigue,
           }));
 
-        // Target count: primera vez (sin ideas del GENERADOR todavía)
-        // escala con la cantidad de ads analizados. Después, cap al límite
-        // diario restante.
-        // CLAVE: contamos solo las ideas del GENERADOR — NO las réplicas
-        // del deep-analyze. Antes las réplicas le comían el cupo: con 80+
-        // réplicas y límite 50, el cupo daba 0 y el generador se salteaba
-        // (todas las ideas terminaban siendo réplicas).
-        const yaGeneradasHoy = countIdeasGeneradorHoy(productoActualId);
+        // Target count = cuántas ideas pide el generador en ESTA corrida.
+        // El `limiteDiario` es un cap POR CORRIDA, no un presupuesto diario
+        // que se agota: antes era `limiteDiario - yaGeneradasHoy`, y la 2da
+        // corrida del día daba 0 → el generador se apagaba. Ahora cada
+        // corrida pide su cupo completo; el dedup evita repetir entre
+        // corridas. La primera vez (sin ideas del generador) escala con la
+        // cantidad de ads de la competencia.
         const esPrimeraVez = loadIdeas()
           .filter(i => String(i.productoId || '') === productoActualId && esIdeaDelGenerador(i))
           .length === 0;
@@ -1273,16 +1272,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         );
         const targetCount = esPrimeraVez
           ? primeraVezTarget
-          : Math.max(0, genConfig.limiteDiario - yaGeneradasHoy);
-
-        if (targetCount === 0) {
-          updateStep('generate', {
-            status: 'done',
-            endedAt: Date.now(),
-            detail: `Ya generaste ${yaGeneradasHoy} ideas hoy (límite ${genConfig.limiteDiario}). Subí el límite o esperá al reset de medianoche.`,
-          });
-          throw new Error('SKIP_GENERATE');
-        }
+          : Math.max(1, genConfig.limiteDiario || 50);
 
         const sumaMix = Math.max(1, genConfig.formatoStatic + genConfig.formatoVideo);
         const formatoMix = {
@@ -1456,7 +1446,10 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         let scoredOk = 0;
         for (const idea of insertedIdeasForScoring) {
           const s = scoresMap.get(idea.id);
-          if (!s) continue;
+          // Si no hay score numérico (idea sin entry, o Claude no la
+          // puntuó), no marcamos nada — ni lowScore ni scoreValue. Antes
+          // se trataba como floja por defecto.
+          if (!s || typeof s.score !== 'number') continue;
           if (s.score < 6) {
             updateIdea(idea.id, { lowScore: true, scoreValue: s.score, scoreReason: s.reason });
             lowScored++;
@@ -2328,7 +2321,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 <span className="inline-flex items-center gap-2">
                   ⚙️ Generador de ideas
                   <span className="text-[10px] font-mono text-gray-400">
-                    {ideasToday}/{genConfig.limiteDiario} hoy · {genConfig.formatoStatic}/{genConfig.formatoVideo} static/video
+                    {genConfig.limiteDiario} ideas/corrida · {genConfig.formatoStatic}/{genConfig.formatoVideo} static/video
                   </span>
                 </span>
                 <ChevronDown size={12} className={`text-gray-400 transition-transform ${showGenConfig ? 'rotate-180' : ''}`} />
@@ -2336,12 +2329,12 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               {showGenConfig && (
                 <div className="mt-3 space-y-3">
                   <div>
-                    <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">Límite diario de ideas</label>
+                    <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">Ideas por corrida</label>
                     <input type="number" min="1" max={MAX_IDEAS_PER_RUN} value={genConfig.limiteDiario}
                       onChange={e => setGenConfig(c => ({ ...c, limiteDiario: Math.max(1, Math.min(MAX_IDEAS_PER_RUN, Number(e.target.value) || 50)) }))}
                       className="w-24 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-brand-500" />
                     <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">
-                      Se resetea a las 00:00 hs Argentina. Primera corrida (bandeja vacía) ignora el límite y genera entre 50 y {MAX_IDEAS_PER_RUN} ideas según cuántos ads tenga la competencia.
+                      Cuántas ideas pide el generador en cada corrida. La primera corrida del producto genera entre 50 y {MAX_IDEAS_PER_RUN} según cuántos ads tenga la competencia. El dedup evita repetir ideas entre corridas.
                     </p>
                   </div>
                   <div>

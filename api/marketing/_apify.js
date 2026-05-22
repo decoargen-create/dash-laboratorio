@@ -189,7 +189,12 @@ const WINNER_DAYS_THRESHOLD = 17;
 const WINNER_VARIANTS_THRESHOLD = 2;
 
 export function scoreAd(ad, allAdsOfSamePage = []) {
-  let score = ad.daysRunning || 0;
+  // Cap a daysRunning: sin tope, un evergreen de branding con 200 días
+  // arrasaba el ranking y se llevaba todos los slots de deep-analyze,
+  // dejando afuera ganadores recientes con varias variantes (señal de
+  // performance más fuerte). Pasados ~60 días, más tiempo no agrega
+  // señal — el ad ya probó que funciona.
+  let score = Math.min(ad.daysRunning || 0, 60);
   if (ad.isMultiplatform) score += 20;
 
   const variantes = allAdsOfSamePage.filter(a =>

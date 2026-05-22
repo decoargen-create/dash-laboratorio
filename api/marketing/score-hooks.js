@@ -127,12 +127,17 @@ export default async function handler(req, res) {
     }
     const scores = toolUse.input.scores;
 
-    // Sanitizamos: clamp 1-10 + limpiar reason.
-    const clean = scores.map(s => ({
-      id: String(s.id || ''),
-      score: Math.max(1, Math.min(10, Number(s.score) || 5)),
-      reason: String(s.reason || '').slice(0, 200),
-    }));
+    // Sanitizamos: clamp 1-10. Si Claude NO devolvió un score numérico,
+    // queda `null` — NO 5. Antes el fallback a 5 marcaba como "floja"
+    // (score < 6) cualquier idea sin score real.
+    const clean = scores.map(s => {
+      const n = Number(s.score);
+      return {
+        id: String(s.id || ''),
+        score: Number.isFinite(n) ? Math.max(1, Math.min(10, Math.round(n))) : null,
+        reason: String(s.reason || '').slice(0, 200),
+      };
+    });
 
     return respondJSON(res, 200, {
       scores: clean,

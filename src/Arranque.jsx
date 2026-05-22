@@ -32,6 +32,8 @@ import CopilotoTab from './CopilotoTab.jsx';
 import DashboardTab from './DashboardTab.jsx';
 import GeneradorRapido from './GeneradorRapido.jsx';
 import ProductoImagenUploader from './ProductoImagenUploader.jsx';
+import GeneradorCreativosMasivo, { BulkProgressBar } from './GeneradorCreativosMasivo.jsx';
+import { generarCreativoParaIdea } from './bulkCreativos.js';
 import { usePipelineRun } from './PipelineRunContext.jsx';
 
 // Etiquetas cortas de la etapa de awareness del prospecto — para el chip
@@ -272,6 +274,41 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // Bumpeamos esta key para forzar el remount de la Bandeja embebida cuando
   // el generador rápido inserta ideas — así aparecen sin recargar la página.
   const [bandejaRefreshKey, setBandejaRefreshKey] = useState(0);
+  // Estado de la generación masiva de creativos. null = no corriendo. El
+  // loop vive acá (no en la pestaña Bandeja) para que sobreviva al cambio
+  // de pestaña dentro del workspace.
+  const [bulkCreativos, setBulkCreativos] = useState(null);
+  const bulkAbortRef = useRef(null);
+
+  // Genera el creativo de cada idea en loop, con barra de progreso.
+  const startBulkCreativos = async (ideas, opts) => {
+    if (!ideas?.length || bulkCreativos) return;
+    const ctrl = new AbortController();
+    bulkAbortRef.current = ctrl;
+    setBulkCreativos({ running: true, total: ideas.length, done: 0, ok: 0, fail: 0, actual: '' });
+    let done = 0, ok = 0, fail = 0;
+    for (const idea of ideas) {
+      if (ctrl.signal.aborted) break;
+      setBulkCreativos(b => b && ({ ...b, actual: idea.titulo || idea.hook || 'Idea' }));
+      try {
+        await generarCreativoParaIdea(idea, { ...opts, signal: ctrl.signal });
+        ok++;
+      } catch (err) {
+        if (err.name === 'AbortError') break;
+        console.error('bulk creativo falló:', err);
+        fail++;
+      }
+      done++;
+      setBulkCreativos(b => b && ({ ...b, done, ok, fail }));
+    }
+    bulkAbortRef.current = null;
+    setBulkCreativos(null);
+    setBandejaRefreshKey(k => k + 1);
+    addToast?.({
+      type: ok > 0 ? 'success' : 'error',
+      message: `Creativos: ${ok} generado${ok !== 1 ? 's' : ''}${fail > 0 ? ` · ${fail} fallaron` : ''}`,
+    });
+  };
   useEffect(() => {
     if (!productoTabKey) { setProductoTab('setup'); return; }
     try { setProductoTab(localStorage.getItem(productoTabKey) || 'setup'); } catch { setProductoTab('setup'); }
@@ -1652,6 +1689,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   if (!producto) {
     return (
       <div className="max-w-6xl mx-auto space-y-6">
+        <BulkProgressBar state={bulkCreativos} onCancel={() => bulkAbortRef.current?.abort()} />
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white shadow-sm">
@@ -1808,6 +1846,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // ====================================================================
   return (
     <div className="max-w-[1500px] mx-auto space-y-6">
+      <BulkProgressBar state={bulkCreativos} onCancel={() => bulkAbortRef.current?.abort()} />
       {/* Header del producto */}
       <div className="flex items-center gap-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-3 shadow-sm">
         <button onClick={() => setActiveProductoId(null)}
@@ -1847,6 +1886,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             producto={producto}
             addToast={addToast}
             onDone={() => setBandejaRefreshKey(k => k + 1)}
+          />
+          <GeneradorCreativosMasivo
+            producto={producto}
+            bulkRunning={!!bulkCreativos}
+            onGenerar={startBulkCreativos}
           />
           <div className="-mx-4">
             <BandejaSection key={bandejaRefreshKey} addToast={addToast} forcedProductoId={String(producto.id)} embedded />

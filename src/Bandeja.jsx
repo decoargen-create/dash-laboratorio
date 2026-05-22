@@ -1712,6 +1712,7 @@ function CreativoPanel({ idea }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [quality, setQuality] = useState('medium');
+  const [estiloEscena, setEstiloEscena] = useState('producto');
   const [checked, setChecked] = useState(false);
   const [qa, setQa] = useState(null);
   const [qaLoading, setQaLoading] = useState(false);
@@ -1813,7 +1814,7 @@ function CreativoPanel({ idea }) {
         const resp = await fetch('/api/marketing/generate-creative', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ quality, productoImagen, paletaMarca, feedbackQA, idea: ideaPayload }),
+          body: JSON.stringify({ quality, estiloEscena, productoImagen, paletaMarca, feedbackQA, idea: ideaPayload }),
         });
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
@@ -2045,6 +2046,17 @@ function CreativoPanel({ idea }) {
               Generá la imagen final del ad a partir del brief. Después la IA revisa la calidad y podés pedir ajustes.
             </p>
             <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={estiloEscena}
+                onChange={e => setEstiloEscena(e.target.value)}
+                className="px-2 py-1 text-[10px] bg-white dark:bg-gray-800 border border-brand-300 dark:border-brand-700 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
+                title="Estilo de escena del creativo"
+              >
+                <option value="producto">🧴 Producto (estudio)</option>
+                <option value="lifestyle">🏡 Lifestyle (persona usándolo)</option>
+                <option value="ugc">📱 UGC (foto de cliente)</option>
+                <option value="comparacion">⚖️ Comparación</option>
+              </select>
               <select
                 value={quality}
                 onChange={e => setQuality(e.target.value)}

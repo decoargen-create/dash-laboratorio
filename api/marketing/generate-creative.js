@@ -54,7 +54,15 @@ function sizeForFormato(formato) {
 // de una idea "réplica" del deep-analyze— armamos la escena desde el
 // hook + ángulo + copy. Así el creativo se puede generar para CUALQUIER
 // idea de la Bandeja, no solo las del generador.
-function buildImagePrompt(idea, usarProductoReal = false, paleta = [], feedbackQA = null) {
+// Guía de escena según el estilo elegido por el user al generar.
+const ESCENA_GUIDE = {
+  producto: 'ENFOQUE DE ESCENA: el producto como protagonista sobre un fondo de marca limpio y atractivo — packshot editorial, iluminación de estudio suave, props mínimos coherentes con la marca.',
+  lifestyle: 'ENFOQUE DE ESCENA: lifestyle real — una persona del público objetivo usando o sosteniendo el producto en un entorno cotidiano y creíble (casa, baño, cocina o exterior según el producto). Luz natural, naturalidad, que se sienta una foto real y aspiracional, no un render.',
+  ugc: 'ENFOQUE DE ESCENA: estilo UGC / contenido de usuario — como una foto sacada con celular por un cliente real. Encuadre casual, luz ambiente, levemente imperfecta a propósito, espontánea y auténtica. Una persona común mostrando el producto.',
+  comparacion: 'ENFOQUE DE ESCENA: comparación lado a lado — el producto del anunciante contra una alternativa genérica sin marca. El producto real bien destacado y favorecido visualmente; la alternativa opaca y poco atractiva.',
+};
+
+function buildImagePrompt(idea, { usarProductoReal = false, paleta = [], feedbackQA = null, estiloEscena = '' } = {}) {
   const estilo = (idea.estiloVisual || '').trim();
   const hook = (idea.hook || '').trim();
 
@@ -98,6 +106,10 @@ function buildImagePrompt(idea, usarProductoReal = false, paleta = [], feedbackQ
   parts.push('');
   parts.push('ESCENA / IMAGEN BASE:');
   parts.push(escena);
+  if (estiloEscena && ESCENA_GUIDE[estiloEscena]) {
+    parts.push('');
+    parts.push(ESCENA_GUIDE[estiloEscena]);
+  }
 
   parts.push('');
   parts.push('SIN TEXTO — CRÍTICO: NO renderices ningún texto, palabra, letra, número, sello ni logo en la imagen. Generá ÚNICAMENTE el fondo, la escena y el producto. El titular y el botón del aviso se agregan después por código (por eso la imagen tiene que salir 100% limpia de texto — así el texto nunca sale con errores).');
@@ -149,7 +161,9 @@ export default async function handler(req, res) {
     sugerencia: String(fb.sugerencia || '').slice(0, 400),
     fortalezas: Array.isArray(fb.fortalezas) ? fb.fortalezas.map(p => String(p).slice(0, 200)).slice(0, 6) : [],
   } : null;
-  const prompt = buildImagePrompt(idea, usarProductoReal, paletaMarca, feedbackQA);
+  const estiloEscena = ['producto', 'lifestyle', 'ugc', 'comparacion'].includes(body?.estiloEscena)
+    ? body.estiloEscena : '';
+  const prompt = buildImagePrompt(idea, { usarProductoReal, paleta: paletaMarca, feedbackQA, estiloEscena });
 
   try {
     let resp;

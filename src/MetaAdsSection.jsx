@@ -61,7 +61,7 @@ export default function MetaAdsSection({ addToast }) {
     return (
       <div className="max-w-5xl mx-auto space-y-5">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-white shadow-sm">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-400 flex items-center justify-center text-white shadow-sm">
             <BarChart3 size={20} />
           </div>
           <div>
@@ -91,10 +91,10 @@ export default function MetaAdsSection({ addToast }) {
                 <button
                   key={p.id}
                   onClick={() => setActiveProductoId(String(p.id))}
-                  className="text-left p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm hover:border-blue-300 dark:hover:border-blue-700 hover:shadow-md transition group"
+                  className="text-left p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm hover:border-brand-300 dark:hover:border-brand-700 hover:shadow-md transition group"
                 >
                   <div className="flex items-center gap-3 mb-2">
-                    <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-white font-bold text-lg shrink-0 group-hover:scale-105 transition">
+                    <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-brand-500 to-brand-400 flex items-center justify-center text-white font-bold text-lg shrink-0 group-hover:scale-105 transition">
                       {inicial}
                     </div>
                     <div className="flex-1 min-w-0">
@@ -105,11 +105,11 @@ export default function MetaAdsSection({ addToast }) {
                           : 'Sin cuenta Meta conectada'}
                       </p>
                     </div>
-                    <ChevronRight size={16} className="text-gray-400 group-hover:text-blue-500 transition shrink-0" />
+                    <ChevronRight size={16} className="text-gray-400 group-hover:text-brand-500 transition shrink-0" />
                   </div>
                   {tieneCuenta && (
                     <div className="flex items-center gap-2 text-[10px] mt-2">
-                      <span className="px-2 py-0.5 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded font-bold">
+                      <span className="px-2 py-0.5 bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300 rounded font-bold">
                         {adsCount} total
                       </span>
                       {matchedCount > 0 && (
@@ -141,12 +141,12 @@ export default function MetaAdsSection({ addToast }) {
         >
           <ChevronRight size={16} className="rotate-180" />
         </button>
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-white shadow-sm shrink-0">
+        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-400 flex items-center justify-center text-white shadow-sm shrink-0">
           <BarChart3 size={20} />
         </div>
         <div className="min-w-0 flex-1">
           <p className="text-[10px] text-gray-500 dark:text-gray-400">
-            <button onClick={() => setActiveProductoId(null)} className="hover:text-blue-500 transition">Meta Ads</button> / {producto.nombre}
+            <button onClick={() => setActiveProductoId(null)} className="hover:text-brand-500 transition">Meta Ads</button> / {producto.nombre}
           </p>
           <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100 truncate">{producto.nombre}</h2>
         </div>
@@ -186,7 +186,7 @@ function TabButton({ active, onClick, icon, children }) {
       onClick={onClick}
       className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold border-b-2 transition -mb-px ${
         active
-          ? 'text-blue-600 dark:text-blue-400 border-blue-500'
+          ? 'text-brand-600 dark:text-brand-400 border-brand-500'
           : 'text-gray-500 dark:text-gray-400 border-transparent hover:text-gray-800 dark:hover:text-gray-200'
       }`}
     >
@@ -278,7 +278,7 @@ function AdsGrid({ metaAccount }) {
           <input
             type="text" value={query} onChange={e => setQuery(e.target.value)}
             placeholder="Buscar por nombre, título, campaña…"
-            className="w-full pl-7 pr-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full pl-7 pr-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500"
           />
         </div>
         <select value={matchFilter} onChange={e => setMatchFilter(e.target.value)}
@@ -356,7 +356,7 @@ function AdCard({ ad }) {
     : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400';
   const fatigueColors = {
     healthy: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300',
-    warming: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300',
+    warming: 'bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300',
     fatiguing: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300',
     dying: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300',
     new: 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400',
@@ -440,7 +440,7 @@ function AdCard({ ad }) {
           <span className="text-[9px] text-gray-400 font-mono">{ad.id}</span>
           <a
             href={fbUrl} target="_blank" rel="noreferrer"
-            className="inline-flex items-center gap-1 text-[10px] text-blue-600 hover:underline font-semibold"
+            className="inline-flex items-center gap-1 text-[10px] text-brand-600 hover:underline font-semibold"
           >
             <ExternalLink size={10} /> Ver en FB
           </a>

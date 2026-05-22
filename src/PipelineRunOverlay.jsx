@@ -62,7 +62,7 @@ export default function PipelineRunOverlay() {
           onClick={() => setExpanded(true)}
           className={`flex items-center gap-3 px-4 py-3 rounded-full shadow-lg border transition group ${
             running
-              ? 'bg-gradient-to-r from-purple-600 to-violet-600 border-purple-500 text-white hover:scale-105'
+              ? 'bg-gradient-to-r from-brand-600 to-brand-500 border-brand-500 text-white hover:scale-105'
               : stepsError > 0
                 ? 'bg-amber-50 dark:bg-amber-900/40 border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-100'
                 : 'bg-emerald-50 dark:bg-emerald-900/40 border-emerald-300 dark:border-emerald-700 text-emerald-900 dark:text-emerald-100'
@@ -89,7 +89,7 @@ export default function PipelineRunOverlay() {
         <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl w-[380px] max-h-[70vh] flex flex-col">
           <div className={`px-4 py-3 flex items-center gap-2 rounded-t-xl ${
             running
-              ? 'bg-gradient-to-r from-purple-600 to-violet-600 text-white'
+              ? 'bg-gradient-to-r from-brand-600 to-brand-500 text-white'
               : stepsError > 0
                 ? 'bg-amber-50 dark:bg-amber-900/40 text-amber-900 dark:text-amber-100'
                 : 'bg-emerald-50 dark:bg-emerald-900/40 text-emerald-900 dark:text-emerald-100'
@@ -120,15 +120,15 @@ export default function PipelineRunOverlay() {
 
           {/* Barra de progreso */}
           <div className="h-1.5 bg-gray-200 dark:bg-gray-700">
-            <div className="h-full bg-gradient-to-r from-purple-500 to-violet-500 transition-all duration-500"
+            <div className="h-full bg-gradient-to-r from-brand-500 to-brand-400 transition-all duration-500"
               style={{ width: `${pct}%` }} />
           </div>
 
           {/* Costo en vivo */}
           {runCost.total > 0 && (
             <div className="px-3 py-1.5 border-b border-gray-100 dark:border-gray-700 text-[10px] font-mono flex flex-wrap gap-1.5">
-              <span className="text-purple-600 dark:text-purple-400 font-bold">💰 ${runCost.total.toFixed(4)}</span>
-              {runCost.anthropic > 0 && <span className="text-violet-600 dark:text-violet-400">🧠 ${runCost.anthropic.toFixed(4)}</span>}
+              <span className="text-brand-600 dark:text-brand-400 font-bold">💰 ${runCost.total.toFixed(4)}</span>
+              {runCost.anthropic > 0 && <span className="text-brand-600 dark:text-brand-400">🧠 ${runCost.anthropic.toFixed(4)}</span>}
               {runCost.openai > 0 && <span className="text-emerald-600 dark:text-emerald-400">🎤 ${runCost.openai.toFixed(4)}</span>}
               {runCost.apify > 0 && <span className="text-amber-600 dark:text-amber-400">🔍 ${runCost.apify.toFixed(4)}</span>}
             </div>
@@ -142,7 +142,7 @@ export default function PipelineRunOverlay() {
                 step.status === 'running' ? '⏳' : '○';
               const colorCls = step.status === 'done' ? 'text-emerald-600 dark:text-emerald-400' :
                 step.status === 'error' ? 'text-red-600 dark:text-red-400' :
-                step.status === 'running' ? 'text-purple-600 dark:text-purple-400 font-semibold' :
+                step.status === 'running' ? 'text-brand-600 dark:text-brand-400 font-semibold' :
                 'text-gray-400 dark:text-gray-500';
               return (
                 <li key={step.id} className="flex items-start gap-2 text-[11px]">
@@ -172,7 +172,7 @@ export default function PipelineRunOverlay() {
             <div className="px-3 py-2 border-t border-gray-100 dark:border-gray-700">
               <button
                 onClick={() => window.dispatchEvent(new CustomEvent('viora-goto-marketing'))}
-                className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-[11px] font-bold text-white bg-gradient-to-br from-fuchsia-600 to-purple-600 rounded hover:from-fuchsia-700 hover:to-purple-700 transition">
+                className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-[11px] font-bold text-white bg-gradient-to-br from-brand-600 to-brand-500 rounded hover:from-brand-700 hover:to-brand-600 transition">
                 <Play size={12} /> Ver resultados en Marketing
               </button>
             </div>

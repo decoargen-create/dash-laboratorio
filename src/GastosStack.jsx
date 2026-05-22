@@ -53,9 +53,9 @@ const SEED_SERVICES = [
 
 const CATEGORIAS = {
   hosting: { label: 'Hosting', icon: Server, color: 'text-slate-600 bg-slate-100 dark:bg-slate-900/40 dark:text-slate-300' },
-  ia:      { label: 'IA / APIs', icon: Bot, color: 'text-purple-600 bg-purple-100 dark:bg-purple-900/40 dark:text-purple-300' },
-  scraping:{ label: 'Scraping', icon: Target, color: 'text-orange-600 bg-orange-100 dark:bg-orange-900/40 dark:text-orange-300' },
-  ads:     { label: 'Publicidad', icon: Zap, color: 'text-blue-600 bg-blue-100 dark:bg-blue-900/40 dark:text-blue-300' },
+  ia:      { label: 'IA / APIs', icon: Bot, color: 'text-brand-600 bg-brand-100 dark:bg-brand-900/40 dark:text-brand-300' },
+  scraping:{ label: 'Scraping', icon: Target, color: 'text-brand-600 bg-brand-100 dark:bg-brand-900/40 dark:text-brand-300' },
+  ads:     { label: 'Publicidad', icon: Zap, color: 'text-brand-600 bg-brand-100 dark:bg-brand-900/40 dark:text-brand-300' },
   otros:   { label: 'Otros', icon: Package, color: 'text-gray-600 bg-gray-100 dark:bg-gray-700 dark:text-gray-300' },
 };
 
@@ -177,7 +177,7 @@ export default function GastosStackSection({ addToast }) {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center text-white shadow-sm">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-brand-500 flex items-center justify-center text-white shadow-sm">
             <DollarSign size={20} />
           </div>
           <div>
@@ -187,7 +187,7 @@ export default function GastosStackSection({ addToast }) {
         </div>
         <button
           onClick={() => { setShowNew(!showNew); setDraft({}); }}
-          className="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-bold text-white bg-gradient-to-br from-emerald-500 to-teal-500 rounded-lg hover:from-emerald-600 hover:to-teal-600 shadow-sm transition"
+          className="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-bold text-white bg-gradient-to-br from-emerald-500 to-brand-500 rounded-lg hover:from-emerald-600 hover:to-brand-600 shadow-sm transition"
         >
           <Plus size={16} /> Agregar servicio
         </button>
@@ -200,22 +200,22 @@ export default function GastosStackSection({ addToast }) {
         const totalMes = tiposAuto.reduce((s, t) => s + spendThisMonth(t), 0);
         if (totalHoy === 0 && totalMes === 0) return null;
         return (
-          <div className="p-4 bg-gradient-to-br from-purple-50 to-fuchsia-50 dark:from-purple-900/20 dark:to-fuchsia-900/20 border border-purple-200 dark:border-purple-800 rounded-xl flex items-center gap-4 flex-wrap">
-            <Activity size={18} className="text-purple-600 dark:text-purple-400 shrink-0" />
+          <div className="p-4 bg-gradient-to-br from-brand-50 to-brand-100 dark:from-brand-900/20 dark:to-brand-800/20 border border-brand-200 dark:border-brand-800 rounded-xl flex items-center gap-4 flex-wrap">
+            <Activity size={18} className="text-brand-600 dark:text-brand-400 shrink-0" />
             <div className="flex-1 min-w-0">
-              <p className="text-[10px] font-bold text-purple-700 dark:text-purple-300 uppercase tracking-wider">⚡ Gasto auto-trackeado</p>
-              <p className="text-[11px] text-purple-800 dark:text-purple-200 mt-0.5">
+              <p className="text-[10px] font-bold text-brand-700 dark:text-brand-300 uppercase tracking-wider">⚡ Gasto auto-trackeado</p>
+              <p className="text-[11px] text-brand-800 dark:text-brand-200 mt-0.5">
                 Cada vez que corrés un análisis (Apify + Claude + Whisper), el sistema registra el costo real. Los números de abajo salen de los logs, no los estimás vos.
               </p>
             </div>
             <div className="grid grid-cols-2 gap-3 text-right">
               <div>
-                <p className="text-[9px] font-bold text-purple-600 dark:text-purple-400 uppercase">Hoy</p>
-                <p className="text-lg font-bold text-purple-900 dark:text-purple-100 tabular-nums">{fmtUSD(totalHoy)}</p>
+                <p className="text-[9px] font-bold text-brand-600 dark:text-brand-400 uppercase">Hoy</p>
+                <p className="text-lg font-bold text-brand-900 dark:text-brand-100 tabular-nums">{fmtUSD(totalHoy)}</p>
               </div>
               <div>
-                <p className="text-[9px] font-bold text-purple-600 dark:text-purple-400 uppercase">Este mes</p>
-                <p className="text-lg font-bold text-purple-900 dark:text-purple-100 tabular-nums">{fmtUSD(totalMes)}</p>
+                <p className="text-[9px] font-bold text-brand-600 dark:text-brand-400 uppercase">Este mes</p>
+                <p className="text-lg font-bold text-brand-900 dark:text-brand-100 tabular-nums">{fmtUSD(totalMes)}</p>
               </div>
             </div>
           </div>
@@ -263,7 +263,7 @@ export default function GastosStackSection({ addToast }) {
               Cancelar
             </button>
             <button onClick={handleAdd}
-              className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-white bg-gradient-to-br from-emerald-500 to-teal-500 rounded-lg hover:from-emerald-600 hover:to-teal-600 transition">
+              className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-white bg-gradient-to-br from-emerald-500 to-brand-500 rounded-lg hover:from-emerald-600 hover:to-brand-600 transition">
               <Plus size={14} /> Agregar
             </button>
           </div>
@@ -342,7 +342,7 @@ export default function GastosStackSection({ addToast }) {
                     {svc.autoTipo ? (() => {
                       const hoy = spendToday(svc.autoTipo);
                       return hoy > 0 ? (
-                        <p className="text-xs font-mono font-bold text-purple-600 dark:text-purple-400 tabular-nums" title="Gastado hoy, auto-tracked">
+                        <p className="text-xs font-mono font-bold text-brand-600 dark:text-brand-400 tabular-nums" title="Gastado hoy, auto-tracked">
                           {fmtUSD(hoy)}
                         </p>
                       ) : (
@@ -359,7 +359,7 @@ export default function GastosStackSection({ addToast }) {
                     {svc.autoTipo && (() => {
                       const mes = spendThisMonth(svc.autoTipo);
                       if (mes > 0) return (
-                        <p className="text-[9px] text-purple-600 dark:text-purple-400 tabular-nums" title="Proveniente de logs auto-tracked">
+                        <p className="text-[9px] text-brand-600 dark:text-brand-400 tabular-nums" title="Proveniente de logs auto-tracked">
                           ⚡ auto
                         </p>
                       );
@@ -388,9 +388,9 @@ export default function GastosStackSection({ addToast }) {
       </div>
 
       {/* Tip */}
-      <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg flex items-start gap-2">
-        <AlertTriangle size={14} className="text-blue-600 shrink-0 mt-0.5" />
-        <p className="text-xs text-blue-900 dark:text-blue-200">
+      <div className="p-3 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-lg flex items-start gap-2">
+        <AlertTriangle size={14} className="text-brand-600 shrink-0 mt-0.5" />
+        <p className="text-xs text-brand-900 dark:text-brand-200">
           <strong>Tip:</strong> actualizá el "gasto variable" de cada servicio al final del mes con el consumo real. Los enlaces ⤴ te llevan directo al dashboard de billing de cada plataforma.
         </p>
       </div>
@@ -466,11 +466,11 @@ function ResumenCard({ label, value, sub, color = 'gray', bold = false }) {
   const colors = {
     emerald: 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200',
     amber:   'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200',
-    purple:  'bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800 text-purple-900 dark:text-purple-200',
+    purple:  'bg-brand-50 dark:bg-brand-900/20 border-brand-200 dark:border-brand-800 text-brand-900 dark:text-brand-200',
     gray:    'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100',
   };
   return (
-    <div className={`p-4 rounded-xl border ${colors[color]} ${bold ? 'ring-2 ring-offset-1 ring-purple-400 dark:ring-offset-gray-900' : ''}`}>
+    <div className={`p-4 rounded-xl border ${colors[color]} ${bold ? 'ring-2 ring-offset-1 ring-brand-400 dark:ring-offset-gray-900' : ''}`}>
       <p className="text-[10px] font-bold uppercase tracking-wider opacity-70 mb-1">{label}</p>
       <p className="text-xl font-bold tabular-nums">{value}</p>
       <p className="text-[10px] opacity-60 mt-0.5">{sub}</p>

@@ -269,7 +269,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     return (
       <div className="max-w-5xl mx-auto space-y-5">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center text-white shadow-sm">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-brand-500 flex items-center justify-center text-white shadow-sm">
             <Sparkles size={20} />
           </div>
           <div>
@@ -300,7 +300,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                   className="text-left p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm hover:border-amber-300 dark:hover:border-amber-700 hover:shadow-md transition group"
                 >
                   <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center text-white font-bold text-lg shrink-0 group-hover:scale-105 transition">
+                    <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-amber-500 to-brand-500 flex items-center justify-center text-white font-bold text-lg shrink-0 group-hover:scale-105 transition">
                       {inicial}
                     </div>
                     <div className="flex-1 min-w-0">
@@ -337,7 +337,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           >
             <ChevronRight size={16} className="rotate-180" />
           </button>
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center text-white shadow-sm shrink-0">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-brand-500 flex items-center justify-center text-white shadow-sm shrink-0">
             <Sparkles size={20} />
           </div>
           <div className="min-w-0 flex-1">
@@ -348,7 +348,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           </div>
           <button
             onClick={() => setShowAddForm(s => !s)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-amber-500 to-orange-500 rounded-lg hover:from-amber-600 hover:to-orange-600 shadow-sm transition"
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-amber-500 to-brand-500 rounded-lg hover:from-amber-600 hover:to-brand-600 shadow-sm transition"
           >
             <Plus size={12} /> Agregar marca
           </button>
@@ -357,7 +357,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         <div className="flex justify-end">
           <button
             onClick={() => setShowAddForm(s => !s)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-amber-500 to-orange-500 rounded-lg hover:from-amber-600 hover:to-orange-600 shadow-sm transition"
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-amber-500 to-brand-500 rounded-lg hover:from-amber-600 hover:to-brand-600 shadow-sm transition"
           >
             <Plus size={12} /> Agregar marca
           </button>
@@ -417,7 +417,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
               Cancelar
             </button>
             <button onClick={handleAddBrand}
-              className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-amber-500 to-orange-500 rounded hover:from-amber-600 hover:to-orange-600 transition">
+              className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-amber-500 to-brand-500 rounded hover:from-amber-600 hover:to-brand-600 transition">
               Agregar
             </button>
           </div>
@@ -543,8 +543,8 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, onScrape, onAdapt, o
       <div className="flex items-start gap-3">
         <div className={`w-12 h-12 rounded-lg flex items-center justify-center text-white font-bold text-lg shrink-0 ${
           isCompetidor
-            ? 'bg-gradient-to-br from-purple-500 to-violet-500'
-            : 'bg-gradient-to-br from-amber-400 to-orange-400'
+            ? 'bg-gradient-to-br from-brand-600 to-brand-500'
+            : 'bg-gradient-to-br from-amber-400 to-brand-400'
         }`}>
           {brand.nombre?.charAt(0)?.toUpperCase() || '?'}
         </div>
@@ -552,14 +552,14 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, onScrape, onAdapt, o
           <div className="flex items-center gap-1.5">
             <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{brand.nombre}</p>
             {isCompetidor && (
-              <span className="px-1.5 py-0.5 text-[9px] font-bold bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 rounded">
+              <span className="px-1.5 py-0.5 text-[9px] font-bold bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 rounded">
                 competidor
               </span>
             )}
           </div>
           {brand.landingUrl && (
             <a href={brand.landingUrl} target="_blank" rel="noreferrer"
-              className="inline-flex items-center gap-1 text-[10px] text-blue-600 hover:underline truncate max-w-full">
+              className="inline-flex items-center gap-1 text-[10px] text-brand-600 hover:underline truncate max-w-full">
               <Link2 size={10} /> {brand.landingUrl.replace(/^https?:\/\//, '').replace(/^www\./, '')}
             </a>
           )}
@@ -595,7 +595,7 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, onScrape, onAdapt, o
           <button
             onClick={onScrape}
             disabled={isScraping}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-amber-500 to-orange-500 rounded-md hover:from-amber-600 hover:to-orange-600 transition disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-amber-500 to-brand-500 rounded-md hover:from-amber-600 hover:to-brand-600 transition disabled:opacity-50"
           >
             {isScraping
               ? <><Loader2 size={12} className="animate-spin" /> Scrapeando…</>

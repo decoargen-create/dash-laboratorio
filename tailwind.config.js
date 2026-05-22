@@ -7,6 +7,26 @@ export default {
   ],
   theme: {
     extend: {
+      colors: {
+        // Paleta de marca Viora — dorado / cobre / champagne, tomada del
+        // logo (arco elíptico dorado). Reemplaza el arcoíris de morados,
+        // rosas y azules decorativos que tenía el sistema. Los colores
+        // SEMÁNTICOS (emerald=éxito, red=error, amber=warning) se mantienen
+        // aparte — comunican estado y no deben colapsar a la marca.
+        brand: {
+          50:  '#faf4ea',
+          100: '#f3e6cf',
+          200: '#e9d2a8',
+          300: '#e9c99d',
+          400: '#d6b084',
+          500: '#c39866',
+          600: '#b8895a',
+          700: '#96703f',
+          800: '#6b4a2a',
+          900: '#4a3320',
+          950: '#2b1d12',
+        },
+      },
       keyframes: {
         'fade-in': {
           '0%': { opacity: '0' },
@@ -38,8 +58,8 @@ export default {
           '100%': { transform: 'scale(0.95)', opacity: '0.7' },
         },
         'glow': {
-          '0%, 100%': { boxShadow: '0 0 0 0 rgba(236, 72, 153, 0.4)' },
-          '50%': { boxShadow: '0 0 16px 4px rgba(236, 72, 153, 0.1)' },
+          '0%, 100%': { boxShadow: '0 0 0 0 rgba(195, 152, 102, 0.4)' },
+          '50%': { boxShadow: '0 0 16px 4px rgba(195, 152, 102, 0.1)' },
         },
       },
       animation: {

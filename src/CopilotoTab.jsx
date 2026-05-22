@@ -121,7 +121,7 @@ export default function CopilotoTab({ producto, addToast }) {
     <div className="flex flex-col h-[600px] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
       {/* Header */}
       <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2">
-        <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-fuchsia-500 to-purple-500 flex items-center justify-center text-white shrink-0">
+        <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-brand-500 to-brand-400 flex items-center justify-center text-white shrink-0">
           <Sparkles size={14} />
         </div>
         <div className="flex-1 min-w-0">
@@ -143,8 +143,8 @@ export default function CopilotoTab({ producto, addToast }) {
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
         {messages.length === 0 && (
           <div className="h-full flex flex-col items-center justify-center text-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-fuchsia-100 to-purple-100 dark:from-fuchsia-900/40 dark:to-purple-900/40 flex items-center justify-center">
-              <Sparkles size={22} className="text-fuchsia-500" />
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-brand-100 to-brand-200 dark:from-brand-900/40 dark:to-brand-800/40 flex items-center justify-center">
+              <Sparkles size={22} className="text-brand-500" />
             </div>
             <div>
               <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Preguntale lo que quieras</p>
@@ -157,7 +157,7 @@ export default function CopilotoTab({ producto, addToast }) {
             <div className="flex flex-col gap-1.5 w-full max-w-sm">
               {SUGERENCIAS.map((s, i) => (
                 <button key={i} onClick={() => enviar(s)}
-                  className="text-left px-3 py-2 text-[11px] text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-gray-700 rounded-lg hover:border-fuchsia-300 dark:hover:border-fuchsia-700 hover:bg-fuchsia-50 dark:hover:bg-fuchsia-900/20 transition">
+                  className="text-left px-3 py-2 text-[11px] text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-gray-700 rounded-lg hover:border-brand-300 dark:hover:border-brand-700 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition">
                   {s}
                 </button>
               ))}
@@ -169,7 +169,7 @@ export default function CopilotoTab({ producto, addToast }) {
           <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div className={`max-w-[85%] px-3 py-2 rounded-xl text-xs whitespace-pre-wrap break-words ${
               m.role === 'user'
-                ? 'bg-gradient-to-br from-fuchsia-600 to-purple-600 text-white rounded-br-sm'
+                ? 'bg-gradient-to-br from-brand-600 to-brand-500 text-white rounded-br-sm'
                 : 'bg-gray-100 dark:bg-gray-900/50 text-gray-800 dark:text-gray-200 rounded-bl-sm'
             }`}>
               {m.content}
@@ -198,12 +198,12 @@ export default function CopilotoTab({ producto, addToast }) {
             placeholder="Escribí tu pregunta… (Enter para enviar, Shift+Enter salto de línea)"
             rows={2}
             disabled={loading}
-            className="flex-1 px-3 py-2 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-fuchsia-500 disabled:opacity-50"
+            className="flex-1 px-3 py-2 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:opacity-50"
           />
           <button
             onClick={() => enviar()}
             disabled={loading || !input.trim()}
-            className="inline-flex items-center justify-center w-10 h-10 shrink-0 text-white bg-gradient-to-br from-fuchsia-600 to-purple-600 rounded-lg hover:from-fuchsia-700 hover:to-purple-700 transition disabled:opacity-40"
+            className="inline-flex items-center justify-center w-10 h-10 shrink-0 text-white bg-gradient-to-br from-brand-600 to-brand-500 rounded-lg hover:from-brand-700 hover:to-brand-600 transition disabled:opacity-40"
             title="Enviar"
           >
             {loading ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}

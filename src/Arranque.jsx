@@ -1562,7 +1562,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       <div className="max-w-4xl mx-auto space-y-6">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-600 to-violet-600 flex items-center justify-center text-white shadow-sm">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white shadow-sm">
               <Package size={20} />
             </div>
             <div>
@@ -1571,34 +1571,34 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             </div>
           </div>
           <button onClick={() => setShowProdForm(true)}
-            className="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-bold text-white bg-gradient-to-br from-purple-600 to-violet-600 rounded-lg hover:from-purple-700 hover:to-violet-700 shadow-sm transition">
+            className="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-bold text-white bg-gradient-to-br from-brand-500 to-brand-700 rounded-lg hover:from-brand-600 hover:to-brand-800 shadow-sm transition">
             <Plus size={16} /> Nuevo producto
           </button>
         </div>
 
         {/* Form de nuevo producto */}
         {showProdForm && (
-          <div className="bg-white dark:bg-gray-800 border-2 border-purple-300 dark:border-purple-700 rounded-xl p-5 space-y-3 animate-fade-in">
+          <div className="bg-white dark:bg-gray-800 border-2 border-brand-300 dark:border-brand-700 rounded-xl p-5 space-y-3 animate-fade-in">
             <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Nuevo producto</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <input type="text" value={prodDraft.nombre} onChange={e => setProdDraft({ ...prodDraft, nombre: e.target.value })}
                 placeholder="Nombre del producto"
-                className="px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500" />
+                className="px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
               <input type="url" value={prodDraft.landingUrl} onChange={e => setProdDraft({ ...prodDraft, landingUrl: e.target.value })}
                 placeholder="URL de la landing"
-                className="px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500" />
+                className="px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
             </div>
             <textarea value={prodDraft.descripcion} onChange={e => setProdDraft({ ...prodDraft, descripcion: e.target.value })}
               placeholder="Descripción corta (opcional)"
               rows={2}
-              className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 resize-y" />
+              className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500 resize-y" />
             <div className="flex gap-2 justify-end">
               <button onClick={() => { setShowProdForm(false); setProdDraft({ nombre: '', landingUrl: '', descripcion: '' }); }}
                 className="px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 transition">
                 Cancelar
               </button>
               <button onClick={handleAddProducto}
-                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-purple-600 to-violet-600 rounded-md hover:from-purple-700 hover:to-violet-700 transition">
+                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-brand-700 rounded-md hover:from-brand-600 hover:to-brand-800 transition">
                 <Check size={12} /> Crear
               </button>
             </div>
@@ -1638,11 +1638,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 <div key={p.id} className="flex items-stretch gap-2">
                   <button
                     onClick={() => setActiveProductoId(String(p.id))}
-                    className="flex-1 text-left p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm hover:border-purple-300 dark:hover:border-purple-700 hover:shadow-md transition group"
+                    className="flex-1 text-left p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm hover:border-brand-300 dark:hover:border-brand-700 hover:shadow-md transition group"
                   >
                     {/* Header */}
                     <div className="flex items-center gap-3 mb-3">
-                      <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-purple-500 to-violet-500 flex items-center justify-center text-white font-bold text-lg shrink-0 group-hover:scale-105 transition">
+                      <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white font-bold text-lg shrink-0 group-hover:scale-105 transition">
                         {p.nombre?.charAt(0)?.toUpperCase() || 'P'}
                       </div>
                       <div className="flex-1 min-w-0">
@@ -1652,10 +1652,10 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                           <span className={`font-semibold ${hasResearch ? 'text-emerald-600' : 'text-gray-400'}`}>
                             {hasResearch ? '✓ documentado' : '○ sin research'}
                           </span>
-                          {p.stage && <span className="text-purple-600 dark:text-purple-400">· {p.stage.replace('_', '-')}</span>}
+                          {p.stage && <span className="text-brand-600 dark:text-brand-400">· {p.stage.replace('_', '-')}</span>}
                         </div>
                       </div>
-                      <ChevronRight size={16} className="text-gray-400 group-hover:text-purple-500 transition shrink-0" />
+                      <ChevronRight size={16} className="text-gray-400 group-hover:text-brand-500 transition shrink-0" />
                     </div>
 
                     {/* Bandeja: contadores por estado (igual que Bandeja) */}
@@ -1685,7 +1685,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                         <span>· ⏱ Último run: <strong className="text-gray-700 dark:text-gray-300">{new Date(ultimoRun.startedAt).toLocaleDateString('es-AR')}</strong></span>
                       )}
                       {costoTotal > 0 && (
-                        <span className="text-purple-600 dark:text-purple-400 font-mono">· 💰 ${costoTotal.toFixed(4)} acumulado</span>
+                        <span className="text-brand-600 dark:text-brand-400 font-mono">· 💰 ${costoTotal.toFixed(4)} acumulado</span>
                       )}
                     </div>
                   </button>
@@ -1723,12 +1723,12 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           title="Volver a la lista de productos">
           <ChevronRight size={16} className="rotate-180" />
         </button>
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-600 to-violet-600 flex items-center justify-center text-white shadow-sm">
+        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white shadow-sm">
           <Play size={20} />
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-[10px] text-gray-500 dark:text-gray-400">
-            <button onClick={() => setActiveProductoId(null)} className="hover:text-purple-500 transition">Productos</button> / {producto.nombre}
+            <button onClick={() => setActiveProductoId(null)} className="hover:text-brand-500 transition">Productos</button> / {producto.nombre}
           </p>
           <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100 truncate">{producto.nombre}</h2>
         </div>
@@ -1759,7 +1759,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       {productoTab === 'competencia' && (
         <div className="space-y-4">
           <div className="flex items-center gap-2">
-            <Target size={18} className="text-orange-500" />
+            <Target size={18} className="text-brand-500" />
             <div className="flex-1">
               <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Competencia del producto</h3>
               <p className="text-[11px] text-gray-500 dark:text-gray-400">
@@ -1768,7 +1768,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             </div>
             {!showCompForm && (
               <button onClick={() => setShowCompForm(true)}
-                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-orange-500 to-red-500 rounded-md hover:from-orange-600 hover:to-red-600 transition">
+                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-red-500 rounded-md hover:from-brand-600 hover:to-red-600 transition">
                 <Plus size={12} /> Agregar competidor
               </button>
             )}
@@ -1776,20 +1776,20 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
           {/* Form de agregar */}
           {showCompForm && (
-            <div className="bg-white dark:bg-gray-800 border border-orange-300 dark:border-orange-700 rounded-xl p-3 flex flex-col sm:flex-row gap-2 items-stretch">
+            <div className="bg-white dark:bg-gray-800 border border-brand-300 dark:border-brand-700 rounded-xl p-3 flex flex-col sm:flex-row gap-2 items-stretch">
               <input type="text" value={compDraft.nombre} onChange={e => setCompDraft({ ...compDraft, nombre: e.target.value })}
                 placeholder="Nombre de la marca (opcional — se autocompleta de la URL)"
-                className="flex-1 px-2.5 py-1.5 text-sm bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                className="flex-1 px-2.5 py-1.5 text-sm bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
               <input type="url" value={compDraft.landingUrl} onChange={e => setCompDraft({ ...compDraft, landingUrl: e.target.value })}
                 placeholder="https://landing-del-competidor.com (recomendado — autodetecta marca + FB page)"
-                className="flex-1 px-2.5 py-1.5 text-sm bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                className="flex-1 px-2.5 py-1.5 text-sm bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
               <div className="flex gap-1">
                 <button onClick={() => { setShowCompForm(false); setCompDraft({ nombre: '', landingUrl: '' }); }}
                   className="px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 transition">
                   Cancelar
                 </button>
                 <button onClick={handleAddCompetidor}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-orange-500 to-red-500 rounded-md hover:from-orange-600 hover:to-red-600 transition">
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-red-500 rounded-md hover:from-brand-600 hover:to-red-600 transition">
                   <Check size={12} /> Agregar
                 </button>
               </div>
@@ -1819,7 +1819,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                   <div key={c.id} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-3 flex items-start gap-3">
                     {/* Avatar: favicon del sitio, con fallback a la inicial
                         de la marca si el favicon no carga. */}
-                    <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-orange-400 to-red-400 flex items-center justify-center text-white font-bold text-sm shrink-0 relative overflow-hidden">
+                    <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-brand-400 to-red-400 flex items-center justify-center text-white font-bold text-sm shrink-0 relative overflow-hidden">
                       {c.nombre?.charAt(0)?.toUpperCase() || '?'}
                       {favHost && (
                         <img
@@ -1834,7 +1834,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                       <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{c.nombre}</p>
                       <div className="flex items-center gap-2 text-[10px] text-gray-500 dark:text-gray-400 flex-wrap mt-0.5">
                         {c.landingUrl && (
-                          <a href={c.landingUrl} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline truncate max-w-[280px]">
+                          <a href={c.landingUrl} target="_blank" rel="noreferrer" className="text-brand-600 hover:underline truncate max-w-[280px]">
                             {c.landingUrl.replace(/^https?:\/\//, '').replace(/^www\./, '')}
                           </a>
                         )}
@@ -1865,7 +1865,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                           <p className="font-bold text-gray-900 dark:text-gray-100">{total} ads</p>
                           {winners > 0 && <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">{winners} ganadores 🏆</p>}
                           {delta != null && delta !== 0 && (
-                            <p className={`text-[10px] font-semibold ${delta > 0 ? 'text-blue-600 dark:text-blue-400' : 'text-red-500'}`}>
+                            <p className={`text-[10px] font-semibold ${delta > 0 ? 'text-brand-600 dark:text-brand-400' : 'text-red-500'}`}>
                               {delta > 0 ? `↑${delta}` : `↓${Math.abs(delta)}`} vs corrida anterior
                             </p>
                           )}
@@ -1911,8 +1911,8 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
       {/* Nudge de auto-run: si pasaron > 24h y el user no está corriendo ahora */}
       {ofrecerRun && (
-        <div className="px-4 py-3 bg-gradient-to-br from-fuchsia-50 to-purple-50 dark:from-fuchsia-900/20 dark:to-purple-900/20 border border-fuchsia-200 dark:border-fuchsia-800 rounded-lg flex items-center gap-3">
-          <div className="shrink-0 w-8 h-8 rounded-lg bg-gradient-to-br from-fuchsia-500 to-purple-500 flex items-center justify-center text-white">
+        <div className="px-4 py-3 bg-gradient-to-br from-brand-50 to-brand-100 dark:from-brand-900/20 dark:to-brand-950/20 border border-brand-200 dark:border-brand-800 rounded-lg flex items-center gap-3">
+          <div className="shrink-0 w-8 h-8 rounded-lg bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center text-white">
             <Sparkles size={14} />
           </div>
           <div className="flex-1 min-w-0">
@@ -1926,7 +1926,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             </p>
           </div>
           <button onClick={runPipeline}
-            className="shrink-0 inline-flex items-center gap-1 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-fuchsia-600 to-purple-600 rounded-md hover:from-fuchsia-700 hover:to-purple-700 transition shadow-sm">
+            className="shrink-0 inline-flex items-center gap-1 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-brand-700 rounded-md hover:from-brand-600 hover:to-brand-800 transition shadow-sm">
             <Play size={12} /> Correr ahora
           </button>
         </div>
@@ -1943,7 +1943,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           <div className="text-xs text-gray-700 dark:text-gray-300 space-y-1">
             <p><strong>{producto.nombre}</strong></p>
             {producto.landingUrl && (
-              <a href={producto.landingUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-blue-600 hover:underline">
+              <a href={producto.landingUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-brand-600 hover:underline">
                 <Link2 size={11} /> {producto.landingUrl}
               </a>
             )}
@@ -1955,7 +1955,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 <label className="text-[10px] font-bold text-gray-500 uppercase">Stage inferido:</label>
                 <select value={producto.stage}
                   onChange={e => setProductos(prev => prev.map(p => String(p.id) === String(producto.id) ? { ...p, stage: e.target.value } : p))}
-                  className="px-2 py-0.5 text-[11px] bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-purple-500"
+                  className="px-2 py-0.5 text-[11px] bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
                   title={producto.stageReason || ''}>
                   <option value="problem_aware">Problem-Aware</option>
                   <option value="solution_aware">Solution-Aware</option>
@@ -1980,7 +1980,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 );
               }
               return (
-                <div className="mt-2 inline-flex items-center gap-1.5 px-2 py-1 text-[10px] font-semibold bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded">
+                <div className="mt-2 inline-flex items-center gap-1.5 px-2 py-1 text-[10px] font-semibold bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300 border border-brand-200 dark:border-brand-800 rounded">
                   ℹ️ Sin research doc todavía — el pipeline lo genera solo en el primer paso (~3-4 min).
                 </div>
               );
@@ -1989,7 +1989,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             {/* Activo visual de marca — elemento icónico reutilizable que se
                 propaga a todos los prompts de imagen. */}
             <details className="mt-3 group">
-              <summary className="cursor-pointer inline-flex items-center gap-1 text-[10px] font-semibold text-gray-600 dark:text-gray-300 hover:text-purple-600 dark:hover:text-purple-400">
+              <summary className="cursor-pointer inline-flex items-center gap-1 text-[10px] font-semibold text-gray-600 dark:text-gray-300 hover:text-brand-600 dark:hover:text-brand-400">
                 <ChevronDown size={10} className="group-open:rotate-180 transition-transform" />
                 🎨 Activo visual de marca (opcional)
                 {producto.activoVisual?.descripcion && <span className="text-emerald-600 dark:text-emerald-400">✓ definido</span>}
@@ -2007,7 +2007,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                   ))}
                   placeholder="Ej: Frasco de vidrio ámbar con tapa dorada, textura tallada en el cuerpo, etiqueta minimalista granate con tipografía serif."
                   rows={3}
-                  className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 resize-y"
+                  className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500 resize-y"
                 />
                 <input
                   type="url"
@@ -2018,14 +2018,14 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                       : p
                   ))}
                   placeholder="URL de una imagen de referencia (opcional)"
-                  className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500"
                 />
               </div>
             </details>
           </div>
         ) : !showProdForm ? (
           <button onClick={() => setShowProdForm(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-purple-600 to-violet-600 rounded-md hover:from-purple-700 hover:to-violet-700 transition">
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-brand-700 rounded-md hover:from-brand-600 hover:to-brand-800 transition">
             <Plus size={12} /> Cargar producto
           </button>
         ) : (
@@ -2033,15 +2033,15 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <input type="text" value={prodDraft.nombre} onChange={e => setProdDraft({ ...prodDraft, nombre: e.target.value })}
                 placeholder="Nombre del producto"
-                className="px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500" />
+                className="px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
               <input type="url" value={prodDraft.landingUrl} onChange={e => setProdDraft({ ...prodDraft, landingUrl: e.target.value })}
                 placeholder="URL de la landing"
-                className="px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500" />
+                className="px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
             </div>
             <textarea value={prodDraft.descripcion} onChange={e => setProdDraft({ ...prodDraft, descripcion: e.target.value })}
               placeholder="Descripción corta (opcional — qué es, para quién, diferenciales)"
               rows={2}
-              className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 resize-y" />
+              className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500 resize-y" />
             <p className="text-[10px] text-gray-500 dark:text-gray-400 italic -mt-1">
               No te pedimos stage (problem/solution/product-aware) porque lo inferimos solos del research doc cuando corras el pipeline.
             </p>
@@ -2051,7 +2051,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 Cancelar
               </button>
               <button onClick={handleAddProducto}
-                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-purple-600 to-violet-600 rounded-md hover:from-purple-700 hover:to-violet-700 transition">
+                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-brand-700 rounded-md hover:from-brand-600 hover:to-brand-800 transition">
                 <Check size={12} /> Guardar
               </button>
             </div>
@@ -2110,7 +2110,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                     </span>
                   )}
                   {summary.warming > 0 && (
-                    <span className="inline-flex items-center px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded">
+                    <span className="inline-flex items-center px-1.5 py-0.5 bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 rounded">
                       📈 {summary.warming} escalando
                     </span>
                   )}
@@ -2131,14 +2131,14 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             {/* Botón matcher IA */}
             {producto?.nombre && !metaAccount.productMatched && (
               <button onClick={matchProductAds} disabled={matching}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-violet-600 to-purple-600 rounded-md hover:from-violet-700 hover:to-purple-700 transition disabled:opacity-40">
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-brand-700 rounded-md hover:from-brand-600 hover:to-brand-800 transition disabled:opacity-40">
                 {matching ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
                 Identificar ads del producto con IA
               </button>
             )}
             {producto?.nombre && metaAccount.productMatched && metaAccount.productMatched !== producto.nombre && (
               <button onClick={matchProductAds} disabled={matching}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-violet-700 dark:text-violet-300 bg-white dark:bg-gray-700 border border-violet-300 dark:border-violet-800 rounded-md hover:bg-violet-50 transition disabled:opacity-40">
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-gray-700 border border-brand-300 dark:border-brand-800 rounded-md hover:bg-brand-50 transition disabled:opacity-40">
                 {matching ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
                 Re-matchear (producto cambió a "{producto.nombre}")
               </button>
@@ -2155,7 +2155,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                     const fatBadge = {
                       dying:     { icon: '💀', color: 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300', label: 'muriendo' },
                       fatiguing: { icon: '🔻', color: 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300', label: 'fatigando' },
-                      warming:   { icon: '📈', color: 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300', label: 'escalando' },
+                      warming:   { icon: '📈', color: 'bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300', label: 'escalando' },
                       healthy:   { icon: '✅', color: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300', label: 'saludable' },
                       new:       { icon: '🆕', color: 'bg-gray-100 dark:bg-gray-700 text-gray-600', label: 'nuevo' },
                     }[fat.status] || null;
@@ -2182,8 +2182,8 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                         {ad.audienceSegment && (
                           <span className={`inline-flex items-center px-1 py-0.5 text-[9px] font-semibold rounded ${
                             ad.audienceSegment === 'retargeting'
-                              ? 'bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300'
-                              : 'bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300'
+                              ? 'bg-brand-200 dark:bg-brand-900/40 text-brand-800 dark:text-brand-300'
+                              : 'bg-brand-100 dark:bg-brand-900/40 text-brand-600 dark:text-brand-300'
                           }`} title={
                             ad.audienceSegment === 'retargeting'
                               ? 'Retargeting / warm — CTR esperado 2-5%, tolera freq 5-8'
@@ -2237,11 +2237,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               {availableAccounts.map(acc => (
                 <li key={acc.id}>
                   <button onClick={() => selectAccount(acc)} disabled={loadingAds}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md hover:border-blue-400 dark:hover:border-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition disabled:opacity-40">
+                    className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md hover:border-brand-400 dark:hover:border-brand-600 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition disabled:opacity-40">
                     <span className="font-semibold text-gray-900 dark:text-gray-100 flex-1">{acc.name}</span>
                     <span className="text-[10px] text-gray-500">{acc.currency}</span>
                     {acc.business && <span className="text-[10px] text-gray-400">· {acc.business}</span>}
-                    {loadingAds && <Loader2 size={12} className="animate-spin text-blue-500" />}
+                    {loadingAds && <Loader2 size={12} className="animate-spin text-brand-500" />}
                   </button>
                 </li>
               ))}
@@ -2277,7 +2277,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         )}
         <button
           onClick={() => setProductoTab('competencia')}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-orange-500 to-red-500 rounded-md hover:from-orange-600 hover:to-red-600 shadow-sm transition"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-red-500 rounded-md hover:from-brand-600 hover:to-red-600 shadow-sm transition"
         >
           <Target size={12} /> Gestionar competencia →
         </button>
@@ -2317,7 +2317,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                     <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">Límite diario de ideas</label>
                     <input type="number" min="1" max={MAX_IDEAS_PER_RUN} value={genConfig.limiteDiario}
                       onChange={e => setGenConfig(c => ({ ...c, limiteDiario: Math.max(1, Math.min(MAX_IDEAS_PER_RUN, Number(e.target.value) || 50)) }))}
-                      className="w-24 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-purple-500" />
+                      className="w-24 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-brand-500" />
                     <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">
                       Se resetea a las 00:00 hs Argentina. Primera corrida (bandeja vacía) ignora el límite y genera entre 50 y {MAX_IDEAS_PER_RUN} ideas según cuántos ads tenga la competencia.
                     </p>
@@ -2327,7 +2327,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                       <label className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase">Mix static / video</label>
                       {competitorMix && (
                         <button onClick={usarMixCompetencia}
-                          className="text-[10px] font-semibold text-fuchsia-600 dark:text-fuchsia-400 hover:underline">
+                          className="text-[10px] font-semibold text-brand-600 dark:text-brand-400 hover:underline">
                           📊 Usar mix de la competencia ({competitorMix.staticPct}/{competitorMix.videoPct})
                         </button>
                       )}
@@ -2339,14 +2339,14 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                         const v = Number(e.target.value);
                         setGenConfig(c => ({ ...c, formatoStatic: v, formatoVideo: 100 - v }));
                       }}
-                      className="w-full accent-purple-600 cursor-pointer" />
+                      className="w-full accent-brand-600 cursor-pointer" />
                     <div className="flex items-center gap-2 mt-1">
                       <input type="number" min="0" max="100" value={genConfig.formatoStatic}
                         onChange={e => {
                           const v = Math.max(0, Math.min(100, Number(e.target.value) || 0));
                           setGenConfig(c => ({ ...c, formatoStatic: v, formatoVideo: 100 - v }));
                         }}
-                        className="w-16 px-2 py-1 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-purple-500" />
+                        className="w-16 px-2 py-1 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-brand-500" />
                       <span className="text-[10px] text-gray-500">% static</span>
                       <span className="text-gray-400 mx-1">·</span>
                       <input type="number" min="0" max="100" value={genConfig.formatoVideo}
@@ -2354,7 +2354,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                           const v = Math.max(0, Math.min(100, Number(e.target.value) || 0));
                           setGenConfig(c => ({ ...c, formatoVideo: v, formatoStatic: 100 - v }));
                         }}
-                        className="w-16 px-2 py-1 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-purple-500" />
+                        className="w-16 px-2 py-1 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-brand-500" />
                       <span className="text-[10px] text-gray-500">% video</span>
                     </div>
 
@@ -2377,7 +2377,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             <div className="flex items-center gap-2">
               {!running ? (
                 <button onClick={runPipeline}
-                  className="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-bold text-white bg-gradient-to-br from-purple-600 to-violet-600 rounded-lg hover:from-purple-700 hover:to-violet-700 shadow-sm transition">
+                  className="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-bold text-white bg-gradient-to-br from-brand-600 to-brand-500 rounded-lg hover:from-brand-700 hover:to-brand-600 shadow-sm transition">
                   <Play size={14} /> Correr pipeline
                 </button>
               ) : (
@@ -2389,11 +2389,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               {!running && steps.length > 0 && (
                 <>
                   <button onClick={() => setProductoTab('bandeja')}
-                    className="inline-flex items-center gap-1 px-3 py-2 text-xs font-bold text-fuchsia-700 dark:text-fuchsia-300 hover:bg-fuchsia-50 dark:hover:bg-fuchsia-900/20 rounded transition">
+                    className="inline-flex items-center gap-1 px-3 py-2 text-xs font-bold text-brand-700 dark:text-brand-300 hover:bg-brand-50 dark:hover:bg-brand-900/20 rounded transition">
                       Ver Bandeja de ideas <ChevronRight size={12} />
                   </button>
                   <button onClick={() => setProductoTab('competencia')}
-                    className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded transition">
+                    className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold text-brand-700 dark:text-brand-300 hover:bg-brand-50 dark:hover:bg-brand-900/20 rounded transition">
                       Ver Competencia <ChevronRight size={12} />
                   </button>
                 </>
@@ -2418,9 +2418,9 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               ).length
             : (ultimoRun?.stats?.ideasInsertadas || 0);
           return (
-            <div className="mt-5 p-4 bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 border-2 border-emerald-300 dark:border-emerald-700 rounded-xl">
+            <div className="mt-5 p-4 bg-gradient-to-br from-emerald-50 to-brand-50 dark:from-emerald-900/20 dark:to-brand-900/20 border-2 border-emerald-300 dark:border-emerald-700 rounded-xl">
               <div className="flex items-center gap-3 flex-wrap">
-                <div className="shrink-0 w-10 h-10 rounded-full bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center text-white shadow">
+                <div className="shrink-0 w-10 h-10 rounded-full bg-gradient-to-br from-emerald-500 to-brand-500 flex items-center justify-center text-white shadow">
                   <Check size={20} />
                 </div>
                 <div className="flex-1 min-w-0">
@@ -2433,13 +2433,13 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 </div>
                 <button
                   onClick={() => setProductoTab('bandeja')}
-                  className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-bold text-white bg-gradient-to-br from-fuchsia-500 to-pink-500 rounded-lg hover:from-fuchsia-600 hover:to-pink-600 shadow-sm transition"
+                  className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-bold text-white bg-gradient-to-br from-brand-500 to-brand-600 rounded-lg hover:from-brand-600 hover:to-brand-700 shadow-sm transition"
                 >
                   <Inbox size={14} /> Ver ideas en la Bandeja <ChevronRight size={14} />
                 </button>
                 <button
                   onClick={() => setProductoTab('competencia')}
-                  className="shrink-0 inline-flex items-center gap-1 px-3 py-2.5 text-xs font-semibold text-purple-700 dark:text-purple-300 bg-white dark:bg-gray-800 border border-purple-200 dark:border-purple-800 rounded-lg hover:bg-purple-50 dark:hover:bg-purple-900/20 transition"
+                  className="shrink-0 inline-flex items-center gap-1 px-3 py-2.5 text-xs font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-gray-800 border border-brand-200 dark:border-brand-800 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/20 transition"
                 >
                   Ver Competencia <ChevronRight size={12} />
                 </button>
@@ -2457,9 +2457,9 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 <span>{stepsDone} de {stepsTotal} pasos</span>
                 {runCost.total > 0 && (
                   <span className="inline-flex items-center gap-1.5 font-mono">
-                    <span className="text-purple-600 dark:text-purple-400 font-bold">💰 ${runCost.total.toFixed(4)}</span>
+                    <span className="text-brand-600 dark:text-brand-400 font-bold">💰 ${runCost.total.toFixed(4)}</span>
                     <span className="text-gray-400">·</span>
-                    {runCost.anthropic > 0 && <span className="text-violet-600 dark:text-violet-400">🧠 ${runCost.anthropic.toFixed(4)}</span>}
+                    {runCost.anthropic > 0 && <span className="text-brand-600 dark:text-brand-400">🧠 ${runCost.anthropic.toFixed(4)}</span>}
                     {runCost.openai > 0 && <span className="text-emerald-600 dark:text-emerald-400">🎤 ${runCost.openai.toFixed(4)}</span>}
                     {runCost.apify > 0 && <span className="text-amber-600 dark:text-amber-400">🔍 ${runCost.apify.toFixed(4)}</span>}
                   </span>
@@ -2468,7 +2468,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               </div>
               <div className="h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-gradient-to-r from-purple-500 to-violet-500 transition-all duration-500"
+                  className="h-full bg-gradient-to-r from-brand-400 to-brand-600 transition-all duration-500"
                   style={{ width: `${progress}%` }}
                 />
               </div>
@@ -2564,7 +2564,7 @@ function RunHistoryCard({ history, onClear }) {
                         <span>· {run.stats.competidoresOk}/{run.stats.competidoresCount} competidores ok</span>
                       )}
                       {run.cost?.total > 0 && (
-                        <span className="text-purple-600 dark:text-purple-400 font-mono">· 💰 ${run.cost.total.toFixed(4)}</span>
+                        <span className="text-brand-600 dark:text-brand-400 font-mono">· 💰 ${run.cost.total.toFixed(4)}</span>
                       )}
                     </div>
                   </div>
@@ -2587,7 +2587,7 @@ function RunHistoryCard({ history, onClear }) {
                     </ul>
                     {run.cost && run.cost.total > 0 && (
                       <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700 text-[10px] font-mono text-gray-600 dark:text-gray-400 flex flex-wrap gap-2">
-                        <span className="text-purple-600 dark:text-purple-400 font-bold">💰 ${run.cost.total.toFixed(4)}</span>
+                        <span className="text-brand-600 dark:text-brand-400 font-bold">💰 ${run.cost.total.toFixed(4)}</span>
                         {run.cost.anthropic > 0 && <span>🧠 ${run.cost.anthropic.toFixed(4)}</span>}
                         {run.cost.openai > 0 && <span>🎤 ${run.cost.openai.toFixed(4)}</span>}
                         {run.cost.apify > 0 && <span>🔍 ${run.cost.apify.toFixed(4)}</span>}
@@ -2618,14 +2618,14 @@ function TabsGuide() {
   });
   if (hidden) return null;
   return (
-    <div className="flex items-center gap-2 px-3 py-2 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg text-[11px] text-purple-800 dark:text-purple-300">
+    <div className="flex items-center gap-2 px-3 py-2 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-lg text-[11px] text-brand-800 dark:text-brand-300">
       <span className="shrink-0">🗺️</span>
       <span className="flex-1 min-w-0">
         <strong>Cómo va el flujo:</strong> ⚙️ Setup (cargá producto + competidores) → ▶️ Correr pipeline → 📥 Bandeja (revisá las ideas y generá el creativo en cada una) → 🤖 Copiloto para pedir más.
       </span>
       <button
         onClick={() => { try { localStorage.setItem('viora-tabs-guide-hidden', '1'); } catch {} setHidden(true); }}
-        className="shrink-0 text-purple-400 hover:text-purple-700 dark:hover:text-purple-200 transition"
+        className="shrink-0 text-brand-400 hover:text-brand-700 dark:hover:text-brand-200 transition"
         title="Ocultar guía"
       >
         <X size={13} />
@@ -2654,13 +2654,13 @@ function ProductTabs({ activeTab, onChange }) {
             onClick={() => onChange(t.id)}
             className={`px-3 py-2 text-xs font-bold transition relative shrink-0 ${
               activeTab === t.id
-                ? 'text-purple-700 dark:text-purple-300'
+                ? 'text-brand-700 dark:text-brand-300'
                 : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
             }`}
           >
             <span className="mr-1">{t.emoji}</span>{t.label}
             {activeTab === t.id && (
-              <span className="absolute bottom-0 left-2 right-2 h-0.5 bg-gradient-to-r from-purple-500 to-violet-500 rounded-t" />
+              <span className="absolute bottom-0 left-2 right-2 h-0.5 bg-gradient-to-r from-brand-400 to-brand-600 rounded-t" />
             )}
           </button>
         ))}
@@ -2678,7 +2678,7 @@ function ProdMiniStat({ label, value, color = 'gray', accent = false }) {
     slate: 'bg-slate-50 dark:bg-slate-900/40 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800',
   };
   return (
-    <div className={`px-2 py-1.5 rounded-md border ${colors[color]} ${accent ? 'ring-1 ring-fuchsia-300 dark:ring-fuchsia-700' : ''}`}>
+    <div className={`px-2 py-1.5 rounded-md border ${colors[color]} ${accent ? 'ring-1 ring-brand-300 dark:ring-brand-700' : ''}`}>
       <p className="text-[8px] font-bold uppercase tracking-wider opacity-60 leading-none">{label}</p>
       <p className="text-base font-bold tabular-nums leading-tight mt-0.5">{value}</p>
     </div>
@@ -2690,7 +2690,7 @@ function ProdReportStat({ label, value, highlight = false }) {
   return (
     <div className={`px-2 py-1.5 rounded border ${
       highlight
-        ? 'bg-fuchsia-50 dark:bg-fuchsia-900/20 border-fuchsia-200 dark:border-fuchsia-800 text-fuchsia-900 dark:text-fuchsia-200'
+        ? 'bg-brand-50 dark:bg-brand-900/20 border-brand-200 dark:border-brand-800 text-brand-900 dark:text-brand-200'
         : 'bg-gray-50 dark:bg-gray-900/30 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300'
     }`}>
       <p className="text-[8px] font-bold uppercase tracking-wider opacity-60 leading-none">{label}</p>
@@ -2740,14 +2740,14 @@ function StepRow({ step, liveIdeas, onRerun, rerunBusy = false }) {
 
   return (
     <li className={`rounded-md text-xs transition ${
-      status === 'running' ? 'bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800' :
+      status === 'running' ? 'bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800' :
       status === 'done' ? 'bg-emerald-50/50 dark:bg-emerald-900/10' :
       status === 'error' ? 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800' :
       'bg-gray-50/50 dark:bg-gray-800/30'
     }`}>
       <div className="flex items-start gap-2 px-3 py-2">
         <span className="mt-0.5 shrink-0">
-          {status === 'running' && <Loader2 size={13} className="animate-spin text-purple-600 dark:text-purple-400" />}
+          {status === 'running' && <Loader2 size={13} className="animate-spin text-brand-600 dark:text-brand-400" />}
           {status === 'done' && <Check size={13} className="text-emerald-600 dark:text-emerald-400" />}
           {status === 'error' && <AlertTriangle size={13} className="text-red-600" />}
           {status === 'pending' && <Clock size={13} className="text-gray-400" />}
@@ -2764,7 +2764,7 @@ function StepRow({ step, liveIdeas, onRerun, rerunBusy = false }) {
           <button
             onClick={onRerun}
             disabled={rerunBusy}
-            className="shrink-0 inline-flex items-center gap-1 px-2 py-1 text-[10px] font-semibold text-purple-700 dark:text-purple-300 bg-white dark:bg-gray-700 border border-purple-300 dark:border-purple-700 rounded hover:bg-purple-50 dark:hover:bg-purple-900/30 transition disabled:opacity-50"
+            className="shrink-0 inline-flex items-center gap-1 px-2 py-1 text-[10px] font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-gray-700 border border-brand-300 dark:border-brand-700 rounded hover:bg-brand-50 dark:hover:bg-brand-900/30 transition disabled:opacity-50"
             title="Re-ejecutar este paso solo"
           >
             {rerunBusy ? <Loader2 size={10} className="animate-spin" /> : <>↻ Re-ejecutar</>}

@@ -246,9 +246,9 @@ export default function CreativeRefreshPanel({ producto, addToast }) {
   return (
     <div className="space-y-4">
       {/* Encabezado explicativo */}
-      <div className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-blue-900/20 dark:to-cyan-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4">
+      <div className="bg-gradient-to-br from-brand-50 to-brand-100 dark:from-brand-900/20 dark:to-brand-800/20 border border-brand-200 dark:border-brand-800 rounded-xl p-4">
         <div className="flex items-center gap-2 mb-1">
-          <RefreshCw size={14} className="text-blue-600 dark:text-blue-400" />
+          <RefreshCw size={14} className="text-brand-600 dark:text-brand-400" />
           <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Renovación automática de creativos</h3>
         </div>
         <p className="text-[11px] text-gray-700 dark:text-gray-300 leading-snug">
@@ -278,7 +278,7 @@ export default function CreativeRefreshPanel({ producto, addToast }) {
                 ))}
               </select>
               <button onClick={loadIgAccounts} disabled={loadingIg} title="Recargar"
-                className="px-2 py-1.5 text-gray-500 hover:text-blue-600 disabled:opacity-40">
+                className="px-2 py-1.5 text-gray-500 hover:text-brand-600 disabled:opacity-40">
                 <RefreshCw size={12} className={loadingIg ? 'animate-spin' : ''} />
               </button>
             </div>
@@ -310,7 +310,7 @@ export default function CreativeRefreshPanel({ producto, addToast }) {
                 ))}
               </select>
               <button onClick={loadCampaigns} disabled={loadingCampaigns} title="Recargar"
-                className="px-2 py-1.5 text-gray-500 hover:text-blue-600 disabled:opacity-40">
+                className="px-2 py-1.5 text-gray-500 hover:text-brand-600 disabled:opacity-40">
                 <RefreshCw size={12} className={loadingCampaigns ? 'animate-spin' : ''} />
               </button>
             </div>
@@ -382,7 +382,7 @@ export default function CreativeRefreshPanel({ producto, addToast }) {
           <button
             onClick={() => run({ dryRun: false })}
             disabled={!canRun}
-            className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-gradient-to-br from-blue-600 to-cyan-500 rounded-md shadow-sm hover:from-blue-700 hover:to-cyan-600 disabled:opacity-40"
+            className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-gradient-to-br from-brand-600 to-brand-500 rounded-md shadow-sm hover:from-brand-700 hover:to-brand-600 disabled:opacity-40"
           >
             {running ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
             Ejecutar ahora
@@ -430,7 +430,7 @@ function RunResult({ result }) {
   const actionStyle = action === 'refreshed'
     ? 'text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800'
     : action === 'reviewed'
-      ? 'text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800'
+      ? 'text-brand-700 dark:text-brand-300 bg-brand-50 dark:bg-brand-900/20 border-brand-200 dark:border-brand-800'
       : 'text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-900/40 border-gray-200 dark:border-gray-700';
   const actionLabel = action === 'refreshed' ? 'Renovado' : action === 'reviewed' ? 'Revisado' : 'Sin cambios';
 

@@ -400,9 +400,9 @@ export default function MarketingSection({ addToast, bgAnalysis, onStart, onCanc
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       {/* Header */}
-      <div className="bg-gradient-to-br from-purple-50 to-white dark:from-purple-900/30 dark:to-gray-800 border border-purple-200 dark:border-purple-800 rounded-2xl p-5">
+      <div className="bg-gradient-to-br from-brand-50 to-white dark:from-brand-900/30 dark:to-gray-800 border border-brand-200 dark:border-brand-800 rounded-2xl p-5">
         <div className="flex items-center gap-3 mb-1">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-600 to-violet-500 flex items-center justify-center text-white font-bold shadow-sm">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-600 to-brand-500 flex items-center justify-center text-white font-bold shadow-sm">
             <Sparkles size={20} />
           </div>
           <div>
@@ -422,7 +422,7 @@ export default function MarketingSection({ addToast, bgAnalysis, onStart, onCanc
               value={form.productoNombre}
               onChange={(e) => setForm({ ...form, productoNombre: e.target.value })}
               placeholder="Ej: CELLU — suplemento anticelulitis"
-              className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-purple-500"
+              className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-brand-500"
             />
           </div>
           <div>
@@ -432,14 +432,14 @@ export default function MarketingSection({ addToast, bgAnalysis, onStart, onCanc
               value={form.productoUrl}
               onChange={(e) => setForm({ ...form, productoUrl: e.target.value })}
               placeholder="https://tumarca.com.ar/productos/slug"
-              className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-purple-500"
+              className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-brand-500"
             />
             <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">Si la poné, scrapeo la landing, extraigo foto + descripción y uso todo como contexto. Sin URL igual funciona pero el research queda más genérico.</p>
           </div>
           <button
             onClick={handleGenerate}
             disabled={effRunning || !form.productoNombre.trim()}
-            className="w-full inline-flex items-center justify-center gap-2 px-6 py-3.5 text-sm font-bold text-white bg-gradient-to-br from-purple-600 to-violet-500 rounded-xl hover:from-purple-700 hover:to-violet-600 shadow-sm transition disabled:opacity-40 disabled:cursor-not-allowed"
+            className="w-full inline-flex items-center justify-center gap-2 px-6 py-3.5 text-sm font-bold text-white bg-gradient-to-br from-brand-600 to-brand-500 rounded-xl hover:from-brand-700 hover:to-brand-600 shadow-sm transition disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <Sparkles size={18} /> {effRunning ? 'Generando… (mirá la pill)' : 'Generar documentación completa'}
           </button>
@@ -478,7 +478,7 @@ export default function MarketingSection({ addToast, bgAnalysis, onStart, onCanc
             </div>
           </div>
           {effInfoMsg && !effErrorMsg && (
-            <div className="mb-3 p-2.5 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-xs text-blue-800 dark:text-blue-200">
+            <div className="mb-3 p-2.5 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-lg text-xs text-brand-800 dark:text-brand-200">
               {effInfoMsg}
             </div>
           )}
@@ -502,22 +502,22 @@ export default function MarketingSection({ addToast, bgAnalysis, onStart, onCanc
             const currentIdx = STEPS.findIndex(s => s.key === effCurrentStep);
             const currentStepLabel = currentIdx >= 0 ? STEPS[currentIdx].label : 'Preparando…';
             return (
-              <div className="mb-4 p-4 rounded-xl bg-gradient-to-br from-purple-50 to-violet-50 dark:from-purple-900/20 dark:to-violet-900/20 border border-purple-200 dark:border-purple-800">
+              <div className="mb-4 p-4 rounded-xl bg-gradient-to-br from-brand-50 to-brand-100 dark:from-brand-900/20 dark:to-brand-800/20 border border-brand-200 dark:border-brand-800">
                 <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
                   <div>
-                    <p className="text-xs font-bold text-purple-900 dark:text-purple-200 uppercase tracking-wider">
+                    <p className="text-xs font-bold text-brand-900 dark:text-brand-200 uppercase tracking-wider">
                       Paso {Math.max(doneCount, currentIdx < 0 ? 0 : currentIdx + 1)} de {totalSteps} · {currentStepLabel}
                     </p>
-                    <p className="text-[11px] text-purple-700 dark:text-purple-300 mt-0.5">
+                    <p className="text-[11px] text-brand-700 dark:text-brand-300 mt-0.5">
                       Tiempo: {mm}:{ss}
                       {effRunning && etaRemainingSec > 0 && <> · ~{etaMM}:{etaSS} restante</>}
                     </p>
                   </div>
-                  <p className="text-2xl font-bold text-purple-900 dark:text-purple-100 tabular-nums">{pct}%</p>
+                  <p className="text-2xl font-bold text-brand-900 dark:text-brand-100 tabular-nums">{pct}%</p>
                 </div>
-                <div className="h-2 bg-purple-200 dark:bg-purple-900/50 rounded-full overflow-hidden">
+                <div className="h-2 bg-brand-200 dark:bg-brand-900/50 rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-gradient-to-r from-purple-600 to-violet-500 rounded-full transition-all duration-500"
+                    className="h-full bg-gradient-to-r from-brand-600 to-brand-500 rounded-full transition-all duration-500"
                     style={{ width: `${pct}%` }}
                   />
                 </div>
@@ -536,11 +536,11 @@ export default function MarketingSection({ addToast, bgAnalysis, onStart, onCanc
                 ? s.bullets[tickerIdx % s.bullets.length]
                 : null;
               return (
-                <div key={s.key} className={`border rounded-lg overflow-hidden transition-all ${isRunning ? 'border-purple-400 dark:border-purple-600 shadow-sm' : 'border-gray-200 dark:border-gray-700'}`}>
-                  <div className={`p-3 flex items-start gap-3 ${isRunning ? 'bg-purple-50 dark:bg-purple-900/20' : status === 'done' ? 'bg-emerald-50 dark:bg-emerald-900/20' : 'bg-gray-50 dark:bg-gray-800/50'}`}>
+                <div key={s.key} className={`border rounded-lg overflow-hidden transition-all ${isRunning ? 'border-brand-400 dark:border-brand-600 shadow-sm' : 'border-gray-200 dark:border-gray-700'}`}>
+                  <div className={`p-3 flex items-start gap-3 ${isRunning ? 'bg-brand-50 dark:bg-brand-900/20' : status === 'done' ? 'bg-emerald-50 dark:bg-emerald-900/20' : 'bg-gray-50 dark:bg-gray-800/50'}`}>
                     <div className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center mt-0.5">
                       {status === 'done' ? <Check size={14} className="text-emerald-600 dark:text-emerald-300" /> :
-                       isRunning ? <Loader2 size={14} className="text-purple-600 dark:text-purple-300 animate-spin" /> :
+                       isRunning ? <Loader2 size={14} className="text-brand-600 dark:text-brand-300 animate-spin" /> :
                        <div className="w-2 h-2 rounded-full bg-gray-300 dark:bg-gray-600" />}
                     </div>
                     <div className="flex-1 min-w-0">
@@ -560,8 +560,8 @@ export default function MarketingSection({ addToast, bgAnalysis, onStart, onCanc
                       <p className="text-[11px] text-gray-600 dark:text-gray-400 mt-1 leading-relaxed">{s.desc}</p>
                       {/* Bullet dinámico mientras el paso está corriendo */}
                       {activeBullet && (
-                        <div className="mt-2 flex items-center gap-1.5 text-[11px] text-purple-700 dark:text-purple-300">
-                          <div className="w-1 h-1 rounded-full bg-purple-600 dark:bg-purple-400 animate-pulse" />
+                        <div className="mt-2 flex items-center gap-1.5 text-[11px] text-brand-700 dark:text-brand-300">
+                          <div className="w-1 h-1 rounded-full bg-brand-600 dark:bg-brand-400 animate-pulse" />
                           <span className="italic">{activeBullet}…</span>
                         </div>
                       )}
@@ -598,7 +598,7 @@ export default function MarketingSection({ addToast, bgAnalysis, onStart, onCanc
                   {p.imagen ? (
                     <img src={p.imagen} alt={p.productoNombre} className="w-14 h-14 rounded-lg object-cover bg-gray-100 dark:bg-gray-700 shrink-0 border border-gray-200 dark:border-gray-600" />
                   ) : (
-                    <div className="w-14 h-14 rounded-lg bg-gradient-to-br from-purple-600 to-violet-500 flex items-center justify-center shrink-0">
+                    <div className="w-14 h-14 rounded-lg bg-gradient-to-br from-brand-600 to-brand-500 flex items-center justify-center shrink-0">
                       <Package size={22} className="text-white" />
                     </div>
                   )}
@@ -606,7 +606,7 @@ export default function MarketingSection({ addToast, bgAnalysis, onStart, onCanc
                     <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{p.productoNombre}</p>
                     <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate mb-0.5">
                       {new Date(p.createdAt).toLocaleDateString('es-AR')}
-                      {p.productoUrl && <> · <span className="text-purple-600 dark:text-purple-400">{(() => { try { return new URL(p.productoUrl).hostname; } catch { return p.productoUrl; } })()}</span></>}
+                      {p.productoUrl && <> · <span className="text-brand-600 dark:text-brand-400">{(() => { try { return new URL(p.productoUrl).hostname; } catch { return p.productoUrl; } })()}</span></>}
                     </p>
                     {/* Resumen ejecutivo inline (si se generó) */}
                     {p.resumenEjecutivo && (
@@ -812,7 +812,7 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
           {p.descripcion && <p className="text-[11px] text-gray-500 dark:text-gray-400 italic">{p.descripcion}</p>}
         </div>
         <div className="flex items-center gap-1 shrink-0">
-          <button onClick={() => onDownloadPack(p)} className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-bold text-white bg-purple-600 rounded-md hover:bg-purple-700 transition" title="Descargar todos los docs">
+          <button onClick={() => onDownloadPack(p)} className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-bold text-white bg-brand-600 rounded-md hover:bg-brand-700 transition" title="Descargar todos los docs">
             <Download size={11} /> Paquete
           </button>
           <button onClick={onDelete} className="p-1.5 text-gray-400 hover:text-red-600 transition" title="Borrar producto">
@@ -835,14 +835,14 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
                   disabled={s.disabled}
                   className={`group flex-1 min-w-[140px] flex items-center gap-2 px-2.5 py-2 rounded-lg text-left transition ${s.disabled ? 'opacity-40 cursor-not-allowed' : 'hover:shadow-sm cursor-pointer'} ${
                     isPast ? 'bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-300 dark:border-emerald-700' :
-                    isCurrent ? 'bg-purple-50 dark:bg-purple-900/20 border-2 border-purple-400 dark:border-purple-600 shadow-sm' :
+                    isCurrent ? 'bg-brand-50 dark:bg-brand-900/20 border-2 border-brand-400 dark:border-brand-600 shadow-sm' :
                     'bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700'
                   }`}
                   title={s.disabled ? 'Próximamente' : s.desc}
                 >
                   <div className={`shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${
                     isPast ? 'bg-emerald-500 text-white' :
-                    isCurrent ? 'bg-purple-600 text-white' :
+                    isCurrent ? 'bg-brand-600 text-white' :
                     'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
                   }`}>
                     {isPast ? <Check size={13} /> : s.n}
@@ -850,7 +850,7 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
                   <div className="flex-1 min-w-0">
                     <p className={`text-[10px] font-bold uppercase tracking-wider ${
                       isPast ? 'text-emerald-700 dark:text-emerald-300' :
-                      isCurrent ? 'text-purple-700 dark:text-purple-300' :
+                      isCurrent ? 'text-brand-700 dark:text-brand-300' :
                       'text-gray-500 dark:text-gray-400'
                     }`}>
                       Paso {s.n} {isPast && '✓'}
@@ -872,7 +872,7 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
           })}
         </div>
         {currentStepIdx !== -1 && !wizardSteps[currentStepIdx].disabled && (
-          <p className="text-[11px] text-purple-700 dark:text-purple-300 mt-2 italic">
+          <p className="text-[11px] text-brand-700 dark:text-brand-300 mt-2 italic">
             → Siguiente: <span className="font-semibold">{wizardSteps[currentStepIdx].desc}</span>
           </p>
         )}
@@ -892,17 +892,17 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
             <button
               key={t.key}
               onClick={() => setActiveTab(t.key)}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-t-md transition whitespace-nowrap ${isActive ? 'bg-white dark:bg-gray-800 text-purple-700 dark:text-purple-300 shadow-sm border border-b-0 border-gray-200 dark:border-gray-700' : 'text-gray-500 dark:text-gray-400 hover:bg-white/50 dark:hover:bg-gray-800/50'}`}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-t-md transition whitespace-nowrap ${isActive ? 'bg-white dark:bg-gray-800 text-brand-700 dark:text-brand-300 shadow-sm border border-b-0 border-gray-200 dark:border-gray-700' : 'text-gray-500 dark:text-gray-400 hover:bg-white/50 dark:hover:bg-gray-800/50'}`}
             >
               <Icon size={12} /> {t.label}
               {t.key === 'competencia' && competidores.length > 0 && (
-                <span className="ml-0.5 px-1 py-0 text-[9px] font-bold bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 rounded">{competidores.length}</span>
+                <span className="ml-0.5 px-1 py-0 text-[9px] font-bold bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 rounded">{competidores.length}</span>
               )}
               {t.key === 'memoria' && (memoria.notas.length + memoria.aprendizajes.length) > 0 && (
                 <span className="ml-0.5 px-1 py-0 text-[9px] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded">{memoria.notas.length + memoria.aprendizajes.length}</span>
               )}
               {t.key === 'creativos' && creativos?.fase1?.hooks?.length > 0 && (
-                <span className="ml-0.5 px-1 py-0 text-[9px] font-bold bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 rounded">{creativos.fase1.hooks.length}</span>
+                <span className="ml-0.5 px-1 py-0 text-[9px] font-bold bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 rounded">{creativos.fase1.hooks.length}</span>
               )}
             </button>
           );
@@ -923,7 +923,7 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
                 { label: 'Offer Brief', key: 'offerBrief', words: (p.docs?.offerBrief || '').split(/\s+/).length },
                 { label: 'Creencias', key: 'beliefs', words: (p.docs?.beliefs || '').split(/\s+/).length },
               ].map(d => (
-                <button key={d.key} onClick={() => setActiveTab('docs')} className="p-3 rounded-lg bg-gray-50 dark:bg-gray-700/50 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition text-left">
+                <button key={d.key} onClick={() => setActiveTab('docs')} className="p-3 rounded-lg bg-gray-50 dark:bg-gray-700/50 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition text-left">
                   <p className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase">{d.label}</p>
                   <p className="text-lg font-bold text-gray-900 dark:text-gray-100 tabular-nums">{d.words > 1 ? d.words : '—'}</p>
                   <p className="text-[10px] text-gray-400 dark:text-gray-500">palabras</p>
@@ -971,10 +971,10 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
               <span>Los ads se refrescan solos cada {COMP_REFRESH_STALE_HOURS}h mientras tengas la app abierta. También podés forzar refresh con el botón.</span>
             </div>
             <div className="flex gap-2">
-              <input type="text" value={compName} onChange={e => setCompName(e.target.value)} placeholder="Nombre del competidor" className="flex-1 px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" />
-              <input type="text" value={compUrl} onChange={e => setCompUrl(e.target.value)} placeholder="URL (landing o FB)" className="flex-1 px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" />
-              <input type="text" value={compPageId} onChange={e => setCompPageId(e.target.value)} placeholder="Page ID (Meta)" className="w-32 px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500" />
-              <button onClick={addCompetidor} disabled={!compName.trim()} className="inline-flex items-center gap-1 px-3 py-2 text-sm font-bold text-white bg-purple-600 rounded-lg hover:bg-purple-700 transition disabled:opacity-40">
+              <input type="text" value={compName} onChange={e => setCompName(e.target.value)} placeholder="Nombre del competidor" className="flex-1 px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
+              <input type="text" value={compUrl} onChange={e => setCompUrl(e.target.value)} placeholder="URL (landing o FB)" className="flex-1 px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
+              <input type="text" value={compPageId} onChange={e => setCompPageId(e.target.value)} placeholder="Page ID (Meta)" className="w-32 px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-500" />
+              <button onClick={addCompetidor} disabled={!compName.trim()} className="inline-flex items-center gap-1 px-3 py-2 text-sm font-bold text-white bg-brand-600 rounded-lg hover:bg-brand-700 transition disabled:opacity-40">
                 <Plus size={14} /> Agregar
               </button>
             </div>
@@ -992,7 +992,7 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
                       <div>
                         <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{c.nombre}</p>
                         <div className="flex items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">
-                          {c.url && <a href={c.url} target="_blank" rel="noreferrer" className="hover:text-purple-600 inline-flex items-center gap-0.5"><ExternalLink size={10} /> Web</a>}
+                          {c.url && <a href={c.url} target="_blank" rel="noreferrer" className="hover:text-brand-600 inline-flex items-center gap-0.5"><ExternalLink size={10} /> Web</a>}
                           {c.pageId && <span className="font-mono">ID: {c.pageId}</span>}
                           <span className="inline-flex items-center gap-1">
                             <span className={`w-1.5 h-1.5 rounded-full ${c.lastCheck ? 'bg-emerald-500 animate-pulse' : 'bg-gray-300'}`} />
@@ -1002,7 +1002,7 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
                       </div>
                       <div className="flex gap-1">
                         {c.pageId && (
-                          <button onClick={() => checkCompetitorAds(c)} className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-900/30 rounded hover:bg-purple-100 transition">
+                          <button onClick={() => checkCompetitorAds(c)} className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-brand-700 dark:text-brand-300 bg-brand-50 dark:bg-brand-900/30 rounded hover:bg-brand-100 transition">
                             <RefreshCw size={11} /> Actualizar ads
                           </button>
                         )}
@@ -1020,7 +1020,7 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
                               <div className="flex items-center gap-2 mt-1 text-[10px] text-gray-500 dark:text-gray-400">
                                 {ad.daysRunning != null && <span className={`font-bold ${ad.daysRunning >= 30 ? 'text-emerald-600' : ad.daysRunning >= 14 ? 'text-amber-600' : 'text-gray-500'}`}>{ad.daysRunning}d</span>}
                                 {ad.platforms && <span>{ad.platforms.join(', ')}</span>}
-                                {ad.snapshotUrl && <a href={ad.snapshotUrl} target="_blank" rel="noreferrer" className="text-purple-600 hover:underline">Ver ad →</a>}
+                                {ad.snapshotUrl && <a href={ad.snapshotUrl} target="_blank" rel="noreferrer" className="text-brand-600 hover:underline">Ver ad →</a>}
                               </div>
                             </div>
                           </div>
@@ -1039,9 +1039,9 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
         {effTab === 'creativos' && (
           <div className="space-y-5">
             {/* Config + botón generar */}
-            <div className="bg-gradient-to-br from-purple-50 to-violet-50 dark:from-purple-900/20 dark:to-violet-900/20 border border-purple-200 dark:border-purple-800 rounded-xl p-4">
+            <div className="bg-gradient-to-br from-brand-50 to-brand-100 dark:from-brand-900/20 dark:to-brand-800/20 border border-brand-200 dark:border-brand-800 rounded-xl p-4">
               <div className="flex items-center gap-2 mb-3">
-                <Sparkles size={16} className="text-purple-600 dark:text-purple-400" />
+                <Sparkles size={16} className="text-brand-600 dark:text-brand-400" />
                 <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Fase 1 — Hooks + diagnóstico</h3>
                 <span className="ml-auto text-[10px] text-gray-500 dark:text-gray-400">Generador de creativos Meta Ads</span>
               </div>
@@ -1052,12 +1052,12 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
                 <div>
                   <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">Tono</label>
                   <input type="text" value={hooksTono} onChange={e => setHooksTono(e.target.value)} placeholder="argentino coloquial, directo"
-                    className="w-full px-2 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-purple-500" />
+                    className="w-full px-2 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-brand-500" />
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">Objetivo</label>
                   <select value={hooksObjetivo} onChange={e => setHooksObjetivo(e.target.value)}
-                    className="w-full px-2 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-purple-500">
+                    className="w-full px-2 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-brand-500">
                     <option value="TOFU">TOFU (prospecting)</option>
                     <option value="MOFU">MOFU (consideración)</option>
                     <option value="BOFU">BOFU (conversión)</option>
@@ -1068,13 +1068,13 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
                 <div>
                   <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">Restricciones</label>
                   <input type="text" value={hooksRestricciones} onChange={e => setHooksRestricciones(e.target.value)} placeholder="sin palabras gatillo, sin vulgaridad"
-                    className="w-full px-2 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-purple-500" />
+                    className="w-full px-2 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-brand-500" />
                 </div>
               </div>
               <button
                 onClick={generarHooks}
                 disabled={hooksRunning}
-                className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-gradient-to-br from-purple-600 to-violet-500 rounded-lg hover:from-purple-700 hover:to-violet-600 shadow-sm transition disabled:opacity-40"
+                className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-gradient-to-br from-brand-600 to-brand-500 rounded-lg hover:from-brand-700 hover:to-brand-600 shadow-sm transition disabled:opacity-40"
               >
                 {hooksRunning ? <><Loader2 size={14} className="animate-spin" /> Generando…</> : <><Sparkles size={14} /> {creativos?.fase1 ? 'Regenerar hooks' : 'Generar hooks'}</>}
               </button>
@@ -1129,7 +1129,7 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
                       return (
                         <div key={a.id} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3">
                           <div className="flex items-center gap-2 mb-2">
-                            <span className="inline-flex items-center justify-center w-6 h-6 rounded bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 font-bold text-xs">{a.id}</span>
+                            <span className="inline-flex items-center justify-center w-6 h-6 rounded bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 font-bold text-xs">{a.id}</span>
                             <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{a.nombre}</p>
                             <span className="ml-auto text-[10px] text-gray-500 dark:text-gray-400">{hooksDelAngulo.length} hooks</span>
                           </div>
@@ -1197,8 +1197,8 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
               <div className="flex gap-2">
                 <input type="text" value={noteText} onChange={e => setNoteText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addNota(); }}
                   placeholder='Ej: "Llamar a proveedor de envases" / "Revisar copy del hero"'
-                  className="flex-1 px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" />
-                <button onClick={addNota} disabled={!noteText.trim()} className="px-3 py-2 text-sm font-bold text-white bg-purple-600 rounded-lg hover:bg-purple-700 transition disabled:opacity-40">Guardar</button>
+                  className="flex-1 px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                <button onClick={addNota} disabled={!noteText.trim()} className="px-3 py-2 text-sm font-bold text-white bg-brand-600 rounded-lg hover:bg-brand-700 transition disabled:opacity-40">Guardar</button>
               </div>
             </div>
             {/* Agregar aprendizaje */}

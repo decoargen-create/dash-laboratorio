@@ -54,7 +54,7 @@ export default function MetaConnectBanner({ returnTo = '/acceso' }) {
   }
 
   return (
-    <div className="mb-4 px-4 py-3 bg-gradient-to-br from-blue-50 to-white dark:from-blue-900/20 dark:to-gray-800/60 border border-blue-200 dark:border-blue-800 rounded-lg flex items-center gap-3">
+    <div className="mb-4 px-4 py-3 bg-gradient-to-br from-brand-50 to-white dark:from-brand-900/20 dark:to-gray-800/60 border border-brand-200 dark:border-brand-800 rounded-lg flex items-center gap-3">
       <div className="shrink-0 w-9 h-9 rounded-lg bg-gradient-to-br from-[#0668E1] to-[#1877F2] flex items-center justify-center text-white shadow-sm">
         <Zap size={16} />
       </div>

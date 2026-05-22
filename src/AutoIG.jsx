@@ -151,7 +151,7 @@ export default function AutoIGSection({ addToast }) {
   return (
     <div className="max-w-5xl mx-auto space-y-5">
       <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-pink-500 to-purple-600 flex items-center justify-center text-white shadow-sm">
+        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-600 flex items-center justify-center text-white shadow-sm">
           <Instagram size={20} />
         </div>
         <div className="flex-1">
@@ -162,7 +162,7 @@ export default function AutoIGSection({ addToast }) {
         </div>
         <button
           onClick={handleNew}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-br from-pink-500 to-purple-600 text-white text-sm font-semibold hover:opacity-90"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-br from-brand-500 to-brand-600 text-white text-sm font-semibold hover:opacity-90"
         >
           <Plus size={16} />
           Nueva automatización
@@ -178,7 +178,7 @@ export default function AutoIGSection({ addToast }) {
           </p>
           <button
             onClick={handleNew}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-br from-pink-500 to-purple-600 text-white text-sm font-semibold hover:opacity-90"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-br from-brand-500 to-brand-600 text-white text-sm font-semibold hover:opacity-90"
           >
             <Plus size={16} />
             Crear la primera
@@ -206,7 +206,7 @@ function AutomationCard({ automation, onEdit, onDelete }) {
   const a = automation;
   return (
     <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/40 p-4 flex items-center gap-4">
-      <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-pink-500 to-purple-600 flex items-center justify-center text-white shrink-0">
+      <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-brand-500 to-brand-600 flex items-center justify-center text-white shrink-0">
         <Instagram size={18} />
       </div>
       <div className="flex-1 min-w-0">
@@ -236,7 +236,7 @@ function AutomationCard({ automation, onEdit, onDelete }) {
         </button>
         <button
           onClick={onDelete}
-          className="p-2 rounded-lg text-gray-500 hover:text-rose-600 dark:text-gray-400 dark:hover:text-rose-400 hover:bg-gray-100 dark:hover:bg-gray-700"
+          className="p-2 rounded-lg text-gray-500 hover:text-brand-600 dark:text-gray-400 dark:hover:text-brand-400 hover:bg-gray-100 dark:hover:bg-gray-700"
           title="Eliminar"
         >
           <Trash2 size={16} />
@@ -420,7 +420,7 @@ function AutomationForm({ initial, onCancel, onSave, addToast }) {
         >
           <ChevronLeft size={16} />
         </button>
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-pink-500 to-purple-600 flex items-center justify-center text-white shadow-sm">
+        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-600 flex items-center justify-center text-white shadow-sm">
           <Instagram size={20} />
         </div>
         <div>
@@ -519,7 +519,7 @@ function AutomationForm({ initial, onCancel, onSave, addToast }) {
             </div>
           )}
           {igError && (
-            <div className="mt-2 text-xs text-rose-600 dark:text-rose-400">{igError}</div>
+            <div className="mt-2 text-xs text-brand-600 dark:text-brand-400">{igError}</div>
           )}
           <div className="mt-2 text-[11px] text-gray-500 dark:text-gray-400">
             La cuenta de IG tiene que estar convertida a Business y linkeada a una Page de tu Business Manager.
@@ -565,7 +565,7 @@ function AutomationForm({ initial, onCancel, onSave, addToast }) {
         </button>
         <button
           onClick={handleSubmit}
-          className="px-4 py-2 rounded-lg bg-gradient-to-br from-pink-500 to-purple-600 text-white text-sm font-semibold hover:opacity-90 inline-flex items-center gap-2"
+          className="px-4 py-2 rounded-lg bg-gradient-to-br from-brand-500 to-brand-600 text-white text-sm font-semibold hover:opacity-90 inline-flex items-center gap-2"
         >
           <Check size={14} /> Guardar
         </button>
@@ -595,7 +595,7 @@ function Spinner() {
 
 function ErrorLine({ msg, onRetry }) {
   return (
-    <div className="flex items-start gap-2 text-xs text-rose-600 dark:text-rose-400">
+    <div className="flex items-start gap-2 text-xs text-brand-600 dark:text-brand-400">
       <AlertTriangle size={14} className="shrink-0 mt-0.5" />
       <div className="flex-1">
         <div>{msg}</div>
@@ -603,7 +603,7 @@ function ErrorLine({ msg, onRetry }) {
           <button
             type="button"
             onClick={onRetry}
-            className="mt-1 inline-flex items-center gap-1 px-2 py-1 rounded border border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-900/20"
+            className="mt-1 inline-flex items-center gap-1 px-2 py-1 rounded border border-brand-300 dark:border-brand-800 text-brand-700 dark:text-brand-300 hover:bg-brand-50 dark:hover:bg-brand-900/20"
           >
             <RefreshCw size={11} /> Reintentar
           </button>
@@ -673,7 +673,7 @@ function SearchableSelect({ value, onChange, options, placeholder, searchPlaceho
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder={searchPlaceholder || 'Buscar…'}
-                className="w-full pl-7 pr-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md focus:outline-none focus:ring-2 focus:ring-pink-500"
+                className="w-full pl-7 pr-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500"
               />
             </div>
           </div>
@@ -689,7 +689,7 @@ function SearchableSelect({ value, onChange, options, placeholder, searchPlaceho
                   type="button"
                   onClick={() => pick(opt)}
                   className={`w-full px-3 py-2 text-left text-xs flex items-center gap-2 hover:bg-gray-50 dark:hover:bg-gray-700/50 ${
-                    opt.value === value ? 'bg-pink-50 dark:bg-pink-900/20 text-pink-700 dark:text-pink-300' : 'text-gray-700 dark:text-gray-300'
+                    opt.value === value ? 'bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300' : 'text-gray-700 dark:text-gray-300'
                   }`}
                 >
                   {opt.value === value ? <Check size={12} className="shrink-0" /> : <span className="w-3 shrink-0" />}

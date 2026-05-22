@@ -1716,6 +1716,7 @@ function CreativoPanel({ idea }) {
   const [qaLoading, setQaLoading] = useState(false);
   const [editInstruccion, setEditInstruccion] = useState('');
   const [editLoading, setEditLoading] = useState(false);
+  const [faseAuto, setFaseAuto] = useState('');
 
   // Al montar, miramos si esta idea ya tiene un creativo producido (y su QA).
   useEffect(() => {
@@ -1774,47 +1775,75 @@ function CreativoPanel({ idea }) {
       return;
     }
     setLoading(true);
+    const paletaMarca = getPaletaMarca(idea.productoId);
+    // Payload de la idea — constante entre intentos.
+    const ideaPayload = {
+      promptGeneradorImagen: idea.promptGeneradorImagen,
+      descripcionImagen: idea.descripcionImagen,
+      textoEnImagen: idea.textoEnImagen,
+      hook: idea.hook,
+      titulo: idea.titulo,
+      formato: idea.formato,
+      estiloVisual: idea.estiloVisual,
+      // Campos extra para que el backend pueda armar la escena cuando la
+      // idea no tiene promptGeneradorImagen (caso réplica).
+      angulo: idea.angulo,
+      painPoint: idea.painPoint,
+      copyPostMeta: idea.copyPostMeta || idea.copy,
+    };
+    // Auto-mejora: generamos el creativo, lo pasa el QA, y si el QA
+    // encuentra problemas regeneramos UNA vez con ese feedback inyectado en
+    // el prompt. Nos quedamos con la versión de mejor score. Así el user no
+    // tiene que pedir manualmente que se rehaga con las sugerencias.
+    const MAX_INTENTOS = 2;
+    const UMBRAL_OK = 9;
     try {
-      const resp = await fetch('/api/marketing/generate-creative', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          quality,
-          productoImagen,
-          paletaMarca: getPaletaMarca(idea.productoId),
-          idea: {
-            promptGeneradorImagen: idea.promptGeneradorImagen,
-            descripcionImagen: idea.descripcionImagen,
-            textoEnImagen: idea.textoEnImagen,
-            hook: idea.hook,
-            titulo: idea.titulo,
-            formato: idea.formato,
-            estiloVisual: idea.estiloVisual,
-            // Campos extra para que el backend pueda armar la escena cuando
-            // la idea no tiene promptGeneradorImagen (caso réplica).
-            angulo: idea.angulo,
-            painPoint: idea.painPoint,
-            copyPostMeta: idea.copyPostMeta || idea.copy,
-          },
-        }),
-      });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-      logCostsFromResponse(data, `generate-creative · ${(idea.titulo || idea.hook || '').slice(0, 60)}`);
+      let mejor = null;
+      let feedbackQA = null;
+      for (let intento = 1; intento <= MAX_INTENTOS; intento++) {
+        setFaseAuto(intento === 1 ? 'Generando el creativo…' : 'Mejorando con las notas del QA…');
+        const resp = await fetch('/api/marketing/generate-creative', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ quality, productoImagen, paletaMarca, feedbackQA, idea: ideaPayload }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+        logCostsFromResponse(data, `generate-creative · intento ${intento} · ${(idea.titulo || idea.hook || '').slice(0, 50)}`);
 
-      await persistirYqa({
-        imageBase64: data.imageBase64,
-        mimeType: data.mimeType || 'image/png',
-        formato: data.formato || idea.formato || 'static',
-        size: data.size,
-        quality: data.quality,
-        model: data.model,
-        generatedAt: data.generatedAt,
-      });
+        const nuevo = {
+          imageBase64: data.imageBase64,
+          mimeType: data.mimeType || 'image/png',
+          formato: data.formato || idea.formato || 'static',
+          size: data.size,
+          quality: data.quality,
+          model: data.model,
+          generatedAt: data.generatedAt,
+        };
+
+        setFaseAuto('Revisando la calidad…');
+        const qaResult = await runQa(nuevo.imageBase64, nuevo.mimeType);
+        const conQa = qaResult ? { ...nuevo, qa: qaResult } : nuevo;
+        const score = qaResult?.score || 0;
+        if (!mejor || score > (mejor.qa?.score || 0)) mejor = conQa;
+
+        // Cortamos si quedó bien, si el QA no respondió, o si fue el último.
+        if (!qaResult || score >= UMBRAL_OK || intento === MAX_INTENTOS) break;
+        feedbackQA = {
+          problemas: qaResult.problemas || [],
+          sugerencia: qaResult.sugerencia || '',
+          fortalezas: qaResult.fortalezas || [],
+        };
+      }
+
+      await saveCreativo(idea.id, mejor);
+      setCreativo(mejor);
+      setQa(mejor.qa || null);
     } catch (err) {
       setError(err.message || 'Error generando el creativo');
     } finally {
       setLoading(false);
+      setFaseAuto('');
     }
   };
 
@@ -1966,11 +1995,16 @@ function CreativoPanel({ idea }) {
           </div>
         )}
 
-        {/* Loading inicial */}
+        {/* Loading inicial — muestra la fase del ciclo generar→QA→mejorar */}
         {loading && !dataUrl && (
-          <div className="flex items-center gap-2 px-2 py-3 text-xs text-brand-700 dark:text-brand-300">
-            <Loader2 size={14} className="animate-spin" />
-            Generando el creativo con IA… puede tardar 30-60s.
+          <div className="px-2 py-3 text-xs text-brand-700 dark:text-brand-300">
+            <div className="flex items-center gap-2">
+              <Loader2 size={14} className="animate-spin" />
+              {faseAuto || 'Generando el creativo…'}
+            </div>
+            <p className="text-[10px] text-brand-500 dark:text-brand-400 mt-1 pl-6">
+              Se genera, la IA revisa la calidad y se mejora sola si hace falta — puede tardar 1-2 min.
+            </p>
           </div>
         )}
 

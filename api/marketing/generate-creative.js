@@ -54,7 +54,7 @@ function sizeForFormato(formato) {
 // de una idea "réplica" del deep-analyze— armamos la escena desde el
 // hook + ángulo + copy. Así el creativo se puede generar para CUALQUIER
 // idea de la Bandeja, no solo las del generador.
-function buildImagePrompt(idea, usarProductoReal = false, paleta = []) {
+function buildImagePrompt(idea, usarProductoReal = false, paleta = [], feedbackQA = null) {
   const estilo = (idea.estiloVisual || '').trim();
   const hook = (idea.hook || '').trim();
   let textoEnImagen = (idea.textoEnImagen || '').trim();
@@ -77,6 +77,19 @@ function buildImagePrompt(idea, usarProductoReal = false, paleta = []) {
 
   const parts = [];
   parts.push('Diseño de creativo publicitario para Meta Ads (Facebook/Instagram), calidad de producción profesional.');
+
+  // Feedback del control de calidad de una versión anterior — el cliente
+  // reintenta automáticamente cuando el QA encuentra problemas.
+  if (feedbackQA && ((Array.isArray(feedbackQA.problemas) && feedbackQA.problemas.length) || feedbackQA.sugerencia)) {
+    parts.push('');
+    parts.push('⚠️ SEGUNDA VERSIÓN — CORRECCIONES OBLIGATORIAS. Una primera versión de este creativo tuvo estos problemas detectados por un control de calidad. Corregilos TODOS en esta versión:');
+    for (const p of (feedbackQA.problemas || [])) parts.push(`- ${p}`);
+    if (feedbackQA.sugerencia) parts.push(`Sugerencia concreta del revisor: ${feedbackQA.sugerencia}`);
+    if (Array.isArray(feedbackQA.fortalezas) && feedbackQA.fortalezas.length) {
+      parts.push(`Conservá lo que SÍ funcionó de la versión anterior: ${feedbackQA.fortalezas.join('; ')}.`);
+    }
+  }
+
   if (usarProductoReal) {
     parts.push('');
     parts.push('PRODUCTO REAL: la imagen de referencia adjunta es el PRODUCTO REAL del anunciante. Usá ESE producto exactamente — mantené idéntica la forma del envase, la etiqueta, los colores, la tapa y todo el texto de la etiqueta. NO inventes otro packaging, no cambies la marca, no alteres el producto. Integralo como protagonista del creativo: nítido, bien iluminado, en foco. Si el creativo necesita un segundo producto genérico de comparación, ese sí puede ser inventado, pero el producto del anunciante es siempre el de la referencia.');
@@ -137,7 +150,14 @@ export default async function handler(req, res) {
   const paletaMarca = Array.isArray(body?.paletaMarca)
     ? body.paletaMarca.filter(c => typeof c === 'string' && /^#?[0-9a-fA-F]{3,8}$/.test(c)).slice(0, 6)
     : [];
-  const prompt = buildImagePrompt(idea, usarProductoReal, paletaMarca);
+  // Feedback de QA de una versión anterior (auto-mejora).
+  const fb = body?.feedbackQA;
+  const feedbackQA = fb && typeof fb === 'object' ? {
+    problemas: Array.isArray(fb.problemas) ? fb.problemas.map(p => String(p).slice(0, 300)).slice(0, 8) : [],
+    sugerencia: String(fb.sugerencia || '').slice(0, 400),
+    fortalezas: Array.isArray(fb.fortalezas) ? fb.fortalezas.map(p => String(p).slice(0, 200)).slice(0, 6) : [],
+  } : null;
+  const prompt = buildImagePrompt(idea, usarProductoReal, paletaMarca, feedbackQA);
 
   try {
     let resp;

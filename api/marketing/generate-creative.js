@@ -92,7 +92,9 @@ function buildImagePrompt(idea, usarProductoReal = false, paleta = [], feedbackQ
 
   if (usarProductoReal) {
     parts.push('');
-    parts.push('PRODUCTO REAL: la imagen de referencia adjunta es el PRODUCTO REAL del anunciante. Usá ESE producto exactamente — mantené idéntica la forma del envase, la etiqueta, los colores, la tapa y todo el texto de la etiqueta. NO inventes otro packaging, no cambies la marca, no alteres el producto. Integralo como protagonista del creativo: nítido, bien iluminado, en foco. Si el creativo necesita un segundo producto genérico de comparación, ese sí puede ser inventado, pero el producto del anunciante es siempre el de la referencia.');
+    parts.push('PRODUCTO REAL — NO LO MODIFIQUES: la imagen de referencia adjunta es el producto real del anunciante. Reproducí el envase EXACTAMENTE como está en la foto: misma forma, misma etiqueta, mismos colores, misma tapa y el MISMO texto de la etiqueta, letra por letra. PROHIBIDO: redibujar o reescribir la etiqueta, inventar o cambiar el texto del envase, agregar texto/sellos/logos sobre el producto, o alterar el packaging de cualquier forma. El producto es intocable — copialo tal cual.');
+    parts.push('TODO el texto del aviso (hook, copy, datos, CTA, sellos) va sobre el FONDO del creativo, alrededor del producto — NUNCA encima del envase. El envase solo muestra su etiqueta original.');
+    parts.push('Si el creativo necesita un segundo envase genérico de comparación, ese sí puede ser inventado y sin marca; pero el producto del anunciante es siempre, exactamente, el de la foto de referencia.');
   }
   if (estilo) parts.push(`Estilo visual: ${estilo}.`);
   if (Array.isArray(paleta) && paleta.length > 0) {

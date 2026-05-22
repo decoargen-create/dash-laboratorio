@@ -101,23 +101,25 @@ export default function DocumentacionTab({ producto, onUpdateProducto, addToast 
 
   return (
     <div className="space-y-3">
-      {/* Header con info + descargar todo */}
-      <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div>
-          <p className="text-xs text-gray-600 dark:text-gray-300">
-            Documentación generada por Claude basada en la landing del producto.
-          </p>
-          {producto?.docsGeneratedAt && (
-            <p className="text-[10px] text-gray-400 mt-0.5">
-              Generada: {new Date(producto.docsGeneratedAt).toLocaleString('es-AR')}
+      {/* Header de la sección */}
+      <div className="flex items-center justify-between gap-3 flex-wrap bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-3">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-brand-500 to-brand-600 flex items-center justify-center text-white shrink-0">
+            <FileText size={16} />
+          </div>
+          <div className="min-w-0">
+            <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Documentación del producto</h3>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400">
+              Research, avatar, offer brief y creencias generados por el pipeline.
+              {producto?.docsGeneratedAt && ` · ${new Date(producto.docsGeneratedAt).toLocaleDateString('es-AR')}`}
             </p>
-          )}
+          </div>
         </div>
         <button
           onClick={downloadAll}
-          className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-brand-600 to-brand-500 rounded-lg hover:from-brand-700 hover:to-brand-600 shadow-sm transition"
+          className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-brand-600 to-brand-500 rounded-lg hover:from-brand-700 hover:to-brand-600 shadow-sm transition shrink-0"
         >
-          <Download size={12} /> Descargar toda como .md
+          <Download size={12} /> Descargar todo (.md)
         </button>
       </div>
 

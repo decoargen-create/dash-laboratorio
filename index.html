@@ -31,6 +31,8 @@
           var font = localStorage.getItem('dash-ui-font');
           if (font === 'montserrat') de.style.fontFamily = "'Montserrat', system-ui, -apple-system, sans-serif";
           else if (font === 'nunito') de.style.fontFamily = "'Nunito', system-ui, -apple-system, sans-serif";
+          var av = localStorage.getItem('dash-accent-vars');
+          if (av) { var o = JSON.parse(av); for (var k in o) de.style.setProperty(k, o[k]); }
         } catch (e) {}
       })();
     </script>

@@ -10,6 +10,23 @@ html.dark {
   color-scheme: dark;
 }
 
+/* Paleta de marca como variables CSS — re-tematizable en runtime desde el
+   panel de Apariencia. Estos son los valores default (dorado Viora);
+   App.jsx los sobreescribe en el <html> cuando el user elige otro color. */
+:root {
+  --brand-50: 250 244 234;
+  --brand-100: 243 230 207;
+  --brand-200: 233 210 168;
+  --brand-300: 233 201 157;
+  --brand-400: 214 176 132;
+  --brand-500: 195 152 102;
+  --brand-600: 184 137 90;
+  --brand-700: 150 112 63;
+  --brand-800: 107 74 42;
+  --brand-900: 74 51 32;
+  --brand-950: 43 29 18;
+}
+
 body {
   @apply bg-gray-50 text-gray-900 dark:bg-gray-900 dark:text-gray-100;
 }

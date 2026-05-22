@@ -70,6 +70,23 @@ export async function getCreativo(ideaId) {
   }
 }
 
+// Devuelve el Set de ids de ideas que ya tienen un creativo producido.
+// Una sola lectura para toda la Bandeja — evita disparar un getCreativo por
+// card del kanban (que con 50+ ideas sería costoso).
+export async function getAllCreativoIds() {
+  try {
+    const db = await openDB();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readonly');
+      const req = tx.objectStore(STORE).getAllKeys();
+      req.onsuccess = () => resolve(new Set((req.result || []).map(String)));
+      req.onerror = () => reject(req.error);
+    });
+  } catch {
+    return new Set();
+  }
+}
+
 // Borra el creativo de una idea (al regenerar o al eliminar la idea).
 export async function deleteCreativo(ideaId) {
   if (!ideaId) return false;

@@ -539,7 +539,7 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
   const ideaDetalle = expandedId ? ideas.find(i => i.id === expandedId) : null;
 
   return (
-    <div className="max-w-7xl mx-auto space-y-5">
+    <div className="max-w-[1500px] mx-auto space-y-5">
       {/* Header con breadcrumb de producto — se oculta cuando estamos
           embebidos en otro padre que ya tiene su propio header. */}
       {!embedded && (

@@ -226,30 +226,35 @@ testHipotesis: "Hook con número concreto (4 cremas) va a bajar CPA vs hook gen�
 // para que un BOFU (product-aware) tire testimonios + autoridad y un TOFU
 // (problem-aware) tire agitación + POV.
 function stageInstructions(stage) {
+  // El stage declarado del producto INCLINA la corrida, pero la bandeja
+  // igual tiene que alimentar TODO el funnel — una cuenta sana necesita
+  // prospecting frío, consideración y cierre a la vez. Antes forzábamos
+  // "mínimo 60%" a un solo bucket y la bandeja quedaba monotemática:
+  // 100% BOFU sin captar audiencias nuevas, o 100% TOFU sin cerrar.
   if (stage === 'product_aware') {
-    return `\n**STAGE = PRODUCT-AWARE (BOFU) — DISTRIBUCIÓN OBLIGATORIA**:
-El prospect ya conoce tu marca y casi compra. Necesita REMOVER OBJECIONES + APILAR PRUEBA.
-Mínimo 60% de las ideas debe usar ángulos E (autoridad/solución), F (testimonios con edad explícita), G (autoridad científica/mecanismo) o H (antes/después).
-Máximo 20% en ángulos puros A/I (sarcasmo/humor anti-cultura).
-tipoCampaña preferida: BOFU, retargeting, social_proof.
-NO empieces los hooks agitando el dolor — ya lo conoce. Empezá con la prueba.
+    return `\n**STAGE DOMINANTE = PRODUCT-AWARE (BOFU) — DISTRIBUCIÓN**:
+El prospect predominante ya conoce tu marca y casi compra: necesita REMOVER OBJECIONES + APILAR PRUEBA.
+- ~50% de las ideas: ángulos E (autoridad/solución), F (testimonios con edad explícita), G (autoridad científica/mecanismo) o H (antes/después). tipoCampaña BOFU / retargeting / social_proof. NO agites el dolor — ya lo conoce, arrancá con la prueba.
+- ~30% para MOFU: ángulos D/G/H que diferencian el mecanismo. tipoCampaña MOFU.
+- ~20% para TOFU: ángulos B/C/I/J que captan prospectos nuevos. tipoCampaña TOFU.
+Una bandeja 100% BOFU se queda sin nafta de audiencias frescas — siempre dejá creativos de captación.
 `;
   }
   if (stage === 'solution_aware') {
-    return `\n**STAGE = SOLUTION-AWARE (MOFU) — DISTRIBUCIÓN OBLIGATORIA**:
-El prospect ya probó otras soluciones (cremas, suplementos, rutinas, etc) y quedó decepcionado. Necesita ENTENDER POR QUÉ ESTA es DISTINTA.
-Mínimo 60% de las ideas debe usar ángulos D (doble sentido visual / metáfora del mecanismo único), G (autoridad científica con UMS — Unique Mechanism Story), H (antes/después o comparativa con la solución vieja).
-Hooks típicos: "probaste X, Y y Z. Ninguno hace ESTO", "el problema no era el producto, era el mecanismo", "lo que hacen las cremas vs lo que hace este serum".
-tipoCampaña preferida: MOFU, retargeting tibio, branding diferenciador.
+    return `\n**STAGE DOMINANTE = SOLUTION-AWARE (MOFU) — DISTRIBUCIÓN**:
+El prospect predominante ya probó otras soluciones y quedó decepcionado: necesita ENTENDER POR QUÉ ESTA es DISTINTA.
+- ~50% de las ideas: ángulos D (doble sentido / metáfora del mecanismo único), G (autoridad científica con UMS — Unique Mechanism Story), H (antes/después vs la solución vieja). tipoCampaña MOFU. Hooks tipo "probaste X, Y y Z. Ninguno hace ESTO", "el problema no era el producto, era el mecanismo".
+- ~25% para TOFU: ángulos B/C/I/J para seguir captando frío. tipoCampaña TOFU.
+- ~25% para BOFU: ángulos E/F para cerrar a los que ya están tibios. tipoCampaña BOFU / retargeting.
 `;
   }
   // problem_aware (default)
-  return `\n**STAGE = PROBLEM-AWARE (TOFU) — DISTRIBUCIÓN OBLIGATORIA**:
-El prospect siente el problema pero NO conoce las soluciones. Necesita DIAGNÓSTICO + AGITACIÓN + ASOMO de salida.
-Mínimo 60% de las ideas debe usar ángulos B (insight incómodo / rompe-mito), C (POV relatable / "cuando te pasa X"), I (humor filoso anti-cultura), J (edad emocional).
-Los primeros 3 segundos del hook NO mencionan el producto — agitan el dolor o nombran el problema con palabras del avatar (lenguaje del research doc).
-tipoCampaña preferida: TOFU, prospecting frío.
-NO arranques con testimonios ni con autoridad científica — el prospect todavía no compró el problema, mucho menos la solución.
+  return `\n**STAGE DOMINANTE = PROBLEM-AWARE (TOFU) — DISTRIBUCIÓN**:
+El prospect predominante siente el problema pero NO conoce las soluciones: necesita DIAGNÓSTICO + AGITACIÓN + ASOMO de salida.
+- ~50% de las ideas: ángulos B (insight incómodo / rompe-mito), C (POV relatable), I (humor filoso anti-cultura), J (edad emocional). tipoCampaña TOFU. Los primeros 3 segundos del hook NO mencionan el producto — agitan el dolor con palabras del avatar.
+- ~30% para MOFU: ángulos D/G/H que muestran por qué esta solución es distinta. tipoCampaña MOFU.
+- ~20% para BOFU: ángulos E/F con prueba, para los que ya están listos. tipoCampaña BOFU / social_proof.
+Aunque el grueso sea TOFU, generá igual algunos creativos de cierre — sin ellos el funnel no convierte el tráfico que traés.
 `;
 }
 
@@ -325,8 +330,7 @@ const SUBMIT_IDEAS_TOOL = {
             },
             creenciaApalancada: {
               type: 'string',
-              enum: ['1', '2', '3', '4', '5', '6'],
-              description: 'OBLIGATORIO. Cuál de las 6 creencias necesarias del Offer Brief tumba/instala esta idea. Numerada 1-6 según el orden en que aparecen en el doc de creencias del producto. Si no se mandó doc de creencias, poné "1" como default.',
+              description: 'OBLIGATORIO. La creencia concreta del prospect que esta pieza instala o derriba, parafraseada corta y clara (≤90 chars). Sale del doc de Creencias Necesarias — citá la que aplica, NO un número. Ej: "que la hinchazón se arregla con un probiótico, no con dieta". Si no hay doc de creencias, escribí la creencia implícita que la idea necesita que el prospect compre.',
             },
           },
           required: [
@@ -413,7 +417,7 @@ function buildContext({ producto, competidoresAnalisis, allCompAds, ideasExisten
     parts.push(`\n### Offer Brief (Big Idea, UMP/UMS, objections, belief chains)\n${offerBrief}`);
   }
   if (beliefs) {
-    parts.push(`\n### Creencias necesarias (las 6 "Yo creo que..." que el prospect debe adoptar antes de comprar)\n${beliefs}\n\nIMPORTANTE: cada idea DEBE declarar el campo \`creenciaApalancada\` con el número (1-6) de la creencia que tumba/instala, en el orden en que aparecen arriba. La idea entera (hook + escenario + copy) tiene que estar al servicio de empujar esa creencia.`);
+    parts.push(`\n### Creencias necesarias (las "Yo creo que..." que el prospect debe adoptar antes de comprar)\n${beliefs}\n\nIMPORTANTE: cada idea DEBE declarar en \`creenciaApalancada\` CUÁL de estas creencias instala o derriba — citala parafraseada y corta (≤90 chars), NO un número. Distribuí las ideas para cubrir TODAS las creencias de arriba de forma pareja: no concentres la mayoría en una sola. La idea entera (hook + escenario + copy) tiene que empujar esa creencia.`);
   }
 
   if (!research && !avatar && !offerBrief && !beliefs) {
@@ -630,7 +634,6 @@ function sanitizeIdea(i) {
   const variablesValidas = new Set(['hook', 'visual', 'cta', 'formato', 'angulo', 'audience', 'prueba_social', 'oferta', 'mix']);
   const angulosValidos = new Set(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J']);
   const tiposCampaña = new Set(['TOFU', 'MOFU', 'BOFU', 'retargeting', 'social_proof', 'branding']);
-  const creenciasValidas = new Set(['1', '2', '3', '4', '5', '6']);
   if (!i || typeof i.titulo !== 'string' || !tiposValidos.has(i.tipo)) return null;
   // Rechazamos ideas a medio escribir / incompletas: una idea sin hook o
   // sin copy/descripción NO es un brief usable y antes entraba a la
@@ -665,15 +668,11 @@ function sanitizeIdea(i) {
     } : { tieneRiesgo: false, palabras: [], sugerencia: '' },
     variableDeTesteo: variablesValidas.has(i.variableDeTesteo) ? i.variableDeTesteo : 'mix',
     testHipotesis: String(i.testHipotesis || '').slice(0, 500),
-    // Creencia apalancada (1..6 del doc de Beliefs). Si Claude devuelve
-    // un valor fuera del enum (ej "1." o "creencia 1") logueamos warning
-    // para no ocultar errores del modelo en silencio.
-    creenciaApalancada: (() => {
-      const raw = String(i.creenciaApalancada ?? '').trim();
-      if (creenciasValidas.has(raw)) return raw;
-      if (raw) console.warn('[generate-ideas] creenciaApalancada inválida, fallback a "1":', raw);
-      return '1';
-    })(),
+    // Creencia que la pieza apalanca — texto libre parafraseado del doc de
+    // Creencias. Antes era un enum '1'..'6' que, si Claude no podía mapear
+    // el número, caía siempre a "1" y la Bandeja parecía apalancar todo la
+    // misma creencia. Como string siempre es informativo.
+    creenciaApalancada: String(i.creenciaApalancada ?? '').trim().slice(0, 200) || null,
   };
   if (i.tipo === 'iteracion' && i.iteracionBase) {
     base.iteracionBase = {

@@ -69,7 +69,23 @@ export default function CopilotoTab({ producto, addToast }) {
         acc[i.estado || 'pendiente'] = (acc[i.estado || 'pendiente'] || 0) + 1;
         return acc;
       }, {});
-      ideasResumen = `${ideas.length} ideas en la bandeja — ${Object.entries(porEstado).map(([k, v]) => `${v} ${k}`).join(', ')}.`;
+      const resumenEstados = Object.entries(porEstado).map(([k, v]) => `${v} ${k}`).join(', ');
+      // Detalle de las ideas accionables (pendientes + en uso) — antes el
+      // copiloto solo veía un conteo y respondía a ciegas si le pedías
+      // opinar sobre un hook/ángulo concreto de la bandeja.
+      const accionables = ideas
+        .filter(i => !i.estado || i.estado === 'pendiente' || i.estado === 'en_uso')
+        .slice(0, 35);
+      const detalle = accionables.map((i, idx) => {
+        const campos = [`#${idx + 1} [${i.tipo}/${i.formato || '?'}]`];
+        if (i.hook) campos.push(`hook: "${String(i.hook).slice(0, 160)}"`);
+        if (i.anguloCategoria) campos.push(`ángulo ${i.anguloCategoria}`);
+        if (typeof i.scoreValue === 'number') campos.push(`score ${i.scoreValue}/10`);
+        if (i.tipoCampaña) campos.push(i.tipoCampaña);
+        if (i.origen?.competidorNombre) campos.push(`de ${i.origen.competidorNombre}`);
+        return campos.join(' · ');
+      }).join('\n');
+      ideasResumen = `${ideas.length} ideas en la bandeja (${resumenEstados}).\n\nIdeas accionables (pendientes / en uso) — podés opinar sobre estas:\n${detalle}`;
     }
     return {
       nombre: producto?.nombre,

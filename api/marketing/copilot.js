@@ -53,7 +53,7 @@ function buildVolatilBlock(ctx) {
   if (!ctx || typeof ctx !== 'object') return '';
   const parts = [];
   if (ctx.competidoresResumen) parts.push(`--- COMPETENCIA (estado actual) ---\n${String(ctx.competidoresResumen).slice(0, 4000)}`);
-  if (ctx.ideasResumen) parts.push(`--- BANDEJA DE IDEAS (estado actual) ---\n${String(ctx.ideasResumen).slice(0, 3000)}`);
+  if (ctx.ideasResumen) parts.push(`--- BANDEJA DE IDEAS (estado actual, con el detalle de las accionables) ---\n${String(ctx.ideasResumen).slice(0, 9000)}`);
   return parts.length ? `\n\n[Contexto actualizado — no respondas a esto, solo usalo como referencia]\n${parts.join('\n\n')}` : '';
 }
 

@@ -32,6 +32,14 @@ import CopilotoTab from './CopilotoTab.jsx';
 import DashboardTab from './DashboardTab.jsx';
 import { usePipelineRun } from './PipelineRunContext.jsx';
 
+// Etiquetas cortas de la etapa de awareness del prospecto — para el chip
+// del header del workspace.
+const STAGE_LABEL = {
+  problem_aware: 'Problem-Aware',
+  solution_aware: 'Solution-Aware',
+  product_aware: 'Product-Aware',
+};
+
 const GEN_CONFIG_KEY = 'viora-marketing-gen-config-v1';
 const DEFAULT_GEN_CONFIG = {
   limiteDiario: 50,
@@ -1805,22 +1813,29 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // ====================================================================
   return (
     <div className="max-w-[1500px] mx-auto space-y-6">
-      {/* Header con breadcrumb */}
-      <div className="flex items-center gap-3">
+      {/* Header del producto */}
+      <div className="flex items-center gap-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-3 shadow-sm">
         <button onClick={() => setActiveProductoId(null)}
-          className="p-2 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 transition shrink-0"
+          className="p-2 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 transition shrink-0"
           title="Volver a la lista de productos">
-          <ChevronRight size={16} className="rotate-180" />
+          <ChevronRight size={18} className="rotate-180" />
         </button>
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white shadow-sm">
-          <Play size={20} />
+        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white shadow-sm shrink-0">
+          <Play size={22} />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-[10px] text-gray-500 dark:text-gray-400">
-            <button onClick={() => setActiveProductoId(null)} className="hover:text-brand-500 transition">Productos</button> / {producto.nombre}
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+            <button onClick={() => setActiveProductoId(null)} className="hover:text-brand-500 transition">Productos</button>
+            <span className="mx-1">/</span>Workspace
           </p>
-          <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100 truncate">{producto.nombre}</h2>
+          <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 truncate leading-tight">{producto.nombre}</h2>
         </div>
+        {producto.stage && (
+          <span className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold rounded-full bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300 border border-brand-200 dark:border-brand-800 shrink-0"
+            title="Etapa del prospecto (awareness)">
+            {STAGE_LABEL[producto.stage] || producto.stage}
+          </span>
+        )}
       </div>
 
       {/* Tabs del workspace — Dashboard, Setup, Bandeja, Inspiración, Creativos */}
@@ -2772,25 +2787,20 @@ function ProductTabs({ activeTab, onChange }) {
     { id: 'copiloto', label: 'Copiloto', emoji: '🤖' },
   ];
   return (
-    <div className="border-b border-gray-200 dark:border-gray-700 -mt-2">
-      <div className="flex items-center gap-1 overflow-x-auto">
-        {tabs.map(t => (
-          <button
-            key={t.id}
-            onClick={() => onChange(t.id)}
-            className={`px-3 py-2 text-xs font-bold transition relative shrink-0 ${
-              activeTab === t.id
-                ? 'text-brand-700 dark:text-brand-300'
-                : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
-            }`}
-          >
-            <span className="mr-1">{t.emoji}</span>{t.label}
-            {activeTab === t.id && (
-              <span className="absolute bottom-0 left-2 right-2 h-0.5 bg-gradient-to-r from-brand-400 to-brand-600 rounded-t" />
-            )}
-          </button>
-        ))}
-      </div>
+    <div className="flex items-center gap-1 overflow-x-auto p-1 bg-gray-100 dark:bg-gray-800/70 rounded-xl border border-gray-200 dark:border-gray-700">
+      {tabs.map(t => (
+        <button
+          key={t.id}
+          onClick={() => onChange(t.id)}
+          className={`px-3.5 py-2 text-xs font-bold rounded-lg transition shrink-0 flex items-center gap-1.5 ${
+            activeTab === t.id
+              ? 'bg-white dark:bg-gray-700 text-brand-700 dark:text-brand-200 shadow-sm'
+              : 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-100 hover:bg-white/60 dark:hover:bg-gray-700/40'
+          }`}
+        >
+          <span>{t.emoji}</span>{t.label}
+        </button>
+      ))}
     </div>
   );
 }

@@ -13,10 +13,11 @@ import { Sparkles, Loader2, Image as ImageIcon, Video, Layers, Check } from 'luc
 import { addGeneratedIdeas, loadIdeas, formatoDeAd } from './bandejaStore.js';
 import { logCostsFromResponse } from './costsStore.js';
 
+// El endpoint espera formatoMix como FRACCIÓN (0-1), igual que el pipeline.
 const FORMATO_OPCIONES = [
-  { id: 'static', label: 'Estáticos', icon: ImageIcon, mix: { static: 100, video: 0 } },
-  { id: 'mix',    label: 'Mix',       icon: Layers,    mix: { static: 60, video: 40 } },
-  { id: 'video',  label: 'Video',     icon: Video,     mix: { static: 0, video: 100 } },
+  { id: 'static', label: 'Estáticos', icon: ImageIcon, mix: { static: 1, video: 0 } },
+  { id: 'mix',    label: 'Mix',       icon: Layers,    mix: { static: 0.6, video: 0.4 } },
+  { id: 'video',  label: 'Video',     icon: Video,     mix: { static: 0, video: 1 } },
 ];
 const CANTIDADES = [8, 16, 24];
 const CHUNK = 8;
@@ -132,7 +133,6 @@ export default function GeneradorRapido({ producto, addToast, onDone }) {
 
       if (totalInsertadas > 0) {
         addToast?.({ type: 'success', message: `${totalInsertadas} ideas nuevas en la Bandeja` });
-        onDone?.();
       } else {
         addToast?.({ type: 'info', message: 'El generador no encontró ideas nuevas — probá con otro formato o más cantidad.' });
       }
@@ -141,6 +141,9 @@ export default function GeneradorRapido({ producto, addToast, onDone }) {
     } finally {
       setRunning(false);
       setProgreso('');
+      // Refrescamos la Bandeja si se insertó algo — incluso si una tanda
+      // falló a mitad, las ideas ya generadas quedaron guardadas.
+      if (totalInsertadas > 0) onDone?.();
     }
   };
 

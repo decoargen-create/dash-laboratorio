@@ -374,7 +374,8 @@ function buildContext({ producto, competidoresAnalisis, allCompAds, ideasExisten
   parts.push(`Nombre: ${producto?.nombre || '(sin nombre)'}`);
   if (producto?.landingUrl) parts.push(`Landing: ${producto.landingUrl}`);
   if (producto?.descripcion) parts.push(`Descripción: ${producto.descripcion}`);
-  if (producto?.resumenEjecutivo) parts.push(`\nResumen ejecutivo: ${producto.resumenEjecutivo}`);
+  const resumenEjec = producto?.docs?.resumenEjecutivo || producto?.resumenEjecutivo;
+  if (resumenEjec) parts.push(`\nResumen ejecutivo: ${resumenEjec}`);
 
   // Activo visual de marca — elemento icónico reutilizable (frasco, textura,
   // forma distintiva). Si está definido, Claude debe incluirlo en el

@@ -486,12 +486,12 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
           >
             <ChevronRight size={16} className="rotate-180" />
           </button>
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-fuchsia-500 to-pink-500 flex items-center justify-center text-white shadow-sm shrink-0">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-600 flex items-center justify-center text-white shadow-sm shrink-0">
             <Inbox size={20} />
           </div>
           <div className="min-w-0">
             <p className="text-[10px] text-gray-500 dark:text-gray-400">
-              <button onClick={() => setActiveProductoId(null)} className="hover:text-fuchsia-500 transition">Bandeja</button> / {productoActivo?.nombre || 'Producto'}
+              <button onClick={() => setActiveProductoId(null)} className="hover:text-brand-500 transition">Bandeja</button> / {productoActivo?.nombre || 'Producto'}
             </p>
             <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100 truncate">
               {productoActivo?.nombre || 'Bandeja de ideas'}
@@ -509,11 +509,11 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
                 Limpiar
               </button>
               <button onClick={() => exportSelected('docx')}
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-fuchsia-500 to-pink-500 rounded-lg hover:from-fuchsia-600 hover:to-pink-600 shadow-sm transition">
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-brand-600 rounded-lg hover:from-brand-600 hover:to-brand-700 shadow-sm transition">
                 <Download size={12} /> Exportar {selected.size} .docx
               </button>
               <button onClick={() => exportSelected('md')}
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-fuchsia-700 dark:text-fuchsia-300 bg-white dark:bg-gray-800 border border-fuchsia-300 dark:border-fuchsia-700 rounded-lg hover:bg-fuchsia-50 dark:hover:bg-fuchsia-900/20 transition">
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-gray-800 border border-brand-300 dark:border-brand-700 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/20 transition">
                 .md
               </button>
             </>
@@ -522,20 +522,20 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
             <>
               <button
                 onClick={() => setSelected(new Set(filtered.map(i => i.id)))}
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-fuchsia-700 dark:text-fuchsia-300 bg-white dark:bg-gray-800 border border-fuchsia-300 dark:border-fuchsia-700 rounded-lg hover:bg-fuchsia-50 dark:hover:bg-fuchsia-900/20 transition"
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-gray-800 border border-brand-300 dark:border-brand-700 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/20 transition"
               >
                 <CheckSquare size={12} /> Seleccionar todas ({filtered.length})
               </button>
               <button
                 onClick={() => exportAll(filtered, 'docx')}
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-fuchsia-500 to-pink-500 rounded-lg hover:from-fuchsia-600 hover:to-pink-600 shadow-sm transition"
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-brand-600 rounded-lg hover:from-brand-600 hover:to-brand-700 shadow-sm transition"
                 title={`Exportar todas las ${filtered.length} ideas visibles como .docx`}
               >
                 <Download size={12} /> Exportar todas .docx ({filtered.length})
               </button>
               <button
                 onClick={() => exportAll(filtered, 'md')}
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-fuchsia-700 dark:text-fuchsia-300 bg-white dark:bg-gray-800 border border-fuchsia-300 dark:border-fuchsia-700 rounded-lg hover:bg-fuchsia-50 dark:hover:bg-fuchsia-900/20 transition"
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-gray-800 border border-brand-300 dark:border-brand-700 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/20 transition"
                 title={`Exportar todas las ${filtered.length} ideas visibles como .md`}
               >
                 .md
@@ -552,7 +552,7 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
           <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
           <input type="text" value={query} onChange={e => setQuery(e.target.value)}
             placeholder="Buscar por título, ángulo, competidor…"
-            className="w-full pl-7 pr-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md focus:outline-none focus:ring-2 focus:ring-fuchsia-500" />
+            className="w-full pl-7 pr-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
         </div>
         <select value={filtroTipo} onChange={e => setFiltroTipo(e.target.value)}
           className="px-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md">
@@ -572,7 +572,7 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
             <button key={f.id} onClick={() => setFiltroFormato(f.id)}
               className={`px-2.5 py-1 text-[11px] font-semibold rounded transition ${
                 filtroFormato === f.id
-                  ? 'bg-white dark:bg-gray-700 text-fuchsia-700 dark:text-fuchsia-300 shadow-sm'
+                  ? 'bg-white dark:bg-gray-700 text-brand-700 dark:text-brand-300 shadow-sm'
                   : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
               }`}>
               {f.label}
@@ -636,7 +636,7 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
           <div className="min-w-[80px] flex-shrink-0 flex items-start pt-2">
             <button
               onClick={addCustomColumn}
-              className="w-full px-3 py-4 rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-600 text-gray-400 hover:border-fuchsia-400 hover:text-fuchsia-500 transition flex flex-col items-center gap-1"
+              className="w-full px-3 py-4 rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-600 text-gray-400 hover:border-brand-400 hover:text-brand-500 transition flex flex-col items-center gap-1"
               title="Agregar columna"
             >
               <Plus size={20} />
@@ -682,7 +682,7 @@ function CounterCard({ label, value, color, accent = false }) {
     emerald: 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200',
   };
   return (
-    <div className={`p-3 rounded-xl border ${colors[color]} ${accent ? 'ring-2 ring-fuchsia-200 dark:ring-fuchsia-900/40' : ''}`}>
+    <div className={`p-3 rounded-xl border ${colors[color]} ${accent ? 'ring-2 ring-brand-200 dark:ring-brand-900/40' : ''}`}>
       <p className="text-[10px] font-bold uppercase tracking-wider opacity-60">{label}</p>
       <p className="text-2xl font-bold tabular-nums">{value}</p>
     </div>
@@ -702,18 +702,18 @@ function IdeaCard({
   return (
     <div className={`bg-white dark:bg-gray-800 border rounded-xl overflow-hidden shadow-sm transition ${
       isSelected
-        ? 'border-fuchsia-400 dark:border-fuchsia-600 ring-2 ring-fuchsia-200 dark:ring-fuchsia-900/40'
+        ? 'border-brand-400 dark:border-brand-600 ring-2 ring-brand-200 dark:ring-brand-900/40'
         : usada
           ? 'border-gray-200 dark:border-gray-700 opacity-70'
-          : 'border-gray-200 dark:border-gray-700 hover:border-fuchsia-300 dark:hover:border-fuchsia-700'
+          : 'border-gray-200 dark:border-gray-700 hover:border-brand-300 dark:hover:border-brand-700'
     }`}>
       {/* Header siempre visible */}
       <div className="px-4 py-3 flex items-start gap-3">
         {/* Checkbox para multi-select export */}
         <button onClick={onToggleSelect}
-          className="mt-1 shrink-0 text-gray-400 hover:text-fuchsia-600 transition"
+          className="mt-1 shrink-0 text-gray-400 hover:text-brand-600 transition"
           title={isSelected ? 'Deseleccionar' : 'Seleccionar para exportar'}>
-          {isSelected ? <CheckSquare size={16} className="text-fuchsia-600" /> : <Square size={16} />}
+          {isSelected ? <CheckSquare size={16} className="text-brand-600" /> : <Square size={16} />}
         </button>
 
         {/* Thumbnail */}
@@ -722,7 +722,7 @@ function IdeaCard({
             className="w-14 h-14 rounded-lg object-cover bg-gray-100 dark:bg-gray-700 shrink-0 border border-gray-200 dark:border-gray-700"
             onError={e => { e.target.style.display = 'none'; }} />
         ) : (
-          <div className="w-14 h-14 rounded-lg bg-gradient-to-br from-fuchsia-200 to-pink-200 dark:from-fuchsia-900/40 dark:to-pink-900/40 flex items-center justify-center shrink-0">
+          <div className="w-14 h-14 rounded-lg bg-gradient-to-br from-brand-200 to-brand-300 dark:from-brand-900/40 dark:to-brand-800/40 flex items-center justify-center shrink-0">
             <span className="text-2xl">{tipo.emoji}</span>
           </div>
         )}
@@ -760,7 +760,7 @@ function IdeaCard({
               </span>
             )}
             {idea.variableDeTesteo && VARIABLE_META[idea.variableDeTesteo] && (
-              <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-semibold bg-cyan-100 dark:bg-cyan-900/40 text-cyan-700 dark:text-cyan-300 rounded"
+              <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-semibold bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 rounded"
                 title={`Variable a testear: ${VARIABLE_META[idea.variableDeTesteo].descripcion}`}>
                 {VARIABLE_META[idea.variableDeTesteo].emoji} testea: {VARIABLE_META[idea.variableDeTesteo].label}
               </span>
@@ -772,7 +772,7 @@ function IdeaCard({
               </span>
             )}
             {idea.hookDuplicado && (
-              <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-semibold bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300 rounded"
+              <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-semibold bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 rounded"
                 title="Este hook arranca igual que otra idea — considerá reescribirlo para diversificar arquetipos">
                 ⚠ hook similar
               </span>
@@ -796,7 +796,7 @@ function IdeaCard({
                 esta pieza (1-6). Útil para verificar que la bandeja cubra
                 las 6 sin sobre-representar una sola. */}
             {idea.creenciaApalancada && (
-              <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-semibold bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 rounded"
+              <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-semibold bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 rounded"
                 title={`Tumba la creencia #${idea.creenciaApalancada} del Offer Brief`}>
                 💭 cr.{idea.creenciaApalancada}
               </span>
@@ -833,7 +833,7 @@ function IdeaCard({
 
         <div className="shrink-0 flex items-center gap-1">
           <button onClick={onToggle}
-            className="p-1.5 text-gray-500 hover:text-fuchsia-600 hover:bg-fuchsia-50 dark:hover:bg-fuchsia-900/20 rounded transition"
+            className="p-1.5 text-gray-500 hover:text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-900/20 rounded transition"
             title={expanded ? 'Cerrar' : 'Ver detalle'}>
             <ChevronDown size={14} className={`transition-transform ${expanded ? 'rotate-180' : ''}`} />
           </button>
@@ -859,20 +859,20 @@ function IdeaCard({
               )}
 
               {idea.promptGeneradorImagen && (
-                <details open className="bg-indigo-50 dark:bg-indigo-900/20 rounded-md border border-indigo-200 dark:border-indigo-800">
-                  <summary className="cursor-pointer px-3 py-2 text-[10px] font-bold text-indigo-700 dark:text-indigo-300 uppercase tracking-wider flex items-center justify-between">
+                <details open className="bg-brand-50 dark:bg-brand-900/20 rounded-md border border-brand-200 dark:border-brand-800">
+                  <summary className="cursor-pointer px-3 py-2 text-[10px] font-bold text-brand-700 dark:text-brand-300 uppercase tracking-wider flex items-center justify-between">
                     <span>🤖 Prompt para Nano Banana / Midjourney (inglés)</span>
                     <button
                       onClick={(e) => {
                         e.preventDefault();
                         navigator.clipboard?.writeText(idea.promptGeneradorImagen);
                       }}
-                      className="text-[10px] font-normal text-indigo-600 dark:text-indigo-400 hover:underline"
+                      className="text-[10px] font-normal text-brand-600 dark:text-brand-400 hover:underline"
                     >
                       📋 copiar
                     </button>
                   </summary>
-                  <p className="px-3 pb-3 text-xs font-mono text-indigo-900 dark:text-indigo-200 whitespace-pre-wrap break-words">{idea.promptGeneradorImagen}</p>
+                  <p className="px-3 pb-3 text-xs font-mono text-brand-900 dark:text-brand-200 whitespace-pre-wrap break-words">{idea.promptGeneradorImagen}</p>
                 </details>
               )}
 
@@ -907,7 +907,7 @@ function IdeaCard({
                     </p>
                     {!editandoGuion && onEditGuion && (
                       <button onClick={onEditGuion}
-                        className="inline-flex items-center gap-1 text-[10px] text-fuchsia-600 hover:text-fuchsia-700 transition">
+                        className="inline-flex items-center gap-1 text-[10px] text-brand-600 hover:text-brand-700 transition">
                         <Edit3 size={10} /> Editar
                       </button>
                     )}
@@ -917,14 +917,14 @@ function IdeaCard({
                       <textarea value={guionDraft} onChange={e => setGuionDraft(e.target.value)}
                         rows={8}
                         placeholder="Guión en porteño — editá beats, VO, acotaciones visuales…"
-                        className="w-full px-2.5 py-1.5 text-xs font-mono bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-md resize-y focus:outline-none focus:ring-2 focus:ring-fuchsia-500" />
+                        className="w-full px-2.5 py-1.5 text-xs font-mono bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-md resize-y focus:outline-none focus:ring-2 focus:ring-brand-500" />
                       <div className="flex gap-1.5 justify-end">
                         <button onClick={onCancelGuion}
                           className="px-2.5 py-1 text-[10px] font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 transition">
                           Cancelar
                         </button>
                         <button onClick={onSaveGuion}
-                          className="px-2.5 py-1 text-[10px] font-bold text-white bg-fuchsia-600 rounded hover:bg-fuchsia-700 transition">
+                          className="px-2.5 py-1 text-[10px] font-bold text-white bg-brand-600 rounded hover:bg-brand-700 transition">
                           Guardar
                         </button>
                       </div>
@@ -950,11 +950,11 @@ function IdeaCard({
                 </div>
               )}
               {idea.tipo !== 'iteracion' && idea.origen?.razonamiento && (
-                <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md">
-                  <p className="text-[10px] font-bold text-blue-800 dark:text-blue-300 uppercase tracking-wider mb-1">
+                <div className="p-3 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-md">
+                  <p className="text-[10px] font-bold text-brand-800 dark:text-brand-300 uppercase tracking-wider mb-1">
                     💡 Por qué esta idea
                   </p>
-                  <p className="text-xs text-blue-900 dark:text-blue-200">{idea.origen.razonamiento}</p>
+                  <p className="text-xs text-brand-900 dark:text-brand-200">{idea.origen.razonamiento}</p>
                 </div>
               )}
 
@@ -963,16 +963,16 @@ function IdeaCard({
               {idea.estiloVisual && <Field label="🎨 Estilo visual" text={idea.estiloVisual} />}
 
               {idea.testHipotesis && (
-                <div className="p-3 bg-cyan-50 dark:bg-cyan-900/20 border border-cyan-200 dark:border-cyan-800 rounded-md">
-                  <p className="text-[10px] font-bold text-cyan-800 dark:text-cyan-300 uppercase tracking-wider mb-1">
+                <div className="p-3 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-md">
+                  <p className="text-[10px] font-bold text-brand-800 dark:text-brand-300 uppercase tracking-wider mb-1">
                     🔬 Hipótesis a validar
                   </p>
                   {VARIABLE_META[idea.variableDeTesteo] && (
-                    <p className="text-[10px] text-cyan-700 dark:text-cyan-400 mb-1">
+                    <p className="text-[10px] text-brand-700 dark:text-brand-400 mb-1">
                       Variable: <strong>{VARIABLE_META[idea.variableDeTesteo].emoji} {VARIABLE_META[idea.variableDeTesteo].label}</strong>
                     </p>
                   )}
-                  <p className="text-xs text-cyan-900 dark:text-cyan-200">{idea.testHipotesis}</p>
+                  <p className="text-xs text-brand-900 dark:text-brand-200">{idea.testHipotesis}</p>
                 </div>
               )}
 
@@ -997,17 +997,17 @@ function IdeaCard({
               )}
 
               {idea.launchedAsAdId && (
-                <div className="p-3 bg-fuchsia-50 dark:bg-fuchsia-900/20 border border-fuchsia-200 dark:border-fuchsia-800 rounded-md">
+                <div className="p-3 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-md">
                   <div className="flex items-center justify-between mb-1.5">
-                    <p className="text-[10px] font-bold text-fuchsia-800 dark:text-fuchsia-300 uppercase tracking-wider">
+                    <p className="text-[10px] font-bold text-brand-800 dark:text-brand-300 uppercase tracking-wider">
                       🚀 Performance
                     </p>
                     <button onClick={onFetchPerformance}
-                      className="text-[10px] font-semibold text-fuchsia-600 dark:text-fuchsia-400 hover:underline inline-flex items-center gap-1">
+                      className="text-[10px] font-semibold text-brand-600 dark:text-brand-400 hover:underline inline-flex items-center gap-1">
                       <Download size={10} /> Métricas
                     </button>
                   </div>
-                  <p className="text-[10px] text-fuchsia-700 dark:text-fuchsia-400 mb-1 font-mono truncate">
+                  <p className="text-[10px] text-brand-700 dark:text-brand-400 mb-1 font-mono truncate">
                     Ad: {idea.launchedAsAdName || idea.launchedAsAdId}
                   </p>
                   {idea.performance ? (
@@ -1021,7 +1021,7 @@ function IdeaCard({
                       <PerformanceStat label="Compras" val={idea.performance.recent?.purchases} fmt={v => v.toLocaleString('es-AR')} />
                     </div>
                   ) : (
-                    <p className="text-[10px] text-fuchsia-700 dark:text-fuchsia-300 italic">
+                    <p className="text-[10px] text-brand-700 dark:text-brand-300 italic">
                       Click "Métricas" para ver cómo rinde.
                     </p>
                   )}
@@ -1039,7 +1039,7 @@ function IdeaCard({
               <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">📓 Notas</p>
               {!editandoNotas && (
                 <button onClick={onEditNotas}
-                  className="inline-flex items-center gap-1 text-[10px] text-fuchsia-600 hover:text-fuchsia-700 transition">
+                  className="inline-flex items-center gap-1 text-[10px] text-brand-600 hover:text-brand-700 transition">
                   <Edit3 size={10} /> Editar
                 </button>
               )}
@@ -1048,14 +1048,14 @@ function IdeaCard({
               <div className="space-y-1.5">
                 <textarea value={notasDraft} onChange={e => setNotasDraft(e.target.value)}
                   rows={3} placeholder="Quién la va a producir, fecha, brief, etc."
-                  className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md resize-y focus:outline-none focus:ring-2 focus:ring-fuchsia-500" />
+                  className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md resize-y focus:outline-none focus:ring-2 focus:ring-brand-500" />
                 <div className="flex gap-1.5 justify-end">
                   <button onClick={onCancelNotas}
                     className="px-2.5 py-1 text-[10px] font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 transition">
                     Cancelar
                   </button>
                   <button onClick={onSaveNotas}
-                    className="px-2.5 py-1 text-[10px] font-bold text-white bg-fuchsia-600 rounded hover:bg-fuchsia-700 transition">
+                    className="px-2.5 py-1 text-[10px] font-bold text-white bg-brand-600 rounded hover:bg-brand-700 transition">
                     Guardar
                   </button>
                 </div>
@@ -1077,7 +1077,7 @@ function IdeaCard({
             <div className="ml-auto flex items-center gap-2">
               {idea.origen?.adSnapshotUrl && (
                 <a href={idea.origen.adSnapshotUrl} target="_blank" rel="noreferrer"
-                  className="inline-flex items-center gap-1 text-[10px] text-blue-600 hover:underline">
+                  className="inline-flex items-center gap-1 text-[10px] text-brand-600 hover:underline">
                   <ExternalLink size={10} /> Ver ad original
                 </a>
               )}
@@ -1100,7 +1100,7 @@ function Field({ label, text, highlight = false }) {
       <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1">{label}</p>
       <p className={`text-xs leading-relaxed ${
         highlight
-          ? 'bg-fuchsia-50 dark:bg-fuchsia-900/20 border border-fuchsia-200 dark:border-fuchsia-800 rounded-md px-3 py-2 text-fuchsia-900 dark:text-fuchsia-200'
+          ? 'bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-md px-3 py-2 text-brand-900 dark:text-brand-200'
           : 'text-gray-700 dark:text-gray-300'
       }`}>{text}</p>
     </div>
@@ -1112,7 +1112,7 @@ function PerformanceStat({ label, val, fmt, semaforo }) {
   if (val == null || isNaN(v)) {
     return (
       <div className="text-[10px]">
-        <p className="text-fuchsia-600 dark:text-fuchsia-400 font-semibold">{label}</p>
+        <p className="text-brand-600 dark:text-brand-400 font-semibold">{label}</p>
         <p className="text-gray-400 font-mono">—</p>
       </div>
     );
@@ -1121,10 +1121,10 @@ function PerformanceStat({ label, val, fmt, semaforo }) {
   const toneClass = tone === 'good' ? 'text-emerald-600 dark:text-emerald-400' :
                     tone === 'mid' ? 'text-amber-600 dark:text-amber-400' :
                     tone === 'bad' ? 'text-red-600 dark:text-red-400' :
-                    'text-fuchsia-900 dark:text-fuchsia-200';
+                    'text-brand-900 dark:text-brand-200';
   return (
     <div className="text-[10px]">
-      <p className="text-fuchsia-600 dark:text-fuchsia-400 font-semibold">{label}</p>
+      <p className="text-brand-600 dark:text-brand-400 font-semibold">{label}</p>
       <p className={`font-mono font-bold ${toneClass}`}>{fmt(v)}</p>
     </div>
   );
@@ -1173,7 +1173,7 @@ function ProductoSelectorView({ productos, ideas, onSelect }) {
     <div className="max-w-5xl mx-auto space-y-5">
       {/* Header */}
       <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-fuchsia-500 to-pink-500 flex items-center justify-center text-white shadow-sm">
+        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-600 flex items-center justify-center text-white shadow-sm">
           <Inbox size={20} />
         </div>
         <div>
@@ -1222,13 +1222,13 @@ function ProductoBandejaCard({ producto, counts, onClick }) {
   return (
     <button
       onClick={onClick}
-      className="text-left p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm hover:border-fuchsia-300 dark:hover:border-fuchsia-700 hover:shadow-md transition group"
+      className="text-left p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm hover:border-brand-300 dark:hover:border-brand-700 hover:shadow-md transition group"
     >
       <div className="flex items-center gap-3 mb-3">
         <div className={`w-12 h-12 rounded-lg flex items-center justify-center text-white font-bold text-lg shrink-0 group-hover:scale-105 transition ${
           producto.legacy
             ? 'bg-gradient-to-br from-gray-400 to-gray-500'
-            : 'bg-gradient-to-br from-fuchsia-500 to-pink-500'
+            : 'bg-gradient-to-br from-brand-500 to-brand-600'
         }`}>
           {producto.legacy ? '?' : inicial}
         </div>
@@ -1238,7 +1238,7 @@ function ProductoBandejaCard({ producto, counts, onClick }) {
             {total} idea{total !== 1 ? 's' : ''} total{total !== 1 ? 'es' : ''}
           </p>
         </div>
-        <ChevronRight size={16} className="text-gray-400 group-hover:text-fuchsia-500 transition shrink-0" />
+        <ChevronRight size={16} className="text-gray-400 group-hover:text-brand-500 transition shrink-0" />
       </div>
       <div className="grid grid-cols-4 gap-1.5">
         <MiniStat label="Pendientes" value={pendiente} accent />
@@ -1257,7 +1257,7 @@ function MiniStat({ label, value, color = 'gray', accent = false }) {
     emerald: 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-900 dark:text-emerald-200 border-emerald-200 dark:border-emerald-800',
   };
   return (
-    <div className={`px-2 py-1.5 rounded-md border ${colors[color]} ${accent ? 'ring-1 ring-fuchsia-300 dark:ring-fuchsia-700' : ''}`}>
+    <div className={`px-2 py-1.5 rounded-md border ${colors[color]} ${accent ? 'ring-1 ring-brand-300 dark:ring-brand-700' : ''}`}>
       <p className="text-[9px] font-bold uppercase tracking-wider opacity-60 leading-none">{label}</p>
       <p className="text-base font-bold tabular-nums leading-tight mt-0.5">{value}</p>
     </div>
@@ -1291,19 +1291,19 @@ function KanbanColumn({ estado, titulo, color, accent = false, isCustom = false,
       dragOver: 'ring-2 ring-slate-400 dark:ring-slate-500',
     },
     violet: {
-      header: 'bg-violet-100 dark:bg-violet-900/40 text-violet-800 dark:text-violet-200 border-violet-300 dark:border-violet-800',
-      body: 'bg-violet-50/30 dark:bg-violet-900/10 border-violet-200 dark:border-violet-900/50',
-      dragOver: 'ring-2 ring-violet-400 dark:ring-violet-500',
+      header: 'bg-brand-100 dark:bg-brand-900/40 text-brand-800 dark:text-brand-200 border-brand-300 dark:border-brand-800',
+      body: 'bg-brand-50/30 dark:bg-brand-900/10 border-brand-200 dark:border-brand-900/50',
+      dragOver: 'ring-2 ring-brand-400 dark:ring-brand-500',
     },
     rose: {
-      header: 'bg-rose-100 dark:bg-rose-900/40 text-rose-800 dark:text-rose-200 border-rose-300 dark:border-rose-800',
-      body: 'bg-rose-50/30 dark:bg-rose-900/10 border-rose-200 dark:border-rose-900/50',
-      dragOver: 'ring-2 ring-rose-400 dark:ring-rose-500',
+      header: 'bg-brand-100 dark:bg-brand-900/40 text-brand-800 dark:text-brand-200 border-brand-300 dark:border-brand-800',
+      body: 'bg-brand-50/30 dark:bg-brand-900/10 border-brand-200 dark:border-brand-900/50',
+      dragOver: 'ring-2 ring-brand-400 dark:ring-brand-500',
     },
     sky: {
-      header: 'bg-sky-100 dark:bg-sky-900/40 text-sky-800 dark:text-sky-200 border-sky-300 dark:border-sky-800',
-      body: 'bg-sky-50/30 dark:bg-sky-900/10 border-sky-200 dark:border-sky-900/50',
-      dragOver: 'ring-2 ring-sky-400 dark:ring-sky-500',
+      header: 'bg-brand-100 dark:bg-brand-900/40 text-brand-800 dark:text-brand-200 border-brand-300 dark:border-brand-800',
+      body: 'bg-brand-50/30 dark:bg-brand-900/10 border-brand-200 dark:border-brand-900/50',
+      dragOver: 'ring-2 ring-brand-400 dark:ring-brand-500',
     },
     lime: {
       header: 'bg-lime-100 dark:bg-lime-900/40 text-lime-800 dark:text-lime-200 border-lime-300 dark:border-lime-800',
@@ -1311,24 +1311,24 @@ function KanbanColumn({ estado, titulo, color, accent = false, isCustom = false,
       dragOver: 'ring-2 ring-lime-400 dark:ring-lime-500',
     },
     orange: {
-      header: 'bg-orange-100 dark:bg-orange-900/40 text-orange-800 dark:text-orange-200 border-orange-300 dark:border-orange-800',
-      body: 'bg-orange-50/30 dark:bg-orange-900/10 border-orange-200 dark:border-orange-900/50',
-      dragOver: 'ring-2 ring-orange-400 dark:ring-orange-500',
+      header: 'bg-brand-100 dark:bg-brand-900/40 text-brand-800 dark:text-brand-200 border-brand-300 dark:border-brand-800',
+      body: 'bg-brand-50/30 dark:bg-brand-900/10 border-brand-200 dark:border-brand-900/50',
+      dragOver: 'ring-2 ring-brand-400 dark:ring-brand-500',
     },
     teal: {
-      header: 'bg-teal-100 dark:bg-teal-900/40 text-teal-800 dark:text-teal-200 border-teal-300 dark:border-teal-800',
-      body: 'bg-teal-50/30 dark:bg-teal-900/10 border-teal-200 dark:border-teal-900/50',
-      dragOver: 'ring-2 ring-teal-400 dark:ring-teal-500',
+      header: 'bg-brand-100 dark:bg-brand-900/40 text-brand-800 dark:text-brand-200 border-brand-300 dark:border-brand-800',
+      body: 'bg-brand-50/30 dark:bg-brand-900/10 border-brand-200 dark:border-brand-900/50',
+      dragOver: 'ring-2 ring-brand-400 dark:ring-brand-500',
     },
     indigo: {
-      header: 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-800 dark:text-indigo-200 border-indigo-300 dark:border-indigo-800',
-      body: 'bg-indigo-50/30 dark:bg-indigo-900/10 border-indigo-200 dark:border-indigo-900/50',
-      dragOver: 'ring-2 ring-indigo-400 dark:ring-indigo-500',
+      header: 'bg-brand-100 dark:bg-brand-900/40 text-brand-800 dark:text-brand-200 border-brand-300 dark:border-brand-800',
+      body: 'bg-brand-50/30 dark:bg-brand-900/10 border-brand-200 dark:border-brand-900/50',
+      dragOver: 'ring-2 ring-brand-400 dark:ring-brand-500',
     },
     pink: {
-      header: 'bg-pink-100 dark:bg-pink-900/40 text-pink-800 dark:text-pink-200 border-pink-300 dark:border-pink-800',
-      body: 'bg-pink-50/30 dark:bg-pink-900/10 border-pink-200 dark:border-pink-900/50',
-      dragOver: 'ring-2 ring-pink-400 dark:ring-pink-500',
+      header: 'bg-brand-100 dark:bg-brand-900/40 text-brand-800 dark:text-brand-200 border-brand-300 dark:border-brand-800',
+      body: 'bg-brand-50/30 dark:bg-brand-900/10 border-brand-200 dark:border-brand-900/50',
+      dragOver: 'ring-2 ring-brand-400 dark:ring-brand-500',
     },
   };
   const c = palette[color] || palette.gray;
@@ -1357,13 +1357,13 @@ function KanbanColumn({ estado, titulo, color, accent = false, isCustom = false,
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      className={`rounded-xl border flex flex-col transition ${c.body} ${accent ? 'ring-2 ring-fuchsia-200 dark:ring-fuchsia-900/40' : ''} ${isDragOver ? c.dragOver : ''}`}
+      className={`rounded-xl border flex flex-col transition ${c.body} ${accent ? 'ring-2 ring-brand-200 dark:ring-brand-900/40' : ''} ${isDragOver ? c.dragOver : ''}`}
     >
       <div className={`px-3 py-2 border-b flex items-center justify-between gap-1 ${c.header} rounded-t-xl`}>
         <p className="text-[11px] font-bold uppercase tracking-wider truncate">{titulo}</p>
         <div className="flex items-center gap-1 shrink-0">
           {onRename && (
-            <button onClick={onRename} className="p-0.5 opacity-60 hover:opacity-100 hover:text-violet-600 transition" title="Renombrar">
+            <button onClick={onRename} className="p-0.5 opacity-60 hover:opacity-100 hover:text-brand-600 transition" title="Renombrar">
               <Pencil size={11} />
             </button>
           )}
@@ -1425,18 +1425,18 @@ function KanbanCard({ idea, isSelected = false, onToggleSelect, onClick }) {
       onDragEnd={handleDragEnd}
       className={`relative bg-white dark:bg-gray-800 border rounded-lg p-2 hover:shadow-sm transition group cursor-grab active:cursor-grabbing ${
         isSelected
-          ? 'border-fuchsia-400 dark:border-fuchsia-600 ring-2 ring-fuchsia-200 dark:ring-fuchsia-900/40'
-          : 'border-gray-200 dark:border-gray-700 hover:border-fuchsia-300 dark:hover:border-fuchsia-700'
+          ? 'border-brand-400 dark:border-brand-600 ring-2 ring-brand-200 dark:ring-brand-900/40'
+          : 'border-gray-200 dark:border-gray-700 hover:border-brand-300 dark:hover:border-brand-700'
       } ${isDragging ? 'opacity-40' : ''}`}
     >
       {onToggleSelect && (
         <button
           onClick={handleCheckboxClick}
-          className="absolute top-1 right-1 w-5 h-5 flex items-center justify-center rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:border-fuchsia-500 transition opacity-0 group-hover:opacity-100 data-[checked=true]:opacity-100"
+          className="absolute top-1 right-1 w-5 h-5 flex items-center justify-center rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:border-brand-500 transition opacity-0 group-hover:opacity-100 data-[checked=true]:opacity-100"
           data-checked={isSelected}
           title={isSelected ? 'Deseleccionar' : 'Seleccionar para exportar'}
         >
-          {isSelected ? <CheckSquare size={12} className="text-fuchsia-600" /> : <Square size={12} className="text-gray-400" />}
+          {isSelected ? <CheckSquare size={12} className="text-brand-600" /> : <Square size={12} className="text-gray-400" />}
         </button>
       )}
       <div className="flex items-start gap-2">
@@ -1447,7 +1447,7 @@ function KanbanCard({ idea, isSelected = false, onToggleSelect, onClick }) {
             onError={e => { e.target.style.display = 'none'; }}
           />
         ) : (
-          <div className="w-10 h-10 rounded bg-gradient-to-br from-fuchsia-200 to-pink-200 dark:from-fuchsia-900/40 dark:to-pink-900/40 flex items-center justify-center shrink-0">
+          <div className="w-10 h-10 rounded bg-gradient-to-br from-brand-200 to-brand-300 dark:from-brand-900/40 dark:to-brand-800/40 flex items-center justify-center shrink-0">
             <span className="text-lg">{tipo.emoji}</span>
           </div>
         )}
@@ -1693,13 +1693,13 @@ function CreativoPanel({ idea }) {
   const ver = qa ? (QA_VEREDICTO[qa.veredicto] || QA_VEREDICTO.revisar) : null;
 
   return (
-    <div className="bg-violet-50 dark:bg-violet-900/20 rounded-md border border-violet-200 dark:border-violet-800">
+    <div className="bg-brand-50 dark:bg-brand-900/20 rounded-md border border-brand-200 dark:border-brand-800">
       <div className="px-3 py-2 flex items-center justify-between gap-2">
-        <p className="text-[10px] font-bold text-violet-700 dark:text-violet-300 uppercase tracking-wider">
+        <p className="text-[10px] font-bold text-brand-700 dark:text-brand-300 uppercase tracking-wider">
           🎨 Creativo estático
         </p>
         {creativo && (
-          <span className="text-[9px] text-violet-500 dark:text-violet-400 font-mono">
+          <span className="text-[9px] text-brand-500 dark:text-brand-400 font-mono">
             {creativo.model} · {creativo.quality} · {creativo.size}
           </span>
         )}
@@ -1712,12 +1712,12 @@ function CreativoPanel({ idea }) {
             <img
               src={dataUrl}
               alt={idea.titulo || 'Creativo generado'}
-              className="w-full rounded-lg border border-violet-200 dark:border-violet-800 bg-white"
+              className="w-full rounded-lg border border-brand-200 dark:border-brand-800 bg-white"
             />
 
             {/* QA visual */}
             {qaLoading && (
-              <div className="flex items-center gap-1.5 text-[10px] text-violet-600 dark:text-violet-400">
+              <div className="flex items-center gap-1.5 text-[10px] text-brand-600 dark:text-brand-400">
                 <Loader2 size={11} className="animate-spin" /> Revisando calidad con IA…
               </div>
             )}
@@ -1744,14 +1744,14 @@ function CreativoPanel({ idea }) {
               <a
                 href={dataUrl}
                 download={`creativo-${(idea.titulo || 'idea').replace(/[^a-z0-9]+/gi, '-').slice(0, 40).toLowerCase()}.png`}
-                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-bold text-white bg-violet-600 rounded hover:bg-violet-700 transition"
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-bold text-white bg-brand-600 rounded hover:bg-brand-700 transition"
               >
                 <Download size={11} /> Descargar PNG
               </a>
               <button
                 onClick={handleRegenerate}
                 disabled={busy}
-                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-semibold text-violet-700 dark:text-violet-300 bg-white dark:bg-gray-800 border border-violet-300 dark:border-violet-700 rounded hover:bg-violet-50 dark:hover:bg-violet-900/30 transition disabled:opacity-50"
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-gray-800 border border-brand-300 dark:border-brand-700 rounded hover:bg-brand-50 dark:hover:bg-brand-900/30 transition disabled:opacity-50"
               >
                 {loading ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
                 Regenerar
@@ -1760,7 +1760,7 @@ function CreativoPanel({ idea }) {
 
             {/* Edición conversacional */}
             <div className="pt-1">
-              <p className="text-[10px] font-semibold text-violet-700 dark:text-violet-300 mb-1">✏️ Pedí un cambio puntual:</p>
+              <p className="text-[10px] font-semibold text-brand-700 dark:text-brand-300 mb-1">✏️ Pedí un cambio puntual:</p>
               <div className="flex gap-1.5">
                 <input
                   type="text"
@@ -1769,12 +1769,12 @@ function CreativoPanel({ idea }) {
                   onKeyDown={e => { if (e.key === 'Enter' && !busy) handleEdit(); }}
                   placeholder='Ej: "el hook más grande", "fondo más claro", "sacá el sello de abajo"'
                   disabled={busy}
-                  className="flex-1 px-2.5 py-1.5 text-[11px] bg-white dark:bg-gray-800 border border-violet-300 dark:border-violet-700 rounded focus:outline-none focus:ring-1 focus:ring-violet-500 disabled:opacity-50"
+                  className="flex-1 px-2.5 py-1.5 text-[11px] bg-white dark:bg-gray-800 border border-brand-300 dark:border-brand-700 rounded focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
                 />
                 <button
                   onClick={handleEdit}
                   disabled={busy || !editInstruccion.trim()}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 text-[11px] font-bold text-white bg-gradient-to-br from-violet-600 to-purple-600 rounded hover:from-violet-700 hover:to-purple-700 transition disabled:opacity-40"
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-[11px] font-bold text-white bg-gradient-to-br from-brand-600 to-brand-700 rounded hover:from-brand-700 hover:to-brand-800 transition disabled:opacity-40"
                 >
                   {editLoading ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
                   Aplicar
@@ -1786,7 +1786,7 @@ function CreativoPanel({ idea }) {
 
         {/* Loading inicial */}
         {loading && !dataUrl && (
-          <div className="flex items-center gap-2 px-2 py-3 text-xs text-violet-700 dark:text-violet-300">
+          <div className="flex items-center gap-2 px-2 py-3 text-xs text-brand-700 dark:text-brand-300">
             <Loader2 size={14} className="animate-spin" />
             Generando el creativo con IA… puede tardar 30-60s.
           </div>
@@ -1795,14 +1795,14 @@ function CreativoPanel({ idea }) {
         {/* Estado inicial: botón generar */}
         {!loading && !dataUrl && checked && (
           <div className="space-y-2">
-            <p className="text-[11px] text-violet-700 dark:text-violet-300">
+            <p className="text-[11px] text-brand-700 dark:text-brand-300">
               Generá la imagen final del ad a partir del brief. Después la IA revisa la calidad y podés pedir ajustes.
             </p>
             <div className="flex flex-wrap items-center gap-2">
               <select
                 value={quality}
                 onChange={e => setQuality(e.target.value)}
-                className="px-2 py-1 text-[10px] bg-white dark:bg-gray-800 border border-violet-300 dark:border-violet-700 rounded focus:outline-none focus:ring-1 focus:ring-violet-500"
+                className="px-2 py-1 text-[10px] bg-white dark:bg-gray-800 border border-brand-300 dark:border-brand-700 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
                 title="Calidad de la imagen — más calidad = más costo"
               >
                 <option value="low">Calidad baja (~$0.01)</option>
@@ -1811,7 +1811,7 @@ function CreativoPanel({ idea }) {
               </select>
               <button
                 onClick={handleGenerate}
-                className="inline-flex items-center gap-1 px-3 py-1.5 text-[11px] font-bold text-white bg-gradient-to-br from-violet-600 to-purple-600 rounded hover:from-violet-700 hover:to-purple-700 transition"
+                className="inline-flex items-center gap-1 px-3 py-1.5 text-[11px] font-bold text-white bg-gradient-to-br from-brand-600 to-brand-700 rounded hover:from-brand-700 hover:to-brand-800 transition"
               >
                 <Sparkles size={12} /> Generar creativo
               </button>
@@ -1913,9 +1913,9 @@ function VideoBriefPanel({ idea }) {
   };
 
   return (
-    <div className="bg-rose-50 dark:bg-rose-900/20 rounded-md border border-rose-200 dark:border-rose-800">
+    <div className="bg-brand-50 dark:bg-brand-900/20 rounded-md border border-brand-200 dark:border-brand-800">
       <div className="px-3 py-2">
-        <p className="text-[10px] font-bold text-rose-700 dark:text-rose-300 uppercase tracking-wider">
+        <p className="text-[10px] font-bold text-brand-700 dark:text-brand-300 uppercase tracking-wider">
           🎬 Pieza de video — para tus editores
         </p>
       </div>
@@ -1924,8 +1924,8 @@ function VideoBriefPanel({ idea }) {
         {/* Guión de referencia del competidor (colapsado) */}
         {idea.guion && !/^n\/?a/i.test((idea.guion || '').trim()) && (
           <details open={refOpen} onToggle={e => setRefOpen(e.currentTarget.open)}
-            className="bg-white dark:bg-gray-800/50 rounded border border-rose-200 dark:border-rose-800">
-            <summary className="cursor-pointer px-2.5 py-1.5 text-[10px] font-semibold text-rose-600 dark:text-rose-400">
+            className="bg-white dark:bg-gray-800/50 rounded border border-brand-200 dark:border-brand-800">
+            <summary className="cursor-pointer px-2.5 py-1.5 text-[10px] font-semibold text-brand-600 dark:text-brand-400">
               📼 Guión del ganador de referencia (transcripción)
             </summary>
             <p className="px-2.5 pb-2 text-[11px] text-gray-600 dark:text-gray-400 whitespace-pre-wrap">{idea.guion}</p>
@@ -1935,20 +1935,20 @@ function VideoBriefPanel({ idea }) {
         {/* Guión adaptado */}
         {guion ? (
           <div className="space-y-2">
-            <div className="flex items-center gap-2 flex-wrap text-[10px] text-rose-700 dark:text-rose-300">
+            <div className="flex items-center gap-2 flex-wrap text-[10px] text-brand-700 dark:text-brand-300">
               <span className="font-bold">✓ Guión adaptado para tu producto</span>
               <span className="font-mono">· {guion.duracionSegundos}s · 9:16</span>
               {guion.tono && <span className="opacity-80">· {guion.tono}</span>}
             </div>
             {guion.ganchoVisual && (
               <p className="text-[11px] text-gray-700 dark:text-gray-300">
-                <span className="font-semibold text-rose-700 dark:text-rose-300">Gancho (1er segundo):</span> {guion.ganchoVisual}
+                <span className="font-semibold text-brand-700 dark:text-brand-300">Gancho (1er segundo):</span> {guion.ganchoVisual}
               </p>
             )}
             <ol className="space-y-1.5">
               {(guion.beats || []).map((b, i) => (
-                <li key={b.n ?? i} className="bg-white dark:bg-gray-800/60 rounded border border-rose-100 dark:border-rose-900/40 px-2.5 py-1.5">
-                  <p className="text-[10px] font-bold text-rose-600 dark:text-rose-400">BEAT {b.n} · {b.timecode}</p>
+                <li key={b.n ?? i} className="bg-white dark:bg-gray-800/60 rounded border border-brand-100 dark:border-brand-900/40 px-2.5 py-1.5">
+                  <p className="text-[10px] font-bold text-brand-600 dark:text-brand-400">BEAT {b.n} · {b.timecode}</p>
                   {b.visual && <p className="text-[11px] text-gray-700 dark:text-gray-300 mt-0.5"><span className="font-semibold">🎥</span> {b.visual}</p>}
                   {b.voz && <p className="text-[11px] text-gray-700 dark:text-gray-300 mt-0.5"><span className="font-semibold">🎙</span> "{b.voz}"</p>}
                   {b.textoEnPantalla && <p className="text-[11px] text-gray-700 dark:text-gray-300 mt-0.5"><span className="font-semibold">📝</span> {b.textoEnPantalla}</p>}
@@ -1963,26 +1963,26 @@ function VideoBriefPanel({ idea }) {
             )}
             <div className="flex flex-wrap gap-1.5 pt-0.5">
               <button onClick={copiar}
-                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-bold text-white bg-rose-600 rounded hover:bg-rose-700 transition">
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-bold text-white bg-brand-600 rounded hover:bg-brand-700 transition">
                 {copied ? <Check size={11} /> : <Download size={11} />} {copied ? 'Copiado' : 'Copiar guión para los editores'}
               </button>
               <button onClick={handleGenerar} disabled={loading}
-                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-semibold text-rose-700 dark:text-rose-300 bg-white dark:bg-gray-800 border border-rose-300 dark:border-rose-700 rounded hover:bg-rose-50 dark:hover:bg-rose-900/30 transition disabled:opacity-50">
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-gray-800 border border-brand-300 dark:border-brand-700 rounded hover:bg-brand-50 dark:hover:bg-brand-900/30 transition disabled:opacity-50">
                 {loading ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />} Regenerar
               </button>
             </div>
           </div>
         ) : loading ? (
-          <div className="flex items-center gap-2 px-1 py-2 text-xs text-rose-700 dark:text-rose-300">
+          <div className="flex items-center gap-2 px-1 py-2 text-xs text-brand-700 dark:text-brand-300">
             <Loader2 size={14} className="animate-spin" /> Adaptando el guión para tu producto…
           </div>
         ) : (
           <div className="space-y-1.5">
-            <p className="text-[11px] text-rose-700 dark:text-rose-300">
+            <p className="text-[11px] text-brand-700 dark:text-brand-300">
               Generá un guión claro y adaptado a tu producto (en argentino, listo para que tus editores lo produzcan), basado en el patrón del ganador de la competencia.
             </p>
             <button onClick={handleGenerar}
-              className="inline-flex items-center gap-1 px-3 py-1.5 text-[11px] font-bold text-white bg-gradient-to-br from-rose-600 to-pink-600 rounded hover:from-rose-700 hover:to-pink-700 transition">
+              className="inline-flex items-center gap-1 px-3 py-1.5 text-[11px] font-bold text-white bg-gradient-to-br from-brand-600 to-brand-700 rounded hover:from-brand-700 hover:to-brand-800 transition">
               <Sparkles size={12} /> Generar guión para mis editores
             </button>
           </div>

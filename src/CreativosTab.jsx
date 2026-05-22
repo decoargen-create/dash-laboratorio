@@ -87,9 +87,9 @@ export default function CreativosTab({ producto, onUpdateProducto, addToast }) {
   return (
     <div className="space-y-5">
       {/* Config + botón generar */}
-      <div className="bg-gradient-to-br from-purple-50 to-violet-50 dark:from-purple-900/20 dark:to-violet-900/20 border border-purple-200 dark:border-purple-800 rounded-xl p-4">
+      <div className="bg-gradient-to-br from-brand-50 to-brand-100 dark:from-brand-900/20 dark:to-brand-800/20 border border-brand-200 dark:border-brand-800 rounded-xl p-4">
         <div className="flex items-center gap-2 mb-3">
-          <Sparkles size={16} className="text-purple-600 dark:text-purple-400" />
+          <Sparkles size={16} className="text-brand-600 dark:text-brand-400" />
           <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Fase 1 — Hooks + diagnóstico</h3>
           <span className="ml-auto text-[10px] text-gray-500 dark:text-gray-400">Generador de creativos Meta Ads</span>
         </div>
@@ -104,7 +104,7 @@ export default function CreativosTab({ producto, onUpdateProducto, addToast }) {
               value={hooksTono}
               onChange={e => setHooksTono(e.target.value)}
               placeholder="argentino coloquial, directo"
-              className="w-full px-2 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-purple-500"
+              className="w-full px-2 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-brand-500"
             />
           </div>
           <div>
@@ -112,7 +112,7 @@ export default function CreativosTab({ producto, onUpdateProducto, addToast }) {
             <select
               value={hooksObjetivo}
               onChange={e => setHooksObjetivo(e.target.value)}
-              className="w-full px-2 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-purple-500"
+              className="w-full px-2 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-brand-500"
             >
               <option value="TOFU">TOFU (prospecting)</option>
               <option value="MOFU">MOFU (consideración)</option>
@@ -128,14 +128,14 @@ export default function CreativosTab({ producto, onUpdateProducto, addToast }) {
               value={hooksRestricciones}
               onChange={e => setHooksRestricciones(e.target.value)}
               placeholder="sin palabras gatillo, sin vulgaridad"
-              className="w-full px-2 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-purple-500"
+              className="w-full px-2 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-brand-500"
             />
           </div>
         </div>
         <button
           onClick={generarHooks}
           disabled={hooksRunning}
-          className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-gradient-to-br from-purple-600 to-violet-500 rounded-lg hover:from-purple-700 hover:to-violet-600 shadow-sm transition disabled:opacity-40"
+          className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-gradient-to-br from-brand-600 to-brand-500 rounded-lg hover:from-brand-700 hover:to-brand-600 shadow-sm transition disabled:opacity-40"
         >
           {hooksRunning
             ? <><Loader2 size={14} className="animate-spin" /> Generando…</>
@@ -229,7 +229,7 @@ function HooksDisplay({ fase1, addToast }) {
             return (
               <div key={angulo.id} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
                 <div className="flex items-baseline gap-2 mb-2">
-                  <span className="px-2 py-0.5 text-[11px] font-bold bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 rounded">
+                  <span className="px-2 py-0.5 text-[11px] font-bold bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 rounded">
                     {angulo.id}
                   </span>
                   <h5 className="text-sm font-bold text-gray-900 dark:text-gray-100">{angulo.nombre}</h5>
@@ -240,7 +240,7 @@ function HooksDisplay({ fase1, addToast }) {
                 )}
                 <ul className="space-y-1.5">
                   {hooksDelAngulo.map(h => (
-                    <li key={h.id} className="group flex items-start gap-2 px-2 py-1.5 bg-gray-50 dark:bg-gray-900/40 rounded-md hover:bg-purple-50 dark:hover:bg-purple-900/20 transition">
+                    <li key={h.id} className="group flex items-start gap-2 px-2 py-1.5 bg-gray-50 dark:bg-gray-900/40 rounded-md hover:bg-brand-50 dark:hover:bg-brand-900/20 transition">
                       <span className="text-[10px] text-gray-400 font-mono shrink-0 mt-0.5">#{h.id}</span>
                       <p className="flex-1 text-xs text-gray-800 dark:text-gray-200 leading-snug">{h.texto}</p>
                       {h.riesgoMeta && (
@@ -250,7 +250,7 @@ function HooksDisplay({ fase1, addToast }) {
                       )}
                       <button
                         onClick={() => copy(h.texto, h.id)}
-                        className="opacity-0 group-hover:opacity-100 transition shrink-0 p-1 text-gray-400 hover:text-purple-600"
+                        className="opacity-0 group-hover:opacity-100 transition shrink-0 p-1 text-gray-400 hover:text-brand-600"
                         title="Copiar hook"
                       >
                         {copiedId === h.id ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}

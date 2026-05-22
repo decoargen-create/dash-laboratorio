@@ -115,7 +115,7 @@ export default function DocumentacionTab({ producto, onUpdateProducto, addToast 
         </div>
         <button
           onClick={downloadAll}
-          className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-purple-600 to-violet-600 rounded-lg hover:from-purple-700 hover:to-violet-700 shadow-sm transition"
+          className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-brand-600 to-brand-500 rounded-lg hover:from-brand-700 hover:to-brand-600 shadow-sm transition"
         >
           <Download size={12} /> Descargar toda como .md
         </button>
@@ -151,7 +151,7 @@ export default function DocumentacionTab({ producto, onUpdateProducto, addToast 
                   {!isEditing && (
                     <>
                       <button onClick={() => startEdit(d.key)}
-                        className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-semibold text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded transition">
+                        className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-semibold text-brand-700 dark:text-brand-300 hover:bg-brand-50 dark:hover:bg-brand-900/20 rounded transition">
                         <Edit3 size={10} /> Editar
                       </button>
                       <button onClick={() => copyText(d.key, content)}
@@ -172,7 +172,7 @@ export default function DocumentacionTab({ producto, onUpdateProducto, addToast 
                       value={draft}
                       onChange={e => setDraft(e.target.value)}
                       rows={20}
-                      className="w-full px-3 py-2 text-xs font-mono bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md resize-y focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      className="w-full px-3 py-2 text-xs font-mono bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md resize-y focus:outline-none focus:ring-2 focus:ring-brand-500"
                     />
                     <div className="flex justify-end gap-2">
                       <button onClick={cancelEdit}
@@ -180,7 +180,7 @@ export default function DocumentacionTab({ producto, onUpdateProducto, addToast 
                         <X size={10} /> Cancelar
                       </button>
                       <button onClick={saveEdit}
-                        className="inline-flex items-center gap-1 px-3 py-1 text-[10px] font-bold text-white bg-purple-600 rounded hover:bg-purple-700 transition">
+                        className="inline-flex items-center gap-1 px-3 py-1 text-[10px] font-bold text-white bg-brand-600 rounded hover:bg-brand-700 transition">
                         <Check size={10} /> Guardar
                       </button>
                     </div>

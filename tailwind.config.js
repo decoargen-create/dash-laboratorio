@@ -8,23 +8,23 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Paleta de marca Viora — dorado / cobre / champagne, tomada del
-        // logo (arco elíptico dorado). Reemplaza el arcoíris de morados,
-        // rosas y azules decorativos que tenía el sistema. Los colores
-        // SEMÁNTICOS (emerald=éxito, red=error, amber=warning) se mantienen
-        // aparte — comunican estado y no deben colapsar a la marca.
+        // Paleta de marca — definida como variables CSS para poder
+        // re-tematizarla en runtime desde el panel de Apariencia (el user
+        // elige el color de acento de toda la app). Los valores default
+        // (dorado Viora) viven en index.css :root. Los colores SEMÁNTICOS
+        // (emerald=éxito, red=error, amber=warning) se mantienen aparte.
         brand: {
-          50:  '#faf4ea',
-          100: '#f3e6cf',
-          200: '#e9d2a8',
-          300: '#e9c99d',
-          400: '#d6b084',
-          500: '#c39866',
-          600: '#b8895a',
-          700: '#96703f',
-          800: '#6b4a2a',
-          900: '#4a3320',
-          950: '#2b1d12',
+          50:  'rgb(var(--brand-50) / <alpha-value>)',
+          100: 'rgb(var(--brand-100) / <alpha-value>)',
+          200: 'rgb(var(--brand-200) / <alpha-value>)',
+          300: 'rgb(var(--brand-300) / <alpha-value>)',
+          400: 'rgb(var(--brand-400) / <alpha-value>)',
+          500: 'rgb(var(--brand-500) / <alpha-value>)',
+          600: 'rgb(var(--brand-600) / <alpha-value>)',
+          700: 'rgb(var(--brand-700) / <alpha-value>)',
+          800: 'rgb(var(--brand-800) / <alpha-value>)',
+          900: 'rgb(var(--brand-900) / <alpha-value>)',
+          950: 'rgb(var(--brand-950) / <alpha-value>)',
         },
       },
       keyframes: {

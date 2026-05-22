@@ -565,16 +565,22 @@ const UI_FONTS = {
   nunito:     { label: 'Nunito',     stack: "'Nunito', system-ui, -apple-system, sans-serif" },
 };
 const TEXT_ZOOM = { chico: 1, mediano: 1.1, grande: 1.22 };
-// Presets de color del menú lateral. `null` = usa el gradiente propio de la
-// plataforma. Los demás son gradientes verticales pensados para texto blanco.
-const SIDEBAR_PRESETS = {
-  default:   { label: 'Plataforma', gradient: null },
-  violeta:   { label: 'Violeta',    gradient: 'linear-gradient(to bottom, #4c1d95, #6d28d9, #5b21b6)' },
-  indigo:    { label: 'Índigo',     gradient: 'linear-gradient(to bottom, #1e1b4b, #3730a3, #312e81)' },
-  oceano:    { label: 'Océano',     gradient: 'linear-gradient(to bottom, #0c4a6e, #0369a1, #075985)' },
-  esmeralda: { label: 'Esmeralda',  gradient: 'linear-gradient(to bottom, #064e3b, #047857, #065f46)' },
-  borravino: { label: 'Borravino',  gradient: 'linear-gradient(to bottom, #4a0f22, #831843, #3f0c1e)' },
-  grafito:   { label: 'Grafito',    gradient: 'linear-gradient(to bottom, #111827, #1f2937, #0b0f19)' },
+// Presets de color de acento — re-tematizan TODA la app (la paleta `brand`)
+// y el menú lateral. Cada uno es una rampa de 11 tonos (50→950) en formato
+// "r g b" para las variables CSS --brand-*.
+const ACCENT_PRESETS = {
+  dorado:    { label: 'Dorado',    ramp: { 50:'250 244 234', 100:'243 230 207', 200:'233 210 168', 300:'233 201 157', 400:'214 176 132', 500:'195 152 102', 600:'184 137 90', 700:'150 112 63', 800:'107 74 42', 900:'74 51 32', 950:'43 29 18' } },
+  violeta:   { label: 'Violeta',   ramp: { 50:'245 243 255', 100:'237 233 254', 200:'221 214 254', 300:'196 181 253', 400:'167 139 250', 500:'139 92 246', 600:'124 58 237', 700:'109 40 217', 800:'91 33 182', 900:'76 29 149', 950:'46 16 101' } },
+  indigo:    { label: 'Índigo',    ramp: { 50:'238 242 255', 100:'224 231 255', 200:'199 210 254', 300:'165 180 252', 400:'129 140 248', 500:'99 102 241', 600:'79 70 229', 700:'67 56 202', 800:'55 48 163', 900:'49 46 129', 950:'30 27 75' } },
+  oceano:    { label: 'Océano',    ramp: { 50:'240 249 255', 100:'224 242 254', 200:'186 230 253', 300:'125 211 252', 400:'56 189 248', 500:'14 165 233', 600:'2 132 199', 700:'3 105 161', 800:'7 89 133', 900:'12 74 110', 950:'8 47 73' } },
+  esmeralda: { label: 'Esmeralda', ramp: { 50:'236 253 245', 100:'209 250 229', 200:'167 243 208', 300:'110 231 183', 400:'52 211 153', 500:'16 185 129', 600:'5 150 105', 700:'4 120 87', 800:'6 95 70', 900:'6 78 59', 950:'2 44 34' } },
+  teal:      { label: 'Teal',      ramp: { 50:'240 253 250', 100:'204 251 241', 200:'153 246 228', 300:'94 234 212', 400:'45 212 191', 500:'20 184 166', 600:'13 148 136', 700:'15 118 110', 800:'17 94 89', 900:'19 78 74', 950:'4 47 46' } },
+  rosa:      { label: 'Rosa',      ramp: { 50:'255 241 242', 100:'255 228 230', 200:'254 205 211', 300:'253 164 175', 400:'251 113 133', 500:'244 63 94', 600:'225 29 72', 700:'190 18 60', 800:'159 18 57', 900:'136 19 55', 950:'76 5 25' } },
+  fucsia:    { label: 'Fucsia',    ramp: { 50:'253 244 255', 100:'250 232 255', 200:'245 208 254', 300:'240 171 252', 400:'232 121 249', 500:'217 70 239', 600:'192 38 211', 700:'162 28 175', 800:'134 25 143', 900:'112 26 117', 950:'74 4 78' } },
+  rubi:      { label: 'Rubí',      ramp: { 50:'254 242 242', 100:'254 226 226', 200:'254 202 202', 300:'252 165 165', 400:'248 113 113', 500:'239 68 68', 600:'220 38 38', 700:'185 28 28', 800:'153 27 27', 900:'127 29 29', 950:'69 10 10' } },
+  ambar:     { label: 'Ámbar',     ramp: { 50:'255 251 235', 100:'254 243 199', 200:'253 230 138', 300:'252 211 77', 400:'251 191 36', 500:'245 158 11', 600:'217 119 6', 700:'180 83 9', 800:'146 64 14', 900:'120 53 15', 950:'69 26 3' } },
+  naranja:   { label: 'Naranja',   ramp: { 50:'255 247 237', 100:'255 237 213', 200:'254 215 170', 300:'253 186 116', 400:'251 146 60', 500:'249 115 22', 600:'234 88 12', 700:'194 65 12', 800:'154 52 18', 900:'124 45 18', 950:'67 20 7' } },
+  grafito:   { label: 'Grafito',   ramp: { 50:'248 250 252', 100:'241 245 249', 200:'226 232 240', 300:'203 213 225', 400:'148 163 184', 500:'100 116 139', 600:'71 85 105', 700:'51 65 85', 800:'30 41 59', 900:'15 23 42', 950:'2 6 23' } },
 };
 
 // Definición de plataformas disponibles en el dashboard. Cada una tiene su
@@ -1580,9 +1586,9 @@ function AppShell({ onExit }) {
     if (typeof window === 'undefined') return 'sistema';
     return localStorage.getItem('dash-ui-font') || 'sistema';
   });
-  const [sidebarColor, setSidebarColor] = useState(() => {
-    if (typeof window === 'undefined') return 'default';
-    return localStorage.getItem('dash-sidebar-color') || 'default';
+  const [accentColor, setAccentColor] = useState(() => {
+    if (typeof window === 'undefined') return 'dorado';
+    return localStorage.getItem('dash-accent-color') || 'dorado';
   });
   // Tamaño: zoom al <html> → escala TODO de forma uniforme (texto + UI).
   // Se aplica al documentElement (no a #root) para ser consistente con el
@@ -1596,9 +1602,24 @@ function AppShell({ onExit }) {
     document.documentElement.style.fontFamily = UI_FONTS[uiFont]?.stack || '';
     try { localStorage.setItem('dash-ui-font', uiFont); } catch {}
   }, [uiFont]);
+  // Color de acento: setea las 11 variables --brand-* en el <html>, lo que
+  // re-tematiza toda la app (paleta `brand`) y el menú lateral. También
+  // guarda las variables resueltas para que el script inline las aplique
+  // antes del render (sin flash).
   useEffect(() => {
-    try { localStorage.setItem('dash-sidebar-color', sidebarColor); } catch {}
-  }, [sidebarColor]);
+    const preset = ACCENT_PRESETS[accentColor] || ACCENT_PRESETS.dorado;
+    const de = document.documentElement;
+    const vars = {};
+    for (const [stop, rgb] of Object.entries(preset.ramp)) {
+      const k = `--brand-${stop}`;
+      vars[k] = rgb;
+      de.style.setProperty(k, rgb);
+    }
+    try {
+      localStorage.setItem('dash-accent-color', accentColor);
+      localStorage.setItem('dash-accent-vars', JSON.stringify(vars));
+    } catch {}
+  }, [accentColor]);
 
   // Atajo global Cmd+K / Ctrl+K para abrir la command palette
   useEffect(() => {
@@ -1923,13 +1944,16 @@ function AppShell({ onExit }) {
         />
       )}
       {/* Sidebar — desktop: lateral fijo. Mobile: overlay deslizante.
-          El gradient sale de la plataforma activa, salvo que el user haya
-          elegido un color propio en el panel de Apariencia. */}
+          En la plataforma Marketing el gradient sigue el color de acento
+          elegido (variables --brand-*); las demás plataformas mantienen su
+          identidad propia. */}
       <aside
-        style={SIDEBAR_PRESETS[sidebarColor]?.gradient ? { backgroundImage: SIDEBAR_PRESETS[sidebarColor].gradient } : undefined}
+        style={currentPlatform === 'marketing'
+          ? { backgroundImage: 'linear-gradient(to bottom, rgb(var(--brand-900)), rgb(var(--brand-800)), rgb(var(--brand-950)))' }
+          : undefined}
         className={`
         ${effectiveSidebarOpen ? 'w-64' : 'w-20'}
-        relative ${SIDEBAR_PRESETS[sidebarColor]?.gradient ? '' : `bg-gradient-to-b ${getPlatform(currentPlatform).sidebarGradient}`} text-white shadow-2xl
+        relative ${currentPlatform === 'marketing' ? '' : `bg-gradient-to-b ${getPlatform(currentPlatform).sidebarGradient}`} text-white shadow-2xl
         transition-all duration-500 ease-out flex flex-col
         max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 max-md:w-72
         max-md:transform max-md:transition-transform
@@ -2049,8 +2073,8 @@ function AppShell({ onExit }) {
           setTextSize={setTextSize}
           uiFont={uiFont}
           setUiFont={setUiFont}
-          sidebarColor={sidebarColor}
-          setSidebarColor={setSidebarColor}
+          accentColor={accentColor}
+          setAccentColor={setAccentColor}
           onOpenCommand={() => setCmdOpen(true)}
           onOpenMobileMenu={() => setMobileMenuOpen(true)}
         />
@@ -8053,7 +8077,7 @@ function StatMini({ label, value, accent = 'neutral', small = false }) {
 
 // Panel "Apariencia" — popover en el header para personalizar tamaño de
 // texto, fuente y color del menú lateral. Cada usuario lo ajusta a su gusto.
-function AppearanceMenu({ textSize, setTextSize, uiFont, setUiFont, sidebarColor, setSidebarColor }) {
+function AppearanceMenu({ textSize, setTextSize, uiFont, setUiFont, accentColor, setAccentColor }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   useEffect(() => {
@@ -8069,8 +8093,8 @@ function AppearanceMenu({ textSize, setTextSize, uiFont, setUiFont, sidebarColor
     <button onClick={onClick}
       className={`flex-1 px-2 py-1.5 text-[11px] font-bold rounded-md border transition ${
         active
-          ? 'bg-pink-500 border-pink-500 text-white shadow-sm'
-          : 'bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:border-pink-300 dark:hover:border-pink-700'
+          ? 'bg-brand-500 border-brand-500 text-white shadow-sm'
+          : 'bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:border-brand-300 dark:hover:border-brand-700'
       }`}>
       {children}
     </button>
@@ -8106,15 +8130,15 @@ function AppearanceMenu({ textSize, setTextSize, uiFont, setUiFont, sidebarColor
           </div>
 
           <div>
-            <p className="text-[11px] font-semibold text-gray-600 dark:text-gray-300 mb-1">Color del menú lateral</p>
+            <p className="text-[11px] font-semibold text-gray-600 dark:text-gray-300 mb-1">Color de acento <span className="text-gray-400 font-normal">(toda la app)</span></p>
             <div className="grid grid-cols-4 gap-1.5">
-              {Object.entries(SIDEBAR_PRESETS).map(([k, p]) => (
-                <button key={k} onClick={() => setSidebarColor(k)} title={p.label}
+              {Object.entries(ACCENT_PRESETS).map(([k, p]) => (
+                <button key={k} onClick={() => setAccentColor(k)} title={p.label}
                   className={`h-8 rounded-md border-2 flex items-center justify-center transition ${
-                    sidebarColor === k ? 'border-pink-500 scale-105' : 'border-transparent hover:scale-105'
+                    accentColor === k ? 'border-gray-900 dark:border-white scale-105' : 'border-transparent hover:scale-105'
                   }`}
-                  style={{ background: p.gradient || 'linear-gradient(to bottom, #6b7280, #374151)' }}>
-                  {sidebarColor === k && <Check size={13} className="text-white" style={{ filter: 'drop-shadow(0 1px 1px rgba(0,0,0,0.6))' }} />}
+                  style={{ background: `linear-gradient(135deg, rgb(${p.ramp[400]}), rgb(${p.ramp[600]}))` }}>
+                  {accentColor === k && <Check size={13} className="text-white" style={{ filter: 'drop-shadow(0 1px 1px rgba(0,0,0,0.7))' }} />}
                 </button>
               ))}
             </div>
@@ -8125,7 +8149,7 @@ function AppearanceMenu({ textSize, setTextSize, uiFont, setUiFont, sidebarColor
   );
 }
 
-function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, textSize, setTextSize, uiFont, setUiFont, sidebarColor, setSidebarColor, onOpenCommand, onOpenMobileMenu, bgTasks = [] }) {
+function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, textSize, setTextSize, uiFont, setUiFont, accentColor, setAccentColor, onOpenCommand, onOpenMobileMenu, bgTasks = [] }) {
   const [scrolled, setScrolled] = useState(false);
   const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform);
 
@@ -8196,8 +8220,8 @@ function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, textSize, set
           setTextSize={setTextSize}
           uiFont={uiFont}
           setUiFont={setUiFont}
-          sidebarColor={sidebarColor}
-          setSidebarColor={setSidebarColor}
+          accentColor={accentColor}
+          setAccentColor={setAccentColor}
         />
         <button
           onClick={toggleDarkMode}

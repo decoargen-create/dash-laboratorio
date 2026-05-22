@@ -54,7 +54,7 @@ function sizeForFormato(formato) {
 // de una idea "réplica" del deep-analyze— armamos la escena desde el
 // hook + ángulo + copy. Así el creativo se puede generar para CUALQUIER
 // idea de la Bandeja, no solo las del generador.
-function buildImagePrompt(idea, usarProductoReal = false) {
+function buildImagePrompt(idea, usarProductoReal = false, paleta = []) {
   const estilo = (idea.estiloVisual || '').trim();
   const hook = (idea.hook || '').trim();
   let textoEnImagen = (idea.textoEnImagen || '').trim();
@@ -82,6 +82,10 @@ function buildImagePrompt(idea, usarProductoReal = false) {
     parts.push('PRODUCTO REAL: la imagen de referencia adjunta es el PRODUCTO REAL del anunciante. Usá ESE producto exactamente — mantené idéntica la forma del envase, la etiqueta, los colores, la tapa y todo el texto de la etiqueta. NO inventes otro packaging, no cambies la marca, no alteres el producto. Integralo como protagonista del creativo: nítido, bien iluminado, en foco. Si el creativo necesita un segundo producto genérico de comparación, ese sí puede ser inventado, pero el producto del anunciante es siempre el de la referencia.');
   }
   if (estilo) parts.push(`Estilo visual: ${estilo}.`);
+  if (Array.isArray(paleta) && paleta.length > 0) {
+    parts.push('');
+    parts.push(`PALETA DE MARCA: usá estos colores como paleta dominante del creativo — fondos, bloques de color, formas y acentos: ${paleta.join(', ')}. El resultado tiene que sentirse coherente con la identidad visual de la marca (su landing y su packaging). Mantené buen contraste para que el texto sea legible.`);
+  }
   parts.push('');
   parts.push('ESCENA / IMAGEN BASE:');
   parts.push(escena);
@@ -129,7 +133,11 @@ export default async function handler(req, res) {
   // creativo es el producto real, no uno inventado.
   const productoImagen = typeof body?.productoImagen === 'string' ? body.productoImagen : '';
   const usarProductoReal = productoImagen.length > 0;
-  const prompt = buildImagePrompt(idea, usarProductoReal);
+  // Paleta de marca — colores hex válidos para inyectar en el prompt.
+  const paletaMarca = Array.isArray(body?.paletaMarca)
+    ? body.paletaMarca.filter(c => typeof c === 'string' && /^#?[0-9a-fA-F]{3,8}$/.test(c)).slice(0, 6)
+    : [];
+  const prompt = buildImagePrompt(idea, usarProductoReal, paletaMarca);
 
   try {
     let resp;

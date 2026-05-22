@@ -24,7 +24,7 @@ import {
 import { exportBriefDocx } from './exportDocx.js';
 import { saveCreativo, getCreativo, deleteCreativo, getAllCreativoIds } from './creativosStorage.js';
 import { logCostsFromResponse } from './costsStore.js';
-import { getProductoImagen } from './productoImagen.js';
+import { getProductoImagen, getPaletaMarca } from './productoImagen.js';
 
 const PRODUCTOS_KEY = 'viora-marketing-productos-v1';
 const ACTIVE_PRODUCT_KEY = 'viora-marketing-bandeja-active-product';
@@ -1781,6 +1781,7 @@ function CreativoPanel({ idea }) {
         body: JSON.stringify({
           quality,
           productoImagen,
+          paletaMarca: getPaletaMarca(idea.productoId),
           idea: {
             promptGeneradorImagen: idea.promptGeneradorImagen,
             descripcionImagen: idea.descripcionImagen,

@@ -1,25 +1,39 @@
-// Uploader de la foto real del producto. Vive en el Setup del producto.
-// La foto es OBLIGATORIA para generar creativos estáticos — sin ella, el
-// botón de generar en la Bandeja queda bloqueado.
+// Setup visual del producto: foto real + paleta de marca.
+//
+// - Foto real: OBLIGATORIA para generar estáticos (gpt-image-1 la usa como
+//   referencia para que el envase sea el real).
+// - Paleta de marca: colores de la landing/producto que se inyectan en el
+//   prompt de generación para que los creativos sean coherentes con la
+//   marca. Se auto-detecta de la foto y se puede editar.
 
 import React, { useState, useRef, useEffect } from 'react';
-import { ImagePlus, Loader2, Trash2, Check, AlertCircle } from 'lucide-react';
-import { getProductoImagen, setProductoImagen, removeProductoImagen, comprimirImagen } from './productoImagen.js';
+import { ImagePlus, Loader2, Trash2, Check, AlertCircle, Plus, Pipette } from 'lucide-react';
+import {
+  getProductoImagen, setProductoImagen, removeProductoImagen, comprimirImagen,
+  getPaletaMarca, setPaletaMarca, extraerColores,
+} from './productoImagen.js';
 
 export default function ProductoImagenUploader({ productoId, addToast }) {
   const [imagen, setImagen] = useState(null);
+  const [paleta, setPaleta] = useState([]);
   const [procesando, setProcesando] = useState(false);
   const [error, setError] = useState('');
   const inputRef = useRef(null);
 
   useEffect(() => {
     setImagen(getProductoImagen(productoId));
+    setPaleta(getPaletaMarca(productoId));
     setError('');
   }, [productoId]);
 
+  const guardarPaleta = (next) => {
+    setPaleta(next);
+    setPaletaMarca(productoId, next);
+  };
+
   const onArchivo = async (e) => {
     const file = e.target.files?.[0];
-    e.target.value = ''; // permite re-subir el mismo archivo
+    e.target.value = '';
     if (!file) return;
     setProcesando(true);
     setError('');
@@ -27,6 +41,11 @@ export default function ProductoImagenUploader({ productoId, addToast }) {
       const dataUrl = await comprimirImagen(file);
       setProductoImagen(productoId, dataUrl);
       setImagen(dataUrl);
+      // Auto-detecta la paleta de la foto si todavía no hay una definida.
+      if (getPaletaMarca(productoId).length === 0) {
+        const colores = await extraerColores(dataUrl);
+        if (colores.length > 0) guardarPaleta(colores);
+      }
       addToast?.({ type: 'success', message: 'Foto del producto cargada' });
     } catch (err) {
       setError(err.message || 'No se pudo cargar la imagen');
@@ -35,10 +54,21 @@ export default function ProductoImagenUploader({ productoId, addToast }) {
     }
   };
 
-  const quitar = () => {
+  const quitarFoto = () => {
     removeProductoImagen(productoId);
     setImagen(null);
     setError('');
+  };
+
+  const tomarColoresDeFoto = async () => {
+    if (!imagen) return;
+    const colores = await extraerColores(imagen);
+    if (colores.length > 0) {
+      guardarPaleta(colores);
+      addToast?.({ type: 'success', message: 'Colores tomados de la foto' });
+    } else {
+      addToast?.({ type: 'info', message: 'No se detectaron colores claros en la foto' });
+    }
   };
 
   return (
@@ -48,9 +78,7 @@ export default function ProductoImagenUploader({ productoId, addToast }) {
         : 'border-amber-300 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-900/10'
     }`}>
       <div className="flex items-center gap-2 mb-2">
-        <p className="text-xs font-bold text-gray-900 dark:text-gray-100 flex items-center gap-1.5">
-          📦 Foto del producto
-        </p>
+        <p className="text-xs font-bold text-gray-900 dark:text-gray-100">📦 Foto del producto</p>
         {imagen
           ? <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-0.5"><Check size={11} /> cargada</span>
           : <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400">requerida para estáticos</span>}
@@ -76,21 +104,13 @@ export default function ProductoImagenUploader({ productoId, addToast }) {
               : <><ImagePlus size={12} /> {imagen ? 'Cambiar foto' : 'Subir foto'}</>}
           </button>
           {imagen && (
-            <button
-              onClick={quitar}
-              className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-gray-500 dark:text-gray-400 hover:text-red-500 transition"
-            >
+            <button onClick={quitarFoto}
+              className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-gray-500 dark:text-gray-400 hover:text-red-500 transition">
               <Trash2 size={11} /> Quitar
             </button>
           )}
         </div>
-        <input
-          ref={inputRef}
-          type="file"
-          accept="image/*"
-          onChange={onArchivo}
-          className="hidden"
-        />
+        <input ref={inputRef} type="file" accept="image/*" onChange={onArchivo} className="hidden" />
       </div>
 
       {error && (
@@ -98,6 +118,56 @@ export default function ProductoImagenUploader({ productoId, addToast }) {
           <AlertCircle size={11} /> {error}
         </p>
       )}
+
+      {/* Paleta de marca */}
+      <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+        <div className="flex items-center justify-between gap-2 mb-1.5">
+          <p className="text-xs font-bold text-gray-900 dark:text-gray-100">🎨 Paleta de marca</p>
+          {imagen && (
+            <button onClick={tomarColoresDeFoto}
+              className="inline-flex items-center gap-1 text-[10px] font-semibold text-brand-600 dark:text-brand-400 hover:underline">
+              <Pipette size={10} /> Tomar de la foto
+            </button>
+          )}
+        </div>
+        <p className="text-[10px] text-gray-500 dark:text-gray-400 mb-2">
+          Colores de tu marca (landing + producto). Los creativos se generan respetando esta paleta.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          {paleta.map((color, i) => (
+            <div key={i} className="relative group">
+              <input
+                type="color"
+                value={/^#[0-9a-fA-F]{6}$/.test(color) ? color : '#cccccc'}
+                onChange={e => guardarPaleta(paleta.map((c, j) => j === i ? e.target.value : c))}
+                className="w-9 h-9 rounded-md border border-gray-300 dark:border-gray-600 cursor-pointer bg-transparent p-0"
+                title={color}
+              />
+              <button
+                onClick={() => guardarPaleta(paleta.filter((_, j) => j !== i))}
+                className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-gray-700 dark:bg-gray-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition"
+                title="Quitar color"
+              >
+                <Trash2 size={9} />
+              </button>
+            </div>
+          ))}
+          {paleta.length < 6 && (
+            <button
+              onClick={() => guardarPaleta([...paleta, '#cccccc'])}
+              className="w-9 h-9 rounded-md border-2 border-dashed border-gray-300 dark:border-gray-600 text-gray-400 hover:border-brand-400 hover:text-brand-500 transition flex items-center justify-center"
+              title="Agregar color"
+            >
+              <Plus size={14} />
+            </button>
+          )}
+        </div>
+        {paleta.length === 0 && (
+          <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1.5 italic">
+            Subí la foto del producto y la paleta se detecta sola — o agregá colores a mano.
+          </p>
+        )}
+      </div>
     </div>
   );
 }

@@ -22,7 +22,7 @@ import {
   loadIdeas, updateIdea, removeIdea, TIPO_META, ESTADO_META, VARIABLE_META, ANGULO_META, CAMPAÑA_META,
 } from './bandejaStore.js';
 import { exportBriefDocx } from './exportDocx.js';
-import { saveCreativo, getCreativo, deleteCreativo } from './creativosStorage.js';
+import { saveCreativo, getCreativo, deleteCreativo, getAllCreativoIds } from './creativosStorage.js';
 import { logCostsFromResponse } from './costsStore.js';
 
 const PRODUCTOS_KEY = 'viora-marketing-productos-v1';
@@ -141,7 +141,13 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
   // Sirve para separar lo que producís vos (imagen) de lo que mandás a
   // producción de video.
   const [filtroFormato, setFiltroFormato] = useState('all');
+  // Orden de las cards dentro de cada columna del kanban.
+  const [orden, setOrden] = useState('recientes'); // recientes | antiguas | score | angulo
   const [query, setQuery] = useState('');
+  // Set de ids de ideas que ya tienen un creativo producido (IndexedDB).
+  // Se carga de una sola lectura para que cada KanbanCard pueda mostrar el
+  // indicador "pieza lista" sin un getCreativo por card.
+  const [creativoIds, setCreativoIds] = useState(() => new Set());
   const [editandoNotasId, setEditandoNotasId] = useState(null);
   const [notasDraft, setNotasDraft] = useState('');
   const [editandoGuionId, setEditandoGuionId] = useState(null);
@@ -162,6 +168,19 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
       setProductos(prev => (prev.length !== freshProds.length ? freshProds : prev));
     }, 3000);
     return () => clearInterval(interval);
+  }, []);
+
+  // Carga el set de ideas con creativo producido — al montar y cada 4s, así
+  // el indicador "pieza lista" en las cards se actualiza cuando el user
+  // genera un creativo desde el modal de detalle.
+  useEffect(() => {
+    let alive = true;
+    const refresh = () => getAllCreativoIds()
+      .then(s => { if (alive) setCreativoIds(prev => (prev.size === s.size ? prev : s)); })
+      .catch(() => {});
+    refresh();
+    const iv = setInterval(refresh, 4000);
+    return () => { alive = false; clearInterval(iv); };
   }, []);
 
   const setEstado = (id, estado) => {
@@ -424,19 +443,33 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
     return true;
   });
 
-  // Orden: pendientes > en uso > usadas > archivadas, y dentro más recientes primero.
-  const orden = { pendiente: 0, en_uso: 1, usada: 2, archivada: 3 };
-  const sorted = [...filtered].sort((a, b) => {
-    const diff = (orden[a.estado] ?? 9) - (orden[b.estado] ?? 9);
-    if (diff !== 0) return diff;
-    return (b.createdAt || '').localeCompare(a.createdAt || '');
-  });
-
-  // Counters por estado (sobre el subset del producto activo — no mezcla).
-  const counts = ideasDelProducto.reduce((acc, i) => {
-    acc[i.estado] = (acc[i.estado] || 0) + 1;
-    return acc;
-  }, {});
+  // Comparador para ordenar las cards dentro de cada columna del kanban.
+  // El user lo elige con el selector de orden — score y ángulo ayudan a
+  // priorizar producción (atacar primero los hooks fuertes / agrupar por
+  // ángulo para no saturar un mismo arquetipo).
+  const fechaDesc = (a, b) => (b.createdAt || '').localeCompare(a.createdAt || '');
+  const comparator = (() => {
+    switch (orden) {
+      case 'antiguas':
+        return (a, b) => (a.createdAt || '').localeCompare(b.createdAt || '');
+      case 'score':
+        // Score desc — los hooks sin puntuar caen al final.
+        return (a, b) => {
+          const sa = typeof a.scoreValue === 'number' ? a.scoreValue : -1;
+          const sb = typeof b.scoreValue === 'number' ? b.scoreValue : -1;
+          return sb !== sa ? sb - sa : fechaDesc(a, b);
+        };
+      case 'angulo':
+        // Agrupa por ángulo estratégico (A-J); sin ángulo al final.
+        return (a, b) => {
+          const aa = a.anguloCategoria || 'zzz';
+          const ab = b.anguloCategoria || 'zzz';
+          return aa !== ab ? aa.localeCompare(ab) : fechaDesc(a, b);
+        };
+      default: // recientes
+        return fechaDesc;
+    }
+  })();
 
   const productoActivo = activeProductoId === SIN_PRODUCTO_ID
     ? { id: SIN_PRODUCTO_ID, nombre: 'Sin producto asignado' }
@@ -466,7 +499,7 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
       byEstado[e].push(i);
     }
   }
-  const sortCol = (arr) => arr.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  const sortCol = (arr) => arr.sort(comparator);
   for (const e of Object.keys(byEstado)) sortCol(byEstado[e]);
   for (const cc of Object.keys(byCustomCol)) sortCol(byCustomCol[cc]);
 
@@ -561,6 +594,15 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
             <option key={k} value={k}>{t.emoji} {t.label}</option>
           ))}
         </select>
+        {/* Orden de las cards dentro de cada columna */}
+        <select value={orden} onChange={e => setOrden(e.target.value)}
+          className="px-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md"
+          title="Ordenar las ideas dentro de cada columna">
+          <option value="recientes">↓ Más recientes</option>
+          <option value="antiguas">↑ Más antiguas</option>
+          <option value="score">★ Mejor score</option>
+          <option value="angulo">📐 Por ángulo</option>
+        </select>
         {/* Filtro de formato — separa lo que producís vos (imagen) de lo
             que mandás a producción de video. */}
         <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-900 rounded-md p-0.5">
@@ -597,35 +639,35 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
         </div>
       ) : (
         <div className="flex gap-3 overflow-x-auto pb-2" style={{ minHeight: '200px' }}>
-          <div className="min-w-[220px] max-w-[280px] flex-shrink-0 flex-1">
+          <div className="min-w-[300px] max-w-[360px] flex-shrink-0 flex-1">
             <KanbanColumn estado="pendiente" titulo={baseTitles.pendiente} color="gray" accent
-              ideas={byEstado.pendiente} selected={selected} onToggleSelect={toggleSelect}
+              ideas={byEstado.pendiente} selected={selected} onToggleSelect={toggleSelect} creativoIds={creativoIds}
               onCardClick={(id) => setExpandedId(id)} onDropIdea={(id) => moveToBaseColumn(id, 'pendiente')}
               onRename={() => renameBaseColumn('pendiente')} />
           </div>
-          <div className="min-w-[220px] max-w-[280px] flex-shrink-0 flex-1">
+          <div className="min-w-[300px] max-w-[360px] flex-shrink-0 flex-1">
             <KanbanColumn estado="en_uso" titulo={baseTitles.en_uso} color="amber"
-              ideas={byEstado.en_uso} selected={selected} onToggleSelect={toggleSelect}
+              ideas={byEstado.en_uso} selected={selected} onToggleSelect={toggleSelect} creativoIds={creativoIds}
               onCardClick={(id) => setExpandedId(id)} onDropIdea={(id) => moveToBaseColumn(id, 'en_uso')}
               onRename={() => renameBaseColumn('en_uso')} />
           </div>
-          <div className="min-w-[220px] max-w-[280px] flex-shrink-0 flex-1">
+          <div className="min-w-[300px] max-w-[360px] flex-shrink-0 flex-1">
             <KanbanColumn estado="usada" titulo={baseTitles.usada} color="emerald"
-              ideas={byEstado.usada} selected={selected} onToggleSelect={toggleSelect}
+              ideas={byEstado.usada} selected={selected} onToggleSelect={toggleSelect} creativoIds={creativoIds}
               onCardClick={(id) => setExpandedId(id)} onDropIdea={(id) => moveToBaseColumn(id, 'usada')}
               onRename={() => renameBaseColumn('usada')} />
           </div>
-          <div className="min-w-[220px] max-w-[280px] flex-shrink-0 flex-1">
+          <div className="min-w-[300px] max-w-[360px] flex-shrink-0 flex-1">
             <KanbanColumn estado="archivada" titulo={baseTitles.archivada} color="slate"
-              ideas={byEstado.archivada} selected={selected} onToggleSelect={toggleSelect}
+              ideas={byEstado.archivada} selected={selected} onToggleSelect={toggleSelect} creativoIds={creativoIds}
               onCardClick={(id) => setExpandedId(id)} onDropIdea={(id) => moveToBaseColumn(id, 'archivada')}
               onRename={() => renameBaseColumn('archivada')} />
           </div>
           {customColumns.map(cc => (
-            <div key={cc.id} className="min-w-[220px] max-w-[280px] flex-shrink-0 flex-1">
+            <div key={cc.id} className="min-w-[300px] max-w-[360px] flex-shrink-0 flex-1">
               <KanbanColumn
                 estado={cc.id} titulo={cc.name} color={cc.color || 'violet'} isCustom
-                ideas={byCustomCol[cc.id] || []} selected={selected} onToggleSelect={toggleSelect}
+                ideas={byCustomCol[cc.id] || []} selected={selected} onToggleSelect={toggleSelect} creativoIds={creativoIds}
                 onCardClick={(id) => setExpandedId(id)}
                 onDropIdea={(id) => moveToCustomColumn(id, cc.id)}
                 onRename={() => renameCustomColumn(cc.id)}
@@ -1267,7 +1309,7 @@ function MiniStat({ label, value, color = 'gray', accent = false }) {
 // Columna del kanban — header con color + count, cuerpo scrolleable con cards.
 // Actúa como drop target: al soltar una card encima, llama onDropIdea con el id
 // de la idea, que la mueve a este estado.
-function KanbanColumn({ estado, titulo, color, accent = false, isCustom = false, ideas, selected, onToggleSelect, onCardClick, onDropIdea, onRename, onDelete }) {
+function KanbanColumn({ estado, titulo, color, accent = false, isCustom = false, ideas, selected, onToggleSelect, onCardClick, onDropIdea, onRename, onDelete, creativoIds }) {
   const [isDragOver, setIsDragOver] = useState(false);
   const palette = {
     gray: {
@@ -1388,6 +1430,7 @@ function KanbanColumn({ estado, titulo, color, accent = false, isCustom = false,
               key={idea.id}
               idea={idea}
               isSelected={selected?.has(idea.id)}
+              tieneCreativo={creativoIds?.has(String(idea.id))}
               onToggleSelect={onToggleSelect ? () => onToggleSelect(idea.id) : null}
               onClick={() => onCardClick(idea.id)}
             />
@@ -1398,11 +1441,37 @@ function KanbanColumn({ estado, titulo, color, accent = false, isCustom = false,
   );
 }
 
-// Card compacta del kanban — thumb chico + título + 2-3 badges clave.
-// Todo el detalle se ve al clickear (abre el modal). También es arrastrable
-// entre columnas (drag&drop HTML5 nativo).
-function KanbanCard({ idea, isSelected = false, onToggleSelect, onClick }) {
+// Etiquetas de formato para las cards del kanban.
+const FORMATO_META = {
+  video:    { emoji: '🎬', label: 'Video' },
+  static:   { emoji: '🖼️', label: 'Imagen' },
+  carrusel: { emoji: '📑', label: 'Carrusel' },
+  mixto:    { emoji: '🎞️', label: 'Mixto' },
+};
+
+// Fecha corta y legible para las cards (ej: "22 may"; agrega el año si la
+// idea es de otro año distinto al actual).
+function fechaCorta(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const opts = { day: 'numeric', month: 'short' };
+  if (d.getFullYear() !== new Date().getFullYear()) opts.year = '2-digit';
+  return d.toLocaleDateString('es-AR', opts);
+}
+
+// Card del kanban — pensada para leerse de un vistazo SIN abrir el ticket:
+// hook grande, tipo + formato + score etiquetados, ángulo, creencia, origen,
+// fecha de creación y si la pieza/guión ya están producidos. El detalle
+// completo se ve al clickear (abre el modal). Arrastrable entre columnas.
+function KanbanCard({ idea, isSelected = false, tieneCreativo = false, onToggleSelect, onClick }) {
   const tipo = TIPO_META[idea.tipo] || TIPO_META.desde_cero;
+  const angulo = idea.anguloCategoria ? ANGULO_META[idea.anguloCategoria] : null;
+  const fmt = FORMATO_META[idea.formato] || null;
+  const esVideo = idea.formato === 'video';
+  // "Pieza lista" = el output final ya producido. Para video es el guión
+  // adaptado; para imagen es el creativo generado (en IndexedDB).
+  const piezaLista = esVideo ? !!idea.guionAdaptado : tieneCreativo;
   const [isDragging, setIsDragging] = useState(false);
 
   const handleDragStart = (e) => {
@@ -1417,13 +1486,26 @@ function KanbanCard({ idea, isSelected = false, onToggleSelect, onClick }) {
     onToggleSelect?.();
   };
 
+  // Origen — de dónde salió la idea. Réplica = competidor; iteración = ad
+  // propio; el resto = generada por IA.
+  let origenIcon = '✨', origenText = 'Generada por IA';
+  if (idea.origen?.tipo === 'competidor' && idea.origen?.competidorNombre) {
+    origenIcon = '🏢';
+    origenText = idea.origen.competidorNombre;
+  } else if (idea.tipo === 'iteracion' && idea.origen?.adNombre) {
+    origenIcon = '🔁';
+    origenText = `itera: ${idea.origen.adNombre}`;
+  }
+
+  const tieneScore = typeof idea.scoreValue === 'number';
+
   return (
     <div
       onClick={onClick}
       draggable
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
-      className={`relative bg-white dark:bg-gray-800 border rounded-lg p-2 hover:shadow-sm transition group cursor-grab active:cursor-grabbing ${
+      className={`relative bg-white dark:bg-gray-800 border rounded-lg p-2.5 hover:shadow-md transition group cursor-grab active:cursor-grabbing ${
         isSelected
           ? 'border-brand-400 dark:border-brand-600 ring-2 ring-brand-200 dark:ring-brand-900/40'
           : 'border-gray-200 dark:border-gray-700 hover:border-brand-300 dark:hover:border-brand-700'
@@ -1432,54 +1514,110 @@ function KanbanCard({ idea, isSelected = false, onToggleSelect, onClick }) {
       {onToggleSelect && (
         <button
           onClick={handleCheckboxClick}
-          className="absolute top-1 right-1 w-5 h-5 flex items-center justify-center rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:border-brand-500 transition opacity-0 group-hover:opacity-100 data-[checked=true]:opacity-100"
+          className="absolute top-1.5 right-1.5 w-5 h-5 flex items-center justify-center rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:border-brand-500 transition opacity-0 group-hover:opacity-100 data-[checked=true]:opacity-100 z-10"
           data-checked={isSelected}
           title={isSelected ? 'Deseleccionar' : 'Seleccionar para exportar'}
         >
           {isSelected ? <CheckSquare size={12} className="text-brand-600" /> : <Square size={12} className="text-gray-400" />}
         </button>
       )}
-      <div className="flex items-start gap-2">
+
+      {/* Fila 1: badges de clasificación (tipo · formato · score) */}
+      <div className="flex items-center gap-1 flex-wrap pr-6">
+        <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[9px] font-bold rounded border ${tipo.color}`}>
+          {tipo.emoji} {tipo.label}
+        </span>
+        {fmt && (
+          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[9px] font-semibold rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
+            {fmt.emoji} {fmt.label}
+          </span>
+        )}
+        {tieneScore && (
+          <span className={`inline-flex items-center px-1.5 py-0.5 text-[9px] font-bold rounded ${
+            idea.lowScore
+              ? 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300'
+              : idea.scoreValue >= 8
+                ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300'
+                : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+          }`}
+            title={idea.scoreReason ? `Score del hook ${idea.scoreValue}/10 — ${idea.scoreReason}` : `Score del hook ${idea.scoreValue}/10`}>
+            ★ {idea.scoreValue}/10
+          </span>
+        )}
+      </div>
+
+      {/* Fila 2: thumbnail + hook (lo principal, legible de un vistazo) */}
+      <div className="flex items-start gap-2.5 mt-2">
         {idea.origen?.imageUrl ? (
           <img
             src={idea.origen.imageUrl} alt=""
-            className="w-10 h-10 rounded object-cover bg-gray-100 dark:bg-gray-700 shrink-0 border border-gray-200 dark:border-gray-700"
+            className="w-12 h-12 rounded-md object-cover bg-gray-100 dark:bg-gray-700 shrink-0 border border-gray-200 dark:border-gray-700"
             onError={e => { e.target.style.display = 'none'; }}
           />
         ) : (
-          <div className="w-10 h-10 rounded bg-gradient-to-br from-brand-200 to-brand-300 dark:from-brand-900/40 dark:to-brand-800/40 flex items-center justify-center shrink-0">
-            <span className="text-lg">{tipo.emoji}</span>
+          <div className="w-12 h-12 rounded-md bg-gradient-to-br from-brand-200 to-brand-300 dark:from-brand-900/40 dark:to-brand-800/40 flex items-center justify-center shrink-0">
+            <span className="text-xl">{tipo.emoji}</span>
           </div>
         )}
         <div className="flex-1 min-w-0">
-          <p className="text-[11px] font-bold text-gray-900 dark:text-gray-100 leading-tight line-clamp-3">
-            {idea.hook ? `"${idea.hook}"` : idea.titulo}
+          <p className="text-[13px] font-bold text-gray-900 dark:text-gray-100 leading-snug line-clamp-3">
+            {idea.hook ? `“${idea.hook}”` : (idea.titulo || 'Sin hook')}
           </p>
-          <div className="flex items-center gap-1 mt-1 flex-wrap">
-            <span className={`inline-flex items-center px-1 py-0 text-[8px] font-bold rounded border ${tipo.color}`}>
-              {tipo.emoji} {tipo.label}
-            </span>
-            {idea.formato && (
-              <span className="text-[9px] text-gray-400">
-                {idea.formato === 'video' ? '🎬' : idea.formato === 'static' ? '🖼️' : '📑'}
-              </span>
-            )}
-            {idea.anguloCategoria && ANGULO_META[idea.anguloCategoria] && (
-              <span className={`inline-flex items-center px-1 py-0 text-[8px] font-bold rounded ${ANGULO_META[idea.anguloCategoria].color}`}
-                title={`Ángulo ${idea.anguloCategoria}`}>
-                {ANGULO_META[idea.anguloCategoria].emoji}
-              </span>
-            )}
-            {idea.metaRiesgo?.tieneRiesgo && (
-              <span className="text-[9px]" title="Riesgo de alcance en Meta">⚠</span>
-            )}
-          </div>
-          {idea.origen?.competidorNombre && (
-            <p className="text-[9px] text-gray-500 dark:text-gray-400 mt-0.5 truncate">
-              de {idea.origen.competidorNombre}
+          {idea.hook && idea.titulo && (
+            <p className="text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide mt-1 truncate">
+              {idea.titulo}
             </p>
           )}
         </div>
+      </div>
+
+      {/* Fila 3: badges secundarios (ángulo · creencia · alertas) */}
+      {(angulo || idea.creenciaApalancada || idea.metaRiesgo?.tieneRiesgo || idea.hookDuplicado) && (
+        <div className="flex items-center gap-1 flex-wrap mt-2">
+          {angulo && (
+            <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[9px] font-semibold rounded ${angulo.color}`}
+              title={`Ángulo estratégico ${idea.anguloCategoria}: ${angulo.label}`}>
+              {angulo.emoji} {angulo.label}
+            </span>
+          )}
+          {idea.creenciaApalancada && (
+            <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-semibold rounded bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300"
+              title={`Tumba la creencia #${idea.creenciaApalancada} del Offer Brief`}>
+              💭 cr.{idea.creenciaApalancada}
+            </span>
+          )}
+          {idea.metaRiesgo?.tieneRiesgo && (
+            <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-bold rounded bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300"
+              title={`Palabras gatillo de Meta: ${(idea.metaRiesgo.palabras || []).join(', ')}`}>
+              ⚠ Meta
+            </span>
+          )}
+          {idea.hookDuplicado && (
+            <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-semibold rounded bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300"
+              title="Este hook arranca igual que otra idea — considerá reescribirlo">
+              ⚠ hook similar
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Fila 4: footer — origen · fecha · estado de producción */}
+      <div className="flex items-center justify-between gap-2 mt-2 pt-1.5 border-t border-gray-100 dark:border-gray-700/60">
+        <span className="text-[9px] text-gray-500 dark:text-gray-400 truncate min-w-0" title={origenText}>
+          {origenIcon} {origenText}
+          {idea.origen?.daysRunning ? ` · ${idea.origen.daysRunning}d` : ''}
+        </span>
+        <span className="flex items-center gap-1.5 shrink-0">
+          {piezaLista && (
+            <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-bold rounded bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300"
+              title={esVideo ? 'Guión de video ya generado' : 'Creativo ya producido'}>
+              ✓ {esVideo ? 'Guión' : 'Pieza'}
+            </span>
+          )}
+          <span className="text-[9px] text-gray-400 dark:text-gray-500 whitespace-nowrap" title={`Creada el ${idea.createdAt ? new Date(idea.createdAt).toLocaleString('es-AR') : '—'}`}>
+            📅 {fechaCorta(idea.createdAt)}
+          </span>
+        </span>
       </div>
     </div>
   );

@@ -454,12 +454,19 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
   const usarMixCompetencia = () => {
     if (!competitorMix) return;
-    setGenConfig(c => ({
-      ...c,
-      formatoStatic: competitorMix.staticPct,
-      formatoVideo: competitorMix.videoPct,
-    }));
-    addToast?.({ type: 'success', message: `Mix ajustado al promedio de la competencia: ${competitorMix.staticPct}/${competitorMix.videoPct}` });
+    // Piso de 25% static. Si la competencia es 100% video y copiábamos el
+    // mix tal cual, el generador quedaba en 0% imagen → no producía NINGÚN
+    // estático. Siempre querés algunas imágenes (las producís vos directo
+    // con IA, y conviene testear ambos formatos).
+    const staticPct = Math.max(25, competitorMix.staticPct);
+    const videoPct = 100 - staticPct;
+    setGenConfig(c => ({ ...c, formatoStatic: staticPct, formatoVideo: videoPct }));
+    addToast?.({
+      type: 'success',
+      message: competitorMix.staticPct < 25
+        ? `Mix ajustado a ${staticPct}/${videoPct} (la competencia usa ${competitorMix.staticPct}% imagen — subimos a 25% mínimo)`
+        : `Mix ajustado al promedio de la competencia: ${staticPct}/${videoPct}`,
+    });
   };
 
   // Chequeo rápido de conexión Meta al montar — solo para habilitar/deshabilitar la card.
@@ -789,7 +796,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     //   - scrape/analyze: uno por competidor (los tiene que cargar el user a mano)
     // La sugerencia automática de competidores fue sacada — devolvía matches
     // imprecisos (e.g. la propia tienda) que confundían más que ayudaban.
-    const necesitaDocs = !producto?.docs?.research;
+    // Chequeamos los 4 docs, no solo `research`. Si una corrida quedó con
+    // docs PARCIALES (research sí, avatar no), mirar solo research activaba
+    // el skip y el avatar faltante nunca se regeneraba.
+    const necesitaDocs = ['research', 'avatar', 'offerBrief', 'beliefs']
+      .some(k => !producto?.docs?.[k]);
 
     const pasosIniciales = [
       { id: 'prep', label: '🚀 Arrancando', detail: `Producto: ${producto.nombre}`, status: 'pending' },

@@ -30,6 +30,7 @@ import CreativosTab from './CreativosTab.jsx';
 import DocumentacionTab from './DocumentacionTab.jsx';
 import CopilotoTab from './CopilotoTab.jsx';
 import DashboardTab from './DashboardTab.jsx';
+import GeneradorRapido from './GeneradorRapido.jsx';
 import { usePipelineRun } from './PipelineRunContext.jsx';
 
 // Etiquetas cortas de la etapa de awareness del prospecto — para el chip
@@ -267,6 +268,9 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // último tab que estabas viendo.
   const productoTabKey = activeProductoId ? `viora-marketing-prod-tab-${activeProductoId}` : null;
   const [productoTab, setProductoTab] = useState('setup');
+  // Bumpeamos esta key para forzar el remount de la Bandeja embebida cuando
+  // el generador rápido inserta ideas — así aparecen sin recargar la página.
+  const [bandejaRefreshKey, setBandejaRefreshKey] = useState(0);
   useEffect(() => {
     if (!productoTabKey) { setProductoTab('setup'); return; }
     try { setProductoTab(localStorage.getItem(productoTabKey) || 'setup'); } catch { setProductoTab('setup'); }
@@ -1837,8 +1841,15 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       )}
 
       {productoTab === 'bandeja' && (
-        <div className="-mx-4">
-          <BandejaSection addToast={addToast} forcedProductoId={String(producto.id)} embedded />
+        <div className="space-y-4">
+          <GeneradorRapido
+            producto={producto}
+            addToast={addToast}
+            onDone={() => setBandejaRefreshKey(k => k + 1)}
+          />
+          <div className="-mx-4">
+            <BandejaSection key={bandejaRefreshKey} addToast={addToast} forcedProductoId={String(producto.id)} embedded />
+          </div>
         </div>
       )}
 

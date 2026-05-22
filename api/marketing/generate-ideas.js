@@ -363,7 +363,7 @@ function respondJSON(res, status, payload) {
 }
 
 // Serializamos el contexto en un string estructurado y legible para Claude.
-function buildContext({ producto, competidoresAnalisis, allCompAds, ideasExistentes, propiosAds }) {
+function buildContext({ producto, competidoresAnalisis, allCompAds, ideasExistentes, propiosAds, targetCount }) {
   const parts = [];
 
   parts.push('## PRODUCTO PROPIO');
@@ -569,7 +569,7 @@ function buildContext({ producto, competidoresAnalisis, allCompAds, ideasExisten
   }
 
   parts.push('\n## INSTRUCCIÓN');
-  parts.push('Generá 10 ideas nuevas siguiendo el formato JSON pedido en el system prompt. Empezá directo con "[".');
+  parts.push(`Generá ${targetCount || 12} ideas nuevas y enviá el array completo con la tool submit_ideas. Respetá el mix de tipos y de formato del system prompt.`);
 
   return parts.join('\n');
 }
@@ -632,6 +632,14 @@ function sanitizeIdea(i) {
   const tiposCampaña = new Set(['TOFU', 'MOFU', 'BOFU', 'retargeting', 'social_proof', 'branding']);
   const creenciasValidas = new Set(['1', '2', '3', '4', '5', '6']);
   if (!i || typeof i.titulo !== 'string' || !tiposValidos.has(i.tipo)) return null;
+  // Rechazamos ideas a medio escribir / incompletas: una idea sin hook o
+  // sin copy/descripción NO es un brief usable y antes entraba a la
+  // Bandeja como si fuera "completa". El stream puede emitir objetos
+  // parciales — esto los filtra.
+  const hookOk = typeof i.hook === 'string' && i.hook.trim().length >= 8;
+  const copyOk = (typeof i.copyPostMeta === 'string' && i.copyPostMeta.trim().length >= 20)
+    || (typeof i.descripcionImagen === 'string' && i.descripcionImagen.trim().length >= 20);
+  if (!hookOk || !copyOk) return null;
   const base = {
     titulo: String(i.titulo).slice(0, 200),
     tipo: i.tipo,
@@ -708,7 +716,7 @@ export default async function handler(req, res) {
 
   const client = new Anthropic({ apiKey: anthropicKey });
   const hasPropios = Array.isArray(propiosAds) && propiosAds.length > 0;
-  const userContent = buildContext({ producto, competidoresAnalisis, allCompAds, ideasExistentes, propiosAds });
+  const userContent = buildContext({ producto, competidoresAnalisis, allCompAds, ideasExistentes, propiosAds, targetCount: clampedTarget });
   const systemPrompt = buildSystemPrompt({
     hasPropios,
     targetCount: clampedTarget,

@@ -43,7 +43,13 @@ export function addIdea(idea) {
   const normTitulo = (idea.titulo || '').trim().toLowerCase();
   const existing = list.find(i => {
     if (i.tipo !== idea.tipo) return false;
-    if (i.origen?.adId && idea.origen?.adId) return i.origen.adId === idea.origen.adId;
+    // Dedup por adId: SOLO si es el mismo producto. Antes ignoraba el
+    // productoId — dos productos que analizan el mismo ad de un competidor
+    // compartido se pisaban y el 2do quedaba sin la réplica.
+    if (i.origen?.adId && idea.origen?.adId) {
+      return i.origen.adId === idea.origen.adId
+        && String(i.productoId || '') === String(idea.productoId || '');
+    }
     if (!i.origen?.adId && !idea.origen?.adId) {
       return (i.titulo || '').trim().toLowerCase() === normTitulo && normTitulo.length > 0;
     }
@@ -66,7 +72,9 @@ export function addIdea(idea) {
 }
 
 // Normaliza un hook para comparar semánticamente: baja caja, saca tildes,
-// saca puntuación, toma las primeras 3 palabras significativas.
+// saca puntuación, toma las primeras 6 palabras significativas.
+// 6 y no 3: con 3, hooks porteños distintos colapsaban en la misma firma
+// ("che mirá esto…" vs "che mirá que…") y se marcaban duplicados sin serlo.
 function hookSignature(hook) {
   if (!hook) return '';
   const normalized = hook
@@ -75,7 +83,7 @@ function hookSignature(hook) {
     .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)
     .filter(w => w.length >= 3);
-  return normalized.slice(0, 3).join(' ');
+  return normalized.slice(0, 6).join(' ');
 }
 
 // Bulk add: agrega varias ideas de una y devuelve el subset realmente

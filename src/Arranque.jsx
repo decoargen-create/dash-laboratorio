@@ -1102,6 +1102,31 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       }
     }
 
+    // Cap GLOBAL de deep-analyze por corrida. Antes se analizaban hasta 20
+    // winners POR competidor (100+ en total). Cada análisis (Claude Vision +
+    // Whisper) tarda 30-60s → el deep-analyze podía durar 30-60 min y el
+    // user cerraba la pestaña ANTES de que corriera el generador. Resultado:
+    // la bandeja se llenaba SOLO de réplicas del deep-analyze (todas video,
+    // sin ángulo, sin score). Ahora analizamos solo los mejores N winners de
+    // TODA la competencia — el generador igual recibe los 800+ ads crudos
+    // para minar patrones, y los análisis se acumulan entre corridas.
+    const MAX_DEEP_ANALYZE_PER_RUN = 12;
+    const yaAnalizadosGlobal = new Set();
+    {
+      const pf = productosRef.current.find(p => String(p.id) === String(producto.id));
+      for (const c of (pf?.competidores || [])) {
+        for (const aid of Object.keys(c.adsAnalysis || {})) yaAnalizadosGlobal.add(aid);
+      }
+    }
+    const analyzeSet = new Set(
+      compWithAds
+        .flatMap(({ winners }) => winners)
+        .filter(ad => ad && !yaAnalizadosGlobal.has(ad.id))
+        .sort((a, b) => (b.score || 0) - (a.score || 0))
+        .slice(0, MAX_DEEP_ANALYZE_PER_RUN)
+        .map(a => a.id)
+    );
+
     // Paso N+2..2N+1: deep-analyze de winners de cada competidor
     for (const { comp, winners } of compWithAds) {
       if (cancelledRef.current) break;
@@ -1110,22 +1135,25 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         updateStep(stepId, { status: 'done', endedAt: Date.now(), detail: 'Sin ganadores para analizar todavía' });
         continue;
       }
-      // Filtrar: no re-analizar los ads que ya tienen análisis guardado.
-      // Ahorramos tokens + tiempo + evitamos tirar ideas duplicadas en la
-      // bandeja. Solo analizamos ads nuevos que aparecieron en este scrape.
+      // Filtrar: no re-analizar los ads que ya tienen análisis guardado, y
+      // respetar el cap global (analyzeSet) — solo los mejores N de toda la
+      // competencia se analizan en esta corrida.
       // Leemos del ref del state global de productos — la key vieja
       // COMPETIDORES_KEY está borrada tras la migración inicial.
       const productoFresh = productosRef.current.find(p => String(p.id) === String(producto.id));
       const compFresh = (productoFresh?.competidores || []).find(x => x.id === comp.id);
       const existingAnalyses = compFresh?.adsAnalysis || {};
-      const nuevosParaAnalizar = winners.filter(ad => !existingAnalyses[ad.id]);
-      const yaAnalizados = winners.length - nuevosParaAnalizar.length;
+      const nuevosParaAnalizar = winners.filter(ad => !existingAnalyses[ad.id] && analyzeSet.has(ad.id));
+      const yaAnalizados = winners.filter(ad => existingAnalyses[ad.id]).length;
 
       if (nuevosParaAnalizar.length === 0) {
+        const habiaNuevos = winners.some(ad => !existingAnalyses[ad.id]);
         updateStep(stepId, {
           status: 'done',
           endedAt: Date.now(),
-          detail: `Todos (${winners.length}) ya analizados en corridas anteriores — nada nuevo.`,
+          detail: habiaNuevos
+            ? `Sus ganadores quedaron fuera del top ${MAX_DEEP_ANALYZE_PER_RUN} de esta corrida — se analizan en la próxima.`
+            : `Todos (${winners.length}) ya analizados en corridas anteriores — nada nuevo.`,
         });
         continue;
       }

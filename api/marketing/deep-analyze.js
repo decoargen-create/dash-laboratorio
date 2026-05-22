@@ -42,7 +42,7 @@ Te paso info de un ad ganador (criterio: ≥17 días corriendo o ≥2 variantes)
 - "cta": object { "texto": string, "ubicacion": string, "urgencia": string }. Análisis del call-to-action.
 - "objections": array de strings. Objeciones del comprador que el ad aborda proactivamente.
 - "copy_patterns": array de strings. Patrones reutilizables del copy (estructura, tono, palabras gatillo, fórmulas).
-- "visual": string. Descripción del visual/mood si hay imagen o video. Qué hace poderosa la composición.
+- "visual": string. ESTILO VISUAL DETALLADO y reutilizable del ad: tipo de toma (estudio / UGC casero / lifestyle con persona / ilustración / comparación), fondo y ambiente, paleta de colores dominante, composición y layout, estilo tipográfico, y mood general. Lo suficientemente concreto como para replicar el look en un creativo nuevo.
 - "why_it_works": string. Por qué este ad lleva tantos días corriendo. 2 a 3 razones concretas.
 
 IMPORTANTE: devolvé ÚNICAMENTE el JSON. Nada antes ni después. Sin comentarios, sin \`\`\`json\`\`\` wrappers.`;

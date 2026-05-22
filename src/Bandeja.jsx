@@ -347,9 +347,9 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
         }
 
         // 📱 Copy del post en Meta
-        if (idea.copyPostMeta) {
+        if (idea.copyPostMeta || idea.copy) {
           lines.push(`### 📱 Copy del post en Meta (va ARRIBA del creativo, NO en la imagen)`);
-          lines.push(idea.copyPostMeta);
+          lines.push(idea.copyPostMeta || idea.copy);
           lines.push(``);
         }
 
@@ -892,10 +892,10 @@ function IdeaCard({
                 <CreativoPanel key={idea.id} idea={idea} />
               ) : null}
 
-              {idea.copyPostMeta && (
+              {(idea.copyPostMeta || idea.copy) && (
                 <div>
                   <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1">📱 Copy del post en Meta (arriba del creativo)</p>
-                  <div className="text-xs text-gray-800 dark:text-gray-200 whitespace-pre-wrap bg-gray-50 dark:bg-gray-800/50 rounded-md px-3 py-2 border border-gray-200 dark:border-gray-700">{idea.copyPostMeta}</div>
+                  <div className="text-xs text-gray-800 dark:text-gray-200 whitespace-pre-wrap bg-gray-50 dark:bg-gray-800/50 rounded-md px-3 py-2 border border-gray-200 dark:border-gray-700">{idea.copyPostMeta || idea.copy}</div>
                 </div>
               )}
 

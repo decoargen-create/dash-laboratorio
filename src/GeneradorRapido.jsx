@@ -6,9 +6,30 @@
 // en vez de la media hora del pipeline completo.
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Sparkles, Loader2, Image as ImageIcon, Video, Layers, Check, X } from 'lucide-react';
+import { Sparkles, Image as ImageIcon, Video, Layers, Check, X, AlertCircle } from 'lucide-react';
 import { addGeneratedIdeas, loadIdeas, formatoDeAd, TIPO_META } from './bandejaStore.js';
 import { logCostsFromResponse } from './costsStore.js';
+
+// Traduce errores técnicos a algo accionable para el user.
+function errorAmigable(msg) {
+  const m = (msg || '').toLowerCase();
+  if (/credit|balance|billing|quota|insufficient/.test(m)) {
+    return `Parece que falta crédito en Anthropic. Cargá saldo en console.anthropic.com y reintentá.\n\nDetalle: ${msg}`;
+  }
+  if (/401|authentication|api[_ ]?key|invalid x-api/.test(m)) {
+    return `La API key de Anthropic no es válida o no está configurada en el servidor.\n\nDetalle: ${msg}`;
+  }
+  if (/429|rate limit|rate_limit/.test(m)) {
+    return 'Demasiadas solicitudes juntas (rate limit de Anthropic). Esperá un minuto y reintentá.';
+  }
+  if (/overloaded|529/.test(m)) {
+    return 'Los servidores de Anthropic están sobrecargados. Reintentá en un minuto.';
+  }
+  if (/timeout|truncad|aborted/.test(m)) {
+    return `La generación se cortó por tiempo. Probá con menos cantidad (8).\n\nDetalle: ${msg}`;
+  }
+  return msg;
+}
 
 // El endpoint espera formatoMix como FRACCIÓN (0-1), igual que el pipeline.
 const FORMATO_OPCIONES = [
@@ -33,6 +54,7 @@ export default function GeneradorRapido({ producto, addToast, onDone }) {
   const [liveIdeas, setLiveIdeas] = useState([]);
   const [tanda, setTanda] = useState({ actual: 0, total: 0 });
   const [elapsed, setElapsed] = useState(0);
+  const [error, setError] = useState(null);
   const abortRef = useRef(null);
 
   const competidores = producto?.competidores || [];
@@ -56,6 +78,7 @@ export default function GeneradorRapido({ producto, addToast, onDone }) {
   const generar = async () => {
     const ctrl = new AbortController();
     abortRef.current = ctrl;
+    setError(null);
     setRunning(true);
     setInsertadas(0);
     setLiveIdeas([]);
@@ -166,6 +189,7 @@ export default function GeneradorRapido({ producto, addToast, onDone }) {
       if (err.name === 'AbortError') {
         addToast?.({ type: 'info', message: `Generación cancelada${totalInsertadas > 0 ? ` — ${totalInsertadas} ideas quedaron en la Bandeja` : ''}` });
       } else {
+        setError(err.message || 'Error desconocido');
         addToast?.({ type: 'error', message: `Generador rápido: ${err.message}` });
       }
     } finally {
@@ -193,6 +217,17 @@ export default function GeneradorRapido({ producto, addToast, onDone }) {
           </p>
         </div>
       </div>
+
+      {!running && error && (
+        <div className="mb-3 px-3 py-2.5 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+          <p className="text-xs font-bold text-red-700 dark:text-red-300 flex items-center gap-1.5">
+            <AlertCircle size={13} /> No se pudieron generar ideas
+          </p>
+          <p className="text-[11px] text-red-600 dark:text-red-400 mt-1 whitespace-pre-wrap break-words">
+            {errorAmigable(error)}
+          </p>
+        </div>
+      )}
 
       {!running && (
         <>

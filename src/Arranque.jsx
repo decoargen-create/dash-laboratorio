@@ -29,6 +29,7 @@ import InspiracionSection from './InspiracionSection.jsx';
 import CreativosTab from './CreativosTab.jsx';
 import DocumentacionTab from './DocumentacionTab.jsx';
 import CopilotoTab from './CopilotoTab.jsx';
+import DashboardTab from './DashboardTab.jsx';
 import { usePipelineRun } from './PipelineRunContext.jsx';
 
 const GEN_CONFIG_KEY = 'viora-marketing-gen-config-v1';
@@ -1619,7 +1620,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // ====================================================================
   if (!producto) {
     return (
-      <div className="max-w-4xl mx-auto space-y-6">
+      <div className="max-w-6xl mx-auto space-y-6">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white shadow-sm">
@@ -1775,7 +1776,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // WORKSPACE DEL PRODUCTO ACTIVO
   // ====================================================================
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div className="max-w-[1500px] mx-auto space-y-6">
       {/* Header con breadcrumb */}
       <div className="flex items-center gap-3">
         <button onClick={() => setActiveProductoId(null)}
@@ -1794,9 +1795,13 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         </div>
       </div>
 
-      {/* Tabs del workspace — Setup, Bandeja, Inspiración, Creativos */}
+      {/* Tabs del workspace — Dashboard, Setup, Bandeja, Inspiración, Creativos */}
       <ProductTabs activeTab={productoTab} onChange={setProductoTab} />
       <TabsGuide />
+
+      {productoTab === 'dashboard' && (
+        <DashboardTab producto={producto} competidores={competidores} runHistory={runHistory} />
+      )}
 
       {productoTab === 'bandeja' && (
         <div className="-mx-4">
@@ -2729,6 +2734,7 @@ function TabsGuide() {
 // Tabs del workspace de un producto: Setup / Bandeja / Inspiración / Creativos.
 function ProductTabs({ activeTab, onChange }) {
   const tabs = [
+    { id: 'dashboard', label: 'Dashboard', emoji: '📊' },
     { id: 'setup', label: 'Setup', emoji: '⚙️' },
     { id: 'documentos', label: 'Documentos', emoji: '📄' },
     { id: 'competencia', label: 'Competencia', emoji: '🎯' },

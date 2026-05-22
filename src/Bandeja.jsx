@@ -24,6 +24,7 @@ import {
 import { exportBriefDocx } from './exportDocx.js';
 import { saveCreativo, getCreativo, deleteCreativo, getAllCreativoIds } from './creativosStorage.js';
 import { logCostsFromResponse } from './costsStore.js';
+import { getProductoImagen } from './productoImagen.js';
 
 const PRODUCTOS_KEY = 'viora-marketing-productos-v1';
 const ACTIVE_PRODUCT_KEY = 'viora-marketing-bandeja-active-product';
@@ -1763,14 +1764,23 @@ function CreativoPanel({ idea }) {
   };
 
   const handleGenerate = async () => {
-    setLoading(true);
     setError('');
+    // La foto real del producto es obligatoria para estáticos — sin ella
+    // gpt-image-1 inventa un envase cualquiera. Para video no aplica.
+    const esEstatico = (idea.formato || 'static') !== 'video';
+    const productoImagen = getProductoImagen(idea.productoId);
+    if (esEstatico && !productoImagen) {
+      setError('Para generar estáticos necesitás cargar la foto del producto. Andá a la pestaña Setup → "Foto del producto".');
+      return;
+    }
+    setLoading(true);
     try {
       const resp = await fetch('/api/marketing/generate-creative', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           quality,
+          productoImagen,
           idea: {
             promptGeneradorImagen: idea.promptGeneradorImagen,
             descripcionImagen: idea.descripcionImagen,

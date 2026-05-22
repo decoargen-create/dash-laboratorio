@@ -37,10 +37,11 @@ const DEFAULT_GEN_CONFIG = {
   formatoStatic: 60, // %
   formatoVideo: 40, // %
 };
-// Tope superior de ideas por corrida — Claude Sonnet 4.6 puede devolver hasta
-// ~100 ideas ricas antes de agotar la budget de output. 100 es un techo
-// realista; más que eso empieza a truncar.
-const MAX_IDEAS_PER_RUN = 100;
+// Tope superior de ideas por corrida. Con el generador en TANDAS (chunking
+// de a 12), ya no hay riesgo de truncar una respuesta gigante — cada tanda
+// es una request corta. Por eso el techo puede ser alto: 200 ideas por
+// corrida. El user igual controla el volumen real con el límite diario.
+const MAX_IDEAS_PER_RUN = 200;
 
 const PRODUCTOS_KEY = 'viora-marketing-productos-v1';
 const COMPETIDORES_KEY = 'viora-marketing-competidores-v1';
@@ -1057,12 +1058,12 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           };
         }));
 
-        // Deep-analyze: top 10 winners por score (los más fuertes).
+        // Deep-analyze: top 20 winners por score (los más fuertes).
         // Todos los demás ads (winners o no) llegan al generador con
         // su copy crudo — no los tiramos.
         const topWinnersForAnalysis = allWinners
           .slice().sort((a, b) => (b.score || 0) - (a.score || 0))
-          .slice(0, 10);
+          .slice(0, 20);
         compWithAds.push({ comp: c, winners: topWinnersForAnalysis, allAds: ads });
         const newWinners = topWinnersForAnalysis.filter(a => !prevAdIds.has(a.id));
         updateStep(stepId, {

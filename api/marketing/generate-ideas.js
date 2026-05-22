@@ -709,9 +709,14 @@ export default async function handler(req, res) {
 
   // Cap 100 — por arriba Claude trunca output, no vale la pena pedir más.
   const clampedTarget = Math.max(1, Math.min(100, Number(targetCount) || 50));
-  // 400 tokens por idea es realista para las ideas ricas con todos los campos.
-  // 32k es el techo de output de Sonnet 4.6 con thinking apagado.
-  const maxTokens = Math.min(32000, 1000 + clampedTarget * 400);
+  // Presupuesto de tokens de salida. Cada brief completo (20 campos: hook,
+  // escenario, descripción visual, prompt de imagen, layout de texto, copy
+  // de Meta, guión, etc.) pesa ~1500-2000 tokens. Antes la fórmula daba
+  // 400/idea → para una tanda de 12 quedaban 5800 tokens, Claude se quedaba
+  // sin presupuesto ANTES de cerrar la primera idea y se emitían 0 briefs.
+  // Ahora presupuestamos 2200/idea con piso de 4000. 32k es el techo de
+  // output de Sonnet 4.6.
+  const maxTokens = Math.min(32000, 4000 + clampedTarget * 2200);
 
   const client = new Anthropic({ apiKey: anthropicKey });
   const hasPropios = Array.isArray(propiosAds) && propiosAds.length > 0;

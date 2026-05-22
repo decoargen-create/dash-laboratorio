@@ -22,7 +22,7 @@ import {
   Package, Target, Play, Check, Loader2, AlertTriangle, ChevronRight, ChevronDown,
   Plus, X, Sparkles, Link2, Search, Clock, Inbox, Trash2,
 } from 'lucide-react';
-import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGeneradorHoy, esIdeaDelGenerador, updateIdea, formatoDeAd } from './bandejaStore.js';
+import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGeneradorHoy, updateIdea, formatoDeAd } from './bandejaStore.js';
 import { logCostsFromResponse } from './costsStore.js';
 import BandejaSection from './Bandeja.jsx';
 import InspiracionSection from './InspiracionSection.jsx';
@@ -1308,22 +1308,12 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
         // Target count = cuántas ideas pide el generador en ESTA corrida.
         // El `limiteDiario` es un cap POR CORRIDA, no un presupuesto diario
-        // que se agota: antes era `limiteDiario - yaGeneradasHoy`, y la 2da
-        // corrida del día daba 0 → el generador se apagaba. Ahora cada
-        // corrida pide su cupo completo; el dedup evita repetir entre
-        // corridas. La primera vez (sin ideas del generador) escala con la
-        // cantidad de ads de la competencia.
-        const esPrimeraVez = loadIdeas()
-          .filter(i => String(i.productoId || '') === productoActualId && esIdeaDelGenerador(i))
-          .length === 0;
-        const adsTotales = (compWithAds || []).reduce((sum, c) => sum + (c.allAds?.length || 0), 0);
-        const primeraVezTarget = Math.min(
-          MAX_IDEAS_PER_RUN,
-          Math.max(50, Math.round(adsTotales * 0.2))
-        );
-        const targetCount = esPrimeraVez
-          ? primeraVezTarget
-          : Math.max(1, genConfig.limiteDiario || 50);
+        // que se agota: cada corrida pide su cupo completo; el dedup evita
+        // repetir entre corridas. Antes había un "primeraVezTarget" que
+        // escalaba con la cantidad de ads (llegaba a 163) → 14 tandas, 32
+        // min de generación. Ahora respetamos siempre el límite que puso el
+        // user — más predecible y rápido.
+        const targetCount = Math.max(1, Math.min(MAX_IDEAS_PER_RUN, genConfig.limiteDiario || 50));
 
         const sumaMix = Math.max(1, genConfig.formatoStatic + genConfig.formatoVideo);
         const formatoMix = {
@@ -1332,11 +1322,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         };
 
         // CHUNKING: pedimos las ideas en TANDAS chicas en vez de una sola
-        // request grande. Una request de 50-100 ideas se trunca por el
-        // timeout de Vercel (5 min) mientras Sonnet escribe briefs largos
-        // → 0 ideas. Tandas de ~12 son rápidas, no se truncan, y si una
-        // falla las anteriores ya quedaron guardadas en la Bandeja.
-        const CHUNK_SIZE = 12;
+        // request grande. Cada brief completo pesa ~1500-2000 tokens de
+        // salida; con tandas de 8 el generador necesita ~16k tokens y
+        // termina en ~3 min — cómodo dentro del límite de 5 min de Vercel.
+        // Tandas más grandes arriesgan truncarse por timeout.
+        const CHUNK_SIZE = 8;
         const totalTandas = Math.max(1, Math.ceil(targetCount / CHUNK_SIZE));
         let insertadas = 0;
         let tandaNum = 0;

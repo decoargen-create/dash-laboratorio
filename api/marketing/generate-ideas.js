@@ -473,9 +473,11 @@ function buildContext({ producto, competidoresAnalisis, allCompAds, ideasExisten
       if (Array.isArray(a.triggers)) parts.push(`Triggers: ${a.triggers.join(', ')}`);
       if (a.audience) parts.push(`Audience: ${a.audience}`);
       if (a.why_it_works) parts.push(`Por qué funciona: ${a.why_it_works}`);
+      if (a.visual) parts.push(`Estilo visual del ad (fondo, paleta, composición, tipo de toma): ${a.visual}`);
       if (Array.isArray(a.copy_patterns)) parts.push(`Patrones de copy: ${a.copy_patterns.join(' | ')}`);
       if (Array.isArray(a.objections)) parts.push(`Objeciones que aborda: ${a.objections.join(' | ')}`);
     });
+    parts.push('\n**USÁ LOS ESTILOS VISUALES DE ARRIBA COMO REFERENCIA**: cuando escribas `estiloVisual` y `promptGeneradorImagen` de cada idea, basate en cómo se ven los estáticos ganadores de la competencia — fondo, ambiente, paleta de colores, composición, tipo de toma (estudio/UGC/lifestyle), estilo tipográfico. No copies, pero replicá el LENGUAJE VISUAL que ya está funcionando en el mercado.');
   } else if (!allCompAds?.length) {
     parts.push('\n## COMPETENCIA');
     parts.push('(Sin datos de competencia todavía. Generá ideas basadas solo en el research doc del producto.)');

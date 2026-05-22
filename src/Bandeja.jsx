@@ -2020,21 +2020,29 @@ function VideoBriefPanel({ idea }) {
       logCostsFromResponse(data, `adapt-guion · ${(idea.titulo || '').slice(0, 50)}`);
       // updateIdea persiste igual aunque el panel se haya desmontado — el
       // guión queda guardado en la idea. Solo el setState es condicional.
-      updateIdea(idea.id, { guionAdaptado: data.guion || '' });
+      // Limpiamos el flag de error: si una corrida previa falló y ahora
+      // anduvo, el guión es válido.
+      updateIdea(idea.id, { guionAdaptado: data.guion || '', guionAdaptadoError: false });
       if (mountedRef.current) setGuion(data.guion || '');
     } catch (err) {
+      // Persistimos que falló — así reabrir la idea NO vuelve a auto-generar
+      // (cada llamada a adapt-guion cuesta plata). El user puede reintentar
+      // manualmente con el botón.
+      updateIdea(idea.id, { guionAdaptadoError: true });
       if (mountedRef.current) setError(err.message || 'Error adaptando el guión');
     } finally {
       if (mountedRef.current) setLoading(false);
     }
   };
 
-  // Auto-generar al abrir la idea, si todavía no tiene guión adaptado.
-  // Sin botón — el guión aparece solo. El componente se monta con
-  // key={idea.id}, así que esto corre una vez por idea.
+  // Auto-generar al abrir la idea, si todavía no tiene guión adaptado NI
+  // falló antes. Sin botón — el guión aparece solo. El componente se monta
+  // con key={idea.id}, así que esto corre una vez por idea. Si una corrida
+  // previa falló, NO re-dispara solo (evita cobrar en cada reapertura) —
+  // queda el botón "Reintentar".
   useEffect(() => {
     mountedRef.current = true;
-    if (!idea.guionAdaptado && !autoGenRef.current) {
+    if (!idea.guionAdaptado && !idea.guionAdaptadoError && !autoGenRef.current) {
       autoGenRef.current = true;
       generar();
     }

@@ -1500,6 +1500,26 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     const endedAt = Date.now();
     const startedAt = finalSteps.find(s => s.startedAt)?.startedAt || endedAt;
     const stepsError = finalSteps.filter(s => s.status === 'error').length;
+
+    // Resumen de lo que produjo ESTA corrida: contamos las ideas de la
+    // Bandeja de este producto creadas desde que arrancó el run y las
+    // desglosamos por tipo y formato. Es lo que el user quiere ver al
+    // terminar — cuántas réplicas, iteraciones, desde cero, imágenes y
+    // videos. El -2000ms es un colchón por desfasaje de reloj.
+    const runIdeas = loadIdeas().filter(i =>
+      String(i.productoId || '') === String(producto?.id || '') &&
+      i.createdAt && new Date(i.createdAt).getTime() >= startedAt - 2000
+    );
+    const breakdown = {
+      ideasNuevas: runIdeas.length,
+      replica: runIdeas.filter(i => i.tipo === 'replica').length,
+      iteracion: runIdeas.filter(i => i.tipo === 'iteracion').length,
+      diferenciacion: runIdeas.filter(i => i.tipo === 'diferenciacion').length,
+      desde_cero: runIdeas.filter(i => i.tipo === 'desde_cero').length,
+      imagenes: runIdeas.filter(i => i.formato !== 'video').length,
+      videos: runIdeas.filter(i => i.formato === 'video').length,
+    };
+
     const runEntry = {
       id: `run-${endedAt}`,
       productoId: producto?.id ? String(producto.id) : null,
@@ -1531,11 +1551,22 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         ideasInsertadas: liveStats.ideasInsertadas,
         ideasGeneradas: liveStats.ideasGeneradas,
         hooksLowScore: liveStats.hooksLowScore,
+        // Desglose de lo producido — alimenta el resumen del historial.
+        breakdown,
       },
     };
     setRunHistory(prev => [runEntry, ...prev].slice(0, RUN_HISTORY_CAP));
     if (!wasCancelled) {
-      addToast?.({ type: 'success', message: '¡Listo! Mirá los análisis + ideas en la Bandeja.' });
+      const partes = [];
+      if (breakdown.replica) partes.push(`${breakdown.replica} réplica${breakdown.replica !== 1 ? 's' : ''}`);
+      if (breakdown.iteracion) partes.push(`${breakdown.iteracion} iteración${breakdown.iteracion !== 1 ? 'es' : ''}`);
+      const nuevasDesdeCero = breakdown.diferenciacion + breakdown.desde_cero;
+      if (nuevasDesdeCero) partes.push(`${nuevasDesdeCero} desde cero`);
+      const detalle = partes.length ? ` — ${partes.join(' · ')}` : '';
+      addToast?.({
+        type: 'success',
+        message: `¡Listo! ${breakdown.ideasNuevas} idea${breakdown.ideasNuevas !== 1 ? 's' : ''} nueva${breakdown.ideasNuevas !== 1 ? 's' : ''}${detalle} · 🖼️ ${breakdown.imagenes} para imagen / 🎬 ${breakdown.videos} para video`,
+      });
     }
   };
 
@@ -2578,6 +2609,11 @@ function RunHistoryCard({ history, onClear }) {
                       {run.stats?.competidoresCount > 0 && (
                         <span>· {run.stats.competidoresOk}/{run.stats.competidoresCount} competidores ok</span>
                       )}
+                      {run.stats?.breakdown && (
+                        <span className="font-semibold text-gray-700 dark:text-gray-300">
+                          · 💡 {run.stats.breakdown.ideasNuevas} idea{run.stats.breakdown.ideasNuevas !== 1 ? 's' : ''}
+                        </span>
+                      )}
                       {run.cost?.total > 0 && (
                         <span className="text-brand-600 dark:text-brand-400 font-mono">· 💰 ${run.cost.total.toFixed(4)}</span>
                       )}
@@ -2587,6 +2623,30 @@ function RunHistoryCard({ history, onClear }) {
 
                 {isExpanded && (
                   <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 px-3 py-2">
+                    {run.stats?.breakdown && (
+                      <div className="mb-2 pb-2 border-b border-gray-200 dark:border-gray-700">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5">
+                          📊 Qué generó esta corrida
+                        </p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {[
+                            { label: 'Total ideas', val: run.stats.breakdown.ideasNuevas, cls: 'bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300' },
+                            { label: '🔵 Réplicas', val: run.stats.breakdown.replica },
+                            { label: '🟡 Iteraciones', val: run.stats.breakdown.iteracion },
+                            { label: '🟢 Diferenciación', val: run.stats.breakdown.diferenciacion },
+                            { label: '✨ Desde cero', val: run.stats.breakdown.desde_cero },
+                            { label: '🖼️ Para imagen', val: run.stats.breakdown.imagenes },
+                            { label: '🎬 Para video', val: run.stats.breakdown.videos },
+                            { label: '🏆 Winners analizados', val: run.stats.winnersAnalyzed || 0 },
+                            ...(run.stats.hooksLowScore ? [{ label: '⚠ Hooks flojos', val: run.stats.hooksLowScore, cls: 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300' }] : []),
+                          ].map((p, i) => (
+                            <span key={i} className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold rounded ${p.cls || 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'}`}>
+                              {p.label} <span className="font-bold tabular-nums">{p.val}</span>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     <ul className="space-y-0.5 text-[10px]">
                       {(run.steps || []).map((s, idx) => (
                         <li key={idx} className="flex items-start gap-2">

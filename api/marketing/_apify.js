@@ -53,6 +53,27 @@ function parseStartDate(raw) {
   return null;
 }
 
+// Clasifica el formato real del ad. Prioriza `display_format` (el formato
+// declarado por Meta) sobre la inferencia por URLs — antes la heurística
+// "tiene cualquier video → video" marcaba como video los carruseles de
+// imágenes (las cards traen videoHdUrl aunque sean estáticas).
+function clasificarFormato(displayFormat, imageUrls, videoUrls) {
+  const df = String(displayFormat || '').toUpperCase();
+  if (df === 'VIDEO') return 'video';
+  if (df === 'IMAGE') return 'static';
+  if (df === 'CAROUSEL' || df === 'DPA') return 'carrusel';
+  if (df === 'DCO') return 'mixto';
+  // Fallback heurístico para ads sin display_format. Ya no asume video
+  // cuando hay imagen Y video — eso marca mixto.
+  const v = videoUrls.length;
+  const i = imageUrls.length;
+  if (v > 0 && i > 0) return 'mixto';
+  if (v > 0) return 'video';
+  if (i > 1) return 'carrusel';
+  if (i === 1) return 'static';
+  return 'mixto';
+}
+
 // Normaliza un ad crudo de cualquier actor a nuestro shape interno.
 // Soporta output del actor oficial (apify/facebook-ads-scraper) y varios
 // comunitarios que siguen estructura parecida.
@@ -92,6 +113,16 @@ export function normalizeAd(raw) {
     ...(snap.cards || []).map(c => c.videoHdUrl || c.videoSdUrl).filter(Boolean),
   ];
 
+  // Formato declarado por Meta — la fuente confiable. `formato` ya clasificado
+  // así todos los consumidores (réplicas, mix de competencia, generador)
+  // usan el mismo valor sin re-inferir.
+  const displayFormat = String(
+    snap.display_format || snap.displayFormat || raw.display_format || ''
+  ).toUpperCase();
+  const imageUrlsU = [...new Set(imageUrls)];
+  const videoUrlsU = [...new Set(videoUrls)];
+  const formato = clasificarFormato(displayFormat, imageUrlsU, videoUrlsU);
+
   const headline = snap.title || snap.linkTitle ||
                    (snap.cards?.[0]?.title) ||
                    (Array.isArray(raw.ad_creative_link_titles) ? raw.ad_creative_link_titles[0] : '') ||
@@ -111,8 +142,10 @@ export function normalizeAd(raw) {
     daysRunning,
     platforms,
     isMultiplatform: platforms.length > 1,
-    imageUrls: [...new Set(imageUrls)],
-    videoUrls: [...new Set(videoUrls)],
+    imageUrls: imageUrlsU,
+    videoUrls: videoUrlsU,
+    displayFormat,
+    formato,
     snapshotUrl: id ? `https://www.facebook.com/ads/library/?id=${id}` : null,
     pageLikeCount: Number(raw.pageLikeCount || snap.pageLikeCount || 0),
     // raw queda guardado por si después queremos extraer otros campos sin rescrapear.

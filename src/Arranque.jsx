@@ -22,7 +22,7 @@ import {
   Package, Target, Play, Check, Loader2, AlertTriangle, ChevronRight, ChevronDown,
   Plus, X, Sparkles, Link2, Search, Clock, Inbox, Trash2,
 } from 'lucide-react';
-import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGeneratedToday, updateIdea } from './bandejaStore.js';
+import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGeneratedToday, updateIdea, formatoDeAd } from './bandejaStore.js';
 import { logCostsFromResponse } from './costsStore.js';
 import BandejaSection from './Bandeja.jsx';
 import InspiracionSection from './InspiracionSection.jsx';
@@ -436,12 +436,13 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     let totalAds = 0, videoAds = 0, staticAds = 0;
     for (const c of competidores) {
       for (const ad of (c.ads || [])) {
-        const hasVideo = (ad.videoUrls?.length || 0) > 0;
-        const hasImage = (ad.imageUrls?.length || 0) > 0;
-        if (!hasVideo && !hasImage) continue;
+        // Usamos el formato real (display_format de Meta vía formatoDeAd),
+        // no la heurística vieja que marcaba video cualquier ad con un
+        // rastro de video — sesgaba el mix de la competencia a video.
+        const f = formatoDeAd(ad);
         totalAds++;
-        if (hasVideo) videoAds++;
-        else staticAds++;
+        if (f === 'video') videoAds++;
+        else staticAds++; // static, carrusel y mixto cuentan como no-video
       }
     }
     if (totalAds === 0) return null;
@@ -1211,7 +1212,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               competidor: c.nombre,
               body: (ad.body || '').slice(0, 300),
               headline: ad.headline || '',
-              formato: (ad.videoUrls?.length > 0) ? 'video' : 'static',
+              formato: formatoDeAd(ad),
               daysRunning: ad.daysRunning || 0,
               score: ad.score || 0,
               isWinner: !!ad.isWinner,

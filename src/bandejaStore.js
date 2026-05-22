@@ -195,11 +195,26 @@ export function countIdeasGeneratedToday(ideas = null, productoId = null) {
 // Transforma un resultado de deep-analyze en una idea tipo "replica".
 // Pensada para llamarse desde Competencia.jsx y Arranque.jsx justo después
 // de que vuelva el análisis, así se puebla la bandeja de forma pasiva.
+// Devuelve el formato de un ad scrapeado. Prioriza el campo `formato` ya
+// clasificado por normalizeAd (basado en el display_format real de Meta).
+// Para ads viejos sin ese campo, cae a una heurística que NO asume video
+// cuando el ad tiene imagen Y video (eso marcaba como video los carruseles
+// de imágenes de la competencia).
+export function formatoDeAd(ad) {
+  if (ad?.formato) return ad.formato;
+  const v = ad?.videoUrls?.length || 0;
+  const i = ad?.imageUrls?.length || 0;
+  if (v > 0 && i > 0) return 'mixto';
+  if (v > 0) return 'video';
+  if (i > 1) return 'carrusel';
+  if (i === 1) return 'static';
+  return 'mixto';
+}
+
 export function ideaFromDeepAnalysis({ analysis, transcript, ad, competidor, producto }) {
   if (!analysis || !ad) return null;
 
-  const formato = (ad.videoUrls?.length > 0) ? 'video' :
-                  (ad.imageUrls?.length > 0) ? 'static' : 'mixto';
+  const formato = formatoDeAd(ad);
 
   const titulo = (ad.headline || analysis.angle || 'Réplica de ganador').slice(0, 100);
   const hookPrincipal = Array.isArray(analysis.hooks) && analysis.hooks.length > 0

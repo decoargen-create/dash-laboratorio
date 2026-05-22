@@ -1830,39 +1830,19 @@ function CreativoPanel({ idea }) {
   );
 }
 
-// Arma el texto plano del guión para copiar y mandar a los editores.
-function formatGuionText(g, idea) {
-  const L = [];
-  L.push(`🎬 GUIÓN DE VIDEO — ${idea.titulo || idea.hook || ''}`);
-  L.push(`Duración: ${g.duracionSegundos}s · Tono: ${g.tono} · Formato: 9:16 vertical`);
-  if (g.ganchoVisual) L.push(`\nGANCHO (primer segundo): ${g.ganchoVisual}`);
-  L.push('');
-  (g.beats || []).forEach(b => {
-    L.push(`BEAT ${b.n} (${b.timecode})`);
-    if (b.visual) L.push(`  🎥 Visual: ${b.visual}`);
-    if (b.voz) L.push(`  🎙 Voz: ${b.voz}`);
-    if (b.textoEnPantalla) L.push(`  📝 Texto en pantalla: ${b.textoEnPantalla}`);
-    L.push('');
-  });
-  if (g.musicaSugerida) L.push(`🎵 Música: ${g.musicaSugerida}`);
-  if (g.notasParaEditor) L.push(`📋 Notas para el editor: ${g.notasParaEditor}`);
-  return L.join('\n');
-}
-
-// Panel de las ideas tipo VIDEO. El video va a producción humana — este
-// panel adapta el guión del ganador de referencia al producto del user
-// (en rioplatense, claro para los editores) y lo deja listo para copiar.
+// Panel de las ideas tipo VIDEO. El video va a producción humana. Al abrir
+// la idea, el guión adaptado al producto del user se genera SOLO (sin
+// botón) — es texto corrido en rioplatense, listo para pasarle al editor.
 function VideoBriefPanel({ idea }) {
-  const [guion, setGuion] = useState(idea.guionAdaptado || null);
+  const [guion, setGuion] = useState(idea.guionAdaptado || '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
-  const [refOpen, setRefOpen] = useState(false);
 
-  const handleGenerar = async () => {
+  const generar = async () => {
     const prod = loadProductos().find(p => String(p.id) === String(idea.productoId));
     if (!prod) {
-      setError('No encontré el producto de esta idea — el guión saldría sin tu research. Recargá la página.');
+      setError('No encontré el producto de esta idea — recargá la página.');
       return;
     }
     setLoading(true);
@@ -1903,10 +1883,18 @@ function VideoBriefPanel({ idea }) {
     }
   };
 
+  // Auto-generar al abrir la idea, si todavía no tiene guión adaptado.
+  // Sin botón — el guión aparece solo. El componente se monta con
+  // key={idea.id}, así que esto corre una vez por idea.
+  useEffect(() => {
+    if (!idea.guionAdaptado) generar();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const copiar = () => {
     if (!guion) return;
     try {
-      navigator.clipboard?.writeText(formatGuionText(guion, idea));
+      navigator.clipboard?.writeText(guion);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {}
@@ -1916,79 +1904,45 @@ function VideoBriefPanel({ idea }) {
     <div className="bg-brand-50 dark:bg-brand-900/20 rounded-md border border-brand-200 dark:border-brand-800">
       <div className="px-3 py-2">
         <p className="text-[10px] font-bold text-brand-700 dark:text-brand-300 uppercase tracking-wider">
-          🎬 Pieza de video — para tus editores
+          🎬 Guión de video — para tus editores
         </p>
       </div>
 
       <div className="px-3 pb-3 space-y-2">
-        {/* Guión de referencia del competidor (colapsado) */}
-        {idea.guion && !/^n\/?a/i.test((idea.guion || '').trim()) && (
-          <details open={refOpen} onToggle={e => setRefOpen(e.currentTarget.open)}
-            className="bg-white dark:bg-gray-800/50 rounded border border-brand-200 dark:border-brand-800">
-            <summary className="cursor-pointer px-2.5 py-1.5 text-[10px] font-semibold text-brand-600 dark:text-brand-400">
-              📼 Guión del ganador de referencia (transcripción)
-            </summary>
-            <p className="px-2.5 pb-2 text-[11px] text-gray-600 dark:text-gray-400 whitespace-pre-wrap">{idea.guion}</p>
-          </details>
+        {loading && !guion && (
+          <div className="flex items-center gap-2 px-1 py-2 text-xs text-brand-700 dark:text-brand-300">
+            <Loader2 size={14} className="animate-spin" /> Generando el guión adaptado a tu producto…
+          </div>
         )}
 
-        {/* Guión adaptado */}
-        {guion ? (
+        {guion && (
           <div className="space-y-2">
-            <div className="flex items-center gap-2 flex-wrap text-[10px] text-brand-700 dark:text-brand-300">
-              <span className="font-bold">✓ Guión adaptado para tu producto</span>
-              <span className="font-mono">· {guion.duracionSegundos}s · 9:16</span>
-              {guion.tono && <span className="opacity-80">· {guion.tono}</span>}
+            <p className="text-[10px] font-bold text-brand-700 dark:text-brand-300">✓ Guión adaptado a tu marca</p>
+            <div className="text-xs text-gray-800 dark:text-gray-200 whitespace-pre-wrap leading-relaxed bg-white dark:bg-gray-800/60 rounded-md px-3 py-2 border border-brand-100 dark:border-brand-900/40">
+              {guion}
             </div>
-            {guion.ganchoVisual && (
-              <p className="text-[11px] text-gray-700 dark:text-gray-300">
-                <span className="font-semibold text-brand-700 dark:text-brand-300">Gancho (1er segundo):</span> {guion.ganchoVisual}
-              </p>
-            )}
-            <ol className="space-y-1.5">
-              {(guion.beats || []).map((b, i) => (
-                <li key={b.n ?? i} className="bg-white dark:bg-gray-800/60 rounded border border-brand-100 dark:border-brand-900/40 px-2.5 py-1.5">
-                  <p className="text-[10px] font-bold text-brand-600 dark:text-brand-400">BEAT {b.n} · {b.timecode}</p>
-                  {b.visual && <p className="text-[11px] text-gray-700 dark:text-gray-300 mt-0.5"><span className="font-semibold">🎥</span> {b.visual}</p>}
-                  {b.voz && <p className="text-[11px] text-gray-700 dark:text-gray-300 mt-0.5"><span className="font-semibold">🎙</span> "{b.voz}"</p>}
-                  {b.textoEnPantalla && <p className="text-[11px] text-gray-700 dark:text-gray-300 mt-0.5"><span className="font-semibold">📝</span> {b.textoEnPantalla}</p>}
-                </li>
-              ))}
-            </ol>
-            {guion.musicaSugerida && (
-              <p className="text-[10px] text-gray-600 dark:text-gray-400">🎵 <span className="font-semibold">Música:</span> {guion.musicaSugerida}</p>
-            )}
-            {guion.notasParaEditor && (
-              <p className="text-[10px] text-gray-600 dark:text-gray-400">📋 <span className="font-semibold">Notas:</span> {guion.notasParaEditor}</p>
-            )}
-            <div className="flex flex-wrap gap-1.5 pt-0.5">
+            <div className="flex flex-wrap gap-1.5">
               <button onClick={copiar}
                 className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-bold text-white bg-brand-600 rounded hover:bg-brand-700 transition">
-                {copied ? <Check size={11} /> : <Download size={11} />} {copied ? 'Copiado' : 'Copiar guión para los editores'}
+                {copied ? <Check size={11} /> : <Download size={11} />} {copied ? 'Copiado' : 'Copiar guión'}
               </button>
-              <button onClick={handleGenerar} disabled={loading}
+              <button onClick={generar} disabled={loading}
                 className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-gray-800 border border-brand-300 dark:border-brand-700 rounded hover:bg-brand-50 dark:hover:bg-brand-900/30 transition disabled:opacity-50">
                 {loading ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />} Regenerar
               </button>
             </div>
           </div>
-        ) : loading ? (
-          <div className="flex items-center gap-2 px-1 py-2 text-xs text-brand-700 dark:text-brand-300">
-            <Loader2 size={14} className="animate-spin" /> Adaptando el guión para tu producto…
-          </div>
-        ) : (
+        )}
+
+        {error && !loading && (
           <div className="space-y-1.5">
-            <p className="text-[11px] text-brand-700 dark:text-brand-300">
-              Generá un guión claro y adaptado a tu producto (en argentino, listo para que tus editores lo produzcan), basado en el patrón del ganador de la competencia.
-            </p>
-            <button onClick={handleGenerar}
-              className="inline-flex items-center gap-1 px-3 py-1.5 text-[11px] font-bold text-white bg-gradient-to-br from-brand-600 to-brand-700 rounded hover:from-brand-700 hover:to-brand-800 transition">
-              <Sparkles size={12} /> Generar guión para mis editores
+            <p className="text-[10px] text-red-600 dark:text-red-400">⚠ {error}</p>
+            <button onClick={generar}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-gray-800 border border-brand-300 dark:border-brand-700 rounded hover:bg-brand-50 dark:hover:bg-brand-900/30 transition">
+              <RefreshCw size={11} /> Reintentar
             </button>
           </div>
         )}
-
-        {error && <p className="text-[10px] text-red-600 dark:text-red-400">⚠ {error}</p>}
       </div>
     </div>
   );

@@ -18,6 +18,27 @@ if (typeof window !== 'undefined' && new URL(window.location.href).searchParams.
   window.location.replace(url.toString());
 }
 
+// ?sw=1 — fuerza la actualización del service worker SIN borrar datos.
+// Cuando se deploya una versión nueva, el SW viejo puede seguir sirviendo
+// el bundle cacheado. Este param desregistra el SW y recarga con
+// cache-buster — los datos (localStorage / IndexedDB) NO se tocan.
+if (typeof window !== 'undefined' && new URL(window.location.href).searchParams.get('sw') === '1') {
+  const recargarLimpio = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('sw');
+    url.searchParams.set('r', Date.now().toString());
+    window.location.replace(url.toString());
+  };
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.getRegistrations()
+      .then(regs => Promise.all(regs.map(r => r.unregister())))
+      .then(recargarLimpio)
+      .catch(recargarLimpio);
+  } else {
+    recargarLimpio();
+  }
+}
+
 // ErrorBoundary global: si algún componente crashea, mostramos el error en
 // pantalla en vez de una página en blanco. Exponemos el stack trace inline
 // (visible sin expandir) y un botón para copiarlo al portapapeles para

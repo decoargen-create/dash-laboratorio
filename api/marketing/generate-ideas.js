@@ -148,8 +148,18 @@ function buildMixSection(mix, formatoMix, targetCount) {
     lines.push(`- ~${mix.desde_cero} tipo "desde_cero": ángulos originales basados en producto + avatar. Diversificá pain points, triggers y beneficios.`);
     lines.push('');
   }
-  lines.push(`**MIX DE FORMATO — OBLIGATORIO**: MÍNIMO ${Math.round(sPct * targetCount / 100)} ideas STATIC y MÍNIMO ${Math.round(vPct * targetCount / 100)} ideas VIDEO del total de ${targetCount}. Si la competencia es 90% video, VOS igual generás ${sPct}% static PORQUE ESO PIDIÓ EL USER. Para statics, describí layout + composición + paleta + mood. Podés incluir carruseles dentro del cupo de statics.`);
-  lines.push('');
+  // Mix de formato. No emitimos "MÍNIMO 0" cuando un formato está en 0%
+  // (instrucción autocontradictoria que confundía al modelo). Solo pedimos
+  // lo que tiene cupo > 0.
+  const minStatic = Math.round(sPct * targetCount / 100);
+  const minVideo = Math.round(vPct * targetCount / 100);
+  const mixReqs = [];
+  if (minStatic > 0) mixReqs.push(`MÍNIMO ${minStatic} ideas STATIC`);
+  if (minVideo > 0) mixReqs.push(`MÍNIMO ${minVideo} ideas VIDEO`);
+  if (mixReqs.length > 0) {
+    lines.push(`**MIX DE FORMATO — OBLIGATORIO**: ${mixReqs.join(' y ')} del total de ${targetCount} (objetivo: ${sPct}% static / ${vPct}% video). Respetá esta proporción aunque la competencia tenga otro mix — es lo que pidió el user. Para statics, describí layout + composición + paleta + mood. Podés incluir carruseles dentro del cupo de statics.`);
+    lines.push('');
+  }
   return lines.join('\n');
 }
 

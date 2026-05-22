@@ -23,7 +23,11 @@ import {
 } from './_lib.js';
 import { anthropicCost } from './_costs.js';
 
-const MODEL_SONNET = 'claude-sonnet-4-5';
+// Alineado con el resto del codebase (deep-analyze, generate-ideas,
+// post-research, copilot, etc. usan todos 4-6). Tener 4-5 acá hacía que el
+// paso research fallara si ese alias ya no era válido → el pipeline
+// abortaba entero sin generar ningún documento.
+const MODEL_SONNET = 'claude-sonnet-4-6';
 const MODEL_HAIKU = 'claude-haiku-4-5-20251001';
 const FETCH_TIMEOUT_MS = 15000;
 

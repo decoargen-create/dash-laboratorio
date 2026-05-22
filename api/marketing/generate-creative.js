@@ -54,7 +54,7 @@ function sizeForFormato(formato) {
 // de una idea "réplica" del deep-analyze— armamos la escena desde el
 // hook + ángulo + copy. Así el creativo se puede generar para CUALQUIER
 // idea de la Bandeja, no solo las del generador.
-function buildImagePrompt(idea) {
+function buildImagePrompt(idea, usarProductoReal = false) {
   const estilo = (idea.estiloVisual || '').trim();
   const hook = (idea.hook || '').trim();
   let textoEnImagen = (idea.textoEnImagen || '').trim();
@@ -77,6 +77,10 @@ function buildImagePrompt(idea) {
 
   const parts = [];
   parts.push('Diseño de creativo publicitario para Meta Ads (Facebook/Instagram), calidad de producción profesional.');
+  if (usarProductoReal) {
+    parts.push('');
+    parts.push('PRODUCTO REAL: la imagen de referencia adjunta es el PRODUCTO REAL del anunciante. Usá ESE producto exactamente — mantené idéntica la forma del envase, la etiqueta, los colores, la tapa y todo el texto de la etiqueta. NO inventes otro packaging, no cambies la marca, no alteres el producto. Integralo como protagonista del creativo: nítido, bien iluminado, en foco. Si el creativo necesita un segundo producto genérico de comparación, ese sí puede ser inventado, pero el producto del anunciante es siempre el de la referencia.');
+  }
   if (estilo) parts.push(`Estilo visual: ${estilo}.`);
   parts.push('');
   parts.push('ESCENA / IMAGEN BASE:');
@@ -119,23 +123,48 @@ export default async function handler(req, res) {
   // El cliente puede pedir 'high' para las ideas que va a producir en serio.
   const quality = ['low', 'medium', 'high'].includes(body?.quality) ? body.quality : 'medium';
   const size = sizeForFormato(idea.formato);
-  const prompt = buildImagePrompt(idea);
+
+  // Foto real del producto (data URL). Si viene, generamos con el endpoint
+  // de EDICIÓN de gpt-image-1 pasándola como referencia → el envase del
+  // creativo es el producto real, no uno inventado.
+  const productoImagen = typeof body?.productoImagen === 'string' ? body.productoImagen : '';
+  const usarProductoReal = productoImagen.length > 0;
+  const prompt = buildImagePrompt(idea, usarProductoReal);
 
   try {
-    const resp = await fetch('https://api.openai.com/v1/images/generations', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'gpt-image-1',
-        prompt,
-        size,
-        quality,
-        n: 1,
-      }),
-    });
+    let resp;
+    if (usarProductoReal) {
+      // /v1/images/edits es multipart — armamos el form con la foto.
+      const base64 = productoImagen.includes(',') ? productoImagen.split(',')[1] : productoImagen;
+      const imgBuffer = Buffer.from(base64, 'base64');
+      const form = new FormData();
+      form.append('model', 'gpt-image-1');
+      form.append('prompt', prompt);
+      form.append('size', size);
+      form.append('quality', quality);
+      form.append('n', '1');
+      form.append('image', new Blob([imgBuffer], { type: 'image/jpeg' }), 'producto.jpg');
+      resp = await fetch('https://api.openai.com/v1/images/edits', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${apiKey}` },
+        body: form,
+      });
+    } else {
+      resp = await fetch('https://api.openai.com/v1/images/generations', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'gpt-image-1',
+          prompt,
+          size,
+          quality,
+          n: 1,
+        }),
+      });
+    }
 
     // Parseo defensivo: si OpenAI devuelve un 502/503 de gateway con HTML
     // o texto plano (pasa en picos de carga), resp.json() explotaría con

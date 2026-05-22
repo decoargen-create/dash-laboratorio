@@ -1866,17 +1866,21 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
       {productoTab === 'competencia' && (
         <div className="space-y-4">
-          <div className="flex items-center gap-2">
-            <Target size={18} className="text-brand-500" />
-            <div className="flex-1">
-              <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Competencia del producto</h3>
-              <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                Marcas que vas a monitorear y de las que extraemos ganadores. Cada corrida del pipeline scrapea sus ads.
-              </p>
+          <div className="flex items-center justify-between gap-3 flex-wrap bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-3">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-brand-500 to-brand-600 flex items-center justify-center text-white shrink-0">
+                <Target size={16} />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Competencia del producto</h3>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                  Marcas que monitoreás y de las que extraemos ganadores. Cada corrida scrapea sus ads.
+                </p>
+              </div>
             </div>
             {!showCompForm && (
               <button onClick={() => setShowCompForm(true)}
-                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-red-500 rounded-md hover:from-brand-600 hover:to-red-600 transition">
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-brand-600 rounded-lg hover:from-brand-600 hover:to-brand-700 shadow-sm transition shrink-0">
                 <Plus size={12} /> Agregar competidor
               </button>
             )}

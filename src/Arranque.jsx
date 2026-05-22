@@ -1379,11 +1379,17 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         while (restante > 0 && !cancelledRef.current) {
           tandaNum++;
           const chunkTarget = Math.min(CHUNK_SIZE, restante);
-          updateStep('generate', { detail: `Tanda ${tandaNum}/${totalTandas} · generando…` });
+          // Denominador `Math.max` para no mostrar "Tanda 18/17" si una
+          // tanda falló y hubo que reintentar.
+          updateStep('generate', { detail: `Tanda ${tandaNum}/${Math.max(totalTandas, tandaNum)} · generando…` });
           try {
             await correrTanda(chunkTarget);
             tandasOk++;
             tandasFallidasSeguidas = 0;
+            // Solo descontamos del target si la tanda salió OK. Si falló,
+            // `restante` no baja y la próxima iteración reintenta ese cupo
+            // — sino una tanda fallida "consumía" 12 ideas en silencio.
+            restante -= chunkTarget;
           } catch (err) {
             tandasFallidasSeguidas++;
             console.error(`generate tanda ${tandaNum} falló:`, err);
@@ -1391,7 +1397,6 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             // que ya se insertó en las tandas anteriores.
             if (tandasFallidasSeguidas >= 2) break;
           }
-          restante -= chunkTarget;
         }
 
         // Fallo real = NINGUNA tanda completó (todas truncadas / timeout).

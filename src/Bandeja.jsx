@@ -12,7 +12,7 @@
 //   - Click en una card expande los detalles (hook, copy, guion, notas)
 //   - Checkbox rápido para marcar "en uso" o "usada"
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Inbox, Search, Filter, ExternalLink, Trash2, Download, Package,
   ChevronDown, Check, Circle, CircleDot, Archive, Edit3, CheckSquare, Square, ChevronRight,
@@ -1838,6 +1838,12 @@ function VideoBriefPanel({ idea }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
+  // mountedRef: evita setState sobre componente desmontado (la llamada
+  // tarda 15-40s; si el user cambia de idea en el medio, el panel se
+  // desmonta). autoGenRef: evita que el auto-generar dispare dos veces
+  // (React StrictMode monta el efecto dos veces en dev).
+  const mountedRef = useRef(true);
+  const autoGenRef = useRef(false);
 
   const generar = async () => {
     const prod = loadProductos().find(p => String(p.id) === String(idea.productoId));
@@ -1874,12 +1880,14 @@ function VideoBriefPanel({ idea }) {
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
       logCostsFromResponse(data, `adapt-guion · ${(idea.titulo || '').slice(0, 50)}`);
-      setGuion(data.guion);
-      updateIdea(idea.id, { guionAdaptado: data.guion });
+      // updateIdea persiste igual aunque el panel se haya desmontado — el
+      // guión queda guardado en la idea. Solo el setState es condicional.
+      updateIdea(idea.id, { guionAdaptado: data.guion || '' });
+      if (mountedRef.current) setGuion(data.guion || '');
     } catch (err) {
-      setError(err.message || 'Error adaptando el guión');
+      if (mountedRef.current) setError(err.message || 'Error adaptando el guión');
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   };
 
@@ -1887,7 +1895,12 @@ function VideoBriefPanel({ idea }) {
   // Sin botón — el guión aparece solo. El componente se monta con
   // key={idea.id}, así que esto corre una vez por idea.
   useEffect(() => {
-    if (!idea.guionAdaptado) generar();
+    mountedRef.current = true;
+    if (!idea.guionAdaptado && !autoGenRef.current) {
+      autoGenRef.current = true;
+      generar();
+    }
+    return () => { mountedRef.current = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

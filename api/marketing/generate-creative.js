@@ -57,11 +57,6 @@ function sizeForFormato(formato) {
 function buildImagePrompt(idea, usarProductoReal = false, paleta = [], feedbackQA = null) {
   const estilo = (idea.estiloVisual || '').trim();
   const hook = (idea.hook || '').trim();
-  let textoEnImagen = (idea.textoEnImagen || '').trim();
-  // Si no hay layout de texto explícito, usamos el hook como texto del ad.
-  if (!textoEnImagen && hook) {
-    textoEnImagen = `HOOK (texto principal, grande y bold): "${hook}"`;
-  }
 
   let escena = (idea.promptGeneradorImagen || idea.descripcionImagen || '').trim();
   if (!escena) {
@@ -93,7 +88,6 @@ function buildImagePrompt(idea, usarProductoReal = false, paleta = [], feedbackQ
   if (usarProductoReal) {
     parts.push('');
     parts.push('PRODUCTO REAL — NO LO MODIFIQUES: la imagen de referencia adjunta es el producto real del anunciante. Reproducí el envase EXACTAMENTE como está en la foto: misma forma, misma etiqueta, mismos colores, misma tapa y el MISMO texto de la etiqueta, letra por letra. PROHIBIDO: redibujar o reescribir la etiqueta, inventar o cambiar el texto del envase, agregar texto/sellos/logos sobre el producto, o alterar el packaging de cualquier forma. El producto es intocable — copialo tal cual.');
-    parts.push('TODO el texto del aviso (hook, copy, datos, CTA, sellos) va sobre el FONDO del creativo, alrededor del producto — NUNCA encima del envase. El envase solo muestra su etiqueta original.');
     parts.push('Si el creativo necesita un segundo envase genérico de comparación, ese sí puede ser inventado y sin marca; pero el producto del anunciante es siempre, exactamente, el de la foto de referencia.');
   }
   if (estilo) parts.push(`Estilo visual: ${estilo}.`);
@@ -105,16 +99,12 @@ function buildImagePrompt(idea, usarProductoReal = false, paleta = [], feedbackQ
   parts.push('ESCENA / IMAGEN BASE:');
   parts.push(escena);
 
-  if (textoEnImagen) {
-    parts.push('');
-    parts.push('TEXTO SOBRE LA IMAGEN — renderizá este texto integrado al diseño, con jerarquía tipográfica clara (títulos grandes y bold, microcopy chico, CTA en botón). El texto debe ser legible, bien compuesto y SIN errores de ortografía. Respetá este layout:');
-    parts.push(textoEnImagen);
-    parts.push('');
-    parts.push('El texto va en ESPAÑOL exactamente como está escrito arriba. No traduzcas, no inventes texto extra.');
-  }
+  parts.push('');
+  parts.push('SIN TEXTO — CRÍTICO: NO renderices ningún texto, palabra, letra, número, sello ni logo en la imagen. Generá ÚNICAMENTE el fondo, la escena y el producto. El titular y el botón del aviso se agregan después por código (por eso la imagen tiene que salir 100% limpia de texto — así el texto nunca sale con errores).');
+  parts.push('COMPOSICIÓN PARA EL TEXTO: dejá el ~32% SUPERIOR de la imagen como una zona visualmente simple y despejada (fondo liso claro o de color de marca, sin elementos importantes ni el producto) — ahí se compone el titular. Dejá también una franja limpia en el ~15% INFERIOR para un botón. El producto y la escena van en la banda central.');
 
   parts.push('');
-  parts.push('Resultado: una sola pieza publicitaria terminada, lista para subir a Meta Ads. Composición equilibrada, colores coherentes, aspecto profesional de agencia.');
+  parts.push('Resultado: el fondo + escena + producto de una pieza publicitaria para Meta Ads, SIN nada de texto, con las zonas superior e inferior despejadas para componerle el titular y el botón encima.');
 
   return parts.join('\n');
 }

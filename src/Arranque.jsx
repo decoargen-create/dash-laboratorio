@@ -433,23 +433,37 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // sugerencia del default: "tu competencia usa X% video, te recomendamos eso".
   // useMemo: con muchos ads (700+) iterar en cada render lagueaba el setup.
   const competitorMix = useMemo(() => {
-    let totalAds = 0, videoAds = 0, staticAds = 0;
+    let totalAds = 0, totalVideo = 0;
+    let winnerAds = 0, winnerVideo = 0;
     for (const c of competidores) {
       for (const ad of (c.ads || [])) {
         // Usamos el formato real (display_format de Meta vía formatoDeAd),
         // no la heurística vieja que marcaba video cualquier ad con un
         // rastro de video — sesgaba el mix de la competencia a video.
-        const f = formatoDeAd(ad);
+        const esVideo = formatoDeAd(ad) === 'video';
         totalAds++;
-        if (f === 'video') videoAds++;
-        else staticAds++; // static, carrusel y mixto cuentan como no-video
+        if (esVideo) totalVideo++;
+        if (ad.isWinner) {
+          winnerAds++;
+          if (esVideo) winnerVideo++;
+        }
       }
     }
     if (totalAds === 0) return null;
+    // El mix se calcula sobre los GANADORES, no sobre todos los ads: lo que
+    // querés copiar es el formato de lo que FUNCIONA, no del descarte que la
+    // competencia tira a la pared. Si hay pocos winners (<5) la muestra es
+    // poco fiable y caemos al mix general.
+    const usaWinners = winnerAds >= 5;
+    const baseAds = usaWinners ? winnerAds : totalAds;
+    const baseVideo = usaWinners ? winnerVideo : totalVideo;
+    const videoPct = Math.round((baseVideo / baseAds) * 100);
     return {
       totalAds,
-      videoPct: Math.round((videoAds / totalAds) * 100),
-      staticPct: Math.round((staticAds / totalAds) * 100),
+      winnerAds,
+      basadoEnWinners: usaWinners,
+      videoPct,
+      staticPct: 100 - videoPct,
       competidoresConAds: competidores.filter(c => (c.ads || []).length > 0).length,
     };
   }, [competidores]);
@@ -2406,7 +2420,10 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
                     {competitorMix ? (
                       <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-1.5">
-                        <span className="font-semibold">Dato de tu competencia:</span> entre {competitorMix.competidoresConAds} competidor{competitorMix.competidoresConAds > 1 ? 'es' : ''} con ads, {competitorMix.videoPct}% usa video ({competitorMix.totalAds} ads analizados).
+                        <span className="font-semibold">Dato de tu competencia:</span>{' '}
+                        {competitorMix.basadoEnWinners
+                          ? `de los ${competitorMix.winnerAds} ads ganadores de tu competencia, ${competitorMix.videoPct}% son video — ese es el formato de lo que funciona.`
+                          : `${competitorMix.videoPct}% de los ${competitorMix.totalAds} ads usa video (pocos ganadores todavía — mix general).`}
                       </p>
                     ) : (
                       <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-1.5 italic">

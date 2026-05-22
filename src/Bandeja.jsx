@@ -36,6 +36,37 @@ function loadProductos() {
   } catch { return []; }
 }
 
+// Coacciona un guión a string. Ideas viejas (anteriores al cambio de guión
+// a texto corrido) tienen `guion`/`guionAdaptado` guardado como objeto
+// estructurado { duracionSegundos, tono, ganchoVisual, beats, ... }.
+// Renderizar ese objeto crudo crashea React (error #31: objects are not
+// valid as a child). Esto lo aplana a texto legible.
+function guionToText(g) {
+  if (!g) return '';
+  if (typeof g === 'string') return g;
+  if (typeof g === 'object') {
+    const lines = [];
+    if (g.duracionSegundos) lines.push(`Duración: ${g.duracionSegundos}s`);
+    if (g.tono) lines.push(`Tono: ${g.tono}`);
+    if (g.ganchoVisual) lines.push(`Gancho visual: ${g.ganchoVisual}`);
+    if (Array.isArray(g.beats)) {
+      g.beats.forEach((b, i) => {
+        if (typeof b === 'string') {
+          lines.push(`${i + 1}. ${b}`);
+        } else if (b && typeof b === 'object') {
+          const partes = [b.timecode || b.tiempo, b.visual || b.escena, b.vo || b.voiceover || b.texto || b.locucion]
+            .filter(Boolean);
+          lines.push(`${i + 1}. ${partes.join(' — ')}`);
+        }
+      });
+    }
+    if (g.musicaSugerida) lines.push(`Música: ${g.musicaSugerida}`);
+    if (g.notasParaEditor) lines.push(`Notas para el editor: ${g.notasParaEditor}`);
+    return lines.join('\n');
+  }
+  return String(g);
+}
+
 // Props:
 //   addToast: callback de toasts
 //   forcedProductoId: cuando viene seteado (ej: embebida en Arranque tabs),
@@ -372,11 +403,13 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
           lines.push(``);
         }
 
-        // 🎬 Guión (solo si es video)
-        if (idea.guion && !/^n\/?a/i.test(idea.guion.trim())) {
-          lines.push(`### 🎬 Guión${idea.formato === 'video' ? ' (beats + VO)' : ''}`);
+        // 🎬 Guión (solo si es video). Preferimos el guión adaptado al
+        // producto si existe; si no, el de referencia.
+        const guionTxt = guionToText(idea.guionAdaptado) || guionToText(idea.guion);
+        if (guionTxt && !/^n\/?a/i.test(guionTxt.trim())) {
+          lines.push(`### 🎬 Guión`);
           lines.push('```');
-          lines.push(idea.guion);
+          lines.push(guionTxt);
           lines.push('```');
           lines.push(``);
         }
@@ -703,7 +736,7 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
           onSaveNotas={() => guardarNotas(ideaDetalle.id)}
           onCancelNotas={() => { setEditandoNotasId(null); setNotasDraft(''); }}
           editandoGuion={editandoGuionId === ideaDetalle.id}
-          onEditGuion={() => { setEditandoGuionId(ideaDetalle.id); setGuionDraft(ideaDetalle.guion || ''); }}
+          onEditGuion={() => { setEditandoGuionId(ideaDetalle.id); setGuionDraft(guionToText(ideaDetalle.guion)); }}
           guionDraft={guionDraft}
           setGuionDraft={setGuionDraft}
           onSaveGuion={() => guardarGuion(ideaDetalle.id)}
@@ -834,13 +867,13 @@ function IdeaCard({
                 {idea.lowScore ? '🟥' : idea.scoreValue >= 8 ? '🟩' : '⬜'} {idea.scoreValue}/10
               </span>
             )}
-            {/* Creencia apalancada — qué creencia del Offer Brief tumba
-                esta pieza (1-6). Útil para verificar que la bandeja cubra
-                las 6 sin sobre-representar una sola. */}
+            {/* Creencia apalancada — qué creencia del prospect instala/derriba
+                esta pieza. Útil para chequear que la bandeja cubra todas las
+                creencias sin sobre-representar una sola. */}
             {idea.creenciaApalancada && (
-              <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-semibold bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 rounded"
-                title={`Tumba la creencia #${idea.creenciaApalancada} del Offer Brief`}>
-                💭 cr.{idea.creenciaApalancada}
+              <span className="inline-flex items-center max-w-[260px] truncate px-1.5 py-0.5 text-[9px] font-semibold bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 rounded"
+                title={`Creencia que apalanca: ${idea.creenciaApalancada}`}>
+                💭 {idea.creenciaApalancada}
               </span>
             )}
             {idea.formato && (
@@ -941,11 +974,11 @@ function IdeaCard({
                 </div>
               )}
 
-              {(idea.guion || editandoGuion) && !/^n\/?a/i.test((idea.guion || '').trim()) && (
+              {(() => { const guionTextoIdea = guionToText(idea.guion); return (guionTextoIdea || editandoGuion) && !/^n\/?a/i.test(guionTextoIdea.trim()) && (
                 <div className="bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700">
                   <div className="flex items-center justify-between px-3 py-2">
                     <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
-                      🎬 Guión {idea.formato === 'video' ? '(beats + VO, porteño)' : '(porteño)'}
+                      🎬 Guión {idea.formato === 'video' ? '(porteño)' : '(porteño)'}
                     </p>
                     {!editandoGuion && onEditGuion && (
                       <button onClick={onEditGuion}
@@ -972,10 +1005,10 @@ function IdeaCard({
                       </div>
                     </div>
                   ) : (
-                    <p className="px-3 pb-3 text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{idea.guion}</p>
+                    <p className="px-3 pb-3 text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{guionTextoIdea}</p>
                   )}
                 </div>
-              )}
+              ); })()}
             </div>
 
             {/* COLUMNA DERECHA — contexto estratégico + metadata (2/5 del espacio) */}
@@ -1581,9 +1614,9 @@ function KanbanCard({ idea, isSelected = false, tieneCreativo = false, onToggleS
             </span>
           )}
           {idea.creenciaApalancada && (
-            <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-semibold rounded bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300"
-              title={`Tumba la creencia #${idea.creenciaApalancada} del Offer Brief`}>
-              💭 cr.{idea.creenciaApalancada}
+            <span className="inline-flex items-center max-w-[180px] truncate px-1.5 py-0.5 text-[9px] font-semibold rounded bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300"
+              title={`Creencia que apalanca: ${idea.creenciaApalancada}`}>
+              💭 {idea.creenciaApalancada}
             </span>
           )}
           {idea.metaRiesgo?.tieneRiesgo && (
@@ -1972,7 +2005,7 @@ function CreativoPanel({ idea }) {
 // la idea, el guión adaptado al producto del user se genera SOLO (sin
 // botón) — es texto corrido en rioplatense, listo para pasarle al editor.
 function VideoBriefPanel({ idea }) {
-  const [guion, setGuion] = useState(idea.guionAdaptado || '');
+  const [guion, setGuion] = useState(guionToText(idea.guionAdaptado));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
@@ -2002,7 +2035,7 @@ function VideoBriefPanel({ idea }) {
             angulo: idea.angulo,
             painPoint: idea.painPoint,
             copy: idea.copyPostMeta || idea.copy,
-            guionReferencia: idea.guion,
+            guionReferencia: guionToText(idea.guion),
             formato: idea.formato,
           },
           producto: {

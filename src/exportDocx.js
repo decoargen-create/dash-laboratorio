@@ -288,10 +288,14 @@ export async function exportBriefDocx(ideas, producto = null) {
         children.push(p(idea.copyPostMeta));
       }
 
-      // Guión (video)
-      if (idea.guion && !/^n\/?a/i.test(idea.guion.trim())) {
-        children.push(h3(idea.formato === 'video' ? '🎬 Guión (beats + VO)' : '🎬 Guión'));
-        children.push(codeBlock(idea.guion));
+      // Guión (video). Coaccionamos a string — ideas viejas pueden tener
+      // el guión guardado como objeto estructurado.
+      const guionDocx = typeof idea.guionAdaptado === 'string' && idea.guionAdaptado
+        ? idea.guionAdaptado
+        : (typeof idea.guion === 'string' ? idea.guion : '');
+      if (guionDocx && !/^n\/?a/i.test(guionDocx.trim())) {
+        children.push(h3('🎬 Guión'));
+        children.push(codeBlock(guionDocx));
       }
 
       // Público sugerido

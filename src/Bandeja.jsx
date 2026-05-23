@@ -213,7 +213,15 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
       .catch(() => {});
     refresh();
     const iv = setInterval(refresh, 4000);
-    return () => { alive = false; clearInterval(iv); };
+    // También refrescamos al toque cuando se guarda un creativo nuevo (la
+    // generación masiva dispara este evento por cada creativo).
+    const onSaved = () => refresh();
+    window.addEventListener('viora:creativo-saved', onSaved);
+    return () => {
+      alive = false;
+      clearInterval(iv);
+      window.removeEventListener('viora:creativo-saved', onSaved);
+    };
   }, []);
 
   const setEstado = (id, estado) => {
@@ -1534,6 +1542,21 @@ function KanbanCard({ idea, isSelected = false, tieneCreativo = false, onToggleS
 
   const tieneScore = typeof idea.scoreValue === 'number';
 
+  // Cuando la idea tiene creativo producido, lazy-loadeamos el thumbnail
+  // desde IndexedDB para mostrarlo arriba de la card — feedback visual
+  // inmediato durante la generación masiva sin tener que abrir cada idea.
+  const [thumb, setThumb] = useState(null);
+  useEffect(() => {
+    if (!tieneCreativo) { setThumb(null); return; }
+    let alive = true;
+    getCreativo(idea.id).then(c => {
+      if (alive && c?.imageBase64) {
+        setThumb(`data:${c.mimeType || 'image/png'};base64,${c.imageBase64}`);
+      }
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [idea.id, tieneCreativo]);
+
   return (
     <div
       onClick={onClick}
@@ -1555,6 +1578,14 @@ function KanbanCard({ idea, isSelected = false, tieneCreativo = false, onToggleS
         >
           {isSelected ? <CheckSquare size={12} className="text-brand-600" /> : <Square size={12} className="text-gray-400" />}
         </button>
+      )}
+
+      {/* Banner con el creativo cuando ya está producido — feedback visual
+          inmediato sin tener que abrir la idea. */}
+      {thumb && (
+        <div className="-mx-2.5 -mt-2.5 mb-2 h-24 bg-gray-100 dark:bg-gray-900 overflow-hidden rounded-t-lg border-b border-gray-200 dark:border-gray-700">
+          <img src={thumb} alt="" className="w-full h-full object-cover" />
+        </div>
       )}
 
       {/* Fila 1: badges de clasificación (tipo · formato · score) */}

@@ -46,6 +46,11 @@ export async function saveCreativo(ideaId, creativo) {
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
+    // Aviso global para que la Bandeja refresque los badges/thumbnails al
+    // toque, sin esperar el polling de 4s.
+    if (typeof window !== 'undefined') {
+      try { window.dispatchEvent(new CustomEvent('viora:creativo-saved', { detail: { ideaId: String(ideaId) } })); } catch {}
+    }
     return true;
   } catch (err) {
     console.error('saveCreativo error:', err);

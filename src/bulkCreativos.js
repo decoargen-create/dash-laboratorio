@@ -4,21 +4,29 @@
 
 import { componerCreativo, extraerCTA, extraerHeadlineYSubcopy } from './componerCreativo.js';
 
-// Estilos de escena disponibles para el bulk.
-const ESTILOS = ['producto', 'lifestyle', 'ugc', 'comparacion'];
+// Estilos de escena disponibles internamente — el "auto" del bulk rota
+// por todos. El selector de la UI muestra solo los 4 principales para no
+// abrumar; los 5 nuevos (explosion, mesa_aerea, editorial, testimonio,
+// mascot) salen vía auto.
+const POOLS = {
+  social_proof:    ['testimonio', 'ugc', 'editorial'],
+  BOFU:            ['comparacion', 'explosion', 'producto'],
+  retargeting:     ['comparacion', 'explosion', 'mascot'],
+  branding:        ['editorial', 'producto', 'mesa_aerea'],
+  TOFU:            ['lifestyle', 'mesa_aerea', 'editorial', 'ugc'],
+  MOFU:            ['lifestyle', 'comparacion', 'testimonio', 'producto'],
+};
+const POOL_DEFAULT = ['lifestyle', 'producto', 'ugc', 'testimonio', 'mesa_aerea', 'editorial', 'explosion', 'mascot'];
 
 // Elige el estilo de escena para esta idea cuando el user pidió "auto" en
-// el bulk — mezcla mapeo por características de la idea (tipo / etapa de
-// campaña) con un round-robin de fallback, para que la tanda tenga variedad.
+// el bulk — pool acorde a la etapa de campaña + round-robin dentro del pool,
+// para que la tanda tenga variedad real (no 46 packshots iguales).
 export function pickEstilo(idea, i) {
-  const camp = idea?.tipoCampaña;
-  const tipo = idea?.tipo;
-  if (camp === 'social_proof') return 'ugc';
-  if (camp === 'BOFU' || camp === 'retargeting') return 'comparacion';
-  if (tipo === 'replica') return 'comparacion';
-  if (tipo === 'diferenciacion') return 'lifestyle';
-  // Cycle entre los 3 restantes para variedad.
-  return ['producto', 'lifestyle', 'ugc'][i % 3];
+  const pool = POOLS[idea?.tipoCampaña] || POOL_DEFAULT;
+  // Sesgo extra por tipo de idea:
+  if (idea?.tipo === 'replica' && !POOLS[idea?.tipoCampaña]) return 'comparacion';
+  if (idea?.tipo === 'diferenciacion' && !POOLS[idea?.tipoCampaña]) return ['editorial', 'lifestyle', 'mascot'][i % 3];
+  return pool[i % pool.length];
 }
 
 import { getProductoImagen, getPaletaMarca } from './productoImagen.js';

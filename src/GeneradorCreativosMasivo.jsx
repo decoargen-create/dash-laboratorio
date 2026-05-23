@@ -3,7 +3,7 @@
 // cambies de pestaña dentro del workspace).
 
 import React, { useState, useEffect } from 'react';
-import { Images, Loader2, X, Check } from 'lucide-react';
+import { Images, Loader2, X, Check, Download } from 'lucide-react';
 import { loadIdeas } from './bandejaStore.js';
 import { getAllCreativoIds } from './creativosStorage.js';
 import { getProductoImagen } from './productoImagen.js';
@@ -95,6 +95,7 @@ export default function GeneradorCreativosMasivo({ producto, bulkRunning, onGene
 // Barra de progreso flotante — fija abajo a la derecha, visible mientras
 // corre la generación masiva aunque cambies de pestaña.
 export function BulkProgressBar({ state, onCancel, onClose }) {
+  const [selected, setSelected] = useState(null); // thumbnail abierto en grande
   if (!state) return null;
   const pct = state.total > 0 ? Math.round((state.done / state.total) * 100) : 0;
   const ultimas = Array.isArray(state.ultimas) ? state.ultimas : [];
@@ -152,13 +153,49 @@ export function BulkProgressBar({ state, onCancel, onClose }) {
           </p>
           <div className={`grid ${finished ? 'grid-cols-4 gap-1.5 max-h-64 overflow-y-auto' : 'flex gap-1.5 overflow-x-auto'}`}>
             {ultimas.map((it) => (
-              <img
+              <button
                 key={it.id}
-                src={`data:image/png;base64,${it.b64}`}
-                alt=""
-                className={`${thumbSize} object-cover rounded-md border border-gray-200 dark:border-gray-700 shrink-0 bg-white`}
-              />
+                onClick={() => setSelected(it)}
+                title="Click para ver en grande y descargar"
+                className={`${thumbSize} shrink-0 rounded-md border border-gray-200 dark:border-gray-700 bg-white overflow-hidden hover:scale-105 hover:border-brand-500 transition cursor-pointer`}
+              >
+                <img src={`data:image/png;base64,${it.b64}`} alt="" className="w-full h-full object-cover" />
+              </button>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Lightbox del creativo */}
+      {selected && (
+        <div
+          className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6"
+          onClick={() => setSelected(null)}
+        >
+          <div
+            className="relative max-w-3xl max-h-[90vh] bg-white dark:bg-gray-900 rounded-xl overflow-hidden shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          >
+            <img
+              src={`data:image/png;base64,${selected.b64}`}
+              alt=""
+              className="max-w-full max-h-[78vh] object-contain bg-white"
+            />
+            <div className="flex items-center justify-between gap-2 p-3 bg-gray-50 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
+              <a
+                href={`data:image/png;base64,${selected.b64}`}
+                download={`creativo-${String(selected.id).slice(0, 12)}.png`}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition"
+              >
+                <Download size={13} /> Descargar PNG
+              </a>
+              <button
+                onClick={() => setSelected(null)}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-gray-700 dark:text-gray-200 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 rounded-lg transition"
+              >
+                <X size={13} /> Cerrar
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -106,9 +106,13 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
-// Compone titular + subcopy + botón sobre la imagen base. Devuelve un data
-// URL PNG. Si algo falla, devuelve la base sin tocar.
-export async function componerCreativo(baseDataUrl, { headline = '', subcopy = '', cta = '', colorCta = '#b8895a' } = {}) {
+// Compone titular + subcopy + botón + (opcional) badge y estrellas sobre
+// la imagen base. Devuelve un data URL PNG. Si algo falla, devuelve la base
+// sin tocar.
+export async function componerCreativo(baseDataUrl, {
+  headline = '', subcopy = '', cta = '', colorCta = '#b8895a',
+  badgeText = '', rating = 0, reviews = 0,
+} = {}) {
   try {
     await Promise.all([
       document.fonts.load('800 80px Montserrat'),
@@ -131,8 +135,39 @@ export async function componerCreativo(baseDataUrl, { headline = '', subcopy = '
         ctx.drawImage(img, 0, 0, W, H);
         const pad = Math.round(W * 0.06);
 
-        // --- Titular (zona superior) ---
-        let yCursor = pad;
+        // --- Estrellas + reseñas (apenas arriba del titular) ---
+        let starsBlockH = 0;
+        if (rating > 0) {
+          const sFont = Math.round(W * 0.032);
+          const fullStars = Math.max(0, Math.min(5, Math.round(rating)));
+          const starsTxt = '★'.repeat(fullStars) + '☆'.repeat(5 - fullStars);
+          const reviewsTxt = reviews > 0 ? `  ${reviews.toLocaleString('es-AR')}+ reseñas` : '';
+
+          // medir total para el scrim
+          ctx.font = `700 ${sFont * 1.3}px Montserrat, system-ui, sans-serif`;
+          const starsW = ctx.measureText(starsTxt).width;
+          ctx.font = `700 ${sFont}px Montserrat, system-ui, sans-serif`;
+          const revsW = ctx.measureText(reviewsTxt).width;
+          const totalW = starsW + revsW;
+          // scrim chico detrás
+          ctx.fillStyle = 'rgba(255,255,252,0.85)';
+          ctx.fillRect(0, 0, totalW + pad * 2, sFont * 2.4);
+          // stars dorados
+          ctx.fillStyle = '#f59e0b';
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'alphabetic';
+          ctx.font = `700 ${sFont * 1.3}px Montserrat, system-ui, sans-serif`;
+          ctx.fillText(starsTxt, pad, pad + sFont * 1.1);
+          if (reviewsTxt) {
+            ctx.fillStyle = '#374151';
+            ctx.font = `700 ${sFont}px Montserrat, system-ui, sans-serif`;
+            ctx.fillText(reviewsTxt, pad + starsW, pad + sFont * 1.1);
+          }
+          starsBlockH = sFont * 1.8;
+        }
+
+        // --- Titular (zona superior, debajo de las estrellas si las hay) ---
+        let yCursor = pad + starsBlockH;
         let headlineBlockH = 0;
         if (headline) {
           const maxW = W - pad * 2;
@@ -147,8 +182,9 @@ export async function componerCreativo(baseDataUrl, { headline = '', subcopy = '
           const lineH = fontSize * 1.12;
           headlineBlockH = lineH * lines.length;
 
-          // Scrim para legibilidad sobre cualquier fondo.
-          const scrimH = headlineBlockH + pad + (subcopy ? Math.round(W * 0.06) : 0);
+          // Scrim para legibilidad — abarca desde 0 (incluye estrellas) hasta
+          // debajo del titular.
+          const scrimH = starsBlockH + headlineBlockH + pad + (subcopy ? Math.round(W * 0.06) : 0);
           const grad = ctx.createLinearGradient(0, 0, 0, scrimH);
           grad.addColorStop(0, 'rgba(255,255,252,0.88)');
           grad.addColorStop(0.7, 'rgba(255,255,252,0.55)');
@@ -159,7 +195,7 @@ export async function componerCreativo(baseDataUrl, { headline = '', subcopy = '
           ctx.textAlign = 'left';
           ctx.textBaseline = 'alphabetic';
           ctx.lineJoin = 'round';
-          let y = pad + fontSize;
+          let y = yCursor + fontSize;
           for (const line of lines) {
             ctx.font = `800 ${fontSize}px Montserrat, system-ui, sans-serif`;
             ctx.lineWidth = Math.max(3, fontSize * 0.08);
@@ -188,6 +224,44 @@ export async function componerCreativo(baseDataUrl, { headline = '', subcopy = '
             ctx.fillText(line, pad, y);
             y += lineH;
           }
+        }
+
+        // --- Badge / sello (esquina superior derecha) ---
+        if (badgeText && badgeText.trim()) {
+          const r = Math.round(W * 0.10);
+          const cx = W - pad - r;
+          const cy = pad + r;
+          ctx.save();
+          ctx.translate(cx, cy);
+          ctx.rotate(-0.18);
+          // sombra
+          ctx.shadowColor = 'rgba(0,0,0,0.28)';
+          ctx.shadowBlur = r * 0.45;
+          ctx.shadowOffsetY = r * 0.12;
+          // círculo principal
+          ctx.fillStyle = '#dc2626';
+          ctx.beginPath();
+          ctx.arc(0, 0, r, 0, Math.PI * 2);
+          ctx.fill();
+          // borde dorado
+          ctx.shadowColor = 'transparent';
+          ctx.strokeStyle = '#fbbf24';
+          ctx.lineWidth = r * 0.06;
+          ctx.stroke();
+          // texto centrado, auto-fit
+          ctx.fillStyle = '#ffffff';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          const text = String(badgeText).trim().toUpperCase();
+          let fs = Math.round(r * 0.4);
+          ctx.font = `900 ${fs}px Montserrat, system-ui, sans-serif`;
+          while (ctx.measureText(text).width > r * 1.55 && fs > Math.round(r * 0.18)) {
+            fs -= 1;
+            ctx.font = `900 ${fs}px Montserrat, system-ui, sans-serif`;
+          }
+          // si entra en una línea
+          ctx.fillText(text, 0, 0);
+          ctx.restore();
         }
 
         // --- Botón CTA (zona inferior) ---

@@ -28,7 +28,7 @@ export default function GeneradorCreativosMasivo({ producto, bulkRunning, onGene
   const handleClick = () => {
     if (sinCreativo.length === 0 || bulkRunning) return;
     if (!window.confirm(
-      `Vas a generar ${sinCreativo.length} creativos (calidad ${quality}). Costo estimado ~$${costoEstim} en OpenAI. ¿Seguir?`
+      `Va a generar hasta ${sinCreativo.length} creativos (~$${costoEstim} estimado, calidad ${quality}). Los vas a ver aparecer en vivo en la barra de progreso. Podés pausar cuando quieras y queda lo ya generado. ¿Arrancar?`
     )) return;
     onGenerar(sinCreativo, { quality, estiloEscena });
   };
@@ -97,15 +97,17 @@ export default function GeneradorCreativosMasivo({ producto, bulkRunning, onGene
 export function BulkProgressBar({ state, onCancel }) {
   if (!state) return null;
   const pct = state.total > 0 ? Math.round((state.done / state.total) * 100) : 0;
+  const ultimas = Array.isArray(state.ultimas) ? state.ultimas : [];
   return (
-    <div className="fixed bottom-4 right-4 z-50 w-80 max-w-[calc(100vw-2rem)] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl p-3.5">
+    <div className="fixed bottom-4 right-4 z-50 w-96 max-w-[calc(100vw-2rem)] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl p-3.5">
       <div className="flex items-center justify-between mb-2">
         <p className="text-xs font-bold text-gray-900 dark:text-gray-100 flex items-center gap-1.5">
           <Loader2 size={13} className="animate-spin text-brand-500" /> Generando creativos
         </p>
-        <button onClick={onCancel} title="Cancelar"
-          className="p-1 text-gray-400 hover:text-red-500 rounded transition">
-          <X size={14} />
+        <button onClick={onCancel}
+          className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-bold text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md transition"
+          title="Pausa — los ya generados quedan guardados">
+          <X size={12} /> Pausar
         </button>
       </div>
       <div className="h-2 bg-gray-100 dark:bg-gray-900 rounded-full overflow-hidden">
@@ -121,6 +123,24 @@ export function BulkProgressBar({ state, onCancel }) {
       </div>
       {state.actual && (
         <p className="text-[10px] text-gray-400 dark:text-gray-500 truncate mt-1">{state.actual}</p>
+      )}
+      {/* Thumbnails en vivo — el más nuevo a la izquierda. */}
+      {ultimas.length > 0 && (
+        <div className="mt-2 pt-2 border-t border-gray-100 dark:border-gray-700">
+          <p className="text-[9px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-1.5">
+            Últimos generados — buscalos con 🎨 en la Bandeja
+          </p>
+          <div className="flex gap-1.5 overflow-x-auto">
+            {ultimas.map((it) => (
+              <img
+                key={it.id}
+                src={`data:image/png;base64,${it.b64}`}
+                alt=""
+                className="w-14 h-14 object-cover rounded-md border border-gray-200 dark:border-gray-700 shrink-0 bg-white"
+              />
+            ))}
+          </div>
+        </div>
       )}
     </div>
   );

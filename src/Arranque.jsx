@@ -285,8 +285,9 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     if (!ideas?.length || bulkCreativos) return;
     const ctrl = new AbortController();
     bulkAbortRef.current = ctrl;
-    setBulkCreativos({ running: true, total: ideas.length, done: 0, ok: 0, fail: 0, actual: '' });
+    setBulkCreativos({ running: true, total: ideas.length, done: 0, ok: 0, fail: 0, actual: '', ultimas: [] });
     let done = 0, ok = 0, fail = 0;
+    let ultimas = []; // thumbnails de los últimos creativos generados (para feedback en vivo)
     // Si el user pidió "auto", el estilo de cada creativo se elige según
     // las características de la idea (tipo / etapa de campaña) con
     // round-robin de fallback — variedad visual en la tanda.
@@ -297,15 +298,19 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       const estiloEscena = baseEstilo === 'auto' ? pickEstilo(idea, i) : baseEstilo;
       setBulkCreativos(b => b && ({ ...b, actual: idea.titulo || idea.hook || 'Idea' }));
       try {
-        await generarCreativoParaIdea(idea, { ...opts, estiloEscena, signal: ctrl.signal });
+        const nuevo = await generarCreativoParaIdea(idea, { ...opts, estiloEscena, signal: ctrl.signal });
         ok++;
+        if (nuevo?.imageBase64) {
+          // El más nuevo va primero, mantenemos solo los últimos 6.
+          ultimas = [{ id: idea.id, b64: nuevo.imageBase64 }, ...ultimas].slice(0, 6);
+        }
       } catch (err) {
         if (err.name === 'AbortError') break;
         console.error('bulk creativo falló:', err);
         fail++;
       }
       done++;
-      setBulkCreativos(b => b && ({ ...b, done, ok, fail }));
+      setBulkCreativos(b => b && ({ ...b, done, ok, fail, ultimas }));
     }
     bulkAbortRef.current = null;
     setBulkCreativos(null);

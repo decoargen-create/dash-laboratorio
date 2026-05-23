@@ -285,9 +285,10 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     if (!ideas?.length || bulkCreativos) return;
     const ctrl = new AbortController();
     bulkAbortRef.current = ctrl;
-    setBulkCreativos({ running: true, total: ideas.length, done: 0, ok: 0, fail: 0, actual: '', ultimas: [] });
+    setBulkCreativos({ running: true, total: ideas.length, done: 0, ok: 0, fail: 0, actual: '', ultimas: [], ultimoError: '' });
     let done = 0, ok = 0, fail = 0;
     let ultimas = []; // thumbnails de los últimos creativos generados (para feedback en vivo)
+    let ultimoError = ''; // último mensaje de error visible — clave para diagnosticar fallas masivas
     // Si el user pidió "auto", el estilo de cada creativo se elige según
     // las características de la idea (tipo / etapa de campaña) con
     // round-robin de fallback — variedad visual en la tanda.
@@ -308,16 +309,17 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         if (err.name === 'AbortError') break;
         console.error('bulk creativo falló:', err);
         fail++;
+        ultimoError = err.message || 'Error desconocido';
       }
       done++;
-      setBulkCreativos(b => b && ({ ...b, done, ok, fail, ultimas }));
+      setBulkCreativos(b => b && ({ ...b, done, ok, fail, ultimas, ultimoError }));
     }
     bulkAbortRef.current = null;
     setBandejaRefreshKey(k => k + 1);
     // Dejamos la barra visible con TODOS los thumbnails generados y el
     // botón "Cerrar" — así el user puede revisar lo que se generó en vez
     // de quedar sin nada visible cuando termina o pausa.
-    setBulkCreativos(b => b && ({ ...b, running: false, finished: true, actual: '', done, ok, fail, ultimas }));
+    setBulkCreativos(b => b && ({ ...b, running: false, finished: true, actual: '', done, ok, fail, ultimas, ultimoError }));
     addToast?.({
       type: ok > 0 ? 'success' : 'error',
       message: `Creativos: ${ok} generado${ok !== 1 ? 's' : ''}${fail > 0 ? ` · ${fail} fallaron` : ''}`,

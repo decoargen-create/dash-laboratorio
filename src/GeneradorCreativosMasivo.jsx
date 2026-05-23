@@ -143,6 +143,12 @@ export function BulkProgressBar({ state, onCancel, onClose }) {
           )}
         </>
       )}
+      {state.ultimoError && state.fail > 0 && (
+        <div className="mt-2 px-2 py-1.5 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-md">
+          <p className="text-[10px] font-bold text-red-700 dark:text-red-300">⚠ Último error ({state.fail} {state.fail === 1 ? 'falla' : 'fallas'}):</p>
+          <p className="text-[10px] text-red-600 dark:text-red-400 break-words mt-0.5 whitespace-pre-wrap">{state.ultimoError}</p>
+        </div>
+      )}
       {/* Thumbnails — el más nuevo a la izquierda. */}
       {ultimas.length > 0 && (
         <div className={`mt-2 ${running ? 'pt-2 border-t border-gray-100 dark:border-gray-700' : ''}`}>

@@ -1849,7 +1849,7 @@ function CreativoPanel({ idea }) {
         const resp = await fetch('/api/marketing/generate-creative', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ quality, estiloEscena, productoImagen, paletaMarca, feedbackQA, idea: ideaPayload }),
+          body: JSON.stringify({ quality, estiloEscena, variationSeed: Math.floor(Math.random() * 100), productoImagen, paletaMarca, feedbackQA, idea: ideaPayload }),
         });
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);

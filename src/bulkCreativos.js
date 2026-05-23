@@ -11,13 +11,16 @@ import { logCostsFromResponse } from './costsStore.js';
 // por todos. El selector de la UI muestra solo los 4 principales para no
 // abrumar; los 5 nuevos (explosion, mesa_aerea, editorial, testimonio,
 // mascot) salen vía auto.
+// Pools por etapa de campaña. Comparación se usa con moderación (1 cada
+// ~5 estilos) — sino el bulk repite el patrón "dos personas split" todo
+// el tiempo.
 const POOLS = {
-  social_proof:    ['testimonio', 'ugc', 'editorial'],
-  BOFU:            ['comparacion', 'explosion', 'producto'],
-  retargeting:     ['comparacion', 'explosion', 'mascot'],
-  branding:        ['editorial', 'producto', 'mesa_aerea'],
-  TOFU:            ['lifestyle', 'mesa_aerea', 'editorial', 'ugc'],
-  MOFU:            ['lifestyle', 'comparacion', 'testimonio', 'producto'],
+  social_proof:    ['testimonio', 'ugc', 'editorial', 'testimonio', 'lifestyle'],
+  BOFU:            ['producto', 'explosion', 'mascot', 'editorial', 'comparacion'],
+  retargeting:     ['mascot', 'explosion', 'editorial', 'producto', 'comparacion'],
+  branding:        ['editorial', 'producto', 'mesa_aerea', 'lifestyle', 'explosion'],
+  TOFU:            ['lifestyle', 'mesa_aerea', 'editorial', 'ugc', 'testimonio'],
+  MOFU:            ['lifestyle', 'testimonio', 'producto', 'mesa_aerea', 'comparacion'],
 };
 const POOL_DEFAULT = ['lifestyle', 'producto', 'ugc', 'testimonio', 'mesa_aerea', 'editorial', 'explosion', 'mascot'];
 
@@ -32,7 +35,7 @@ export function pickEstilo(idea, i) {
   return pool[i % pool.length];
 }
 
-export async function generarCreativoParaIdea(idea, { quality = 'medium', estiloEscena = 'producto', signal } = {}) {
+export async function generarCreativoParaIdea(idea, { quality = 'medium', estiloEscena = 'producto', variationSeed = 0, signal } = {}) {
   const productoImagen = getProductoImagen(idea.productoId);
   const paletaMarca = getPaletaMarca(idea.productoId);
   const mkt = getDatosMarketing(idea.productoId) || {};
@@ -44,6 +47,7 @@ export async function generarCreativoParaIdea(idea, { quality = 'medium', estilo
     body: JSON.stringify({
       quality,
       estiloEscena,
+      variationSeed,
       productoImagen,
       paletaMarca,
       idea: {

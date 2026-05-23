@@ -25,7 +25,7 @@ import { exportBriefDocx } from './exportDocx.js';
 import { saveCreativo, getCreativo, deleteCreativo, getAllCreativoIds } from './creativosStorage.js';
 import { logCostsFromResponse } from './costsStore.js';
 import { getProductoImagen, getPaletaMarca } from './productoImagen.js';
-import { componerCreativo, extraerCTA } from './componerCreativo.js';
+import { componerCreativo, extraerCTA, extraerHeadlineYSubcopy } from './componerCreativo.js';
 
 const PRODUCTOS_KEY = 'viora-marketing-productos-v1';
 const ACTIVE_PRODUCT_KEY = 'viora-marketing-bandeja-active-product';
@@ -1644,9 +1644,9 @@ function KanbanCard({ idea, isSelected = false, tieneCreativo = false, onToggleS
         </span>
         <span className="flex items-center gap-1.5 shrink-0">
           {piezaLista && (
-            <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-bold rounded bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300"
-              title={esVideo ? 'Guión de video ya generado' : 'Creativo ya producido'}>
-              ✓ {esVideo ? 'Guión' : 'Pieza'}
+            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-bold rounded-md bg-gradient-to-br from-emerald-500 to-emerald-600 text-white shadow-sm"
+              title={esVideo ? 'Guión de video ya generado' : 'Creativo ya producido — abrí la idea para verlo'}>
+              {esVideo ? '🎬' : '🎨'} {esVideo ? 'Guión' : 'Creativo'}
             </span>
           )}
           <span className="text-[9px] text-gray-400 dark:text-gray-500 whitespace-nowrap" title={`Creada el ${idea.createdAt ? new Date(idea.createdAt).toLocaleString('es-AR') : '—'}`}>
@@ -1780,10 +1780,8 @@ function CreativoPanel({ idea }) {
     const paletaMarca = getPaletaMarca(idea.productoId);
     // Texto del aviso — lo dibuja el código sobre la imagen (la IA genera
     // SIN texto), así nunca sale con typos ni letras inventadas.
-    const overlay = {
-      headline: (idea.hook || idea.titulo || '').trim(),
-      cta: extraerCTA(idea.textoEnImagen) || 'Quiero saber más',
-    };
+    const { headline, subcopy } = extraerHeadlineYSubcopy(idea);
+    const overlay = { headline, subcopy, cta: extraerCTA(idea) };
     const colorCta = paletaMarca[0] || '#b8895a';
     // Payload de la idea — constante entre intentos.
     const ideaPayload = {
@@ -1902,10 +1900,10 @@ function CreativoPanel({ idea }) {
 
       // Re-componemos el texto sobre la base editada.
       const newBase = data.imageBase64;
-      const overlay = creativo.overlay || {
-        headline: (idea.hook || idea.titulo || '').trim(),
-        cta: extraerCTA(idea.textoEnImagen) || 'Quiero saber más',
-      };
+      const overlay = creativo.overlay || (() => {
+        const { headline, subcopy } = extraerHeadlineYSubcopy(idea);
+        return { headline, subcopy, cta: extraerCTA(idea) };
+      })();
       const colorCta = getPaletaMarca(idea.productoId)[0] || '#b8895a';
       const finalUrl = await componerCreativo(`data:image/png;base64,${newBase}`, { ...overlay, colorCta });
 

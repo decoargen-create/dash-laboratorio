@@ -56,10 +56,10 @@ function sizeForFormato(formato) {
 // idea de la Bandeja, no solo las del generador.
 // Guía de escena según el estilo elegido por el user al generar.
 const ESCENA_GUIDE = {
-  producto: 'ENFOQUE DE ESCENA: el producto como protagonista sobre un fondo de marca limpio y atractivo — packshot editorial, iluminación de estudio suave, props mínimos coherentes con la marca.',
-  lifestyle: 'ENFOQUE DE ESCENA: lifestyle real — una persona del público objetivo usando o sosteniendo el producto en un entorno cotidiano y creíble (casa, baño, cocina o exterior según el producto). Luz natural, naturalidad, que se sienta una foto real y aspiracional, no un render.',
-  ugc: 'ENFOQUE DE ESCENA: estilo UGC / contenido de usuario — como una foto sacada con celular por un cliente real. Encuadre casual, luz ambiente, levemente imperfecta a propósito, espontánea y auténtica. Una persona común mostrando el producto.',
-  comparacion: 'ENFOQUE DE ESCENA: comparación lado a lado — el producto del anunciante contra una alternativa genérica sin marca. El producto real bien destacado y favorecido visualmente; la alternativa opaca y poco atractiva.',
+  producto: 'ENFOQUE DE ESCENA: producto como protagonista en un mini-mundo editorial — NO packshot vacío de catálogo. Ingredientes clave o elementos del beneficio fotografiados con peso material alrededor del producto (gotas, polvo, plantas, ondas, partículas), sombras y reflejos creíbles, profundidad. Iluminación con dirección, no plana. El producto en foco nítido; los elementos secundarios con leve desenfoque artístico. Composición editorial, no centrada-aburrida.',
+  lifestyle: 'ENFOQUE DE ESCENA: lifestyle real y aspiracional — una persona del target USANDO el producto en un momento cotidiano creíble (rutina del baño con luz natural, escritorio iluminado, mesa de café, exterior con luz dorada). Persona con expresión auténtica, NUNCA cara perfecta tipo IA con simetría imposible. Mostrá detalle (manos, perfil, tres cuartos) más que cara frontal. Importante: el envase del producto se ve INTEGRADO al momento pero en ángulo / parcialmente fuera de foco / parcialmente cubierto por la mano — NO un primer plano frontal de la etiqueta. Así el producto se reconoce por su color y forma sin que la IA tenga que redibujar el texto de la etiqueta.',
+  ugc: 'ENFOQUE DE ESCENA: foto estilo cliente real con celular — encuadre casual e imperfecto a propósito, luz ambiente real (no de estudio), expresión espontánea, micro-imperfecciones (mano corta, recorte raro, leve grano), fondo cotidiano sin curar. NO se nota IA. Importante: el producto se sostiene mostrando MÁS el color y la silueta que la etiqueta frontal — envase en ángulo o parcialmente cubierto por la mano para evitar que la etiqueta se renderice mal.',
+  comparacion: 'ENFOQUE DE ESCENA: comparación lado a lado o antes/después con alto contraste cromático y de mood. Tu producto del lado favorable: protagónico, iluminado, atractivo, paleta cálida o de marca. El otro lado: opaco, frío, abarrotado o desordenado, paleta apagada. Composición clara de dos zonas separadas por una línea visual sutil. NUNCA pongas texto comparativo encima — el contraste lo cuenta solo.',
 };
 
 function buildImagePrompt(idea, { usarProductoReal = false, paleta = [], feedbackQA = null, estiloEscena = '' } = {}) {
@@ -103,6 +103,16 @@ function buildImagePrompt(idea, { usarProductoReal = false, paleta = [], feedbac
     parts.push('');
     parts.push(`PALETA DE MARCA: usá estos colores como paleta dominante del creativo — fondos, bloques de color, formas y acentos: ${paleta.join(', ')}. El resultado tiene que sentirse coherente con la identidad visual de la marca (su landing y su packaging). Mantené buen contraste para que el texto sea legible.`);
   }
+  parts.push('');
+  parts.push('DIRECCIÓN CREATIVA — ESTÁNDARES DTC PREMIUM. Esto NO es una foto de catálogo: es un creativo de scroll-stop para Meta Ads que tiene que parar el dedo del cliente en 0.5 segundos.');
+  parts.push('- Composición editorial moderna: foco único claro, jerarquía visual marcada, espacio negativo intencional. Evitá el centrado-aburrido.');
+  parts.push('- Iluminación con DIRECCIÓN y profundidad (lateral, contraluz suave, o desde arriba + relleno). Nunca luz plana de catálogo.');
+  parts.push('- Materialidad y textura visibles en HD: gotas, refracción, microdetalle del envase, sombras y reflejos creíbles. Todo tiene peso y gravedad real.');
+  parts.push('- UNA sola idea visual potente. Si hay props secundarios, son INTENCIONALES y conectan con el beneficio (ingredientes, símbolos del problema, antes/después).');
+  parts.push('- Estética cinematográfica, no stock: piel y rostros REALISTAS sin look IA (poros, textura, asimetría natural). Props con materialidad y sombras reales.');
+  parts.push('- Contraste cromático intencional: paleta de marca dominante + un acento de tensión que rompa la armonía y atraiga el ojo a un punto.');
+  parts.push('- PROHIBIDO: fondo blanco vacío sin razón, look "render plástico", caras de IA con simetría imposible, props flotantes sin sombra, gradientes saturados sin propósito, sellos/badges mal integrados, etiqueta del producto re-escrita con texto inventado, composición centrada-aburrida.');
+
   parts.push('');
   parts.push('ESCENA / IMAGEN BASE:');
   parts.push(escena);

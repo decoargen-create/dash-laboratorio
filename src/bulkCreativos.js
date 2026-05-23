@@ -2,7 +2,25 @@
 // masiva (un creativo por idea, en loop) — misma lógica que el panel
 // individual pero sin la auto-mejora, para acotar el costo en bulk.
 
-import { componerCreativo, extraerCTA } from './componerCreativo.js';
+import { componerCreativo, extraerCTA, extraerHeadlineYSubcopy } from './componerCreativo.js';
+
+// Estilos de escena disponibles para el bulk.
+const ESTILOS = ['producto', 'lifestyle', 'ugc', 'comparacion'];
+
+// Elige el estilo de escena para esta idea cuando el user pidió "auto" en
+// el bulk — mezcla mapeo por características de la idea (tipo / etapa de
+// campaña) con un round-robin de fallback, para que la tanda tenga variedad.
+export function pickEstilo(idea, i) {
+  const camp = idea?.tipoCampaña;
+  const tipo = idea?.tipo;
+  if (camp === 'social_proof') return 'ugc';
+  if (camp === 'BOFU' || camp === 'retargeting') return 'comparacion';
+  if (tipo === 'replica') return 'comparacion';
+  if (tipo === 'diferenciacion') return 'lifestyle';
+  // Cycle entre los 3 restantes para variedad.
+  return ['producto', 'lifestyle', 'ugc'][i % 3];
+}
+
 import { getProductoImagen, getPaletaMarca } from './productoImagen.js';
 import { saveCreativo } from './creativosStorage.js';
 import { logCostsFromResponse } from './costsStore.js';
@@ -38,12 +56,10 @@ export async function generarCreativoParaIdea(idea, { quality = 'medium', estilo
   if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
   logCostsFromResponse(data, `generate-creative masivo · ${(idea.titulo || idea.hook || '').slice(0, 50)}`);
 
-  // La IA devuelve la imagen sin texto — componemos el titular + CTA.
+  // La IA devuelve la imagen sin texto — componemos titular + subcopy + CTA.
   const baseB64 = data.imageBase64;
-  const overlay = {
-    headline: (idea.hook || idea.titulo || '').trim(),
-    cta: extraerCTA(idea.textoEnImagen) || 'Quiero saber más',
-  };
+  const { headline, subcopy } = extraerHeadlineYSubcopy(idea);
+  const overlay = { headline, subcopy, cta: extraerCTA(idea) };
   const finalUrl = await componerCreativo(
     `data:${data.mimeType || 'image/png'};base64,${baseB64}`,
     { ...overlay, colorCta: paletaMarca[0] || '#b8895a' }

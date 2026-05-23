@@ -11,7 +11,7 @@ import { getProductoImagen } from './productoImagen.js';
 export default function GeneradorCreativosMasivo({ producto, bulkRunning, onGenerar }) {
   const [conCreativo, setConCreativo] = useState(new Set());
   const [quality, setQuality] = useState('medium');
-  const [estiloEscena, setEstiloEscena] = useState('producto');
+  const [estiloEscena, setEstiloEscena] = useState('auto');
 
   // Refrescamos qué ideas ya tienen creativo cuando termina un bulk.
   useEffect(() => {
@@ -62,10 +62,11 @@ export default function GeneradorCreativosMasivo({ producto, bulkRunning, onGene
           disabled={bulkRunning}
           className="px-2 py-1.5 text-[11px] bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
         >
-          <option value="producto">🧴 Producto (estudio)</option>
-          <option value="lifestyle">🏡 Lifestyle (persona)</option>
-          <option value="ugc">📱 UGC</option>
-          <option value="comparacion">⚖️ Comparación</option>
+          <option value="auto">🎲 Auto (variado, recomendado)</option>
+          <option value="producto">🧴 Solo Producto (estudio)</option>
+          <option value="lifestyle">🏡 Solo Lifestyle (persona)</option>
+          <option value="ugc">📱 Solo UGC</option>
+          <option value="comparacion">⚖️ Solo Comparación</option>
         </select>
         <select
           value={quality}

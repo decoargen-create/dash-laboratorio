@@ -33,7 +33,7 @@ import DashboardTab from './DashboardTab.jsx';
 import GeneradorRapido from './GeneradorRapido.jsx';
 import ProductoImagenUploader from './ProductoImagenUploader.jsx';
 import GeneradorCreativosMasivo, { BulkProgressBar } from './GeneradorCreativosMasivo.jsx';
-import { generarCreativoParaIdea } from './bulkCreativos.js';
+import { generarCreativoParaIdea, pickEstilo } from './bulkCreativos.js';
 import { usePipelineRun } from './PipelineRunContext.jsx';
 
 // Etiquetas cortas de la etapa de awareness del prospecto — para el chip
@@ -287,11 +287,17 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     bulkAbortRef.current = ctrl;
     setBulkCreativos({ running: true, total: ideas.length, done: 0, ok: 0, fail: 0, actual: '' });
     let done = 0, ok = 0, fail = 0;
-    for (const idea of ideas) {
+    // Si el user pidió "auto", el estilo de cada creativo se elige según
+    // las características de la idea (tipo / etapa de campaña) con
+    // round-robin de fallback — variedad visual en la tanda.
+    const baseEstilo = opts?.estiloEscena || 'auto';
+    for (let i = 0; i < ideas.length; i++) {
+      const idea = ideas[i];
       if (ctrl.signal.aborted) break;
+      const estiloEscena = baseEstilo === 'auto' ? pickEstilo(idea, i) : baseEstilo;
       setBulkCreativos(b => b && ({ ...b, actual: idea.titulo || idea.hook || 'Idea' }));
       try {
-        await generarCreativoParaIdea(idea, { ...opts, signal: ctrl.signal });
+        await generarCreativoParaIdea(idea, { ...opts, estiloEscena, signal: ctrl.signal });
         ok++;
       } catch (err) {
         if (err.name === 'AbortError') break;

@@ -1,14 +1,82 @@
 // Compositor del creativo. La IA genera el fondo + escena + producto SIN
-// texto; acá dibujamos el titular y el botón de CTA por código. Así el
-// texto del aviso sale siempre nítido y exacto — nunca alucinado por la IA.
+// texto; acá dibujamos el titular, un subcopy y el botón de CTA por código.
+// Así el texto del aviso sale siempre nítido y exacto.
 
-// Extrae el texto del botón del layout que escribió el generador
-// (idea.textoEnImagen suele tener una línea "CTA: ...").
-export function extraerCTA(textoEnImagen) {
-  if (!textoEnImagen) return '';
-  const m = String(textoEnImagen).match(/CTA[:\s]*["']?([^"'\n]+)["']?/i);
-  if (!m) return '';
-  return m[1].trim().replace(/\s+/g, ' ').replace(/[→>\s]+$/, '').slice(0, 60);
+// Defaults de CTA por etapa de funnel, cuando la idea no trae un CTA propio.
+const TIPO_CAMPAÑA_CTA = {
+  TOFU: 'Conocé más',
+  MOFU: 'Descubrí cómo',
+  BOFU: 'Comprar ahora',
+  retargeting: 'Volvé a verlo',
+  social_proof: 'Ver opiniones',
+  branding: 'Conocer la marca',
+};
+
+// Sanea un string: descarta prefijos tipo "button verde:" / "Botón:" /
+// cualquier "Algo:" que el generador a veces inserta antes del CTA real.
+function limpiarPrefijos(s) {
+  let out = String(s || '').trim();
+  out = out.replace(/^(?:button|botón|boton|bot[oó]n verde|cta)\s*[^:\n]*:\s*/i, '');
+  // Cualquier prefijo "X:" corto adicional.
+  if (/^[^:\n]{1,40}:\s/.test(out)) out = out.replace(/^[^:\n]{1,40}:\s+/, '');
+  return out.replace(/^["']|["']$/g, '').trim();
+}
+
+// Extrae el texto del botón de la idea. Prefiere el contenido ENTRE COMILLAS
+// después de "CTA:" (el generador suele escribir 'CTA: button verde:
+// "Texto →"' y nuestra regex anterior se quedaba con "button verde:").
+// Si no hay comillas, descarta prefijos. Si no hay nada, cae a un default
+// por etapa de campaña.
+export function extraerCTA(idea) {
+  const t = idea?.textoEnImagen || '';
+  let m = t.match(/CTA[\s:][^"\n]*"([^"\n]+)"/i);
+  if (!m) m = t.match(/CTA[\s:][^'\n]*'([^'\n]+)'/i);
+  if (m) {
+    const s = limpiarPrefijos(m[1]).replace(/[→>"'\s]+$/, '').trim();
+    if (s) return s.slice(0, 60);
+  }
+  // Sin comillas — tomamos toda la línea y limpiamos prefijos.
+  const line = t.match(/CTA[:\s]+([^\n]+)/i);
+  if (line) {
+    const s = limpiarPrefijos(line[1]).replace(/[→>"'\s]+$/, '').trim();
+    if (s && s.length >= 3) return s.slice(0, 60);
+  }
+  return TIPO_CAMPAÑA_CTA[idea?.tipoCampaña] || 'Quiero saber más';
+}
+
+// Extrae un subcopy/microcopy corto para reforzar el titular.
+export function extraerSubcopy(idea) {
+  const t = idea?.textoEnImagen || '';
+  let m = t.match(/(?:MICROCOPY|SUBCOPY|MICRO|SUB|SUBTITULO|SUBTÍTULO)[\s:][^"\n]*"([^"\n]+)"/i);
+  if (!m) m = t.match(/(?:MICROCOPY|SUBCOPY|MICRO|SUB|SUBTITULO|SUBTÍTULO)[\s:]+([^\n]+)/i);
+  if (m) {
+    const s = limpiarPrefijos(m[1]).slice(0, 110).trim();
+    if (s) return s;
+  }
+  return '';
+}
+
+// Si el hook es largo (>50 chars), lo dividimos en titular punchy + segundo
+// pedazo más chico como subcopy. Cortamos en el primer punto/punto y coma
+// que deje un titular razonable (entre 20 y 55 chars).
+function splitHook(hook) {
+  const s = String(hook || '').trim();
+  if (!s) return { headline: '', auto: '' };
+  if (s.length <= 50) return { headline: s, auto: '' };
+  const m = s.match(/^(.{18,58}?)[.;!?]\s+(.+)$/);
+  if (m) return { headline: m[1].trim().replace(/[,;]+$/, ''), auto: m[2].trim() };
+  return { headline: s, auto: '' };
+}
+
+// Devuelve { headline, subcopy } para componer sobre la imagen. Si la idea
+// trae un subcopy explícito en textoEnImagen, lo usamos; si no, splitteamos
+// el hook automáticamente.
+export function extraerHeadlineYSubcopy(idea) {
+  const hookCompleto = (idea?.hook || idea?.titulo || '').trim();
+  const explicito = extraerSubcopy(idea);
+  if (explicito) return { headline: hookCompleto, subcopy: explicito };
+  const sp = splitHook(hookCompleto);
+  return { headline: sp.headline, subcopy: sp.auto };
 }
 
 function wrap(ctx, text, maxW) {
@@ -38,13 +106,14 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
-// Compone titular + CTA sobre la imagen base. Devuelve un data URL PNG.
-// Si algo falla, devuelve la imagen base sin tocar.
-export async function componerCreativo(baseDataUrl, { headline = '', cta = '', colorCta = '#b8895a' } = {}) {
+// Compone titular + subcopy + botón sobre la imagen base. Devuelve un data
+// URL PNG. Si algo falla, devuelve la base sin tocar.
+export async function componerCreativo(baseDataUrl, { headline = '', subcopy = '', cta = '', colorCta = '#b8895a' } = {}) {
   try {
     await Promise.all([
       document.fonts.load('800 80px Montserrat'),
       document.fonts.load('700 40px Montserrat'),
+      document.fonts.load('500 30px Montserrat'),
     ]);
   } catch { /* la fuente cae a system-ui */ }
 
@@ -63,26 +132,29 @@ export async function componerCreativo(baseDataUrl, { headline = '', cta = '', c
         const pad = Math.round(W * 0.06);
 
         // --- Titular (zona superior) ---
+        let yCursor = pad;
+        let headlineBlockH = 0;
         if (headline) {
           const maxW = W - pad * 2;
-          let fontSize = Math.round(W * 0.088);
+          let fontSize = Math.round(W * 0.082);
           let lines = [];
-          const minSize = Math.round(W * 0.044);
+          const minSize = Math.round(W * 0.042);
           for (; fontSize >= minSize; fontSize -= 2) {
             ctx.font = `800 ${fontSize}px Montserrat, system-ui, sans-serif`;
             lines = wrap(ctx, headline, maxW);
             if (lines.length <= 3) break;
           }
-          const lineH = fontSize * 1.14;
-          const blockH = lineH * lines.length + pad;
+          const lineH = fontSize * 1.12;
+          headlineBlockH = lineH * lines.length;
 
-          // Scrim degradado para que el titular se lea sobre cualquier fondo.
-          const grad = ctx.createLinearGradient(0, 0, 0, blockH);
-          grad.addColorStop(0, 'rgba(255,255,252,0.86)');
+          // Scrim para legibilidad sobre cualquier fondo.
+          const scrimH = headlineBlockH + pad + (subcopy ? Math.round(W * 0.06) : 0);
+          const grad = ctx.createLinearGradient(0, 0, 0, scrimH);
+          grad.addColorStop(0, 'rgba(255,255,252,0.88)');
           grad.addColorStop(0.7, 'rgba(255,255,252,0.55)');
           grad.addColorStop(1, 'rgba(255,255,252,0)');
           ctx.fillStyle = grad;
-          ctx.fillRect(0, 0, W, blockH);
+          ctx.fillRect(0, 0, W, scrimH);
 
           ctx.textAlign = 'left';
           ctx.textBaseline = 'alphabetic';
@@ -94,6 +166,25 @@ export async function componerCreativo(baseDataUrl, { headline = '', cta = '', c
             ctx.strokeStyle = 'rgba(255,255,255,0.95)';
             ctx.strokeText(line, pad, y);
             ctx.fillStyle = '#1f2430';
+            ctx.fillText(line, pad, y);
+            y += lineH;
+          }
+          yCursor = y;
+        }
+
+        // --- Subcopy (debajo del titular) ---
+        if (subcopy) {
+          const subFont = Math.round(W * 0.034);
+          const maxW = W - pad * 2;
+          ctx.font = `600 ${subFont}px Montserrat, system-ui, sans-serif`;
+          const subLines = wrap(ctx, subcopy, maxW).slice(0, 2);
+          const lineH = subFont * 1.22;
+          let y = yCursor + subFont * 0.3;
+          for (const line of subLines) {
+            ctx.lineWidth = Math.max(2, subFont * 0.07);
+            ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+            ctx.strokeText(line, pad, y);
+            ctx.fillStyle = '#3a3f4f';
             ctx.fillText(line, pad, y);
             y += lineH;
           }

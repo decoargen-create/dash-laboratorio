@@ -10,12 +10,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   Inbox, Image as ImageIcon, Video, Target, Trophy, DollarSign,
-  Sparkles, Palette, Clock, Gauge, Layers, TrendingUp,
+  Sparkles, Clock, Gauge, Layers, TrendingUp,
 } from 'lucide-react';
 import {
   loadIdeas, TIPO_META, ESTADO_META, ANGULO_META, CAMPAÑA_META, formatoDeAd,
 } from './bandejaStore.js';
-import { getAllCreativoIds } from './creativosStorage.js';
 
 // KPI grande — número protagonista con ícono.
 function KpiCard({ label, value, sublabel, icon, accent = false }) {
@@ -92,14 +91,12 @@ function EmptyState() {
 
 export default function DashboardTab({ producto, competidores = [], runHistory = [] }) {
   const [ideas, setIdeas] = useState(() => loadIdeas());
-  const [creativoIds, setCreativoIds] = useState(() => new Set());
 
   // Refrescamos la data cada 4s — así el dashboard se actualiza mientras
   // corre el pipeline sin tener que recargar.
   useEffect(() => {
     const tick = () => {
       setIdeas(loadIdeas());
-      getAllCreativoIds().then(s => setCreativoIds(s)).catch(() => {});
     };
     tick();
     const iv = setInterval(tick, 4000);
@@ -116,7 +113,6 @@ export default function DashboardTab({ producto, competidores = [], runHistory =
     const porAngulo = {};
     let imagen = 0, video = 0;
     let scoreSum = 0, scoreN = 0, fuertes = 0, ok = 0, flojos = 0;
-    let conCreativo = 0;
     for (const i of mias) {
       porEstado[i.estado] = (porEstado[i.estado] || 0) + 1;
       if (porTipo[i.tipo] != null) porTipo[i.tipo]++;
@@ -129,7 +125,6 @@ export default function DashboardTab({ producto, competidores = [], runHistory =
         else if (i.scoreValue >= 8) fuertes++;
         else ok++;
       }
-      if (creativoIds.has(String(i.id))) conCreativo++;
     }
     const angulosCubiertos = Object.keys(porAngulo).length;
 
@@ -156,12 +151,11 @@ export default function DashboardTab({ producto, competidores = [], runHistory =
       imagen, video,
       scorePromedio: scoreN > 0 ? scoreSum / scoreN : null,
       scoreN, fuertes, ok, flojos,
-      conCreativo,
       runs, costo,
       competidoresCount: competidores.length,
       adsTotal, winners,
     };
-  }, [ideas, creativoIds, runHistory, competidores, prodId]);
+  }, [ideas, runHistory, competidores, prodId]);
 
   if (stats.total === 0 && stats.runs.length === 0) {
     return <EmptyState />;
@@ -182,8 +176,6 @@ export default function DashboardTab({ producto, competidores = [], runHistory =
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <KpiCard label="Ideas en Bandeja" value={stats.total} icon={<Inbox size={16} />} accent
           sublabel={`${stats.porEstado.pendiente} sin revisar`} />
-        <KpiCard label="Creativos producidos" value={stats.conCreativo} icon={<Palette size={16} />}
-          sublabel={`${stats.total - stats.conCreativo} sin generar`} />
         <KpiCard label="Hooks fuertes" value={stats.fuertes} icon={<TrendingUp size={16} />}
           sublabel={stats.scoreN > 0 ? `de ${stats.scoreN} puntuados` : 'sin puntuar aún'} />
         <KpiCard label="Competidores" value={stats.competidoresCount} icon={<Target size={16} />}

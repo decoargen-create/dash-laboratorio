@@ -31,9 +31,6 @@ import DocumentacionTab from './DocumentacionTab.jsx';
 import CopilotoTab from './CopilotoTab.jsx';
 import DashboardTab from './DashboardTab.jsx';
 import GeneradorRapido from './GeneradorRapido.jsx';
-import ProductoImagenUploader from './ProductoImagenUploader.jsx';
-import GeneradorCreativosMasivo, { BulkProgressBar } from './GeneradorCreativosMasivo.jsx';
-import { generarCreativoParaIdea, pickEstilo } from './bulkCreativos.js';
 import { usePipelineRun } from './PipelineRunContext.jsx';
 
 // Etiquetas cortas de la etapa de awareness del prospecto — para el chip
@@ -277,54 +274,6 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // Estado de la generación masiva de creativos. null = no corriendo. El
   // loop vive acá (no en la pestaña Bandeja) para que sobreviva al cambio
   // de pestaña dentro del workspace.
-  const [bulkCreativos, setBulkCreativos] = useState(null);
-  const bulkAbortRef = useRef(null);
-
-  // Genera el creativo de cada idea en loop, con barra de progreso.
-  const startBulkCreativos = async (ideas, opts) => {
-    if (!ideas?.length || bulkCreativos) return;
-    const ctrl = new AbortController();
-    bulkAbortRef.current = ctrl;
-    setBulkCreativos({ running: true, total: ideas.length, done: 0, ok: 0, fail: 0, actual: '', ultimas: [], ultimoError: '' });
-    let done = 0, ok = 0, fail = 0;
-    let ultimas = []; // thumbnails de los últimos creativos generados (para feedback en vivo)
-    let ultimoError = ''; // último mensaje de error visible — clave para diagnosticar fallas masivas
-    // Si el user pidió "auto", el estilo de cada creativo se elige según
-    // las características de la idea (tipo / etapa de campaña) con
-    // round-robin de fallback — variedad visual en la tanda.
-    const baseEstilo = opts?.estiloEscena || 'auto';
-    for (let i = 0; i < ideas.length; i++) {
-      const idea = ideas[i];
-      if (ctrl.signal.aborted) break;
-      const estiloEscena = baseEstilo === 'auto' ? pickEstilo(idea, i) : baseEstilo;
-      setBulkCreativos(b => b && ({ ...b, actual: idea.titulo || idea.hook || 'Idea' }));
-      try {
-        const nuevo = await generarCreativoParaIdea(idea, { ...opts, estiloEscena, variationSeed: i, provider: opts?.provider || 'openai', signal: ctrl.signal });
-        ok++;
-        if (nuevo?.imageBase64) {
-          // El más nuevo va primero, mantenemos los últimos 30.
-          ultimas = [{ id: idea.id, b64: nuevo.imageBase64 }, ...ultimas].slice(0, 30);
-        }
-      } catch (err) {
-        if (err.name === 'AbortError') break;
-        console.error('bulk creativo falló:', err);
-        fail++;
-        ultimoError = err.message || 'Error desconocido';
-      }
-      done++;
-      setBulkCreativos(b => b && ({ ...b, done, ok, fail, ultimas, ultimoError }));
-    }
-    bulkAbortRef.current = null;
-    setBandejaRefreshKey(k => k + 1);
-    // Dejamos la barra visible con TODOS los thumbnails generados y el
-    // botón "Cerrar" — así el user puede revisar lo que se generó en vez
-    // de quedar sin nada visible cuando termina o pausa.
-    setBulkCreativos(b => b && ({ ...b, running: false, finished: true, actual: '', done, ok, fail, ultimas, ultimoError }));
-    addToast?.({
-      type: ok > 0 ? 'success' : 'error',
-      message: `Creativos: ${ok} generado${ok !== 1 ? 's' : ''}${fail > 0 ? ` · ${fail} fallaron` : ''}`,
-    });
-  };
   useEffect(() => {
     if (!productoTabKey) { setProductoTab('setup'); return; }
     try { setProductoTab(localStorage.getItem(productoTabKey) || 'setup'); } catch { setProductoTab('setup'); }
@@ -1866,11 +1815,6 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // ====================================================================
   return (
     <div className="max-w-[1500px] mx-auto space-y-6">
-      <BulkProgressBar
-        state={bulkCreativos}
-        onCancel={() => bulkAbortRef.current?.abort()}
-        onClose={() => setBulkCreativos(null)}
-      />
       {/* Header del producto */}
       <div className="flex items-center gap-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-3 shadow-sm">
         <button onClick={() => setActiveProductoId(null)}
@@ -1910,11 +1854,6 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             producto={producto}
             addToast={addToast}
             onDone={() => setBandejaRefreshKey(k => k + 1)}
-          />
-          <GeneradorCreativosMasivo
-            producto={producto}
-            bulkRunning={!!bulkCreativos}
-            onGenerar={startBulkCreativos}
           />
           <div className="-mx-4">
             <BandejaSection key={bandejaRefreshKey} addToast={addToast} forcedProductoId={String(producto.id)} embedded />
@@ -2167,9 +2106,6 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 </div>
               );
             })()}
-
-            {/* Foto real del producto — obligatoria para generar estáticos. */}
-            <ProductoImagenUploader productoId={producto.id} addToast={addToast} />
 
             {/* Activo visual de marca — elemento icónico reutilizable que se
                 propaga a todos los prompts de imagen. */}

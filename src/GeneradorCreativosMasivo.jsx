@@ -3,7 +3,7 @@
 // cambies de pestaña dentro del workspace).
 
 import React, { useState, useEffect } from 'react';
-import { Images, Loader2, X } from 'lucide-react';
+import { Images, Loader2, X, Check } from 'lucide-react';
 import { loadIdeas } from './bandejaStore.js';
 import { getAllCreativoIds } from './creativosStorage.js';
 import { getProductoImagen } from './productoImagen.js';
@@ -94,49 +94,69 @@ export default function GeneradorCreativosMasivo({ producto, bulkRunning, onGene
 
 // Barra de progreso flotante — fija abajo a la derecha, visible mientras
 // corre la generación masiva aunque cambies de pestaña.
-export function BulkProgressBar({ state, onCancel }) {
+export function BulkProgressBar({ state, onCancel, onClose }) {
   if (!state) return null;
   const pct = state.total > 0 ? Math.round((state.done / state.total) * 100) : 0;
   const ultimas = Array.isArray(state.ultimas) ? state.ultimas : [];
+  const running = !!state.running;
+  const finished = !!state.finished;
+  // Cuando ya terminó/se pausó mostramos la grilla más grande para revisar.
+  const thumbSize = finished ? 'w-20 h-20' : 'w-14 h-14';
   return (
-    <div className="fixed bottom-4 right-4 z-50 w-96 max-w-[calc(100vw-2rem)] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl p-3.5">
+    <div className="fixed bottom-4 right-4 z-50 w-[28rem] max-w-[calc(100vw-2rem)] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl p-3.5">
       <div className="flex items-center justify-between mb-2">
         <p className="text-xs font-bold text-gray-900 dark:text-gray-100 flex items-center gap-1.5">
-          <Loader2 size={13} className="animate-spin text-brand-500" /> Generando creativos
+          {running
+            ? <><Loader2 size={13} className="animate-spin text-brand-500" /> Generando creativos</>
+            : <><Check size={13} className="text-emerald-500" /> {state.done === state.total ? 'Terminado' : 'Pausado'} · {state.ok} creativo{state.ok !== 1 ? 's' : ''} en la Bandeja</>}
         </p>
-        <button onClick={onCancel}
-          className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-bold text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md transition"
-          title="Pausa — los ya generados quedan guardados">
-          <X size={12} /> Pausar
-        </button>
+        {running ? (
+          <button onClick={onCancel}
+            className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-bold text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md transition"
+            title="Pausa — los ya generados quedan guardados">
+            <X size={12} /> Pausar
+          </button>
+        ) : (
+          <button onClick={onClose}
+            className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-md transition"
+            title="Cerrar este panel">
+            <X size={12} /> Cerrar
+          </button>
+        )}
       </div>
-      <div className="h-2 bg-gray-100 dark:bg-gray-900 rounded-full overflow-hidden">
-        <div className="h-full bg-gradient-to-r from-brand-500 to-brand-600 rounded-full transition-all duration-500"
-          style={{ width: `${pct}%` }} />
-      </div>
-      <div className="flex items-center justify-between mt-1.5 text-[10px] tabular-nums">
-        <span className="text-gray-600 dark:text-gray-300 font-bold">{state.done} / {state.total}</span>
-        <span className="text-gray-500 dark:text-gray-400">
-          <span className="text-emerald-600 dark:text-emerald-400 font-bold">✓ {state.ok}</span>
-          {state.fail > 0 && <span className="text-red-500 font-bold"> · ✗ {state.fail}</span>}
-        </span>
-      </div>
-      {state.actual && (
-        <p className="text-[10px] text-gray-400 dark:text-gray-500 truncate mt-1">{state.actual}</p>
+      {running && (
+        <>
+          <div className="h-2 bg-gray-100 dark:bg-gray-900 rounded-full overflow-hidden">
+            <div className="h-full bg-gradient-to-r from-brand-500 to-brand-600 rounded-full transition-all duration-500"
+              style={{ width: `${pct}%` }} />
+          </div>
+          <div className="flex items-center justify-between mt-1.5 text-[10px] tabular-nums">
+            <span className="text-gray-600 dark:text-gray-300 font-bold">{state.done} / {state.total}</span>
+            <span className="text-gray-500 dark:text-gray-400">
+              <span className="text-emerald-600 dark:text-emerald-400 font-bold">✓ {state.ok}</span>
+              {state.fail > 0 && <span className="text-red-500 font-bold"> · ✗ {state.fail}</span>}
+            </span>
+          </div>
+          {state.actual && (
+            <p className="text-[10px] text-gray-400 dark:text-gray-500 truncate mt-1">{state.actual}</p>
+          )}
+        </>
       )}
-      {/* Thumbnails en vivo — el más nuevo a la izquierda. */}
+      {/* Thumbnails — el más nuevo a la izquierda. */}
       {ultimas.length > 0 && (
-        <div className="mt-2 pt-2 border-t border-gray-100 dark:border-gray-700">
-          <p className="text-[9px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-1.5">
-            Últimos generados — buscalos con 🎨 en la Bandeja
+        <div className={`mt-2 ${running ? 'pt-2 border-t border-gray-100 dark:border-gray-700' : ''}`}>
+          <p className="text-[10px] font-bold text-gray-500 dark:text-gray-400 mb-1.5">
+            {finished
+              ? `${ultimas.length} creativo${ultimas.length !== 1 ? 's' : ''} generado${ultimas.length !== 1 ? 's' : ''} en esta tanda — también están en la Bandeja con 🎨`
+              : 'Últimos generados — buscalos con 🎨 en la Bandeja'}
           </p>
-          <div className="flex gap-1.5 overflow-x-auto">
+          <div className={`grid ${finished ? 'grid-cols-4 gap-1.5 max-h-64 overflow-y-auto' : 'flex gap-1.5 overflow-x-auto'}`}>
             {ultimas.map((it) => (
               <img
                 key={it.id}
                 src={`data:image/png;base64,${it.b64}`}
                 alt=""
-                className="w-14 h-14 object-cover rounded-md border border-gray-200 dark:border-gray-700 shrink-0 bg-white"
+                className={`${thumbSize} object-cover rounded-md border border-gray-200 dark:border-gray-700 shrink-0 bg-white`}
               />
             ))}
           </div>

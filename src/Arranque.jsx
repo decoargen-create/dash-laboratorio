@@ -301,8 +301,8 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         const nuevo = await generarCreativoParaIdea(idea, { ...opts, estiloEscena, signal: ctrl.signal });
         ok++;
         if (nuevo?.imageBase64) {
-          // El más nuevo va primero, mantenemos solo los últimos 6.
-          ultimas = [{ id: idea.id, b64: nuevo.imageBase64 }, ...ultimas].slice(0, 6);
+          // El más nuevo va primero, mantenemos los últimos 30.
+          ultimas = [{ id: idea.id, b64: nuevo.imageBase64 }, ...ultimas].slice(0, 30);
         }
       } catch (err) {
         if (err.name === 'AbortError') break;
@@ -313,8 +313,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       setBulkCreativos(b => b && ({ ...b, done, ok, fail, ultimas }));
     }
     bulkAbortRef.current = null;
-    setBulkCreativos(null);
     setBandejaRefreshKey(k => k + 1);
+    // Dejamos la barra visible con TODOS los thumbnails generados y el
+    // botón "Cerrar" — así el user puede revisar lo que se generó en vez
+    // de quedar sin nada visible cuando termina o pausa.
+    setBulkCreativos(b => b && ({ ...b, running: false, finished: true, actual: '', done, ok, fail, ultimas }));
     addToast?.({
       type: ok > 0 ? 'success' : 'error',
       message: `Creativos: ${ok} generado${ok !== 1 ? 's' : ''}${fail > 0 ? ` · ${fail} fallaron` : ''}`,
@@ -1700,7 +1703,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   if (!producto) {
     return (
       <div className="max-w-6xl mx-auto space-y-6">
-        <BulkProgressBar state={bulkCreativos} onCancel={() => bulkAbortRef.current?.abort()} />
+        <BulkProgressBar
+          state={bulkCreativos}
+          onCancel={() => bulkAbortRef.current?.abort()}
+          onClose={() => setBulkCreativos(null)}
+        />
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white shadow-sm">
@@ -1857,7 +1864,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // ====================================================================
   return (
     <div className="max-w-[1500px] mx-auto space-y-6">
-      <BulkProgressBar state={bulkCreativos} onCancel={() => bulkAbortRef.current?.abort()} />
+      <BulkProgressBar
+        state={bulkCreativos}
+        onCancel={() => bulkAbortRef.current?.abort()}
+        onClose={() => setBulkCreativos(null)}
+      />
       {/* Header del producto */}
       <div className="flex items-center gap-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-3 shadow-sm">
         <button onClick={() => setActiveProductoId(null)}

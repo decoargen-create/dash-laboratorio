@@ -12,6 +12,7 @@ export default function GeneradorCreativosMasivo({ producto, bulkRunning, onGene
   const [conCreativo, setConCreativo] = useState(new Set());
   const [quality, setQuality] = useState('medium');
   const [estiloEscena, setEstiloEscena] = useState('auto');
+  const [provider, setProvider] = useState('openai');
 
   // Refrescamos qué ideas ya tienen creativo cuando termina un bulk.
   useEffect(() => {
@@ -30,7 +31,7 @@ export default function GeneradorCreativosMasivo({ producto, bulkRunning, onGene
     if (!window.confirm(
       `Va a generar hasta ${sinCreativo.length} creativos (~$${costoEstim} estimado, calidad ${quality}). Los vas a ver aparecer en vivo en la barra de progreso. Podés pausar cuando quieras y queda lo ya generado. ¿Arrancar?`
     )) return;
-    onGenerar(sinCreativo, { quality, estiloEscena });
+    onGenerar(sinCreativo, { quality, estiloEscena, provider });
   };
 
   return (
@@ -56,6 +57,16 @@ export default function GeneradorCreativosMasivo({ producto, bulkRunning, onGene
       )}
 
       <div className="flex flex-wrap items-center gap-2">
+        <select
+          value={provider}
+          onChange={e => setProvider(e.target.value)}
+          disabled={bulkRunning}
+          className="px-2 py-1.5 text-[11px] bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
+          title="Motor de IA para generar la imagen"
+        >
+          <option value="openai">🟢 gpt-image-1 (foto del producto real)</option>
+          <option value="ideogram">✨ Ideogram v3 (mejor texto integrado)</option>
+        </select>
         <select
           value={estiloEscena}
           onChange={e => setEstiloEscena(e.target.value)}

@@ -225,9 +225,132 @@ function buildImagePrompt(idea, { usarProductoReal = false, paleta = [], feedbac
   return parts.join('\n');
 }
 
+// Construye el prompt para Ideogram — diferente al de gpt-image-1 porque
+// Ideogram SÍ renderiza texto bien, entonces le pedimos que escriba el
+// titular, subcopy y CTA dentro de la imagen (no por canvas como con
+// gpt-image-1). Prompt en inglés porque Ideogram performa mejor así.
+function buildIdeogramPrompt(idea, {
+  paleta = [], estiloEscena = '', variationSeed = 0,
+  headline = '', cta = '', subcopy = '', badgeText = '',
+} = {}) {
+  const scene = (idea.promptGeneradorImagen || idea.descripcionImagen || idea.hook || idea.titulo || '').trim();
+  const estiloDesc = ESCENA_GUIDE[estiloEscena] || '';
+  const variants = VARIANTS[estiloEscena];
+  const variant = variants ? variants[variationSeed % variants.length] : '';
+  const colorHint = paleta.length > 0 ? `Brand color palette: ${paleta.join(', ')}.` : '';
+  const parts = [];
+  parts.push('Professional DTC Meta Ads creative, premium scroll-stop design for the Argentine / LatAm market. Editorial composition, cinematic lighting with direction, real props with tangible materiality. Realistic premium product photography — NO AI plastic look, NO uncanny faces.');
+  if (estiloDesc) parts.push(estiloDesc);
+  if (variant) parts.push(`Composition variant (use THIS, not the typical/canonical one): ${variant}.`);
+  if (scene) parts.push(`Scene: ${scene.slice(0, 600)}`);
+  if (colorHint) parts.push(colorHint);
+
+  if (headline || cta || subcopy || badgeText) {
+    parts.push('');
+    parts.push('TEXT TO RENDER IN THE IMAGE (write EXACTLY this text, modern bold sans-serif, perfectly legible, no typos, no extra text):');
+    if (headline) parts.push(`- Headline at top, big bold sans-serif: "${headline.slice(0, 100)}"`);
+    if (subcopy) parts.push(`- Subcopy just below the headline, smaller and lighter: "${subcopy.slice(0, 80)}"`);
+    if (badgeText) parts.push(`- Small circular badge / sticker in top-right corner (red circle with gold border, slightly rotated): "${badgeText.slice(0, 20)}"`);
+    if (cta) parts.push(`- CTA button at the bottom — pill shape, brand color background, white bold text: "${cta.slice(0, 40)} →"`);
+  }
+  parts.push('');
+  parts.push('NO watermarks, NO extra text outside the specified, NO garbled letters, NO randomly placed words.');
+  return parts.join('\n');
+}
+
+// Llama a la API de Ideogram V3 y baja el binario de la imagen (la URL
+// que devuelven es de corta duración, hay que bajarla server-side).
+async function generateWithIdeogram(prompt, aspectRatio, renderingSpeed, apiKey) {
+  const form = new FormData();
+  form.append('prompt', prompt);
+  form.append('aspect_ratio', aspectRatio);
+  form.append('rendering_speed', renderingSpeed);
+  form.append('num_images', '1');
+  form.append('style_type', 'AUTO');
+  form.append('magic_prompt', 'AUTO');
+
+  const resp = await fetch('https://api.ideogram.ai/v1/ideogram-v3/generate', {
+    method: 'POST',
+    headers: { 'Api-Key': apiKey },
+    body: form,
+  });
+  if (!resp.ok) {
+    const t = await resp.text().catch(() => '');
+    throw new Error(`Ideogram HTTP ${resp.status}${t ? ': ' + t.slice(0, 300) : ''}`);
+  }
+  const data = await resp.json();
+  const item = Array.isArray(data?.data) ? data.data[0] : null;
+  if (!item?.url) throw new Error('Ideogram no devolvió URL de imagen');
+  const imgResp = await fetch(item.url);
+  if (!imgResp.ok) throw new Error(`No se pudo descargar la imagen de Ideogram (HTTP ${imgResp.status})`);
+  const buf = Buffer.from(await imgResp.arrayBuffer());
+  const cost = { TURBO: 0.025, DEFAULT: 0.04, QUALITY: 0.08 }[renderingSpeed] || 0.04;
+  return {
+    b64: buf.toString('base64'),
+    sizeResolved: item.resolution || (aspectRatio === '1x1' ? '1024x1024' : '1024x1536'),
+    cost,
+    model: item.model || 'ideogram-v3',
+  };
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
 
+  const body = await readBody(req);
+  const idea = body?.idea;
+  if (!idea || !(idea.promptGeneradorImagen || idea.descripcionImagen || idea.hook || idea.titulo)) {
+    return respondJSON(res, 400, { error: 'La idea no tiene contenido suficiente para generar el creativo (falta hook/título/descripción)' });
+  }
+
+  const provider = body?.provider === 'ideogram' ? 'ideogram' : 'openai';
+  const quality = ['low', 'medium', 'high'].includes(body?.quality) ? body.quality : 'medium';
+
+  // Paleta de marca — colores hex válidos para inyectar en el prompt.
+  const paletaMarca = Array.isArray(body?.paletaMarca)
+    ? body.paletaMarca.filter(c => typeof c === 'string' && /^#?[0-9a-fA-F]{3,8}$/.test(c)).slice(0, 6)
+    : [];
+  const estiloEscena = Object.keys(ESCENA_GUIDE).includes(body?.estiloEscena)
+    ? body.estiloEscena : '';
+  const variationSeed = Math.max(0, Math.floor(Number(body?.variationSeed) || 0));
+
+  // --- RAMA IDEOGRAM ---
+  if (provider === 'ideogram') {
+    const ideogramKey = process.env.IDEOGRAM_API_KEY;
+    if (!ideogramKey) {
+      return respondJSON(res, 500, {
+        error: 'IDEOGRAM_API_KEY no configurada en el servidor. Agregala en Vercel → Settings → Environment Variables.',
+      });
+    }
+    const overlayText = body?.overlayText || {};
+    const ideogramPrompt = buildIdeogramPrompt(idea, {
+      paleta: paletaMarca, estiloEscena, variationSeed,
+      headline: String(overlayText.headline || '').slice(0, 120),
+      cta: String(overlayText.cta || '').slice(0, 60),
+      subcopy: String(overlayText.subcopy || '').slice(0, 100),
+      badgeText: String(overlayText.badgeText || '').slice(0, 20),
+    });
+    const aspectRatio = idea?.formato === 'video' ? '9x16' : '1x1';
+    const renderingSpeed = { low: 'TURBO', medium: 'DEFAULT', high: 'QUALITY' }[quality] || 'DEFAULT';
+    try {
+      const r = await generateWithIdeogram(ideogramPrompt, aspectRatio, renderingSpeed, ideogramKey);
+      return respondJSON(res, 200, {
+        imageBase64: r.b64,
+        mimeType: 'image/png',
+        size: r.sizeResolved,
+        quality,
+        formato: idea.formato || 'static',
+        model: r.model,
+        generatedAt: new Date().toISOString(),
+        overlayDone: true, // Ideogram ya rendea el texto — el cliente no compone con canvas.
+        cost: { openai: r.cost }, // bucketamos bajo openai por ahora.
+      });
+    } catch (err) {
+      console.error('Ideogram error:', err);
+      return respondJSON(res, 502, { error: `Ideogram falló: ${err.message}` });
+    }
+  }
+
+  // --- RAMA OPENAI (gpt-image-1) ---
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     return respondJSON(res, 500, {
@@ -235,18 +358,6 @@ export default async function handler(req, res) {
     });
   }
 
-  const body = await readBody(req);
-  const idea = body?.idea;
-  // Requiere AL MENOS algo con qué armar la escena. Las ideas del generador
-  // traen promptGeneradorImagen; las réplicas del deep-analyze traen hook +
-  // ángulo. Cualquiera de esos sirve.
-  if (!idea || !(idea.promptGeneradorImagen || idea.descripcionImagen || idea.hook || idea.titulo)) {
-    return respondJSON(res, 400, { error: 'La idea no tiene contenido suficiente para generar el creativo (falta hook/título/descripción)' });
-  }
-
-  // Calidad: 'medium' es el default — buen balance calidad/costo (~$0.04-0.06).
-  // El cliente puede pedir 'high' para las ideas que va a producir en serio.
-  const quality = ['low', 'medium', 'high'].includes(body?.quality) ? body.quality : 'medium';
   const size = sizeForFormato(idea.formato);
 
   // Foto real del producto (data URL). Si viene, generamos con el endpoint
@@ -254,20 +365,12 @@ export default async function handler(req, res) {
   // creativo es el producto real, no uno inventado.
   const productoImagen = typeof body?.productoImagen === 'string' ? body.productoImagen : '';
   const usarProductoReal = productoImagen.length > 0;
-  // Paleta de marca — colores hex válidos para inyectar en el prompt.
-  const paletaMarca = Array.isArray(body?.paletaMarca)
-    ? body.paletaMarca.filter(c => typeof c === 'string' && /^#?[0-9a-fA-F]{3,8}$/.test(c)).slice(0, 6)
-    : [];
-  // Feedback de QA de una versión anterior (auto-mejora).
   const fb = body?.feedbackQA;
   const feedbackQA = fb && typeof fb === 'object' ? {
     problemas: Array.isArray(fb.problemas) ? fb.problemas.map(p => String(p).slice(0, 300)).slice(0, 8) : [],
     sugerencia: String(fb.sugerencia || '').slice(0, 400),
     fortalezas: Array.isArray(fb.fortalezas) ? fb.fortalezas.map(p => String(p).slice(0, 200)).slice(0, 6) : [],
   } : null;
-  const estiloEscena = Object.keys(ESCENA_GUIDE).includes(body?.estiloEscena)
-    ? body.estiloEscena : '';
-  const variationSeed = Math.max(0, Math.floor(Number(body?.variationSeed) || 0));
   const prompt = buildImagePrompt(idea, { usarProductoReal, paleta: paletaMarca, feedbackQA, estiloEscena, variationSeed });
 
   try {

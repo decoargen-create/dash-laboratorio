@@ -1744,6 +1744,7 @@ function CreativoPanel({ idea }) {
   const [error, setError] = useState('');
   const [quality, setQuality] = useState('medium');
   const [estiloEscena, setEstiloEscena] = useState('producto');
+  const [provider, setProvider] = useState('openai');
   const [checked, setChecked] = useState(false);
   const [qa, setQa] = useState(null);
   const [qaLoading, setQaLoading] = useState(false);
@@ -1849,30 +1850,49 @@ function CreativoPanel({ idea }) {
         const resp = await fetch('/api/marketing/generate-creative', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ quality, estiloEscena, variationSeed: Math.floor(Math.random() * 100), productoImagen, paletaMarca, feedbackQA, idea: ideaPayload }),
+          body: JSON.stringify({
+            quality, estiloEscena, provider,
+            variationSeed: Math.floor(Math.random() * 100),
+            productoImagen, paletaMarca, feedbackQA,
+            overlayText: { headline: overlay.headline, subcopy: overlay.subcopy, cta: overlay.cta, badgeText: overlay.badgeText || '' },
+            idea: ideaPayload,
+          }),
         });
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
         logCostsFromResponse(data, `generate-creative · intento ${intento} · ${(idea.titulo || idea.hook || '').slice(0, 50)}`);
 
-        // La IA devolvió la imagen SIN texto — componemos el titular y el CTA.
-        setFaseAuto('Componiendo el texto…');
-        const baseB64 = data.imageBase64;
-        const finalUrl = await componerCreativo(
-          `data:${data.mimeType || 'image/png'};base64,${baseB64}`,
-          { ...overlay, colorCta }
-        );
-        const nuevo = {
-          imageBase64: finalUrl.includes(',') ? finalUrl.split(',')[1] : finalUrl,
-          baseBase64: baseB64,
-          overlay,
-          mimeType: 'image/png',
-          formato: data.formato || idea.formato || 'static',
-          size: data.size,
-          quality: data.quality,
-          model: data.model,
-          generatedAt: data.generatedAt,
-        };
+        let nuevo;
+        if (data.overlayDone) {
+          // Ideogram ya rendea el texto en la imagen — no componemos por canvas.
+          nuevo = {
+            imageBase64: data.imageBase64,
+            mimeType: data.mimeType || 'image/png',
+            formato: data.formato || idea.formato || 'static',
+            size: data.size,
+            quality: data.quality || quality,
+            model: data.model,
+            generatedAt: data.generatedAt,
+          };
+        } else {
+          setFaseAuto('Componiendo el texto…');
+          const baseB64 = data.imageBase64;
+          const finalUrl = await componerCreativo(
+            `data:${data.mimeType || 'image/png'};base64,${baseB64}`,
+            { ...overlay, colorCta }
+          );
+          nuevo = {
+            imageBase64: finalUrl.includes(',') ? finalUrl.split(',')[1] : finalUrl,
+            baseBase64: baseB64,
+            overlay,
+            mimeType: 'image/png',
+            formato: data.formato || idea.formato || 'static',
+            size: data.size,
+            quality: data.quality,
+            model: data.model,
+            generatedAt: data.generatedAt,
+          };
+        }
 
         setFaseAuto('Revisando la calidad…');
         const qaResult = await runQa(nuevo.imageBase64, nuevo.mimeType);
@@ -2088,6 +2108,15 @@ function CreativoPanel({ idea }) {
               Generá la imagen final del ad a partir del brief. Después la IA revisa la calidad y podés pedir ajustes.
             </p>
             <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={provider}
+                onChange={e => setProvider(e.target.value)}
+                className="px-2 py-1 text-[10px] bg-white dark:bg-gray-800 border border-brand-300 dark:border-brand-700 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
+                title="Motor de IA"
+              >
+                <option value="openai">🟢 gpt-image-1 (foto real)</option>
+                <option value="ideogram">✨ Ideogram (texto integrado)</option>
+              </select>
               <select
                 value={estiloEscena}
                 onChange={e => setEstiloEscena(e.target.value)}

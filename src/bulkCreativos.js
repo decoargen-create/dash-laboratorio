@@ -35,10 +35,14 @@ export function pickEstilo(idea, i) {
   return pool[i % pool.length];
 }
 
-export async function generarCreativoParaIdea(idea, { quality = 'medium', estiloEscena = 'producto', variationSeed = 0, signal } = {}) {
+export async function generarCreativoParaIdea(idea, { quality = 'medium', estiloEscena = 'producto', variationSeed = 0, provider = 'openai', signal } = {}) {
   const productoImagen = getProductoImagen(idea.productoId);
   const paletaMarca = getPaletaMarca(idea.productoId);
   const mkt = getDatosMarketing(idea.productoId) || {};
+  // Textos para overlay — los usa Ideogram para renderizarlos en la imagen
+  // (cuando provider=ideogram) o el canvas para componerlos arriba (openai).
+  const { headline, subcopy } = extraerHeadlineYSubcopy(idea);
+  const cta = extraerCTA(idea);
 
   const resp = await fetch('/api/marketing/generate-creative', {
     method: 'POST',
@@ -48,8 +52,10 @@ export async function generarCreativoParaIdea(idea, { quality = 'medium', estilo
       quality,
       estiloEscena,
       variationSeed,
+      provider,
       productoImagen,
       paletaMarca,
+      overlayText: { headline, subcopy, cta, badgeText: mkt.badgeText || '' },
       idea: {
         promptGeneradorImagen: idea.promptGeneradorImagen,
         descripcionImagen: idea.descripcionImagen,
@@ -66,33 +72,46 @@ export async function generarCreativoParaIdea(idea, { quality = 'medium', estilo
   });
   const data = await resp.json();
   if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-  logCostsFromResponse(data, `generate-creative masivo · ${(idea.titulo || idea.hook || '').slice(0, 50)}`);
+  logCostsFromResponse(data, `generate-creative masivo · ${provider} · ${(idea.titulo || idea.hook || '').slice(0, 40)}`);
 
-  // La IA devuelve la imagen sin texto — componemos titular + subcopy + CTA.
-  const baseB64 = data.imageBase64;
-  const { headline, subcopy } = extraerHeadlineYSubcopy(idea);
-  const overlay = { headline, subcopy, cta: extraerCTA(idea) };
-  const finalUrl = await componerCreativo(
-    `data:${data.mimeType || 'image/png'};base64,${baseB64}`,
-    {
-      ...overlay,
-      colorCta: paletaMarca[0] || '#b8895a',
-      badgeText: mkt.badgeText || '',
-      rating: Number(mkt.rating || 0),
-      reviews: Number(mkt.reviews || 0),
-    }
-  );
-  const nuevo = {
-    imageBase64: finalUrl.includes(',') ? finalUrl.split(',')[1] : finalUrl,
-    baseBase64: baseB64,
-    overlay,
-    mimeType: 'image/png',
-    formato: data.formato || idea.formato || 'static',
-    size: data.size,
-    quality: data.quality,
-    model: data.model,
-    generatedAt: data.generatedAt,
-  };
+  let nuevo;
+  if (data.overlayDone) {
+    // Ideogram ya rendea el texto en la imagen — no componemos por canvas.
+    nuevo = {
+      imageBase64: data.imageBase64,
+      mimeType: data.mimeType || 'image/png',
+      formato: data.formato || idea.formato || 'static',
+      size: data.size,
+      quality: data.quality || quality,
+      model: data.model,
+      generatedAt: data.generatedAt,
+    };
+  } else {
+    // gpt-image-1 devuelve la imagen sin texto — componemos titular + CTA.
+    const baseB64 = data.imageBase64;
+    const overlay = { headline, subcopy, cta };
+    const finalUrl = await componerCreativo(
+      `data:${data.mimeType || 'image/png'};base64,${baseB64}`,
+      {
+        ...overlay,
+        colorCta: paletaMarca[0] || '#b8895a',
+        badgeText: mkt.badgeText || '',
+        rating: Number(mkt.rating || 0),
+        reviews: Number(mkt.reviews || 0),
+      }
+    );
+    nuevo = {
+      imageBase64: finalUrl.includes(',') ? finalUrl.split(',')[1] : finalUrl,
+      baseBase64: baseB64,
+      overlay,
+      mimeType: 'image/png',
+      formato: data.formato || idea.formato || 'static',
+      size: data.size,
+      quality: data.quality || quality,
+      model: data.model,
+      generatedAt: data.generatedAt,
+    };
+  }
 
   // QA — best-effort, no es fatal si falla.
   try {

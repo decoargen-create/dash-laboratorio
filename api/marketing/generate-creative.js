@@ -130,7 +130,7 @@ function buildImagePrompt(idea, { usarProductoReal = false, paleta = [], feedbac
 
   parts.push('');
   parts.push('SIN TEXTO — CRÍTICO: NO renderices ningún texto, palabra, letra, número, sello ni logo en la imagen. Generá ÚNICAMENTE el fondo, la escena y el producto. El titular y el botón del aviso se agregan después por código (por eso la imagen tiene que salir 100% limpia de texto — así el texto nunca sale con errores).');
-  parts.push('COMPOSICIÓN PARA EL TEXTO: dejá el ~32% SUPERIOR de la imagen como una zona visualmente simple y despejada (fondo liso claro o de color de marca, sin elementos importantes ni el producto) — ahí se compone el titular. Dejá también una franja limpia en el ~15% INFERIOR para un botón. El producto y la escena van en la banda central.');
+  parts.push('COMPOSICIÓN PARA EL TEXTO: dejá el ~32% SUPERIOR de la imagen como una zona visualmente simple y despejada (fondo liso claro o de color de marca, sin elementos importantes ni el producto) — ahí se compone el titular y, en la esquina superior derecha, un sello/badge chico. Dejá también una franja limpia en el ~15% INFERIOR para un botón. El producto y la escena van en la banda central, sin invadir esas zonas.');
 
   parts.push('');
   parts.push('Resultado: el fondo + escena + producto de una pieza publicitaria para Meta Ads, SIN nada de texto, con las zonas superior e inferior despejadas para componerle el titular y el botón encima.');

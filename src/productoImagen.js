@@ -27,6 +27,25 @@ export function removeProductoImagen(id) {
   try { localStorage.removeItem(KEY(id)); } catch { /* noop */ }
 }
 
+// --- Datos de marketing del producto --------------------------------
+// Badge, rating y reseñas que se componen encima de TODOS los creativos
+// del producto (set una vez, se aplica a todos).
+
+const MKT_KEY = (id) => `viora-producto-mkt-${id}`;
+
+export function getDatosMarketing(id) {
+  if (!id) return null;
+  try {
+    const v = JSON.parse(localStorage.getItem(MKT_KEY(id)) || 'null');
+    return v && typeof v === 'object' ? v : null;
+  } catch { return null; }
+}
+
+export function setDatosMarketing(id, data) {
+  if (!id) return;
+  try { localStorage.setItem(MKT_KEY(id), JSON.stringify(data || {})); } catch { /* noop */ }
+}
+
 // --- Paleta de marca -------------------------------------------------
 // Colores de marca (de la landing y del producto) que se inyectan en el
 // prompt de generación de creativos para que sean coherentes con la marca.

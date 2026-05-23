@@ -24,7 +24,7 @@ import {
 import { exportBriefDocx } from './exportDocx.js';
 import { saveCreativo, getCreativo, deleteCreativo, getAllCreativoIds } from './creativosStorage.js';
 import { logCostsFromResponse } from './costsStore.js';
-import { getProductoImagen, getPaletaMarca } from './productoImagen.js';
+import { getProductoImagen, getPaletaMarca, getDatosMarketing } from './productoImagen.js';
 import { componerCreativo, extraerCTA, extraerHeadlineYSubcopy } from './componerCreativo.js';
 
 const PRODUCTOS_KEY = 'viora-marketing-productos-v1';
@@ -1812,7 +1812,13 @@ function CreativoPanel({ idea }) {
     // Texto del aviso — lo dibuja el código sobre la imagen (la IA genera
     // SIN texto), así nunca sale con typos ni letras inventadas.
     const { headline, subcopy } = extraerHeadlineYSubcopy(idea);
-    const overlay = { headline, subcopy, cta: extraerCTA(idea) };
+    const mkt = getDatosMarketing(idea.productoId) || {};
+    const overlay = {
+      headline, subcopy, cta: extraerCTA(idea),
+      badgeText: mkt.badgeText || '',
+      rating: Number(mkt.rating || 0),
+      reviews: Number(mkt.reviews || 0),
+    };
     const colorCta = paletaMarca[0] || '#b8895a';
     // Payload de la idea — constante entre intentos.
     const ideaPayload = {
@@ -1935,8 +1941,15 @@ function CreativoPanel({ idea }) {
         const { headline, subcopy } = extraerHeadlineYSubcopy(idea);
         return { headline, subcopy, cta: extraerCTA(idea) };
       })();
+      const mkt2 = getDatosMarketing(idea.productoId) || {};
       const colorCta = getPaletaMarca(idea.productoId)[0] || '#b8895a';
-      const finalUrl = await componerCreativo(`data:image/png;base64,${newBase}`, { ...overlay, colorCta });
+      const finalUrl = await componerCreativo(`data:image/png;base64,${newBase}`, {
+        ...overlay,
+        colorCta,
+        badgeText: mkt2.badgeText || '',
+        rating: Number(mkt2.rating || 0),
+        reviews: Number(mkt2.reviews || 0),
+      });
 
       setEditInstruccion('');
       await persistirYqa({

@@ -3,6 +3,9 @@
 // individual pero sin la auto-mejora, para acotar el costo en bulk.
 
 import { componerCreativo, extraerCTA, extraerHeadlineYSubcopy } from './componerCreativo.js';
+import { getProductoImagen, getPaletaMarca, getDatosMarketing } from './productoImagen.js';
+import { saveCreativo } from './creativosStorage.js';
+import { logCostsFromResponse } from './costsStore.js';
 
 // Estilos de escena disponibles internamente — el "auto" del bulk rota
 // por todos. El selector de la UI muestra solo los 4 principales para no
@@ -29,13 +32,10 @@ export function pickEstilo(idea, i) {
   return pool[i % pool.length];
 }
 
-import { getProductoImagen, getPaletaMarca } from './productoImagen.js';
-import { saveCreativo } from './creativosStorage.js';
-import { logCostsFromResponse } from './costsStore.js';
-
 export async function generarCreativoParaIdea(idea, { quality = 'medium', estiloEscena = 'producto', signal } = {}) {
   const productoImagen = getProductoImagen(idea.productoId);
   const paletaMarca = getPaletaMarca(idea.productoId);
+  const mkt = getDatosMarketing(idea.productoId) || {};
 
   const resp = await fetch('/api/marketing/generate-creative', {
     method: 'POST',
@@ -70,7 +70,13 @@ export async function generarCreativoParaIdea(idea, { quality = 'medium', estilo
   const overlay = { headline, subcopy, cta: extraerCTA(idea) };
   const finalUrl = await componerCreativo(
     `data:${data.mimeType || 'image/png'};base64,${baseB64}`,
-    { ...overlay, colorCta: paletaMarca[0] || '#b8895a' }
+    {
+      ...overlay,
+      colorCta: paletaMarca[0] || '#b8895a',
+      badgeText: mkt.badgeText || '',
+      rating: Number(mkt.rating || 0),
+      reviews: Number(mkt.reviews || 0),
+    }
   );
   const nuevo = {
     imageBase64: finalUrl.includes(',') ? finalUrl.split(',')[1] : finalUrl,

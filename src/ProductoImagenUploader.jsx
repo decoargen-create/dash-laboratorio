@@ -11,11 +11,13 @@ import { ImagePlus, Loader2, Trash2, Check, AlertCircle, Plus, Pipette } from 'l
 import {
   getProductoImagen, setProductoImagen, removeProductoImagen, comprimirImagen,
   getPaletaMarca, setPaletaMarca, extraerColores,
+  getDatosMarketing, setDatosMarketing,
 } from './productoImagen.js';
 
 export default function ProductoImagenUploader({ productoId, addToast }) {
   const [imagen, setImagen] = useState(null);
   const [paleta, setPaleta] = useState([]);
+  const [marketing, setMarketing] = useState({ badgeText: '', rating: 0, reviews: 0 });
   const [procesando, setProcesando] = useState(false);
   const [error, setError] = useState('');
   const inputRef = useRef(null);
@@ -23,8 +25,19 @@ export default function ProductoImagenUploader({ productoId, addToast }) {
   useEffect(() => {
     setImagen(getProductoImagen(productoId));
     setPaleta(getPaletaMarca(productoId));
+    const mkt = getDatosMarketing(productoId);
+    setMarketing({
+      badgeText: mkt?.badgeText || '',
+      rating: Number(mkt?.rating || 0),
+      reviews: Number(mkt?.reviews || 0),
+    });
     setError('');
   }, [productoId]);
+
+  const guardarMarketing = (next) => {
+    setMarketing(next);
+    setDatosMarketing(productoId, next);
+  };
 
   const guardarPaleta = (next) => {
     setPaleta(next);
@@ -167,6 +180,49 @@ export default function ProductoImagenUploader({ productoId, addToast }) {
             Subí la foto del producto y la paleta se detecta sola — o agregá colores a mano.
           </p>
         )}
+      </div>
+
+      {/* Datos de marketing — badge + rating + reseñas, opcionales,
+          se componen encima de TODOS los creativos del producto. */}
+      <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+        <p className="text-xs font-bold text-gray-900 dark:text-gray-100 mb-1.5">📊 Datos de marketing <span className="font-normal text-gray-400">(opcionales)</span></p>
+        <p className="text-[10px] text-gray-500 dark:text-gray-400 mb-2">
+          Se agregan como overlay encima de los creativos. Dejá vacío lo que no quieras mostrar.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-1">Badge (sello)</label>
+            <input
+              type="text"
+              value={marketing.badgeText}
+              onChange={e => guardarMarketing({ ...marketing, badgeText: e.target.value.slice(0, 20) })}
+              placeholder="Ej: HOT SALE, -50%"
+              className="w-full px-2 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-1">Rating ★</label>
+            <input
+              type="number"
+              min={0} max={5} step={0.1}
+              value={marketing.rating || ''}
+              onChange={e => guardarMarketing({ ...marketing, rating: Math.max(0, Math.min(5, Number(e.target.value) || 0)) })}
+              placeholder="0 a 5"
+              className="w-full px-2 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-1">Reseñas (cant.)</label>
+            <input
+              type="number"
+              min={0}
+              value={marketing.reviews || ''}
+              onChange={e => guardarMarketing({ ...marketing, reviews: Math.max(0, Number(e.target.value) || 0) })}
+              placeholder="Ej: 1200"
+              className="w-full px-2 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500"
+            />
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -299,7 +299,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       const estiloEscena = baseEstilo === 'auto' ? pickEstilo(idea, i) : baseEstilo;
       setBulkCreativos(b => b && ({ ...b, actual: idea.titulo || idea.hook || 'Idea' }));
       try {
-        const nuevo = await generarCreativoParaIdea(idea, { ...opts, estiloEscena, variationSeed: i, signal: ctrl.signal });
+        const nuevo = await generarCreativoParaIdea(idea, { ...opts, estiloEscena, variationSeed: i, provider: opts?.provider || 'openai', signal: ctrl.signal });
         ok++;
         if (nuevo?.imageBase64) {
           // El más nuevo va primero, mantenemos los últimos 30.

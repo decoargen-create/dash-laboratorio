@@ -135,55 +135,35 @@ export async function componerCreativo(baseDataUrl, {
         ctx.drawImage(img, 0, 0, W, H);
         const pad = Math.round(W * 0.06);
 
-        // --- Estrellas + reseñas (apenas arriba del titular) ---
+        // Preparamos las MEDIDAS de estrellas y titular ANTES de dibujar nada,
+        // así pintamos un solo scrim que abarque todo y después ponemos los
+        // textos encima (sino el scrim del titular tapaba a las estrellas).
         let starsBlockH = 0;
-        if (rating > 0) {
-          const sFont = Math.round(W * 0.032);
-          const fullStars = Math.max(0, Math.min(5, Math.round(rating)));
-          const starsTxt = '★'.repeat(fullStars) + '☆'.repeat(5 - fullStars);
-          const reviewsTxt = reviews > 0 ? `  ${reviews.toLocaleString('es-AR')}+ reseñas` : '';
+        const sFont = Math.round(W * 0.032);
+        const fullStars = Math.max(0, Math.min(5, Math.round(rating)));
+        const starsTxt = rating > 0 ? '★'.repeat(fullStars) + '☆'.repeat(5 - fullStars) : '';
+        const reviewsTxt = (rating > 0 && reviews > 0) ? `  ${reviews.toLocaleString('es-AR')}+ reseñas` : '';
+        if (starsTxt) starsBlockH = sFont * 1.8;
 
-          // medir total para el scrim
-          ctx.font = `700 ${sFont * 1.3}px Montserrat, system-ui, sans-serif`;
-          const starsW = ctx.measureText(starsTxt).width;
-          ctx.font = `700 ${sFont}px Montserrat, system-ui, sans-serif`;
-          const revsW = ctx.measureText(reviewsTxt).width;
-          const totalW = starsW + revsW;
-          // scrim chico detrás
-          ctx.fillStyle = 'rgba(255,255,252,0.85)';
-          ctx.fillRect(0, 0, totalW + pad * 2, sFont * 2.4);
-          // stars dorados
-          ctx.fillStyle = '#f59e0b';
-          ctx.textAlign = 'left';
-          ctx.textBaseline = 'alphabetic';
-          ctx.font = `700 ${sFont * 1.3}px Montserrat, system-ui, sans-serif`;
-          ctx.fillText(starsTxt, pad, pad + sFont * 1.1);
-          if (reviewsTxt) {
-            ctx.fillStyle = '#374151';
-            ctx.font = `700 ${sFont}px Montserrat, system-ui, sans-serif`;
-            ctx.fillText(reviewsTxt, pad + starsW, pad + sFont * 1.1);
-          }
-          starsBlockH = sFont * 1.8;
-        }
-
-        // --- Titular (zona superior, debajo de las estrellas si las hay) ---
-        let yCursor = pad + starsBlockH;
+        let headlineLines = [];
+        let headlineFontSize = 0;
+        let headlineLineH = 0;
         let headlineBlockH = 0;
         if (headline) {
           const maxW = W - pad * 2;
-          let fontSize = Math.round(W * 0.082);
-          let lines = [];
+          headlineFontSize = Math.round(W * 0.082);
           const minSize = Math.round(W * 0.042);
-          for (; fontSize >= minSize; fontSize -= 2) {
-            ctx.font = `800 ${fontSize}px Montserrat, system-ui, sans-serif`;
-            lines = wrap(ctx, headline, maxW);
-            if (lines.length <= 3) break;
+          for (; headlineFontSize >= minSize; headlineFontSize -= 2) {
+            ctx.font = `800 ${headlineFontSize}px Montserrat, system-ui, sans-serif`;
+            headlineLines = wrap(ctx, headline, maxW);
+            if (headlineLines.length <= 3) break;
           }
-          const lineH = fontSize * 1.12;
-          headlineBlockH = lineH * lines.length;
+          headlineLineH = headlineFontSize * 1.12;
+          headlineBlockH = headlineLineH * headlineLines.length;
+        }
 
-          // Scrim para legibilidad — abarca desde 0 (incluye estrellas) hasta
-          // debajo del titular.
+        // --- Scrim único que cubre estrellas + titular ---
+        if (starsBlockH > 0 || headlineBlockH > 0) {
           const scrimH = starsBlockH + headlineBlockH + pad + (subcopy ? Math.round(W * 0.06) : 0);
           const grad = ctx.createLinearGradient(0, 0, 0, scrimH);
           grad.addColorStop(0, 'rgba(255,255,252,0.88)');
@@ -191,19 +171,39 @@ export async function componerCreativo(baseDataUrl, {
           grad.addColorStop(1, 'rgba(255,255,252,0)');
           ctx.fillStyle = grad;
           ctx.fillRect(0, 0, W, scrimH);
+        }
 
+        // --- Estrellas + reseñas (encima del scrim) ---
+        let yCursor = pad;
+        if (starsTxt) {
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'alphabetic';
+          ctx.fillStyle = '#f59e0b';
+          ctx.font = `700 ${sFont * 1.3}px Montserrat, system-ui, sans-serif`;
+          ctx.fillText(starsTxt, pad, pad + sFont * 1.1);
+          if (reviewsTxt) {
+            const starsW = ctx.measureText(starsTxt).width;
+            ctx.fillStyle = '#374151';
+            ctx.font = `700 ${sFont}px Montserrat, system-ui, sans-serif`;
+            ctx.fillText(reviewsTxt, pad + starsW, pad + sFont * 1.1);
+          }
+          yCursor = pad + starsBlockH;
+        }
+
+        // --- Titular (encima del scrim, debajo de las estrellas) ---
+        if (headline) {
           ctx.textAlign = 'left';
           ctx.textBaseline = 'alphabetic';
           ctx.lineJoin = 'round';
-          let y = yCursor + fontSize;
-          for (const line of lines) {
-            ctx.font = `800 ${fontSize}px Montserrat, system-ui, sans-serif`;
-            ctx.lineWidth = Math.max(3, fontSize * 0.08);
+          let y = yCursor + headlineFontSize;
+          for (const line of headlineLines) {
+            ctx.font = `800 ${headlineFontSize}px Montserrat, system-ui, sans-serif`;
+            ctx.lineWidth = Math.max(3, headlineFontSize * 0.08);
             ctx.strokeStyle = 'rgba(255,255,255,0.95)';
             ctx.strokeText(line, pad, y);
             ctx.fillStyle = '#1f2430';
             ctx.fillText(line, pad, y);
-            y += lineH;
+            y += headlineLineH;
           }
           yCursor = y;
         }

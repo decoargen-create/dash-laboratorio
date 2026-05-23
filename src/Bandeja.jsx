@@ -22,10 +22,7 @@ import {
   loadIdeas, updateIdea, removeIdea, TIPO_META, ESTADO_META, VARIABLE_META, ANGULO_META, CAMPAÑA_META,
 } from './bandejaStore.js';
 import { exportBriefDocx } from './exportDocx.js';
-import { saveCreativo, getCreativo, deleteCreativo, getAllCreativoIds } from './creativosStorage.js';
 import { logCostsFromResponse } from './costsStore.js';
-import { getProductoImagen, getPaletaMarca, getDatosMarketing } from './productoImagen.js';
-import { componerCreativo, extraerCTA, extraerHeadlineYSubcopy } from './componerCreativo.js';
 
 const PRODUCTOS_KEY = 'viora-marketing-productos-v1';
 const ACTIVE_PRODUCT_KEY = 'viora-marketing-bandeja-active-product';
@@ -178,9 +175,6 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
   const [orden, setOrden] = useState('recientes'); // recientes | antiguas | score | angulo
   const [query, setQuery] = useState('');
   // Set de ids de ideas que ya tienen un creativo producido (IndexedDB).
-  // Se carga de una sola lectura para que cada KanbanCard pueda mostrar el
-  // indicador "pieza lista" sin un getCreativo por card.
-  const [creativoIds, setCreativoIds] = useState(() => new Set());
   const [editandoNotasId, setEditandoNotasId] = useState(null);
   const [notasDraft, setNotasDraft] = useState('');
   const [editandoGuionId, setEditandoGuionId] = useState(null);
@@ -201,27 +195,6 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
       setProductos(prev => (prev.length !== freshProds.length ? freshProds : prev));
     }, 3000);
     return () => clearInterval(interval);
-  }, []);
-
-  // Carga el set de ideas con creativo producido — al montar y cada 4s, así
-  // el indicador "pieza lista" en las cards se actualiza cuando el user
-  // genera un creativo desde el modal de detalle.
-  useEffect(() => {
-    let alive = true;
-    const refresh = () => getAllCreativoIds()
-      .then(s => { if (alive) setCreativoIds(prev => (prev.size === s.size ? prev : s)); })
-      .catch(() => {});
-    refresh();
-    const iv = setInterval(refresh, 4000);
-    // También refrescamos al toque cuando se guarda un creativo nuevo (la
-    // generación masiva dispara este evento por cada creativo).
-    const onSaved = () => refresh();
-    window.addEventListener('viora:creativo-saved', onSaved);
-    return () => {
-      alive = false;
-      clearInterval(iv);
-      window.removeEventListener('viora:creativo-saved', onSaved);
-    };
   }, []);
 
   const setEstado = (id, estado) => {
@@ -684,25 +657,25 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
         <div className="flex gap-3 overflow-x-auto pb-2" style={{ minHeight: '200px' }}>
           <div className="min-w-[300px] max-w-[360px] flex-shrink-0 flex-1">
             <KanbanColumn estado="pendiente" titulo={baseTitles.pendiente} color="gray" accent
-              ideas={byEstado.pendiente} selected={selected} onToggleSelect={toggleSelect} creativoIds={creativoIds}
+              ideas={byEstado.pendiente} selected={selected} onToggleSelect={toggleSelect}
               onCardClick={(id) => setExpandedId(id)} onDropIdea={(id) => moveToBaseColumn(id, 'pendiente')}
               onRename={() => renameBaseColumn('pendiente')} />
           </div>
           <div className="min-w-[300px] max-w-[360px] flex-shrink-0 flex-1">
             <KanbanColumn estado="en_uso" titulo={baseTitles.en_uso} color="amber"
-              ideas={byEstado.en_uso} selected={selected} onToggleSelect={toggleSelect} creativoIds={creativoIds}
+              ideas={byEstado.en_uso} selected={selected} onToggleSelect={toggleSelect}
               onCardClick={(id) => setExpandedId(id)} onDropIdea={(id) => moveToBaseColumn(id, 'en_uso')}
               onRename={() => renameBaseColumn('en_uso')} />
           </div>
           <div className="min-w-[300px] max-w-[360px] flex-shrink-0 flex-1">
             <KanbanColumn estado="usada" titulo={baseTitles.usada} color="emerald"
-              ideas={byEstado.usada} selected={selected} onToggleSelect={toggleSelect} creativoIds={creativoIds}
+              ideas={byEstado.usada} selected={selected} onToggleSelect={toggleSelect}
               onCardClick={(id) => setExpandedId(id)} onDropIdea={(id) => moveToBaseColumn(id, 'usada')}
               onRename={() => renameBaseColumn('usada')} />
           </div>
           <div className="min-w-[300px] max-w-[360px] flex-shrink-0 flex-1">
             <KanbanColumn estado="archivada" titulo={baseTitles.archivada} color="slate"
-              ideas={byEstado.archivada} selected={selected} onToggleSelect={toggleSelect} creativoIds={creativoIds}
+              ideas={byEstado.archivada} selected={selected} onToggleSelect={toggleSelect}
               onCardClick={(id) => setExpandedId(id)} onDropIdea={(id) => moveToBaseColumn(id, 'archivada')}
               onRename={() => renameBaseColumn('archivada')} />
           </div>
@@ -710,7 +683,7 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
             <div key={cc.id} className="min-w-[300px] max-w-[360px] flex-shrink-0 flex-1">
               <KanbanColumn
                 estado={cc.id} titulo={cc.name} color={cc.color || 'violet'} isCustom
-                ideas={byCustomCol[cc.id] || []} selected={selected} onToggleSelect={toggleSelect} creativoIds={creativoIds}
+                ideas={byCustomCol[cc.id] || []} selected={selected} onToggleSelect={toggleSelect}
                 onCardClick={(id) => setExpandedId(id)}
                 onDropIdea={(id) => moveToCustomColumn(id, cc.id)}
                 onRename={() => renameCustomColumn(cc.id)}
@@ -968,14 +941,12 @@ function IdeaCard({
                 </div>
               )}
 
-              {/* Output según formato:
-                  - video → brief para mandar a producción humana.
-                  - imagen/carrusel → generación del creativo con gpt-image-1. */}
-              {idea.formato === 'video' ? (
+              {/* Para video → brief con guion para mandar a producción
+                  humana. Para imagen/carrusel → el brief completo se ve en
+                  los campos de la idea; los diseñadores producen el creativo. */}
+              {idea.formato === 'video' && (
                 <VideoBriefPanel key={idea.id} idea={idea} />
-              ) : (idea.hook || idea.titulo || idea.promptGeneradorImagen || idea.descripcionImagen) ? (
-                <CreativoPanel key={idea.id} idea={idea} />
-              ) : null}
+              )}
 
               {(idea.copyPostMeta || idea.copy) && (
                 <div>
@@ -1352,7 +1323,7 @@ function MiniStat({ label, value, color = 'gray', accent = false }) {
 // Columna del kanban — header con color + count, cuerpo scrolleable con cards.
 // Actúa como drop target: al soltar una card encima, llama onDropIdea con el id
 // de la idea, que la mueve a este estado.
-function KanbanColumn({ estado, titulo, color, accent = false, isCustom = false, ideas, selected, onToggleSelect, onCardClick, onDropIdea, onRename, onDelete, creativoIds }) {
+function KanbanColumn({ estado, titulo, color, accent = false, isCustom = false, ideas, selected, onToggleSelect, onCardClick, onDropIdea, onRename, onDelete }) {
   const [isDragOver, setIsDragOver] = useState(false);
   const palette = {
     gray: {
@@ -1473,7 +1444,7 @@ function KanbanColumn({ estado, titulo, color, accent = false, isCustom = false,
               key={idea.id}
               idea={idea}
               isSelected={selected?.has(idea.id)}
-              tieneCreativo={creativoIds?.has(String(idea.id))}
+             
               onToggleSelect={onToggleSelect ? () => onToggleSelect(idea.id) : null}
               onClick={() => onCardClick(idea.id)}
             />
@@ -1507,14 +1478,15 @@ function fechaCorta(iso) {
 // hook grande, tipo + formato + score etiquetados, ángulo, creencia, origen,
 // fecha de creación y si la pieza/guión ya están producidos. El detalle
 // completo se ve al clickear (abre el modal). Arrastrable entre columnas.
-function KanbanCard({ idea, isSelected = false, tieneCreativo = false, onToggleSelect, onClick }) {
+function KanbanCard({ idea, isSelected = false, onToggleSelect, onClick }) {
   const tipo = TIPO_META[idea.tipo] || TIPO_META.desde_cero;
   const angulo = idea.anguloCategoria ? ANGULO_META[idea.anguloCategoria] : null;
   const fmt = FORMATO_META[idea.formato] || null;
   const esVideo = idea.formato === 'video';
   // "Pieza lista" = el output final ya producido. Para video es el guión
-  // adaptado; para imagen es el creativo generado (en IndexedDB).
-  const piezaLista = esVideo ? !!idea.guionAdaptado : tieneCreativo;
+  // adaptado. Las imágenes las produce un diseñador externo, no las
+  // marcamos como "listas" desde la app.
+  const piezaLista = esVideo && !!idea.guionAdaptado;
   const [isDragging, setIsDragging] = useState(false);
 
   const handleDragStart = (e) => {
@@ -1542,21 +1514,6 @@ function KanbanCard({ idea, isSelected = false, tieneCreativo = false, onToggleS
 
   const tieneScore = typeof idea.scoreValue === 'number';
 
-  // Cuando la idea tiene creativo producido, lazy-loadeamos el thumbnail
-  // desde IndexedDB para mostrarlo arriba de la card — feedback visual
-  // inmediato durante la generación masiva sin tener que abrir cada idea.
-  const [thumb, setThumb] = useState(null);
-  useEffect(() => {
-    if (!tieneCreativo) { setThumb(null); return; }
-    let alive = true;
-    getCreativo(idea.id).then(c => {
-      if (alive && c?.imageBase64) {
-        setThumb(`data:${c.mimeType || 'image/png'};base64,${c.imageBase64}`);
-      }
-    }).catch(() => {});
-    return () => { alive = false; };
-  }, [idea.id, tieneCreativo]);
-
   return (
     <div
       onClick={onClick}
@@ -1578,14 +1535,6 @@ function KanbanCard({ idea, isSelected = false, tieneCreativo = false, onToggleS
         >
           {isSelected ? <CheckSquare size={12} className="text-brand-600" /> : <Square size={12} className="text-gray-400" />}
         </button>
-      )}
-
-      {/* Banner con el creativo cuando ya está producido — feedback visual
-          inmediato sin tener que abrir la idea. */}
-      {thumb && (
-        <div className="-mx-2.5 -mt-2.5 mb-2 h-24 bg-gray-100 dark:bg-gray-900 overflow-hidden rounded-t-lg border-b border-gray-200 dark:border-gray-700">
-          <img src={thumb} alt="" className="w-full h-full object-cover" />
-        </div>
       )}
 
       {/* Fila 1: badges de clasificación (tipo · formato · score) */}
@@ -1722,438 +1671,6 @@ function IdeaDetailModal({ idea, onClose, ...cardProps }) {
           onToggle={onClose}
           {...cardProps}
         />
-      </div>
-    </div>
-  );
-}
-
-// Panel de generación del creativo estático final. Vive dentro del card
-// expandido de cada idea. On-demand: el user genera la imagen solo para
-// las ideas que va a producir. El creativo se guarda en IndexedDB (no en
-// localStorage — las imágenes base64 pesan demasiado).
-// Veredictos del QA visual → estilo del badge.
-const QA_VEREDICTO = {
-  aprobado:  { emoji: '🟢', label: 'Aprobado',  cls: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700' },
-  revisar:   { emoji: '🟡', label: 'Revisar',   cls: 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-700' },
-  regenerar: { emoji: '🔴', label: 'Regenerar', cls: 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 border-red-300 dark:border-red-700' },
-};
-
-function CreativoPanel({ idea }) {
-  const [creativo, setCreativo] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [quality, setQuality] = useState('medium');
-  const [estiloEscena, setEstiloEscena] = useState('producto');
-  const [provider, setProvider] = useState('openai');
-  const [checked, setChecked] = useState(false);
-  const [qa, setQa] = useState(null);
-  const [qaLoading, setQaLoading] = useState(false);
-  const [editInstruccion, setEditInstruccion] = useState('');
-  const [editLoading, setEditLoading] = useState(false);
-  const [faseAuto, setFaseAuto] = useState('');
-
-  // Al montar, miramos si esta idea ya tiene un creativo producido (y su QA).
-  useEffect(() => {
-    let abort = false;
-    getCreativo(idea.id).then(c => {
-      if (abort) return;
-      setCreativo(c);
-      setQa(c?.qa || null);
-      setChecked(true);
-    }).catch(() => { if (!abort) setChecked(true); });
-    return () => { abort = true; };
-  }, [idea.id]);
-
-  // QA visual con Claude Vision — best-effort: si falla, no rompe nada.
-  const runQa = async (imageBase64, mimeType) => {
-    setQaLoading(true);
-    try {
-      const resp = await fetch('/api/marketing/qa-creative', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64, mimeType, hook: idea.hook, textoEnImagen: idea.textoEnImagen }),
-      });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-      logCostsFromResponse(data, `qa-creative · ${(idea.titulo || '').slice(0, 50)}`);
-      return data.qa || null;
-    } catch {
-      return null;
-    } finally {
-      setQaLoading(false);
-    }
-  };
-
-  // Guarda el creativo + corre el QA + re-guarda con el resultado del QA.
-  const persistirYqa = async (nuevo) => {
-    await saveCreativo(idea.id, nuevo);
-    setCreativo(nuevo);
-    setQa(null);
-    const qaResult = await runQa(nuevo.imageBase64, nuevo.mimeType);
-    if (qaResult) {
-      const conQa = { ...nuevo, qa: qaResult };
-      await saveCreativo(idea.id, conQa);
-      setCreativo(conQa);
-      setQa(qaResult);
-    }
-  };
-
-  const handleGenerate = async () => {
-    setError('');
-    // La foto real del producto es obligatoria para estáticos — sin ella
-    // gpt-image-1 inventa un envase cualquiera. Para video no aplica.
-    const esEstatico = (idea.formato || 'static') !== 'video';
-    const productoImagen = getProductoImagen(idea.productoId);
-    if (esEstatico && !productoImagen) {
-      setError('Para generar estáticos necesitás cargar la foto del producto. Andá a la pestaña Setup → "Foto del producto".');
-      return;
-    }
-    setLoading(true);
-    const paletaMarca = getPaletaMarca(idea.productoId);
-    // Texto del aviso — lo dibuja el código sobre la imagen (la IA genera
-    // SIN texto), así nunca sale con typos ni letras inventadas.
-    const { headline, subcopy } = extraerHeadlineYSubcopy(idea);
-    const mkt = getDatosMarketing(idea.productoId) || {};
-    const overlay = {
-      headline, subcopy, cta: extraerCTA(idea),
-      badgeText: mkt.badgeText || '',
-      rating: Number(mkt.rating || 0),
-      reviews: Number(mkt.reviews || 0),
-    };
-    const colorCta = paletaMarca[0] || '#b8895a';
-    // Payload de la idea — constante entre intentos.
-    const ideaPayload = {
-      promptGeneradorImagen: idea.promptGeneradorImagen,
-      descripcionImagen: idea.descripcionImagen,
-      textoEnImagen: idea.textoEnImagen,
-      hook: idea.hook,
-      titulo: idea.titulo,
-      formato: idea.formato,
-      estiloVisual: idea.estiloVisual,
-      // Campos extra para que el backend pueda armar la escena cuando la
-      // idea no tiene promptGeneradorImagen (caso réplica).
-      angulo: idea.angulo,
-      painPoint: idea.painPoint,
-      copyPostMeta: idea.copyPostMeta || idea.copy,
-    };
-    // Auto-mejora: generamos el creativo, lo pasa el QA, y si el QA
-    // encuentra problemas regeneramos UNA vez con ese feedback inyectado en
-    // el prompt. Nos quedamos con la versión de mejor score. Así el user no
-    // tiene que pedir manualmente que se rehaga con las sugerencias.
-    const MAX_INTENTOS = 2;
-    const UMBRAL_OK = 9;
-    try {
-      let mejor = null;
-      let feedbackQA = null;
-      for (let intento = 1; intento <= MAX_INTENTOS; intento++) {
-        setFaseAuto(intento === 1 ? 'Generando el creativo…' : 'Mejorando con las notas del QA…');
-        const resp = await fetch('/api/marketing/generate-creative', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            quality, estiloEscena, provider,
-            variationSeed: Math.floor(Math.random() * 100),
-            productoImagen, paletaMarca, feedbackQA,
-            overlayText: { headline: overlay.headline, subcopy: overlay.subcopy, cta: overlay.cta, badgeText: overlay.badgeText || '' },
-            idea: ideaPayload,
-          }),
-        });
-        const data = await resp.json();
-        if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-        logCostsFromResponse(data, `generate-creative · intento ${intento} · ${(idea.titulo || idea.hook || '').slice(0, 50)}`);
-
-        let nuevo;
-        if (data.overlayDone) {
-          // Ideogram ya rendea el texto en la imagen — no componemos por canvas.
-          nuevo = {
-            imageBase64: data.imageBase64,
-            mimeType: data.mimeType || 'image/png',
-            formato: data.formato || idea.formato || 'static',
-            size: data.size,
-            quality: data.quality || quality,
-            model: data.model,
-            generatedAt: data.generatedAt,
-          };
-        } else {
-          setFaseAuto('Componiendo el texto…');
-          const baseB64 = data.imageBase64;
-          const finalUrl = await componerCreativo(
-            `data:${data.mimeType || 'image/png'};base64,${baseB64}`,
-            { ...overlay, colorCta }
-          );
-          nuevo = {
-            imageBase64: finalUrl.includes(',') ? finalUrl.split(',')[1] : finalUrl,
-            baseBase64: baseB64,
-            overlay,
-            mimeType: 'image/png',
-            formato: data.formato || idea.formato || 'static',
-            size: data.size,
-            quality: data.quality,
-            model: data.model,
-            generatedAt: data.generatedAt,
-          };
-        }
-
-        setFaseAuto('Revisando la calidad…');
-        const qaResult = await runQa(nuevo.imageBase64, nuevo.mimeType);
-        const conQa = qaResult ? { ...nuevo, qa: qaResult } : nuevo;
-        const score = qaResult?.score || 0;
-        if (!mejor || score > (mejor.qa?.score || 0)) mejor = conQa;
-
-        // Cortamos si quedó bien, si el QA no respondió, o si fue el último.
-        if (!qaResult || score >= UMBRAL_OK || intento === MAX_INTENTOS) break;
-        feedbackQA = {
-          problemas: qaResult.problemas || [],
-          sugerencia: qaResult.sugerencia || '',
-          fortalezas: qaResult.fortalezas || [],
-        };
-      }
-
-      await saveCreativo(idea.id, mejor);
-      setCreativo(mejor);
-      setQa(mejor.qa || null);
-    } catch (err) {
-      setError(err.message || 'Error generando el creativo');
-    } finally {
-      setLoading(false);
-      setFaseAuto('');
-    }
-  };
-
-  const handleRegenerate = async () => {
-    await deleteCreativo(idea.id);
-    setCreativo(null);
-    setQa(null);
-    await handleGenerate();
-  };
-
-  // Edición conversacional: el user describe un cambio y gpt-image-1 lo
-  // aplica sobre el creativo actual, sin tirar todo y empezar de cero.
-  const handleEdit = async () => {
-    const instruccion = editInstruccion.trim();
-    if (!instruccion || !creativo) return;
-    setEditLoading(true);
-    setError('');
-    try {
-      const resp = await fetch('/api/marketing/edit-creative', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          // Editamos la imagen BASE (sin texto) — el texto se re-compone
-          // después, así no se degrada al editar.
-          imageBase64: creativo.baseBase64 || creativo.imageBase64,
-          mimeType: 'image/png',
-          instruccion,
-          formato: creativo.formato,
-          quality: creativo.quality,
-          // Mandamos el size REAL del creativo original — sino la edición
-          // re-derivaba el tamaño del formato y podía re-encuadrar.
-          size: creativo.size,
-        }),
-      });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-      logCostsFromResponse(data, `edit-creative · ${(idea.titulo || '').slice(0, 50)}`);
-
-      // Re-componemos el texto sobre la base editada.
-      const newBase = data.imageBase64;
-      const overlay = creativo.overlay || (() => {
-        const { headline, subcopy } = extraerHeadlineYSubcopy(idea);
-        return { headline, subcopy, cta: extraerCTA(idea) };
-      })();
-      const mkt2 = getDatosMarketing(idea.productoId) || {};
-      const colorCta = getPaletaMarca(idea.productoId)[0] || '#b8895a';
-      const finalUrl = await componerCreativo(`data:image/png;base64,${newBase}`, {
-        ...overlay,
-        colorCta,
-        badgeText: mkt2.badgeText || '',
-        rating: Number(mkt2.rating || 0),
-        reviews: Number(mkt2.reviews || 0),
-      });
-
-      setEditInstruccion('');
-      await persistirYqa({
-        imageBase64: finalUrl.includes(',') ? finalUrl.split(',')[1] : finalUrl,
-        baseBase64: newBase,
-        overlay,
-        mimeType: 'image/png',
-        formato: data.formato || creativo.formato || 'static',
-        size: data.size,
-        quality: data.quality,
-        model: data.model,
-        generatedAt: data.generatedAt,
-      });
-    } catch (err) {
-      setError(err.message || 'Error editando el creativo');
-    } finally {
-      setEditLoading(false);
-    }
-  };
-
-  const dataUrl = creativo
-    ? `data:${creativo.mimeType || 'image/png'};base64,${creativo.imageBase64}`
-    : null;
-  const busy = loading || editLoading;
-  const ver = qa ? (QA_VEREDICTO[qa.veredicto] || QA_VEREDICTO.revisar) : null;
-
-  return (
-    <div className="bg-brand-50 dark:bg-brand-900/20 rounded-md border border-brand-200 dark:border-brand-800">
-      <div className="px-3 py-2 flex items-center justify-between gap-2">
-        <p className="text-[10px] font-bold text-brand-700 dark:text-brand-300 uppercase tracking-wider">
-          🎨 Creativo estático
-        </p>
-        {creativo && (
-          <span className="text-[9px] text-brand-500 dark:text-brand-400 font-mono">
-            {creativo.model} · {creativo.quality} · {creativo.size}
-          </span>
-        )}
-      </div>
-
-      <div className="px-3 pb-3">
-        {/* Imagen generada */}
-        {dataUrl && (
-          <div className="space-y-2">
-            <img
-              src={dataUrl}
-              alt={idea.titulo || 'Creativo generado'}
-              className="w-full rounded-lg border border-brand-200 dark:border-brand-800 bg-white"
-            />
-
-            {/* QA visual */}
-            {qaLoading && (
-              <div className="flex items-center gap-1.5 text-[10px] text-brand-600 dark:text-brand-400">
-                <Loader2 size={11} className="animate-spin" /> Revisando calidad con IA…
-              </div>
-            )}
-            {!qaLoading && ver && (
-              <div className={`rounded-md border px-2.5 py-2 text-[10px] ${ver.cls}`}>
-                <div className="flex items-center gap-1.5 font-bold">
-                  <span>{ver.emoji} QA: {ver.label}</span>
-                  <span className="font-mono opacity-80">· {qa.score}/10</span>
-                  {!qa.textoLegible && <span className="font-normal opacity-90">· ⚠ texto con problemas de render</span>}
-                </div>
-                {qa.problemas?.length > 0 && (
-                  <ul className="mt-1 space-y-0.5 list-disc list-inside opacity-90 font-normal">
-                    {qa.problemas.map((p, i) => <li key={i}>{p}</li>)}
-                  </ul>
-                )}
-                {qa.sugerencia && (
-                  <p className="mt-1 font-normal opacity-90"><span className="font-semibold">Sugerencia:</span> {qa.sugerencia}</p>
-                )}
-              </div>
-            )}
-
-            {/* Acciones */}
-            <div className="flex flex-wrap gap-1.5">
-              <a
-                href={dataUrl}
-                download={`creativo-${(idea.titulo || 'idea').replace(/[^a-z0-9]+/gi, '-').slice(0, 40).toLowerCase()}.png`}
-                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-bold text-white bg-brand-600 rounded hover:bg-brand-700 transition"
-              >
-                <Download size={11} /> Descargar PNG
-              </a>
-              <button
-                onClick={handleRegenerate}
-                disabled={busy}
-                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-gray-800 border border-brand-300 dark:border-brand-700 rounded hover:bg-brand-50 dark:hover:bg-brand-900/30 transition disabled:opacity-50"
-              >
-                {loading ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
-                Regenerar
-              </button>
-            </div>
-
-            {/* Edición conversacional */}
-            <div className="pt-1">
-              <p className="text-[10px] font-semibold text-brand-700 dark:text-brand-300 mb-1">✏️ Pedí un cambio puntual:</p>
-              <div className="flex gap-1.5">
-                <input
-                  type="text"
-                  value={editInstruccion}
-                  onChange={e => setEditInstruccion(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter' && !busy) handleEdit(); }}
-                  placeholder='Ej: "el hook más grande", "fondo más claro", "sacá el sello de abajo"'
-                  disabled={busy}
-                  className="flex-1 px-2.5 py-1.5 text-[11px] bg-white dark:bg-gray-800 border border-brand-300 dark:border-brand-700 rounded focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
-                />
-                <button
-                  onClick={handleEdit}
-                  disabled={busy || !editInstruccion.trim()}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 text-[11px] font-bold text-white bg-gradient-to-br from-brand-600 to-brand-700 rounded hover:from-brand-700 hover:to-brand-800 transition disabled:opacity-40"
-                >
-                  {editLoading ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
-                  Aplicar
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Loading inicial — muestra la fase del ciclo generar→QA→mejorar */}
-        {loading && !dataUrl && (
-          <div className="px-2 py-3 text-xs text-brand-700 dark:text-brand-300">
-            <div className="flex items-center gap-2">
-              <Loader2 size={14} className="animate-spin" />
-              {faseAuto || 'Generando el creativo…'}
-            </div>
-            <p className="text-[10px] text-brand-500 dark:text-brand-400 mt-1 pl-6">
-              Se genera, la IA revisa la calidad y se mejora sola si hace falta — puede tardar 1-2 min.
-            </p>
-          </div>
-        )}
-
-        {/* Estado inicial: botón generar */}
-        {!loading && !dataUrl && checked && (
-          <div className="space-y-2">
-            <p className="text-[11px] text-brand-700 dark:text-brand-300">
-              Generá la imagen final del ad a partir del brief. Después la IA revisa la calidad y podés pedir ajustes.
-            </p>
-            <div className="flex flex-wrap items-center gap-2">
-              <select
-                value={provider}
-                onChange={e => setProvider(e.target.value)}
-                className="px-2 py-1 text-[10px] bg-white dark:bg-gray-800 border border-brand-300 dark:border-brand-700 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
-                title="Motor de IA"
-              >
-                <option value="openai">🟢 gpt-image-1 (foto real)</option>
-                <option value="ideogram">✨ Ideogram (texto integrado)</option>
-              </select>
-              <select
-                value={estiloEscena}
-                onChange={e => setEstiloEscena(e.target.value)}
-                className="px-2 py-1 text-[10px] bg-white dark:bg-gray-800 border border-brand-300 dark:border-brand-700 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
-                title="Estilo de escena del creativo"
-              >
-                <option value="producto">🧴 Producto (estudio)</option>
-                <option value="lifestyle">🏡 Lifestyle (persona usándolo)</option>
-                <option value="ugc">📱 UGC (foto de cliente)</option>
-                <option value="comparacion">⚖️ Comparación</option>
-              </select>
-              <select
-                value={quality}
-                onChange={e => setQuality(e.target.value)}
-                className="px-2 py-1 text-[10px] bg-white dark:bg-gray-800 border border-brand-300 dark:border-brand-700 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
-                title="Calidad de la imagen — más calidad = más costo"
-              >
-                <option value="low">Calidad baja (~$0.01)</option>
-                <option value="medium">Calidad media (~$0.05)</option>
-                <option value="high">Calidad alta (~$0.17-0.25)</option>
-              </select>
-              <button
-                onClick={handleGenerate}
-                className="inline-flex items-center gap-1 px-3 py-1.5 text-[11px] font-bold text-white bg-gradient-to-br from-brand-600 to-brand-700 rounded hover:from-brand-700 hover:to-brand-800 transition"
-              >
-                <Sparkles size={12} /> Generar creativo
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Error */}
-        {error && (
-          <p className="mt-2 text-[10px] text-red-600 dark:text-red-400">
-            ⚠ {error}
-          </p>
-        )}
       </div>
     </div>
   );

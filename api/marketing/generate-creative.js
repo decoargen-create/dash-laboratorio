@@ -55,6 +55,85 @@ function sizeForFormato(formato) {
 // hook + ángulo + copy. Así el creativo se puede generar para CUALQUIER
 // idea de la Bandeja, no solo las del generador.
 // Guía de escena según el estilo elegido por el user al generar.
+// Sub-variantes por estilo — el cliente manda variationSeed (índice de la
+// idea en el bulk o random en single) y elegimos UNA variante específica
+// para forzar variedad real dentro del mismo estilo (sino la IA cae siempre
+// en la composición canónica: "dos mujeres lado a lado" para comparación,
+// "mujer feliz en el baño" para lifestyle, etc).
+const VARIANTS = {
+  producto: [
+    'composición minimalista monocromática con producto en pedestal de piedra',
+    'producto en mini-mundo de ingredientes con peso material a la vista',
+    'producto en composición geométrica asimétrica con sombras largas',
+    'detalle macro del producto con gotas/polvo en suspensión',
+    'silueta dramática del producto a contraluz con fondo color block',
+    'producto en composición flatlay con elementos del beneficio dispuestos en abanico',
+  ],
+  lifestyle: [
+    'rutina mañanera en el baño con luz natural lateral',
+    'rutina nocturna con luz cálida ámbar y textiles suaves',
+    'mesa de café o desayuno casero con luz de ventana',
+    'al aire libre en un balcón/parque con luz dorada',
+    'momento de oficina/escritorio con elementos de trabajo',
+    'persona leyendo en sillón con manta y luz tenue',
+    'preparándose para salir frente al espejo con vestuario casual',
+    'detalle de manos sosteniendo el producto sobre encimera de mármol',
+  ],
+  ugc: [
+    'selfie casero en espejo del baño con flash leve',
+    'foto rápida sobre la mesa de la cocina al mediodía',
+    'mano espontánea sosteniendo el producto en el sofá',
+    'expresión de "ay sí, esto funcionó" con gesto natural',
+    'recorte raro tipo celular vertical con leve grano',
+    'foto tomada desde arriba sobre la cama mientras se está apoyado',
+  ],
+  comparacion: [
+    'ANTES/DESPUÉS del MISMO cuerpo/objeto en dos momentos distintos (NO dos personas distintas)',
+    'producto del anunciante vs envase genérico sin marca, SOLO los dos productos (sin personas)',
+    'escenario caótico/desordenado a un lado vs limpio/ordenado con el producto al otro',
+    'sólo manos: una sosteniendo algo viejo/cansado vs otra sosteniendo el producto con vitalidad',
+    'producto del anunciante protagónico + un pequeño elemento del "antes" descartado al costado',
+    'split por textura: lado mate gris vs lado con color vibrante del producto',
+  ],
+  explosion: [
+    'explosión radial de polvo de colores que envuelve el producto',
+    'gotas y líquidos en suspensión congelada alrededor del producto',
+    'ingredientes (raíces, frutas, semillas) flotando como cohetes hacia el producto',
+    'rayos/destellos dorados emanando del producto sobre fondo oscuro',
+    'partículas brillantes y humo etéreo alrededor del producto',
+  ],
+  mesa_aerea: [
+    'flatlay de desayuno saludable con ingredientes en cuencos pequeños',
+    'flatlay de mesa familiar con platos servidos y el producto integrado',
+    'flatlay de ingredientes crudos del producto (raíces, plantas, polvos) dispuestos en abanico',
+    'flatlay de oficina con notas, café, agenda y el producto entre los elementos',
+    'flatlay de kit completo con accesorios coherentes con la rutina',
+  ],
+  editorial: [
+    'color block bicromático horizontal con el producto en la línea de contraste',
+    'pedestal con sombras duras y luz lateral única tipo galería',
+    'fondo monocromático con UN acento de color vibrante de la marca',
+    'contraste de texturas: mate y aterciopelado vs brillo metálico',
+    'composición geométrica asimétrica con espacio negativo intencional',
+    'producto pequeño en un encuadre amplio con tipografía implícita por composición',
+  ],
+  testimonio: [
+    'rostro de la persona en 3/4 con expresión de alivio, sosteniendo el producto a la altura del pecho',
+    'detalle de manos cruzadas sosteniendo el producto sobre el regazo, sin mostrar cara',
+    'persona mayor real (60+) sonriendo con calma, producto cerca pero no protagónico',
+    'momento natural en casa, persona sentada en cocina o living, producto sobre la mesa',
+    'expresión de "por fin" — ojos cerrados, levemente sonriendo, producto al pecho',
+    'detalle de espalda de la persona apoyando el producto sobre una mesa, luz cálida',
+  ],
+  mascot: [
+    'mascota envase saludando con brazo arriba, fondo color block alegre',
+    'mascota señalando un elemento (precio, beneficio, otro objeto) con expresión picarona',
+    'mascota celebrando con confeti y guirnaldas pequeñas alrededor',
+    'mascota con cara de sorprendida positiva (boca abierta, ojos grandes)',
+    'mascota tachando algo con un marcador rojo, gesto enérgico',
+  ],
+};
+
 const ESCENA_GUIDE = {
   producto: 'ENFOQUE DE ESCENA: producto como protagonista en un mini-mundo editorial — NO packshot vacío de catálogo. Ingredientes clave o elementos del beneficio fotografiados con peso material alrededor del producto (gotas, polvo, plantas, ondas, partículas), sombras y reflejos creíbles, profundidad. Iluminación con dirección, no plana. El producto en foco nítido; los elementos secundarios con leve desenfoque artístico. Composición editorial, no centrada-aburrida.',
   lifestyle: 'ENFOQUE DE ESCENA: lifestyle real y aspiracional — una persona del target USANDO el producto en un momento cotidiano creíble (rutina del baño con luz natural, escritorio iluminado, mesa de café, exterior con luz dorada). Persona con expresión auténtica, NUNCA cara perfecta tipo IA con simetría imposible. Mostrá detalle (manos, perfil, tres cuartos) más que cara frontal. El envase del producto se ve INTEGRADO al momento pero en ángulo / parcialmente fuera de foco / parcialmente cubierto por la mano — NO un primer plano frontal de la etiqueta. Así el producto se reconoce por su color y forma sin que la IA tenga que redibujar el texto de la etiqueta.',
@@ -67,7 +146,7 @@ const ESCENA_GUIDE = {
   mascot: 'ENFOQUE DE ESCENA: el envase del producto antropomorfizado como personaje cartoon de Pixar / 3D estilizado — con cara expresiva (ojos grandes, sonrisa), brazos y posiblemente piernas estilizadas que salen del envase. El personaje hace una acción coherente con el mensaje (señala algo, hace pose de victoria, sostiene un elemento). Fondo simple y luminoso. Mood divertido y memorable. Cuidá que el envase reconozca la marca aún antropomorfizado.',
 };
 
-function buildImagePrompt(idea, { usarProductoReal = false, paleta = [], feedbackQA = null, estiloEscena = '' } = {}) {
+function buildImagePrompt(idea, { usarProductoReal = false, paleta = [], feedbackQA = null, estiloEscena = '', variationSeed = 0 } = {}) {
   const estilo = (idea.estiloVisual || '').trim();
   const hook = (idea.hook || '').trim();
 
@@ -126,6 +205,14 @@ function buildImagePrompt(idea, { usarProductoReal = false, paleta = [], feedbac
   if (estiloEscena && ESCENA_GUIDE[estiloEscena]) {
     parts.push('');
     parts.push(ESCENA_GUIDE[estiloEscena]);
+    // Variante específica forzada por seed — para que dentro del mismo estilo
+    // no se repita siempre la composición canónica entre creativos.
+    const variants = VARIANTS[estiloEscena];
+    if (Array.isArray(variants) && variants.length > 0) {
+      const seed = Math.max(0, Number(variationSeed) || 0);
+      const variant = variants[seed % variants.length];
+      parts.push(`VARIANTE OBLIGATORIA de este estilo (NO uses la composición canónica/típica — usá ESTA): ${variant}.`);
+    }
   }
 
   parts.push('');
@@ -180,7 +267,8 @@ export default async function handler(req, res) {
   } : null;
   const estiloEscena = Object.keys(ESCENA_GUIDE).includes(body?.estiloEscena)
     ? body.estiloEscena : '';
-  const prompt = buildImagePrompt(idea, { usarProductoReal, paleta: paletaMarca, feedbackQA, estiloEscena });
+  const variationSeed = Math.max(0, Math.floor(Number(body?.variationSeed) || 0));
+  const prompt = buildImagePrompt(idea, { usarProductoReal, paleta: paletaMarca, feedbackQA, estiloEscena, variationSeed });
 
   try {
     let resp;

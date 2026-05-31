@@ -9,6 +9,7 @@
     "api/marketing/apify-ingest.js":    { "maxDuration": 300 },
     "api/marketing/deep-analyze.js":    { "maxDuration": 240 },
     "api/marketing/generate-ideas.js":  { "maxDuration": 300 },
+    "api/marketing/generate-creative.js": { "maxDuration": 180 },
     "api/marketing/adapt-guion.js":     { "maxDuration": 60 },
     "api/marketing/copilot.js":         { "maxDuration": 60 },
     "api/marketing/score-hooks.js":     { "maxDuration": 60 },

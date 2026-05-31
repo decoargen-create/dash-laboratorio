@@ -23,6 +23,7 @@ import {
 } from './bandejaStore.js';
 import { exportBriefDocx } from './exportDocx.js';
 import { logCostsFromResponse } from './costsStore.js';
+import CreativoPanel from './CreativoPanel.jsx';
 
 const PRODUCTOS_KEY = 'viora-marketing-productos-v1';
 const ACTIVE_PRODUCT_KEY = 'viora-marketing-bandeja-active-product';
@@ -942,11 +943,13 @@ function IdeaCard({
               )}
 
               {/* Para video → brief con guion para mandar a producción
-                  humana. Para imagen/carrusel → el brief completo se ve en
-                  los campos de la idea; los diseñadores producen el creativo. */}
-              {idea.formato === 'video' && (
+                  humana. Para imagen/carrusel → panel de generación con
+                  gpt-image-2 (renderiza texto multilingüe bien por sí solo). */}
+              {idea.formato === 'video' ? (
                 <VideoBriefPanel key={idea.id} idea={idea} />
-              )}
+              ) : (idea.hook || idea.titulo || idea.promptGeneradorImagen || idea.descripcionImagen) ? (
+                <CreativoPanel key={idea.id} idea={idea} />
+              ) : null}
 
               {(idea.copyPostMeta || idea.copy) && (
                 <div>

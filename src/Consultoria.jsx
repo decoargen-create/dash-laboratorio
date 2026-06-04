@@ -205,18 +205,25 @@ const STYLE = `
 .cs-pop-note { font-size: 11px; color: var(--c-ink-soft); margin-top: 8px; line-height: 1.4; }
 
 @media print {
+  /* El contenido del panel vive dentro de <main overflow:auto>, que recorta
+     el acta abspos a ~1 página. Neutralizamos cualquier scroll-container y
+     límite de alto para que el documento pagine completo. */
+  html, body { background: #fff !important; height: auto !important; overflow: visible !important; }
+  body main, body #root, body #root > div, body main > div {
+    overflow: visible !important; height: auto !important; max-height: none !important;
+  }
   body * { visibility: hidden !important; }
   #acta-print, #acta-print * { visibility: visible !important; }
   #acta-print {
     position: absolute; left: 0; top: 0; width: 100%;
     background: #fff !important; border: none !important; box-shadow: none !important;
     border-radius: 0 !important; padding: 0 !important; margin: 0 !important;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
   }
+  #acta-print * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .no-print, .no-print * { display: none !important; visibility: hidden !important; }
   @page { margin: 16mm 14mm; }
-  html, body { background: #fff !important; }
-  -webkit-print-color-adjust: exact; print-color-adjust: exact;
-  .cs-diag, .cs-task, .cs-step { break-inside: avoid; }
+  .cs-diag, .cs-task, .cs-step, .cs-section { break-inside: avoid; }
 }
 `;
 

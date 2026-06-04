@@ -7,7 +7,7 @@ import {
   Menu, LogOut, Home, ShoppingCart, Package, Users, AlertCircle, CreditCard,
   UserCheck, TrendingUp, Plus, Filter, Eye, Edit2, Trash2, Calendar, DollarSign,
   Moon, Sun, ChevronDown, ChevronRight, Search, X, Command, Check, Bell,
-  AlignJustify, LayoutGrid, Columns3, Sparkles, Bot, Zap, Activity, FileText, Settings, Loader2, Calculator, Copy, Save, RotateCcw, Target, Play, Inbox, BarChart3, Instagram, SlidersHorizontal
+  AlignJustify, LayoutGrid, Columns3, Sparkles, Bot, Zap, Activity, FileText, Settings, Loader2, Calculator, Copy, Save, RotateCcw, Target, Play, Inbox, BarChart3, Instagram, SlidersHorizontal, ClipboardList
 } from 'lucide-react';
 import { VioraLogo, VioraMark } from './logo.jsx';
 import LandingPage from './LandingPage.jsx';
@@ -25,6 +25,7 @@ import BandejaSection from './Bandeja.jsx';
 import MetaAdsSection from './MetaAdsSection.jsx';
 import AutoIGSection from './AutoIG.jsx';
 import InspiracionSection from './InspiracionSection.jsx';
+import ConsultoriaSection from './Consultoria.jsx';
 import { PipelineRunProvider } from './PipelineRunContext.jsx';
 import PipelineRunOverlay from './PipelineRunOverlay.jsx';
 import { generateCSV, downloadCSV, parseCSV, toNumber, toBool } from './csv.js';
@@ -629,6 +630,16 @@ const PLATFORMS = [
     badgeBg: 'bg-gradient-to-br from-purple-600 to-violet-500',
     badgeText: 'text-white',
     defaultSection: 'mk-arranque',
+  },
+  {
+    id: 'consultoria',
+    name: 'Consultoría',
+    shortName: 'Consultoría',
+    initials: 'CO',
+    sidebarGradient: 'from-[#2F4A3A] via-[#3E6B4F] to-[#26402F]',
+    badgeBg: 'bg-gradient-to-br from-[#2F4A3A] to-[#3E6B4F]',
+    badgeText: 'text-white',
+    defaultSection: 'con-acta',
   },
 ];
 
@@ -2030,6 +2041,11 @@ function AppShell({ onExit }) {
               <NavItem icon={DollarSign} label="Gastos del stack" section="mk-gastos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
             </>
           )}
+          {currentUser.role === 'admin' && currentPlatform === 'consultoria' && (
+            <>
+              <NavItem icon={ClipboardList} label="Acta de reunión" section="con-acta" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+            </>
+          )}
           {currentUser.role !== 'admin' && (
             <>
               <NavItem icon={Home} label="Inicio" section="inicio" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
@@ -2111,6 +2127,9 @@ function AppShell({ onExit }) {
               onDismiss={dismissBgAnalysis}
             />
           )}
+
+          {/* Consultoría */}
+          {currentUser.role === 'admin' && currentPlatform === 'consultoria' && currentSection === 'con-acta' && <ConsultoriaSection addToast={addToast} />}
 
           {/* Mentor Views */}
           {currentUser.role === 'mentor' && currentSection === 'inicio' && <EquipoInicioSection currentUser={currentUser} state={state} />}
@@ -7790,6 +7809,7 @@ function getSectionTitle(user, section) {
     'mk-auto-ig': 'Marketing · Automatización IG',
     'mk-inspiracion': 'Marketing · Inspiración',
     'mk-gastos': 'Marketing · Gastos del stack',
+    'con-acta': 'Consultoría · Acta de reunión',
   };
   const mentor = {
     inicio: 'Inicio',

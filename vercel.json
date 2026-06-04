@@ -19,7 +19,8 @@
     "api/marketing/creatives.js": { "maxDuration": 180 },
     "api/marketing/adapt-inspiracion.js": { "maxDuration": 120 },
     "api/marketing/resolve-fb-page.js": { "maxDuration": 30 },
-    "api/meta/[action].js": { "maxDuration": 60 }
+    "api/meta/[action].js": { "maxDuration": 60 },
+    "api/acta.js": { "maxDuration": 120 }
   },
   "crons": [
     { "path": "/api/meta/cron-creative-refresh", "schedule": "0 12 * * *" }

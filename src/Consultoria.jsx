@@ -1,4 +1,6 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { loadActas, saveActa, deleteActa, groupByClient } from './actasStore.js';
+import { descargarActaPDF } from './actaPdf.js';
 
 // =============================================================================
 // CONSULTORÍA — Acta de reunión
@@ -157,6 +159,51 @@ const STYLE = `
 }
 .cs-notes li { margin-bottom: 6px; }
 
+/* ---- Repositorio por cliente ---- */
+.cs-link-btn {
+  background: none; border: none; color: var(--c-forest); font-family: inherit;
+  font-weight: 600; font-size: 13px; cursor: pointer; padding: 0;
+}
+.cs-link-btn:hover { text-decoration: underline; }
+.cs-link-danger { color: var(--c-terracota); }
+.cs-repo-client {
+  border: 1px solid var(--c-border); border-radius: 12px; background: var(--c-card);
+  margin-bottom: 10px; overflow: hidden;
+}
+.cs-repo-head {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  background: none; border: none; cursor: pointer; padding: 13px 15px; font-family: inherit;
+}
+.cs-repo-head:hover { background: rgba(28,27,23,.03); }
+.cs-repo-name { font-weight: 700; font-size: 14.5px; color: var(--c-ink); flex: 1; }
+.cs-repo-count {
+  font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--c-ink-soft);
+  background: rgba(47,74,58,.08); border-radius: 999px; padding: 2px 9px;
+}
+.cs-acta-row {
+  display: flex; align-items: center; gap: 12px; padding: 11px 15px;
+  border-top: 1px solid var(--c-border);
+}
+.cs-acta-date { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--c-ink-soft); width: 132px; flex-shrink: 0; }
+.cs-acta-prev { flex: 1; min-width: 0; font-size: 13.5px; color: var(--c-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- Popover de descarga ---- */
+.cs-pop-wrap { position: relative; display: inline-block; }
+.cs-popover {
+  position: absolute; z-index: 60; top: calc(100% + 8px); left: 0;
+  background: var(--c-card); border: 1px solid var(--c-border); border-radius: 13px;
+  padding: 15px; width: 270px; box-shadow: 0 16px 40px -14px rgba(28,27,23,.35);
+}
+.cs-pop-title { font-weight: 700; font-size: 13px; margin-bottom: 4px; }
+.cs-pop-sub { font-size: 11.5px; color: var(--c-ink-soft); margin-bottom: 10px; }
+.cs-checkrow {
+  display: flex; align-items: center; gap: 9px; padding: 7px 0; font-size: 14px;
+  cursor: pointer; user-select: none;
+}
+.cs-checkrow input { width: 16px; height: 16px; accent-color: var(--c-forest); cursor: pointer; }
+.cs-pop-presets { display: flex; gap: 14px; margin: 4px 0 10px; }
+.cs-pop-note { font-size: 11px; color: var(--c-ink-soft); margin-top: 8px; line-height: 1.4; }
+
 @media print {
   body * { visibility: hidden !important; }
   #acta-print, #acta-print * { visibility: visible !important; }
@@ -219,6 +266,30 @@ export default function ConsultoriaSection({ addToast }) {
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(''); // '' | 'full' | 'tareas'
   const resultRef = useRef(null);
+  const popRef = useRef(null);
+
+  // Repositorio por cliente (persistido en localStorage).
+  const [actas, setActas] = useState(() => loadActas());
+  const [currentActaId, setCurrentActaId] = useState(null);
+  const [openClients, setOpenClients] = useState({}); // clientKey -> bool
+
+  // Descarga de PDF: popover de opciones + qué secciones incluir + spinner.
+  const [pdfOpen, setPdfOpen] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [pdfSections, setPdfSections] = useState({ resumen: true, diagnostico: true, tareas: true, plan: true });
+
+  const refreshActas = useCallback(() => setActas(loadActas()), []);
+  const groups = useMemo(() => groupByClient(actas), [actas]);
+
+  // Cerrar el popover de descarga al clickear afuera o con Escape.
+  useEffect(() => {
+    if (!pdfOpen) return;
+    const onDown = (e) => { if (popRef.current && !popRef.current.contains(e.target)) setPdfOpen(false); };
+    const onKey = (e) => { if (e.key === 'Escape') setPdfOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
+  }, [pdfOpen]);
 
   const wordCount = useMemo(
     () => transcript.trim().split(/\s+/).filter(Boolean).length,
@@ -246,6 +317,10 @@ export default function ConsultoriaSection({ addToast }) {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || `Error ${res.status}`);
       setResult(data);
+      // Guardamos el acta en el repositorio del cliente.
+      const saved = saveActa({ client, date, transcript, result: data });
+      setCurrentActaId(saved.id);
+      refreshActas();
       // Scroll suave al resultado.
       setTimeout(() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
     } catch (err) {
@@ -254,6 +329,53 @@ export default function ConsultoriaSection({ addToast }) {
       setLoading(false);
     }
   }
+
+  // ---- Repositorio: abrir / borrar un acta guardada ----
+  function abrirActa(a) {
+    setClient(a.client || '');
+    setDate(a.date || '');
+    setTranscript(a.transcript || '');
+    setResult(a.result || null);
+    setCurrentActaId(a.id);
+    setError('');
+    setTimeout(() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
+  }
+
+  function borrarActa(id, e) {
+    if (e) e.stopPropagation();
+    deleteActa(id);
+    refreshActas();
+    if (currentActaId === id) { setResult(null); setCurrentActaId(null); }
+  }
+
+  // ---- Descarga del PDF con las secciones elegidas ----
+  async function descargarPDF() {
+    if (!result) return;
+    const anySection = pdfSections.resumen || pdfSections.diagnostico || pdfSections.tareas || pdfSections.plan;
+    if (!anySection) { setError('Elegí al menos una sección para el PDF.'); return; }
+    setPdfLoading(true);
+    setError('');
+    try {
+      const safeClient = (client || 'cliente').replace(/[\\/:*?"<>|]/g, '').trim() || 'cliente';
+      const safeDate = (date || '').replace(/[\\/:*?"<>|]/g, '').trim();
+      await descargarActaPDF({
+        client, date, result, sections: pdfSections,
+        filename: `Acta ${safeClient}${safeDate ? ' - ' + safeDate : ''}.pdf`,
+      });
+      notify('PDF generado.', 'success');
+      setPdfOpen(false);
+    } catch (err) {
+      setError(`No pude generar el PDF: ${err?.message || err}`);
+    } finally {
+      setPdfLoading(false);
+    }
+  }
+
+  const toggleSection = (key) => setPdfSections(s => ({ ...s, [key]: !s[key] }));
+  const setPreset = (preset) => {
+    if (preset === 'todo') setPdfSections({ resumen: true, diagnostico: true, tareas: true, plan: true });
+    else if (preset === 'tareas') setPdfSections({ resumen: false, diagnostico: false, tareas: true, plan: false });
+  };
 
   // ---- Texto plano para copiar ----
   function actaToText(onlyTasks = false) {
@@ -352,6 +474,36 @@ export default function ConsultoriaSection({ addToast }) {
 
           {error && <div className="cs-error" style={{ marginTop: 14 }}>{error}</div>}
         </div>
+
+        {/* ---------- REPOSITORIO POR CLIENTE ---------- */}
+        {groups.length > 0 && (
+          <div style={{ marginTop: 30 }}>
+            <h3 className="cs-section-title" style={{ marginBottom: 14 }}>Repositorio de clientes</h3>
+            {groups.map(g => {
+              const isOpen = !!openClients[g.clientKey];
+              return (
+                <div key={g.clientKey} className="cs-repo-client">
+                  <button
+                    className="cs-repo-head"
+                    onClick={() => setOpenClients(o => ({ ...o, [g.clientKey]: !o[g.clientKey] }))}
+                  >
+                    <span style={{ fontSize: 13, color: C.inkSoft, transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▸</span>
+                    <span className="cs-repo-name">{g.client || 'Sin cliente'}</span>
+                    <span className="cs-repo-count">{g.items.length} {g.items.length === 1 ? 'acta' : 'actas'}</span>
+                  </button>
+                  {isOpen && g.items.map(a => (
+                    <div key={a.id} className="cs-acta-row">
+                      <span className="cs-acta-date">{a.date || new Date(a.createdAt).toLocaleDateString('es-AR')}</span>
+                      <span className="cs-acta-prev">{a.result?.resumen || '—'}</span>
+                      <button className="cs-link-btn" onClick={() => abrirActa(a)}>Abrir</button>
+                      <button className="cs-link-btn cs-link-danger" onClick={(e) => borrarActa(a.id, e)}>Borrar</button>
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* ---------- RESULTADO ---------- */}
@@ -359,14 +511,44 @@ export default function ConsultoriaSection({ addToast }) {
         <div ref={resultRef} className="cs-appear" style={{ marginTop: 28 }}>
           {/* Barra de acciones — no va al PDF */}
           <div className="no-print" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 22 }}>
-            <button className="cs-btn cs-btn-primary" onClick={() => window.print()}>
-              Descargar PDF
-            </button>
+            <div className="cs-pop-wrap" ref={popRef}>
+              <button className="cs-btn cs-btn-primary" onClick={() => setPdfOpen(o => !o)} disabled={pdfLoading}>
+                {pdfLoading ? (<><Spinner /> Generando…</>) : (<>Descargar PDF <span style={{ opacity: .7, fontSize: 11 }}>▾</span></>)}
+              </button>
+              {pdfOpen && !pdfLoading && (
+                <div className="cs-popover">
+                  <div className="cs-pop-title">¿Qué incluir en el PDF?</div>
+                  <div className="cs-pop-presets">
+                    <button className="cs-link-btn" onClick={() => setPreset('todo')}>Todo</button>
+                    <button className="cs-link-btn" onClick={() => setPreset('tareas')}>Solo tareas</button>
+                  </div>
+                  <label className="cs-checkrow">
+                    <input type="checkbox" checked={pdfSections.resumen} onChange={() => toggleSection('resumen')} /> Resumen y temas
+                  </label>
+                  <label className="cs-checkrow">
+                    <input type="checkbox" checked={pdfSections.diagnostico} onChange={() => toggleSection('diagnostico')} /> Lo que vimos
+                  </label>
+                  <label className="cs-checkrow">
+                    <input type="checkbox" checked={pdfSections.tareas} onChange={() => toggleSection('tareas')} /> Tareas y pendientes
+                  </label>
+                  <label className="cs-checkrow">
+                    <input type="checkbox" checked={pdfSections.plan} onChange={() => toggleSection('plan')} /> Plan de acción
+                  </label>
+                  <button className="cs-btn cs-btn-primary" style={{ width: '100%', marginTop: 10 }} onClick={descargarPDF}>
+                    Descargar PDF
+                  </button>
+                  <p className="cs-pop-note">Las notas internas nunca se incluyen — el PDF es para el cliente.</p>
+                </div>
+              )}
+            </div>
             <button className="cs-btn cs-btn-ghost" onClick={() => copiar(false)}>
               {copied === 'full' ? '¡Copiado!' : 'Copiar acta completa'}
             </button>
             <button className="cs-btn cs-btn-ghost" onClick={() => copiar(true)}>
               {copied === 'tareas' ? '¡Copiado!' : 'Copiar solo tareas'}
+            </button>
+            <button className="cs-btn cs-btn-ghost" onClick={() => window.print()} title="Usar el diálogo de impresión del navegador">
+              Imprimir
             </button>
           </div>
 

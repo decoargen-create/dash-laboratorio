@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { loadActas, saveActa, deleteActa, groupByClient } from './actasStore.js';
+import { loadActas, saveActa, deleteActa, groupByClient, clientKeyOf } from './actasStore.js';
 import { descargarActaPDF } from './actaPdf.js';
 
 // =============================================================================
@@ -280,13 +280,81 @@ export default function ConsultoriaSection({ addToast }) {
   const [currentActaId, setCurrentActaId] = useState(null);
   const [openClients, setOpenClients] = useState({}); // clientKey -> bool
 
+  // Actas auto-generadas desde Drive (sync). Cacheadas en localStorage para
+  // mostrarlas al instante; la fuente de verdad es Drive.
+  const SYNC_CACHE = 'viora-actas-synced-v1';
+  const [syncedActas, setSyncedActas] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(SYNC_CACHE) || '[]'); } catch { return []; }
+  });
+  const [syncState, setSyncState] = useState('idle'); // idle | syncing | done | error | unconfigured
+  const [syncMsg, setSyncMsg] = useState('');
+
   // Descarga de PDF: popover de opciones + qué secciones incluir + spinner.
   const [pdfOpen, setPdfOpen] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [pdfSections, setPdfSections] = useState({ resumen: true, diagnostico: true, tareas: true, plan: true });
 
   const refreshActas = useCallback(() => setActas(loadActas()), []);
-  const groups = useMemo(() => groupByClient(actas), [actas]);
+
+  // Mezcla actas locales (manuales) + sincronizadas (Drive) para el repositorio.
+  const groups = useMemo(() => {
+    const fromDrive = (syncedActas || []).map(a => ({
+      id: a.id || a.transcriptId,
+      client: a.client || 'Sin cliente',
+      clientKey: clientKeyOf(a.client),
+      date: a.date || '',
+      result: a.result || null,
+      createdAt: a.createdAt || 0,
+      updatedAt: a.createdAt || 0,
+      _drive: true,
+    }));
+    return groupByClient([...fromDrive, ...actas]);
+  }, [actas, syncedActas]);
+
+  // Sync con Drive: al montar el módulo (= al entrar logueado). Genera lo que
+  // falte en tandas y refresca hasta que no queden pendientes.
+  useEffect(() => {
+    let cancel = false;
+    async function sync() {
+      let session = '';
+      try { session = localStorage.getItem('viora-session') || ''; } catch {}
+      if (!session) return;
+      setSyncState('syncing');
+      setSyncMsg('Sincronizando con Drive…');
+      try {
+        for (let i = 0; i < 6; i++) {
+          const res = await fetch('/api/actas/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (cancel) return;
+          if (data.configured === false) {
+            setSyncState('unconfigured');
+            setSyncMsg(data.error || 'La automatización de Drive no está configurada todavía.');
+            return;
+          }
+          if (!res.ok) throw new Error(data?.error || `Error ${res.status}`);
+          if (Array.isArray(data.actas)) {
+            setSyncedActas(data.actas);
+            try { localStorage.setItem(SYNC_CACHE, JSON.stringify(data.actas)); } catch {}
+          }
+          if (!data.pending || data.pending <= 0) {
+            setSyncState('done');
+            setSyncMsg(`${data.actas?.length || 0} actas sincronizadas desde Drive.`);
+            return;
+          }
+          setSyncMsg(`Generando actas nuevas… (${data.pending} pendiente${data.pending === 1 ? '' : 's'})`);
+        }
+        setSyncState('done');
+      } catch (err) {
+        if (!cancel) { setSyncState('error'); setSyncMsg(`No pude sincronizar con Drive: ${err?.message || err}`); }
+      }
+    }
+    sync();
+    return () => { cancel = true; };
+  }, []);
 
   // Cerrar el popover de descarga al clickear afuera o con Escape.
   useEffect(() => {
@@ -483,9 +551,29 @@ export default function ConsultoriaSection({ addToast }) {
         </div>
 
         {/* ---------- REPOSITORIO POR CLIENTE ---------- */}
-        {groups.length > 0 && (
+        {(groups.length > 0 || syncState !== 'idle') && (
           <div style={{ marginTop: 30 }}>
-            <h3 className="cs-section-title" style={{ marginBottom: 14 }}>Repositorio de clientes</h3>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
+              <h3 className="cs-section-title" style={{ margin: 0 }}>Repositorio de clientes</h3>
+              {syncState !== 'idle' && (
+                <span className="cs-mono" style={{
+                  fontSize: 12,
+                  color: syncState === 'error' || syncState === 'unconfigured' ? C.terracota : C.inkSoft,
+                  display: 'inline-flex', alignItems: 'center', gap: 7,
+                }}>
+                  {syncState === 'syncing' && <Spinner />}
+                  {syncMsg}
+                </span>
+              )}
+            </div>
+
+            {syncState === 'unconfigured' && (
+              <div className="cs-error" style={{ marginBottom: 14, background: '#FBF3D6', borderColor: '#E8D9A0', color: '#7A5B00' }}>
+                Para que las actas se generen solas desde Google Drive, falta configurar el acceso (service account + carpeta).
+                Las actas que armes a mano acá se siguen guardando igual.
+              </div>
+            )}
+
             {groups.map(g => {
               const isOpen = !!openClients[g.clientKey];
               return (
@@ -501,9 +589,12 @@ export default function ConsultoriaSection({ addToast }) {
                   {isOpen && g.items.map(a => (
                     <div key={a.id} className="cs-acta-row">
                       <span className="cs-acta-date">{a.date || new Date(a.createdAt).toLocaleDateString('es-AR')}</span>
-                      <span className="cs-acta-prev">{a.result?.resumen || '—'}</span>
+                      <span className="cs-acta-prev">
+                        {a._drive && <span className="cs-repo-count" style={{ marginRight: 8, fontSize: 10 }}>Auto · Drive</span>}
+                        {a.result?.resumen || '—'}
+                      </span>
                       <button className="cs-link-btn" onClick={() => abrirActa(a)}>Abrir</button>
-                      <button className="cs-link-btn cs-link-danger" onClick={(e) => borrarActa(a.id, e)}>Borrar</button>
+                      {!a._drive && <button className="cs-link-btn cs-link-danger" onClick={(e) => borrarActa(a.id, e)}>Borrar</button>}
                     </div>
                   ))}
                 </div>

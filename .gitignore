@@ -5,3 +5,8 @@ build/
 .env.local
 .DS_Store
 npm-debug.log*
+
+# Keys de service account de Google — NUNCA commitear
+*-key.json
+acta-bot-key.json
+service-account*.json

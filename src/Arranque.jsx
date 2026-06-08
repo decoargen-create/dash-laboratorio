@@ -2540,7 +2540,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             <div className="flex items-center gap-2">
               {!running ? (
                 <button onClick={runPipeline}
-                  className="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-bold text-white bg-gradient-to-br from-brand-600 to-brand-500 rounded-lg hover:from-brand-700 hover:to-brand-600 shadow-sm transition">
+                  className="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-bold text-white bg-gradient-to-br from-brand-500 to-brand-600 rounded-lg hover:from-brand-700 hover:to-brand-600 shadow-sm transition">
                   <Play size={14} /> Correr pipeline
                 </button>
               ) : (

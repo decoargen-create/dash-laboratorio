@@ -25,7 +25,7 @@ import {
 import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGeneradorHoy, updateIdea, formatoDeAd } from './bandejaStore.js';
 import { logCostsFromResponse } from './costsStore.js';
 import BandejaSection from './Bandeja.jsx';
-import InspiracionSection, { BulkProgressBar } from './InspiracionSection.jsx';
+import InspiracionSection from './InspiracionSection.jsx';
 import CreativosTab from './CreativosTab.jsx';
 import DocumentacionTab from './DocumentacionTab.jsx';
 import CopilotoTab from './CopilotoTab.jsx';
@@ -2072,11 +2072,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   if (!producto) {
     return (
       <div className="max-w-6xl mx-auto space-y-6">
-        <BulkProgressBar
-          state={bulkCreativos}
-          onCancel={() => bulkAbortRef.current?.abort()}
-          onClose={() => setBulkCreativos(null)}
-        />
+        {/* Antes había acá <BulkProgressBar state={bulkCreativos} .../> pero
+            bulkCreativos / bulkAbortRef nunca se declararon — era código
+            muerto que crasheaba al primer render. La barra real de bulk
+            progress vive en InspiracionSection (renderizada cuando el bulk
+            está corriendo). */}
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white shadow-sm">

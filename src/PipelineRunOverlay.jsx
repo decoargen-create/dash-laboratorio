@@ -171,7 +171,7 @@ export default function PipelineRunOverlay() {
           ) : (
             <div className="px-3 py-2 border-t border-gray-100 dark:border-gray-700">
               <button
-                onClick={() => window.dispatchEvent(new CustomEvent('viora-goto-marketing'))}
+                onClick={() => window.dispatchEvent(new CustomEvent('adslab-goto-marketing'))}
                 className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-[11px] font-bold text-white bg-gradient-to-br from-brand-500 to-brand-600 rounded hover:from-brand-700 hover:to-brand-600 transition">
                 <Play size={12} /> Ver resultados en Marketing
               </button>

@@ -23,10 +23,10 @@ import {
   MessageSquare, Send, GraduationCap, FileCheck,
 } from 'lucide-react';
 
-const STORAGE_KEY_BOCETOS = 'viora-bocetos-v1';
-const STORAGE_KEY_CLIENTES = 'viora-bocetos-clientes-v1';
-const STORAGE_KEY_LAST_CLIENTE = 'viora-bocetos-last-cliente';
-const STORAGE_KEY_AI_CONFIG = 'viora-bocetos-ai-config-v1';
+const STORAGE_KEY_BOCETOS = 'adslab-bocetos-v1';
+const STORAGE_KEY_CLIENTES = 'adslab-bocetos-clientes-v1';
+const STORAGE_KEY_LAST_CLIENTE = 'adslab-bocetos-last-cliente';
+const STORAGE_KEY_AI_CONFIG = 'adslab-bocetos-ai-config-v1';
 const MAX_IMG_BYTES = 1024 * 1024;
 const CANVAS_SIZE = 1000; // imagen normalizada a cuadrado de 1000x1000 con fondo blanco
 

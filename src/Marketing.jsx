@@ -16,7 +16,7 @@ import {
   Users, BookOpen, Clock, ExternalLink, ChevronDown, Target,
 } from 'lucide-react';
 
-const STORAGE_KEY = 'viora-marketing-productos-v1';
+const STORAGE_KEY = 'adslab-marketing-productos-v1';
 
 const STEPS = [
   {

@@ -537,12 +537,12 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
   const [showDebug, setShowDebug] = useState(false);
   // Vista: 'grid' | 'list' | 'table'. Persistida.
   const [viewMode, setViewMode] = useState(() => {
-    try { return localStorage.getItem('viora-galeria-view') || 'grid'; }
+    try { return localStorage.getItem('adslab-galeria-view') || 'grid'; }
     catch { return 'grid'; }
   });
   const setMode = (m) => {
     setViewMode(m);
-    try { localStorage.setItem('viora-galeria-view', m); } catch {}
+    try { localStorage.setItem('adslab-galeria-view', m); } catch {}
   };
   // Multi-select. Set preserva orden de inserción.
   const [seleccionados, setSeleccionados] = useState(new Set());

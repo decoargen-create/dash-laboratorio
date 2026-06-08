@@ -14,7 +14,7 @@
 //     amount (USD), descripcion: 'deep-analyze · ad abc' ...
 //   }
 
-const STORAGE_KEY = 'viora-costs-log-v1';
+const STORAGE_KEY = 'adslab-costs-log-v1';
 
 function loadLogs() {
   try {

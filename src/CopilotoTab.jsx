@@ -10,7 +10,7 @@ import { Loader2, Send, Sparkles, Trash2 } from 'lucide-react';
 import { loadIdeas } from './bandejaStore.js';
 import { logCostsFromResponse } from './costsStore.js';
 
-const CHAT_KEY_PREFIX = 'viora-marketing-copilot-';
+const CHAT_KEY_PREFIX = 'adslab-marketing-copilot-';
 const CHAT_CAP = 40; // mensajes guardados por producto
 
 // Preguntas sugeridas para arrancar la conversación.

@@ -3,7 +3,7 @@
 // Complementa al ExecutionsTray que es "in-flight + recientes" (auto-cierra
 // en 3-12s). Acá viven los logs para revisar histórico.
 
-const STORAGE_KEY = 'viora-activity-log-v1';
+const STORAGE_KEY = 'adslab-activity-log-v1';
 const MAX_ITEMS = 100;
 const listeners = new Set();
 

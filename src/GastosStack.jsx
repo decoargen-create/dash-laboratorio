@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { spendThisMonth, spendToday, AUTO_TIPO_LABELS } from './costsStore.js';
 
-const STORAGE_KEY = 'viora-stack-costs-v1';
+const STORAGE_KEY = 'adslab-stack-costs-v1';
 const USD_ARS = 1500; // tipo de cambio aproximado para mostrar conversión
 
 // Servicios precargados la primera vez que entrás.

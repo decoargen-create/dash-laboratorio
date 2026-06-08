@@ -15,7 +15,7 @@ import BocetosSection from './Bocetos.jsx';
 import MarketingSection from './Marketing.jsx';
 // CompetenciaSection (./Competencia.jsx) fue deprecada — la fuente de verdad
 // vive en productos[].competidores (Arranque). Su key vieja
-// `viora-marketing-competidores-v1` se borra al primer mount de Arranque
+// `adslab-marketing-competidores-v1` se borra al primer mount de Arranque
 // tras la migración. La sección quedó huérfana; cualquier deep-link a
 // `mk-competencia` ahora redirige a `mk-arranque` (workspace del producto).
 import GastosStackSection from './GastosStack.jsx';
@@ -533,7 +533,7 @@ export function getOrderPayments(order, product, mentor) {
 // Al cambiar la key, los usuarios con data en v1 arrancan limpios tras el
 // deploy. Si tenés data importante en v1, exportala desde la sección Datos
 // antes de actualizar, o borrá manualmente viora-state-v1 de localStorage.
-const STATE_STORAGE_KEY = 'viora-state-v2';
+const STATE_STORAGE_KEY = 'adslab-state-v2';
 
 function loadPersistedState() {
   if (typeof window === 'undefined') return INITIAL_STATE;
@@ -712,7 +712,7 @@ function PlatformSwitcher({ currentPlatform, onSwitch, sidebarOpen }) {
 // Ve en vivo ganancia informada, comisión, profit real, margen. Guardás
 // escenarios en localStorage para compararlos side-by-side.
 function CalculadoraSection({ state, addToast }) {
-  const STORAGE_KEY = 'viora-calc-escenarios-v1';
+  const STORAGE_KEY = 'adslab-calc-escenarios-v1';
   const DEFAULT_FORM = {
     productoId: '',
     cantidad: 100,
@@ -1400,7 +1400,7 @@ function AppShell({ onExit }) {
   // su propio sidebar (logo, colores, secciones) y sus datos aislados.
   const [currentPlatform, setCurrentPlatform] = useState(() => {
     try {
-      const saved = localStorage.getItem('viora-current-platform');
+      const saved = localStorage.getItem('adslab-current-platform');
       // Si tenía guardada una plataforma que ya no existe (viora, senydrop,
       // metaads), forzamos marketing como default.
       const valid = ['marketing', 'consultoria'];
@@ -1408,11 +1408,11 @@ function AppShell({ onExit }) {
     } catch { return 'marketing'; }
   });
   useEffect(() => {
-    try { localStorage.setItem('viora-current-platform', currentPlatform); } catch {}
+    try { localStorage.setItem('adslab-current-platform', currentPlatform); } catch {}
   }, [currentPlatform]);
   const [currentSection, setCurrentSection] = useState(() => {
     try {
-      const saved = localStorage.getItem('viora-last-section');
+      const saved = localStorage.getItem('adslab-last-section');
       // Si tenía una sección de Viora/Senydrop/MetaAds, defaulteamos a la
       // de Marketing. Lista de secciones válidas en las plataformas activas:
       const validSections = ['mk-arranque', 'mk-bandeja', 'mk-meta-ads', 'mk-auto-ig',
@@ -1421,7 +1421,7 @@ function AppShell({ onExit }) {
     } catch { return 'mk-arranque'; }
   });
   useEffect(() => {
-    try { localStorage.setItem('viora-last-section', currentSection); } catch {}
+    try { localStorage.setItem('adslab-last-section', currentSection); } catch {}
   }, [currentSection]);
   // Redirect de la sección legacy `mk-competencia` (sidebar global, ahora
   // viviendo como tab dentro del workspace de cada producto) → `mk-arranque`.
@@ -1434,8 +1434,8 @@ function AppShell({ onExit }) {
   // directo a Marketing para ver los resultados.
   useEffect(() => {
     const onGoto = () => { setCurrentPlatform('marketing'); setCurrentSection('mk-arranque'); };
-    window.addEventListener('viora-goto-marketing', onGoto);
-    return () => window.removeEventListener('viora-goto-marketing', onGoto);
+    window.addEventListener('adslab-goto-marketing', onGoto);
+    return () => window.removeEventListener('adslab-goto-marketing', onGoto);
   }, []);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   // Cada vez que cambia el estado del sidebar, avisamos a otros componentes
@@ -1686,7 +1686,7 @@ function AppShell({ onExit }) {
     let cancelled = false;
     const url = new URL(window.location.href);
     const linkToken = url.searchParams.get('token');
-    const storedSession = localStorage.getItem('viora-session');
+    const storedSession = localStorage.getItem('adslab-session');
 
     const clearTokenFromUrl = () => {
       url.searchParams.delete('token');
@@ -1714,7 +1714,7 @@ function AppShell({ onExit }) {
           }
           const data = await resp.json().catch(() => null);
           if (data?.ok && data.session && data.user) {
-            localStorage.setItem('viora-session', data.session);
+            localStorage.setItem('adslab-session', data.session);
             if (!cancelled) {
               const u = data.user;
               setCurrentUser({
@@ -1739,13 +1739,13 @@ function AppShell({ onExit }) {
           if (!resp.ok) {
             // Sesión inválida / expirada / usuario borrado → limpiar y
             // dejar que el LoginScreen se muestre.
-            localStorage.removeItem('viora-session');
+            localStorage.removeItem('adslab-session');
             if (!cancelled) setCurrentUser(null);
             return;
           }
           const data = await resp.json().catch(() => null);
           if (!data?.ok || !data.user) {
-            localStorage.removeItem('viora-session');
+            localStorage.removeItem('adslab-session');
             if (!cancelled) setCurrentUser(null);
             return;
           }
@@ -1814,7 +1814,11 @@ function AppShell({ onExit }) {
     if (supabase) {
       try { await supabase.auth.signOut(); } catch {}
     }
+<<<<<<< HEAD
+    localStorage.removeItem('adslab-session');
+=======
     localStorage.removeItem('viora-session');
+>>>>>>> origin/main
     setCurrentUser(null);
     setSupabaseUser(null);
     setCurrentSection('mk-arranque');
@@ -2394,14 +2398,14 @@ function SidebarStats({ sidebarOpen, onNavGastos }) {
 function NavSection({ title, sectionKey, sidebarOpen, defaultOpen = true, children }) {
   const [open, setOpen] = useState(() => {
     try {
-      const v = localStorage.getItem(`viora-navsec-${sectionKey}`);
+      const v = localStorage.getItem(`adslab-navsec-${sectionKey}`);
       return v == null ? defaultOpen : v === '1';
     } catch { return defaultOpen; }
   });
   const toggle = () => {
     setOpen(o => {
       const next = !o;
-      try { localStorage.setItem(`viora-navsec-${sectionKey}`, next ? '1' : '0'); } catch {}
+      try { localStorage.setItem(`adslab-navsec-${sectionKey}`, next ? '1' : '0'); } catch {}
       return next;
     });
   };
@@ -2458,7 +2462,7 @@ function NavItem({ icon: Icon, label, section, currentSection, onSelect, sidebar
 function LoginScreen({ onLogin, onSessionAuth, darkMode, toggleDarkMode }) {
   const [loginMode, setLoginMode] = useState('login');
   const [username, setUsername] = useState(() => {
-    try { return localStorage.getItem('viora-last-user') || ''; } catch { return ''; }
+    try { return localStorage.getItem('adslab-last-user') || ''; } catch { return ''; }
   });
   const [password, setPassword] = useState('');
   const [rememberUser, setRememberUser] = useState(true);
@@ -2489,11 +2493,11 @@ function LoginScreen({ onLogin, onSessionAuth, darkMode, toggleDarkMode }) {
         setLoginError(data?.error || 'Usuario o contraseña inválidos');
         return;
       }
-      localStorage.setItem('viora-session', data.session);
+      localStorage.setItem('adslab-session', data.session);
       if (rememberUser) {
-        try { localStorage.setItem('viora-last-user', username.trim()); } catch {}
+        try { localStorage.setItem('adslab-last-user', username.trim()); } catch {}
       } else {
-        try { localStorage.removeItem('viora-last-user'); } catch {}
+        try { localStorage.removeItem('adslab-last-user'); } catch {}
       }
       if (typeof onSessionAuth === 'function') {
         onSessionAuth(data.user);
@@ -3051,10 +3055,10 @@ function OrdersList({ state, dispatch, orders, onEditOrder }) {
   // Vista del listado: 'table' | 'cards' | 'kanban'. Persistida en localStorage.
   const [layout, setLayout] = useState(() => {
     if (typeof window === 'undefined') return 'table';
-    return localStorage.getItem('viora-layout-orders') || 'table';
+    return localStorage.getItem('adslab-layout-orders') || 'table';
   });
   useEffect(() => {
-    try { localStorage.setItem('viora-layout-orders', layout); } catch {}
+    try { localStorage.setItem('adslab-layout-orders', layout); } catch {}
   }, [layout]);
 
   // Columnas visibles del listado: configurables y persistidas. Las required
@@ -3062,7 +3066,7 @@ function OrdersList({ state, dispatch, orders, onEditOrder }) {
   const [visibleCols, setVisibleCols] = useState(() => {
     if (typeof window === 'undefined') return new Set(ORDERS_DEFAULT_VISIBLE);
     try {
-      const stored = localStorage.getItem('viora-cols-orders');
+      const stored = localStorage.getItem('adslab-cols-orders');
       if (stored) {
         const savedSet = new Set(JSON.parse(stored));
         // Merge: si hay columnas nuevas con default=true que no estaban
@@ -3074,7 +3078,7 @@ function OrdersList({ state, dispatch, orders, onEditOrder }) {
     return new Set(ORDERS_DEFAULT_VISIBLE);
   });
   useEffect(() => {
-    try { localStorage.setItem('viora-cols-orders', JSON.stringify(Array.from(visibleCols))); } catch {}
+    try { localStorage.setItem('adslab-cols-orders', JSON.stringify(Array.from(visibleCols))); } catch {}
   }, [visibleCols]);
   const isColVisible = (key) => {
     const def = ORDERS_COLUMNS.find(c => c.key === key);
@@ -4450,10 +4454,10 @@ function ProductosSection({ state, onAddProduct, showModal, setShowModal, calcul
   const [expanded, setExpanded] = useState(() => new Set());
   const [layout, setLayout] = useState(() => {
     if (typeof window === 'undefined') return 'cards';
-    return localStorage.getItem('viora-layout-products') || 'cards';
+    return localStorage.getItem('adslab-layout-products') || 'cards';
   });
   useEffect(() => {
-    try { localStorage.setItem('viora-layout-products', layout); } catch {}
+    try { localStorage.setItem('adslab-layout-products', layout); } catch {}
   }, [layout]);
 
   const toggleExpand = (id) => {
@@ -4923,10 +4927,10 @@ function ClientesSection({ state, onAddClient, onUpdateClient, showModal, setSho
   const [expanded, setExpanded] = useState(() => new Set());
   const [layout, setLayout] = useState(() => {
     if (typeof window === 'undefined') return 'table';
-    return localStorage.getItem('viora-layout-clients') || 'table';
+    return localStorage.getItem('adslab-layout-clients') || 'table';
   });
   useEffect(() => {
-    try { localStorage.setItem('viora-layout-clients', layout); } catch {}
+    try { localStorage.setItem('adslab-layout-clients', layout); } catch {}
   }, [layout]);
 
   const toggleExpand = (id) => {
@@ -5771,7 +5775,7 @@ function DatosSection({ state, dispatch, addToast }) {
               const url = URL.createObjectURL(blob);
               const a = document.createElement('a');
               a.href = url;
-              a.download = `viora-backup-${new Date().toISOString().split('T')[0]}.json`;
+              a.download = `adslab-backup-${new Date().toISOString().split('T')[0]}.json`;
               document.body.appendChild(a);
               a.click();
               document.body.removeChild(a);
@@ -5825,7 +5829,7 @@ function EntityDataCard({ entity, state, dispatch, addToast }) {
 
   const handleExport = () => {
     const csv = generateCSV(data, entity.columns);
-    const filename = `viora-${entity.key}-${new Date().toISOString().split('T')[0]}.csv`;
+    const filename = `adslab-${entity.key}-${new Date().toISOString().split('T')[0]}.csv`;
     downloadCSV(filename, csv);
     addToast?.({ type: 'success', message: `${entity.label} exportados (${data.length} filas)` });
   };
@@ -8095,7 +8099,7 @@ function getSectionTitle(user, section) {
 function UserMenu({ currentUser, sidebarOpen, state, onLogout }) {
   const [open, setOpen] = useState(false);
   const [now, setNow] = useState(() => new Date());
-  const storageKey = `viora-pref-displayName-${currentUser.role}-${currentUser.id}`;
+  const storageKey = `adslab-pref-displayName-${currentUser.role}-${currentUser.id}`;
   const [displayName, setDisplayName] = useState(() => {
     try { return localStorage.getItem(storageKey) || currentUser.name || ''; } catch { return currentUser.name || ''; }
   });

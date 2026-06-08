@@ -13,10 +13,10 @@
 import { supabase, getCurrentUser } from './supabase.js';
 
 const KEYS = {
-  productos: 'viora-marketing-productos-v1',
-  active: 'viora-marketing-active-product',
-  genOpts: 'viora-marketing-gen-opts',
-  brandsPrefix: 'viora-marketing-inspiracion-brands-',
+  productos: 'adslab-marketing-productos-v1',
+  active: 'adslab-marketing-active-product',
+  genOpts: 'adslab-marketing-gen-opts',
+  brandsPrefix: 'adslab-marketing-inspiracion-brands-',
 };
 
 // ============================================================

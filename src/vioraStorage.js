@@ -20,7 +20,7 @@
 //   restoreBackup(ts) → Promise<state>
 //
 // Migración: en el primer load chequeamos si hay state legacy en
-// localStorage bajo la key `viora-state-v2`. Si sí, lo copiamos a
+// localStorage bajo la key `adslab-state-v2`. Si sí, lo copiamos a
 // IndexedDB y limpiamos la key vieja para que el próximo
 // localStorage.clear() ya no la encuentre.
 
@@ -29,7 +29,7 @@ const DB_VERSION = 1;
 const STORE = 'state';
 const STATE_KEY = 'current';
 const BACKUP_PREFIX = 'backup-';
-const LEGACY_LOCALSTORAGE_KEY = 'viora-state-v2';
+const LEGACY_LOCALSTORAGE_KEY = 'adslab-state-v2';
 
 // Backups: cuántos guardamos. 24 cubre ~1 día con 1 backup/hora, suficiente
 // como red de seguridad sin explotar el storage.

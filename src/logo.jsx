@@ -45,8 +45,8 @@ export function VioraLogo({ variant = 'default', size = 'md', className = '' }) 
     xl: { w: 480, h: 250 },
   };
   const { w, h } = sizes[size] || sizes.md;
-  const arcGradientId = `viora-arc-${variant}-${size}`;
-  const starGradientId = `viora-star-${variant}-${size}`;
+  const arcGradientId = `adslab-arc-${variant}-${size}`;
+  const starGradientId = `adslab-star-${variant}-${size}`;
   const textMain = variant === 'light' ? '#ffffff' : '#111111';
   const textLabel = variant === 'light' ? '#f5e9d6' : '#6b4a2a';
   return (
@@ -117,7 +117,7 @@ export function VioraMark({ className = '', size = 40 }) {
   return (
     <svg viewBox="0 0 100 100" width={size} height={size} className={className} role="img" aria-label="Viora">
       <defs>
-        <linearGradient id="viora-mark-g" x1="0" y1="0" x2="1" y2="1">
+        <linearGradient id="adslab-mark-g" x1="0" y1="0" x2="1" y2="1">
           <stop offset="0" stopColor="#e9c99d" />
           <stop offset=".5" stopColor="#b8895a" />
           <stop offset="1" stopColor="#d6b084" />
@@ -128,7 +128,7 @@ export function VioraMark({ className = '', size = 40 }) {
         fontFamily="'Allura', 'Brush Script MT', cursive"
         fontSize="90"
         fontStyle="italic"
-        fill="url(#viora-mark-g)"
+        fill="url(#adslab-mark-g)"
       >
         V
       </text>

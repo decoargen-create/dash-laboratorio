@@ -2,11 +2,11 @@
 // bulk completo). Generados con Web Audio API en lugar de archivos para
 // evitar precaches y latencia de carga.
 //
-// Respetan preferencia del user via localStorage 'viora-sonidos-enabled'
+// Respetan preferencia del user via localStorage 'adslab-sonidos-enabled'
 // (default true). Toggle disponible en /Setup → Preferencias o donde se
 // agregue el switch.
 
-const PREF_KEY = 'viora-sonidos-enabled';
+const PREF_KEY = 'adslab-sonidos-enabled';
 
 export function soundsEnabled() {
   try {

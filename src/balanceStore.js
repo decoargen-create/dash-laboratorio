@@ -10,7 +10,7 @@
 
 import { spendSince } from './costsStore.js';
 
-const KEY = 'viora-balances-v1';
+const KEY = 'adslab-balances-v1';
 const listeners = new Set();
 
 function readAll() {

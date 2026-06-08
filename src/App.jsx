@@ -2171,18 +2171,18 @@ function AppShell({ onExit }) {
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && !supabaseUser && supabase && (
             <SupabaseAuthScreen onLoggedIn={setSupabaseUser} />
           )}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && supabaseUser && (
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && (
             <MetaConnectBanner returnTo={`/acceso?section=${currentSection}`} />
           )}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && supabaseUser && currentSection === 'mk-arranque' && <ArranqueSection addToast={addToast} onGoToSection={setCurrentSection} />}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && supabaseUser && currentSection === 'mk-bandeja' && <BandejaSection addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-arranque' && <ArranqueSection addToast={addToast} onGoToSection={setCurrentSection} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-bandeja' && <BandejaSection addToast={addToast} />}
           {/* mk-competencia (sidebar legacy) está redirigido por el effect
               de arriba a mk-arranque — no necesita su propio render. */}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && supabaseUser && currentSection === 'mk-meta-ads' && <MetaAdsSection addToast={addToast} />}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && supabaseUser && currentSection === 'mk-auto-ig' && <AutoIGSection addToast={addToast} />}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && supabaseUser && currentSection === 'mk-inspiracion' && <InspiracionSection addToast={addToast} />}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && supabaseUser && currentSection === 'mk-gastos' && <GastosStackSection addToast={addToast} />}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && supabaseUser && currentSection === 'mk-docs' && (
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-meta-ads' && <MetaAdsSection addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-auto-ig' && <AutoIGSection addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-inspiracion' && <InspiracionSection addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-gastos' && <GastosStackSection addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-docs' && (
             <MarketingSection
               addToast={addToast}
               bgAnalysis={bgAnalysis}

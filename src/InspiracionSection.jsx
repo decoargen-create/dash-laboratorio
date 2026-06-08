@@ -1074,6 +1074,48 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
 
   const producto = productos.find(p => String(p.id) === String(activeProductoId)) || null;
 
+  // Sync uni-direccional: competidores → brands. Cada competidor cargado en
+  // Setup/Competencia aparece automático en Inspiración como marca scrapeable.
+  // Matcheamos por landingUrl (más estable que id porque competidor.id es
+  // numérico y brand.id es string `brand-xxx`). Si no hay match, agregamos.
+  // No removemos las brands que no tienen competidor — eso lo decide el user
+  // explícito desde Inspiración (que también borra del competidores como
+  // efecto cascade — ver handleRemoveBrand abajo).
+  useEffect(() => {
+    if (!producto?.competidores) return;
+    const comps = producto.competidores;
+    if (comps.length === 0) return;
+    setBrands(prev => {
+      const byHost = new Map();
+      for (const b of prev) {
+        const host = (b.landingUrl || '').replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+        if (host) byHost.set(host, b);
+        // Match alternativo por nombre normalizado (lower + trim)
+        const n = (b.nombre || '').toLowerCase().trim();
+        if (n) byHost.set(`n:${n}`, b);
+      }
+      const nuevas = [];
+      for (const c of comps) {
+        const host = (c.landingUrl || '').replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+        const nKey = `n:${(c.nombre || '').toLowerCase().trim()}`;
+        const existsBy = (host && byHost.get(host)) || byHost.get(nKey);
+        if (existsBy) continue;
+        nuevas.push({
+          id: `brand-from-comp-${c.id}`,
+          nombre: c.nombre,
+          landingUrl: c.landingUrl || '',
+          fbPageUrl: c.fbPageUrl || '',
+          notas: c.notas || '',
+          createdAt: c.createdAt || new Date().toISOString(),
+          lastScraped: null,
+          seenAdIds: [],
+          fromCompetidorId: c.id,  // marker para tracking del origen
+        });
+      }
+      return nuevas.length > 0 ? [...nuevas, ...prev] : prev;
+    });
+  }, [producto?.competidores]);
+
   // useEffect para usedAdIds — ahora SÍ podemos referenciar `producto`.
   useEffect(() => {
     if (!producto?.id) return;
@@ -1113,10 +1155,35 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   const handleRemoveBrand = (id) => {
     const b = brands.find(x => x.id === id);
     if (!b) return;
-    if (!window.confirm(`¿Eliminar "${b.nombre}" de inspiración?`)) return;
+    if (!window.confirm(`¿Eliminar "${b.nombre}"? Si está cargado como competidor también lo quita de Setup → Competencia.`)) return;
     setBrands(prev => prev.filter(x => x.id !== id));
     setAdsByBrand(prev => {
       const next = { ...prev }; delete next[id]; return next;
+    });
+    // Cascade delete: si la brand vino de un competidor (o matchea por
+    // landingUrl / nombre), borramos también el competidor del producto.
+    // Source of truth unificado.
+    setProductos(prev => {
+      const updated = prev.map(p => {
+        if (String(p.id) !== String(activeProductoId)) return p;
+        const comps = p.competidores || [];
+        const host = (b.landingUrl || '').replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+        const brandNombre = (b.nombre || '').toLowerCase().trim();
+        const next = comps.filter(c => {
+          if (b.fromCompetidorId && String(c.id) === String(b.fromCompetidorId)) return false;
+          const cHost = (c.landingUrl || '').replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+          if (host && cHost === host) return false;
+          if (brandNombre && (c.nombre || '').toLowerCase().trim() === brandNombre) return false;
+          return true;
+        });
+        return { ...p, competidores: next };
+      });
+      // Persistir a localStorage como hacen otros lugares en este archivo.
+      try {
+        localStorage.setItem(PRODUCTOS_KEY, JSON.stringify(updated));
+        window.dispatchEvent(new CustomEvent('viora:marketing-storage-changed', { detail: { key: PRODUCTOS_KEY } }));
+      } catch {}
+      return updated;
     });
   };
 
@@ -2134,13 +2201,18 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                   </div>
                 )}
               </div>
-              {/* Galería: ya no vive como botón flotante acá — ahora es su
-                  propio tab "Galería" en el workspace. Quito el modal. */}
+              {/* Para agregar una marca nueva el flujo va por Competencia
+                  (single source of truth). Las marcas que aparecen acá son
+                  derivadas de producto.competidores via el useEffect de sync. */}
               <button
-                onClick={() => setShowAddForm(s => !s)}
+                onClick={() => {
+                  try { window.dispatchEvent(new CustomEvent('viora:product-tab', { detail: { tab: 'competencia' } })); } catch {}
+                  addToast?.({ type: 'info', message: 'Cargá la marca como competidor — va a aparecer acá automático.' });
+                }}
                 className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-amber-500 to-brand-500 rounded hover:from-amber-600 hover:to-brand-600 shadow-sm transition"
+                title="Las marcas se agregan desde Competencia. Click para ir."
               >
-                <Plus size={11} /> Marca
+                <Plus size={11} /> Marca (en Competencia)
               </button>
             </div>
 
@@ -2150,7 +2222,14 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                 icon={Sparkles}
                 title="Ninguna marca coincide con el filtro"
                 description="Probá ajustar los filtros o agregá marcas custom con el botón de arriba."
-                primaryAction={{ label: 'Agregar marca', icon: Plus, onClick: () => setShowAddForm(true) }}
+                primaryAction={{
+                  label: 'Agregar competidor',
+                  icon: Plus,
+                  onClick: () => {
+                    try { window.dispatchEvent(new CustomEvent('viora:product-tab', { detail: { tab: 'competencia' } })); } catch {}
+                    addToast?.({ type: 'info', message: 'Cargalo como competidor — va a aparecer acá automático.' });
+                  },
+                }}
               />
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

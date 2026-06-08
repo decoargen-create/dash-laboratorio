@@ -24,6 +24,82 @@ function iconForKind(kind, status) {
   return <Loader2 size={14} className="text-brand-500 animate-spin" />;
 }
 
+// ---- inner components moved before export (TDZ fix Vite/Rollup) ----
+
+function ExecutionCard({ exec, dolar }) {
+  const elapsed = Date.now() - exec.startedAt;
+  const pct = estimateProgress(exec);
+  const isDone = exec.status === 'done';
+  const isError = exec.status === 'error';
+  return (
+    <div className="px-3 py-2.5">
+      <div className="flex items-start gap-2">
+        <div className="mt-0.5 shrink-0">{iconForKind(exec.kind, exec.status)}</div>
+        <div className="flex-1 min-w-0">
+          <p className="text-[11px] font-bold text-gray-900 dark:text-gray-100 truncate">
+            {exec.label}
+          </p>
+          {(exec.sublabel || exec.stage) && (
+            <p className="text-[10px] text-gray-500 dark:text-gray-400 truncate">
+              {exec.stage || exec.sublabel}
+            </p>
+          )}
+          {isError && exec.message && (
+            <p className="text-[10px] text-red-600 dark:text-red-400 mt-0.5 line-clamp-2">{exec.message}</p>
+          )}
+          {isDone && exec.message && (
+            <p className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-0.5 line-clamp-2">{exec.message}</p>
+          )}
+        </div>
+        <button
+          onClick={() => dismissExecution(exec.id)}
+          className="p-0.5 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition shrink-0"
+          title="Cerrar"
+        >
+          <X size={11} />
+        </button>
+      </div>
+
+      {/* Barra de progreso — siempre visible para running; full o vacía para done/error. */}
+      <div className="h-1 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden mt-1.5">
+        <div
+          className={`h-full transition-all duration-500 ${
+            isDone ? 'bg-emerald-500'
+            : isError ? 'bg-red-500'
+            : 'bg-gradient-to-r from-brand-500 to-brand-400'
+          }`}
+          style={{ width: `${isError ? (exec.progress ?? 100) : pct}%` }}
+        />
+      </div>
+      <div className="flex items-center justify-between gap-2 mt-0.5">
+        <p className="text-[9px] text-gray-500 dark:text-gray-400">
+          {fmtElapsed(elapsed)}{exec.status === 'running' && exec.estimatedMs ? ` / ~${fmtElapsed(exec.estimatedMs)}` : ''}
+        </p>
+        {/* Costo: si terminó OK con cost, mostrarlo. Si está corriendo y hay
+            estimatedCost, mostrar el estimado en gris para que el user sepa
+            cuánto va a salir antes de gastar. */}
+        {(exec.cost > 0 || (exec.status === 'running' && exec.estimatedCost > 0)) && (() => {
+          const usd = exec.status === 'running' ? Number(exec.estimatedCost) : Number(exec.cost);
+          const prefix = exec.status === 'running' ? '~' : '';
+          const arsLabel = dolar?.venta ? ` · ${usdToArsString(usd, dolar)}` : '';
+          return (
+            <p className={`text-[9px] font-bold tabular-nums ${
+              exec.status === 'running'
+                ? 'text-gray-500 dark:text-gray-400'
+                : isError
+                  ? 'text-red-500'
+                  : 'text-emerald-600 dark:text-emerald-400'
+            }`}>
+              {prefix}${usd.toFixed(3)}<span className="font-normal opacity-80">{arsLabel}</span>
+            </p>
+          );
+        })()}
+      </div>
+    </div>
+  );
+}
+
+
 export default function ExecutionsTray() {
   const [execs, setExecs] = useState([]);
   const [collapsed, setCollapsed] = useState(false);
@@ -110,75 +186,3 @@ export default function ExecutionsTray() {
   );
 }
 
-function ExecutionCard({ exec, dolar }) {
-  const elapsed = Date.now() - exec.startedAt;
-  const pct = estimateProgress(exec);
-  const isDone = exec.status === 'done';
-  const isError = exec.status === 'error';
-  return (
-    <div className="px-3 py-2.5">
-      <div className="flex items-start gap-2">
-        <div className="mt-0.5 shrink-0">{iconForKind(exec.kind, exec.status)}</div>
-        <div className="flex-1 min-w-0">
-          <p className="text-[11px] font-bold text-gray-900 dark:text-gray-100 truncate">
-            {exec.label}
-          </p>
-          {(exec.sublabel || exec.stage) && (
-            <p className="text-[10px] text-gray-500 dark:text-gray-400 truncate">
-              {exec.stage || exec.sublabel}
-            </p>
-          )}
-          {isError && exec.message && (
-            <p className="text-[10px] text-red-600 dark:text-red-400 mt-0.5 line-clamp-2">{exec.message}</p>
-          )}
-          {isDone && exec.message && (
-            <p className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-0.5 line-clamp-2">{exec.message}</p>
-          )}
-        </div>
-        <button
-          onClick={() => dismissExecution(exec.id)}
-          className="p-0.5 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition shrink-0"
-          title="Cerrar"
-        >
-          <X size={11} />
-        </button>
-      </div>
-
-      {/* Barra de progreso — siempre visible para running; full o vacía para done/error. */}
-      <div className="h-1 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden mt-1.5">
-        <div
-          className={`h-full transition-all duration-500 ${
-            isDone ? 'bg-emerald-500'
-            : isError ? 'bg-red-500'
-            : 'bg-gradient-to-r from-brand-500 to-brand-400'
-          }`}
-          style={{ width: `${isError ? (exec.progress ?? 100) : pct}%` }}
-        />
-      </div>
-      <div className="flex items-center justify-between gap-2 mt-0.5">
-        <p className="text-[9px] text-gray-500 dark:text-gray-400">
-          {fmtElapsed(elapsed)}{exec.status === 'running' && exec.estimatedMs ? ` / ~${fmtElapsed(exec.estimatedMs)}` : ''}
-        </p>
-        {/* Costo: si terminó OK con cost, mostrarlo. Si está corriendo y hay
-            estimatedCost, mostrar el estimado en gris para que el user sepa
-            cuánto va a salir antes de gastar. */}
-        {(exec.cost > 0 || (exec.status === 'running' && exec.estimatedCost > 0)) && (() => {
-          const usd = exec.status === 'running' ? Number(exec.estimatedCost) : Number(exec.cost);
-          const prefix = exec.status === 'running' ? '~' : '';
-          const arsLabel = dolar?.venta ? ` · ${usdToArsString(usd, dolar)}` : '';
-          return (
-            <p className={`text-[9px] font-bold tabular-nums ${
-              exec.status === 'running'
-                ? 'text-gray-500 dark:text-gray-400'
-                : isError
-                  ? 'text-red-500'
-                  : 'text-emerald-600 dark:text-emerald-400'
-            }`}>
-              {prefix}${usd.toFixed(3)}<span className="font-normal opacity-80">{arsLabel}</span>
-            </p>
-          );
-        })()}
-      </div>
-    </div>
-  );
-}

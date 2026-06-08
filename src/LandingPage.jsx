@@ -149,6 +149,72 @@ function TiltCard({ children, className = '', max = 6 }) {
   );
 }
 
+// ---- inner components moved before export (TDZ fix Vite/Rollup) ----
+
+function DataCard({ kpi, kpiPrefix = '', unit, label, detail }) {
+  const isNumeric = typeof kpi === 'number';
+  const [ref, value] = useAnimatedNumber(isNumeric ? kpi : 0);
+  const display = isNumeric ? Math.round(value).toString() : kpi;
+  return (
+    <div ref={ref} className="h-full p-6 rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 shadow-sm hover:shadow-xl transition-all duration-300">
+      <div className="flex items-baseline gap-1.5">
+        {kpiPrefix && <span className="text-2xl md:text-3xl font-light text-gray-700 dark:text-gray-300">{kpiPrefix}</span>}
+        <span className="text-4xl md:text-5xl font-light text-gray-900 dark:text-gray-100 tracking-tight tabular-nums">{display}</span>
+        <span className="text-sm font-medium text-gray-500 dark:text-gray-400">{unit}</span>
+      </div>
+      <p className="mt-2 text-xs uppercase tracking-widest font-semibold text-amber-700 dark:text-amber-300">{label}</p>
+      <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 leading-relaxed">{detail}</p>
+    </div>
+  );
+}
+
+// Marquee: barra horizontal con keywords/productos del lab que se desplazan
+// infinitamente. Genera sensación de continuidad y vida visual sin ser
+// chillón. Pause on hover para legibilidad.
+
+function Marquee() {
+  const items = [
+    'Cremas', 'Sérums', 'Aceites', 'Goteros', 'Marca propia',
+    'Tiradas chicas', 'Fórmulas a medida', 'Cosmética artesanal',
+    'Mínimo 100 unidades', 'Despacho 5–9 días',
+  ];
+  // duplicamos para loop continuo sin "salto"
+  const stream = [...items, ...items];
+  return (
+    <div className="relative py-6 border-y border-rose-100/60 dark:border-gray-800/60 overflow-hidden bg-gradient-to-r from-rose-50/50 via-amber-50/30 to-rose-50/50 dark:from-gray-900/50 dark:via-gray-800/30 dark:to-gray-900/50">
+      <div className="flex gap-12 marquee-track whitespace-nowrap">
+        {stream.map((it, i) => (
+          <span
+            key={i}
+            className="text-sm uppercase tracking-[0.25em] font-semibold text-gray-600 dark:text-gray-400 inline-flex items-center gap-3 shrink-0"
+          >
+            <Sparkles size={12} className="text-amber-600 dark:text-amber-400" />
+            {it}
+          </span>
+        ))}
+      </div>
+      {/* Fade en los bordes para que el loop se sienta natural */}
+      <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0 w-24 bg-gradient-to-r from-rose-50/95 to-transparent dark:from-gray-950/95" />
+      <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-0 w-24 bg-gradient-to-l from-rose-50/95 to-transparent dark:from-gray-950/95" />
+    </div>
+  );
+}
+
+// Card de producto: ícono pequeño + título + descripción técnica corta.
+
+function ProductCard({ icon: Icon, title, description }) {
+  return (
+    <div className="group h-full p-5 rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 hover:shadow-lg hover:-translate-y-1 transition-all duration-300">
+      <div className="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-gradient-to-br from-amber-100 to-amber-200 dark:from-amber-900/40 dark:to-amber-800/40 text-amber-800 dark:text-amber-300 mb-3 group-hover:scale-110 transition-transform">
+        <Icon size={18} />
+      </div>
+      <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-1.5">{title}</h3>
+      <p className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">{description}</p>
+    </div>
+  );
+}
+
+
 export default function LandingPage({ onAccess }) {
   const [darkMode, setDarkMode] = useState(() => {
     if (typeof window === 'undefined') return false;
@@ -487,63 +553,3 @@ export default function LandingPage({ onAccess }) {
 // Card de KPI: número grande + unidad chica + label + detalle.
 // Si kpi es un número, se anima de 0 al valor cuando entra al viewport.
 // Si es string (ej. "5–9"), se muestra tal cual.
-function DataCard({ kpi, kpiPrefix = '', unit, label, detail }) {
-  const isNumeric = typeof kpi === 'number';
-  const [ref, value] = useAnimatedNumber(isNumeric ? kpi : 0);
-  const display = isNumeric ? Math.round(value).toString() : kpi;
-  return (
-    <div ref={ref} className="h-full p-6 rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 shadow-sm hover:shadow-xl transition-all duration-300">
-      <div className="flex items-baseline gap-1.5">
-        {kpiPrefix && <span className="text-2xl md:text-3xl font-light text-gray-700 dark:text-gray-300">{kpiPrefix}</span>}
-        <span className="text-4xl md:text-5xl font-light text-gray-900 dark:text-gray-100 tracking-tight tabular-nums">{display}</span>
-        <span className="text-sm font-medium text-gray-500 dark:text-gray-400">{unit}</span>
-      </div>
-      <p className="mt-2 text-xs uppercase tracking-widest font-semibold text-amber-700 dark:text-amber-300">{label}</p>
-      <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 leading-relaxed">{detail}</p>
-    </div>
-  );
-}
-
-// Marquee: barra horizontal con keywords/productos del lab que se desplazan
-// infinitamente. Genera sensación de continuidad y vida visual sin ser
-// chillón. Pause on hover para legibilidad.
-function Marquee() {
-  const items = [
-    'Cremas', 'Sérums', 'Aceites', 'Goteros', 'Marca propia',
-    'Tiradas chicas', 'Fórmulas a medida', 'Cosmética artesanal',
-    'Mínimo 100 unidades', 'Despacho 5–9 días',
-  ];
-  // duplicamos para loop continuo sin "salto"
-  const stream = [...items, ...items];
-  return (
-    <div className="relative py-6 border-y border-rose-100/60 dark:border-gray-800/60 overflow-hidden bg-gradient-to-r from-rose-50/50 via-amber-50/30 to-rose-50/50 dark:from-gray-900/50 dark:via-gray-800/30 dark:to-gray-900/50">
-      <div className="flex gap-12 marquee-track whitespace-nowrap">
-        {stream.map((it, i) => (
-          <span
-            key={i}
-            className="text-sm uppercase tracking-[0.25em] font-semibold text-gray-600 dark:text-gray-400 inline-flex items-center gap-3 shrink-0"
-          >
-            <Sparkles size={12} className="text-amber-600 dark:text-amber-400" />
-            {it}
-          </span>
-        ))}
-      </div>
-      {/* Fade en los bordes para que el loop se sienta natural */}
-      <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0 w-24 bg-gradient-to-r from-rose-50/95 to-transparent dark:from-gray-950/95" />
-      <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-0 w-24 bg-gradient-to-l from-rose-50/95 to-transparent dark:from-gray-950/95" />
-    </div>
-  );
-}
-
-// Card de producto: ícono pequeño + título + descripción técnica corta.
-function ProductCard({ icon: Icon, title, description }) {
-  return (
-    <div className="group h-full p-5 rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 hover:shadow-lg hover:-translate-y-1 transition-all duration-300">
-      <div className="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-gradient-to-br from-amber-100 to-amber-200 dark:from-amber-900/40 dark:to-amber-800/40 text-amber-800 dark:text-amber-300 mb-3 group-hover:scale-110 transition-transform">
-        <Icon size={18} />
-      </div>
-      <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-1.5">{title}</h3>
-      <p className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">{description}</p>
-    </div>
-  );
-}

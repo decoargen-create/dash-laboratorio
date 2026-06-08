@@ -53,6 +53,184 @@ const DEFAULT_STATE = {
   history: [],
 };
 
+// ---- inner components moved before export (TDZ fix Vite/Rollup) ----
+
+function Field({ label, children }) {
+  return (
+    <div>
+      <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">{label}</label>
+      {children}
+    </div>
+  );
+}
+
+
+function RunResult({ result }) {
+  if (result.error) {
+    return (
+      <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4">
+        <div className="flex items-center gap-2 mb-2">
+          <XCircle size={14} className="text-red-600" />
+          <h4 className="text-sm font-bold text-red-900 dark:text-red-200">Falló la corrida</h4>
+        </div>
+        <p className="text-xs text-red-800 dark:text-red-300 font-mono">{result.error}</p>
+        {result.log?.length > 0 && <LogView log={result.log} />}
+      </div>
+    );
+  }
+
+  const { action, detectedPost, adsetsChecked = [], created, paused = [], log = [], webhook } = result;
+  const actionStyle = action === 'refreshed'
+    ? 'text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800'
+    : action === 'reviewed'
+      ? 'text-brand-700 dark:text-brand-300 bg-brand-50 dark:bg-brand-900/20 border-brand-200 dark:border-brand-800'
+      : 'text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-900/40 border-gray-200 dark:border-gray-700';
+  const actionLabel = action === 'refreshed' ? 'Renovado' : action === 'reviewed' ? 'Revisado' : 'Sin cambios';
+
+  return (
+    <div className={`border rounded-xl p-4 ${actionStyle}`}>
+      <div className="flex items-center gap-2 mb-3">
+        <CheckCircle2 size={14} />
+        <h4 className="text-sm font-bold">{actionLabel}</h4>
+        {webhook?.sent && (
+          <span className="ml-auto text-[10px] opacity-70">Discord: {webhook.status}</span>
+        )}
+      </div>
+
+      {detectedPost && (
+        <div className="mb-3 text-xs">
+          <p className="font-semibold mb-1 flex items-center gap-1">
+            <Instagram size={11} /> Último post detectado
+          </p>
+          <p className="italic opacity-80 line-clamp-2">"{detectedPost.caption || '(sin caption)'}"</p>
+          <p className="text-[11px] opacity-70 flex items-center gap-2 mt-0.5">
+            <Heart size={10} /> {detectedPost.likes}
+            <span>·</span>
+            <a href={detectedPost.permalink} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 underline">
+              ver post <ExternalLink size={9} />
+            </a>
+          </p>
+        </div>
+      )}
+
+      {adsetsChecked.length > 0 && (
+        <div className="mb-3">
+          <p className="text-[11px] font-bold opacity-70 uppercase mb-1">Engagement por conjunto</p>
+          <ul className="space-y-0.5 text-[11px] font-mono">
+            {adsetsChecked.map(c => (
+              <li key={c.adsetId} className="flex items-center gap-2">
+                <span className="opacity-60">{c.adsetId.slice(-10)}</span>
+                <Heart size={10} /> {c.likes}
+                {c.meetsThreshold && <span className="text-amber-600 font-sans">· supera umbral</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {created && (
+        <div className="mb-2 text-[11px] font-mono">
+          <CheckCircle2 size={11} className="inline mr-1" />
+          Adset nuevo: <strong>{created.adsetId}</strong> · Ad: {created.adId} · Creative: {created.creativeId}
+        </div>
+      )}
+
+      {paused.length > 0 && (
+        <div className="mb-2 text-[11px] font-mono">
+          <Pause size={11} className="inline mr-1" />
+          Pausados: {paused.join(', ')}
+        </div>
+      )}
+
+      {log.length > 0 && <LogView log={log} />}
+    </div>
+  );
+}
+
+
+function LogView({ log }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-2">
+      <button onClick={() => setOpen(o => !o)} className="text-[10px] opacity-60 hover:opacity-100 underline">
+        {open ? 'Ocultar' : 'Ver'} log ({log.length})
+      </button>
+      {open && (
+        <pre className="mt-1 p-2 bg-gray-900/80 text-gray-100 rounded text-[10px] leading-tight font-mono max-h-60 overflow-auto whitespace-pre-wrap">
+{log.join('\n')}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+
+function PersistedState({ state }) {
+  const { lastPostId, lastRunAt, activeAdsets = [], history = [] } = state;
+  return (
+    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <Clock size={12} className="text-gray-400" />
+        <h4 className="text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Estado persistido</h4>
+        {lastRunAt && (
+          <span className="ml-auto text-[10px] text-gray-500">
+            Última corrida: {new Date(lastRunAt).toLocaleString('es-AR')}
+          </span>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px]">
+        <div>
+          <p className="font-bold text-gray-600 dark:text-gray-400 mb-1">Último post visto</p>
+          <p className="font-mono text-gray-800 dark:text-gray-200">{lastPostId || <span className="opacity-50">ninguno</span>}</p>
+        </div>
+        <div>
+          <p className="font-bold text-gray-600 dark:text-gray-400 mb-1">Conjuntos activos ({activeAdsets.length})</p>
+          {activeAdsets.length === 0
+            ? <p className="opacity-50">—</p>
+            : <ul className="space-y-0.5 font-mono">
+                {activeAdsets.map(a => (
+                  <li key={a.adsetId} className="truncate">
+                    {a.adsetId} <span className="opacity-50">· post {a.postId}</span>
+                  </li>
+                ))}
+              </ul>}
+        </div>
+      </div>
+
+      {history.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
+          <p className="font-bold text-gray-600 dark:text-gray-400 text-[11px] mb-1">Historial ({history.length})</p>
+          <ul className="space-y-1 text-[10px] font-mono max-h-40 overflow-auto">
+            {[...history].reverse().map((h, i) => (
+              <li key={i} className="flex items-start gap-2">
+                <span className="opacity-60 shrink-0">{new Date(h.at).toLocaleString('es-AR')}</span>
+                <span className="shrink-0">{h.action}</span>
+                {h.createdAdsetId && <span className="text-emerald-600">+{h.createdAdsetId.slice(-8)}</span>}
+                {h.pausedAdsetIds?.length > 0 && (
+                  <span className="text-amber-600">−{h.pausedAdsetIds.map(id => id.slice(-8)).join(',')}</span>
+                )}
+                {h.detectedPostId && <span className="opacity-60">post {h.detectedPostId.slice(-10)}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {history.length === 0 && activeAdsets.length === 0 && (
+        <div className="mt-3 flex items-start gap-2 text-[11px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded p-2">
+          <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+          <span>
+            Primera vez: el motor todavía no "conoce" los conjuntos activos. Si ya tenés conjuntos corriendo en la
+            campaña, corré una vez y en la primera ejecución va a tomar el post actual como referencia sin crear nada nuevo.
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 export default function CreativeRefreshPanel({ producto, addToast }) {
   const productoId = String(producto?.id || '');
   const accountId = producto?.metaAccount?.id || null; // incluye prefijo act_
@@ -403,174 +581,3 @@ export default function CreativeRefreshPanel({ producto, addToast }) {
   );
 }
 
-function Field({ label, children }) {
-  return (
-    <div>
-      <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">{label}</label>
-      {children}
-    </div>
-  );
-}
-
-function RunResult({ result }) {
-  if (result.error) {
-    return (
-      <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4">
-        <div className="flex items-center gap-2 mb-2">
-          <XCircle size={14} className="text-red-600" />
-          <h4 className="text-sm font-bold text-red-900 dark:text-red-200">Falló la corrida</h4>
-        </div>
-        <p className="text-xs text-red-800 dark:text-red-300 font-mono">{result.error}</p>
-        {result.log?.length > 0 && <LogView log={result.log} />}
-      </div>
-    );
-  }
-
-  const { action, detectedPost, adsetsChecked = [], created, paused = [], log = [], webhook } = result;
-  const actionStyle = action === 'refreshed'
-    ? 'text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800'
-    : action === 'reviewed'
-      ? 'text-brand-700 dark:text-brand-300 bg-brand-50 dark:bg-brand-900/20 border-brand-200 dark:border-brand-800'
-      : 'text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-900/40 border-gray-200 dark:border-gray-700';
-  const actionLabel = action === 'refreshed' ? 'Renovado' : action === 'reviewed' ? 'Revisado' : 'Sin cambios';
-
-  return (
-    <div className={`border rounded-xl p-4 ${actionStyle}`}>
-      <div className="flex items-center gap-2 mb-3">
-        <CheckCircle2 size={14} />
-        <h4 className="text-sm font-bold">{actionLabel}</h4>
-        {webhook?.sent && (
-          <span className="ml-auto text-[10px] opacity-70">Discord: {webhook.status}</span>
-        )}
-      </div>
-
-      {detectedPost && (
-        <div className="mb-3 text-xs">
-          <p className="font-semibold mb-1 flex items-center gap-1">
-            <Instagram size={11} /> Último post detectado
-          </p>
-          <p className="italic opacity-80 line-clamp-2">"{detectedPost.caption || '(sin caption)'}"</p>
-          <p className="text-[11px] opacity-70 flex items-center gap-2 mt-0.5">
-            <Heart size={10} /> {detectedPost.likes}
-            <span>·</span>
-            <a href={detectedPost.permalink} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 underline">
-              ver post <ExternalLink size={9} />
-            </a>
-          </p>
-        </div>
-      )}
-
-      {adsetsChecked.length > 0 && (
-        <div className="mb-3">
-          <p className="text-[11px] font-bold opacity-70 uppercase mb-1">Engagement por conjunto</p>
-          <ul className="space-y-0.5 text-[11px] font-mono">
-            {adsetsChecked.map(c => (
-              <li key={c.adsetId} className="flex items-center gap-2">
-                <span className="opacity-60">{c.adsetId.slice(-10)}</span>
-                <Heart size={10} /> {c.likes}
-                {c.meetsThreshold && <span className="text-amber-600 font-sans">· supera umbral</span>}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {created && (
-        <div className="mb-2 text-[11px] font-mono">
-          <CheckCircle2 size={11} className="inline mr-1" />
-          Adset nuevo: <strong>{created.adsetId}</strong> · Ad: {created.adId} · Creative: {created.creativeId}
-        </div>
-      )}
-
-      {paused.length > 0 && (
-        <div className="mb-2 text-[11px] font-mono">
-          <Pause size={11} className="inline mr-1" />
-          Pausados: {paused.join(', ')}
-        </div>
-      )}
-
-      {log.length > 0 && <LogView log={log} />}
-    </div>
-  );
-}
-
-function LogView({ log }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="mt-2">
-      <button onClick={() => setOpen(o => !o)} className="text-[10px] opacity-60 hover:opacity-100 underline">
-        {open ? 'Ocultar' : 'Ver'} log ({log.length})
-      </button>
-      {open && (
-        <pre className="mt-1 p-2 bg-gray-900/80 text-gray-100 rounded text-[10px] leading-tight font-mono max-h-60 overflow-auto whitespace-pre-wrap">
-{log.join('\n')}
-        </pre>
-      )}
-    </div>
-  );
-}
-
-function PersistedState({ state }) {
-  const { lastPostId, lastRunAt, activeAdsets = [], history = [] } = state;
-  return (
-    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
-      <div className="flex items-center gap-2 mb-3">
-        <Clock size={12} className="text-gray-400" />
-        <h4 className="text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Estado persistido</h4>
-        {lastRunAt && (
-          <span className="ml-auto text-[10px] text-gray-500">
-            Última corrida: {new Date(lastRunAt).toLocaleString('es-AR')}
-          </span>
-        )}
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px]">
-        <div>
-          <p className="font-bold text-gray-600 dark:text-gray-400 mb-1">Último post visto</p>
-          <p className="font-mono text-gray-800 dark:text-gray-200">{lastPostId || <span className="opacity-50">ninguno</span>}</p>
-        </div>
-        <div>
-          <p className="font-bold text-gray-600 dark:text-gray-400 mb-1">Conjuntos activos ({activeAdsets.length})</p>
-          {activeAdsets.length === 0
-            ? <p className="opacity-50">—</p>
-            : <ul className="space-y-0.5 font-mono">
-                {activeAdsets.map(a => (
-                  <li key={a.adsetId} className="truncate">
-                    {a.adsetId} <span className="opacity-50">· post {a.postId}</span>
-                  </li>
-                ))}
-              </ul>}
-        </div>
-      </div>
-
-      {history.length > 0 && (
-        <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
-          <p className="font-bold text-gray-600 dark:text-gray-400 text-[11px] mb-1">Historial ({history.length})</p>
-          <ul className="space-y-1 text-[10px] font-mono max-h-40 overflow-auto">
-            {[...history].reverse().map((h, i) => (
-              <li key={i} className="flex items-start gap-2">
-                <span className="opacity-60 shrink-0">{new Date(h.at).toLocaleString('es-AR')}</span>
-                <span className="shrink-0">{h.action}</span>
-                {h.createdAdsetId && <span className="text-emerald-600">+{h.createdAdsetId.slice(-8)}</span>}
-                {h.pausedAdsetIds?.length > 0 && (
-                  <span className="text-amber-600">−{h.pausedAdsetIds.map(id => id.slice(-8)).join(',')}</span>
-                )}
-                {h.detectedPostId && <span className="opacity-60">post {h.detectedPostId.slice(-10)}</span>}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {history.length === 0 && activeAdsets.length === 0 && (
-        <div className="mt-3 flex items-start gap-2 text-[11px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded p-2">
-          <AlertTriangle size={12} className="shrink-0 mt-0.5" />
-          <span>
-            Primera vez: el motor todavía no "conoce" los conjuntos activos. Si ya tenés conjuntos corriendo en la
-            campaña, corré una vez y en la primera ejecución va a tomar el post actual como referencia sin crear nada nuevo.
-          </span>
-        </div>
-      )}
-    </div>
-  );
-}

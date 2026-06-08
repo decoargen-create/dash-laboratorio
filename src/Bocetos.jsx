@@ -241,6 +241,405 @@ function iniciales(nombre) {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
+// ---- inner components moved before export (TDZ fix Vite/Rollup) ----
+
+function AiConfigModal({ value, onChange, onClose }) {
+  const [draft, setDraft] = useState(value);
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose?.(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const handleSave = () => {
+    onChange(draft);
+    onClose();
+  };
+
+  const handleLoadExamples = () => {
+    setDraft(d => ({ ...d, instructions: DEFAULT_AI_INSTRUCTIONS }));
+  };
+
+  const handleClear = () => {
+    setDraft(d => ({ ...d, instructions: '' }));
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        <div className="p-5 border-b border-gray-200 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Wand2 size={18} className="text-[#d97706]" />
+            <h3 className="text-base font-bold text-gray-900">Configurar IA</h3>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition">
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="p-5 space-y-5">
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-sm font-semibold text-gray-700">
+                Instrucciones personalizadas para la IA
+              </label>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleLoadExamples}
+                  className="text-[11px] font-semibold text-[#d97706] hover:underline"
+                  type="button"
+                >
+                  Cargar ejemplos
+                </button>
+                <button
+                  onClick={handleClear}
+                  className="text-[11px] font-semibold text-gray-500 hover:text-gray-700 hover:underline"
+                  type="button"
+                >
+                  Limpiar
+                </button>
+              </div>
+            </div>
+            <textarea
+              value={draft.instructions}
+              onChange={(e) => setDraft({ ...draft, instructions: e.target.value })}
+              rows={10}
+              placeholder={DEFAULT_AI_INSTRUCTIONS}
+              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#FFD33D] focus:border-[#FFD33D] shadow-sm transition resize-y font-mono"
+            />
+            <p className="text-xs text-gray-500 mt-2">
+              La IA aplica estas instrucciones cada vez que scrapea un producto. Podés escribir reglas sobre cómo generar nombres, SKUs, variantes, o cualquier convención tuya.
+            </p>
+          </div>
+
+          <div className="border-t border-gray-200 pt-4 space-y-4">
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={draft.autoRemoveBackground}
+                onChange={(e) => setDraft({ ...draft, autoRemoveBackground: e.target.checked })}
+                className="mt-0.5 w-4 h-4 rounded border-gray-300 text-[#FFD33D] focus:ring-[#FFD33D]"
+              />
+              <div>
+                <p className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                  Remover fondo con IA automáticamente
+                  <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-bold bg-[#FFD33D] text-gray-900 rounded">NUEVO</span>
+                </p>
+                <p className="text-xs text-gray-500 mt-0.5">Usa un modelo de segmentación que corre 100% en tu navegador (gratis, privado). La primera vez descarga ~30MB de modelo; después es casi instantáneo. Remueve fondos con texto, colores, escenas y deja el producto sobre un cuadrado blanco 1000×1000. Tarda 2-8 segundos por imagen.</p>
+              </div>
+            </label>
+
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={draft.autoNormalizeImage}
+                onChange={(e) => setDraft({ ...draft, autoNormalizeImage: e.target.checked })}
+                disabled={draft.autoRemoveBackground}
+                className="mt-0.5 w-4 h-4 rounded border-gray-300 text-[#FFD33D] focus:ring-[#FFD33D] disabled:opacity-40"
+              />
+              <div className={draft.autoRemoveBackground ? 'opacity-40' : ''}>
+                <p className="text-sm font-semibold text-gray-900">Normalizar tamaño a cuadrado blanco</p>
+                <p className="text-xs text-gray-500 mt-0.5">Sólo centra y agranda la imagen sin tocar el fondo. Útil si las fotos YA tienen fondo blanco. Se ignora si está activado "Remover fondo con IA" (esa opción ya lo hace).</p>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <div className="p-5 border-t border-gray-200 flex justify-end gap-2">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-sm font-semibold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleSave}
+            className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-gray-900 bg-[#FFD33D] rounded-lg hover:bg-[#f5c518] transition"
+          >
+            <Save size={14} /> Guardar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Pending item (inline editor) ----------
+
+
+function PendingItem({ item, layout, onChange, onApprove, onDiscard, onReplaceImage, onNormalize, onRemoveBg, onRestoreOriginal, onEditExternal, pasteActive, onTogglePaste }) {
+  const fileRef = useRef(null);
+  const [showShipping, setShowShipping] = useState(false);
+  const missing = !item.nombre.trim() || !item.sku.trim();
+  const processing = !!item._bgRemoving;
+  const hasOriginalBackup = !!item._imagenOriginal && item._imagenOriginal !== item.imagen;
+
+  const content = (
+    <div className="flex gap-4">
+      {/* Imagen */}
+      <div className="shrink-0 flex flex-col items-center gap-1.5">
+        <div className={`w-24 h-24 rounded-lg bg-white border overflow-hidden flex items-center justify-center relative group ${item._bgRemoved ? 'border-emerald-400' : item._normalized ? 'border-emerald-300' : 'border-gray-200'}`}>
+          {item.imagen ? (
+            <img src={item.imagen} alt={item.nombre} className="w-full h-full object-contain" />
+          ) : (
+            <ImageIcon size={28} className="text-gray-300" />
+          )}
+          {processing && (
+            <div className="absolute inset-0 bg-white/80 flex flex-col items-center justify-center gap-1">
+              <Loader2 size={18} className="animate-spin text-[#d97706]" />
+              <span className="text-[9px] font-bold text-gray-700">Procesando…</span>
+            </div>
+          )}
+          {!processing && (
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              className="absolute inset-0 bg-black/50 text-white text-[11px] font-semibold opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-1"
+            >
+              <RefreshCw size={12} /> Cambiar
+            </button>
+          )}
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) onReplaceImage(f);
+              e.target.value = '';
+            }}
+            className="hidden"
+          />
+        </div>
+        {item.imagen && !processing && (
+          <div className="flex flex-col items-stretch gap-1 w-24">
+            <button
+              type="button"
+              onClick={onRemoveBg}
+              className={`inline-flex items-center justify-center gap-1 px-2 py-0.5 text-[10px] font-semibold rounded transition ${item._bgRemoved ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-[#FFD33D] text-gray-900 border border-[#f5c518] hover:bg-[#f5c518]'}`}
+              title="Remover el fondo con IA y dejar el producto sobre blanco"
+            >
+              <Sparkles size={10} /> {item._bgRemoved ? 'Sin fondo ✓' : 'Remover fondo'}
+            </button>
+            {!item._bgRemoved && (
+              <button
+                type="button"
+                onClick={onNormalize}
+                className={`inline-flex items-center justify-center gap-1 px-2 py-0.5 text-[10px] font-semibold rounded transition ${item._normalized ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'}`}
+                title="Centrar imagen en cuadrado con padding blanco (sin tocar fondo)"
+              >
+                <Wand2 size={10} /> {item._normalized ? 'Cuadrada ✓' : 'Cuadrar'}
+              </button>
+            )}
+            {hasOriginalBackup && (
+              <button
+                type="button"
+                onClick={onRestoreOriginal}
+                className="inline-flex items-center justify-center gap-1 px-2 py-0.5 text-[10px] font-semibold bg-white text-gray-600 border border-gray-300 rounded hover:bg-gray-50 hover:text-gray-900 transition"
+                title="Volver a la foto original (antes del procesamiento)"
+              >
+                <RotateCcw size={10} /> Restaurar
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Campos */}
+      <div className="flex-1 min-w-0 space-y-2">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {item._manual && (
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold bg-gray-100 text-gray-700 rounded">
+              <PencilLine size={10} /> Manual
+            </span>
+          )}
+          {item.imagenRiesgosa && (
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold bg-amber-100 text-amber-800 rounded border border-amber-300" title={item.imagenRiesgosaMotivo || ''}>
+              <AlertTriangle size={10} /> Revisar foto: {item.imagenRiesgosaMotivo || 'posible problema'}
+            </span>
+          )}
+        </div>
+        {item.imagenRiesgosa && item.imagen && (
+          <div className="flex items-center gap-1.5 -mt-1 mb-1 flex-wrap">
+            <button
+              type="button"
+              onClick={onEditExternal}
+              className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold text-amber-800 bg-amber-50 border border-amber-300 rounded hover:bg-amber-100 transition"
+              title="Descarga la imagen y abre cleanup.pictures para editarla"
+            >
+              <Eraser size={10} /> Editar en Cleanup
+              <ExternalLink size={9} />
+            </button>
+            <button
+              type="button"
+              onClick={onTogglePaste}
+              className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold rounded transition ${pasteActive ? 'bg-emerald-600 text-white border border-emerald-700' : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'}`}
+              title="Activá esto y después pegá la imagen editada con Ctrl+V"
+            >
+              <ClipboardPaste size={10} /> {pasteActive ? 'Listo para Ctrl+V' : 'Pegar editada'}
+            </button>
+          </div>
+        )}
+        <div>
+          <div className="flex items-center justify-between mb-0.5">
+            <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider">Nombre</label>
+            {item.tituloOriginalEraDeTienda && (
+              <span className="inline-flex items-center gap-1 text-[10px] text-amber-700 font-semibold" title={`El scraper bajó "${item.nombreOriginal || '?'}" pero la IA detectó que es el nombre de la tienda. Revisá el nombre final.`}>
+                <AlertTriangle size={10} /> IA corrigió título de tienda
+              </span>
+            )}
+          </div>
+          <input
+            type="text"
+            value={item.nombre}
+            onChange={(e) => onChange({ nombre: e.target.value })}
+            className="w-full px-2.5 py-1.5 bg-white border border-gray-300 rounded-md text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#FFD33D] focus:border-[#FFD33D] shadow-sm transition"
+          />
+        </div>
+        <div>
+          <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-0.5">SKU</label>
+          <input
+            type="text"
+            value={item.sku}
+            onChange={(e) => onChange({ sku: e.target.value })}
+            className="w-full px-2.5 py-1.5 bg-white border border-gray-300 rounded-md text-sm text-gray-900 font-mono uppercase focus:outline-none focus:ring-2 focus:ring-[#FFD33D] focus:border-[#FFD33D] shadow-sm transition"
+          />
+        </div>
+        {/* Variantes */}
+        {item.variantes && item.variantes.length > 0 && (
+          <div>
+            <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-0.5">Variantes ({item.variantes.length})</label>
+            <div className="flex flex-wrap gap-1">
+              {item.variantes.map((v, idx) => (
+                <span key={idx} className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 text-gray-700 rounded text-[11px]">
+                  <span className="text-gray-400">{v.tipo}:</span> {v.valor}
+                  <button
+                    onClick={() => onChange({ variantes: item.variantes.filter((_, i) => i !== idx) })}
+                    className="hover:text-red-600"
+                    aria-label="Quitar variante"
+                  >
+                    <X size={10} />
+                  </button>
+                </span>
+              ))}
+            </div>
+            {/* Toggle: expandir cada variante como un SKU distinto */}
+            <label className="flex items-center gap-2 mt-2 cursor-pointer text-[11px] text-gray-700">
+              <input
+                type="checkbox"
+                checked={!!item._expandVariantes}
+                onChange={(e) => onChange({ _expandVariantes: e.target.checked })}
+                className="w-3.5 h-3.5 rounded border-gray-300 text-[#FFD33D] focus:ring-[#FFD33D]"
+              />
+              <span>
+                Expandir en <span className="font-bold text-gray-900">{contarExpansiones(item.variantes)}</span> SKUs separados
+                <span className="text-gray-500"> (un producto por variante)</span>
+              </span>
+            </label>
+          </div>
+        )}
+        {/* Datos de envío (colapsable) — Andreani / Correo Argentino los piden */}
+        <div className="border-t border-dashed border-gray-200 pt-2">
+          <button
+            type="button"
+            onClick={() => setShowShipping(s => !s)}
+            className="inline-flex items-center gap-1 text-[10px] font-bold text-gray-500 hover:text-gray-700 uppercase tracking-wider transition"
+          >
+            <Truck size={11} /> Datos de envío
+            <ChevronDown size={11} className={`transition-transform ${showShipping ? 'rotate-180' : ''}`} />
+          </button>
+          {showShipping && (
+            <div className="mt-2 grid grid-cols-4 gap-2">
+              <div>
+                <label className="block text-[9px] font-semibold text-gray-500 uppercase mb-0.5">Peso (kg)</label>
+                <input
+                  type="number"
+                  step="0.001"
+                  min="0"
+                  value={item.peso ?? DEFAULT_SHIPPING.peso}
+                  onChange={(e) => onChange({ peso: parseFloat(e.target.value) || 0 })}
+                  className="w-full px-2 py-1 bg-white border border-gray-300 rounded text-xs text-gray-900 focus:outline-none focus:ring-1 focus:ring-[#FFD33D]"
+                />
+              </div>
+              <div>
+                <label className="block text-[9px] font-semibold text-gray-500 uppercase mb-0.5">Largo (cm)</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={item.largo ?? DEFAULT_SHIPPING.largo}
+                  onChange={(e) => onChange({ largo: parseFloat(e.target.value) || 0 })}
+                  className="w-full px-2 py-1 bg-white border border-gray-300 rounded text-xs text-gray-900 focus:outline-none focus:ring-1 focus:ring-[#FFD33D]"
+                />
+              </div>
+              <div>
+                <label className="block text-[9px] font-semibold text-gray-500 uppercase mb-0.5">Ancho (cm)</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={item.ancho ?? DEFAULT_SHIPPING.ancho}
+                  onChange={(e) => onChange({ ancho: parseFloat(e.target.value) || 0 })}
+                  className="w-full px-2 py-1 bg-white border border-gray-300 rounded text-xs text-gray-900 focus:outline-none focus:ring-1 focus:ring-[#FFD33D]"
+                />
+              </div>
+              <div>
+                <label className="block text-[9px] font-semibold text-gray-500 uppercase mb-0.5">Alto (cm)</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={item.alto ?? DEFAULT_SHIPPING.alto}
+                  onChange={(e) => onChange({ alto: parseFloat(e.target.value) || 0 })}
+                  className="w-full px-2 py-1 bg-white border border-gray-300 rounded text-xs text-gray-900 focus:outline-none focus:ring-1 focus:ring-[#FFD33D]"
+                />
+              </div>
+            </div>
+          )}
+        </div>
+        {missing && (
+          <div className="flex items-center gap-1 text-[11px] text-amber-700">
+            <AlertTriangle size={12} /> Nombre y SKU son obligatorios
+          </div>
+        )}
+        {item.url && (
+          <a href={item.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] text-gray-500 hover:text-[#d97706] transition">
+            <ExternalLink size={11} /> Ver original
+          </a>
+        )}
+      </div>
+
+      {/* Acciones */}
+      <div className="shrink-0 flex flex-col gap-2">
+        <button
+          type="button"
+          onClick={onApprove}
+          disabled={missing}
+          className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-gray-900 bg-[#FFD33D] rounded-md hover:bg-[#f5c518] transition disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <Check size={12} /> Aprobar
+        </button>
+        <button
+          type="button"
+          onClick={onDiscard}
+          className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-gray-500 bg-white border border-gray-300 rounded-md hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition"
+        >
+          <X size={12} /> Descartar
+        </button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className={layout === 'list' ? 'p-4 hover:bg-gray-50 transition' : 'p-4 rounded-lg border border-gray-200 hover:border-gray-300 transition'}>
+      {content}
+    </div>
+  );
+}
+
+
 export default function BocetosSection({ addToast }) {
   const [bocetos, setBocetos] = useState(() => loadJSON(STORAGE_KEY_BOCETOS, []));
   const [clientes, setClientes] = useState(() => loadClientes());
@@ -1200,397 +1599,3 @@ export default function BocetosSection({ addToast }) {
 
 // ---------- AI config modal ----------
 
-function AiConfigModal({ value, onChange, onClose }) {
-  const [draft, setDraft] = useState(value);
-
-  useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape') onClose?.(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  const handleSave = () => {
-    onChange(draft);
-    onClose();
-  };
-
-  const handleLoadExamples = () => {
-    setDraft(d => ({ ...d, instructions: DEFAULT_AI_INSTRUCTIONS }));
-  };
-
-  const handleClear = () => {
-    setDraft(d => ({ ...d, instructions: '' }));
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
-      <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-        <div className="p-5 border-b border-gray-200 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Wand2 size={18} className="text-[#d97706]" />
-            <h3 className="text-base font-bold text-gray-900">Configurar IA</h3>
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition">
-            <X size={20} />
-          </button>
-        </div>
-
-        <div className="p-5 space-y-5">
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="block text-sm font-semibold text-gray-700">
-                Instrucciones personalizadas para la IA
-              </label>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleLoadExamples}
-                  className="text-[11px] font-semibold text-[#d97706] hover:underline"
-                  type="button"
-                >
-                  Cargar ejemplos
-                </button>
-                <button
-                  onClick={handleClear}
-                  className="text-[11px] font-semibold text-gray-500 hover:text-gray-700 hover:underline"
-                  type="button"
-                >
-                  Limpiar
-                </button>
-              </div>
-            </div>
-            <textarea
-              value={draft.instructions}
-              onChange={(e) => setDraft({ ...draft, instructions: e.target.value })}
-              rows={10}
-              placeholder={DEFAULT_AI_INSTRUCTIONS}
-              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#FFD33D] focus:border-[#FFD33D] shadow-sm transition resize-y font-mono"
-            />
-            <p className="text-xs text-gray-500 mt-2">
-              La IA aplica estas instrucciones cada vez que scrapea un producto. Podés escribir reglas sobre cómo generar nombres, SKUs, variantes, o cualquier convención tuya.
-            </p>
-          </div>
-
-          <div className="border-t border-gray-200 pt-4 space-y-4">
-            <label className="flex items-start gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={draft.autoRemoveBackground}
-                onChange={(e) => setDraft({ ...draft, autoRemoveBackground: e.target.checked })}
-                className="mt-0.5 w-4 h-4 rounded border-gray-300 text-[#FFD33D] focus:ring-[#FFD33D]"
-              />
-              <div>
-                <p className="text-sm font-semibold text-gray-900 flex items-center gap-2">
-                  Remover fondo con IA automáticamente
-                  <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-bold bg-[#FFD33D] text-gray-900 rounded">NUEVO</span>
-                </p>
-                <p className="text-xs text-gray-500 mt-0.5">Usa un modelo de segmentación que corre 100% en tu navegador (gratis, privado). La primera vez descarga ~30MB de modelo; después es casi instantáneo. Remueve fondos con texto, colores, escenas y deja el producto sobre un cuadrado blanco 1000×1000. Tarda 2-8 segundos por imagen.</p>
-              </div>
-            </label>
-
-            <label className="flex items-start gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={draft.autoNormalizeImage}
-                onChange={(e) => setDraft({ ...draft, autoNormalizeImage: e.target.checked })}
-                disabled={draft.autoRemoveBackground}
-                className="mt-0.5 w-4 h-4 rounded border-gray-300 text-[#FFD33D] focus:ring-[#FFD33D] disabled:opacity-40"
-              />
-              <div className={draft.autoRemoveBackground ? 'opacity-40' : ''}>
-                <p className="text-sm font-semibold text-gray-900">Normalizar tamaño a cuadrado blanco</p>
-                <p className="text-xs text-gray-500 mt-0.5">Sólo centra y agranda la imagen sin tocar el fondo. Útil si las fotos YA tienen fondo blanco. Se ignora si está activado "Remover fondo con IA" (esa opción ya lo hace).</p>
-              </div>
-            </label>
-          </div>
-        </div>
-
-        <div className="p-5 border-t border-gray-200 flex justify-end gap-2">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-sm font-semibold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition"
-          >
-            Cancelar
-          </button>
-          <button
-            onClick={handleSave}
-            className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-gray-900 bg-[#FFD33D] rounded-lg hover:bg-[#f5c518] transition"
-          >
-            <Save size={14} /> Guardar
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ---------- Pending item (inline editor) ----------
-
-function PendingItem({ item, layout, onChange, onApprove, onDiscard, onReplaceImage, onNormalize, onRemoveBg, onRestoreOriginal, onEditExternal, pasteActive, onTogglePaste }) {
-  const fileRef = useRef(null);
-  const [showShipping, setShowShipping] = useState(false);
-  const missing = !item.nombre.trim() || !item.sku.trim();
-  const processing = !!item._bgRemoving;
-  const hasOriginalBackup = !!item._imagenOriginal && item._imagenOriginal !== item.imagen;
-
-  const content = (
-    <div className="flex gap-4">
-      {/* Imagen */}
-      <div className="shrink-0 flex flex-col items-center gap-1.5">
-        <div className={`w-24 h-24 rounded-lg bg-white border overflow-hidden flex items-center justify-center relative group ${item._bgRemoved ? 'border-emerald-400' : item._normalized ? 'border-emerald-300' : 'border-gray-200'}`}>
-          {item.imagen ? (
-            <img src={item.imagen} alt={item.nombre} className="w-full h-full object-contain" />
-          ) : (
-            <ImageIcon size={28} className="text-gray-300" />
-          )}
-          {processing && (
-            <div className="absolute inset-0 bg-white/80 flex flex-col items-center justify-center gap-1">
-              <Loader2 size={18} className="animate-spin text-[#d97706]" />
-              <span className="text-[9px] font-bold text-gray-700">Procesando…</span>
-            </div>
-          )}
-          {!processing && (
-            <button
-              type="button"
-              onClick={() => fileRef.current?.click()}
-              className="absolute inset-0 bg-black/50 text-white text-[11px] font-semibold opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-1"
-            >
-              <RefreshCw size={12} /> Cambiar
-            </button>
-          )}
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) onReplaceImage(f);
-              e.target.value = '';
-            }}
-            className="hidden"
-          />
-        </div>
-        {item.imagen && !processing && (
-          <div className="flex flex-col items-stretch gap-1 w-24">
-            <button
-              type="button"
-              onClick={onRemoveBg}
-              className={`inline-flex items-center justify-center gap-1 px-2 py-0.5 text-[10px] font-semibold rounded transition ${item._bgRemoved ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-[#FFD33D] text-gray-900 border border-[#f5c518] hover:bg-[#f5c518]'}`}
-              title="Remover el fondo con IA y dejar el producto sobre blanco"
-            >
-              <Sparkles size={10} /> {item._bgRemoved ? 'Sin fondo ✓' : 'Remover fondo'}
-            </button>
-            {!item._bgRemoved && (
-              <button
-                type="button"
-                onClick={onNormalize}
-                className={`inline-flex items-center justify-center gap-1 px-2 py-0.5 text-[10px] font-semibold rounded transition ${item._normalized ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'}`}
-                title="Centrar imagen en cuadrado con padding blanco (sin tocar fondo)"
-              >
-                <Wand2 size={10} /> {item._normalized ? 'Cuadrada ✓' : 'Cuadrar'}
-              </button>
-            )}
-            {hasOriginalBackup && (
-              <button
-                type="button"
-                onClick={onRestoreOriginal}
-                className="inline-flex items-center justify-center gap-1 px-2 py-0.5 text-[10px] font-semibold bg-white text-gray-600 border border-gray-300 rounded hover:bg-gray-50 hover:text-gray-900 transition"
-                title="Volver a la foto original (antes del procesamiento)"
-              >
-                <RotateCcw size={10} /> Restaurar
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Campos */}
-      <div className="flex-1 min-w-0 space-y-2">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          {item._manual && (
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold bg-gray-100 text-gray-700 rounded">
-              <PencilLine size={10} /> Manual
-            </span>
-          )}
-          {item.imagenRiesgosa && (
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold bg-amber-100 text-amber-800 rounded border border-amber-300" title={item.imagenRiesgosaMotivo || ''}>
-              <AlertTriangle size={10} /> Revisar foto: {item.imagenRiesgosaMotivo || 'posible problema'}
-            </span>
-          )}
-        </div>
-        {item.imagenRiesgosa && item.imagen && (
-          <div className="flex items-center gap-1.5 -mt-1 mb-1 flex-wrap">
-            <button
-              type="button"
-              onClick={onEditExternal}
-              className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold text-amber-800 bg-amber-50 border border-amber-300 rounded hover:bg-amber-100 transition"
-              title="Descarga la imagen y abre cleanup.pictures para editarla"
-            >
-              <Eraser size={10} /> Editar en Cleanup
-              <ExternalLink size={9} />
-            </button>
-            <button
-              type="button"
-              onClick={onTogglePaste}
-              className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold rounded transition ${pasteActive ? 'bg-emerald-600 text-white border border-emerald-700' : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'}`}
-              title="Activá esto y después pegá la imagen editada con Ctrl+V"
-            >
-              <ClipboardPaste size={10} /> {pasteActive ? 'Listo para Ctrl+V' : 'Pegar editada'}
-            </button>
-          </div>
-        )}
-        <div>
-          <div className="flex items-center justify-between mb-0.5">
-            <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider">Nombre</label>
-            {item.tituloOriginalEraDeTienda && (
-              <span className="inline-flex items-center gap-1 text-[10px] text-amber-700 font-semibold" title={`El scraper bajó "${item.nombreOriginal || '?'}" pero la IA detectó que es el nombre de la tienda. Revisá el nombre final.`}>
-                <AlertTriangle size={10} /> IA corrigió título de tienda
-              </span>
-            )}
-          </div>
-          <input
-            type="text"
-            value={item.nombre}
-            onChange={(e) => onChange({ nombre: e.target.value })}
-            className="w-full px-2.5 py-1.5 bg-white border border-gray-300 rounded-md text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#FFD33D] focus:border-[#FFD33D] shadow-sm transition"
-          />
-        </div>
-        <div>
-          <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-0.5">SKU</label>
-          <input
-            type="text"
-            value={item.sku}
-            onChange={(e) => onChange({ sku: e.target.value })}
-            className="w-full px-2.5 py-1.5 bg-white border border-gray-300 rounded-md text-sm text-gray-900 font-mono uppercase focus:outline-none focus:ring-2 focus:ring-[#FFD33D] focus:border-[#FFD33D] shadow-sm transition"
-          />
-        </div>
-        {/* Variantes */}
-        {item.variantes && item.variantes.length > 0 && (
-          <div>
-            <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-0.5">Variantes ({item.variantes.length})</label>
-            <div className="flex flex-wrap gap-1">
-              {item.variantes.map((v, idx) => (
-                <span key={idx} className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 text-gray-700 rounded text-[11px]">
-                  <span className="text-gray-400">{v.tipo}:</span> {v.valor}
-                  <button
-                    onClick={() => onChange({ variantes: item.variantes.filter((_, i) => i !== idx) })}
-                    className="hover:text-red-600"
-                    aria-label="Quitar variante"
-                  >
-                    <X size={10} />
-                  </button>
-                </span>
-              ))}
-            </div>
-            {/* Toggle: expandir cada variante como un SKU distinto */}
-            <label className="flex items-center gap-2 mt-2 cursor-pointer text-[11px] text-gray-700">
-              <input
-                type="checkbox"
-                checked={!!item._expandVariantes}
-                onChange={(e) => onChange({ _expandVariantes: e.target.checked })}
-                className="w-3.5 h-3.5 rounded border-gray-300 text-[#FFD33D] focus:ring-[#FFD33D]"
-              />
-              <span>
-                Expandir en <span className="font-bold text-gray-900">{contarExpansiones(item.variantes)}</span> SKUs separados
-                <span className="text-gray-500"> (un producto por variante)</span>
-              </span>
-            </label>
-          </div>
-        )}
-        {/* Datos de envío (colapsable) — Andreani / Correo Argentino los piden */}
-        <div className="border-t border-dashed border-gray-200 pt-2">
-          <button
-            type="button"
-            onClick={() => setShowShipping(s => !s)}
-            className="inline-flex items-center gap-1 text-[10px] font-bold text-gray-500 hover:text-gray-700 uppercase tracking-wider transition"
-          >
-            <Truck size={11} /> Datos de envío
-            <ChevronDown size={11} className={`transition-transform ${showShipping ? 'rotate-180' : ''}`} />
-          </button>
-          {showShipping && (
-            <div className="mt-2 grid grid-cols-4 gap-2">
-              <div>
-                <label className="block text-[9px] font-semibold text-gray-500 uppercase mb-0.5">Peso (kg)</label>
-                <input
-                  type="number"
-                  step="0.001"
-                  min="0"
-                  value={item.peso ?? DEFAULT_SHIPPING.peso}
-                  onChange={(e) => onChange({ peso: parseFloat(e.target.value) || 0 })}
-                  className="w-full px-2 py-1 bg-white border border-gray-300 rounded text-xs text-gray-900 focus:outline-none focus:ring-1 focus:ring-[#FFD33D]"
-                />
-              </div>
-              <div>
-                <label className="block text-[9px] font-semibold text-gray-500 uppercase mb-0.5">Largo (cm)</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  min="0"
-                  value={item.largo ?? DEFAULT_SHIPPING.largo}
-                  onChange={(e) => onChange({ largo: parseFloat(e.target.value) || 0 })}
-                  className="w-full px-2 py-1 bg-white border border-gray-300 rounded text-xs text-gray-900 focus:outline-none focus:ring-1 focus:ring-[#FFD33D]"
-                />
-              </div>
-              <div>
-                <label className="block text-[9px] font-semibold text-gray-500 uppercase mb-0.5">Ancho (cm)</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  min="0"
-                  value={item.ancho ?? DEFAULT_SHIPPING.ancho}
-                  onChange={(e) => onChange({ ancho: parseFloat(e.target.value) || 0 })}
-                  className="w-full px-2 py-1 bg-white border border-gray-300 rounded text-xs text-gray-900 focus:outline-none focus:ring-1 focus:ring-[#FFD33D]"
-                />
-              </div>
-              <div>
-                <label className="block text-[9px] font-semibold text-gray-500 uppercase mb-0.5">Alto (cm)</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  min="0"
-                  value={item.alto ?? DEFAULT_SHIPPING.alto}
-                  onChange={(e) => onChange({ alto: parseFloat(e.target.value) || 0 })}
-                  className="w-full px-2 py-1 bg-white border border-gray-300 rounded text-xs text-gray-900 focus:outline-none focus:ring-1 focus:ring-[#FFD33D]"
-                />
-              </div>
-            </div>
-          )}
-        </div>
-        {missing && (
-          <div className="flex items-center gap-1 text-[11px] text-amber-700">
-            <AlertTriangle size={12} /> Nombre y SKU son obligatorios
-          </div>
-        )}
-        {item.url && (
-          <a href={item.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] text-gray-500 hover:text-[#d97706] transition">
-            <ExternalLink size={11} /> Ver original
-          </a>
-        )}
-      </div>
-
-      {/* Acciones */}
-      <div className="shrink-0 flex flex-col gap-2">
-        <button
-          type="button"
-          onClick={onApprove}
-          disabled={missing}
-          className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-gray-900 bg-[#FFD33D] rounded-md hover:bg-[#f5c518] transition disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          <Check size={12} /> Aprobar
-        </button>
-        <button
-          type="button"
-          onClick={onDiscard}
-          className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-gray-500 bg-white border border-gray-300 rounded-md hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition"
-        >
-          <X size={12} /> Descartar
-        </button>
-      </div>
-    </div>
-  );
-
-  return (
-    <div className={layout === 'list' ? 'p-4 hover:bg-gray-50 transition' : 'p-4 rounded-lg border border-gray-200 hover:border-gray-300 transition'}>
-      {content}
-    </div>
-  );
-}

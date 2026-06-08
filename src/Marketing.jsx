@@ -120,545 +120,7 @@ function downloadText(content, filename) {
   URL.revokeObjectURL(url);
 }
 
-export default function MarketingSection({ addToast, bgAnalysis, onStart, onCancel, onDismiss }) {
-  const [productos, setProductos] = useState(() => loadProductos());
-  const [form, setForm] = useState({ productoUrl: '', productoNombre: '' });
-  const [activeProductId, setActiveProductId] = useState(null);
-  const [activeTab, setActiveTab] = useState('research');
-
-  // Estado de generación.
-  const [running, setRunning] = useState(false);
-  const [currentStep, setCurrentStep] = useState(null);
-  const [stepStatus, setStepStatus] = useState({});
-  const [liveOutputs, setLiveOutputs] = useState({});
-  const [infoMsg, setInfoMsg] = useState('');
-  const [errorMsg, setErrorMsg] = useState('');
-  const [startedAt, setStartedAt] = useState(null);   // timestamp del arranque
-  const [elapsedSec, setElapsedSec] = useState(0);    // segundos que lleva
-  const [tickerIdx, setTickerIdx] = useState(0);      // rota entre los bullets del paso activo
-
-  const readerRef = useRef(null);
-
-  useEffect(() => { saveProductos(productos); }, [productos]);
-
-  // ------------------------------------------------------------------------
-  // Auto-refresh de competidores.
-  // Mientras la app esté abierta, cada 30 min chequeamos si algún competidor
-  // tiene lastCheck > 6h. Si sí, re-consulta Ad Library en silencio.
-  // Así no tenés que apretar "Actualizar ads" a mano.
-  // ------------------------------------------------------------------------
-  const productosRef = useRef(productos);
-  useEffect(() => { productosRef.current = productos; }, [productos]);
-
-  useEffect(() => {
-    const refreshStaleCompetitors = async () => {
-      const now = Date.now();
-      const staleMs = COMP_REFRESH_STALE_HOURS * 60 * 60 * 1000;
-      const current = productosRef.current;
-      for (const p of current) {
-        const comps = p.competidores || [];
-        for (const c of comps) {
-          if (!c.pageId) continue; // sin pageId no podemos consultar
-          const last = c.lastCheck ? new Date(c.lastCheck).getTime() : 0;
-          if (now - last < staleMs) continue;
-          try {
-            const resp = await fetch('/api/meta/ad-library', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ pageId: c.pageId }),
-            });
-            if (!resp.ok) continue; // silencioso: si falla, no molestamos al user
-            const data = await resp.json();
-            // Actualizo el producto en el state, preservando todo lo demás.
-            setProductos(prev => prev.map(prod => {
-              if (prod.id !== p.id) return prod;
-              const updatedComps = (prod.competidores || []).map(cc =>
-                cc.id === c.id ? { ...cc, ads: data.ads || [], lastCheck: new Date().toISOString() } : cc
-              );
-              return { ...prod, competidores: updatedComps, updatedAt: new Date().toISOString() };
-            }));
-          } catch { /* silencioso */ }
-        }
-      }
-    };
-
-    // Corremos al montar (después de 3s para no pisar el primer render) y cada 30 min.
-    const initial = setTimeout(refreshStaleCompetitors, 3000);
-    const interval = setInterval(refreshStaleCompetitors, COMP_REFRESH_INTERVAL_MS);
-    return () => {
-      clearTimeout(initial);
-      clearInterval(interval);
-    };
-  }, []);
-
-  // Contador de segundos mientras corre el pipeline.
-  useEffect(() => {
-    if (!running || !startedAt) return;
-    const t = setInterval(() => {
-      setElapsedSec(Math.round((Date.now() - startedAt) / 1000));
-    }, 1000);
-    return () => clearInterval(t);
-  }, [running, startedAt]);
-
-  // Rotador de bullets dentro del paso activo (muestra cada ~4s uno distinto).
-  useEffect(() => {
-    if (!running || !currentStep) return;
-    setTickerIdx(0);
-    const step = STEPS.find(s => s.key === currentStep);
-    const bullets = step?.bullets || [];
-    if (bullets.length <= 1) return;
-    const t = setInterval(() => {
-      setTickerIdx(i => (i + 1) % bullets.length);
-    }, 4000);
-    return () => clearInterval(t);
-  }, [running, currentStep]);
-
-  const activeProduct = productos.find(p => p.id === activeProductId) || null;
-
-  const resetRun = () => {
-    setCurrentStep(null);
-    setStepStatus({});
-    setLiveOutputs({});
-    setInfoMsg('');
-    setErrorMsg('');
-    setStartedAt(null);
-    setElapsedSec(0);
-    setTickerIdx(0);
-  };
-
-  const handleGenerate = async () => {
-    const productoNombre = form.productoNombre.trim();
-    const productoUrl = form.productoUrl.trim();
-    if (!productoNombre) { addToast?.({ type: 'error', message: 'Falta el nombre del producto' }); return; }
-
-    // Si el padre (AppShell) nos pasó onStart, delegamos ahí para que el
-    // análisis corra como "bg task" y siga vivo al cambiar de sección.
-    // El padre nos devuelve el resultado vía onComplete, acá lo agregamos
-    // a la lista de productos guardados.
-    if (typeof onStart === 'function') {
-      onStart({
-        productoNombre, productoUrl,
-        onComplete: (result) => {
-          const paquete = {
-            id: Date.now(),
-            productoNombre: result.productoNombre,
-            productoUrl: result.productoUrl,
-            descripcion: result.descripcion || '',
-            imagen: result.ogImage || null,
-            resumenEjecutivo: result.resumenEjecutivo || '',
-            docs: result.docs || { research: '', avatar: '', offerBrief: '', beliefs: '', resumenEjecutivo: '' },
-            memoria: { notas: [], aprendizajes: [] },
-            historial: [{ tipo: 'generacion-inicial', at: new Date().toISOString() }],
-            createdAt: new Date().toISOString(),
-          };
-          setProductos(prev => [paquete, ...prev]);
-          setActiveProductId(paquete.id);
-          setActiveTab('research');
-          setForm({ productoUrl: '', productoNombre: '' });
-        },
-      });
-      return;
-    }
-
-    // Fallback: corre inline (pre-refactor). Útil si el componente se usa standalone.
-    setRunning(true);
-    resetRun();
-    setStartedAt(Date.now());
-
-    try {
-      const resp = await fetch('/api/marketing/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ productoUrl, productoNombre }),
-      });
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        throw new Error(err.error || `HTTP ${resp.status}`);
-      }
-      const reader = resp.body.getReader();
-      readerRef.current = reader;
-      const decoder = new TextDecoder();
-      let buffer = '';
-      const collectedOutputs = { research: '', avatar: '', offerBrief: '', beliefs: '', resumenEjecutivo: '' };
-      let ogImage = null;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        for (const line of lines) {
-          if (!line.startsWith('data:')) continue;
-          const payload = line.substring(5).trim();
-          if (!payload) continue;
-          let ev;
-          try { ev = JSON.parse(payload); } catch { continue; }
-
-          if (ev.type === 'info') {
-            setInfoMsg(ev.message || '');
-          } else if (ev.type === 'og-image') {
-            ogImage = ev.url || null;
-          } else if (ev.type === 'step-start') {
-            setCurrentStep(ev.key);
-            setStepStatus(s => ({ ...s, [ev.key]: 'running' }));
-          } else if (ev.type === 'step-done') {
-            setStepStatus(s => ({ ...s, [ev.key]: 'done' }));
-            collectedOutputs[ev.key] = ev.content || '';
-            setLiveOutputs(prev => ({ ...prev, [ev.key]: ev.content || '' }));
-          } else if (ev.type === 'complete') {
-            // Guardamos el paquete en la lista (expediente del producto).
-            const paquete = {
-              id: Date.now(),
-              productoNombre,
-              productoUrl,
-              descripcion: ev.descripcion || '', // la autogenera el backend
-              imagen: ev.ogImage || ogImage || null,
-              resumenEjecutivo: (ev.outputs?.resumenEjecutivo || collectedOutputs.resumenEjecutivo) || '',
-              docs: ev.outputs || collectedOutputs,
-              memoria: { notas: [], aprendizajes: [] }, // para Fase 2b
-              historial: [{ tipo: 'generacion-inicial', at: new Date().toISOString() }],
-              createdAt: new Date().toISOString(),
-            };
-            setProductos(prev => [paquete, ...prev]);
-            setActiveProductId(paquete.id);
-            setActiveTab('research');
-            setForm({ productoUrl: '', productoNombre: '' });
-            addToast?.({ type: 'success', message: `Documentación generada para "${productoNombre}"` });
-          } else if (ev.type === 'error') {
-            setErrorMsg(ev.error || 'Error durante la generación');
-            addToast?.({ type: 'error', message: ev.error || 'Error durante la generación' });
-          }
-        }
-      }
-    } catch (err) {
-      setErrorMsg(err.message);
-      addToast?.({ type: 'error', message: err.message });
-    } finally {
-      setRunning(false);
-      setCurrentStep(null);
-      readerRef.current = null;
-    }
-  };
-
-  const handleDeleteProducto = (id) => {
-    if (!window.confirm('¿Borrar esta documentación? No se puede deshacer.')) return;
-    setProductos(prev => prev.filter(p => p.id !== id));
-    if (activeProductId === id) setActiveProductId(null);
-  };
-
-  const handleDownloadPack = (p) => {
-    const stamp = new Date().toISOString().split('T')[0];
-    const slug = p.productoNombre.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-    const doc = [
-      `# ${p.productoNombre} — Paquete de documentación de marketing`,
-      `\n**URL**: ${p.productoUrl || 'N/A'}`,
-      `**Descripción**: ${p.descripcion}`,
-      `**Generado**: ${new Date(p.createdAt).toLocaleString('es-AR')}`,
-      '\n---\n\n# 1. RESEARCH DOC\n\n' + (p.docs.research || ''),
-      '\n\n---\n\n# 2. AVATAR SHEET\n\n' + (p.docs.avatar || ''),
-      '\n\n---\n\n# 3. OFFER BRIEF\n\n' + (p.docs.offerBrief || ''),
-      '\n\n---\n\n# 4. CREENCIAS NECESARIAS\n\n' + (p.docs.beliefs || ''),
-    ].join('\n');
-    downloadText(doc, `marketing-${slug}-${stamp}.md`);
-  };
-
-  const handleDownloadSingle = (p, key, label) => {
-    const stamp = new Date().toISOString().split('T')[0];
-    const slug = p.productoNombre.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-    downloadText(p.docs[key] || '', `${slug}-${key}-${stamp}.md`);
-  };
-
-  const handleCopy = async (text) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      addToast?.({ type: 'success', message: 'Copiado al portapapeles' });
-    } catch { addToast?.({ type: 'error', message: 'No se pudo copiar' }); }
-  };
-
-  // Si el padre gestiona el bgAnalysis, usamos SU state. Si no, el nuestro.
-  const effective = bgAnalysis || {
-    status: running ? 'running' : 'idle',
-    currentStep,
-    stepStatus,
-    liveOutputs,
-    elapsedSec,
-    infoMsg,
-    errorMsg,
-  };
-  const effRunning = effective.status === 'running';
-  const effStepStatus = effective.stepStatus || {};
-  const effLiveOutputs = effective.liveOutputs || {};
-  const effCurrentStep = effective.currentStep;
-  const effElapsedSec = effective.elapsedSec || 0;
-  const effInfoMsg = effective.infoMsg || '';
-  const effErrorMsg = effective.errorMsg || '';
-
-  // Mostrar viewer si hay progreso en vivo O si ya hay outputs (incluido done).
-  const showingLive = effRunning || Object.keys(effLiveOutputs).length > 0;
-
-  return (
-    <div className="max-w-6xl mx-auto space-y-6">
-      {/* Header */}
-      <div className="bg-gradient-to-br from-brand-50 to-white dark:from-brand-900/30 dark:to-gray-800 border border-brand-200 dark:border-brand-800 rounded-2xl p-5">
-        <div className="flex items-center gap-3 mb-1">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-600 flex items-center justify-center text-white font-bold shadow-sm">
-            <Sparkles size={20} />
-          </div>
-          <div>
-            <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Documentación de producto</h2>
-            <p className="text-xs text-gray-600 dark:text-gray-400">Research + Avatar + Offer Brief + Creencias. 5-10 min por producto, 100% IA.</p>
-          </div>
-        </div>
-      </div>
-
-      {/* Form de generación — sólo nombre + URL. La descripción la autogenera el backend. */}
-      {!showingLive && (
-        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm p-5 space-y-4">
-          <div>
-            <label className="block text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1.5">Nombre del producto <span className="text-red-500">*</span></label>
-            <input
-              type="text"
-              value={form.productoNombre}
-              onChange={(e) => setForm({ ...form, productoNombre: e.target.value })}
-              placeholder="Ej: CELLU — suplemento anticelulitis"
-              className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-brand-500"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1.5">URL de la landing <span className="text-gray-400 normal-case font-normal">(opcional)</span></label>
-            <input
-              type="url"
-              value={form.productoUrl}
-              onChange={(e) => setForm({ ...form, productoUrl: e.target.value })}
-              placeholder="https://tumarca.com.ar/productos/slug"
-              className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-brand-500"
-            />
-            <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">Si la poné, scrapeo la landing, extraigo foto + descripción y uso todo como contexto. Sin URL igual funciona pero el research queda más genérico.</p>
-          </div>
-          <button
-            onClick={handleGenerate}
-            disabled={effRunning || !form.productoNombre.trim()}
-            className="w-full inline-flex items-center justify-center gap-2 px-6 py-3.5 text-sm font-bold text-white bg-gradient-to-br from-brand-500 to-brand-600 rounded-xl hover:from-brand-700 hover:to-brand-600 shadow-sm transition disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <Sparkles size={18} /> {effRunning ? 'Generando… (mirá la pill)' : 'Generar documentación completa'}
-          </button>
-          <p className="text-[11px] text-center text-gray-500 dark:text-gray-400">Tarda entre 3 y 8 minutos. No cierres la pestaña.</p>
-        </div>
-      )}
-
-      {/* Progreso en vivo */}
-      {showingLive && (
-        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm p-5">
-          <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-            <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 uppercase tracking-wider">
-              {effRunning ? 'Generando…' : 'Resultado'}
-            </h3>
-            <div className="flex items-center gap-2">
-              {effRunning && typeof onCancel === 'function' && (
-                <button
-                  onClick={() => { if (window.confirm('¿Cancelar el análisis en curso?')) onCancel(); }}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-red-700 dark:text-red-300 bg-white dark:bg-gray-700 border border-red-200 dark:border-red-800 hover:bg-red-50 rounded-md transition"
-                >
-                  <X size={12} /> Cancelar análisis
-                </button>
-              )}
-              {!effRunning && Object.keys(effLiveOutputs).length > 0 && (
-                <button
-                  onClick={() => {
-                    if (typeof onDismiss === 'function') onDismiss();
-                    resetRun();
-                    setActiveProductId(null);
-                  }}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 bg-gray-100 dark:bg-gray-700 rounded-md transition"
-                >
-                  <X size={12} /> Cerrar
-                </button>
-              )}
-            </div>
-          </div>
-          {effInfoMsg && !effErrorMsg && (
-            <div className="mb-3 p-2.5 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-lg text-xs text-brand-800 dark:text-brand-200">
-              {effInfoMsg}
-            </div>
-          )}
-          {effErrorMsg && (
-            <div className="mb-3 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex items-start gap-2">
-              <AlertTriangle size={16} className="text-red-600 shrink-0 mt-0.5" />
-              <p className="text-xs text-red-800 dark:text-red-200">{effErrorMsg}</p>
-            </div>
-          )}
-
-          {/* Progress bar global */}
-          {(() => {
-            const doneCount = STEPS.filter(s => effStepStatus[s.key] === 'done').length;
-            const totalSteps = STEPS.length;
-            const pct = Math.round((doneCount / totalSteps) * 100);
-            const mm = String(Math.floor(effElapsedSec / 60)).padStart(2, '0');
-            const ss = String(effElapsedSec % 60).padStart(2, '0');
-            const etaRemainingSec = Math.max(0, TOTAL_ETA_SEC - effElapsedSec);
-            const etaMM = String(Math.floor(etaRemainingSec / 60)).padStart(2, '0');
-            const etaSS = String(etaRemainingSec % 60).padStart(2, '0');
-            const currentIdx = STEPS.findIndex(s => s.key === effCurrentStep);
-            const currentStepLabel = currentIdx >= 0 ? STEPS[currentIdx].label : 'Preparando…';
-            return (
-              <div className="mb-4 p-4 rounded-xl bg-gradient-to-br from-brand-50 to-brand-100 dark:from-brand-900/20 dark:to-brand-800/20 border border-brand-200 dark:border-brand-800">
-                <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-                  <div>
-                    <p className="text-xs font-bold text-brand-900 dark:text-brand-200 uppercase tracking-wider">
-                      Paso {Math.max(doneCount, currentIdx < 0 ? 0 : currentIdx + 1)} de {totalSteps} · {currentStepLabel}
-                    </p>
-                    <p className="text-[11px] text-brand-700 dark:text-brand-300 mt-0.5">
-                      Tiempo: {mm}:{ss}
-                      {effRunning && etaRemainingSec > 0 && <> · ~{etaMM}:{etaSS} restante</>}
-                    </p>
-                  </div>
-                  <p className="text-2xl font-bold text-brand-900 dark:text-brand-100 tabular-nums">{pct}%</p>
-                </div>
-                <div className="h-2 bg-brand-200 dark:bg-brand-900/50 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-gradient-to-r from-brand-500 to-brand-600 rounded-full transition-all duration-500"
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* Stepper con bullets detallados */}
-          <div className="space-y-2">
-            {STEPS.map(s => {
-              const status = effStepStatus[s.key] || 'pending';
-              const content = effLiveOutputs[s.key];
-              const isOpen = !!content;
-              const isRunning = status === 'running';
-              const activeBullet = isRunning && s.bullets && s.bullets.length > 0
-                ? s.bullets[tickerIdx % s.bullets.length]
-                : null;
-              return (
-                <div key={s.key} className={`border rounded-lg overflow-hidden transition-all ${isRunning ? 'border-brand-400 dark:border-brand-600 shadow-sm' : 'border-gray-200 dark:border-gray-700'}`}>
-                  <div className={`p-3 flex items-start gap-3 ${isRunning ? 'bg-brand-50 dark:bg-brand-900/20' : status === 'done' ? 'bg-emerald-50 dark:bg-emerald-900/20' : 'bg-gray-50 dark:bg-gray-800/50'}`}>
-                    <div className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center mt-0.5">
-                      {status === 'done' ? <Check size={14} className="text-emerald-600 dark:text-emerald-300" /> :
-                       isRunning ? <Loader2 size={14} className="text-brand-600 dark:text-brand-300 animate-spin" /> :
-                       <div className="w-2 h-2 rounded-full bg-gray-300 dark:bg-gray-600" />}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{s.label}</p>
-                        {status === 'done' && (
-                          <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded">
-                            Listo
-                          </span>
-                        )}
-                        {s.etaSec && (
-                          <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded">
-                            ~{Math.round(s.etaSec / 60 * 10) / 10 < 1 ? `${s.etaSec}s` : `${Math.round(s.etaSec / 60)}min`}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-[11px] text-gray-600 dark:text-gray-400 mt-1 leading-relaxed">{s.desc}</p>
-                      {/* Bullet dinámico mientras el paso está corriendo */}
-                      {activeBullet && (
-                        <div className="mt-2 flex items-center gap-1.5 text-[11px] text-brand-700 dark:text-brand-300">
-                          <div className="w-1 h-1 rounded-full bg-brand-600 dark:bg-brand-400 animate-pulse" />
-                          <span className="italic">{activeBullet}…</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  {isOpen && (
-                    <div className="bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 p-4 max-h-80 overflow-y-auto">
-                      <pre className="text-xs text-gray-800 dark:text-gray-200 whitespace-pre-wrap font-sans leading-relaxed">{content}</pre>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Listado de productos previamente generados */}
-      {productos.length > 0 && !showingLive && (
-        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm">
-          <div className="p-5 border-b border-gray-200 dark:border-gray-700">
-            <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 uppercase tracking-wider">
-              Productos documentados ({productos.length})
-            </h3>
-          </div>
-          <div className="divide-y divide-gray-100 dark:divide-gray-700">
-            {productos.map(p => (
-              <div key={p.id}>
-                <button
-                  onClick={() => setActiveProductId(activeProductId === p.id ? null : p.id)}
-                  className="w-full flex items-start gap-3 p-4 text-left hover:bg-gray-50 dark:hover:bg-gray-700/30 transition"
-                >
-                  {/* Thumbnail: og:image si existe, fallback al ícono */}
-                  {p.imagen ? (
-                    <img src={p.imagen} alt={p.productoNombre} className="w-14 h-14 rounded-lg object-cover bg-gray-100 dark:bg-gray-700 shrink-0 border border-gray-200 dark:border-gray-600" />
-                  ) : (
-                    <div className="w-14 h-14 rounded-lg bg-gradient-to-br from-brand-500 to-brand-600 flex items-center justify-center shrink-0">
-                      <Package size={22} className="text-white" />
-                    </div>
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{p.productoNombre}</p>
-                    <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate mb-0.5">
-                      {new Date(p.createdAt).toLocaleDateString('es-AR')}
-                      {p.productoUrl && <> · <span className="text-brand-600 dark:text-brand-400">{(() => { try { return new URL(p.productoUrl).hostname; } catch { return p.productoUrl; } })()}</span></>}
-                    </p>
-                    {/* Resumen ejecutivo inline (si se generó) */}
-                    {p.resumenEjecutivo && (
-                      <p className="text-xs text-gray-700 dark:text-gray-300 leading-snug line-clamp-2 mt-1">{p.resumenEjecutivo}</p>
-                    )}
-                  </div>
-                  <ChevronRight size={16} className={`text-gray-400 transition-transform shrink-0 mt-1 ${activeProductId === p.id ? 'rotate-90' : ''}`} />
-                </button>
-
-                {/* Dashboard expandido del producto */}
-                {activeProductId === p.id && (
-                  <ProductDashboard
-                    product={p}
-                    activeTab={activeTab}
-                    setActiveTab={setActiveTab}
-                    onCopy={handleCopy}
-                    onDownloadSingle={handleDownloadSingle}
-                    onDownloadPack={handleDownloadPack}
-                    onDelete={() => handleDeleteProducto(p.id)}
-                    onUpdateProduct={(patch) => setProductos(prev => prev.map(x => x.id === p.id ? { ...x, ...patch, updatedAt: new Date().toISOString() } : x))}
-                    addToast={addToast}
-                  />
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Estado vacío */}
-      {productos.length === 0 && !showingLive && (
-        <div className="bg-white dark:bg-gray-800 rounded-2xl border-2 border-dashed border-gray-300 dark:border-gray-600 p-12 text-center">
-          <FileText size={36} className="mx-auto text-gray-300 dark:text-gray-600 mb-3" />
-          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Todavía no tenés productos documentados</p>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Completá el formulario arriba para generar el primero.</p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ============================================================
-// Dashboard expandido de un producto
-// ============================================================
-const DASH_TABS = [
-  { key: 'resumen',      label: 'Resumen',      icon: BookOpen },
-  { key: 'docs',         label: 'Documentos',   icon: FileText },
-  { key: 'competencia',  label: 'Competencia',  icon: Target },
-  { key: 'creativos',    label: 'Creativos',    icon: Sparkles },
-  { key: 'memoria',      label: 'Memoria',      icon: MessageSquare },
-  { key: 'historial',    label: 'Historial',    icon: Clock },
-];
+// ---- inner components moved before export (TDZ fix Vite/Rollup) ----
 
 function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownloadSingle, onDownloadPack, onDelete, onUpdateProduct, addToast }) {
   const [noteText, setNoteText] = useState('');
@@ -1260,6 +722,7 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
 }
 
 // Accordion para cada documento (en tab Docs).
+
 function DocAccordion({ title, content, wordCount, onCopy, onDownload }) {
   const [open, setOpen] = useState(false);
   return (
@@ -1282,3 +745,545 @@ function DocAccordion({ title, content, wordCount, onCopy, onDownload }) {
     </div>
   );
 }
+
+
+export default function MarketingSection({ addToast, bgAnalysis, onStart, onCancel, onDismiss }) {
+  const [productos, setProductos] = useState(() => loadProductos());
+  const [form, setForm] = useState({ productoUrl: '', productoNombre: '' });
+  const [activeProductId, setActiveProductId] = useState(null);
+  const [activeTab, setActiveTab] = useState('research');
+
+  // Estado de generación.
+  const [running, setRunning] = useState(false);
+  const [currentStep, setCurrentStep] = useState(null);
+  const [stepStatus, setStepStatus] = useState({});
+  const [liveOutputs, setLiveOutputs] = useState({});
+  const [infoMsg, setInfoMsg] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
+  const [startedAt, setStartedAt] = useState(null);   // timestamp del arranque
+  const [elapsedSec, setElapsedSec] = useState(0);    // segundos que lleva
+  const [tickerIdx, setTickerIdx] = useState(0);      // rota entre los bullets del paso activo
+
+  const readerRef = useRef(null);
+
+  useEffect(() => { saveProductos(productos); }, [productos]);
+
+  // ------------------------------------------------------------------------
+  // Auto-refresh de competidores.
+  // Mientras la app esté abierta, cada 30 min chequeamos si algún competidor
+  // tiene lastCheck > 6h. Si sí, re-consulta Ad Library en silencio.
+  // Así no tenés que apretar "Actualizar ads" a mano.
+  // ------------------------------------------------------------------------
+  const productosRef = useRef(productos);
+  useEffect(() => { productosRef.current = productos; }, [productos]);
+
+  useEffect(() => {
+    const refreshStaleCompetitors = async () => {
+      const now = Date.now();
+      const staleMs = COMP_REFRESH_STALE_HOURS * 60 * 60 * 1000;
+      const current = productosRef.current;
+      for (const p of current) {
+        const comps = p.competidores || [];
+        for (const c of comps) {
+          if (!c.pageId) continue; // sin pageId no podemos consultar
+          const last = c.lastCheck ? new Date(c.lastCheck).getTime() : 0;
+          if (now - last < staleMs) continue;
+          try {
+            const resp = await fetch('/api/meta/ad-library', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ pageId: c.pageId }),
+            });
+            if (!resp.ok) continue; // silencioso: si falla, no molestamos al user
+            const data = await resp.json();
+            // Actualizo el producto en el state, preservando todo lo demás.
+            setProductos(prev => prev.map(prod => {
+              if (prod.id !== p.id) return prod;
+              const updatedComps = (prod.competidores || []).map(cc =>
+                cc.id === c.id ? { ...cc, ads: data.ads || [], lastCheck: new Date().toISOString() } : cc
+              );
+              return { ...prod, competidores: updatedComps, updatedAt: new Date().toISOString() };
+            }));
+          } catch { /* silencioso */ }
+        }
+      }
+    };
+
+    // Corremos al montar (después de 3s para no pisar el primer render) y cada 30 min.
+    const initial = setTimeout(refreshStaleCompetitors, 3000);
+    const interval = setInterval(refreshStaleCompetitors, COMP_REFRESH_INTERVAL_MS);
+    return () => {
+      clearTimeout(initial);
+      clearInterval(interval);
+    };
+  }, []);
+
+  // Contador de segundos mientras corre el pipeline.
+  useEffect(() => {
+    if (!running || !startedAt) return;
+    const t = setInterval(() => {
+      setElapsedSec(Math.round((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => clearInterval(t);
+  }, [running, startedAt]);
+
+  // Rotador de bullets dentro del paso activo (muestra cada ~4s uno distinto).
+  useEffect(() => {
+    if (!running || !currentStep) return;
+    setTickerIdx(0);
+    const step = STEPS.find(s => s.key === currentStep);
+    const bullets = step?.bullets || [];
+    if (bullets.length <= 1) return;
+    const t = setInterval(() => {
+      setTickerIdx(i => (i + 1) % bullets.length);
+    }, 4000);
+    return () => clearInterval(t);
+  }, [running, currentStep]);
+
+  const activeProduct = productos.find(p => p.id === activeProductId) || null;
+
+  const resetRun = () => {
+    setCurrentStep(null);
+    setStepStatus({});
+    setLiveOutputs({});
+    setInfoMsg('');
+    setErrorMsg('');
+    setStartedAt(null);
+    setElapsedSec(0);
+    setTickerIdx(0);
+  };
+
+  const handleGenerate = async () => {
+    const productoNombre = form.productoNombre.trim();
+    const productoUrl = form.productoUrl.trim();
+    if (!productoNombre) { addToast?.({ type: 'error', message: 'Falta el nombre del producto' }); return; }
+
+    // Si el padre (AppShell) nos pasó onStart, delegamos ahí para que el
+    // análisis corra como "bg task" y siga vivo al cambiar de sección.
+    // El padre nos devuelve el resultado vía onComplete, acá lo agregamos
+    // a la lista de productos guardados.
+    if (typeof onStart === 'function') {
+      onStart({
+        productoNombre, productoUrl,
+        onComplete: (result) => {
+          const paquete = {
+            id: Date.now(),
+            productoNombre: result.productoNombre,
+            productoUrl: result.productoUrl,
+            descripcion: result.descripcion || '',
+            imagen: result.ogImage || null,
+            resumenEjecutivo: result.resumenEjecutivo || '',
+            docs: result.docs || { research: '', avatar: '', offerBrief: '', beliefs: '', resumenEjecutivo: '' },
+            memoria: { notas: [], aprendizajes: [] },
+            historial: [{ tipo: 'generacion-inicial', at: new Date().toISOString() }],
+            createdAt: new Date().toISOString(),
+          };
+          setProductos(prev => [paquete, ...prev]);
+          setActiveProductId(paquete.id);
+          setActiveTab('research');
+          setForm({ productoUrl: '', productoNombre: '' });
+        },
+      });
+      return;
+    }
+
+    // Fallback: corre inline (pre-refactor). Útil si el componente se usa standalone.
+    setRunning(true);
+    resetRun();
+    setStartedAt(Date.now());
+
+    try {
+      const resp = await fetch('/api/marketing/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productoUrl, productoNombre }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${resp.status}`);
+      }
+      const reader = resp.body.getReader();
+      readerRef.current = reader;
+      const decoder = new TextDecoder();
+      let buffer = '';
+      const collectedOutputs = { research: '', avatar: '', offerBrief: '', beliefs: '', resumenEjecutivo: '' };
+      let ogImage = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.startsWith('data:')) continue;
+          const payload = line.substring(5).trim();
+          if (!payload) continue;
+          let ev;
+          try { ev = JSON.parse(payload); } catch { continue; }
+
+          if (ev.type === 'info') {
+            setInfoMsg(ev.message || '');
+          } else if (ev.type === 'og-image') {
+            ogImage = ev.url || null;
+          } else if (ev.type === 'step-start') {
+            setCurrentStep(ev.key);
+            setStepStatus(s => ({ ...s, [ev.key]: 'running' }));
+          } else if (ev.type === 'step-done') {
+            setStepStatus(s => ({ ...s, [ev.key]: 'done' }));
+            collectedOutputs[ev.key] = ev.content || '';
+            setLiveOutputs(prev => ({ ...prev, [ev.key]: ev.content || '' }));
+          } else if (ev.type === 'complete') {
+            // Guardamos el paquete en la lista (expediente del producto).
+            const paquete = {
+              id: Date.now(),
+              productoNombre,
+              productoUrl,
+              descripcion: ev.descripcion || '', // la autogenera el backend
+              imagen: ev.ogImage || ogImage || null,
+              resumenEjecutivo: (ev.outputs?.resumenEjecutivo || collectedOutputs.resumenEjecutivo) || '',
+              docs: ev.outputs || collectedOutputs,
+              memoria: { notas: [], aprendizajes: [] }, // para Fase 2b
+              historial: [{ tipo: 'generacion-inicial', at: new Date().toISOString() }],
+              createdAt: new Date().toISOString(),
+            };
+            setProductos(prev => [paquete, ...prev]);
+            setActiveProductId(paquete.id);
+            setActiveTab('research');
+            setForm({ productoUrl: '', productoNombre: '' });
+            addToast?.({ type: 'success', message: `Documentación generada para "${productoNombre}"` });
+          } else if (ev.type === 'error') {
+            setErrorMsg(ev.error || 'Error durante la generación');
+            addToast?.({ type: 'error', message: ev.error || 'Error durante la generación' });
+          }
+        }
+      }
+    } catch (err) {
+      setErrorMsg(err.message);
+      addToast?.({ type: 'error', message: err.message });
+    } finally {
+      setRunning(false);
+      setCurrentStep(null);
+      readerRef.current = null;
+    }
+  };
+
+  const handleDeleteProducto = (id) => {
+    if (!window.confirm('¿Borrar esta documentación? No se puede deshacer.')) return;
+    setProductos(prev => prev.filter(p => p.id !== id));
+    if (activeProductId === id) setActiveProductId(null);
+  };
+
+  const handleDownloadPack = (p) => {
+    const stamp = new Date().toISOString().split('T')[0];
+    const slug = p.productoNombre.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+    const doc = [
+      `# ${p.productoNombre} — Paquete de documentación de marketing`,
+      `\n**URL**: ${p.productoUrl || 'N/A'}`,
+      `**Descripción**: ${p.descripcion}`,
+      `**Generado**: ${new Date(p.createdAt).toLocaleString('es-AR')}`,
+      '\n---\n\n# 1. RESEARCH DOC\n\n' + (p.docs.research || ''),
+      '\n\n---\n\n# 2. AVATAR SHEET\n\n' + (p.docs.avatar || ''),
+      '\n\n---\n\n# 3. OFFER BRIEF\n\n' + (p.docs.offerBrief || ''),
+      '\n\n---\n\n# 4. CREENCIAS NECESARIAS\n\n' + (p.docs.beliefs || ''),
+    ].join('\n');
+    downloadText(doc, `marketing-${slug}-${stamp}.md`);
+  };
+
+  const handleDownloadSingle = (p, key, label) => {
+    const stamp = new Date().toISOString().split('T')[0];
+    const slug = p.productoNombre.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+    downloadText(p.docs[key] || '', `${slug}-${key}-${stamp}.md`);
+  };
+
+  const handleCopy = async (text) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      addToast?.({ type: 'success', message: 'Copiado al portapapeles' });
+    } catch { addToast?.({ type: 'error', message: 'No se pudo copiar' }); }
+  };
+
+  // Si el padre gestiona el bgAnalysis, usamos SU state. Si no, el nuestro.
+  const effective = bgAnalysis || {
+    status: running ? 'running' : 'idle',
+    currentStep,
+    stepStatus,
+    liveOutputs,
+    elapsedSec,
+    infoMsg,
+    errorMsg,
+  };
+  const effRunning = effective.status === 'running';
+  const effStepStatus = effective.stepStatus || {};
+  const effLiveOutputs = effective.liveOutputs || {};
+  const effCurrentStep = effective.currentStep;
+  const effElapsedSec = effective.elapsedSec || 0;
+  const effInfoMsg = effective.infoMsg || '';
+  const effErrorMsg = effective.errorMsg || '';
+
+  // Mostrar viewer si hay progreso en vivo O si ya hay outputs (incluido done).
+  const showingLive = effRunning || Object.keys(effLiveOutputs).length > 0;
+
+  return (
+    <div className="max-w-6xl mx-auto space-y-6">
+      {/* Header */}
+      <div className="bg-gradient-to-br from-brand-50 to-white dark:from-brand-900/30 dark:to-gray-800 border border-brand-200 dark:border-brand-800 rounded-2xl p-5">
+        <div className="flex items-center gap-3 mb-1">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-600 flex items-center justify-center text-white font-bold shadow-sm">
+            <Sparkles size={20} />
+          </div>
+          <div>
+            <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Documentación de producto</h2>
+            <p className="text-xs text-gray-600 dark:text-gray-400">Research + Avatar + Offer Brief + Creencias. 5-10 min por producto, 100% IA.</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Form de generación — sólo nombre + URL. La descripción la autogenera el backend. */}
+      {!showingLive && (
+        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm p-5 space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1.5">Nombre del producto <span className="text-red-500">*</span></label>
+            <input
+              type="text"
+              value={form.productoNombre}
+              onChange={(e) => setForm({ ...form, productoNombre: e.target.value })}
+              placeholder="Ej: CELLU — suplemento anticelulitis"
+              className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-brand-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1.5">URL de la landing <span className="text-gray-400 normal-case font-normal">(opcional)</span></label>
+            <input
+              type="url"
+              value={form.productoUrl}
+              onChange={(e) => setForm({ ...form, productoUrl: e.target.value })}
+              placeholder="https://tumarca.com.ar/productos/slug"
+              className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-brand-500"
+            />
+            <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">Si la poné, scrapeo la landing, extraigo foto + descripción y uso todo como contexto. Sin URL igual funciona pero el research queda más genérico.</p>
+          </div>
+          <button
+            onClick={handleGenerate}
+            disabled={effRunning || !form.productoNombre.trim()}
+            className="w-full inline-flex items-center justify-center gap-2 px-6 py-3.5 text-sm font-bold text-white bg-gradient-to-br from-brand-500 to-brand-600 rounded-xl hover:from-brand-700 hover:to-brand-600 shadow-sm transition disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Sparkles size={18} /> {effRunning ? 'Generando… (mirá la pill)' : 'Generar documentación completa'}
+          </button>
+          <p className="text-[11px] text-center text-gray-500 dark:text-gray-400">Tarda entre 3 y 8 minutos. No cierres la pestaña.</p>
+        </div>
+      )}
+
+      {/* Progreso en vivo */}
+      {showingLive && (
+        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm p-5">
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+            <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 uppercase tracking-wider">
+              {effRunning ? 'Generando…' : 'Resultado'}
+            </h3>
+            <div className="flex items-center gap-2">
+              {effRunning && typeof onCancel === 'function' && (
+                <button
+                  onClick={() => { if (window.confirm('¿Cancelar el análisis en curso?')) onCancel(); }}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-red-700 dark:text-red-300 bg-white dark:bg-gray-700 border border-red-200 dark:border-red-800 hover:bg-red-50 rounded-md transition"
+                >
+                  <X size={12} /> Cancelar análisis
+                </button>
+              )}
+              {!effRunning && Object.keys(effLiveOutputs).length > 0 && (
+                <button
+                  onClick={() => {
+                    if (typeof onDismiss === 'function') onDismiss();
+                    resetRun();
+                    setActiveProductId(null);
+                  }}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 bg-gray-100 dark:bg-gray-700 rounded-md transition"
+                >
+                  <X size={12} /> Cerrar
+                </button>
+              )}
+            </div>
+          </div>
+          {effInfoMsg && !effErrorMsg && (
+            <div className="mb-3 p-2.5 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-lg text-xs text-brand-800 dark:text-brand-200">
+              {effInfoMsg}
+            </div>
+          )}
+          {effErrorMsg && (
+            <div className="mb-3 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex items-start gap-2">
+              <AlertTriangle size={16} className="text-red-600 shrink-0 mt-0.5" />
+              <p className="text-xs text-red-800 dark:text-red-200">{effErrorMsg}</p>
+            </div>
+          )}
+
+          {/* Progress bar global */}
+          {(() => {
+            const doneCount = STEPS.filter(s => effStepStatus[s.key] === 'done').length;
+            const totalSteps = STEPS.length;
+            const pct = Math.round((doneCount / totalSteps) * 100);
+            const mm = String(Math.floor(effElapsedSec / 60)).padStart(2, '0');
+            const ss = String(effElapsedSec % 60).padStart(2, '0');
+            const etaRemainingSec = Math.max(0, TOTAL_ETA_SEC - effElapsedSec);
+            const etaMM = String(Math.floor(etaRemainingSec / 60)).padStart(2, '0');
+            const etaSS = String(etaRemainingSec % 60).padStart(2, '0');
+            const currentIdx = STEPS.findIndex(s => s.key === effCurrentStep);
+            const currentStepLabel = currentIdx >= 0 ? STEPS[currentIdx].label : 'Preparando…';
+            return (
+              <div className="mb-4 p-4 rounded-xl bg-gradient-to-br from-brand-50 to-brand-100 dark:from-brand-900/20 dark:to-brand-800/20 border border-brand-200 dark:border-brand-800">
+                <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+                  <div>
+                    <p className="text-xs font-bold text-brand-900 dark:text-brand-200 uppercase tracking-wider">
+                      Paso {Math.max(doneCount, currentIdx < 0 ? 0 : currentIdx + 1)} de {totalSteps} · {currentStepLabel}
+                    </p>
+                    <p className="text-[11px] text-brand-700 dark:text-brand-300 mt-0.5">
+                      Tiempo: {mm}:{ss}
+                      {effRunning && etaRemainingSec > 0 && <> · ~{etaMM}:{etaSS} restante</>}
+                    </p>
+                  </div>
+                  <p className="text-2xl font-bold text-brand-900 dark:text-brand-100 tabular-nums">{pct}%</p>
+                </div>
+                <div className="h-2 bg-brand-200 dark:bg-brand-900/50 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-brand-500 to-brand-600 rounded-full transition-all duration-500"
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Stepper con bullets detallados */}
+          <div className="space-y-2">
+            {STEPS.map(s => {
+              const status = effStepStatus[s.key] || 'pending';
+              const content = effLiveOutputs[s.key];
+              const isOpen = !!content;
+              const isRunning = status === 'running';
+              const activeBullet = isRunning && s.bullets && s.bullets.length > 0
+                ? s.bullets[tickerIdx % s.bullets.length]
+                : null;
+              return (
+                <div key={s.key} className={`border rounded-lg overflow-hidden transition-all ${isRunning ? 'border-brand-400 dark:border-brand-600 shadow-sm' : 'border-gray-200 dark:border-gray-700'}`}>
+                  <div className={`p-3 flex items-start gap-3 ${isRunning ? 'bg-brand-50 dark:bg-brand-900/20' : status === 'done' ? 'bg-emerald-50 dark:bg-emerald-900/20' : 'bg-gray-50 dark:bg-gray-800/50'}`}>
+                    <div className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center mt-0.5">
+                      {status === 'done' ? <Check size={14} className="text-emerald-600 dark:text-emerald-300" /> :
+                       isRunning ? <Loader2 size={14} className="text-brand-600 dark:text-brand-300 animate-spin" /> :
+                       <div className="w-2 h-2 rounded-full bg-gray-300 dark:bg-gray-600" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{s.label}</p>
+                        {status === 'done' && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded">
+                            Listo
+                          </span>
+                        )}
+                        {s.etaSec && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded">
+                            ~{Math.round(s.etaSec / 60 * 10) / 10 < 1 ? `${s.etaSec}s` : `${Math.round(s.etaSec / 60)}min`}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-gray-600 dark:text-gray-400 mt-1 leading-relaxed">{s.desc}</p>
+                      {/* Bullet dinámico mientras el paso está corriendo */}
+                      {activeBullet && (
+                        <div className="mt-2 flex items-center gap-1.5 text-[11px] text-brand-700 dark:text-brand-300">
+                          <div className="w-1 h-1 rounded-full bg-brand-600 dark:bg-brand-400 animate-pulse" />
+                          <span className="italic">{activeBullet}…</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  {isOpen && (
+                    <div className="bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 p-4 max-h-80 overflow-y-auto">
+                      <pre className="text-xs text-gray-800 dark:text-gray-200 whitespace-pre-wrap font-sans leading-relaxed">{content}</pre>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Listado de productos previamente generados */}
+      {productos.length > 0 && !showingLive && (
+        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm">
+          <div className="p-5 border-b border-gray-200 dark:border-gray-700">
+            <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 uppercase tracking-wider">
+              Productos documentados ({productos.length})
+            </h3>
+          </div>
+          <div className="divide-y divide-gray-100 dark:divide-gray-700">
+            {productos.map(p => (
+              <div key={p.id}>
+                <button
+                  onClick={() => setActiveProductId(activeProductId === p.id ? null : p.id)}
+                  className="w-full flex items-start gap-3 p-4 text-left hover:bg-gray-50 dark:hover:bg-gray-700/30 transition"
+                >
+                  {/* Thumbnail: og:image si existe, fallback al ícono */}
+                  {p.imagen ? (
+                    <img src={p.imagen} alt={p.productoNombre} className="w-14 h-14 rounded-lg object-cover bg-gray-100 dark:bg-gray-700 shrink-0 border border-gray-200 dark:border-gray-600" />
+                  ) : (
+                    <div className="w-14 h-14 rounded-lg bg-gradient-to-br from-brand-500 to-brand-600 flex items-center justify-center shrink-0">
+                      <Package size={22} className="text-white" />
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{p.productoNombre}</p>
+                    <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate mb-0.5">
+                      {new Date(p.createdAt).toLocaleDateString('es-AR')}
+                      {p.productoUrl && <> · <span className="text-brand-600 dark:text-brand-400">{(() => { try { return new URL(p.productoUrl).hostname; } catch { return p.productoUrl; } })()}</span></>}
+                    </p>
+                    {/* Resumen ejecutivo inline (si se generó) */}
+                    {p.resumenEjecutivo && (
+                      <p className="text-xs text-gray-700 dark:text-gray-300 leading-snug line-clamp-2 mt-1">{p.resumenEjecutivo}</p>
+                    )}
+                  </div>
+                  <ChevronRight size={16} className={`text-gray-400 transition-transform shrink-0 mt-1 ${activeProductId === p.id ? 'rotate-90' : ''}`} />
+                </button>
+
+                {/* Dashboard expandido del producto */}
+                {activeProductId === p.id && (
+                  <ProductDashboard
+                    product={p}
+                    activeTab={activeTab}
+                    setActiveTab={setActiveTab}
+                    onCopy={handleCopy}
+                    onDownloadSingle={handleDownloadSingle}
+                    onDownloadPack={handleDownloadPack}
+                    onDelete={() => handleDeleteProducto(p.id)}
+                    onUpdateProduct={(patch) => setProductos(prev => prev.map(x => x.id === p.id ? { ...x, ...patch, updatedAt: new Date().toISOString() } : x))}
+                    addToast={addToast}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Estado vacío */}
+      {productos.length === 0 && !showingLive && (
+        <div className="bg-white dark:bg-gray-800 rounded-2xl border-2 border-dashed border-gray-300 dark:border-gray-600 p-12 text-center">
+          <FileText size={36} className="mx-auto text-gray-300 dark:text-gray-600 mb-3" />
+          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Todavía no tenés productos documentados</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Completá el formulario arriba para generar el primero.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// Dashboard expandido de un producto
+// ============================================================
+const DASH_TABS = [
+  { key: 'resumen',      label: 'Resumen',      icon: BookOpen },
+  { key: 'docs',         label: 'Documentos',   icon: FileText },
+  { key: 'competencia',  label: 'Competencia',  icon: Target },
+  { key: 'creativos',    label: 'Creativos',    icon: Sparkles },
+  { key: 'memoria',      label: 'Memoria',      icon: MessageSquare },
+  { key: 'historial',    label: 'Historial',    icon: Clock },
+];
+

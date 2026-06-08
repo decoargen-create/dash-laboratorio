@@ -35,6 +35,7 @@ import { cacheAdImagesBatch, getCachedAdImageUrl } from './adImagesStore.js';
 import { startExecution, updateExecution, finishExecution } from './executionsStore.js';
 import { playDoneChime, playBulkDoneChime, playErrorTone } from './sounds.js';
 import EmptyState from './EmptyState.jsx';
+import { supabase } from './supabase.js';
 // Galería ahora vive como tab independiente en el workspace (Arranque),
 // no más como modal acá.
 
@@ -1380,9 +1381,21 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     };
 
     // Helper: una sola llamada (devuelve { data } o lanza).
+    // Mandamos Authorization con el access_token de Supabase para que el
+    // backend pueda guardar el creativo en cloud (Storage + DB) directamente
+    // — eso permite que el user cierre la pestaña y el creativo igual quede.
     const doCall = async (variationStartIndex, planCached) => {
+      let authToken = '';
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        authToken = session?.access_token || '';
+      } catch {}
       const resp = await fetch('/api/marketing/crear-creativo-referencial', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
+        },
         body: JSON.stringify({
           ...baseBody,
           n: 1,
@@ -1397,7 +1410,19 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     };
 
     // Helper: persiste UNA imagen del response a galería.
+    // - Si el backend guardó al cloud (data.cloudCreativos existe), NO
+    //   re-subimos — la galería va a leer del cloud automático. Solo
+    //   notificamos que hay un nuevo creativo.
+    // - Si NO hubo cloud save (fallback IDB local), guardamos con
+    //   imageBase64 como antes.
     const saveOne = async (data, variantIndex, plan) => {
+      // Background save server-side: ya está. Solo refrescar la galería.
+      if (Array.isArray(data.cloudCreativos) && data.cloudCreativos.length > 0) {
+        try { window.dispatchEvent(new CustomEvent('viora:referencial-saved', { detail: { productoId: String(producto.id), cloud: true } })); } catch {}
+        return;
+      }
+      // Fallback: backend NO guardó al cloud (sin auth o sin Storage). Save
+      // local como antes.
       const variantStyle = data.variantStyles?.[0] || 'strategist';
       const promptStr = data.prompts?.[0]?.prompt || data.promptReference || '';
       await saveReferencial({

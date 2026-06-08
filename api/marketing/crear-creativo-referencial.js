@@ -28,6 +28,11 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { anthropicCost } from './_costs.js';
+import {
+  getUserIdFromAuth,
+  uploadCreativoToBucket,
+  insertCreativoRow,
+} from './_supabase-server.js';
 
 const MODEL_IMAGE = 'gpt-image-2';
 const MODEL_STRATEGIST = 'claude-sonnet-4-6';
@@ -1122,8 +1127,75 @@ export default async function handler(req, res) {
         throw err;
       }
     }
+    // Background save al cloud — si el user mandó Authorization válido y
+    // tenemos producto.id, subimos cada imagen al Storage e insertamos
+    // la fila en marketing_creativos ACÁ en el server. Eso permite que
+    // el frontend pueda cerrar la pestaña y aun así el creativo queda
+    // guardado. Si falla el save al cloud, devolvemos las imágenes en
+    // base64 igual para que el frontend lo guarde local (fallback).
+    let cloudCreativos = null;
+    let cloudSaveError = null;
+    try {
+      const userId = await getUserIdFromAuth(req);
+      const productoId = producto?.id != null ? String(producto.id) : null;
+      if (userId && productoId) {
+        const ts = Date.now();
+        const sourceAdId = inspiracion?.adId || inspiracion?.id || `unknown-${ts}`;
+        const sourceBrand = inspiracion?.brandNombre || null;
+        const sourceImageUrl = inspiracionImageUrl || null;
+        const sourceHeadline = (inspiracion?.headline || inspiracion?.body || '').slice(0, 200);
+
+        cloudCreativos = await Promise.all(imagenes.map(async (b64, i) => {
+          const localVariantIndex = i + variationStartIndex;
+          const refId = `ref_${ts}_${sourceAdId}_${localVariantIndex}`;
+          const variantStyle = variantStyles[i] || 'strategist';
+          const promptStr = prompts?.[i]?.prompt
+            || (typeof __legacyPromptRef !== 'undefined' ? __legacyPromptRef : null);
+          try {
+            const { storagePath, imageUrl } = await uploadCreativoToBucket(userId, refId, b64);
+            const row = await insertCreativoRow({
+              id: refId,
+              user_id: userId,
+              producto_id: productoId,
+              source_ad_id: sourceAdId,
+              source_brand: sourceBrand,
+              source_image_url: sourceImageUrl,
+              source_headline: sourceHeadline,
+              source_type: 'inspiracion',
+              variant_index: localVariantIndex,
+              variant_style: variantStyle,
+              prompt: promptStr,
+              skeleton: plan?.visual || skeleton || null,
+              model: MODEL_IMAGE,
+              vision_model: visionModel || null,
+              size: sizeUsed,
+              size_fallback: !!sizeFallback,
+              quality: qualityUsed,
+              storage_path: storagePath,
+              image_url: imageUrl,
+              created_at: new Date(ts + i).toISOString(),
+            });
+            return { id: row.id, imageUrl, variantIndex: localVariantIndex, variantStyle };
+          } catch (err) {
+            console.warn(`[cloud save] imagen ${i} falló:`, err.message);
+            return null;
+          }
+        }));
+        cloudCreativos = cloudCreativos.filter(Boolean);
+        if (cloudCreativos.length === 0) cloudCreativos = null;
+      }
+    } catch (err) {
+      console.warn('[cloud save] error general:', err.message);
+      cloudSaveError = err.message;
+    }
+
     return respondJSON(res, 200, {
-      imagenes,
+      // imagenes y cloudCreativos: si el cloud save tuvo éxito, el frontend
+      // PUEDE usar cloudCreativos y skipear el saveReferencial local.
+      // Si no, sigue el flow viejo con base64.
+      imagenes: cloudCreativos ? [] : imagenes, // ahorra payload si ya subió
+      cloudCreativos,
+      cloudSaveError,
       variantStyles,         // array paralelo — 'strategist' | 'reference' | 'rebrand'
       mimeType: 'image/png',
       size: sizeUsed,

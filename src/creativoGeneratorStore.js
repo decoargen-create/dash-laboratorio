@@ -18,6 +18,7 @@
 
 import { startExecution, updateExecution, finishExecution } from './executionsStore.js';
 import { saveCreativo } from './creativosStorage.js';
+import { supabase } from './supabase.js';
 import { saveReferencial } from './galeriaReferenciales.js';
 import { logCostsFromResponse } from './costsStore.js';
 import { playDoneChime, playErrorTone, playBulkDoneChime } from './sounds.js';
@@ -97,12 +98,25 @@ async function processNext() {
   updateExecution(execId, { stage: 'Llamando a gpt-image-2…' });
 
   try {
+    // Authorization header con el token de Supabase — para que el backend
+    // pueda guardar el creativo al cloud (Storage + DB) en background.
+    let authToken = '';
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      authToken = session?.access_token || '';
+    } catch {}
+
     const resp = await fetch('/api/marketing/generate-creative', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
+      },
       body: JSON.stringify({
         quality: opts.quality,
+        productoId: opts.productoId || null,
         idea: {
+          id: idea.id,
           promptGeneradorImagen: idea.promptGeneradorImagen,
           descripcionImagen: idea.descripcionImagen,
           textoEnImagen: idea.textoEnImagen,
@@ -130,9 +144,10 @@ async function processNext() {
     };
     await saveCreativo(idea.id, nuevo);
 
-    // También guardamos en la galería referencial para que aparezca junto
-    // con los referenciales — mismo flow de uso (download / archive).
-    if (opts.productoId) {
+    // Si el backend NO guardó al cloud (sin auth o sin Storage), fallback
+    // al save local. Si sí guardó, skipeamos — la galería ya tiene el
+    // creativo via marketing_creativos y se va a refrescar al abrir.
+    if (!data.cloudCreativo && opts.productoId) {
       try {
         await saveReferencial({
           id: `from-bandeja-${idea.id}-${Date.now()}`,

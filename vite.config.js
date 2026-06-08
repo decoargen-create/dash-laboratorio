@@ -3,6 +3,19 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 import fs from 'node:fs'
 import path from 'node:path'
+import { execSync } from 'node:child_process'
+
+// Tag de build — útil para confirmar QUÉ código está corriendo cuando
+// debug en prod vs preview. Se inyecta en window.__VIORA_BUILD__.
+function readBuildTag() {
+  try {
+    const sha = execSync('git rev-parse --short HEAD').toString().trim()
+    const ts = new Date().toISOString().slice(0, 16).replace('T', ' ')
+    return `${sha} · ${ts}`
+  } catch {
+    return 'dev'
+  }
+}
 
 // Plugin de Vite que, en modo dev, mapea /api/<nombre> al archivo api/<nombre>.js
 // Así el chatbot funciona con `npm run dev` sin necesitar `vercel dev`.
@@ -92,7 +105,11 @@ function safeJSON(str) {
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
+  const buildTag = readBuildTag()
   return {
+    define: {
+      __VIORA_BUILD__: JSON.stringify(buildTag),
+    },
     build: {
       // Habilitamos sourcemaps en prod para poder identificar errores TDZ
       // que aparecen solo en bundles minificados. Permite que el browser

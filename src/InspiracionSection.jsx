@@ -427,8 +427,12 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       updateExecution(execId, { stage: 'Guardando en galería…' });
 
       // Cachear skeleton del ad para futuras re-generaciones (saltea Vision).
-      if (data.skeleton && !data.skeletonFromCache) {
-        upsertSkeleton(ad.id, data.skeleton);
+      // Cacheamos el plan COMPLETO si vino del Strategist (incluye visual +
+      // strategy + variations), sino el skeleton solo. Próxima vez sobre el
+      // mismo ad reutilizamos sin re-pagar Sonnet.
+      if (!data.skeletonFromCache) {
+        if (data.plan) upsertSkeleton(ad.id, data.plan);
+        else if (data.skeleton) upsertSkeleton(ad.id, data.skeleton);
       }
 
       // Guardar las N variaciones en la galería. Persistimos skeleton +

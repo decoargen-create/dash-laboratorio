@@ -2082,6 +2082,25 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                           >{n}</button>
                         ))}
                       </div>
+                      {/* Explicación dinámica de qué saca cada cantidad de variantes.
+                          Quita la pregunta "qué hace cada N" antes de generar y
+                          ayuda a entender por qué con 1-2 sale "fiel" y con 4+
+                          empieza a inventar escenarios nuevos respetando el
+                          ángulo de venta. */}
+                      <p className="text-[9px] text-gray-600 dark:text-gray-400 mt-1 leading-snug">
+                        {(genOpts.n || 2) === 1 && (
+                          <><strong className="text-gray-800 dark:text-gray-200">Tight:</strong> réplica fiel del ad ganador. Misma composición y escena, solo cambia el producto.</>
+                        )}
+                        {(genOpts.n || 2) === 2 && (
+                          <><strong className="text-gray-800 dark:text-gray-200">Tight + Rebrand:</strong> #1 réplica fiel · #2 misma composición pero con la paleta de tu marca dominando la escena.</>
+                        )}
+                        {(genOpts.n || 2) === 4 && (
+                          <><strong className="text-gray-800 dark:text-gray-200">Tight → Medium → Loose → Rebrand:</strong> #1 fiel · #2 mismo concepto distinto modelo/ángulo · #3 escena <em>nueva inventada</em> manteniendo el ángulo de venta · #4 paleta de marca.</>
+                        )}
+                        {(genOpts.n || 2) === 6 && (
+                          <><strong className="text-gray-800 dark:text-gray-200">Mix amplio:</strong> #1 fiel · #2 medium · #3-5 escenas <em>nuevas inventadas</em> que comunican el mismo ángulo (cambia escenario, props, plano) · #6 paleta de marca.</>
+                        )}
+                      </p>
                     </div>
 
                     <div className="mb-2.5">

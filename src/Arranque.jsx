@@ -2148,6 +2148,40 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 />
               </div>
             </details>
+
+            {/* Ofertas y claims reales — opcional. Si no se carga, los creativos
+                referenciales generados van a SACAR cualquier promo/claim del ad
+                de referencia (mejor decir menos que inventar una oferta falsa).
+                Si se carga, Vision tiene permiso explícito para usarlos. */}
+            <details className="mt-3 group">
+              <summary className="cursor-pointer inline-flex items-center gap-1 text-[10px] font-semibold text-gray-600 dark:text-gray-300 hover:text-brand-600 dark:hover:text-brand-400">
+                <ChevronDown size={10} className="group-open:rotate-180 transition-transform" />
+                💰 Ofertas y claims reales (opcional)
+                {producto.ofertasReales?.trim() && <span className="text-emerald-600 dark:text-emerald-400">✓ cargado</span>}
+              </summary>
+              <div className="mt-2 space-y-2 pl-4">
+                <p className="text-[10px] text-gray-500 dark:text-gray-400">
+                  Promos, descuentos y claims regulatorios que SÍ podés usar en tus ads. Sin esto, el generador de creativos referenciales remueve cualquier "25% off", "FDA Approved", etc. del ad ref — para no inventar. Cuando cargás esto, Vision puede mantenerlos en el texto adaptado.
+                </p>
+                <textarea
+                  value={producto.ofertasReales || ''}
+                  onChange={e => setProductos(prev => prev.map(p =>
+                    String(p.id) === String(activeProductoId)
+                      ? { ...p, ofertasReales: e.target.value, updated_at: new Date().toISOString() }
+                      : p
+                  ))}
+                  placeholder={`Ejemplos:
+• Comprá 3 frascos y ahorrás 20%
+• Envío gratis a todo el país
+• 30 días para devolverlo si no te gusta
+• ANMAT registrado
+• Sin gluten · Sin TACC
+• Formulado por farmacéuticos`}
+                  rows={6}
+                  className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500 resize-y font-mono"
+                />
+              </div>
+            </details>
           </div>
         ) : !showProdForm ? (
           <button onClick={() => setShowProdForm(true)}

@@ -104,28 +104,53 @@ export default async function handler(req, res) {
   }).join('\n\n')}\n\nDevolvé un score (1-10) + reason corta para cada uno. El array debe tener exactamente ${capped.length} entries en el mismo orden.`;
 
   try {
+    // max_tokens: Haiku 4.5 acepta hasta 8192. Para 100 ideas (cap del
+    // endpoint), cada score serializado pesa ~60 tokens (id + score + reason
+    // + JSON overhead). 100 × 60 = 6000 + overhead → 8192 suficiente.
+    // Antes era 4096 que se quedaba corto y Claude truncaba la tool_use
+    // → llegaba malformada al server.
     const resp = await client.messages.create({
       model: MODEL,
-      max_tokens: Math.min(4096, 80 + capped.length * 60),
+      max_tokens: Math.min(8192, 200 + capped.length * 80),
       tools: [SUBMIT_SCORES_TOOL],
       tool_choice: { type: 'tool', name: 'submit_scores' },
       system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: userContent }],
     });
 
-    // Extraemos la tool call. Si Claude se desvió y devolvió text en lugar
-    // de tool_use (raro con tool_choice forzado, pero pasa con timeouts o
-    // refusals), fallamos con 500 explícito en vez de devolver `scores: []`
-    // silencioso — el cliente no se enteraría que el scoring se rompió y
-    // el step se marcaría "done · 0 marcados" mintiendo.
+    // Buscamos la tool_use. Si no hay (Claude se desvió a text — raro con
+    // tool_choice forzado), intentamos parsear JSON del text como fallback.
+    let scores = null;
     const toolUse = (resp.content || []).find(c => c.type === 'tool_use');
-    if (!toolUse || !Array.isArray(toolUse.input?.scores)) {
-      return respondJSON(res, 500, {
-        error: 'Claude no devolvió scores válidos (tool_use ausente o malformado)',
+    if (toolUse?.input?.scores && Array.isArray(toolUse.input.scores)) {
+      scores = toolUse.input.scores;
+    } else {
+      // Fallback: text con JSON adentro
+      const textBlock = (resp.content || []).find(c => c.type === 'text');
+      if (textBlock?.text) {
+        const match = textBlock.text.match(/\{[\s\S]*"scores"[\s\S]*\}/);
+        if (match) {
+          try {
+            const parsed = JSON.parse(match[0]);
+            if (Array.isArray(parsed.scores)) scores = parsed.scores;
+          } catch {}
+        }
+      }
+    }
+
+    if (!scores) {
+      // No hubo forma de extraer scores. Devolvemos array vacío + warning
+      // (NO 500) para que el cliente NO muestre toast de error rojo. Las
+      // ideas igual entraron a Bandeja, solo no se filtran las flojas.
+      return respondJSON(res, 200, {
+        scores: [],
+        warning: 'Claude no devolvió scores válidos. Las ideas están en Bandeja sin marcar score.',
+        stopReason: resp.stop_reason,
+        model: MODEL,
+        generatedAt: new Date().toISOString(),
         cost: { anthropic: anthropicCost(resp.usage, MODEL) },
       });
     }
-    const scores = toolUse.input.scores;
 
     // Sanitizamos: clamp 1-10. Si Claude NO devolvió un score numérico,
     // queda `null` — NO 5. Antes el fallback a 5 marcaba como "floja"

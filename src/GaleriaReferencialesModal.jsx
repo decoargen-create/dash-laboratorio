@@ -230,29 +230,9 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
   const visibleItems = items.filter(it => !soloNoDescargados || !it.descargada);
   const yaDescargadosCount = items.filter(it => it.descargada).length;
 
-  // Wrapper: modal (con backdrop) o sección embebida (full width).
-  const Wrapper = embedded
-    ? ({ children }) => (
-        <div className="w-full bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
-          {children}
-        </div>
-      )
-    : ({ children }) => (
-        <div
-          className="fixed inset-0 z-50 flex items-start justify-center px-4 py-8 bg-black/60 backdrop-blur-sm overflow-y-auto"
-          onClick={onClose}
-        >
-          <div
-            className="relative w-full max-w-6xl bg-white dark:bg-gray-900 rounded-xl shadow-2xl"
-            onClick={e => e.stopPropagation()}
-          >
-            {children}
-          </div>
-        </div>
-      );
-
-  return (
-    <Wrapper>
+  // Contenido principal — se renderiza dentro del modal o embebido.
+  const innerContent = (
+    <>
         {/* Header */}
         <div className="px-5 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2.5 min-w-0">
@@ -376,7 +356,28 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
           onToggleDescargada={() => toggleDescargadaFlag(selected.id, !!selected.descargada)}
         />
       )}
-    </Wrapper>
+    </>
+  );
+
+  if (embedded) {
+    return (
+      <div className="w-full bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+        {innerContent}
+      </div>
+    );
+  }
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center px-4 py-8 bg-black/60 backdrop-blur-sm overflow-y-auto"
+      onClick={onClose}
+    >
+      <div
+        className="relative w-full max-w-6xl bg-white dark:bg-gray-900 rounded-xl shadow-2xl"
+        onClick={e => e.stopPropagation()}
+      >
+        {innerContent}
+      </div>
+    </div>
   );
 }
 

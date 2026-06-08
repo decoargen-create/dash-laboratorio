@@ -13,6 +13,7 @@
 import React, { useState } from 'react';
 import { Sparkles, Loader2, AlertTriangle, Copy, Check } from 'lucide-react';
 import { logCostsFromResponse } from './costsStore.js';
+import { startExecution, updateExecution, finishExecution } from './executionsStore.js';
 
 export default function CreativosTab({ producto, onUpdateProducto, addToast }) {
   // Config del generador (defaults razonables para Argentina/cosmética)
@@ -36,7 +37,16 @@ export default function CreativosTab({ producto, onUpdateProducto, addToast }) {
       return;
     }
     setHooksRunning(true);
+    // Loguea en el tray global de pipeline + en el ActivityBell.
+    const execId = startExecution({
+      label: `Generando hooks para ${producto.nombre}`,
+      sublabel: `Tono: ${hooksTono} · Objetivo: ${hooksObjetivo}`,
+      kind: 'creative',
+      estimatedMs: 75000,
+      estimatedCost: 0.04,
+    });
     try {
+      updateExecution(execId, { stage: 'Analizando research + competencia con Claude…' });
       const resp = await fetch('/api/marketing/creatives', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -76,9 +86,12 @@ export default function CreativosTab({ producto, onUpdateProducto, addToast }) {
         },
       };
       onUpdateProducto?.({ creativos: nuevosCreativos });
-      addToast?.({ type: 'success', message: `${data.hooks?.length || 0} hooks generados` });
+      const msg = `${data.hooks?.length || 0} hooks generados`;
+      addToast?.({ type: 'success', message: msg });
+      finishExecution(execId, { ok: true, message: msg, cost: data?.cost?.anthropic || data?.cost?.openai || 0 });
     } catch (err) {
       addToast?.({ type: 'error', message: `Generador falló: ${err.message}` });
+      finishExecution(execId, { ok: false, message: err.message || 'Error' });
     } finally {
       setHooksRunning(false);
     }

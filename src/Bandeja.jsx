@@ -24,6 +24,9 @@ import {
 import { exportBriefDocx } from './exportDocx.js';
 import { logCostsFromResponse } from './costsStore.js';
 import CreativoPanel from './CreativoPanel.jsx';
+import { getProductoImagen, getAccentColor } from './productoImagen.js';
+import { saveReferencial } from './galeriaReferenciales.js';
+import { startExecution, updateExecution, finishExecution } from './executionsStore.js';
 
 const PRODUCTOS_KEY = 'viora-marketing-productos-v1';
 const ACTIVE_PRODUCT_KEY = 'viora-marketing-bandeja-active-product';
@@ -929,25 +932,9 @@ function IdeaCard({
               {/* Prompt listo para pegar en gpt-image-2 — solo si es imagen
                   o carrusel. El prompt está en castellano argentino y combina
                   los campos relevantes de la idea en un solo bloque copiable. */}
-              {idea.formato !== 'video' && (idea.hook || idea.descripcionImagen) && (() => {
-                const promptEs = buildPromptGptImage2Es(idea);
-                return (
-                  <div className="bg-brand-50 dark:bg-brand-900/20 rounded-md border border-brand-200 dark:border-brand-800">
-                    <div className="flex items-center justify-between px-3 py-2">
-                      <p className="text-[10px] font-bold text-brand-700 dark:text-brand-300 uppercase tracking-wider">
-                        🤖 Prompt para gpt-image-2 (ES)
-                      </p>
-                      <button
-                        onClick={() => navigator.clipboard?.writeText(promptEs)}
-                        className="text-[10px] font-semibold text-brand-600 dark:text-brand-400 hover:underline inline-flex items-center gap-1"
-                      >
-                        📋 Copiar prompt
-                      </button>
-                    </div>
-                    <pre className="px-3 pb-3 text-xs text-brand-900 dark:text-brand-200 whitespace-pre-wrap break-words font-sans">{promptEs}</pre>
-                  </div>
-                );
-              })()}
+              {idea.formato !== 'video' && (idea.hook || idea.descripcionImagen) && (
+                <IdeaImageGenerator idea={idea} />
+              )}
 
               {/* Para video → brief con guion para mandar a producción
                   humana. Para imagen/carrusel → panel de generación con
@@ -1703,6 +1690,215 @@ function IdeaDetailModal({ idea, onClose, ...cardProps }) {
 // Panel de las ideas tipo VIDEO. El video va a producción humana. Al abrir
 // la idea, el guión adaptado al producto del user se genera SOLO (sin
 // botón) — es texto corrido en rioplatense, listo para pasarle al editor.
+// Genera imágenes directamente desde una idea de la Bandeja. Reusa el mismo
+// pipeline de la galería (saveReferencial → mismo lightbox y tracking).
+// El user puede elegir N variantes — la primera es interpretación literal del
+// brief, las siguientes van divergiendo (medium → loose).
+function IdeaImageGenerator({ idea }) {
+  const promptEs = buildPromptGptImage2Es(idea);
+  const [n, setN] = useState(2);
+  const [size, setSize] = useState('2048x2048');
+  const [quality, setQuality] = useState('high');
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState('');
+  const [lastBatch, setLastBatch] = useState(null); // { count, t, durMs }
+
+  const handleGenerar = async () => {
+    setError('');
+    const productos = loadProductos();
+    const producto = productos.find(p => String(p.id) === String(idea.productoId));
+    if (!producto) {
+      setError('No encontré el producto de esta idea — recargá la página.');
+      return;
+    }
+    const prodImg = getProductoImagen(producto.id);
+    if (!prodImg) {
+      setError('Cargá la foto del producto en Setup (Arranque) antes de generar.');
+      return;
+    }
+    const costoPorImg = quality === 'low' ? 0.03 : quality === 'medium' ? 0.07 : 0.18;
+    const estimatedCost = n * costoPorImg;
+    const execId = startExecution({
+      label: `Generando ${n} imágenes desde idea`,
+      sublabel: idea.hook || idea.titulo || idea.descripcionImagen?.slice(0, 60) || '',
+      kind: 'creative-from-idea',
+      estimatedMs: 90000,
+      estimatedCost,
+    });
+    setRunning(true);
+    const t0 = Date.now();
+    try {
+      updateExecution(execId, { stage: `Generando ${n} variante${n !== 1 ? 's' : ''}…` });
+      const resp = await fetch('/api/marketing/crear-imagen-desde-idea', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          idea: {
+            id: idea.id,
+            hook: idea.hook,
+            titulo: idea.titulo,
+            angulo: idea.angulo,
+            painPoint: idea.painPoint,
+            escenarioNarrativo: idea.escenarioNarrativo,
+            descripcionImagen: idea.descripcionImagen,
+            estiloVisual: idea.estiloVisual,
+            publicoSugerido: idea.publicoSugerido,
+            creenciaApalancada: idea.creenciaApalancada,
+            textoEnImagen: idea.textoEnImagen,
+            formato: idea.formato,
+          },
+          producto: {
+            nombre: producto.nombre,
+            descripcion: producto.descripcion,
+            research: producto.docs?.research,
+            offerBrief: producto.ofertasReales || producto.docs?.offerBrief || '',
+          },
+          productoImagen: prodImg,
+          accentColor: getAccentColor(producto.id) || '',
+          n, size, quality,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      const costo = logCostsFromResponse(data, `crear-imagen-desde-idea · ${idea.hook?.slice(0, 40) || 'idea'}`);
+
+      // Guardar en la galería con sourceType: 'bandeja-idea'.
+      const ahora = Date.now();
+      const imagenes = data.imagenes || [];
+      const variantStyles = data.variantStyles || [];
+      const prompts = data.prompts || [];
+      for (let i = 0; i < imagenes.length; i++) {
+        const promptUsed = prompts[i]?.prompt || data.prompts?.[i]?.prompt || '';
+        await saveReferencial({
+          id: `idea_${ahora}_${idea.id}_${i}`,
+          productoId: String(producto.id),
+          sourceType: 'bandeja-idea',
+          sourceIdeaId: idea.id,
+          sourceBrand: 'Idea propia',
+          sourceHeadline: idea.hook || idea.titulo || '',
+          variantIndex: i,
+          variantStyle: variantStyles[i] || 'tight',
+          imageBase64: imagenes[i],
+          mimeType: data.mimeType || 'image/png',
+          prompt: promptUsed,
+          model: data.model,
+          size: data.size,
+          sizeFallback: !!data.sizeFallback,
+          quality: data.quality || quality,
+          createdAt: new Date(ahora + i).toISOString(),
+        });
+      }
+      const durMs = Date.now() - t0;
+      setLastBatch({ count: imagenes.length, t: ahora, durMs });
+      finishExecution(execId, {
+        ok: true,
+        message: `${imagenes.length} imagen${imagenes.length !== 1 ? 'es' : ''} en galería`,
+        cost: costo?.total,
+      });
+    } catch (err) {
+      setError(err.message || 'Error generando imagen');
+      finishExecution(execId, { ok: false, message: err.message || 'Error' });
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const costoPorImg = quality === 'low' ? 0.03 : quality === 'medium' ? 0.07 : 0.18;
+
+  return (
+    <div className="bg-brand-50 dark:bg-brand-900/20 rounded-md border border-brand-200 dark:border-brand-800">
+      <div className="px-3 py-2 flex flex-wrap items-center gap-2 border-b border-brand-200 dark:border-brand-800">
+        <p className="text-[10px] font-bold text-brand-700 dark:text-brand-300 uppercase tracking-wider mr-1">
+          🤖 Generar imagen con gpt-image-2
+        </p>
+        {/* Selector compacto de N */}
+        <div className="flex items-center gap-0.5">
+          {[1, 2, 4, 6].map(opt => (
+            <button key={opt}
+              onClick={() => setN(opt)}
+              className={`px-1.5 py-0.5 text-[10px] font-bold rounded transition ${
+                n === opt
+                  ? 'bg-brand-600 text-white'
+                  : 'bg-white text-gray-600 dark:bg-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+              }`}
+            >{opt}v</button>
+          ))}
+        </div>
+        {/* Selector compacto de ratio */}
+        <div className="flex items-center gap-0.5">
+          {[
+            { v: '2048x2048', label: '1:1' },
+            { v: '1024x1536', label: 'Story' },
+          ].map(opt => (
+            <button key={opt.v}
+              onClick={() => setSize(opt.v)}
+              className={`px-1.5 py-0.5 text-[10px] font-bold rounded transition ${
+                size === opt.v
+                  ? 'bg-brand-600 text-white'
+                  : 'bg-white text-gray-600 dark:bg-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+              }`}
+            >{opt.label}</button>
+          ))}
+        </div>
+        {/* Quality */}
+        <div className="flex items-center gap-0.5">
+          {['low', 'medium', 'high'].map(opt => (
+            <button key={opt}
+              onClick={() => setQuality(opt)}
+              className={`px-1.5 py-0.5 text-[10px] font-bold rounded transition uppercase ${
+                quality === opt
+                  ? 'bg-brand-600 text-white'
+                  : 'bg-white text-gray-600 dark:bg-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+              }`}
+              title={`$${{ low: 0.03, medium: 0.07, high: 0.18 }[opt]} por imagen`}
+            >{opt.charAt(0).toUpperCase()}</button>
+          ))}
+        </div>
+        <span className="text-[9px] text-gray-500 dark:text-gray-400 ml-1 tabular-nums">
+          ~${(n * costoPorImg).toFixed(2)}
+        </span>
+        <div className="ml-auto flex items-center gap-1.5">
+          <button
+            onClick={() => navigator.clipboard?.writeText(promptEs)}
+            className="text-[10px] font-semibold text-brand-600 dark:text-brand-400 hover:underline"
+            title="Copiar prompt al portapapeles"
+          >
+            📋 Copiar
+          </button>
+          <button
+            onClick={handleGenerar}
+            disabled={running}
+            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-white bg-gradient-to-br from-brand-500 to-brand-600 rounded hover:from-brand-700 hover:to-brand-600 transition disabled:opacity-50 shadow-sm"
+          >
+            {running
+              ? <><Loader2 size={10} className="animate-spin" /> Generando…</>
+              : <><Sparkles size={10} /> Generar</>
+            }
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="px-3 py-2 text-[10px] font-semibold text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/30 border-t border-red-200 dark:border-red-800">
+          ⚠ {error}
+        </div>
+      )}
+
+      {lastBatch && !error && (
+        <div className="px-3 py-2 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/30 border-t border-emerald-200 dark:border-emerald-800">
+          ✓ {lastBatch.count} imagen{lastBatch.count !== 1 ? 'es' : ''} en {Math.floor(lastBatch.durMs / 1000)}s — buscalas en la <strong>Galería</strong>.
+        </div>
+      )}
+
+      <details className="border-t border-brand-200 dark:border-brand-800">
+        <summary className="px-3 py-1.5 text-[10px] font-bold text-brand-700 dark:text-brand-300 uppercase tracking-wider cursor-pointer hover:bg-brand-100/40 dark:hover:bg-brand-900/30">
+          Ver el prompt base que va a usar
+        </summary>
+        <pre className="px-3 pb-3 text-xs text-brand-900 dark:text-brand-200 whitespace-pre-wrap break-words font-sans">{promptEs}</pre>
+      </details>
+    </div>
+  );
+}
+
 function VideoBriefPanel({ idea }) {
   const [guion, setGuion] = useState(guionToText(idea.guionAdaptado));
   const [loading, setLoading] = useState(false);

@@ -19,7 +19,7 @@
 //    con n=1 (prompts distintos por variación):
 //    image[0] = la ref del competidor (composición a clonar)
 //    image[1] = la foto del producto (objeto a respetar EXACTO)
-//    + input_fidelity: high
+//    (input_fidelity NO se setea — gpt-image-2 no acepta ese parámetro)
 //    → size 2048x2048 1:1 / 1024x1536 portrait, quality high
 // 5. Devolvemos los N base64 + plan + per-variation metadata.
 //
@@ -378,10 +378,10 @@ async function callGptImage2Edit({ apiKey, prompt, refImgBuf, refMime, prodImgBu
   form.append('size', size);
   form.append('quality', quality);
   form.append('n', String(Math.min(10, Math.max(1, n || 2))));
-  // input_fidelity=high → gpt-image-2 prioriza respetar las imágenes input
-  // (clave para que el envase del producto NO se redibuje y el background de
-  // la ref se mantenga lo más fiel posible).
-  form.append('input_fidelity', 'high');
+  // Nota: input_fidelity existe en gpt-image-1 pero NO en gpt-image-2 — si lo
+  // mandamos, la API rechaza con "model does not support the parameter".
+  // Para que respete las imágenes input confiamos en el prompt explícito
+  // ("KEEP its shape, color, label IDENTICAL", "do NOT redraw the label").
   // IMAGE 1 — la ref del competidor (composición a clonar)
   form.append('image[]', new Blob([refImgBuf], { type: refMime }), 'reference.' + extForMime(refMime));
   // IMAGE 2 — el producto del usuario (objeto a respetar)

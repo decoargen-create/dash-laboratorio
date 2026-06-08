@@ -32,6 +32,7 @@ import { addGeneratedIdeas } from './bandejaStore.js';
 import { getProductoImagen, getAccentColor } from './productoImagen.js';
 import { saveReferencial } from './galeriaReferenciales.js';
 import { cacheAdImagesBatch, getCachedAdImageUrl } from './adImagesStore.js';
+import { startExecution, updateExecution, finishExecution } from './executionsStore.js';
 import GaleriaReferencialesModal from './GaleriaReferencialesModal.jsx';
 
 const MAX_SELECCIONADOS = 5;
@@ -223,6 +224,12 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   const handleAdapt = async (brandNombre, ad) => {
     if (!producto) return;
     setAdaptingAdIds(prev => new Set(prev).add(ad.id));
+    const execId = startExecution({
+      label: `Adaptando ideas desde ${brandNombre}`,
+      sublabel: ad.headline?.slice(0, 60) || ad.body?.slice(0, 60) || '',
+      kind: 'adapt',
+      estimatedMs: 40000,
+    });
     try {
       const resp = await fetch('/api/marketing/adapt-inspiracion', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -257,9 +264,12 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       }));
       addGeneratedIdeas(ideas);
 
-      addToast?.({ type: 'success', message: `${ideas.length} ideas adaptadas en la Bandeja de ${producto.nombre}` });
+      const msg = `${ideas.length} ideas adaptadas en la Bandeja de ${producto.nombre}`;
+      addToast?.({ type: 'success', message: msg });
+      finishExecution(execId, { ok: true, message: msg });
     } catch (err) {
       addToast?.({ type: 'error', message: `No pude adaptar: ${err.message}` });
+      finishExecution(execId, { ok: false, message: err.message || 'Error' });
     } finally {
       setAdaptingAdIds(prev => {
         const next = new Set(prev); next.delete(ad.id); return next;
@@ -500,12 +510,18 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   // eso (más estable). Sino, deriva keyword del landingUrl.
   const handleScrapeBrand = async (brand) => {
     setScrapingBrandId(brand.id);
+    const execId = startExecution({
+      label: `Scrapeando ads de ${brand.nombre}`,
+      sublabel: 'Meta Ads Library vía Apify',
+      kind: 'scrape',
+      estimatedMs: 60000,
+    });
     try {
       const payload = { country: 'ALL', limit: 100 };
       if (brand.fbPageUrl) {
         payload.fbPageUrl = brand.fbPageUrl.startsWith('http') ? brand.fbPageUrl : `https://www.facebook.com/${brand.fbPageUrl}`;
       } else if (brand.landingUrl) {
-        // Reusamos el resolver de FB page primero — más confiable.
+        updateExecution(execId, { stage: 'Buscando la FB page del competidor…' });
         try {
           const r = await fetch('/api/marketing/resolve-fb-page', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -516,9 +532,6 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
             payload.fbPageUrl = d.pageUrl;
             setBrands(prev => prev.map(x => x.id === brand.id ? { ...x, fbPageUrl: d.pageUrl } : x));
           } else {
-            // Fallback: usar el HOSTNAME del landing como keyword (no el nombre).
-            // Antes esto era brand.nombre y traía basura cuando el nombre era
-            // genérico ("1", "Acme", etc.).
             payload.searchKeyword = landingToKeyword(brand.landingUrl);
           }
         } catch {
@@ -533,6 +546,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         throw new Error(`Keyword "${payload.searchKeyword}" no es utilizable (muy genérica). Cargá el FB page URL del competidor en Setup.`);
       }
 
+      updateExecution(execId, { stage: `Scrapeando ${payload.fbPageUrl ? 'desde FB page' : `keyword "${payload.searchKeyword}"`}…` });
       const resp = await fetch('/api/marketing/apify-ingest', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -573,8 +587,11 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
 
       // Cacheo de imágenes en background — para que sobrevivan a las 24h del CDN.
       cacheNewAdsInBackground(enriched, { productoId: producto?.id, brandId: brand.id, brandNombre: brand.nombre });
+
+      finishExecution(execId, { ok: true, message: msg });
     } catch (err) {
       addToast?.({ type: 'error', message: `No pude scrapear ${brand.nombre}: ${err.message}` });
+      finishExecution(execId, { ok: false, message: err.message || 'Error' });
     } finally {
       setScrapingBrandId(null);
     }
@@ -590,11 +607,18 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       setScrapingBrandId(null);
       return;
     }
+    const execId = startExecution({
+      label: `Scrapeando ads de ${comp.nombre}`,
+      sublabel: 'Meta Ads Library vía Apify',
+      kind: 'scrape',
+      estimatedMs: 60000,
+    });
     try {
       const payload = { country: 'ALL', limit: 100 };
       if (comp.fbPageUrl) {
         payload.fbPageUrl = comp.fbPageUrl.startsWith('http') ? comp.fbPageUrl : `https://www.facebook.com/${comp.fbPageUrl}`;
       } else if (comp.landingUrl) {
+        updateExecution(execId, { stage: 'Buscando la FB page del competidor…' });
         try {
           const r = await fetch('/api/marketing/resolve-fb-page', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -615,6 +639,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         throw new Error(`Keyword "${payload.searchKeyword}" no es utilizable (muy genérica). Cargá el FB page URL en Setup.`);
       }
 
+      updateExecution(execId, { stage: `Scrapeando ${payload.fbPageUrl ? 'desde FB page' : `keyword "${payload.searchKeyword}"`}…` });
       const resp = await fetch('/api/marketing/apify-ingest', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -644,18 +669,19 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       try { localStorage.setItem(PRODUCTOS_KEY, JSON.stringify(updated)); } catch {}
       setProductos(updated);
 
-      addToast?.({
-        type: 'success',
-        message: newAds.length > 0
-          ? `${newAds.length} estáticos NUEVOS de ${comp.nombre} (${ads.length} total)`
-          : `${ads.length} estáticos de ${comp.nombre} (sin nuevos)`,
-      });
+      const msg = newAds.length > 0
+        ? `${newAds.length} estáticos NUEVOS de ${comp.nombre} (${ads.length} total)`
+        : `${ads.length} estáticos de ${comp.nombre} (sin nuevos)`;
+      addToast?.({ type: 'success', message: msg });
 
       // Cache en background. Para Inspiración solo nos interesan los estáticos.
       const staticAds = ads.filter(a => (a.imageUrls?.length || 0) > 0 && (a.videoUrls?.length || 0) === 0);
       cacheNewAdsInBackground(staticAds, { productoId: producto.id, brandId: brand.id, brandNombre: comp.nombre });
+
+      finishExecution(execId, { ok: true, message: msg });
     } catch (err) {
       addToast?.({ type: 'error', message: `No pude scrapear ${brand.nombre}: ${err.message}` });
+      finishExecution(execId, { ok: false, message: err.message || 'Error' });
     } finally {
       setScrapingBrandId(null);
     }

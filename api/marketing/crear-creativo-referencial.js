@@ -391,6 +391,119 @@ function aspectRatioFromSize(size) {
 }
 
 // Prompt builder v2 — usa el skeleton estructurado + producto + research.
+// Prompt para una variación específica del Strategist — combina visual
+// skeleton + strategy + badges_adapted + execution_diff de esa variación.
+// Cada variación termina con un prompt distinto → la grilla de N creativos
+// son N ejecuciones distintas de la misma fórmula validada, no N versiones
+// de la misma foto.
+function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentColor, aspectRatio }) {
+  const nombre = (producto?.nombre || '').trim();
+  const descripcion = (producto?.descripcion || '').trim();
+  const research = (producto?.research || producto?.docs?.research || '').trim();
+  const productoForm = inferProductForm(producto);
+  const v = plan?.visual || {};
+  const s = plan?.strategy || {};
+
+  const parts = [];
+  parts.push('Premium DTC creative for Meta Ads — editorial production, scroll-stop composition. PHOTOREALISTIC, NO AI plastic look, NO uncanny faces, NO garbled text.');
+  parts.push('');
+  parts.push('YOU RECEIVE TWO IMAGES:');
+  parts.push('  • IMAGE 1 = a winning competitor ad. COPY its composition, framing, lighting, background style, palette, mood.');
+  parts.push('  • IMAGE 2 = the product you must feature. KEEP it pixel-faithful.');
+
+  // Strategy: el "por qué" del ad
+  parts.push('');
+  parts.push('STRATEGIC FORMULA (from competitor analysis — DO NOT change):');
+  if (s.angle) parts.push(`  • Angle: ${s.angle}`);
+  if (s.awareness_stage) parts.push(`  • Awareness stage: ${s.awareness_stage}`);
+  if (s.hook_type) parts.push(`  • Hook type: ${s.hook_type}`);
+  if (s.target_avatar) parts.push(`  • Target avatar: ${s.target_avatar}`);
+  if (s.value_prop_implicit) parts.push(`  • Implicit value prop: ${s.value_prop_implicit}`);
+
+  // Visual skeleton de IMAGE 1
+  parts.push('');
+  parts.push('VISUAL COMPOSITION (from IMAGE 1 — preserve unless variation overrides):');
+  if (v.framing) parts.push(`  • Framing: ${v.framing}`);
+  if (v.composition) parts.push(`  • Composition: ${v.composition}`);
+  if (v.productPlacement) {
+    const pp = v.productPlacement;
+    parts.push(`  • Product placement: ${pp.position || ''} · ${pp.scale || ''} · ${pp.rotation || ''}`);
+  }
+  if (v.background) parts.push(`  • Background: ${v.background}`);
+  if (v.lighting) parts.push(`  • Lighting: ${v.lighting}`);
+  if (Array.isArray(v.palette) && v.palette.length) parts.push(`  • Palette: ${v.palette.join(', ')}`);
+  if (Array.isArray(v.props) && v.props.length) parts.push(`  • Props: ${v.props.join('; ')}`);
+  if (v.mood) parts.push(`  • Mood: ${v.mood}`);
+  if (v.style) parts.push(`  • Style: ${v.style}`);
+
+  // Variación específica — el diff de ejecución
+  parts.push('');
+  parts.push(`THIS VARIATION (#${variation.id} — "${variation.label || 'Variación'}"):`);
+  parts.push(`  • Execution diff: ${variation.execution_diff || '(sin diff específico — usá composición base)'}`);
+  if (variation.scene_notes) parts.push(`  • Scene notes: ${variation.scene_notes}`);
+
+  // Textos adaptados con contenido válido para NUESTRO producto
+  if (Array.isArray(v.textBlocks) && v.textBlocks.length) {
+    parts.push('');
+    parts.push('TEXT OVERLAYS to render IN THE IMAGE (exact Spanish, do NOT translate):');
+    v.textBlocks.forEach((b, i) => {
+      const txt = b.content_adapted || b.content_literal || '';
+      if (!txt) return;
+      parts.push(`     ${i + 1}. ${b.position || 'top'} · ${b.size || 'M'} · ${b.style || ''}`);
+      parts.push(`        TEXT: "${txt}"`);
+    });
+  }
+
+  // Badges con contenido adaptado
+  if (Array.isArray(plan?.badges_adapted) && plan.badges_adapted.length) {
+    parts.push('');
+    parts.push('BADGES (replicate as graphic shapes with the ADAPTED content — these have been validated for our product):');
+    plan.badges_adapted.forEach((b, i) => {
+      const c = b.adapted_content || '';
+      if (!c) return;
+      parts.push(`     ${i + 1}. ${b.position || ''} · role=${b.role || ''} · "${c}" · ${b.visual_treatment || ''}`);
+    });
+  }
+  if (Array.isArray(plan?.ctaElements_adapted) && plan.ctaElements_adapted.length) {
+    parts.push('');
+    parts.push('CTA ELEMENTS (pills/buttons — use the adapted text):');
+    plan.ctaElements_adapted.forEach((c, i) => {
+      const txt = c.adapted_content || '';
+      if (!txt) return;
+      parts.push(`     ${i + 1}. ${c.position || ''} · "${txt}" · ${c.visual_treatment || ''}`);
+    });
+  }
+
+  // Producto
+  parts.push('');
+  parts.push('THE PRODUCT (IMAGE 2):');
+  if (nombre) parts.push(`  • Product name: ${nombre}`);
+  if (productoForm) {
+    parts.push(`  • **PHYSICAL FORM**: ${productoForm} (NOT capsules/pills/another format). If reference shows the product contents, show ${productoForm}.`);
+  }
+  if (descripcion) parts.push(`  • Description: ${descripcion.slice(0, 400)}`);
+  if (research) parts.push(`  • Audience and pain points: ${research.slice(0, 1500)}`);
+
+  if (accentColor) {
+    parts.push('');
+    parts.push(`Brand accent color: ${accentColor} — use as highlight for arrows, pills, badges.`);
+  }
+
+  parts.push('');
+  parts.push('SCENE SETTING: LATAM / Argentina home aesthetic. Warm natural light, terracotta / wood / linen textures, plants. If hands/skin visible, use Mediterranean/Latin skin tones. Decoration porteño/contemporáneo.');
+
+  parts.push('');
+  parts.push('CRITICAL RULES:');
+  parts.push('  • Replace original product in IMAGE 1 with IMAGE 2 product — same scene, same composition, but new product at same spot/scale/rotation.');
+  parts.push('  • Keep IMAGE 2 packaging PIXEL-FAITHFUL. Do not redraw labels or invent text on packaging.');
+  parts.push('  • Photorealistic, premium DTC, ready for Meta Ads.');
+  parts.push('  • Render Spanish text overlays EXACTLY as written above.');
+  parts.push(`  • Output aspect ratio: ${aspectRatio || '1:1'}. High resolution.`);
+  parts.push('  • This variation differs from siblings in EXECUTION (model demographic/camera/prop/light) but the FORMULA stays identical.');
+
+  return parts.join('\n');
+}
+
 function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio, variantStyle = 'reference' }) {
   const nombre = (producto?.nombre || '').trim();
   const descripcion = (producto?.descripcion || '').trim();
@@ -619,31 +732,80 @@ export default async function handler(req, res) {
     const prodBuf = Buffer.from(prodBase64, 'base64');
     const prodMime = detectImageType(prodBuf) || 'image/jpeg';
 
-    // Paso 3 — extraer skeleton con Claude Vision (Haiku, ~$0.005).
-    // Si el frontend ya tiene un skeleton cacheado del mismo ad, lo reusamos
-    // y nos saltamos Vision por completo.
+    // Paso 3 — análisis del ad con Vision.
+    //
+    // CASO A (preferido): si tenemos anthropicKey + n>=2, intentamos el
+    // STRATEGIST (Sonnet) que devuelve plan con visual + strategy +
+    // badges_adapted + N variations. Cada variación va a tener su propio
+    // prompt → la grilla de N son N ejecuciones distintas de la misma
+    // fórmula validada (no N versiones de la misma foto).
+    //
+    // CASO B (fallback): Si Strategist falla, o n=1, o el cache tiene un
+    // skeleton viejo (legacy sin strategy), caemos al pipeline anterior:
+    // extractSkeletonHaiku → buildPrompt con reference + rebrand split.
     let skeleton = null;
+    let plan = null;
     let visionCost = 0;
     let skeletonFromCache = false;
-    if (skeletonCached && typeof skeletonCached === 'object') {
+    let visionModel = null;
+    const skeletonHasFullPlan = skeletonCached?.strategy && Array.isArray(skeletonCached?.variations);
+
+    if (skeletonCached && typeof skeletonCached === 'object' && skeletonHasFullPlan) {
+      // Cache tiene plan completo del Strategist — reusarlo.
+      plan = skeletonCached;
+      skeleton = plan.visual;
+      skeletonFromCache = true;
+    } else if (skeletonCached && typeof skeletonCached === 'object') {
+      // Cache solo tiene skeleton legacy (Haiku) — reusarlo pero no como plan.
       skeleton = skeletonCached;
       skeletonFromCache = true;
-    } else if (anthropicKey) {
-      const result = await extractSkeleton({ apiKey: anthropicKey, refImgBuf, refMime, producto });
-      skeleton = result.skeleton;
-      visionCost = result.cost;
+    } else if (anthropicKey && n >= 2) {
+      // Sin cache: intentar Strategist (Sonnet).
+      const stratResult = await planStrategyAndVariations({
+        apiKey: anthropicKey, refImgBuf, refMime, producto, accentColor, n,
+      });
+      if (stratResult.plan && Array.isArray(stratResult.plan.variations) && stratResult.plan.variations.length > 0) {
+        plan = stratResult.plan;
+        skeleton = plan.visual;
+        visionModel = MODEL_STRATEGIST;
+      }
+      visionCost += stratResult.cost || 0;
     }
 
-    // Paso 4 — construir prompts. Si tenemos accentColor + n>=2, hacemos
-    // 2 calls PARALELAS con prompts distintos:
-    //   Variante A — palette del ad ref (reference)
-    //   Variante B — rebrand con accentColor dominante en la escena entera
-    // Si no hay accentColor o n=1, hacemos UNA call con n imágenes.
-    const usarRebrandVariant = !!accentColor && n >= 2;
-    const promptRef = buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio, variantStyle: 'reference' });
-    const promptRebrand = usarRebrandVariant
-      ? buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio, variantStyle: 'rebrand' })
-      : null;
+    // Si no logramos un plan, caer al skeleton-only (Haiku).
+    if (!plan && !skeletonFromCache && anthropicKey) {
+      const result = await extractSkeleton({ apiKey: anthropicKey, refImgBuf, refMime, producto });
+      skeleton = result.skeleton;
+      visionCost += result.cost || 0;
+      visionModel = MODEL_VISION_FALLBACK;
+    }
+
+    // Paso 4 — construir prompts.
+    // Si tenemos PLAN: N prompts distintos (uno por variación del plan).
+    // Si no: pipeline legacy reference + rebrand (cuando hay accentColor + n>=2).
+    let prompts; // array de objetos { prompt, variantStyle }
+    if (plan && plan.variations && plan.variations.length > 0) {
+      // Usar plan.variations — un prompt distinto por variación.
+      // Si plan devolvió menos variations que N, completamos repitiendo la última.
+      const variationsToUse = plan.variations.slice(0, n);
+      while (variationsToUse.length < n) variationsToUse.push(plan.variations[plan.variations.length - 1]);
+      prompts = variationsToUse.map((variation, idx) => ({
+        prompt: buildPromptFromPlan({ producto, inspiracion, plan, variation, accentColor, aspectRatio }),
+        variantStyle: idx === variationsToUse.length - 1 && accentColor ? 'rebrand' : 'strategist',
+        variation,
+      }));
+    } else {
+      // Fallback legacy: reference / rebrand.
+      const usarRebrandVariant = !!accentColor && n >= 2;
+      const promptRef = buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio, variantStyle: 'reference' });
+      const promptRebrand = usarRebrandVariant
+        ? buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio, variantStyle: 'rebrand' })
+        : null;
+      prompts = null; // marcador para que runCalls use el path viejo
+      var __legacyPromptRef = promptRef;
+      var __legacyPromptRebrand = promptRebrand;
+      var __legacyUsarRebrand = usarRebrandVariant;
+    }
 
     // Paso 5 — llamar a gpt-image-2 /v1/images/edits con AMBAS imágenes.
     // Si falla por tamaño no soportado, hacemos un único retry con FALLBACK_SIZE.
@@ -653,19 +815,32 @@ export default async function handler(req, res) {
     let sizeFallback = false;
 
     const runCalls = async (useSize) => {
-      if (usarRebrandVariant) {
-        // 2 calls paralelas con n=Math.floor(n/2) cada una (típicamente 1+1).
-        // Si n es impar (3, 5...), la primera variant lleva el extra.
+      // MODO STRATEGIST: N llamadas paralelas, una por cada plan.variation.
+      if (prompts && prompts.length > 0) {
+        const results = await Promise.all(prompts.map(p =>
+          callGptImage2Edit({
+            apiKey, prompt: p.prompt,
+            refImgBuf, refMime, prodImgBuf: prodBuf, prodMime,
+            size: useSize, quality, n: 1,
+          })
+        ));
+        return {
+          imagenes: results.flat(),
+          variantStyles: prompts.flatMap((p, i) => results[i].map(() => p.variantStyle)),
+        };
+      }
+      // MODO LEGACY: reference + rebrand split.
+      if (__legacyUsarRebrand) {
         const nRef = Math.ceil(n / 2);
         const nReb = Math.floor(n / 2);
         const [imgsRef, imgsReb] = await Promise.all([
           callGptImage2Edit({
-            apiKey, prompt: promptRef,
+            apiKey, prompt: __legacyPromptRef,
             refImgBuf, refMime, prodImgBuf: prodBuf, prodMime,
             size: useSize, quality, n: nRef,
           }),
           callGptImage2Edit({
-            apiKey, prompt: promptRebrand,
+            apiKey, prompt: __legacyPromptRebrand,
             refImgBuf, refMime, prodImgBuf: prodBuf, prodMime,
             size: useSize, quality, n: nReb,
           }),
@@ -675,9 +850,9 @@ export default async function handler(req, res) {
           variantStyles: [...imgsRef.map(() => 'reference'), ...imgsReb.map(() => 'rebrand')],
         };
       }
-      // 1 sola call con n imágenes — todas referencia.
+      // MODO LEGACY 1 sola call con n imágenes.
       const imgs = await callGptImage2Edit({
-        apiKey, prompt: promptRef,
+        apiKey, prompt: __legacyPromptRef,
         refImgBuf, refMime, prodImgBuf: prodBuf, prodMime,
         size: useSize, quality, n,
       });
@@ -704,7 +879,7 @@ export default async function handler(req, res) {
     }
     return respondJSON(res, 200, {
       imagenes,
-      variantStyles,         // array paralelo a imagenes — 'reference' | 'rebrand'
+      variantStyles,         // array paralelo — 'strategist' | 'reference' | 'rebrand'
       mimeType: 'image/png',
       size: sizeUsed,
       sizeRequested: size,
@@ -713,11 +888,14 @@ export default async function handler(req, res) {
       n: imagenes.length,
       aspectRatio,
       model: MODEL_IMAGE,
-      visionModel: skeleton && !skeletonFromCache ? MODEL_VISION_FALLBACK : null,
-      skeleton,
+      visionModel,           // 'claude-sonnet-4-6' | 'claude-haiku-4-5-...' | null
+      strategist: !!plan,    // true si usamos el pipeline strategist
+      skeleton,              // visual skeleton (compat con cache viejo)
+      plan,                  // plan completo del strategist (null si no aplica)
       skeletonFromCache,
-      promptReference: promptRef,
-      promptRebrand,         // null si no se usó rebrand
+      promptReference: prompts ? prompts[0]?.prompt : (typeof __legacyPromptRef !== 'undefined' ? __legacyPromptRef : null),
+      promptRebrand: prompts ? null : (typeof __legacyPromptRebrand !== 'undefined' ? __legacyPromptRebrand : null),
+      prompts: prompts ? prompts.map(p => ({ variantStyle: p.variantStyle, variation: p.variation, prompt: p.prompt })) : null,
       generatedAt: new Date().toISOString(),
       cost: {
         openai: (COST_ESTIMATE[quality] ?? 0.18) * imagenes.length,

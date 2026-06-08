@@ -77,7 +77,14 @@ function loadJSON(key, fallback) {
 }
 
 function saveJSON(key, value) {
-  try { localStorage.setItem(key, JSON.stringify(value)); return true; }
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+    // Notificar al sync de Marketing si la key es relevante (productos o brands).
+    if (key.startsWith('viora-marketing-')) {
+      try { window.dispatchEvent(new CustomEvent('viora:marketing-storage-changed', { detail: { key } })); } catch {}
+    }
+    return true;
+  }
   catch (err) {
     // Quota exceeded es lo único que vamos a surface — el resto de errores
     // (storage disabled en navegadores raros) no son accionables y mantienen

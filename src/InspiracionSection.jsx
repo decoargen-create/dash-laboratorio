@@ -47,7 +47,13 @@ const MAX_SELECCIONADOS = 10;
 // para no triggear el rate limit. El endpoint igual hace auto-retry con
 // backoff (15s, 30s) si OpenAI tira 429, así que los pico que sí lleguen
 // los salva transparente.
-const BULK_CONCURRENCY = 3;
+// BULK_CONCURRENCY=1: procesamos los ads UNO POR VEZ. Antes era 3 (3 ads en
+// paralelo) pero la cuenta OpenAI del user encolaba los 3+ calls concurrentes
+// → cada call tardaba 2-3x más por congestión. Total ≈ igual pero la UX era
+// peor: imágenes salían desordenadas a la galería.
+// Sequential = ad1 (4 imgs) → ad2 (4 imgs) → ad3 (4 imgs). Cada call corre
+// sin cola = ~75s en vez de ~150s. Galería se llena en orden predecible.
+const BULK_CONCURRENCY = 1;
 
 // Extrae una keyword sensata desde una landing URL — preferimos el hostname
 // COMPLETO con www. si está, porque eso es lo que pegarías a mano en la

@@ -139,7 +139,7 @@ function HoverPreview({ item, imgSrc, children, className = '' }) {
 
 // VISTA 1 — Grid: thumbs cuadrados con número de selección + badge si ya descargado.
 
-function GalleryGridView({ items, blobUrls, seleccionados, selectedOrder, onToggleSelect, onOpen }) {
+function GalleryGridView({ items, blobUrls, seleccionados, selectedOrder, onToggleSelect, onOpen, onArchive }) {
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
       {items.map(it => {
@@ -180,13 +180,29 @@ function GalleryGridView({ items, blobUrls, seleccionados, selectedOrder, onTogg
             >
               {isSel ? selIdx : <Plus size={14} />}
             </button>
-            {/* Badge "descargada" */}
+            {/* Badge "descargada" — esquina superior derecha, debajo del archive */}
             {it.descargada && (
-              <div className="absolute top-2 right-2 z-10 inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold text-white bg-emerald-500 rounded-md shadow-md"
+              <div className={`absolute ${onArchive ? 'top-10' : 'top-2'} right-2 z-10 inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold text-white bg-emerald-500 rounded-md shadow-md`}
                 title={`Descargado ${fmtDate(it.descargadaAt)}`}
               >
                 <Check size={10} /> ✓
               </div>
+            )}
+            {/* Botón archivar / restaurar — solo visible al hover, top-right.
+                Click rápido para sacar de la vista sin tener que entrar al
+                lightbox. */}
+            {onArchive && (
+              <button
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); onArchive(it.id, !!it.archivado); }}
+                className={`absolute top-2 right-2 z-10 w-7 h-7 rounded-full flex items-center justify-center shadow-md transition-all ${
+                  it.archivado
+                    ? 'bg-amber-500 text-white opacity-100'
+                    : 'bg-white/90 dark:bg-gray-900/90 text-gray-500 hover:text-amber-600 hover:bg-amber-50 opacity-0 group-hover:opacity-100 hover:scale-110'
+                }`}
+                title={it.archivado ? 'Restaurar' : 'Archivar (lo saca de la vista, no se borra)'}
+              >
+                {it.archivado ? <ArchiveRestore size={12} /> : <Archive size={12} />}
+              </button>
             )}
             {/* Footer con brand + variant */}
             <div className="absolute bottom-0 left-0 right-0 px-1.5 py-1 bg-gradient-to-t from-black/80 to-transparent text-white pointer-events-none">
@@ -693,6 +709,21 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
     refresh();
   };
 
+  // Bulk archive: archiva todos los seleccionados a la vez. Útil cuando
+  // armaste una grilla de 4 variaciones y solo querés guardar las 2 que
+  // sirven para usar en Meta.
+  const handleBulkArchive = async () => {
+    if (seleccionados.size === 0) return;
+    const cant = seleccionados.size;
+    if (!window.confirm(`¿Archivar ${cant} creativo${cant !== 1 ? 's' : ''} seleccionado${cant !== 1 ? 's' : ''}? Quedan ocultos pero no se borran — los podés restaurar con el toggle "Ver archivados".`)) return;
+    await patchReferenciales(
+      Array.from(seleccionados),
+      { archivado: true, archivadoAt: new Date().toISOString() }
+    );
+    limpiarSeleccion();
+    refresh();
+  };
+
   const visibleItems = items.filter(it => {
     if (filtroEstado === 'pending' && it.descargada) return false;
     if (filtroEstado === 'downloaded' && !it.descargada) return false;
@@ -812,7 +843,7 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
             />
           ) : viewMode === 'grid' ? (
             <GalleryGridView items={visibleItems} blobUrls={blobUrls} seleccionados={seleccionados} selectedOrder={selectedOrder}
-              onToggleSelect={toggleSeleccion} onOpen={setSelected} />
+              onToggleSelect={toggleSeleccion} onOpen={setSelected} onArchive={handleArchive} />
           ) : viewMode === 'list' ? (
             <GalleryListView items={visibleItems} blobUrls={blobUrls} seleccionados={seleccionados} selectedOrder={selectedOrder}
               onToggleSelect={toggleSeleccion} onOpen={setSelected}
@@ -838,6 +869,14 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
           <button onClick={seleccionarTodos}
             className="text-[11px] text-brand-600 hover:text-brand-700 transition">
             Seleccionar todos los visibles
+          </button>
+          <button
+            onClick={handleBulkArchive}
+            disabled={zipping}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-lg hover:bg-amber-100 dark:hover:bg-amber-900/50 transition disabled:opacity-60"
+            title="Archivar los seleccionados (no se borran, quedan ocultos)"
+          >
+            <Archive size={12} /> Archivar ({seleccionados.size})
           </button>
           <button
             onClick={handleBulkDownload}

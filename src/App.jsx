@@ -32,6 +32,9 @@ import ExecutionsTray from './ExecutionsTray.jsx';
 import BalanceBar from './BalanceBar.jsx';
 import ActivityBell from './ActivityBell.jsx';
 import { getRemaining, subscribeBalance } from './balanceStore.js';
+import SupabaseAuthScreen from './SupabaseAuth.jsx';
+import { useMarketingSync } from './useMarketingSync.js';
+import { supabase, onAuthChange } from './supabase.js';
 import { generateCSV, downloadCSV, parseCSV, toNumber, toBool } from './csv.js';
 import { loadVioraState, saveVioraState, clearVioraState, createBackup } from './vioraStorage.js';
 
@@ -1342,6 +1345,19 @@ function AppShell({ onExit }) {
   const [state, dispatch] = useReducer(appReducer, INITIAL_STATE);
   const [hydrated, setHydrated] = useState(false);
 
+  // Supabase user state — solo afecta a la plataforma Marketing. Las demás
+  // plataformas siguen funcionando sin Supabase (localStorage / IndexedDB).
+  // Sin user, Marketing muestra el SupabaseAuthScreen (gate).
+  const [supabaseUser, setSupabaseUser] = useState(null);
+  useEffect(() => {
+    if (!supabase) return;
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      setSupabaseUser(session?.user || null);
+    })();
+    return onAuthChange(({ user }) => setSupabaseUser(user));
+  }, []);
+
   // Hidratación inicial — async porque IndexedDB.
   useEffect(() => {
     let alive = true;
@@ -1449,6 +1465,11 @@ function AppShell({ onExit }) {
     setToasts(prev => [...prev, { id, ...toast }]);
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), toast.duration || 3500);
   };
+
+  // Activá el sync de Marketing con Supabase. Pull on mount/login, push
+  // debounced en cambios. Si el user NO está logueado, el hook noopea hasta
+  // que aparezca una session.
+  useMarketingSync({ addToast });
 
   // --------- Background analysis del módulo Marketing ---------
   // Vive a nivel del AppShell (no dentro de MarketingSection) para que siga
@@ -2144,18 +2165,24 @@ function AppShell({ onExit }) {
           {currentUser.role === 'admin' && currentPlatform === 'viora' && currentSection === 'datos' && <DatosSection state={state} dispatch={dispatch} addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'senydrop' && currentSection === 'seny-productos' && <BocetosSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'metaads' && <MetaAdsPlaceholder section={currentSection} />}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (
+          {/* GATE: si estoy en Marketing pero no hay user Supabase logueado,
+              corto el render y muestro el auth screen. El resto de las
+              plataformas (Viora, MetaAds, etc.) NO requieren Supabase. */}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && !supabaseUser && supabase && (
+            <SupabaseAuthScreen onLoggedIn={setSupabaseUser} />
+          )}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && (
             <MetaConnectBanner returnTo={`/acceso?section=${currentSection}`} />
           )}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-arranque' && <ArranqueSection addToast={addToast} onGoToSection={setCurrentSection} />}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-bandeja' && <BandejaSection addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-arranque' && <ArranqueSection addToast={addToast} onGoToSection={setCurrentSection} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-bandeja' && <BandejaSection addToast={addToast} />}
           {/* mk-competencia (sidebar legacy) está redirigido por el effect
               de arriba a mk-arranque — no necesita su propio render. */}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-meta-ads' && <MetaAdsSection addToast={addToast} />}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-auto-ig' && <AutoIGSection addToast={addToast} />}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-inspiracion' && <InspiracionSection addToast={addToast} />}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-gastos' && <GastosStackSection addToast={addToast} />}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-docs' && (
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-meta-ads' && <MetaAdsSection addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-auto-ig' && <AutoIGSection addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-inspiracion' && <InspiracionSection addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-gastos' && <GastosStackSection addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-docs' && (
             <MarketingSection
               addToast={addToast}
               bgAnalysis={bgAnalysis}

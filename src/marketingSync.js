@@ -26,16 +26,26 @@ export async function pullMarketingFromCloud() {
   if (!supabase) throw new Error('Supabase no configurado');
   const user = await getCurrentUser();
   if (!user) throw new Error('No hay user logueado');
+  console.info(`[sync] pull arrancando para user ${user.id}`);
 
   // 1) productos del user
   const { data: productos, error: errProd } = await supabase
     .from('marketing_productos')
     .select('id, data, updated_at')
     .order('updated_at', { ascending: false });
-  if (errProd) throw new Error(`Pull productos: ${errProd.message}`);
+  if (errProd) {
+    console.warn('[sync] pull productos error:', errProd.message);
+    throw new Error(`Pull productos: ${errProd.message}`);
+  }
+  console.info(`[sync] pull recibió ${productos?.length || 0} productos del cloud`);
 
   const productosArr = (productos || []).map(row => row.data);
-  try { localStorage.setItem(KEYS.productos, JSON.stringify(productosArr)); } catch {}
+  try {
+    localStorage.setItem(KEYS.productos, JSON.stringify(productosArr));
+    console.info(`[sync] localStorage productos actualizado, ahora tiene ${productosArr.length}`);
+  } catch (e) {
+    console.warn('[sync] no pude escribir localStorage:', e.message);
+  }
 
   // 2) prefs (active_producto_id + gen_opts)
   const { data: prefs } = await supabase

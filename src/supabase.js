@@ -29,6 +29,12 @@ export const supabase = url && anonKey
     })
   : null;
 
+// Exponer en window para debugging desde la console del browser.
+// Permite: await window.__adslab.from('marketing_productos').select('*')
+if (typeof window !== 'undefined' && supabase) {
+  window.__adslab = supabase;
+}
+
 // Helper: ¿hay un user logueado? Cualquier write a Marketing requiere esto.
 export async function getCurrentUser() {
   if (!supabase) return null;

@@ -28,6 +28,7 @@ import InspiracionSection from './InspiracionSection.jsx';
 import ConsultoriaSection from './Consultoria.jsx';
 import { PipelineRunProvider } from './PipelineRunContext.jsx';
 import PipelineRunOverlay from './PipelineRunOverlay.jsx';
+import ExecutionsTray from './ExecutionsTray.jsx';
 import { generateCSV, downloadCSV, parseCSV, toNumber, toBool } from './csv.js';
 import { loadVioraState, saveVioraState, clearVioraState, createBackup } from './vioraStorage.js';
 
@@ -8494,6 +8495,7 @@ export default function App() {
       <PipelineRunProvider>
         <AppShell onExit={() => navigate('/')} />
         <PipelineRunOverlay />
+        <ExecutionsTray />
       </PipelineRunProvider>
     );
   }

@@ -130,6 +130,106 @@ function saveBrands(productoId, brands) {
 //   forcedProductoId: pisar el selector con un producto específico (cuando
 //     vivimos embebidos en otra pantalla con tabs).
 //   embedded: ocultar header con breadcrumb cuando el padre ya lo tiene.
+function estimateProgress(progress) {
+  if (!progress) return 0;
+  const elapsed = (Date.now() - progress.startedAt) / 1000;
+  if (progress.stage === 'preparando') return Math.min(8, elapsed * 4);
+  if (progress.stage === 'generando') {
+    // Asintótica hacia 92% con τ=30s.
+    return 8 + (92 - 8) * (1 - Math.exp(-Math.max(0, elapsed - 0.5) / 30));
+  }
+  if (progress.stage === 'guardando') return 95;
+  if (progress.stage === 'done') return 100;
+  return 0;
+}
+
+function stageLabel(stage) {
+  if (stage === 'preparando') return 'Preparando prompt…';
+  if (stage === 'generando') return 'Generando con gpt-image-2…';
+  if (stage === 'guardando') return 'Guardando en galería…';
+  if (stage === 'done') return '¡Listo!';
+  if (stage === 'error') return 'Falló';
+  return '';
+}
+
+function formatMs(ms) {
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  return `${Math.floor(s / 60)}m ${s % 60}s`;
+}
+
+// Barra flotante de progreso del bulk. Muestra ad current, % total, ETA
+// y un pill por cada ad para ver qué está done/doing/pending/error.
+function BulkProgressBar({ state, onClose }) {
+  const { total, completed, currentIdx, current, startedAt, adsList, errors, adDurations } = state;
+  const elapsedMs = Date.now() - startedAt;
+  // ETA basado en duración promedio de los ads ya completos. Fallback: 45s/ad.
+  const avgMs = adDurations.length > 0
+    ? adDurations.reduce((a, b) => a + b, 0) / adDurations.length
+    : 45000;
+  const remainingMs = Math.max(0, (total - completed) * avgMs);
+  const pct = Math.round((completed / total) * 100);
+  const isDone = completed === total;
+
+  return (
+    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-white dark:bg-gray-800 border-2 border-brand-400 dark:border-brand-700 rounded-xl shadow-2xl w-[420px] max-w-[calc(100vw-3rem)] overflow-hidden">
+      <div className="p-3.5">
+        <div className="flex items-center gap-2 mb-2">
+          {isDone
+            ? <Check size={16} className="text-emerald-500" />
+            : <Loader2 size={14} className="text-brand-500 animate-spin" />
+          }
+          <p className="text-xs font-bold text-gray-900 dark:text-gray-100 flex-1 truncate">
+            {isDone
+              ? `Completo · ${completed - errors.length}/${total} OK${errors.length > 0 ? ` · ${errors.length} fallaron` : ''}`
+              : `Generando ${currentIdx + 1} de ${total}`
+            }
+          </p>
+          <button onClick={onClose} className="p-1 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition" title="Cerrar">
+            <X size={14} />
+          </button>
+        </div>
+
+        {!isDone && current && (
+          <p className="text-[10px] text-gray-500 dark:text-gray-400 truncate mb-2">
+            <span className="font-semibold text-brand-600 dark:text-brand-400">{current.brandNombre}</span>
+            {current.adHeadline && <span> · {current.adHeadline}</span>}
+          </p>
+        )}
+
+        {/* Barra de progreso total (basado en ads completos) */}
+        <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden mb-1">
+          <div
+            className={`h-full transition-all duration-500 ${isDone ? 'bg-emerald-500' : 'bg-gradient-to-r from-brand-500 to-brand-400'}`}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+
+        <div className="flex items-center justify-between text-[10px] text-gray-500 dark:text-gray-400">
+          <span>{pct}% · transcurrido {formatMs(elapsedMs)}</span>
+          {!isDone && <span>ETA {formatMs(remainingMs)}</span>}
+        </div>
+
+        {/* Pills por ad — visual mini-status. */}
+        <div className="flex flex-wrap gap-1 mt-2.5 pt-2.5 border-t border-gray-100 dark:border-gray-700">
+          {adsList.map((x, i) => (
+            <div
+              key={x.adId + i}
+              title={`${x.brandNombre} · ${x.status}`}
+              className={`w-2.5 h-2.5 rounded-full ${
+                x.status === 'done' ? 'bg-emerald-500'
+                : x.status === 'error' ? 'bg-red-500'
+                : x.status === 'doing' ? 'bg-brand-500 animate-pulse'
+                : 'bg-gray-300 dark:bg-gray-600'
+              }`}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function InspiracionSection({ addToast, forcedProductoId, embedded = false }) {
   const [productos, setProductos] = useState(() => loadProductos());
   const [activeProductoIdRaw, setActiveProductoIdRaw] = useState(() => {
@@ -1624,105 +1724,6 @@ function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccion
 
 // Estima un % de progreso "honesto" para una llamada de gpt-image-2.
 // preparando: 0-8% / generando: 8-92% asintótico ~45s / guardando: 92-99% / done: 100%.
-function estimateProgress(progress) {
-  if (!progress) return 0;
-  const elapsed = (Date.now() - progress.startedAt) / 1000;
-  if (progress.stage === 'preparando') return Math.min(8, elapsed * 4);
-  if (progress.stage === 'generando') {
-    // Asintótica hacia 92% con τ=30s.
-    return 8 + (92 - 8) * (1 - Math.exp(-Math.max(0, elapsed - 0.5) / 30));
-  }
-  if (progress.stage === 'guardando') return 95;
-  if (progress.stage === 'done') return 100;
-  return 0;
-}
-
-function stageLabel(stage) {
-  if (stage === 'preparando') return 'Preparando prompt…';
-  if (stage === 'generando') return 'Generando con gpt-image-2…';
-  if (stage === 'guardando') return 'Guardando en galería…';
-  if (stage === 'done') return '¡Listo!';
-  if (stage === 'error') return 'Falló';
-  return '';
-}
-
-function formatMs(ms) {
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  return `${Math.floor(s / 60)}m ${s % 60}s`;
-}
-
-// Barra flotante de progreso del bulk. Muestra ad current, % total, ETA
-// y un pill por cada ad para ver qué está done/doing/pending/error.
-function BulkProgressBar({ state, onClose }) {
-  const { total, completed, currentIdx, current, startedAt, adsList, errors, adDurations } = state;
-  const elapsedMs = Date.now() - startedAt;
-  // ETA basado en duración promedio de los ads ya completos. Fallback: 45s/ad.
-  const avgMs = adDurations.length > 0
-    ? adDurations.reduce((a, b) => a + b, 0) / adDurations.length
-    : 45000;
-  const remainingMs = Math.max(0, (total - completed) * avgMs);
-  const pct = Math.round((completed / total) * 100);
-  const isDone = completed === total;
-
-  return (
-    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-white dark:bg-gray-800 border-2 border-brand-400 dark:border-brand-700 rounded-xl shadow-2xl w-[420px] max-w-[calc(100vw-3rem)] overflow-hidden">
-      <div className="p-3.5">
-        <div className="flex items-center gap-2 mb-2">
-          {isDone
-            ? <Check size={16} className="text-emerald-500" />
-            : <Loader2 size={14} className="text-brand-500 animate-spin" />
-          }
-          <p className="text-xs font-bold text-gray-900 dark:text-gray-100 flex-1 truncate">
-            {isDone
-              ? `Completo · ${completed - errors.length}/${total} OK${errors.length > 0 ? ` · ${errors.length} fallaron` : ''}`
-              : `Generando ${currentIdx + 1} de ${total}`
-            }
-          </p>
-          <button onClick={onClose} className="p-1 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition" title="Cerrar">
-            <X size={14} />
-          </button>
-        </div>
-
-        {!isDone && current && (
-          <p className="text-[10px] text-gray-500 dark:text-gray-400 truncate mb-2">
-            <span className="font-semibold text-brand-600 dark:text-brand-400">{current.brandNombre}</span>
-            {current.adHeadline && <span> · {current.adHeadline}</span>}
-          </p>
-        )}
-
-        {/* Barra de progreso total (basado en ads completos) */}
-        <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden mb-1">
-          <div
-            className={`h-full transition-all duration-500 ${isDone ? 'bg-emerald-500' : 'bg-gradient-to-r from-brand-500 to-brand-400'}`}
-            style={{ width: `${pct}%` }}
-          />
-        </div>
-
-        <div className="flex items-center justify-between text-[10px] text-gray-500 dark:text-gray-400">
-          <span>{pct}% · transcurrido {formatMs(elapsedMs)}</span>
-          {!isDone && <span>ETA {formatMs(remainingMs)}</span>}
-        </div>
-
-        {/* Pills por ad — visual mini-status. */}
-        <div className="flex flex-wrap gap-1 mt-2.5 pt-2.5 border-t border-gray-100 dark:border-gray-700">
-          {adsList.map((x, i) => (
-            <div
-              key={x.adId + i}
-              title={`${x.brandNombre} · ${x.status}`}
-              className={`w-2.5 h-2.5 rounded-full ${
-                x.status === 'done' ? 'bg-emerald-500'
-                : x.status === 'error' ? 'bg-red-500'
-                : x.status === 'doing' ? 'bg-brand-500 animate-pulse'
-                : 'bg-gray-300 dark:bg-gray-600'
-              }`}
-            />
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // Top 10 escalados — agrega ads de todas las brands del producto, los rankea
 // por score (que el backend ya calcula con daysRunning + variantes +

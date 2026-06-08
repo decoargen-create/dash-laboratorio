@@ -339,7 +339,7 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
           <button
             onClick={handleBulkDownload}
             disabled={zipping}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-brand-600 to-brand-500 rounded-lg hover:from-brand-700 hover:to-brand-600 transition disabled:opacity-60"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-brand-600 rounded-lg hover:from-brand-700 hover:to-brand-600 transition disabled:opacity-60"
           >
             {zipping ? <span className="animate-spin">⏳</span> : <FileArchive size={13} />}
             {zipping ? 'Armando ZIP…' : `Descargar ZIP (${seleccionados.size})`}

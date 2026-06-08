@@ -185,7 +185,7 @@ export default function CopilotoTab({ producto, addToast }) {
           <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div className={`max-w-[85%] px-3 py-2 rounded-xl text-xs whitespace-pre-wrap break-words ${
               m.role === 'user'
-                ? 'bg-gradient-to-br from-brand-600 to-brand-500 text-white rounded-br-sm'
+                ? 'bg-gradient-to-br from-brand-500 to-brand-600 text-white rounded-br-sm'
                 : 'bg-gray-100 dark:bg-gray-900/50 text-gray-800 dark:text-gray-200 rounded-bl-sm'
             }`}>
               {m.content}
@@ -219,7 +219,7 @@ export default function CopilotoTab({ producto, addToast }) {
           <button
             onClick={() => enviar()}
             disabled={loading || !input.trim()}
-            className="inline-flex items-center justify-center w-10 h-10 shrink-0 text-white bg-gradient-to-br from-brand-600 to-brand-500 rounded-lg hover:from-brand-700 hover:to-brand-600 transition disabled:opacity-40"
+            className="inline-flex items-center justify-center w-10 h-10 shrink-0 text-white bg-gradient-to-br from-brand-500 to-brand-600 rounded-lg hover:from-brand-700 hover:to-brand-600 transition disabled:opacity-40"
             title="Enviar"
           >
             {loading ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}

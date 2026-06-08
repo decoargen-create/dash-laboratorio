@@ -117,7 +117,7 @@ export default function DocumentacionTab({ producto, onUpdateProducto, addToast 
         </div>
         <button
           onClick={downloadAll}
-          className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-brand-600 to-brand-500 rounded-lg hover:from-brand-700 hover:to-brand-600 shadow-sm transition shrink-0"
+          className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-brand-600 rounded-lg hover:from-brand-700 hover:to-brand-600 shadow-sm transition shrink-0"
         >
           <Download size={12} /> Descargar todo (.md)
         </button>

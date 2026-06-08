@@ -382,7 +382,7 @@ export default function CreativeRefreshPanel({ producto, addToast }) {
           <button
             onClick={() => run({ dryRun: false })}
             disabled={!canRun}
-            className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-gradient-to-br from-brand-600 to-brand-500 rounded-md shadow-sm hover:from-brand-700 hover:to-brand-600 disabled:opacity-40"
+            className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-brand-600 rounded-md shadow-sm hover:from-brand-700 hover:to-brand-600 disabled:opacity-40"
           >
             {running ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
             Ejecutar ahora

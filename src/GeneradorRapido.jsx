@@ -273,7 +273,7 @@ export default function GeneradorRapido({ producto, addToast, onDone }) {
             </div>
 
             <button onClick={generar}
-              className="inline-flex items-center gap-2 px-5 py-2 text-sm font-bold text-white bg-gradient-to-br from-brand-600 to-brand-500 rounded-lg hover:from-brand-700 hover:to-brand-600 shadow-sm transition">
+              className="inline-flex items-center gap-2 px-5 py-2 text-sm font-bold text-white bg-gradient-to-br from-brand-500 to-brand-600 rounded-lg hover:from-brand-700 hover:to-brand-600 shadow-sm transition">
               <Sparkles size={14} /> Generar ideas
             </button>
           </div>

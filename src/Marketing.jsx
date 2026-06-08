@@ -402,7 +402,7 @@ export default function MarketingSection({ addToast, bgAnalysis, onStart, onCanc
       {/* Header */}
       <div className="bg-gradient-to-br from-brand-50 to-white dark:from-brand-900/30 dark:to-gray-800 border border-brand-200 dark:border-brand-800 rounded-2xl p-5">
         <div className="flex items-center gap-3 mb-1">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-600 to-brand-500 flex items-center justify-center text-white font-bold shadow-sm">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-600 flex items-center justify-center text-white font-bold shadow-sm">
             <Sparkles size={20} />
           </div>
           <div>
@@ -439,7 +439,7 @@ export default function MarketingSection({ addToast, bgAnalysis, onStart, onCanc
           <button
             onClick={handleGenerate}
             disabled={effRunning || !form.productoNombre.trim()}
-            className="w-full inline-flex items-center justify-center gap-2 px-6 py-3.5 text-sm font-bold text-white bg-gradient-to-br from-brand-600 to-brand-500 rounded-xl hover:from-brand-700 hover:to-brand-600 shadow-sm transition disabled:opacity-40 disabled:cursor-not-allowed"
+            className="w-full inline-flex items-center justify-center gap-2 px-6 py-3.5 text-sm font-bold text-white bg-gradient-to-br from-brand-500 to-brand-600 rounded-xl hover:from-brand-700 hover:to-brand-600 shadow-sm transition disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <Sparkles size={18} /> {effRunning ? 'Generando… (mirá la pill)' : 'Generar documentación completa'}
           </button>
@@ -517,7 +517,7 @@ export default function MarketingSection({ addToast, bgAnalysis, onStart, onCanc
                 </div>
                 <div className="h-2 bg-brand-200 dark:bg-brand-900/50 rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-gradient-to-r from-brand-600 to-brand-500 rounded-full transition-all duration-500"
+                    className="h-full bg-gradient-to-r from-brand-500 to-brand-600 rounded-full transition-all duration-500"
                     style={{ width: `${pct}%` }}
                   />
                 </div>
@@ -598,7 +598,7 @@ export default function MarketingSection({ addToast, bgAnalysis, onStart, onCanc
                   {p.imagen ? (
                     <img src={p.imagen} alt={p.productoNombre} className="w-14 h-14 rounded-lg object-cover bg-gray-100 dark:bg-gray-700 shrink-0 border border-gray-200 dark:border-gray-600" />
                   ) : (
-                    <div className="w-14 h-14 rounded-lg bg-gradient-to-br from-brand-600 to-brand-500 flex items-center justify-center shrink-0">
+                    <div className="w-14 h-14 rounded-lg bg-gradient-to-br from-brand-500 to-brand-600 flex items-center justify-center shrink-0">
                       <Package size={22} className="text-white" />
                     </div>
                   )}
@@ -1074,7 +1074,7 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
               <button
                 onClick={generarHooks}
                 disabled={hooksRunning}
-                className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-gradient-to-br from-brand-600 to-brand-500 rounded-lg hover:from-brand-700 hover:to-brand-600 shadow-sm transition disabled:opacity-40"
+                className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-gradient-to-br from-brand-500 to-brand-600 rounded-lg hover:from-brand-700 hover:to-brand-600 shadow-sm transition disabled:opacity-40"
               >
                 {hooksRunning ? <><Loader2 size={14} className="animate-spin" /> Generando…</> : <><Sparkles size={14} /> {creativos?.fase1 ? 'Regenerar hooks' : 'Generar hooks'}</>}
               </button>

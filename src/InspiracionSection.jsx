@@ -908,7 +908,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
             Limpiar
           </button>
           <button onClick={handleBulkCrear}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-brand-600 to-brand-500 rounded-lg hover:from-brand-700 hover:to-brand-600 transition">
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-brand-600 rounded-lg hover:from-brand-700 hover:to-brand-600 transition">
             <Sparkles size={13} /> Generar {seleccionados.size * (genOpts.n || 2)} creativos
           </button>
         </div>
@@ -1190,7 +1190,7 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
       <div className="flex items-center gap-2.5">
         <div className={`w-9 h-9 rounded-md flex items-center justify-center text-white font-bold text-sm shrink-0 ${
           isCompetidor
-            ? 'bg-gradient-to-br from-brand-600 to-brand-500'
+            ? 'bg-gradient-to-br from-brand-500 to-brand-600'
             : 'bg-gradient-to-br from-amber-400 to-brand-400'
         }`}>
           {brand.nombre?.charAt(0)?.toUpperCase() || '?'}

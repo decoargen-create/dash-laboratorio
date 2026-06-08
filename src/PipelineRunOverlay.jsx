@@ -62,7 +62,7 @@ export default function PipelineRunOverlay() {
           onClick={() => setExpanded(true)}
           className={`flex items-center gap-3 px-4 py-3 rounded-full shadow-lg border transition group ${
             running
-              ? 'bg-gradient-to-r from-brand-600 to-brand-500 border-brand-500 text-white hover:scale-105'
+              ? 'bg-gradient-to-r from-brand-500 to-brand-600 border-brand-500 text-white hover:scale-105'
               : stepsError > 0
                 ? 'bg-amber-50 dark:bg-amber-900/40 border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-100'
                 : 'bg-emerald-50 dark:bg-emerald-900/40 border-emerald-300 dark:border-emerald-700 text-emerald-900 dark:text-emerald-100'
@@ -89,7 +89,7 @@ export default function PipelineRunOverlay() {
         <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl w-[380px] max-h-[70vh] flex flex-col">
           <div className={`px-4 py-3 flex items-center gap-2 rounded-t-xl ${
             running
-              ? 'bg-gradient-to-r from-brand-600 to-brand-500 text-white'
+              ? 'bg-gradient-to-r from-brand-500 to-brand-600 text-white'
               : stepsError > 0
                 ? 'bg-amber-50 dark:bg-amber-900/40 text-amber-900 dark:text-amber-100'
                 : 'bg-emerald-50 dark:bg-emerald-900/40 text-emerald-900 dark:text-emerald-100'
@@ -172,7 +172,7 @@ export default function PipelineRunOverlay() {
             <div className="px-3 py-2 border-t border-gray-100 dark:border-gray-700">
               <button
                 onClick={() => window.dispatchEvent(new CustomEvent('viora-goto-marketing'))}
-                className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-[11px] font-bold text-white bg-gradient-to-br from-brand-600 to-brand-500 rounded hover:from-brand-700 hover:to-brand-600 transition">
+                className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-[11px] font-bold text-white bg-gradient-to-br from-brand-500 to-brand-600 rounded hover:from-brand-700 hover:to-brand-600 transition">
                 <Play size={12} /> Ver resultados en Marketing
               </button>
             </div>

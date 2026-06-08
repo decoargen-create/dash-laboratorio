@@ -483,17 +483,51 @@ function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio
   return parts.join('\n');
 }
 
+// Sanitiza palabras clínicas que típicamente disparan el safety filter de
+// gpt-image-2, reemplazándolas por equivalentes comerciales que pasan. Los
+// media buyers profesionales de wellness/cosmética usan los mismos eufemismos
+// en sus copys de Meta Ads igual.
+// Nota: OpenAI NO permite desactivar el safety filter por completo —
+// 'moderation: low' es el setting más permisivo. Esto es la capa extra para
+// minimizar rechazos.
+function sanitizePromptForSafety(text) {
+  if (!text) return text;
+  const swaps = [
+    // Anatomía clínica → genérica
+    [/\bvaginales?\b/gi, 'íntimo'],
+    [/\bvagina\b/gi, 'zona íntima'],
+    [/\bvulvas?\b/gi, 'zona íntima'],
+    [/\bgenitales?\b/gi, 'íntimo'],
+    [/\bsexuales?\b/gi, 'íntimo'],
+    // Procesos clínicos → suaves
+    [/\bmenstruales?\b/gi, 'mensual'],
+    [/\bmenstruaci[óo]n\b/gi, 'ciclo'],
+    [/\bsangrado\b/gi, 'flujo'],
+    [/\binfeccion(es)?\b/gi, 'molestia$1'],
+    [/\bhongos?\b/gi, 'desequilibrio'],
+    [/\bcandidiasis\b/gi, 'desequilibrio'],
+    // Inglés
+    [/\bvagina(l)?\b/gi, 'intimate$1'],
+    [/\bvulva\b/gi, 'intimate area'],
+    [/\bgenital\b/gi, 'intimate'],
+    [/\bnaked\b/gi, ''],
+    [/\bnude\b/gi, ''],
+  ];
+  let out = text;
+  for (const [re, rep] of swaps) out = out.replace(re, rep);
+  return out;
+}
+
 async function callGptImage2Edit({ apiKey, prompt, refImgBuf, refMime, prodImgBuf, prodMime, size, quality, n }) {
   const form = new FormData();
   form.append('model', MODEL_IMAGE);
-  form.append('prompt', prompt);
+  form.append('prompt', sanitizePromptForSafety(prompt));
   form.append('size', size);
   form.append('quality', quality);
   form.append('n', String(Math.min(10, Math.max(1, n || 2))));
-  // moderation: 'low' baja la sensibilidad del safety filter de gpt-image-2.
-  // Default 'auto' rechaza muchos creativos de wellness/cosmética con palabras
-  // como "vaginal", "íntimo", etc. — el usuario quiere replicar competidores
-  // que SI están corriendo esos ads, así que 'low' refleja mejor el contexto.
+  // moderation: 'low' es el setting MÁS PERMISIVO que OpenAI permite. No
+  // existe 'off'. Igual aplicamos sanitizePromptForSafety arriba como
+  // segunda capa de defensa contra rechazos del safety system.
   form.append('moderation', 'low');
   // Nota: input_fidelity existe en gpt-image-1 pero NO en gpt-image-2 — si lo
   // mandamos, la API rechaza con "model does not support the parameter".

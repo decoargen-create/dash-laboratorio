@@ -29,6 +29,7 @@ import ConsultoriaSection from './Consultoria.jsx';
 import { PipelineRunProvider } from './PipelineRunContext.jsx';
 import PipelineRunOverlay from './PipelineRunOverlay.jsx';
 import ExecutionsTray from './ExecutionsTray.jsx';
+import BalanceBar from './BalanceBar.jsx';
 import { generateCSV, downloadCSV, parseCSV, toNumber, toBool } from './csv.js';
 import { loadVioraState, saveVioraState, clearVioraState, createBackup } from './vioraStorage.js';
 
@@ -8209,6 +8210,7 @@ function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, textSize, set
         </div>
       </div>
       <div className="flex items-center gap-2 shrink-0">
+        <BalanceBar />
         <button
           onClick={onOpenCommand}
           className="hidden sm:inline-flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700 hover:border-pink-300 dark:hover:border-pink-600 hover:text-gray-900 dark:hover:text-gray-100 transition-all duration-200 hover:shadow group"

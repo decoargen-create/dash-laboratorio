@@ -490,6 +490,11 @@ async function callGptImage2Edit({ apiKey, prompt, refImgBuf, refMime, prodImgBu
   form.append('size', size);
   form.append('quality', quality);
   form.append('n', String(Math.min(10, Math.max(1, n || 2))));
+  // moderation: 'low' baja la sensibilidad del safety filter de gpt-image-2.
+  // Default 'auto' rechaza muchos creativos de wellness/cosmética con palabras
+  // como "vaginal", "íntimo", etc. — el usuario quiere replicar competidores
+  // que SI están corriendo esos ads, así que 'low' refleja mejor el contexto.
+  form.append('moderation', 'low');
   // Nota: input_fidelity existe en gpt-image-1 pero NO en gpt-image-2 — si lo
   // mandamos, la API rechaza con "model does not support the parameter".
   // Para que respete las imágenes input confiamos en el prompt explícito

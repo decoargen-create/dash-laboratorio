@@ -11,7 +11,7 @@
 // Cache: 30 min en localStorage. Si falla la API, devolvemos el último valor
 // cacheado (mejor mostrar algo viejo que nada).
 
-const CACHE_KEY = 'viora-dolar-cripto-v1';
+const CACHE_KEY = 'adslab-dolar-cripto-v1';
 const TTL_MS = 30 * 60 * 1000; // 30 min
 
 let inflight = null;

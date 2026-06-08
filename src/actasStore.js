@@ -2,7 +2,7 @@
 // por cliente. Cada acta guarda la transcripción original + el resultado de la
 // IA, así se puede reabrir, re-descargar o borrar más tarde.
 
-const KEY = 'viora-actas-v1';
+const KEY = 'adslab-actas-v1';
 
 export function clientKeyOf(client) {
   const c = (client || '').trim();

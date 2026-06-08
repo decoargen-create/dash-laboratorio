@@ -29,8 +29,8 @@ import { saveReferencial } from './galeriaReferenciales.js';
 import { enqueueGenerate as enqueueGenerarCreativo } from './creativoGeneratorStore.js';
 import { startExecution, updateExecution, finishExecution } from './executionsStore.js';
 
-const PRODUCTOS_KEY = 'viora-marketing-productos-v1';
-const ACTIVE_PRODUCT_KEY = 'viora-marketing-bandeja-active-product';
+const PRODUCTOS_KEY = 'adslab-marketing-productos-v1';
+const ACTIVE_PRODUCT_KEY = 'adslab-marketing-bandeja-active-product';
 const SIN_PRODUCTO_ID = '__sin_producto__';
 
 function loadProductos() {
@@ -1465,8 +1465,8 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
   // Columnas custom del kanban por producto — Trello-like.
   // Las 4 columnas base (pendiente, en_uso, usada, archivada) siempre existen.
   // El user puede agregar columnas extra Y renombrar las base (persistidas).
-  const customColsKey = activeProductoId ? `viora-kanban-cols-${activeProductoId}` : null;
-  const baseTitlesKey = activeProductoId ? `viora-kanban-base-titles-${activeProductoId}` : null;
+  const customColsKey = activeProductoId ? `adslab-kanban-cols-${activeProductoId}` : null;
+  const baseTitlesKey = activeProductoId ? `adslab-kanban-base-titles-${activeProductoId}` : null;
   const DEFAULT_BASE_TITLES = { pendiente: 'Pendientes', en_uso: 'En uso', usada: 'Usadas', archivada: 'Archivadas' };
   const [customColumns, setCustomColumns] = useState(() => {
     if (!customColsKey) return [];

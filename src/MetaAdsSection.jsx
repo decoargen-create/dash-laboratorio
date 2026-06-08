@@ -18,8 +18,8 @@ import {
 } from 'lucide-react';
 import CreativeRefreshPanel from './CreativeRefreshPanel.jsx';
 
-const PRODUCTOS_KEY = 'viora-marketing-productos-v1';
-const ACTIVE_KEY = 'viora-marketing-meta-ads-active-product';
+const PRODUCTOS_KEY = 'adslab-marketing-productos-v1';
+const ACTIVE_KEY = 'adslab-marketing-meta-ads-active-product';
 
 function loadProductos() {
   try {

@@ -10,7 +10,7 @@
 //     IG Business vinculadas a las Pages del user del Business Manager.
 //   - threshold de likes (para pausar viejos), pinnedPosts, webhookUrl (opcionales)
 //
-// Storage: localStorage clave `viora-auto-ig-automations-v1`.
+// Storage: localStorage clave `adslab-auto-ig-automations-v1`.
 // Shape:
 //   [{ id, name, adAccountId, adAccountName, campaignId, campaignName,
 //      baseAdsetId, baseAdsetName, igUrl, igUsername, igUserId, pageId,
@@ -26,8 +26,8 @@ import {
   ChevronLeft, Link2, RefreshCw, ExternalLink, Search, ChevronDown,
 } from 'lucide-react';
 
-const STORAGE_KEY = 'viora-auto-ig-automations-v1';
-const CACHE_PREFIX = 'viora-auto-ig-cache-';
+const STORAGE_KEY = 'adslab-auto-ig-automations-v1';
+const CACHE_PREFIX = 'adslab-auto-ig-cache-';
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 min — balance entre frescura y rate limit
 
 function loadAutomations() {

@@ -126,9 +126,9 @@ async function parseJsonOrThrow(resp, contexto = 'API') {
   return data;
 }
 
-const PRODUCTOS_KEY = 'viora-marketing-productos-v1';
-const ACTIVE_KEY = 'viora-marketing-inspiracion-active-product';
-const brandsKey = (productoId) => `viora-marketing-inspiracion-brands-${productoId}`;
+const PRODUCTOS_KEY = 'adslab-marketing-productos-v1';
+const ACTIVE_KEY = 'adslab-marketing-inspiracion-active-product';
+const brandsKey = (productoId) => `adslab-marketing-inspiracion-brands-${productoId}`;
 
 function loadProductos() {
   try {
@@ -632,12 +632,12 @@ function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, se
   //   list: rows con thumb chico + brand + métricas + acciones inline
   //   table: tabla compacta con columnas para escanear rápido
   const [viewMode, setViewMode] = useState(() => {
-    try { return localStorage.getItem('viora-top10-view') || 'grid'; }
+    try { return localStorage.getItem('adslab-top10-view') || 'grid'; }
     catch { return 'grid'; }
   });
   const setMode = (m) => {
     setViewMode(m);
-    try { localStorage.setItem('viora-top10-view', m); } catch {}
+    try { localStorage.setItem('adslab-top10-view', m); } catch {}
   };
   return (
     <div className="bg-gradient-to-br from-amber-50 to-brand-50 dark:from-amber-950/30 dark:to-brand-950/30 border border-amber-200 dark:border-amber-800 rounded-xl overflow-hidden">
@@ -995,7 +995,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   // pierdan entre sesiones.
   const [genOpts, setGenOpts] = useState(() => {
     try {
-      const raw = localStorage.getItem('viora-marketing-gen-opts');
+      const raw = localStorage.getItem('adslab-marketing-gen-opts');
       const parsed = raw ? JSON.parse(raw) : null;
       // MIGRACIÓN: si tenían cacheado 2048x2048 del default viejo, los
       // bajamos a 1024x1024 — 2K tarda 150-250s en gpt-image-2 high y
@@ -1006,7 +1006,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     } catch { return { n: 2, size: '1024x1024', quality: 'high' }; }
   });
   useEffect(() => {
-    try { localStorage.setItem('viora-marketing-gen-opts', JSON.stringify(genOpts)); } catch {}
+    try { localStorage.setItem('adslab-marketing-gen-opts', JSON.stringify(genOpts)); } catch {}
   }, [genOpts]);
   // Estimación de costo por imagen alineada con backend (_costs.js). Incluye
   // size porque 2048×2048 es ~4× más caro que 1024×1024 — antes lo ignorábamos
@@ -1024,7 +1024,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   // Vision por completo. Se persiste en localStorage para sobrevivir refresh.
   const [skeletonCache, setSkeletonCache] = useState(() => {
     try {
-      const raw = localStorage.getItem('viora-marketing-skeleton-cache');
+      const raw = localStorage.getItem('adslab-marketing-skeleton-cache');
       return raw ? JSON.parse(raw) : {};
     } catch { return {}; }
   });
@@ -1044,12 +1044,12 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       } else {
         next = { ...prev, [adId]: skel };
       }
-      try { localStorage.setItem('viora-marketing-skeleton-cache', JSON.stringify(next)); }
+      try { localStorage.setItem('adslab-marketing-skeleton-cache', JSON.stringify(next)); }
       catch (err) {
         // Si todavía falla (quota), purgamos a la mitad y reintentamos.
         const halved = Object.fromEntries(Object.entries(next).slice(-Math.floor(MAX_ENTRIES / 2)));
         halved[adId] = skel;
-        try { localStorage.setItem('viora-marketing-skeleton-cache', JSON.stringify(halved)); } catch {}
+        try { localStorage.setItem('adslab-marketing-skeleton-cache', JSON.stringify(halved)); } catch {}
         return halved;
       }
       return next;

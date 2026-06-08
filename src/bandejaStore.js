@@ -17,7 +17,7 @@
 //       'diferenciacion' (azul, nadie lo hace) | 'desde_cero' (generado)
 // estado: 'pendiente' | 'en_uso' | 'usada' | 'archivada'
 
-const STORAGE_KEY = 'viora-marketing-bandeja-v1';
+const STORAGE_KEY = 'adslab-marketing-bandeja-v1';
 
 export function loadIdeas() {
   try {

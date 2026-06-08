@@ -10,7 +10,7 @@
 //      como creativo ("publicación existente"), activa, pausa los viejos
 //      con likes ≥ umbral si queda al menos uno activo.
 //
-// Estado por producto en localStorage bajo `viora-creative-refresh-<prodId>`:
+// Estado por producto en localStorage bajo `adslab-creative-refresh-<prodId>`:
 //   {
 //     config: { igId, pageId, campaignId, baseAdsetId, threshold, pinnedPosts, webhookUrl },
 //     state:  { lastPostId, activeAdsets: [{adsetId, postId, postPermalink, createdAt}], history }
@@ -22,7 +22,7 @@ import {
   RefreshCw, Pause, AlertTriangle, Heart, Instagram,
 } from 'lucide-react';
 
-const STATE_PREFIX = 'viora-creative-refresh-';
+const STATE_PREFIX = 'adslab-creative-refresh-';
 
 function loadPersisted(productoId) {
   try {

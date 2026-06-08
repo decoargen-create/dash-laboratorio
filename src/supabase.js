@@ -24,7 +24,7 @@ export const supabase = url && anonKey
         persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: true, // soporta magic links / OAuth callback
-        storageKey: 'viora-supabase-auth-v1',
+        storageKey: 'adslab-supabase-auth-v1',
       },
     })
   : null;

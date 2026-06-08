@@ -3,6 +3,31 @@ import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
 import './index.css'
 
+// Migración soft de localStorage keys: copia todas las viora-* a adslab-*
+// si no existen ya. Se ejecuta antes de cualquier read/write de la app
+// para que los components que ya leen adslab-* encuentren su data del
+// rename anterior. Idempotente — corre cada boot pero no daña nada.
+// No borra las viora-* (rollback fácil si algo sale mal).
+(function migrateLocalStorageKeys() {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    const keysToMigrate = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('viora-')) keysToMigrate.push(k);
+    }
+    for (const oldKey of keysToMigrate) {
+      const newKey = 'adslab-' + oldKey.slice('viora-'.length);
+      if (localStorage.getItem(newKey) == null) {
+        const val = localStorage.getItem(oldKey);
+        if (val != null) localStorage.setItem(newKey, val);
+      }
+    }
+  } catch (err) {
+    console.warn('[localStorage migration] error:', err.message);
+  }
+})();
+
 // Query param especial para reset: si entrás con ?reset=1 (o /acceso?reset=1)
 // limpiamos TODO el localStorage y recargamos. Útil cuando el PWA quedó con
 // state viejo incompatible y el user no puede llegar al botón de reset.

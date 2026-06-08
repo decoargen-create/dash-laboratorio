@@ -9,7 +9,7 @@ import { saveReferencialCloud } from './galeriaReferencialesCloud.js';
 
 const IDB_NAME = 'lab-viora-referenciales';
 const IDB_STORE = 'referenciales';
-const MARKER_KEY = 'viora-creativos-cloud-migrated-v1';
+const MARKER_KEY = 'adslab-creativos-cloud-migrated-v1';
 
 // Lee todos los creativos del IDB (full data, incluyendo imageBase64).
 async function readAllIDBReferenciales() {

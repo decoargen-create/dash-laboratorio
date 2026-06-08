@@ -294,7 +294,7 @@ export default function ConsultoriaSection({ addToast }) {
 
   // Actas auto-generadas desde Drive (sync). Cacheadas en localStorage para
   // mostrarlas al instante; la fuente de verdad es Drive.
-  const SYNC_CACHE = 'viora-actas-synced-v1';
+  const SYNC_CACHE = 'adslab-actas-synced-v1';
   const [syncedActas, setSyncedActas] = useState(() => {
     try { return JSON.parse(localStorage.getItem(SYNC_CACHE) || '[]'); } catch { return []; }
   });
@@ -329,7 +329,7 @@ export default function ConsultoriaSection({ addToast }) {
     let cancel = false;
     async function sync() {
       let session = '';
-      try { session = localStorage.getItem('viora-session') || ''; } catch {}
+      try { session = localStorage.getItem('adslab-session') || ''; } catch {}
       if (!session) return;
       setSyncState('syncing');
       setSyncMsg('Sincronizando con Drive…');

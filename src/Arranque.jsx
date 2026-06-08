@@ -43,7 +43,7 @@ const STAGE_LABEL = {
   product_aware: 'Product-Aware',
 };
 
-const GEN_CONFIG_KEY = 'viora-marketing-gen-config-v1';
+const GEN_CONFIG_KEY = 'adslab-marketing-gen-config-v1';
 const DEFAULT_GEN_CONFIG = {
   limiteDiario: 50,
   formatoStatic: 60, // %
@@ -55,11 +55,11 @@ const DEFAULT_GEN_CONFIG = {
 // corrida. El user igual controla el volumen real con el límite diario.
 const MAX_IDEAS_PER_RUN = 200;
 
-const PRODUCTOS_KEY = 'viora-marketing-productos-v1';
-const COMPETIDORES_KEY = 'viora-marketing-competidores-v1';
-const META_ACCOUNT_KEY = 'viora-marketing-meta-account-v1';
-const LAST_RUN_KEY = 'viora-marketing-last-pipeline-run-v1';
-const RUN_HISTORY_KEY = 'viora-marketing-run-history-v1';
+const PRODUCTOS_KEY = 'adslab-marketing-productos-v1';
+const COMPETIDORES_KEY = 'adslab-marketing-competidores-v1';
+const META_ACCOUNT_KEY = 'adslab-marketing-meta-account-v1';
+const LAST_RUN_KEY = 'adslab-marketing-last-pipeline-run-v1';
+const RUN_HISTORY_KEY = 'adslab-marketing-run-history-v1';
 // Cap del historial guardado — cada entry tiene los steps + stats + cost.
 // 20 corridas cubren ~3 semanas a 1 run/día, sin explotar localStorage.
 const RUN_HISTORY_CAP = 20;
@@ -67,7 +67,7 @@ const RUN_HISTORY_CAP = 20;
 // encontramos pero `running=false`, significa que el user cerró/refreshó la
 // pestaña a medio run. Sirve para no dejar al user sin aviso de que quedaron
 // docs/ads/análisis a medias en el storage.
-const PIPELINE_RUNNING_KEY = 'viora-marketing-pipeline-running-v1';
+const PIPELINE_RUNNING_KEY = 'adslab-marketing-pipeline-running-v1';
 
 function loadJSON(key, fallback) {
   try {
@@ -80,7 +80,7 @@ function saveJSON(key, value) {
   try {
     localStorage.setItem(key, JSON.stringify(value));
     // Notificar al sync de Marketing si la key es relevante (productos o brands).
-    if (key.startsWith('viora-marketing-')) {
+    if (key.startsWith('adslab-marketing-')) {
       try { window.dispatchEvent(new CustomEvent('viora:marketing-storage-changed', { detail: { key } })); } catch {}
     }
     return true;
@@ -93,7 +93,7 @@ function saveJSON(key, value) {
       try {
         // Notificamos vía CustomEvent así el componente puede mostrar toast
         // sin tener que pasar `addToast` a esta función pura.
-        window.dispatchEvent(new CustomEvent('viora-storage-quota-exceeded', { detail: { key } }));
+        window.dispatchEvent(new CustomEvent('adslab-storage-quota-exceeded', { detail: { key } }));
       } catch {}
     }
     return false;
@@ -380,7 +380,7 @@ function RunHistoryCard({ history, onClear }) {
 
 function TabsGuide() {
   const [hidden, setHidden] = useState(() => {
-    try { return localStorage.getItem('viora-tabs-guide-hidden') === '1'; } catch { return false; }
+    try { return localStorage.getItem('adslab-tabs-guide-hidden') === '1'; } catch { return false; }
   });
   if (hidden) return null;
   return (
@@ -390,7 +390,7 @@ function TabsGuide() {
         <strong>Cómo va el flujo:</strong> ⚙️ Setup (cargá producto + competidores) → ▶️ Correr pipeline → 📥 Bandeja (revisá las ideas y generá el creativo en cada una) → 🤖 Copiloto para pedir más.
       </span>
       <button
-        onClick={() => { try { localStorage.setItem('viora-tabs-guide-hidden', '1'); } catch {} setHidden(true); }}
+        onClick={() => { try { localStorage.setItem('adslab-tabs-guide-hidden', '1'); } catch {} setHidden(true); }}
         className="shrink-0 text-brand-400 hover:text-brand-700 dark:hover:text-brand-200 transition"
         title="Ocultar guía"
       >
@@ -625,15 +625,15 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   const [activeProductoId, setActiveProductoId] = useState(null);
   useEffect(() => {
     try {
-      if (activeProductoId) localStorage.setItem('viora-marketing-active-product', activeProductoId);
-      else localStorage.removeItem('viora-marketing-active-product');
+      if (activeProductoId) localStorage.setItem('adslab-marketing-active-product', activeProductoId);
+      else localStorage.removeItem('adslab-marketing-active-product');
     } catch {}
   }, [activeProductoId]);
 
   // Tab activo dentro del workspace del producto (Setup / Bandeja / Inspiración / Creativos).
   // Se persiste por producto para que volver al mismo producto te lleve al
   // último tab que estabas viendo.
-  const productoTabKey = activeProductoId ? `viora-marketing-prod-tab-${activeProductoId}` : null;
+  const productoTabKey = activeProductoId ? `adslab-marketing-prod-tab-${activeProductoId}` : null;
   const [productoTab, setProductoTab] = useState('setup');
   // Bumpeamos esta key para forzar el remount de la Bandeja embebida cuando
   // el generador rápido inserta ideas — así aparecen sin recargar la página.
@@ -782,7 +782,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // corregía después → flicker en pantalla con un número que no se respeta.
   const [ideasToday, setIdeasToday] = useState(() => {
     try {
-      const aid = localStorage.getItem('viora-marketing-active-product');
+      const aid = localStorage.getItem('adslab-marketing-active-product');
       return countIdeasGeneradorHoy(aid || null);
     } catch { return 0; }
   });
@@ -842,8 +842,8 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         message: `Storage del navegador lleno (clave: ${e.detail?.key || '—'}). Limpiá historial o productos viejos para liberar espacio.`,
       });
     };
-    window.addEventListener('viora-storage-quota-exceeded', onQuota);
-    return () => window.removeEventListener('viora-storage-quota-exceeded', onQuota);
+    window.addEventListener('adslab-storage-quota-exceeded', onQuota);
+    return () => window.removeEventListener('adslab-storage-quota-exceeded', onQuota);
   }, [addToast]);
 
   // Detectar pipeline a medias: si al montar Arranque encontramos el marker

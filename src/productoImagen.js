@@ -2,8 +2,8 @@
 // de creativos (gpt-image-2 /images/edits). Se guarda comprimida en
 // localStorage por producto.
 
-const KEY = (id) => `viora-producto-img-${id}`;
-const ACCENT_KEY = (id) => `viora-producto-accent-${id}`;
+const KEY = (id) => `adslab-producto-img-${id}`;
+const ACCENT_KEY = (id) => `adslab-producto-accent-${id}`;
 
 export function getProductoImagen(id) {
   if (!id) return null;

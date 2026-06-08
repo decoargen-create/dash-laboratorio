@@ -113,8 +113,17 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   const [adsByBrand, setAdsByBrand] = useState({});
   // ad.id → bool, true mientras se adapta al producto (loading).
   const [adaptingAdIds, setAdaptingAdIds] = useState(new Set());
-  // Multi-select para generar creativos referenciales en bulk (max 5).
+  // Multi-select para bulk. Set preserva el orden de inserción → podemos
+  // mostrar 1, 2, 3... en cada thumb según el orden en que el user clickeó.
   const [seleccionados, setSeleccionados] = useState(new Set());
+  // Map { adId → 1-based selection index } recomputado cada vez que cambia
+  // la selección. Lo pasamos a cada AdThumb para que muestre el número.
+  const selectedOrder = React.useMemo(() => {
+    const m = new Map();
+    let i = 0;
+    for (const adId of seleccionados) m.set(adId, ++i);
+    return m;
+  }, [seleccionados]);
   const [creandoAdIds, setCreandoAdIds] = useState(new Set());
   const [showGaleria, setShowGaleria] = useState(false);
   // Opciones de generación (las elige el usuario en la barra de bulk o en
@@ -348,6 +357,9 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
             nombre: producto.nombre,
             descripcion: producto.descripcion,
             research: producto.docs?.research,
+            // Ofertas y claims reales del usuario (declarados en Setup). Si está vacío,
+            // Vision removerá cualquier promo/claim del ad ref (más conservador).
+            offerBrief: producto.ofertasReales || producto.docs?.offerBrief || '',
           },
           inspiracion: {
             brandNombre,
@@ -1026,6 +1038,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                 adaptingAdIds={adaptingAdIds}
                 creandoAdIds={creandoAdIds}
                 seleccionados={seleccionados}
+                selectedOrder={selectedOrder}
                 progressById={progressById}
                 onAdapt={(brandNombre, ad) => handleAdapt(brandNombre, ad)}
                 onCrearReferencial={(brandNombre, ad) => crearReferencialDeAd(brandNombre, ad)}
@@ -1103,6 +1116,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                     adaptingAdIds={adaptingAdIds}
                     creandoAdIds={creandoAdIds}
                     seleccionados={seleccionados}
+                    selectedOrder={selectedOrder}
                     progressById={progressById}
                     onScrape={() => b.isCompetidor ? handleScrapeCompetidor(b) : handleScrapeBrand(b)}
                     onAdapt={(ad) => handleAdapt(b.nombre, ad)}
@@ -1120,7 +1134,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   );
 }
 
-function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, seleccionados, progressById, onScrape, onAdapt, onCrearReferencial, onToggleSelect, onRemove }) {
+function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, progressById, onScrape, onAdapt, onCrearReferencial, onToggleSelect, onRemove }) {
   const isCompetidor = !!brand.isCompetidor;
   return (
     <div className="group bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 hover:border-amber-300 dark:hover:border-amber-700 transition">
@@ -1195,6 +1209,7 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
           adaptingAdIds={adaptingAdIds}
           creandoAdIds={creandoAdIds}
           seleccionados={seleccionados}
+          selectedOrder={selectedOrder}
           progressById={progressById}
           onAdapt={onAdapt}
           onCrearReferencial={onCrearReferencial}
@@ -1205,7 +1220,7 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
   );
 }
 
-function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccionados, progressById, onAdapt, onCrearReferencial, onToggleSelect }) {
+function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, progressById, onAdapt, onCrearReferencial, onToggleSelect }) {
   const [showRepeated, setShowRepeated] = useState(false);
   const fresh = ads.filter(a => a.isFresh !== false);
   const repeated = ads.filter(a => a.isFresh === false);
@@ -1228,6 +1243,7 @@ function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccion
                 adapting={adaptingAdIds?.has(ad.id)}
                 creando={creandoAdIds?.has(ad.id)}
                 selected={seleccionados?.has(ad.id)}
+                selectionIndex={selectedOrder?.get(ad.id) || null}
                 progress={progressById?.[ad.id]}
                 onAdapt={onAdapt ? () => onAdapt(ad) : null}
                 onCrearReferencial={onCrearReferencial ? () => onCrearReferencial(ad) : null}
@@ -1267,6 +1283,7 @@ function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccion
                   adapting={adaptingAdIds?.has(ad.id)}
                   creando={creandoAdIds?.has(ad.id)}
                   selected={seleccionados?.has(ad.id)}
+                  selectionIndex={selectedOrder?.get(ad.id) || null}
                   onAdapt={onAdapt ? () => onAdapt(ad) : null}
                   onCrearReferencial={onCrearReferencial ? () => onCrearReferencial(ad) : null}
                   onToggleSelect={onToggleSelect ? () => onToggleSelect(ad.id) : null}
@@ -1392,7 +1409,7 @@ function BulkProgressBar({ state, onClose }) {
 // multiplatform + pageLikeCount + penalty pause early), y los muestra en una
 // strip horizontal. Cada item es un AdThumb con sus acciones normales
 // (Crear creativo, + ideas en Bandeja, multi-select).
-function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, progressById, onAdapt, onCrearReferencial, onToggleSelect }) {
+function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, progressById, onAdapt, onCrearReferencial, onToggleSelect }) {
   const [expanded, setExpanded] = useState(true);
   return (
     <div className="bg-gradient-to-br from-amber-50 to-brand-50 dark:from-amber-950/30 dark:to-brand-950/30 border border-amber-200 dark:border-amber-800 rounded-xl overflow-hidden">
@@ -1431,6 +1448,7 @@ function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, pr
                   adapting={adaptingAdIds?.has(ad.id)}
                   creando={creandoAdIds?.has(ad.id)}
                   selected={seleccionados?.has(ad.id)}
+                  selectionIndex={selectedOrder?.get(ad.id) || null}
                   progress={progressById?.[ad.id]}
                   onAdapt={onAdapt ? () => onAdapt(brandNombre, ad) : null}
                   onCrearReferencial={onCrearReferencial ? () => onCrearReferencial(brandNombre, ad) : null}
@@ -1456,7 +1474,7 @@ function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, pr
   );
 }
 
-function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = false, selected = false, onAdapt, onCrearReferencial, onToggleSelect, progress = null }) {
+function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = false, selected = false, selectionIndex = null, onAdapt, onCrearReferencial, onToggleSelect, progress = null }) {
   const cdnThumb = ad.imageUrls?.[0];
   const fbUrl = ad.snapshotUrl;
   // Si tenemos el ad cacheado en IndexedDB (sobreviven el TTL de 24h del CDN),
@@ -1503,18 +1521,20 @@ function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = f
         <div className="absolute top-1 right-7 w-1.5 h-1.5 rounded-full bg-emerald-400/80 opacity-0 group-hover:opacity-100 transition" title="Imagen cacheada localmente" />
       )}
 
-      {/* Checkbox de selección — siempre visible si está seleccionado, sino on-hover. */}
+      {/* Selector numerado — siempre visible (más prominente que el checkbox).
+          Cuando seleccionás muestra el ORDEN (1, 2, 3...) según el orden en
+          que clickeaste. Sin selección, muestra un + suave. */}
       {onToggleSelect && (
         <button
           onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggleSelect(); }}
-          className={`absolute top-1 left-1 w-5 h-5 rounded flex items-center justify-center transition ${
+          className={`absolute top-1.5 left-1.5 z-10 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all shadow-md ${
             selected
-              ? 'bg-brand-500 text-white opacity-100'
-              : 'bg-white/90 dark:bg-gray-800/90 border border-gray-300 dark:border-gray-600 text-transparent opacity-0 group-hover:opacity-100 hover:border-brand-500'
+              ? 'bg-brand-600 text-white scale-110 ring-2 ring-white dark:ring-gray-900'
+              : 'bg-white/90 dark:bg-gray-900/90 text-gray-400 dark:text-gray-500 hover:bg-brand-50 hover:text-brand-600 dark:hover:bg-brand-900/40 dark:hover:text-brand-300 hover:scale-110 opacity-70 group-hover:opacity-100'
           }`}
-          title={selected ? 'Deseleccionar' : 'Seleccionar para bulk'}
+          title={selected ? `Seleccionado #${selectionIndex} — click para deseleccionar` : 'Click para seleccionar'}
         >
-          {selected && <Check size={12} />}
+          {selected ? (selectionIndex || <Check size={14} />) : <Plus size={14} />}
         </button>
       )}
 

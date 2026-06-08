@@ -640,6 +640,44 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     if (productoTabKey) try { localStorage.setItem(productoTabKey, productoTab); } catch {}
   }, [productoTab, productoTabKey]);
 
+  // Sync del contexto del producto activo + lista para que el sidebar de
+  // App.jsx pueda renderizar el nav vertical estilo Apify (lista de productos
+  // con su set de tabs adentro del activo). Usamos eventos en lugar de prop
+  // drilling para no tener que tocar 5 componentes intermedios.
+  useEffect(() => {
+    try {
+      window.dispatchEvent(new CustomEvent('viora:product-ctx', {
+        detail: {
+          productos: productos.map(p => ({ id: String(p.id), nombre: p.nombre || `Producto ${p.id}` })),
+          activeProductoId: activeProductoId != null ? String(activeProductoId) : null,
+          activeTab: productoTab,
+        },
+      }));
+    } catch {}
+    return () => {
+      try { window.dispatchEvent(new CustomEvent('viora:product-ctx-clear')); } catch {}
+    };
+  }, [productos, activeProductoId, productoTab]);
+
+  // Listener: el sidebar dispara 'viora:product-select' cuando el user clickea
+  // otro producto en el menú lateral. Cambiamos el active acá.
+  useEffect(() => {
+    const onSelect = (e) => {
+      const id = e?.detail?.productoId;
+      if (id != null) setActiveProductoId(String(id));
+    };
+    const onTab = (e) => {
+      const tab = e?.detail?.tab;
+      if (tab) setProductoTab(tab);
+    };
+    window.addEventListener('viora:product-select', onSelect);
+    window.addEventListener('viora:product-tab', onTab);
+    return () => {
+      window.removeEventListener('viora:product-select', onSelect);
+      window.removeEventListener('viora:product-tab', onTab);
+    };
+  }, []);
+
   // Cuando estamos parados en tab Setup, el stepper inline ya muestra el
   // progreso detallado del pipeline — el pill flotante sería redundante.
   // En cualquier otro tab (o sin producto activo), dejamos el pill visible.

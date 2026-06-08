@@ -64,6 +64,25 @@ export function finishExecution(id, { ok = true, message = '', cost = 0 } = {}) 
   exec.cost = Number(cost) || 0;
   emit();
 
+  // Persiste en activityLog para que el user lo pueda revisar después.
+  // Import dinámico para evitar dependencia circular si algún día activityLog
+  // necesita algo del executionsStore.
+  import('./activityLogStore.js').then(mod => {
+    try {
+      mod.logActivity({
+        id: exec.id,
+        label: exec.label,
+        sublabel: exec.sublabel,
+        kind: exec.kind,
+        status: exec.status,
+        message: exec.message,
+        cost: exec.cost,
+        durationMs: (exec.finishedAt || Date.now()) - exec.startedAt,
+        finishedAt: new Date(exec.finishedAt).toISOString(),
+      });
+    } catch {}
+  }).catch(() => {});
+
   // Auto-dismiss después de 3s si OK, 12s si error (le da tiempo al user
   // a leer el mensaje). El user igual puede cerrarlo manual desde el tray.
   setTimeout(() => {

@@ -40,7 +40,11 @@ import GaleriaReferencialesModal from './GaleriaReferencialesModal.jsx';
 // Con concurrencia 5 paralela y n=2 fijo, 10 ads × 2 variantes = 20 imágenes
 // en ~3 min, costo ~$3.60.
 const MAX_SELECCIONADOS = 10;
-const BULK_CONCURRENCY = 5;
+// Bajamos de 5 a 3 paralelos — gpt-image-2 tier 1 = 5 RPM, queremos margen
+// para no triggear el rate limit. El endpoint igual hace auto-retry con
+// backoff (15s, 30s) si OpenAI tira 429, así que los pico que sí lleguen
+// los salva transparente.
+const BULK_CONCURRENCY = 3;
 
 // Extrae una keyword sensata desde una landing URL — preferimos el hostname
 // COMPLETO con www. si está, porque eso es lo que pegarías a mano en la

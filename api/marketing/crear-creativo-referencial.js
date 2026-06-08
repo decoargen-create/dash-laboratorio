@@ -518,48 +518,62 @@ function sanitizePromptForSafety(text) {
   return out;
 }
 
-async function callGptImage2Edit({ apiKey, prompt, refImgBuf, refMime, prodImgBuf, prodMime, size, quality, n }) {
+// Construye la FormData para gpt-image-2 — extraído para reusar en retries.
+function buildEditForm({ prompt, refImgBuf, refMime, prodImgBuf, prodMime, size, quality, n }) {
   const form = new FormData();
   form.append('model', MODEL_IMAGE);
   form.append('prompt', sanitizePromptForSafety(prompt));
   form.append('size', size);
   form.append('quality', quality);
   form.append('n', String(Math.min(10, Math.max(1, n || 2))));
-  // moderation: 'low' es el setting MÁS PERMISIVO que OpenAI permite. No
-  // existe 'off'. Igual aplicamos sanitizePromptForSafety arriba como
-  // segunda capa de defensa contra rechazos del safety system.
   form.append('moderation', 'low');
-  // Nota: input_fidelity existe en gpt-image-1 pero NO en gpt-image-2 — si lo
-  // mandamos, la API rechaza con "model does not support the parameter".
-  // Para que respete las imágenes input confiamos en el prompt explícito
-  // ("KEEP its shape, color, label IDENTICAL", "do NOT redraw the label").
-  // IMAGE 1 — la ref del competidor (composición a clonar)
   form.append('image[]', new Blob([refImgBuf], { type: refMime }), 'reference.' + extForMime(refMime));
-  // IMAGE 2 — el producto del usuario (objeto a respetar)
   form.append('image[]', new Blob([prodImgBuf], { type: prodMime }), 'producto.' + extForMime(prodMime));
+  return form;
+}
 
-  const resp = await fetch('https://api.openai.com/v1/images/edits', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${apiKey}` },
-    body: form,
-  });
-  const raw = await resp.text();
-  let data;
-  try { data = JSON.parse(raw); } catch {
-    throw new Error(`OpenAI no devolvió JSON (HTTP ${resp.status}): ${raw.slice(0, 200)}`);
-  }
-  if (!resp.ok) {
+async function callGptImage2Edit(params) {
+  const { apiKey } = params;
+  // Auto-retry contra rate limit: hasta 2 reintentos con backoff 15s, 30s.
+  // OpenAI gpt-image-2 tier 1 = 5 RPM. Cuando el bulk hace burst de calls
+  // paralelos, algunos vuelven 429 — reintentar suele bastar.
+  const RETRY_DELAYS = [15000, 30000];
+  let lastErr = null;
+  for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
+    const form = buildEditForm(params);
+    const resp = await fetch('https://api.openai.com/v1/images/edits', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}` },
+      body: form,
+    });
+    const raw = await resp.text();
+    let data;
+    try { data = JSON.parse(raw); } catch {
+      throw new Error(`OpenAI no devolvió JSON (HTTP ${resp.status}): ${raw.slice(0, 200)}`);
+    }
+    if (resp.ok) {
+      const imagenes = (data?.data || []).map(d => d.b64_json).filter(Boolean);
+      if (imagenes.length === 0) throw new Error('OpenAI no devolvió imágenes (b64_json ausente)');
+      return imagenes;
+    }
     const msg = data?.error?.message || `HTTP ${resp.status}`;
     const code = data?.error?.code || data?.error?.type || '';
-    // Throw con el error code para que el caller pueda hacer fallback a tamaño chico.
-    const err = new Error(`OpenAI rechazó: ${msg}`);
-    err.code = code;
-    err.status = resp.status;
-    throw err;
+    const isRateLimit = resp.status === 429 ||
+                        /rate limit/i.test(msg) ||
+                        /too many requests/i.test(msg);
+    if (isRateLimit && attempt < RETRY_DELAYS.length) {
+      const delay = RETRY_DELAYS[attempt];
+      console.warn(`Rate limit hit. Retry ${attempt + 1}/${RETRY_DELAYS.length} en ${delay}ms`);
+      await new Promise(r => setTimeout(r, delay));
+      continue;
+    }
+    lastErr = new Error(`OpenAI rechazó: ${msg}`);
+    lastErr.code = code;
+    lastErr.status = resp.status;
+    throw lastErr;
   }
-  const imagenes = (data?.data || []).map(d => d.b64_json).filter(Boolean);
-  if (imagenes.length === 0) throw new Error('OpenAI no devolvió imágenes (b64_json ausente)');
-  return imagenes;
+  // Si salió del loop sin return ni throw (todos los retries fallaron por rate limit).
+  throw lastErr || new Error('OpenAI rate limit — agotados los retries');
 }
 
 export default async function handler(req, res) {

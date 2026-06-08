@@ -143,6 +143,1306 @@ function guionToText(g) {
 //     fuerza el producto activo y skipea el selector inicial.
 //   embedded: cuando true, oculta el header con breadcrumb (porque el padre
 //     ya tiene su propio header de producto).
+// =========================================================
+// Componentes internos definidos ANTES del export — fix TDZ
+// para Vite/Rollup en builds minificados.
+// =========================================================
+
+function CounterCard({ label, value, color, accent = false }) {
+  const colors = {
+    gray: 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100',
+    amber: 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200',
+    emerald: 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200',
+  };
+  return (
+    <div className={`p-3 rounded-xl border ${colors[color]} ${accent ? 'ring-2 ring-brand-200 dark:ring-brand-900/40' : ''}`}>
+      <p className="text-[10px] font-bold uppercase tracking-wider opacity-60">{label}</p>
+      <p className="text-2xl font-bold tabular-nums">{value}</p>
+    </div>
+  );
+}
+
+
+function IdeaCard({
+  idea, expanded, onToggle, onEstado, onRemove,
+  editandoNotas, onEditNotas, notasDraft, setNotasDraft, onSaveNotas, onCancelNotas,
+  editandoGuion, onEditGuion, guionDraft, setGuionDraft, onSaveGuion, onCancelGuion,
+  isSelected, onToggleSelect, onFetchPerformance,
+}) {
+  const tipo = TIPO_META[idea.tipo] || TIPO_META.desde_cero;
+  const estado = ESTADO_META[idea.estado] || ESTADO_META.pendiente;
+  const usada = idea.estado === 'usada' || idea.estado === 'archivada';
+
+  return (
+    <div className={`bg-white dark:bg-gray-800 border rounded-xl overflow-hidden shadow-sm transition ${
+      isSelected
+        ? 'border-brand-400 dark:border-brand-600 ring-2 ring-brand-200 dark:ring-brand-900/40'
+        : usada
+          ? 'border-gray-200 dark:border-gray-700 opacity-70'
+          : 'border-gray-200 dark:border-gray-700 hover:border-brand-300 dark:hover:border-brand-700'
+    }`}>
+      {/* Header siempre visible */}
+      <div className="px-4 py-3 flex items-start gap-3">
+        {/* Checkbox para multi-select export */}
+        <button onClick={onToggleSelect}
+          className="mt-1 shrink-0 text-gray-400 hover:text-brand-600 transition"
+          title={isSelected ? 'Deseleccionar' : 'Seleccionar para exportar'}>
+          {isSelected ? <CheckSquare size={16} className="text-brand-600" /> : <Square size={16} />}
+        </button>
+
+        {/* Thumbnail */}
+        {idea.origen?.imageUrl ? (
+          <img src={idea.origen.imageUrl} alt=""
+            className="w-14 h-14 rounded-lg object-cover bg-gray-100 dark:bg-gray-700 shrink-0 border border-gray-200 dark:border-gray-700"
+            onError={e => { e.target.style.display = 'none'; }} />
+        ) : (
+          <div className="w-14 h-14 rounded-lg bg-gradient-to-br from-brand-200 to-brand-300 dark:from-brand-900/40 dark:to-brand-800/40 flex items-center justify-center shrink-0">
+            <span className="text-2xl">{tipo.emoji}</span>
+          </div>
+        )}
+
+        <div className="flex-1 min-w-0">
+          {/* Badges */}
+          <div className="flex items-center gap-1.5 flex-wrap mb-1">
+            <span className={`inline-flex items-center px-1.5 py-0.5 text-[10px] font-bold rounded border ${tipo.color}`}>
+              {tipo.emoji} {tipo.label}
+            </span>
+            <span className={`text-[10px] font-semibold ${estado.color}`}>
+              {estado.icon} {estado.label}
+            </span>
+            {idea.origen?.competidorNombre && (
+              <span className="text-[10px] text-gray-500 dark:text-gray-400">
+                · de {idea.origen.competidorNombre}
+                {idea.origen.daysRunning ? ` · ${idea.origen.daysRunning}d corriendo` : ''}
+              </span>
+            )}
+            {idea.tipo === 'iteracion' && idea.origen?.adNombre && (
+              <span className="text-[10px] text-gray-500 dark:text-gray-400">
+                · itera: <span className="font-semibold text-gray-700 dark:text-gray-300">{idea.origen.adNombre}</span>
+              </span>
+            )}
+            {idea.anguloCategoria && ANGULO_META[idea.anguloCategoria] && (
+              <span className={`inline-flex items-center px-1.5 py-0.5 text-[9px] font-bold rounded ${ANGULO_META[idea.anguloCategoria].color}`}
+                title={`Ángulo estratégico ${idea.anguloCategoria}: ${ANGULO_META[idea.anguloCategoria].label}`}>
+                {ANGULO_META[idea.anguloCategoria].emoji} {idea.anguloCategoria}
+              </span>
+            )}
+            {idea.tipoCampaña && CAMPAÑA_META[idea.tipoCampaña] && (
+              <span className={`inline-flex items-center text-[9px] font-semibold ${CAMPAÑA_META[idea.tipoCampaña].color}`}
+                title={CAMPAÑA_META[idea.tipoCampaña].label}>
+                {CAMPAÑA_META[idea.tipoCampaña].emoji} {idea.tipoCampaña}
+              </span>
+            )}
+            {idea.variableDeTesteo && VARIABLE_META[idea.variableDeTesteo] && (
+              <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-semibold bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 rounded"
+                title={`Variable a testear: ${VARIABLE_META[idea.variableDeTesteo].descripcion}`}>
+                {VARIABLE_META[idea.variableDeTesteo].emoji} testea: {VARIABLE_META[idea.variableDeTesteo].label}
+              </span>
+            )}
+            {idea.metaRiesgo?.tieneRiesgo && (
+              <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-bold bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 rounded"
+                title={`Palabras gatillo de Meta: ${(idea.metaRiesgo.palabras || []).join(', ')}${idea.metaRiesgo.sugerencia ? ' · ' + idea.metaRiesgo.sugerencia : ''}`}>
+                ⚠ Meta
+              </span>
+            )}
+            {idea.hookDuplicado && (
+              <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-semibold bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 rounded"
+                title="Este hook arranca igual que otra idea — considerá reescribirlo para diversificar arquetipos">
+                ⚠ hook similar
+              </span>
+            )}
+            {/* Score del hook (1-10) — Haiku puntúa cada hook después de
+                generarlo. Las <6 quedan marcadas como flojas: el user las
+                puede archivar de un click. Las >=8 son las "fuertes". */}
+            {typeof idea.scoreValue === 'number' && (
+              <span className={`inline-flex items-center px-1.5 py-0.5 text-[9px] font-bold rounded ${
+                idea.lowScore
+                  ? 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300'
+                  : idea.scoreValue >= 8
+                    ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300'
+                    : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+              }`}
+                title={idea.scoreReason ? `Score ${idea.scoreValue}/10 — ${idea.scoreReason}` : `Score ${idea.scoreValue}/10`}>
+                {idea.lowScore ? '🟥' : idea.scoreValue >= 8 ? '🟩' : '⬜'} {idea.scoreValue}/10
+              </span>
+            )}
+            {/* Creencia apalancada — qué creencia del prospect instala/derriba
+                esta pieza. Útil para chequear que la bandeja cubra todas las
+                creencias sin sobre-representar una sola. */}
+            {idea.creenciaApalancada && (
+              <span className="inline-flex items-center max-w-[260px] truncate px-1.5 py-0.5 text-[9px] font-semibold bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 rounded"
+                title={`Creencia que apalanca: ${idea.creenciaApalancada}`}>
+                💭 {idea.creenciaApalancada}
+              </span>
+            )}
+            {idea.formato && (
+              <span className="text-[10px] text-gray-400 ml-auto">
+                {idea.formato === 'video' ? '🎬' : idea.formato === 'static' ? '🖼️' : '📑'} {idea.formato}
+              </span>
+            )}
+          </div>
+
+          {idea.hook ? (
+            <>
+              <p className={`text-sm font-bold leading-snug ${usada ? 'text-gray-500 dark:text-gray-400 line-through' : 'text-gray-900 dark:text-gray-100'}`}>
+                "{idea.hook}"
+              </p>
+              {idea.titulo && (
+                <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 uppercase tracking-wider">
+                  Concepto: {idea.titulo}
+                </p>
+              )}
+            </>
+          ) : (
+            <p className={`text-sm font-semibold ${usada ? 'text-gray-500 dark:text-gray-400 line-through' : 'text-gray-900 dark:text-gray-100'}`}>
+              {idea.titulo}
+            </p>
+          )}
+          {idea.angulo && !expanded && (
+            <p className="text-[11px] text-gray-600 dark:text-gray-400 line-clamp-2 mt-0.5">
+              {idea.angulo}
+            </p>
+          )}
+        </div>
+
+        <div className="shrink-0 flex items-center gap-1">
+          <button onClick={onToggle}
+            className="p-1.5 text-gray-500 hover:text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-900/20 rounded transition"
+            title={expanded ? 'Cerrar' : 'Ver detalle'}>
+            <ChevronDown size={14} className={`transition-transform ${expanded ? 'rotate-180' : ''}`} />
+          </button>
+        </div>
+      </div>
+
+      {/* Detalle expandido — 2 columnas: izquierda = output creativo, derecha = estrategia + contexto */}
+      {expanded && (
+        <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 px-4 py-3">
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+            {/* COLUMNA IZQUIERDA — output creativo (3/5 del espacio) */}
+            <div className="lg:col-span-3 space-y-3">
+              {idea.hook && (
+                <Field label="🎯 Hook" text={idea.hook} highlight />
+              )}
+
+              {/* Prompt listo para pegar en gpt-image-2 — solo si es imagen
+                  o carrusel. El prompt está en castellano argentino y combina
+                  los campos relevantes de la idea en un solo bloque copiable. */}
+              {idea.formato !== 'video' && (idea.hook || idea.descripcionImagen) && (
+                <IdeaImageGenerator idea={idea} />
+              )}
+
+              {/* Para video → brief con guion para mandar a producción
+                  humana. Para imagen/carrusel → panel de generación con
+                  gpt-image-2 (renderiza texto multilingüe bien por sí solo). */}
+              {idea.formato === 'video' ? (
+                <VideoBriefPanel key={idea.id} idea={idea} />
+              ) : (idea.hook || idea.titulo || idea.promptGeneradorImagen || idea.descripcionImagen) ? (
+                <CreativoPanel key={idea.id} idea={idea} />
+              ) : null}
+
+              {(() => { const guionTextoIdea = guionToText(idea.guion); return (guionTextoIdea || editandoGuion) && !/^n\/?a/i.test(guionTextoIdea.trim()) && (
+                <div className="bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700">
+                  <div className="flex items-center justify-between px-3 py-2">
+                    <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
+                      🎬 Guión {idea.formato === 'video' ? '(porteño)' : '(porteño)'}
+                    </p>
+                    {!editandoGuion && onEditGuion && (
+                      <button onClick={onEditGuion}
+                        className="inline-flex items-center gap-1 text-[10px] text-brand-600 hover:text-brand-700 transition">
+                        <Edit3 size={10} /> Editar
+                      </button>
+                    )}
+                  </div>
+                  {editandoGuion ? (
+                    <div className="px-3 pb-3 space-y-1.5">
+                      <textarea value={guionDraft} onChange={e => setGuionDraft(e.target.value)}
+                        rows={8}
+                        placeholder="Guión en porteño — editá beats, VO, acotaciones visuales…"
+                        className="w-full px-2.5 py-1.5 text-xs font-mono bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-md resize-y focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                      <div className="flex gap-1.5 justify-end">
+                        <button onClick={onCancelGuion}
+                          className="px-2.5 py-1 text-[10px] font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 transition">
+                          Cancelar
+                        </button>
+                        <button onClick={onSaveGuion}
+                          className="px-2.5 py-1 text-[10px] font-bold text-white bg-brand-600 rounded hover:bg-brand-700 transition">
+                          Guardar
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="px-3 pb-3 text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{guionTextoIdea}</p>
+                  )}
+                </div>
+              ); })()}
+            </div>
+
+            {/* COLUMNA DERECHA — contexto estratégico + metadata (2/5 del espacio) */}
+            <div className="lg:col-span-2 space-y-3">
+              {/* Visible siempre: ángulo + pain point (los dos datos
+                  estratégicos clave) + riesgo Meta si aplica. */}
+              {idea.angulo && <Field label="📐 Ángulo" text={idea.angulo} />}
+              {idea.painPoint && <Field label="💥 Pain point" text={idea.painPoint} />}
+
+              {idea.metaRiesgo?.tieneRiesgo && (
+                <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md">
+                  <p className="text-[10px] font-bold text-red-800 dark:text-red-300 uppercase tracking-wider mb-1">
+                    ⚠ Riesgo Meta
+                  </p>
+                  {idea.metaRiesgo.palabras?.length > 0 && (
+                    <p className="text-[10px] text-red-700 dark:text-red-400 mb-1">
+                      Palabras: <strong>{idea.metaRiesgo.palabras.join(', ')}</strong>
+                    </p>
+                  )}
+                  {idea.metaRiesgo.sugerencia && (
+                    <p className="text-xs text-red-900 dark:text-red-200">{idea.metaRiesgo.sugerencia}</p>
+                  )}
+                </div>
+              )}
+
+              {/* Detalles estratégicos colapsados — agrupa todo el contexto
+                  secundario (escenario, razonamiento, hipótesis, estilo,
+                  público) en UN solo bloque expandible. Antes esto eran 5
+                  cards sueltas que saturaban el ticket. */}
+              {(idea.origen?.razonamiento || idea.origen?.razonIteracion || idea.escenarioNarrativo || idea.testHipotesis || idea.estiloVisual || idea.publicoSugerido) && (
+                <details className="bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700">
+                  <summary className="cursor-pointer px-3 py-2 text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider hover:bg-gray-50 dark:hover:bg-gray-700/30 rounded-md">
+                    💭 Detalles estratégicos
+                  </summary>
+                  <div className="px-3 pb-3 pt-1 space-y-2.5">
+                    {idea.tipo === 'iteracion' && idea.origen?.razonIteracion && (
+                      <div>
+                        <p className="text-[10px] font-bold text-amber-700 dark:text-amber-300 uppercase tracking-wider mb-0.5">🔄 Por qué iterar</p>
+                        <p className="text-[11px] text-gray-700 dark:text-gray-300">
+                          <span className="font-semibold">Ad base:</span> {idea.origen.adNombre || '(sin nombre)'}
+                        </p>
+                        <p className="text-[11px] text-gray-700 dark:text-gray-300 mt-0.5">{idea.origen.razonIteracion}</p>
+                      </div>
+                    )}
+                    {idea.tipo !== 'iteracion' && idea.origen?.razonamiento && (
+                      <div>
+                        <p className="text-[10px] font-bold text-brand-700 dark:text-brand-300 uppercase tracking-wider mb-0.5">💡 Por qué esta idea</p>
+                        <p className="text-[11px] text-gray-700 dark:text-gray-300">{idea.origen.razonamiento}</p>
+                      </div>
+                    )}
+                    {idea.escenarioNarrativo && (
+                      <div>
+                        <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-0.5">📖 Escenario narrativo</p>
+                        <p className="text-[11px] text-gray-700 dark:text-gray-300">{idea.escenarioNarrativo}</p>
+                      </div>
+                    )}
+                    {idea.testHipotesis && (
+                      <div>
+                        <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-0.5">🔬 Hipótesis a validar</p>
+                        {VARIABLE_META[idea.variableDeTesteo] && (
+                          <p className="text-[10px] text-gray-500 dark:text-gray-400 mb-0.5">
+                            Variable: <strong>{VARIABLE_META[idea.variableDeTesteo].emoji} {VARIABLE_META[idea.variableDeTesteo].label}</strong>
+                          </p>
+                        )}
+                        <p className="text-[11px] text-gray-700 dark:text-gray-300">{idea.testHipotesis}</p>
+                      </div>
+                    )}
+                    {idea.estiloVisual && (
+                      <div>
+                        <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-0.5">🎨 Estilo visual</p>
+                        <p className="text-[11px] text-gray-700 dark:text-gray-300">{idea.estiloVisual}</p>
+                      </div>
+                    )}
+                    {idea.publicoSugerido && (
+                      <div>
+                        <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-0.5">🎯 Público sugerido</p>
+                        <p className="text-[11px] text-gray-700 dark:text-gray-300">{idea.publicoSugerido}</p>
+                      </div>
+                    )}
+                  </div>
+                </details>
+              )}
+
+              {idea.launchedAsAdId && (
+                <div className="p-3 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-md">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <p className="text-[10px] font-bold text-brand-800 dark:text-brand-300 uppercase tracking-wider">
+                      🚀 Performance
+                    </p>
+                    <button onClick={onFetchPerformance}
+                      className="text-[10px] font-semibold text-brand-600 dark:text-brand-400 hover:underline inline-flex items-center gap-1">
+                      <Download size={10} /> Métricas
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-brand-700 dark:text-brand-400 mb-1 font-mono truncate">
+                    Ad: {idea.launchedAsAdName || idea.launchedAsAdId}
+                  </p>
+                  {idea.performance ? (
+                    <div className="grid grid-cols-2 gap-2 mt-2">
+                      <PerformanceStat label="CTR" val={idea.performance.recent?.ctr} fmt={v => `${v.toFixed(2)}%`} />
+                      <PerformanceStat label="ROAS" val={idea.performance.recent?.roas} fmt={v => v.toFixed(2)}
+                        semaforo={v => v >= 2 ? 'good' : v >= 1 ? 'mid' : 'bad'} />
+                      <PerformanceStat label="CPA" val={idea.performance.recent?.cpa} fmt={v => `$${v.toFixed(2)}`} />
+                      <PerformanceStat label="Thumb-stop" val={idea.performance.recent?.thumbStopRate} fmt={v => `${v.toFixed(1)}%`} />
+                      <PerformanceStat label="Impressions" val={idea.performance.recent?.impressions} fmt={v => v.toLocaleString('es-AR')} />
+                      <PerformanceStat label="Compras" val={idea.performance.recent?.purchases} fmt={v => v.toLocaleString('es-AR')} />
+                    </div>
+                  ) : (
+                    <p className="text-[10px] text-brand-700 dark:text-brand-300 italic">
+                      Click "Métricas" para ver cómo rinde.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Sección inferior full-width: notas + acciones */}
+          <div className="mt-4 pt-3 border-t border-gray-200 dark:border-gray-700 space-y-3">
+
+          {/* Notas */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">📓 Notas</p>
+              {!editandoNotas && (
+                <button onClick={onEditNotas}
+                  className="inline-flex items-center gap-1 text-[10px] text-brand-600 hover:text-brand-700 transition">
+                  <Edit3 size={10} /> Editar
+                </button>
+              )}
+            </div>
+            {editandoNotas ? (
+              <div className="space-y-1.5">
+                <textarea value={notasDraft} onChange={e => setNotasDraft(e.target.value)}
+                  rows={3} placeholder="Quién la va a producir, fecha, brief, etc."
+                  className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md resize-y focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                <div className="flex gap-1.5 justify-end">
+                  <button onClick={onCancelNotas}
+                    className="px-2.5 py-1 text-[10px] font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 transition">
+                    Cancelar
+                  </button>
+                  <button onClick={onSaveNotas}
+                    className="px-2.5 py-1 text-[10px] font-bold text-white bg-brand-600 rounded hover:bg-brand-700 transition">
+                    Guardar
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700 px-3 py-2">
+                {idea.notas || <span className="italic text-gray-400">Sin notas todavía.</span>}
+              </p>
+            )}
+          </div>
+
+          {/* Acciones — estado + links */}
+          <div className="flex items-center gap-2 flex-wrap pt-2 border-t border-gray-200 dark:border-gray-700">
+            <EstadoButton active={idea.estado === 'pendiente'} onClick={() => onEstado('pendiente')} icon={<Circle size={10} />} label="Pendiente" />
+            <EstadoButton active={idea.estado === 'en_uso'} onClick={() => onEstado('en_uso')} icon={<CircleDot size={10} />} label="En uso" color="amber" />
+            <EstadoButton active={idea.estado === 'usada'} onClick={() => onEstado('usada')} icon={<Check size={10} />} label="Usada" color="emerald" />
+            <EstadoButton active={idea.estado === 'archivada'} onClick={() => onEstado('archivada')} icon={<Archive size={10} />} label="Archivar" />
+
+            <div className="ml-auto flex items-center gap-2">
+              {idea.origen?.adSnapshotUrl && (
+                <a href={idea.origen.adSnapshotUrl} target="_blank" rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-[10px] text-brand-600 hover:underline">
+                  <ExternalLink size={10} /> Ver ad original
+                </a>
+              )}
+              <button onClick={onRemove}
+                className="p-1 text-gray-400 hover:text-red-600 transition" title="Borrar idea">
+                <Trash2 size={12} />
+              </button>
+            </div>
+          </div>
+        </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+function Field({ label, text, highlight = false }) {
+  return (
+    <div>
+      <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1">{label}</p>
+      <p className={`text-xs leading-relaxed ${
+        highlight
+          ? 'bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-md px-3 py-2 text-brand-900 dark:text-brand-200'
+          : 'text-gray-700 dark:text-gray-300'
+      }`}>{text}</p>
+    </div>
+  );
+}
+
+
+function PerformanceStat({ label, val, fmt, semaforo }) {
+  const v = Number(val);
+  if (val == null || isNaN(v)) {
+    return (
+      <div className="text-[10px]">
+        <p className="text-brand-600 dark:text-brand-400 font-semibold">{label}</p>
+        <p className="text-gray-400 font-mono">—</p>
+      </div>
+    );
+  }
+  const tone = semaforo ? semaforo(v) : null;
+  const toneClass = tone === 'good' ? 'text-emerald-600 dark:text-emerald-400' :
+                    tone === 'mid' ? 'text-amber-600 dark:text-amber-400' :
+                    tone === 'bad' ? 'text-red-600 dark:text-red-400' :
+                    'text-brand-900 dark:text-brand-200';
+  return (
+    <div className="text-[10px]">
+      <p className="text-brand-600 dark:text-brand-400 font-semibold">{label}</p>
+      <p className={`font-mono font-bold ${toneClass}`}>{fmt(v)}</p>
+    </div>
+  );
+}
+
+
+function EstadoButton({ active, onClick, icon, label, color }) {
+  const colors = {
+    amber: active ? 'bg-amber-500 text-white' : 'bg-white dark:bg-gray-700 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800',
+    emerald: active ? 'bg-emerald-500 text-white' : 'bg-white dark:bg-gray-700 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800',
+    default: active ? 'bg-gray-700 dark:bg-gray-200 text-white dark:text-gray-900' : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 border border-gray-300 dark:border-gray-600',
+  };
+  return (
+    <button onClick={onClick}
+      className={`inline-flex items-center gap-1 px-2 py-1 text-[10px] font-semibold rounded transition ${colors[color || 'default']} hover:opacity-90`}>
+      {icon} {label}
+    </button>
+  );
+}
+
+// Vista inicial de Bandeja: grid de productos para elegir uno.
+// Cada card muestra contadores por estado + total. Al final, si hay ideas
+// sin productoId (legacy, de antes del multi-producto), se muestra un bucket
+// "Sin producto asignado" para no perderlas de vista.
+
+function ProductoSelectorView({ productos, ideas, onSelect }) {
+  // Contamos ideas por producto + un bucket "sin producto" para legacy.
+  const countsByProducto = new Map();
+  const countsSin = { pendiente: 0, en_uso: 0, usada: 0, archivada: 0, total: 0 };
+  for (const i of ideas) {
+    const key = i.productoId ? String(i.productoId) : SIN_PRODUCTO_ID;
+    if (key === SIN_PRODUCTO_ID) {
+      countsSin[i.estado] = (countsSin[i.estado] || 0) + 1;
+      countsSin.total++;
+      continue;
+    }
+    if (!countsByProducto.has(key)) {
+      countsByProducto.set(key, { pendiente: 0, en_uso: 0, usada: 0, archivada: 0, total: 0 });
+    }
+    const c = countsByProducto.get(key);
+    c[i.estado] = (c[i.estado] || 0) + 1;
+    c.total++;
+  }
+
+  const tieneAlgo = productos.length > 0 || countsSin.total > 0;
+
+  return (
+    <div className="max-w-5xl mx-auto space-y-5">
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-600 flex items-center justify-center text-white shadow-sm">
+          <Inbox size={20} />
+        </div>
+        <div>
+          <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Bandeja de ideas</h2>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Elegí un producto para ver su bandeja — cada uno es independiente.</p>
+        </div>
+      </div>
+
+      {!tieneAlgo ? (
+        <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-12 text-center">
+          <Package size={36} className="mx-auto text-gray-300 dark:text-gray-600 mb-3" />
+          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Sin productos ni ideas todavía</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            Andá a "Arranque", creá un producto y corré el pipeline — las ideas van a aparecer acá agrupadas por producto.
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {productos.map(p => {
+            const c = countsByProducto.get(String(p.id)) || { pendiente: 0, en_uso: 0, usada: 0, archivada: 0, total: 0 };
+            return (
+              <ProductoBandejaCard
+                key={p.id}
+                producto={p}
+                counts={c}
+                onClick={() => onSelect(String(p.id))}
+              />
+            );
+          })}
+          {countsSin.total > 0 && (
+            <ProductoBandejaCard
+              producto={{ id: SIN_PRODUCTO_ID, nombre: 'Sin producto asignado', legacy: true }}
+              counts={countsSin}
+              onClick={() => onSelect(SIN_PRODUCTO_ID)}
+            />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+function ProductoBandejaCard({ producto, counts, onClick }) {
+  const { pendiente = 0, en_uso = 0, usada = 0, archivada = 0, total } = counts;
+  const inicial = producto.nombre?.charAt(0)?.toUpperCase() || '?';
+  return (
+    <button
+      onClick={onClick}
+      className="text-left p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm hover:border-brand-300 dark:hover:border-brand-700 hover:shadow-md transition group"
+    >
+      <div className="flex items-center gap-3 mb-3">
+        <div className={`w-12 h-12 rounded-lg flex items-center justify-center text-white font-bold text-lg shrink-0 group-hover:scale-105 transition ${
+          producto.legacy
+            ? 'bg-gradient-to-br from-gray-400 to-gray-500'
+            : 'bg-gradient-to-br from-brand-500 to-brand-600'
+        }`}>
+          {producto.legacy ? '?' : inicial}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{producto.nombre}</p>
+          <p className="text-[10px] text-gray-500 dark:text-gray-400">
+            {total} idea{total !== 1 ? 's' : ''} total{total !== 1 ? 'es' : ''}
+          </p>
+        </div>
+        <ChevronRight size={16} className="text-gray-400 group-hover:text-brand-500 transition shrink-0" />
+      </div>
+      <div className="grid grid-cols-4 gap-1.5">
+        <MiniStat label="Pendientes" value={pendiente} accent />
+        <MiniStat label="En uso" value={en_uso} color="amber" />
+        <MiniStat label="Usadas" value={usada} color="emerald" />
+        <MiniStat label="Archivadas" value={archivada} color="gray" />
+      </div>
+    </button>
+  );
+}
+
+
+function MiniStat({ label, value, color = 'gray', accent = false }) {
+  const colors = {
+    gray: 'bg-gray-50 dark:bg-gray-900/40 text-gray-900 dark:text-gray-100 border-gray-200 dark:border-gray-700',
+    amber: 'bg-amber-50 dark:bg-amber-900/30 text-amber-900 dark:text-amber-200 border-amber-200 dark:border-amber-800',
+    emerald: 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-900 dark:text-emerald-200 border-emerald-200 dark:border-emerald-800',
+  };
+  return (
+    <div className={`px-2 py-1.5 rounded-md border ${colors[color]} ${accent ? 'ring-1 ring-brand-300 dark:ring-brand-700' : ''}`}>
+      <p className="text-[9px] font-bold uppercase tracking-wider opacity-60 leading-none">{label}</p>
+      <p className="text-base font-bold tabular-nums leading-tight mt-0.5">{value}</p>
+    </div>
+  );
+}
+
+// Columna del kanban — header con color + count, cuerpo scrolleable con cards.
+// Actúa como drop target: al soltar una card encima, llama onDropIdea con el id
+// de la idea, que la mueve a este estado.
+
+function KanbanColumn({ estado, titulo, color, accent = false, isCustom = false, ideas, selected, onToggleSelect, onCardClick, onDropIdea, onRename, onDelete }) {
+  const [isDragOver, setIsDragOver] = useState(false);
+  const palette = {
+    gray: {
+      header: 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-700',
+      body: 'bg-gray-50/50 dark:bg-gray-900/20 border-gray-200 dark:border-gray-700',
+      dragOver: 'ring-2 ring-gray-400 dark:ring-gray-500',
+    },
+    amber: {
+      header: 'bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 border-amber-300 dark:border-amber-800',
+      body: 'bg-amber-50/30 dark:bg-amber-900/10 border-amber-200 dark:border-amber-900/50',
+      dragOver: 'ring-2 ring-amber-400 dark:ring-amber-500',
+    },
+    emerald: {
+      header: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-200 border-emerald-300 dark:border-emerald-800',
+      body: 'bg-emerald-50/30 dark:bg-emerald-900/10 border-emerald-200 dark:border-emerald-900/50',
+      dragOver: 'ring-2 ring-emerald-400 dark:ring-emerald-500',
+    },
+    slate: {
+      header: 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700',
+      body: 'bg-slate-50/30 dark:bg-slate-900/20 border-slate-200 dark:border-slate-800',
+      dragOver: 'ring-2 ring-slate-400 dark:ring-slate-500',
+    },
+    violet: {
+      header: 'bg-brand-100 dark:bg-brand-900/40 text-brand-800 dark:text-brand-200 border-brand-300 dark:border-brand-800',
+      body: 'bg-brand-50/30 dark:bg-brand-900/10 border-brand-200 dark:border-brand-900/50',
+      dragOver: 'ring-2 ring-brand-400 dark:ring-brand-500',
+    },
+    rose: {
+      header: 'bg-brand-100 dark:bg-brand-900/40 text-brand-800 dark:text-brand-200 border-brand-300 dark:border-brand-800',
+      body: 'bg-brand-50/30 dark:bg-brand-900/10 border-brand-200 dark:border-brand-900/50',
+      dragOver: 'ring-2 ring-brand-400 dark:ring-brand-500',
+    },
+    sky: {
+      header: 'bg-brand-100 dark:bg-brand-900/40 text-brand-800 dark:text-brand-200 border-brand-300 dark:border-brand-800',
+      body: 'bg-brand-50/30 dark:bg-brand-900/10 border-brand-200 dark:border-brand-900/50',
+      dragOver: 'ring-2 ring-brand-400 dark:ring-brand-500',
+    },
+    lime: {
+      header: 'bg-lime-100 dark:bg-lime-900/40 text-lime-800 dark:text-lime-200 border-lime-300 dark:border-lime-800',
+      body: 'bg-lime-50/30 dark:bg-lime-900/10 border-lime-200 dark:border-lime-900/50',
+      dragOver: 'ring-2 ring-lime-400 dark:ring-lime-500',
+    },
+    orange: {
+      header: 'bg-brand-100 dark:bg-brand-900/40 text-brand-800 dark:text-brand-200 border-brand-300 dark:border-brand-800',
+      body: 'bg-brand-50/30 dark:bg-brand-900/10 border-brand-200 dark:border-brand-900/50',
+      dragOver: 'ring-2 ring-brand-400 dark:ring-brand-500',
+    },
+    teal: {
+      header: 'bg-brand-100 dark:bg-brand-900/40 text-brand-800 dark:text-brand-200 border-brand-300 dark:border-brand-800',
+      body: 'bg-brand-50/30 dark:bg-brand-900/10 border-brand-200 dark:border-brand-900/50',
+      dragOver: 'ring-2 ring-brand-400 dark:ring-brand-500',
+    },
+    indigo: {
+      header: 'bg-brand-100 dark:bg-brand-900/40 text-brand-800 dark:text-brand-200 border-brand-300 dark:border-brand-800',
+      body: 'bg-brand-50/30 dark:bg-brand-900/10 border-brand-200 dark:border-brand-900/50',
+      dragOver: 'ring-2 ring-brand-400 dark:ring-brand-500',
+    },
+    pink: {
+      header: 'bg-brand-100 dark:bg-brand-900/40 text-brand-800 dark:text-brand-200 border-brand-300 dark:border-brand-800',
+      body: 'bg-brand-50/30 dark:bg-brand-900/10 border-brand-200 dark:border-brand-900/50',
+      dragOver: 'ring-2 ring-brand-400 dark:ring-brand-500',
+    },
+  };
+  const c = palette[color] || palette.gray;
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (!isDragOver) setIsDragOver(true);
+  };
+  const handleDragLeave = (e) => {
+    // Evitar flickers cuando el cursor pasa sobre hijos — solo des-highlight si
+    // salió del contenedor realmente.
+    if (!e.currentTarget.contains(e.relatedTarget)) setIsDragOver(false);
+  };
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    const ideaId = e.dataTransfer.getData('text/idea-id');
+    const fromEstado = e.dataTransfer.getData('text/idea-estado');
+    if (!ideaId || fromEstado === estado) return;
+    onDropIdea?.(ideaId);
+  };
+
+  return (
+    <div
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      className={`rounded-xl border flex flex-col transition ${c.body} ${accent ? 'ring-2 ring-brand-200 dark:ring-brand-900/40' : ''} ${isDragOver ? c.dragOver : ''}`}
+    >
+      <div className={`px-3 py-2 border-b flex items-center justify-between gap-1 ${c.header} rounded-t-xl`}>
+        <p className="text-[11px] font-bold uppercase tracking-wider truncate">{titulo}</p>
+        <div className="flex items-center gap-1 shrink-0">
+          {onRename && (
+            <button onClick={onRename} className="p-0.5 opacity-60 hover:opacity-100 hover:text-brand-600 transition" title="Renombrar">
+              <Pencil size={11} />
+            </button>
+          )}
+          {isCustom && onDelete && (
+            <button onClick={onDelete} className="p-0.5 opacity-60 hover:opacity-100 hover:text-red-600 transition" title="Eliminar columna">
+              <Trash2 size={11} />
+            </button>
+          )}
+          <span className="text-xs font-bold tabular-nums">{ideas.length}</span>
+        </div>
+      </div>
+      <div className="p-2 space-y-2 min-h-[120px] max-h-[70vh] overflow-y-auto">
+        {ideas.length === 0 ? (
+          <p className={`text-[10px] italic text-center py-6 transition ${
+            isDragOver ? 'text-gray-700 dark:text-gray-300 font-semibold' : 'text-gray-400 dark:text-gray-600'
+          }`}>
+            {isDragOver ? 'Soltá acá' : 'Sin ideas'}
+          </p>
+        ) : (
+          ideas.map(idea => (
+            <KanbanCard
+              key={idea.id}
+              idea={idea}
+              isSelected={selected?.has(idea.id)}
+             
+              onToggleSelect={onToggleSelect ? () => onToggleSelect(idea.id) : null}
+              onClick={() => onCardClick(idea.id)}
+            />
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Etiquetas de formato para las cards del kanban.
+const FORMATO_META = {
+  video:    { emoji: '🎬', label: 'Video' },
+  static:   { emoji: '🖼️', label: 'Imagen' },
+  carrusel: { emoji: '📑', label: 'Carrusel' },
+  mixto:    { emoji: '🎞️', label: 'Mixto' },
+};
+
+// Fecha corta y legible para las cards (ej: "22 may"; agrega el año si la
+// idea es de otro año distinto al actual).
+
+function fechaCorta(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const opts = { day: 'numeric', month: 'short' };
+  if (d.getFullYear() !== new Date().getFullYear()) opts.year = '2-digit';
+  return d.toLocaleDateString('es-AR', opts);
+}
+
+// Card del kanban — pensada para leerse de un vistazo SIN abrir el ticket:
+// hook grande, tipo + formato + score etiquetados, ángulo, creencia, origen,
+// fecha de creación y si la pieza/guión ya están producidos. El detalle
+// completo se ve al clickear (abre el modal). Arrastrable entre columnas.
+
+function KanbanCard({ idea, isSelected = false, onToggleSelect, onClick }) {
+  const tipo = TIPO_META[idea.tipo] || TIPO_META.desde_cero;
+  const angulo = idea.anguloCategoria ? ANGULO_META[idea.anguloCategoria] : null;
+  const fmt = FORMATO_META[idea.formato] || null;
+  const esVideo = idea.formato === 'video';
+  // "Pieza lista" = el output final ya producido. Para video es el guión
+  // adaptado. Las imágenes las produce un diseñador externo, no las
+  // marcamos como "listas" desde la app.
+  const piezaLista = esVideo && !!idea.guionAdaptado;
+  const [isDragging, setIsDragging] = useState(false);
+
+  const handleDragStart = (e) => {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/idea-id', idea.id);
+    e.dataTransfer.setData('text/idea-estado', idea.estado || '');
+    setIsDragging(true);
+  };
+  const handleDragEnd = () => setIsDragging(false);
+  const handleCheckboxClick = (e) => {
+    e.stopPropagation();
+    onToggleSelect?.();
+  };
+
+  // Origen — de dónde salió la idea. Réplica = competidor; iteración = ad
+  // propio; el resto = generada por IA.
+  let origenIcon = '✨', origenText = 'Generada por IA';
+  if (idea.origen?.tipo === 'competidor' && idea.origen?.competidorNombre) {
+    origenIcon = '🏢';
+    origenText = idea.origen.competidorNombre;
+  } else if (idea.tipo === 'iteracion' && idea.origen?.adNombre) {
+    origenIcon = '🔁';
+    origenText = `itera: ${idea.origen.adNombre}`;
+  }
+
+  const tieneScore = typeof idea.scoreValue === 'number';
+
+  return (
+    <div
+      onClick={onClick}
+      draggable
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+      className={`relative bg-white dark:bg-gray-800 border rounded-lg p-2.5 hover:shadow-md transition group cursor-grab active:cursor-grabbing ${
+        isSelected
+          ? 'border-brand-400 dark:border-brand-600 ring-2 ring-brand-200 dark:ring-brand-900/40'
+          : 'border-gray-200 dark:border-gray-700 hover:border-brand-300 dark:hover:border-brand-700'
+      } ${isDragging ? 'opacity-40' : ''}`}
+    >
+      {onToggleSelect && (
+        <button
+          onClick={handleCheckboxClick}
+          className="absolute top-1.5 right-1.5 w-5 h-5 flex items-center justify-center rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:border-brand-500 transition opacity-0 group-hover:opacity-100 data-[checked=true]:opacity-100 z-10"
+          data-checked={isSelected}
+          title={isSelected ? 'Deseleccionar' : 'Seleccionar para exportar'}
+        >
+          {isSelected ? <CheckSquare size={12} className="text-brand-600" /> : <Square size={12} className="text-gray-400" />}
+        </button>
+      )}
+
+      {/* Fila 1: badges de clasificación (tipo · formato · score) */}
+      <div className="flex items-center gap-1 flex-wrap pr-6">
+        <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[9px] font-bold rounded border ${tipo.color}`}>
+          {tipo.emoji} {tipo.label}
+        </span>
+        {fmt && (
+          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[9px] font-semibold rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
+            {fmt.emoji} {fmt.label}
+          </span>
+        )}
+        {tieneScore && (
+          <span className={`inline-flex items-center px-1.5 py-0.5 text-[9px] font-bold rounded ${
+            idea.lowScore
+              ? 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300'
+              : idea.scoreValue >= 8
+                ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300'
+                : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+          }`}
+            title={idea.scoreReason ? `Score del hook ${idea.scoreValue}/10 — ${idea.scoreReason}` : `Score del hook ${idea.scoreValue}/10`}>
+            ★ {idea.scoreValue}/10
+          </span>
+        )}
+      </div>
+
+      {/* Fila 2: thumbnail + hook (lo principal, legible de un vistazo) */}
+      <div className="flex items-start gap-2.5 mt-2">
+        {idea.origen?.imageUrl ? (
+          <img
+            src={idea.origen.imageUrl} alt=""
+            className="w-12 h-12 rounded-md object-cover bg-gray-100 dark:bg-gray-700 shrink-0 border border-gray-200 dark:border-gray-700"
+            onError={e => { e.target.style.display = 'none'; }}
+          />
+        ) : (
+          <div className="w-12 h-12 rounded-md bg-gradient-to-br from-brand-200 to-brand-300 dark:from-brand-900/40 dark:to-brand-800/40 flex items-center justify-center shrink-0">
+            <span className="text-xl">{tipo.emoji}</span>
+          </div>
+        )}
+        <div className="flex-1 min-w-0">
+          <p className="text-[13px] font-bold text-gray-900 dark:text-gray-100 leading-snug line-clamp-3">
+            {idea.hook ? `“${idea.hook}”` : (idea.titulo || 'Sin hook')}
+          </p>
+          {idea.hook && idea.titulo && (
+            <p className="text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide mt-1 truncate">
+              {idea.titulo}
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* Fila 3: badges secundarios (ángulo · creencia · alertas) */}
+      {(angulo || idea.creenciaApalancada || idea.metaRiesgo?.tieneRiesgo || idea.hookDuplicado) && (
+        <div className="flex items-center gap-1 flex-wrap mt-2">
+          {angulo && (
+            <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[9px] font-semibold rounded ${angulo.color}`}
+              title={`Ángulo estratégico ${idea.anguloCategoria}: ${angulo.label}`}>
+              {angulo.emoji} {angulo.label}
+            </span>
+          )}
+          {idea.creenciaApalancada && (
+            <span className="inline-flex items-center max-w-[180px] truncate px-1.5 py-0.5 text-[9px] font-semibold rounded bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300"
+              title={`Creencia que apalanca: ${idea.creenciaApalancada}`}>
+              💭 {idea.creenciaApalancada}
+            </span>
+          )}
+          {idea.metaRiesgo?.tieneRiesgo && (
+            <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-bold rounded bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300"
+              title={`Palabras gatillo de Meta: ${(idea.metaRiesgo.palabras || []).join(', ')}`}>
+              ⚠ Meta
+            </span>
+          )}
+          {idea.hookDuplicado && (
+            <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-semibold rounded bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300"
+              title="Este hook arranca igual que otra idea — considerá reescribirlo">
+              ⚠ hook similar
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Fila 4: footer — origen · fecha · estado de producción */}
+      <div className="flex items-center justify-between gap-2 mt-2 pt-1.5 border-t border-gray-100 dark:border-gray-700/60">
+        <span className="text-[9px] text-gray-500 dark:text-gray-400 truncate min-w-0" title={origenText}>
+          {origenIcon} {origenText}
+          {idea.origen?.daysRunning ? ` · ${idea.origen.daysRunning}d` : ''}
+        </span>
+        <span className="flex items-center gap-1.5 shrink-0">
+          {piezaLista && (
+            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-bold rounded-md bg-gradient-to-br from-emerald-500 to-emerald-600 text-white shadow-sm"
+              title={esVideo ? 'Guión de video ya generado' : 'Creativo ya producido — abrí la idea para verlo'}>
+              {esVideo ? '🎬' : '🎨'} {esVideo ? 'Guión' : 'Creativo'}
+            </span>
+          )}
+          <span className="text-[9px] text-gray-400 dark:text-gray-500 whitespace-nowrap" title={`Creada el ${idea.createdAt ? new Date(idea.createdAt).toLocaleString('es-AR') : '—'}`}>
+            📅 {fechaCorta(idea.createdAt)}
+          </span>
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// Modal simple que muestra el detalle completo de una idea.
+// En Parte 2b.4 se pule: tabs, mejor layout, keyboard shortcuts.
+// Por ahora reutiliza el IdeaCard expandido envuelto en un overlay.
+
+function IdeaDetailModal({ idea, onClose, ...cardProps }) {
+  // Cerrar con ESC.
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center px-4 py-8 bg-black/50 backdrop-blur-sm overflow-y-auto"
+      onClick={onClose}
+    >
+      <div
+        className="relative w-full max-w-5xl"
+        onClick={e => e.stopPropagation()}
+      >
+        <button
+          onClick={onClose}
+          className="absolute -top-2 -right-2 z-10 w-8 h-8 rounded-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 shadow-md flex items-center justify-center text-gray-600 dark:text-gray-300 hover:text-red-600 transition"
+          title="Cerrar (ESC)"
+        >
+          ✕
+        </button>
+        <IdeaCard
+          idea={idea}
+          expanded={true}
+          onToggle={onClose}
+          {...cardProps}
+        />
+      </div>
+    </div>
+  );
+}
+
+// Panel de las ideas tipo VIDEO. El video va a producción humana. Al abrir
+// la idea, el guión adaptado al producto del user se genera SOLO (sin
+// botón) — es texto corrido en rioplatense, listo para pasarle al editor.
+// Genera imágenes directamente desde una idea de la Bandeja. Reusa el mismo
+// pipeline de la galería (saveReferencial → mismo lightbox y tracking).
+// El user puede elegir N variantes — la primera es interpretación literal del
+// brief, las siguientes van divergiendo (medium → loose).
+
+function IdeaImageGenerator({ idea }) {
+  const promptEs = buildPromptGptImage2Es(idea);
+  const [n, setN] = useState(2);
+  const [size, setSize] = useState('2048x2048');
+  const [quality, setQuality] = useState('high');
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState('');
+  const [lastBatch, setLastBatch] = useState(null); // { count, t, durMs }
+
+  const handleGenerar = async () => {
+    setError('');
+    const productos = loadProductos();
+    const producto = productos.find(p => String(p.id) === String(idea.productoId));
+    if (!producto) {
+      setError('No encontré el producto de esta idea — recargá la página.');
+      return;
+    }
+    const prodImg = getProductoImagen(producto.id);
+    if (!prodImg) {
+      setError('Cargá la foto del producto en Setup (Arranque) antes de generar.');
+      return;
+    }
+    const costoPorImg = quality === 'low' ? 0.03 : quality === 'medium' ? 0.07 : 0.18;
+    const estimatedCost = n * costoPorImg;
+    const execId = startExecution({
+      label: `Generando ${n} imágenes desde idea`,
+      sublabel: idea.hook || idea.titulo || idea.descripcionImagen?.slice(0, 60) || '',
+      kind: 'creative-from-idea',
+      estimatedMs: 90000,
+      estimatedCost,
+    });
+    setRunning(true);
+    const t0 = Date.now();
+    try {
+      updateExecution(execId, { stage: `Generando ${n} variante${n !== 1 ? 's' : ''}…` });
+      const resp = await fetch('/api/marketing/crear-imagen-desde-idea', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          idea: {
+            id: idea.id,
+            hook: idea.hook,
+            titulo: idea.titulo,
+            angulo: idea.angulo,
+            painPoint: idea.painPoint,
+            escenarioNarrativo: idea.escenarioNarrativo,
+            descripcionImagen: idea.descripcionImagen,
+            estiloVisual: idea.estiloVisual,
+            publicoSugerido: idea.publicoSugerido,
+            creenciaApalancada: idea.creenciaApalancada,
+            textoEnImagen: idea.textoEnImagen,
+            formato: idea.formato,
+          },
+          producto: {
+            nombre: producto.nombre,
+            descripcion: producto.descripcion,
+            research: producto.docs?.research,
+            offerBrief: producto.ofertasReales || producto.docs?.offerBrief || '',
+          },
+          productoImagen: prodImg,
+          accentColor: getAccentColor(producto.id) || '',
+          n, size, quality,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      const costo = logCostsFromResponse(data, `crear-imagen-desde-idea · ${idea.hook?.slice(0, 40) || 'idea'}`);
+
+      // Guardar en la galería con sourceType: 'bandeja-idea'.
+      const ahora = Date.now();
+      const imagenes = data.imagenes || [];
+      const variantStyles = data.variantStyles || [];
+      const prompts = data.prompts || [];
+      for (let i = 0; i < imagenes.length; i++) {
+        const promptUsed = prompts[i]?.prompt || data.prompts?.[i]?.prompt || '';
+        await saveReferencial({
+          id: `idea_${ahora}_${idea.id}_${i}`,
+          productoId: String(producto.id),
+          sourceType: 'bandeja-idea',
+          sourceIdeaId: idea.id,
+          sourceBrand: 'Idea propia',
+          sourceHeadline: idea.hook || idea.titulo || '',
+          variantIndex: i,
+          variantStyle: variantStyles[i] || 'tight',
+          imageBase64: imagenes[i],
+          mimeType: data.mimeType || 'image/png',
+          prompt: promptUsed,
+          model: data.model,
+          size: data.size,
+          sizeFallback: !!data.sizeFallback,
+          quality: data.quality || quality,
+          createdAt: new Date(ahora + i).toISOString(),
+        });
+      }
+      const durMs = Date.now() - t0;
+      setLastBatch({ count: imagenes.length, t: ahora, durMs });
+      finishExecution(execId, {
+        ok: true,
+        message: `${imagenes.length} imagen${imagenes.length !== 1 ? 'es' : ''} en galería`,
+        cost: costo?.total,
+      });
+    } catch (err) {
+      setError(err.message || 'Error generando imagen');
+      finishExecution(execId, { ok: false, message: err.message || 'Error' });
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const costoPorImg = quality === 'low' ? 0.03 : quality === 'medium' ? 0.07 : 0.18;
+
+  return (
+    <div className="bg-brand-50 dark:bg-brand-900/20 rounded-md border border-brand-200 dark:border-brand-800">
+      <div className="px-3 py-2 flex flex-wrap items-center gap-2 border-b border-brand-200 dark:border-brand-800">
+        <p className="text-[10px] font-bold text-brand-700 dark:text-brand-300 uppercase tracking-wider mr-1">
+          🤖 Generar imagen con gpt-image-2
+        </p>
+        {/* Selector compacto de N */}
+        <div className="flex items-center gap-0.5">
+          {[1, 2, 4, 6].map(opt => (
+            <button key={opt}
+              onClick={() => setN(opt)}
+              className={`px-1.5 py-0.5 text-[10px] font-bold rounded transition ${
+                n === opt
+                  ? 'bg-brand-600 text-white'
+                  : 'bg-white text-gray-600 dark:bg-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+              }`}
+            >{opt}v</button>
+          ))}
+        </div>
+        {/* Selector compacto de ratio */}
+        <div className="flex items-center gap-0.5">
+          {[
+            { v: '2048x2048', label: '1:1' },
+            { v: '1024x1536', label: 'Story' },
+          ].map(opt => (
+            <button key={opt.v}
+              onClick={() => setSize(opt.v)}
+              className={`px-1.5 py-0.5 text-[10px] font-bold rounded transition ${
+                size === opt.v
+                  ? 'bg-brand-600 text-white'
+                  : 'bg-white text-gray-600 dark:bg-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+              }`}
+            >{opt.label}</button>
+          ))}
+        </div>
+        {/* Quality */}
+        <div className="flex items-center gap-0.5">
+          {['low', 'medium', 'high'].map(opt => (
+            <button key={opt}
+              onClick={() => setQuality(opt)}
+              className={`px-1.5 py-0.5 text-[10px] font-bold rounded transition uppercase ${
+                quality === opt
+                  ? 'bg-brand-600 text-white'
+                  : 'bg-white text-gray-600 dark:bg-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+              }`}
+              title={`$${{ low: 0.03, medium: 0.07, high: 0.18 }[opt]} por imagen`}
+            >{opt.charAt(0).toUpperCase()}</button>
+          ))}
+        </div>
+        <span className="text-[9px] text-gray-500 dark:text-gray-400 ml-1 tabular-nums">
+          ~${(n * costoPorImg).toFixed(2)}
+        </span>
+        <div className="ml-auto flex items-center gap-1.5">
+          <button
+            onClick={() => navigator.clipboard?.writeText(promptEs)}
+            className="text-[10px] font-semibold text-brand-600 dark:text-brand-400 hover:underline"
+            title="Copiar prompt al portapapeles"
+          >
+            📋 Copiar
+          </button>
+          <button
+            onClick={handleGenerar}
+            disabled={running}
+            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-white bg-gradient-to-br from-brand-500 to-brand-600 rounded hover:from-brand-700 hover:to-brand-600 transition disabled:opacity-50 shadow-sm"
+          >
+            {running
+              ? <><Loader2 size={10} className="animate-spin" /> Generando…</>
+              : <><Sparkles size={10} /> Generar</>
+            }
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="px-3 py-2 text-[10px] font-semibold text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/30 border-t border-red-200 dark:border-red-800">
+          ⚠ {error}
+        </div>
+      )}
+
+      {lastBatch && !error && (
+        <div className="px-3 py-2 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/30 border-t border-emerald-200 dark:border-emerald-800">
+          ✓ {lastBatch.count} imagen{lastBatch.count !== 1 ? 'es' : ''} en {Math.floor(lastBatch.durMs / 1000)}s — buscalas en la <strong>Galería</strong>.
+        </div>
+      )}
+
+      <details className="border-t border-brand-200 dark:border-brand-800">
+        <summary className="px-3 py-1.5 text-[10px] font-bold text-brand-700 dark:text-brand-300 uppercase tracking-wider cursor-pointer hover:bg-brand-100/40 dark:hover:bg-brand-900/30">
+          Ver el prompt base que va a usar
+        </summary>
+        <pre className="px-3 pb-3 text-xs text-brand-900 dark:text-brand-200 whitespace-pre-wrap break-words font-sans">{promptEs}</pre>
+      </details>
+    </div>
+  );
+}
+
+
+function VideoBriefPanel({ idea }) {
+  const [guion, setGuion] = useState(guionToText(idea.guionAdaptado));
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [copied, setCopied] = useState(false);
+  // mountedRef: evita setState sobre componente desmontado (la llamada
+  // tarda 15-40s; si el user cambia de idea en el medio, el panel se
+  // desmonta). autoGenRef: evita que el auto-generar dispare dos veces
+  // (React StrictMode monta el efecto dos veces en dev).
+  const mountedRef = useRef(true);
+  const autoGenRef = useRef(false);
+
+  const generar = async () => {
+    const prod = loadProductos().find(p => String(p.id) === String(idea.productoId));
+    if (!prod) {
+      setError('No encontré el producto de esta idea — recargá la página.');
+      return;
+    }
+    setLoading(true);
+    setError('');
+    try {
+      const resp = await fetch('/api/marketing/adapt-guion', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          idea: {
+            titulo: idea.titulo,
+            hook: idea.hook,
+            angulo: idea.angulo,
+            painPoint: idea.painPoint,
+            copy: idea.copyPostMeta || idea.copy,
+            guionReferencia: guionToText(idea.guion),
+            formato: idea.formato,
+          },
+          producto: {
+            nombre: prod.nombre,
+            descripcion: prod.descripcion,
+            research: prod.docs?.research || prod.research,
+            avatar: prod.docs?.avatar || prod.avatar,
+            stage: prod.stage,
+          },
+          competidorRef: idea.origen?.competidorNombre,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      logCostsFromResponse(data, `adapt-guion · ${(idea.titulo || '').slice(0, 50)}`);
+      // updateIdea persiste igual aunque el panel se haya desmontado — el
+      // guión queda guardado en la idea. Solo el setState es condicional.
+      // Limpiamos el flag de error: si una corrida previa falló y ahora
+      // anduvo, el guión es válido.
+      updateIdea(idea.id, { guionAdaptado: data.guion || '', guionAdaptadoError: false });
+      if (mountedRef.current) setGuion(data.guion || '');
+    } catch (err) {
+      // Persistimos que falló — así reabrir la idea NO vuelve a auto-generar
+      // (cada llamada a adapt-guion cuesta plata). El user puede reintentar
+      // manualmente con el botón.
+      updateIdea(idea.id, { guionAdaptadoError: true });
+      if (mountedRef.current) setError(err.message || 'Error adaptando el guión');
+    } finally {
+      if (mountedRef.current) setLoading(false);
+    }
+  };
+
+  // Auto-generar al abrir la idea, si todavía no tiene guión adaptado NI
+  // falló antes. Sin botón — el guión aparece solo. El componente se monta
+  // con key={idea.id}, así que esto corre una vez por idea. Si una corrida
+  // previa falló, NO re-dispara solo (evita cobrar en cada reapertura) —
+  // queda el botón "Reintentar".
+  useEffect(() => {
+    mountedRef.current = true;
+    if (!idea.guionAdaptado && !idea.guionAdaptadoError && !autoGenRef.current) {
+      autoGenRef.current = true;
+      generar();
+    }
+    return () => { mountedRef.current = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const copiar = () => {
+    if (!guion) return;
+    try {
+      navigator.clipboard?.writeText(guion);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {}
+  };
+
+  return (
+    <div className="bg-brand-50 dark:bg-brand-900/20 rounded-md border border-brand-200 dark:border-brand-800">
+      <div className="px-3 py-2">
+        <p className="text-[10px] font-bold text-brand-700 dark:text-brand-300 uppercase tracking-wider">
+          🎬 Guión de video — para tus editores
+        </p>
+      </div>
+
+      <div className="px-3 pb-3 space-y-2">
+        {loading && !guion && (
+          <div className="flex items-center gap-2 px-1 py-2 text-xs text-brand-700 dark:text-brand-300">
+            <Loader2 size={14} className="animate-spin" /> Generando el guión adaptado a tu producto…
+          </div>
+        )}
+
+        {guion && (
+          <div className="space-y-2">
+            <p className="text-[10px] font-bold text-brand-700 dark:text-brand-300">✓ Guión adaptado a tu marca</p>
+            <div className="text-xs text-gray-800 dark:text-gray-200 whitespace-pre-wrap leading-relaxed bg-white dark:bg-gray-800/60 rounded-md px-3 py-2 border border-brand-100 dark:border-brand-900/40">
+              {guion}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              <button onClick={copiar}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-bold text-white bg-brand-600 rounded hover:bg-brand-700 transition">
+                {copied ? <Check size={11} /> : <Download size={11} />} {copied ? 'Copiado' : 'Copiar guión'}
+              </button>
+              <button onClick={generar} disabled={loading}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-gray-800 border border-brand-300 dark:border-brand-700 rounded hover:bg-brand-50 dark:hover:bg-brand-900/30 transition disabled:opacity-50">
+                {loading ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />} Regenerar
+              </button>
+            </div>
+          </div>
+        )}
+
+        {error && !loading && (
+          <div className="space-y-1.5">
+            <p className="text-[10px] text-red-600 dark:text-red-400">⚠ {error}</p>
+            <button onClick={generar}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-gray-800 border border-brand-300 dark:border-brand-700 rounded hover:bg-brand-50 dark:hover:bg-brand-900/30 transition">
+              <RefreshCw size={11} /> Reintentar
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
 export default function BandejaSection({ addToast, forcedProductoId, embedded = false }) {
   const [ideas, setIdeas] = useState(() => loadIdeas());
   const [productos, setProductos] = useState(() => loadProductos());
@@ -804,1283 +2104,3 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
   );
 }
 
-function CounterCard({ label, value, color, accent = false }) {
-  const colors = {
-    gray: 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100',
-    amber: 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200',
-    emerald: 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200',
-  };
-  return (
-    <div className={`p-3 rounded-xl border ${colors[color]} ${accent ? 'ring-2 ring-brand-200 dark:ring-brand-900/40' : ''}`}>
-      <p className="text-[10px] font-bold uppercase tracking-wider opacity-60">{label}</p>
-      <p className="text-2xl font-bold tabular-nums">{value}</p>
-    </div>
-  );
-}
-
-function IdeaCard({
-  idea, expanded, onToggle, onEstado, onRemove,
-  editandoNotas, onEditNotas, notasDraft, setNotasDraft, onSaveNotas, onCancelNotas,
-  editandoGuion, onEditGuion, guionDraft, setGuionDraft, onSaveGuion, onCancelGuion,
-  isSelected, onToggleSelect, onFetchPerformance,
-}) {
-  const tipo = TIPO_META[idea.tipo] || TIPO_META.desde_cero;
-  const estado = ESTADO_META[idea.estado] || ESTADO_META.pendiente;
-  const usada = idea.estado === 'usada' || idea.estado === 'archivada';
-
-  return (
-    <div className={`bg-white dark:bg-gray-800 border rounded-xl overflow-hidden shadow-sm transition ${
-      isSelected
-        ? 'border-brand-400 dark:border-brand-600 ring-2 ring-brand-200 dark:ring-brand-900/40'
-        : usada
-          ? 'border-gray-200 dark:border-gray-700 opacity-70'
-          : 'border-gray-200 dark:border-gray-700 hover:border-brand-300 dark:hover:border-brand-700'
-    }`}>
-      {/* Header siempre visible */}
-      <div className="px-4 py-3 flex items-start gap-3">
-        {/* Checkbox para multi-select export */}
-        <button onClick={onToggleSelect}
-          className="mt-1 shrink-0 text-gray-400 hover:text-brand-600 transition"
-          title={isSelected ? 'Deseleccionar' : 'Seleccionar para exportar'}>
-          {isSelected ? <CheckSquare size={16} className="text-brand-600" /> : <Square size={16} />}
-        </button>
-
-        {/* Thumbnail */}
-        {idea.origen?.imageUrl ? (
-          <img src={idea.origen.imageUrl} alt=""
-            className="w-14 h-14 rounded-lg object-cover bg-gray-100 dark:bg-gray-700 shrink-0 border border-gray-200 dark:border-gray-700"
-            onError={e => { e.target.style.display = 'none'; }} />
-        ) : (
-          <div className="w-14 h-14 rounded-lg bg-gradient-to-br from-brand-200 to-brand-300 dark:from-brand-900/40 dark:to-brand-800/40 flex items-center justify-center shrink-0">
-            <span className="text-2xl">{tipo.emoji}</span>
-          </div>
-        )}
-
-        <div className="flex-1 min-w-0">
-          {/* Badges */}
-          <div className="flex items-center gap-1.5 flex-wrap mb-1">
-            <span className={`inline-flex items-center px-1.5 py-0.5 text-[10px] font-bold rounded border ${tipo.color}`}>
-              {tipo.emoji} {tipo.label}
-            </span>
-            <span className={`text-[10px] font-semibold ${estado.color}`}>
-              {estado.icon} {estado.label}
-            </span>
-            {idea.origen?.competidorNombre && (
-              <span className="text-[10px] text-gray-500 dark:text-gray-400">
-                · de {idea.origen.competidorNombre}
-                {idea.origen.daysRunning ? ` · ${idea.origen.daysRunning}d corriendo` : ''}
-              </span>
-            )}
-            {idea.tipo === 'iteracion' && idea.origen?.adNombre && (
-              <span className="text-[10px] text-gray-500 dark:text-gray-400">
-                · itera: <span className="font-semibold text-gray-700 dark:text-gray-300">{idea.origen.adNombre}</span>
-              </span>
-            )}
-            {idea.anguloCategoria && ANGULO_META[idea.anguloCategoria] && (
-              <span className={`inline-flex items-center px-1.5 py-0.5 text-[9px] font-bold rounded ${ANGULO_META[idea.anguloCategoria].color}`}
-                title={`Ángulo estratégico ${idea.anguloCategoria}: ${ANGULO_META[idea.anguloCategoria].label}`}>
-                {ANGULO_META[idea.anguloCategoria].emoji} {idea.anguloCategoria}
-              </span>
-            )}
-            {idea.tipoCampaña && CAMPAÑA_META[idea.tipoCampaña] && (
-              <span className={`inline-flex items-center text-[9px] font-semibold ${CAMPAÑA_META[idea.tipoCampaña].color}`}
-                title={CAMPAÑA_META[idea.tipoCampaña].label}>
-                {CAMPAÑA_META[idea.tipoCampaña].emoji} {idea.tipoCampaña}
-              </span>
-            )}
-            {idea.variableDeTesteo && VARIABLE_META[idea.variableDeTesteo] && (
-              <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-semibold bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 rounded"
-                title={`Variable a testear: ${VARIABLE_META[idea.variableDeTesteo].descripcion}`}>
-                {VARIABLE_META[idea.variableDeTesteo].emoji} testea: {VARIABLE_META[idea.variableDeTesteo].label}
-              </span>
-            )}
-            {idea.metaRiesgo?.tieneRiesgo && (
-              <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-bold bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 rounded"
-                title={`Palabras gatillo de Meta: ${(idea.metaRiesgo.palabras || []).join(', ')}${idea.metaRiesgo.sugerencia ? ' · ' + idea.metaRiesgo.sugerencia : ''}`}>
-                ⚠ Meta
-              </span>
-            )}
-            {idea.hookDuplicado && (
-              <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-semibold bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 rounded"
-                title="Este hook arranca igual que otra idea — considerá reescribirlo para diversificar arquetipos">
-                ⚠ hook similar
-              </span>
-            )}
-            {/* Score del hook (1-10) — Haiku puntúa cada hook después de
-                generarlo. Las <6 quedan marcadas como flojas: el user las
-                puede archivar de un click. Las >=8 son las "fuertes". */}
-            {typeof idea.scoreValue === 'number' && (
-              <span className={`inline-flex items-center px-1.5 py-0.5 text-[9px] font-bold rounded ${
-                idea.lowScore
-                  ? 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300'
-                  : idea.scoreValue >= 8
-                    ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300'
-                    : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
-              }`}
-                title={idea.scoreReason ? `Score ${idea.scoreValue}/10 — ${idea.scoreReason}` : `Score ${idea.scoreValue}/10`}>
-                {idea.lowScore ? '🟥' : idea.scoreValue >= 8 ? '🟩' : '⬜'} {idea.scoreValue}/10
-              </span>
-            )}
-            {/* Creencia apalancada — qué creencia del prospect instala/derriba
-                esta pieza. Útil para chequear que la bandeja cubra todas las
-                creencias sin sobre-representar una sola. */}
-            {idea.creenciaApalancada && (
-              <span className="inline-flex items-center max-w-[260px] truncate px-1.5 py-0.5 text-[9px] font-semibold bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 rounded"
-                title={`Creencia que apalanca: ${idea.creenciaApalancada}`}>
-                💭 {idea.creenciaApalancada}
-              </span>
-            )}
-            {idea.formato && (
-              <span className="text-[10px] text-gray-400 ml-auto">
-                {idea.formato === 'video' ? '🎬' : idea.formato === 'static' ? '🖼️' : '📑'} {idea.formato}
-              </span>
-            )}
-          </div>
-
-          {idea.hook ? (
-            <>
-              <p className={`text-sm font-bold leading-snug ${usada ? 'text-gray-500 dark:text-gray-400 line-through' : 'text-gray-900 dark:text-gray-100'}`}>
-                "{idea.hook}"
-              </p>
-              {idea.titulo && (
-                <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 uppercase tracking-wider">
-                  Concepto: {idea.titulo}
-                </p>
-              )}
-            </>
-          ) : (
-            <p className={`text-sm font-semibold ${usada ? 'text-gray-500 dark:text-gray-400 line-through' : 'text-gray-900 dark:text-gray-100'}`}>
-              {idea.titulo}
-            </p>
-          )}
-          {idea.angulo && !expanded && (
-            <p className="text-[11px] text-gray-600 dark:text-gray-400 line-clamp-2 mt-0.5">
-              {idea.angulo}
-            </p>
-          )}
-        </div>
-
-        <div className="shrink-0 flex items-center gap-1">
-          <button onClick={onToggle}
-            className="p-1.5 text-gray-500 hover:text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-900/20 rounded transition"
-            title={expanded ? 'Cerrar' : 'Ver detalle'}>
-            <ChevronDown size={14} className={`transition-transform ${expanded ? 'rotate-180' : ''}`} />
-          </button>
-        </div>
-      </div>
-
-      {/* Detalle expandido — 2 columnas: izquierda = output creativo, derecha = estrategia + contexto */}
-      {expanded && (
-        <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 px-4 py-3">
-          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-            {/* COLUMNA IZQUIERDA — output creativo (3/5 del espacio) */}
-            <div className="lg:col-span-3 space-y-3">
-              {idea.hook && (
-                <Field label="🎯 Hook" text={idea.hook} highlight />
-              )}
-
-              {/* Prompt listo para pegar en gpt-image-2 — solo si es imagen
-                  o carrusel. El prompt está en castellano argentino y combina
-                  los campos relevantes de la idea en un solo bloque copiable. */}
-              {idea.formato !== 'video' && (idea.hook || idea.descripcionImagen) && (
-                <IdeaImageGenerator idea={idea} />
-              )}
-
-              {/* Para video → brief con guion para mandar a producción
-                  humana. Para imagen/carrusel → panel de generación con
-                  gpt-image-2 (renderiza texto multilingüe bien por sí solo). */}
-              {idea.formato === 'video' ? (
-                <VideoBriefPanel key={idea.id} idea={idea} />
-              ) : (idea.hook || idea.titulo || idea.promptGeneradorImagen || idea.descripcionImagen) ? (
-                <CreativoPanel key={idea.id} idea={idea} />
-              ) : null}
-
-              {(() => { const guionTextoIdea = guionToText(idea.guion); return (guionTextoIdea || editandoGuion) && !/^n\/?a/i.test(guionTextoIdea.trim()) && (
-                <div className="bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700">
-                  <div className="flex items-center justify-between px-3 py-2">
-                    <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
-                      🎬 Guión {idea.formato === 'video' ? '(porteño)' : '(porteño)'}
-                    </p>
-                    {!editandoGuion && onEditGuion && (
-                      <button onClick={onEditGuion}
-                        className="inline-flex items-center gap-1 text-[10px] text-brand-600 hover:text-brand-700 transition">
-                        <Edit3 size={10} /> Editar
-                      </button>
-                    )}
-                  </div>
-                  {editandoGuion ? (
-                    <div className="px-3 pb-3 space-y-1.5">
-                      <textarea value={guionDraft} onChange={e => setGuionDraft(e.target.value)}
-                        rows={8}
-                        placeholder="Guión en porteño — editá beats, VO, acotaciones visuales…"
-                        className="w-full px-2.5 py-1.5 text-xs font-mono bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-md resize-y focus:outline-none focus:ring-2 focus:ring-brand-500" />
-                      <div className="flex gap-1.5 justify-end">
-                        <button onClick={onCancelGuion}
-                          className="px-2.5 py-1 text-[10px] font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 transition">
-                          Cancelar
-                        </button>
-                        <button onClick={onSaveGuion}
-                          className="px-2.5 py-1 text-[10px] font-bold text-white bg-brand-600 rounded hover:bg-brand-700 transition">
-                          Guardar
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="px-3 pb-3 text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{guionTextoIdea}</p>
-                  )}
-                </div>
-              ); })()}
-            </div>
-
-            {/* COLUMNA DERECHA — contexto estratégico + metadata (2/5 del espacio) */}
-            <div className="lg:col-span-2 space-y-3">
-              {/* Visible siempre: ángulo + pain point (los dos datos
-                  estratégicos clave) + riesgo Meta si aplica. */}
-              {idea.angulo && <Field label="📐 Ángulo" text={idea.angulo} />}
-              {idea.painPoint && <Field label="💥 Pain point" text={idea.painPoint} />}
-
-              {idea.metaRiesgo?.tieneRiesgo && (
-                <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md">
-                  <p className="text-[10px] font-bold text-red-800 dark:text-red-300 uppercase tracking-wider mb-1">
-                    ⚠ Riesgo Meta
-                  </p>
-                  {idea.metaRiesgo.palabras?.length > 0 && (
-                    <p className="text-[10px] text-red-700 dark:text-red-400 mb-1">
-                      Palabras: <strong>{idea.metaRiesgo.palabras.join(', ')}</strong>
-                    </p>
-                  )}
-                  {idea.metaRiesgo.sugerencia && (
-                    <p className="text-xs text-red-900 dark:text-red-200">{idea.metaRiesgo.sugerencia}</p>
-                  )}
-                </div>
-              )}
-
-              {/* Detalles estratégicos colapsados — agrupa todo el contexto
-                  secundario (escenario, razonamiento, hipótesis, estilo,
-                  público) en UN solo bloque expandible. Antes esto eran 5
-                  cards sueltas que saturaban el ticket. */}
-              {(idea.origen?.razonamiento || idea.origen?.razonIteracion || idea.escenarioNarrativo || idea.testHipotesis || idea.estiloVisual || idea.publicoSugerido) && (
-                <details className="bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700">
-                  <summary className="cursor-pointer px-3 py-2 text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider hover:bg-gray-50 dark:hover:bg-gray-700/30 rounded-md">
-                    💭 Detalles estratégicos
-                  </summary>
-                  <div className="px-3 pb-3 pt-1 space-y-2.5">
-                    {idea.tipo === 'iteracion' && idea.origen?.razonIteracion && (
-                      <div>
-                        <p className="text-[10px] font-bold text-amber-700 dark:text-amber-300 uppercase tracking-wider mb-0.5">🔄 Por qué iterar</p>
-                        <p className="text-[11px] text-gray-700 dark:text-gray-300">
-                          <span className="font-semibold">Ad base:</span> {idea.origen.adNombre || '(sin nombre)'}
-                        </p>
-                        <p className="text-[11px] text-gray-700 dark:text-gray-300 mt-0.5">{idea.origen.razonIteracion}</p>
-                      </div>
-                    )}
-                    {idea.tipo !== 'iteracion' && idea.origen?.razonamiento && (
-                      <div>
-                        <p className="text-[10px] font-bold text-brand-700 dark:text-brand-300 uppercase tracking-wider mb-0.5">💡 Por qué esta idea</p>
-                        <p className="text-[11px] text-gray-700 dark:text-gray-300">{idea.origen.razonamiento}</p>
-                      </div>
-                    )}
-                    {idea.escenarioNarrativo && (
-                      <div>
-                        <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-0.5">📖 Escenario narrativo</p>
-                        <p className="text-[11px] text-gray-700 dark:text-gray-300">{idea.escenarioNarrativo}</p>
-                      </div>
-                    )}
-                    {idea.testHipotesis && (
-                      <div>
-                        <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-0.5">🔬 Hipótesis a validar</p>
-                        {VARIABLE_META[idea.variableDeTesteo] && (
-                          <p className="text-[10px] text-gray-500 dark:text-gray-400 mb-0.5">
-                            Variable: <strong>{VARIABLE_META[idea.variableDeTesteo].emoji} {VARIABLE_META[idea.variableDeTesteo].label}</strong>
-                          </p>
-                        )}
-                        <p className="text-[11px] text-gray-700 dark:text-gray-300">{idea.testHipotesis}</p>
-                      </div>
-                    )}
-                    {idea.estiloVisual && (
-                      <div>
-                        <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-0.5">🎨 Estilo visual</p>
-                        <p className="text-[11px] text-gray-700 dark:text-gray-300">{idea.estiloVisual}</p>
-                      </div>
-                    )}
-                    {idea.publicoSugerido && (
-                      <div>
-                        <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-0.5">🎯 Público sugerido</p>
-                        <p className="text-[11px] text-gray-700 dark:text-gray-300">{idea.publicoSugerido}</p>
-                      </div>
-                    )}
-                  </div>
-                </details>
-              )}
-
-              {idea.launchedAsAdId && (
-                <div className="p-3 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-md">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <p className="text-[10px] font-bold text-brand-800 dark:text-brand-300 uppercase tracking-wider">
-                      🚀 Performance
-                    </p>
-                    <button onClick={onFetchPerformance}
-                      className="text-[10px] font-semibold text-brand-600 dark:text-brand-400 hover:underline inline-flex items-center gap-1">
-                      <Download size={10} /> Métricas
-                    </button>
-                  </div>
-                  <p className="text-[10px] text-brand-700 dark:text-brand-400 mb-1 font-mono truncate">
-                    Ad: {idea.launchedAsAdName || idea.launchedAsAdId}
-                  </p>
-                  {idea.performance ? (
-                    <div className="grid grid-cols-2 gap-2 mt-2">
-                      <PerformanceStat label="CTR" val={idea.performance.recent?.ctr} fmt={v => `${v.toFixed(2)}%`} />
-                      <PerformanceStat label="ROAS" val={idea.performance.recent?.roas} fmt={v => v.toFixed(2)}
-                        semaforo={v => v >= 2 ? 'good' : v >= 1 ? 'mid' : 'bad'} />
-                      <PerformanceStat label="CPA" val={idea.performance.recent?.cpa} fmt={v => `$${v.toFixed(2)}`} />
-                      <PerformanceStat label="Thumb-stop" val={idea.performance.recent?.thumbStopRate} fmt={v => `${v.toFixed(1)}%`} />
-                      <PerformanceStat label="Impressions" val={idea.performance.recent?.impressions} fmt={v => v.toLocaleString('es-AR')} />
-                      <PerformanceStat label="Compras" val={idea.performance.recent?.purchases} fmt={v => v.toLocaleString('es-AR')} />
-                    </div>
-                  ) : (
-                    <p className="text-[10px] text-brand-700 dark:text-brand-300 italic">
-                      Click "Métricas" para ver cómo rinde.
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Sección inferior full-width: notas + acciones */}
-          <div className="mt-4 pt-3 border-t border-gray-200 dark:border-gray-700 space-y-3">
-
-          {/* Notas */}
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">📓 Notas</p>
-              {!editandoNotas && (
-                <button onClick={onEditNotas}
-                  className="inline-flex items-center gap-1 text-[10px] text-brand-600 hover:text-brand-700 transition">
-                  <Edit3 size={10} /> Editar
-                </button>
-              )}
-            </div>
-            {editandoNotas ? (
-              <div className="space-y-1.5">
-                <textarea value={notasDraft} onChange={e => setNotasDraft(e.target.value)}
-                  rows={3} placeholder="Quién la va a producir, fecha, brief, etc."
-                  className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md resize-y focus:outline-none focus:ring-2 focus:ring-brand-500" />
-                <div className="flex gap-1.5 justify-end">
-                  <button onClick={onCancelNotas}
-                    className="px-2.5 py-1 text-[10px] font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 transition">
-                    Cancelar
-                  </button>
-                  <button onClick={onSaveNotas}
-                    className="px-2.5 py-1 text-[10px] font-bold text-white bg-brand-600 rounded hover:bg-brand-700 transition">
-                    Guardar
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <p className="text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700 px-3 py-2">
-                {idea.notas || <span className="italic text-gray-400">Sin notas todavía.</span>}
-              </p>
-            )}
-          </div>
-
-          {/* Acciones — estado + links */}
-          <div className="flex items-center gap-2 flex-wrap pt-2 border-t border-gray-200 dark:border-gray-700">
-            <EstadoButton active={idea.estado === 'pendiente'} onClick={() => onEstado('pendiente')} icon={<Circle size={10} />} label="Pendiente" />
-            <EstadoButton active={idea.estado === 'en_uso'} onClick={() => onEstado('en_uso')} icon={<CircleDot size={10} />} label="En uso" color="amber" />
-            <EstadoButton active={idea.estado === 'usada'} onClick={() => onEstado('usada')} icon={<Check size={10} />} label="Usada" color="emerald" />
-            <EstadoButton active={idea.estado === 'archivada'} onClick={() => onEstado('archivada')} icon={<Archive size={10} />} label="Archivar" />
-
-            <div className="ml-auto flex items-center gap-2">
-              {idea.origen?.adSnapshotUrl && (
-                <a href={idea.origen.adSnapshotUrl} target="_blank" rel="noreferrer"
-                  className="inline-flex items-center gap-1 text-[10px] text-brand-600 hover:underline">
-                  <ExternalLink size={10} /> Ver ad original
-                </a>
-              )}
-              <button onClick={onRemove}
-                className="p-1 text-gray-400 hover:text-red-600 transition" title="Borrar idea">
-                <Trash2 size={12} />
-              </button>
-            </div>
-          </div>
-        </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Field({ label, text, highlight = false }) {
-  return (
-    <div>
-      <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1">{label}</p>
-      <p className={`text-xs leading-relaxed ${
-        highlight
-          ? 'bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-md px-3 py-2 text-brand-900 dark:text-brand-200'
-          : 'text-gray-700 dark:text-gray-300'
-      }`}>{text}</p>
-    </div>
-  );
-}
-
-function PerformanceStat({ label, val, fmt, semaforo }) {
-  const v = Number(val);
-  if (val == null || isNaN(v)) {
-    return (
-      <div className="text-[10px]">
-        <p className="text-brand-600 dark:text-brand-400 font-semibold">{label}</p>
-        <p className="text-gray-400 font-mono">—</p>
-      </div>
-    );
-  }
-  const tone = semaforo ? semaforo(v) : null;
-  const toneClass = tone === 'good' ? 'text-emerald-600 dark:text-emerald-400' :
-                    tone === 'mid' ? 'text-amber-600 dark:text-amber-400' :
-                    tone === 'bad' ? 'text-red-600 dark:text-red-400' :
-                    'text-brand-900 dark:text-brand-200';
-  return (
-    <div className="text-[10px]">
-      <p className="text-brand-600 dark:text-brand-400 font-semibold">{label}</p>
-      <p className={`font-mono font-bold ${toneClass}`}>{fmt(v)}</p>
-    </div>
-  );
-}
-
-function EstadoButton({ active, onClick, icon, label, color }) {
-  const colors = {
-    amber: active ? 'bg-amber-500 text-white' : 'bg-white dark:bg-gray-700 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800',
-    emerald: active ? 'bg-emerald-500 text-white' : 'bg-white dark:bg-gray-700 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800',
-    default: active ? 'bg-gray-700 dark:bg-gray-200 text-white dark:text-gray-900' : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 border border-gray-300 dark:border-gray-600',
-  };
-  return (
-    <button onClick={onClick}
-      className={`inline-flex items-center gap-1 px-2 py-1 text-[10px] font-semibold rounded transition ${colors[color || 'default']} hover:opacity-90`}>
-      {icon} {label}
-    </button>
-  );
-}
-
-// Vista inicial de Bandeja: grid de productos para elegir uno.
-// Cada card muestra contadores por estado + total. Al final, si hay ideas
-// sin productoId (legacy, de antes del multi-producto), se muestra un bucket
-// "Sin producto asignado" para no perderlas de vista.
-function ProductoSelectorView({ productos, ideas, onSelect }) {
-  // Contamos ideas por producto + un bucket "sin producto" para legacy.
-  const countsByProducto = new Map();
-  const countsSin = { pendiente: 0, en_uso: 0, usada: 0, archivada: 0, total: 0 };
-  for (const i of ideas) {
-    const key = i.productoId ? String(i.productoId) : SIN_PRODUCTO_ID;
-    if (key === SIN_PRODUCTO_ID) {
-      countsSin[i.estado] = (countsSin[i.estado] || 0) + 1;
-      countsSin.total++;
-      continue;
-    }
-    if (!countsByProducto.has(key)) {
-      countsByProducto.set(key, { pendiente: 0, en_uso: 0, usada: 0, archivada: 0, total: 0 });
-    }
-    const c = countsByProducto.get(key);
-    c[i.estado] = (c[i.estado] || 0) + 1;
-    c.total++;
-  }
-
-  const tieneAlgo = productos.length > 0 || countsSin.total > 0;
-
-  return (
-    <div className="max-w-5xl mx-auto space-y-5">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-600 flex items-center justify-center text-white shadow-sm">
-          <Inbox size={20} />
-        </div>
-        <div>
-          <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Bandeja de ideas</h2>
-          <p className="text-xs text-gray-500 dark:text-gray-400">Elegí un producto para ver su bandeja — cada uno es independiente.</p>
-        </div>
-      </div>
-
-      {!tieneAlgo ? (
-        <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-12 text-center">
-          <Package size={36} className="mx-auto text-gray-300 dark:text-gray-600 mb-3" />
-          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Sin productos ni ideas todavía</p>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            Andá a "Arranque", creá un producto y corré el pipeline — las ideas van a aparecer acá agrupadas por producto.
-          </p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {productos.map(p => {
-            const c = countsByProducto.get(String(p.id)) || { pendiente: 0, en_uso: 0, usada: 0, archivada: 0, total: 0 };
-            return (
-              <ProductoBandejaCard
-                key={p.id}
-                producto={p}
-                counts={c}
-                onClick={() => onSelect(String(p.id))}
-              />
-            );
-          })}
-          {countsSin.total > 0 && (
-            <ProductoBandejaCard
-              producto={{ id: SIN_PRODUCTO_ID, nombre: 'Sin producto asignado', legacy: true }}
-              counts={countsSin}
-              onClick={() => onSelect(SIN_PRODUCTO_ID)}
-            />
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ProductoBandejaCard({ producto, counts, onClick }) {
-  const { pendiente = 0, en_uso = 0, usada = 0, archivada = 0, total } = counts;
-  const inicial = producto.nombre?.charAt(0)?.toUpperCase() || '?';
-  return (
-    <button
-      onClick={onClick}
-      className="text-left p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm hover:border-brand-300 dark:hover:border-brand-700 hover:shadow-md transition group"
-    >
-      <div className="flex items-center gap-3 mb-3">
-        <div className={`w-12 h-12 rounded-lg flex items-center justify-center text-white font-bold text-lg shrink-0 group-hover:scale-105 transition ${
-          producto.legacy
-            ? 'bg-gradient-to-br from-gray-400 to-gray-500'
-            : 'bg-gradient-to-br from-brand-500 to-brand-600'
-        }`}>
-          {producto.legacy ? '?' : inicial}
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{producto.nombre}</p>
-          <p className="text-[10px] text-gray-500 dark:text-gray-400">
-            {total} idea{total !== 1 ? 's' : ''} total{total !== 1 ? 'es' : ''}
-          </p>
-        </div>
-        <ChevronRight size={16} className="text-gray-400 group-hover:text-brand-500 transition shrink-0" />
-      </div>
-      <div className="grid grid-cols-4 gap-1.5">
-        <MiniStat label="Pendientes" value={pendiente} accent />
-        <MiniStat label="En uso" value={en_uso} color="amber" />
-        <MiniStat label="Usadas" value={usada} color="emerald" />
-        <MiniStat label="Archivadas" value={archivada} color="gray" />
-      </div>
-    </button>
-  );
-}
-
-function MiniStat({ label, value, color = 'gray', accent = false }) {
-  const colors = {
-    gray: 'bg-gray-50 dark:bg-gray-900/40 text-gray-900 dark:text-gray-100 border-gray-200 dark:border-gray-700',
-    amber: 'bg-amber-50 dark:bg-amber-900/30 text-amber-900 dark:text-amber-200 border-amber-200 dark:border-amber-800',
-    emerald: 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-900 dark:text-emerald-200 border-emerald-200 dark:border-emerald-800',
-  };
-  return (
-    <div className={`px-2 py-1.5 rounded-md border ${colors[color]} ${accent ? 'ring-1 ring-brand-300 dark:ring-brand-700' : ''}`}>
-      <p className="text-[9px] font-bold uppercase tracking-wider opacity-60 leading-none">{label}</p>
-      <p className="text-base font-bold tabular-nums leading-tight mt-0.5">{value}</p>
-    </div>
-  );
-}
-
-// Columna del kanban — header con color + count, cuerpo scrolleable con cards.
-// Actúa como drop target: al soltar una card encima, llama onDropIdea con el id
-// de la idea, que la mueve a este estado.
-function KanbanColumn({ estado, titulo, color, accent = false, isCustom = false, ideas, selected, onToggleSelect, onCardClick, onDropIdea, onRename, onDelete }) {
-  const [isDragOver, setIsDragOver] = useState(false);
-  const palette = {
-    gray: {
-      header: 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-700',
-      body: 'bg-gray-50/50 dark:bg-gray-900/20 border-gray-200 dark:border-gray-700',
-      dragOver: 'ring-2 ring-gray-400 dark:ring-gray-500',
-    },
-    amber: {
-      header: 'bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 border-amber-300 dark:border-amber-800',
-      body: 'bg-amber-50/30 dark:bg-amber-900/10 border-amber-200 dark:border-amber-900/50',
-      dragOver: 'ring-2 ring-amber-400 dark:ring-amber-500',
-    },
-    emerald: {
-      header: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-200 border-emerald-300 dark:border-emerald-800',
-      body: 'bg-emerald-50/30 dark:bg-emerald-900/10 border-emerald-200 dark:border-emerald-900/50',
-      dragOver: 'ring-2 ring-emerald-400 dark:ring-emerald-500',
-    },
-    slate: {
-      header: 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700',
-      body: 'bg-slate-50/30 dark:bg-slate-900/20 border-slate-200 dark:border-slate-800',
-      dragOver: 'ring-2 ring-slate-400 dark:ring-slate-500',
-    },
-    violet: {
-      header: 'bg-brand-100 dark:bg-brand-900/40 text-brand-800 dark:text-brand-200 border-brand-300 dark:border-brand-800',
-      body: 'bg-brand-50/30 dark:bg-brand-900/10 border-brand-200 dark:border-brand-900/50',
-      dragOver: 'ring-2 ring-brand-400 dark:ring-brand-500',
-    },
-    rose: {
-      header: 'bg-brand-100 dark:bg-brand-900/40 text-brand-800 dark:text-brand-200 border-brand-300 dark:border-brand-800',
-      body: 'bg-brand-50/30 dark:bg-brand-900/10 border-brand-200 dark:border-brand-900/50',
-      dragOver: 'ring-2 ring-brand-400 dark:ring-brand-500',
-    },
-    sky: {
-      header: 'bg-brand-100 dark:bg-brand-900/40 text-brand-800 dark:text-brand-200 border-brand-300 dark:border-brand-800',
-      body: 'bg-brand-50/30 dark:bg-brand-900/10 border-brand-200 dark:border-brand-900/50',
-      dragOver: 'ring-2 ring-brand-400 dark:ring-brand-500',
-    },
-    lime: {
-      header: 'bg-lime-100 dark:bg-lime-900/40 text-lime-800 dark:text-lime-200 border-lime-300 dark:border-lime-800',
-      body: 'bg-lime-50/30 dark:bg-lime-900/10 border-lime-200 dark:border-lime-900/50',
-      dragOver: 'ring-2 ring-lime-400 dark:ring-lime-500',
-    },
-    orange: {
-      header: 'bg-brand-100 dark:bg-brand-900/40 text-brand-800 dark:text-brand-200 border-brand-300 dark:border-brand-800',
-      body: 'bg-brand-50/30 dark:bg-brand-900/10 border-brand-200 dark:border-brand-900/50',
-      dragOver: 'ring-2 ring-brand-400 dark:ring-brand-500',
-    },
-    teal: {
-      header: 'bg-brand-100 dark:bg-brand-900/40 text-brand-800 dark:text-brand-200 border-brand-300 dark:border-brand-800',
-      body: 'bg-brand-50/30 dark:bg-brand-900/10 border-brand-200 dark:border-brand-900/50',
-      dragOver: 'ring-2 ring-brand-400 dark:ring-brand-500',
-    },
-    indigo: {
-      header: 'bg-brand-100 dark:bg-brand-900/40 text-brand-800 dark:text-brand-200 border-brand-300 dark:border-brand-800',
-      body: 'bg-brand-50/30 dark:bg-brand-900/10 border-brand-200 dark:border-brand-900/50',
-      dragOver: 'ring-2 ring-brand-400 dark:ring-brand-500',
-    },
-    pink: {
-      header: 'bg-brand-100 dark:bg-brand-900/40 text-brand-800 dark:text-brand-200 border-brand-300 dark:border-brand-800',
-      body: 'bg-brand-50/30 dark:bg-brand-900/10 border-brand-200 dark:border-brand-900/50',
-      dragOver: 'ring-2 ring-brand-400 dark:ring-brand-500',
-    },
-  };
-  const c = palette[color] || palette.gray;
-
-  const handleDragOver = (e) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    if (!isDragOver) setIsDragOver(true);
-  };
-  const handleDragLeave = (e) => {
-    // Evitar flickers cuando el cursor pasa sobre hijos — solo des-highlight si
-    // salió del contenedor realmente.
-    if (!e.currentTarget.contains(e.relatedTarget)) setIsDragOver(false);
-  };
-  const handleDrop = (e) => {
-    e.preventDefault();
-    setIsDragOver(false);
-    const ideaId = e.dataTransfer.getData('text/idea-id');
-    const fromEstado = e.dataTransfer.getData('text/idea-estado');
-    if (!ideaId || fromEstado === estado) return;
-    onDropIdea?.(ideaId);
-  };
-
-  return (
-    <div
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
-      className={`rounded-xl border flex flex-col transition ${c.body} ${accent ? 'ring-2 ring-brand-200 dark:ring-brand-900/40' : ''} ${isDragOver ? c.dragOver : ''}`}
-    >
-      <div className={`px-3 py-2 border-b flex items-center justify-between gap-1 ${c.header} rounded-t-xl`}>
-        <p className="text-[11px] font-bold uppercase tracking-wider truncate">{titulo}</p>
-        <div className="flex items-center gap-1 shrink-0">
-          {onRename && (
-            <button onClick={onRename} className="p-0.5 opacity-60 hover:opacity-100 hover:text-brand-600 transition" title="Renombrar">
-              <Pencil size={11} />
-            </button>
-          )}
-          {isCustom && onDelete && (
-            <button onClick={onDelete} className="p-0.5 opacity-60 hover:opacity-100 hover:text-red-600 transition" title="Eliminar columna">
-              <Trash2 size={11} />
-            </button>
-          )}
-          <span className="text-xs font-bold tabular-nums">{ideas.length}</span>
-        </div>
-      </div>
-      <div className="p-2 space-y-2 min-h-[120px] max-h-[70vh] overflow-y-auto">
-        {ideas.length === 0 ? (
-          <p className={`text-[10px] italic text-center py-6 transition ${
-            isDragOver ? 'text-gray-700 dark:text-gray-300 font-semibold' : 'text-gray-400 dark:text-gray-600'
-          }`}>
-            {isDragOver ? 'Soltá acá' : 'Sin ideas'}
-          </p>
-        ) : (
-          ideas.map(idea => (
-            <KanbanCard
-              key={idea.id}
-              idea={idea}
-              isSelected={selected?.has(idea.id)}
-             
-              onToggleSelect={onToggleSelect ? () => onToggleSelect(idea.id) : null}
-              onClick={() => onCardClick(idea.id)}
-            />
-          ))
-        )}
-      </div>
-    </div>
-  );
-}
-
-// Etiquetas de formato para las cards del kanban.
-const FORMATO_META = {
-  video:    { emoji: '🎬', label: 'Video' },
-  static:   { emoji: '🖼️', label: 'Imagen' },
-  carrusel: { emoji: '📑', label: 'Carrusel' },
-  mixto:    { emoji: '🎞️', label: 'Mixto' },
-};
-
-// Fecha corta y legible para las cards (ej: "22 may"; agrega el año si la
-// idea es de otro año distinto al actual).
-function fechaCorta(iso) {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return '';
-  const opts = { day: 'numeric', month: 'short' };
-  if (d.getFullYear() !== new Date().getFullYear()) opts.year = '2-digit';
-  return d.toLocaleDateString('es-AR', opts);
-}
-
-// Card del kanban — pensada para leerse de un vistazo SIN abrir el ticket:
-// hook grande, tipo + formato + score etiquetados, ángulo, creencia, origen,
-// fecha de creación y si la pieza/guión ya están producidos. El detalle
-// completo se ve al clickear (abre el modal). Arrastrable entre columnas.
-function KanbanCard({ idea, isSelected = false, onToggleSelect, onClick }) {
-  const tipo = TIPO_META[idea.tipo] || TIPO_META.desde_cero;
-  const angulo = idea.anguloCategoria ? ANGULO_META[idea.anguloCategoria] : null;
-  const fmt = FORMATO_META[idea.formato] || null;
-  const esVideo = idea.formato === 'video';
-  // "Pieza lista" = el output final ya producido. Para video es el guión
-  // adaptado. Las imágenes las produce un diseñador externo, no las
-  // marcamos como "listas" desde la app.
-  const piezaLista = esVideo && !!idea.guionAdaptado;
-  const [isDragging, setIsDragging] = useState(false);
-
-  const handleDragStart = (e) => {
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/idea-id', idea.id);
-    e.dataTransfer.setData('text/idea-estado', idea.estado || '');
-    setIsDragging(true);
-  };
-  const handleDragEnd = () => setIsDragging(false);
-  const handleCheckboxClick = (e) => {
-    e.stopPropagation();
-    onToggleSelect?.();
-  };
-
-  // Origen — de dónde salió la idea. Réplica = competidor; iteración = ad
-  // propio; el resto = generada por IA.
-  let origenIcon = '✨', origenText = 'Generada por IA';
-  if (idea.origen?.tipo === 'competidor' && idea.origen?.competidorNombre) {
-    origenIcon = '🏢';
-    origenText = idea.origen.competidorNombre;
-  } else if (idea.tipo === 'iteracion' && idea.origen?.adNombre) {
-    origenIcon = '🔁';
-    origenText = `itera: ${idea.origen.adNombre}`;
-  }
-
-  const tieneScore = typeof idea.scoreValue === 'number';
-
-  return (
-    <div
-      onClick={onClick}
-      draggable
-      onDragStart={handleDragStart}
-      onDragEnd={handleDragEnd}
-      className={`relative bg-white dark:bg-gray-800 border rounded-lg p-2.5 hover:shadow-md transition group cursor-grab active:cursor-grabbing ${
-        isSelected
-          ? 'border-brand-400 dark:border-brand-600 ring-2 ring-brand-200 dark:ring-brand-900/40'
-          : 'border-gray-200 dark:border-gray-700 hover:border-brand-300 dark:hover:border-brand-700'
-      } ${isDragging ? 'opacity-40' : ''}`}
-    >
-      {onToggleSelect && (
-        <button
-          onClick={handleCheckboxClick}
-          className="absolute top-1.5 right-1.5 w-5 h-5 flex items-center justify-center rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:border-brand-500 transition opacity-0 group-hover:opacity-100 data-[checked=true]:opacity-100 z-10"
-          data-checked={isSelected}
-          title={isSelected ? 'Deseleccionar' : 'Seleccionar para exportar'}
-        >
-          {isSelected ? <CheckSquare size={12} className="text-brand-600" /> : <Square size={12} className="text-gray-400" />}
-        </button>
-      )}
-
-      {/* Fila 1: badges de clasificación (tipo · formato · score) */}
-      <div className="flex items-center gap-1 flex-wrap pr-6">
-        <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[9px] font-bold rounded border ${tipo.color}`}>
-          {tipo.emoji} {tipo.label}
-        </span>
-        {fmt && (
-          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[9px] font-semibold rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
-            {fmt.emoji} {fmt.label}
-          </span>
-        )}
-        {tieneScore && (
-          <span className={`inline-flex items-center px-1.5 py-0.5 text-[9px] font-bold rounded ${
-            idea.lowScore
-              ? 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300'
-              : idea.scoreValue >= 8
-                ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300'
-                : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
-          }`}
-            title={idea.scoreReason ? `Score del hook ${idea.scoreValue}/10 — ${idea.scoreReason}` : `Score del hook ${idea.scoreValue}/10`}>
-            ★ {idea.scoreValue}/10
-          </span>
-        )}
-      </div>
-
-      {/* Fila 2: thumbnail + hook (lo principal, legible de un vistazo) */}
-      <div className="flex items-start gap-2.5 mt-2">
-        {idea.origen?.imageUrl ? (
-          <img
-            src={idea.origen.imageUrl} alt=""
-            className="w-12 h-12 rounded-md object-cover bg-gray-100 dark:bg-gray-700 shrink-0 border border-gray-200 dark:border-gray-700"
-            onError={e => { e.target.style.display = 'none'; }}
-          />
-        ) : (
-          <div className="w-12 h-12 rounded-md bg-gradient-to-br from-brand-200 to-brand-300 dark:from-brand-900/40 dark:to-brand-800/40 flex items-center justify-center shrink-0">
-            <span className="text-xl">{tipo.emoji}</span>
-          </div>
-        )}
-        <div className="flex-1 min-w-0">
-          <p className="text-[13px] font-bold text-gray-900 dark:text-gray-100 leading-snug line-clamp-3">
-            {idea.hook ? `“${idea.hook}”` : (idea.titulo || 'Sin hook')}
-          </p>
-          {idea.hook && idea.titulo && (
-            <p className="text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide mt-1 truncate">
-              {idea.titulo}
-            </p>
-          )}
-        </div>
-      </div>
-
-      {/* Fila 3: badges secundarios (ángulo · creencia · alertas) */}
-      {(angulo || idea.creenciaApalancada || idea.metaRiesgo?.tieneRiesgo || idea.hookDuplicado) && (
-        <div className="flex items-center gap-1 flex-wrap mt-2">
-          {angulo && (
-            <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[9px] font-semibold rounded ${angulo.color}`}
-              title={`Ángulo estratégico ${idea.anguloCategoria}: ${angulo.label}`}>
-              {angulo.emoji} {angulo.label}
-            </span>
-          )}
-          {idea.creenciaApalancada && (
-            <span className="inline-flex items-center max-w-[180px] truncate px-1.5 py-0.5 text-[9px] font-semibold rounded bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300"
-              title={`Creencia que apalanca: ${idea.creenciaApalancada}`}>
-              💭 {idea.creenciaApalancada}
-            </span>
-          )}
-          {idea.metaRiesgo?.tieneRiesgo && (
-            <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-bold rounded bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300"
-              title={`Palabras gatillo de Meta: ${(idea.metaRiesgo.palabras || []).join(', ')}`}>
-              ⚠ Meta
-            </span>
-          )}
-          {idea.hookDuplicado && (
-            <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-semibold rounded bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300"
-              title="Este hook arranca igual que otra idea — considerá reescribirlo">
-              ⚠ hook similar
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* Fila 4: footer — origen · fecha · estado de producción */}
-      <div className="flex items-center justify-between gap-2 mt-2 pt-1.5 border-t border-gray-100 dark:border-gray-700/60">
-        <span className="text-[9px] text-gray-500 dark:text-gray-400 truncate min-w-0" title={origenText}>
-          {origenIcon} {origenText}
-          {idea.origen?.daysRunning ? ` · ${idea.origen.daysRunning}d` : ''}
-        </span>
-        <span className="flex items-center gap-1.5 shrink-0">
-          {piezaLista && (
-            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-bold rounded-md bg-gradient-to-br from-emerald-500 to-emerald-600 text-white shadow-sm"
-              title={esVideo ? 'Guión de video ya generado' : 'Creativo ya producido — abrí la idea para verlo'}>
-              {esVideo ? '🎬' : '🎨'} {esVideo ? 'Guión' : 'Creativo'}
-            </span>
-          )}
-          <span className="text-[9px] text-gray-400 dark:text-gray-500 whitespace-nowrap" title={`Creada el ${idea.createdAt ? new Date(idea.createdAt).toLocaleString('es-AR') : '—'}`}>
-            📅 {fechaCorta(idea.createdAt)}
-          </span>
-        </span>
-      </div>
-    </div>
-  );
-}
-
-// Modal simple que muestra el detalle completo de una idea.
-// En Parte 2b.4 se pule: tabs, mejor layout, keyboard shortcuts.
-// Por ahora reutiliza el IdeaCard expandido envuelto en un overlay.
-function IdeaDetailModal({ idea, onClose, ...cardProps }) {
-  // Cerrar con ESC.
-  useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center px-4 py-8 bg-black/50 backdrop-blur-sm overflow-y-auto"
-      onClick={onClose}
-    >
-      <div
-        className="relative w-full max-w-5xl"
-        onClick={e => e.stopPropagation()}
-      >
-        <button
-          onClick={onClose}
-          className="absolute -top-2 -right-2 z-10 w-8 h-8 rounded-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 shadow-md flex items-center justify-center text-gray-600 dark:text-gray-300 hover:text-red-600 transition"
-          title="Cerrar (ESC)"
-        >
-          ✕
-        </button>
-        <IdeaCard
-          idea={idea}
-          expanded={true}
-          onToggle={onClose}
-          {...cardProps}
-        />
-      </div>
-    </div>
-  );
-}
-
-// Panel de las ideas tipo VIDEO. El video va a producción humana. Al abrir
-// la idea, el guión adaptado al producto del user se genera SOLO (sin
-// botón) — es texto corrido en rioplatense, listo para pasarle al editor.
-// Genera imágenes directamente desde una idea de la Bandeja. Reusa el mismo
-// pipeline de la galería (saveReferencial → mismo lightbox y tracking).
-// El user puede elegir N variantes — la primera es interpretación literal del
-// brief, las siguientes van divergiendo (medium → loose).
-function IdeaImageGenerator({ idea }) {
-  const promptEs = buildPromptGptImage2Es(idea);
-  const [n, setN] = useState(2);
-  const [size, setSize] = useState('2048x2048');
-  const [quality, setQuality] = useState('high');
-  const [running, setRunning] = useState(false);
-  const [error, setError] = useState('');
-  const [lastBatch, setLastBatch] = useState(null); // { count, t, durMs }
-
-  const handleGenerar = async () => {
-    setError('');
-    const productos = loadProductos();
-    const producto = productos.find(p => String(p.id) === String(idea.productoId));
-    if (!producto) {
-      setError('No encontré el producto de esta idea — recargá la página.');
-      return;
-    }
-    const prodImg = getProductoImagen(producto.id);
-    if (!prodImg) {
-      setError('Cargá la foto del producto en Setup (Arranque) antes de generar.');
-      return;
-    }
-    const costoPorImg = quality === 'low' ? 0.03 : quality === 'medium' ? 0.07 : 0.18;
-    const estimatedCost = n * costoPorImg;
-    const execId = startExecution({
-      label: `Generando ${n} imágenes desde idea`,
-      sublabel: idea.hook || idea.titulo || idea.descripcionImagen?.slice(0, 60) || '',
-      kind: 'creative-from-idea',
-      estimatedMs: 90000,
-      estimatedCost,
-    });
-    setRunning(true);
-    const t0 = Date.now();
-    try {
-      updateExecution(execId, { stage: `Generando ${n} variante${n !== 1 ? 's' : ''}…` });
-      const resp = await fetch('/api/marketing/crear-imagen-desde-idea', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          idea: {
-            id: idea.id,
-            hook: idea.hook,
-            titulo: idea.titulo,
-            angulo: idea.angulo,
-            painPoint: idea.painPoint,
-            escenarioNarrativo: idea.escenarioNarrativo,
-            descripcionImagen: idea.descripcionImagen,
-            estiloVisual: idea.estiloVisual,
-            publicoSugerido: idea.publicoSugerido,
-            creenciaApalancada: idea.creenciaApalancada,
-            textoEnImagen: idea.textoEnImagen,
-            formato: idea.formato,
-          },
-          producto: {
-            nombre: producto.nombre,
-            descripcion: producto.descripcion,
-            research: producto.docs?.research,
-            offerBrief: producto.ofertasReales || producto.docs?.offerBrief || '',
-          },
-          productoImagen: prodImg,
-          accentColor: getAccentColor(producto.id) || '',
-          n, size, quality,
-        }),
-      });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-      const costo = logCostsFromResponse(data, `crear-imagen-desde-idea · ${idea.hook?.slice(0, 40) || 'idea'}`);
-
-      // Guardar en la galería con sourceType: 'bandeja-idea'.
-      const ahora = Date.now();
-      const imagenes = data.imagenes || [];
-      const variantStyles = data.variantStyles || [];
-      const prompts = data.prompts || [];
-      for (let i = 0; i < imagenes.length; i++) {
-        const promptUsed = prompts[i]?.prompt || data.prompts?.[i]?.prompt || '';
-        await saveReferencial({
-          id: `idea_${ahora}_${idea.id}_${i}`,
-          productoId: String(producto.id),
-          sourceType: 'bandeja-idea',
-          sourceIdeaId: idea.id,
-          sourceBrand: 'Idea propia',
-          sourceHeadline: idea.hook || idea.titulo || '',
-          variantIndex: i,
-          variantStyle: variantStyles[i] || 'tight',
-          imageBase64: imagenes[i],
-          mimeType: data.mimeType || 'image/png',
-          prompt: promptUsed,
-          model: data.model,
-          size: data.size,
-          sizeFallback: !!data.sizeFallback,
-          quality: data.quality || quality,
-          createdAt: new Date(ahora + i).toISOString(),
-        });
-      }
-      const durMs = Date.now() - t0;
-      setLastBatch({ count: imagenes.length, t: ahora, durMs });
-      finishExecution(execId, {
-        ok: true,
-        message: `${imagenes.length} imagen${imagenes.length !== 1 ? 'es' : ''} en galería`,
-        cost: costo?.total,
-      });
-    } catch (err) {
-      setError(err.message || 'Error generando imagen');
-      finishExecution(execId, { ok: false, message: err.message || 'Error' });
-    } finally {
-      setRunning(false);
-    }
-  };
-
-  const costoPorImg = quality === 'low' ? 0.03 : quality === 'medium' ? 0.07 : 0.18;
-
-  return (
-    <div className="bg-brand-50 dark:bg-brand-900/20 rounded-md border border-brand-200 dark:border-brand-800">
-      <div className="px-3 py-2 flex flex-wrap items-center gap-2 border-b border-brand-200 dark:border-brand-800">
-        <p className="text-[10px] font-bold text-brand-700 dark:text-brand-300 uppercase tracking-wider mr-1">
-          🤖 Generar imagen con gpt-image-2
-        </p>
-        {/* Selector compacto de N */}
-        <div className="flex items-center gap-0.5">
-          {[1, 2, 4, 6].map(opt => (
-            <button key={opt}
-              onClick={() => setN(opt)}
-              className={`px-1.5 py-0.5 text-[10px] font-bold rounded transition ${
-                n === opt
-                  ? 'bg-brand-600 text-white'
-                  : 'bg-white text-gray-600 dark:bg-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
-              }`}
-            >{opt}v</button>
-          ))}
-        </div>
-        {/* Selector compacto de ratio */}
-        <div className="flex items-center gap-0.5">
-          {[
-            { v: '2048x2048', label: '1:1' },
-            { v: '1024x1536', label: 'Story' },
-          ].map(opt => (
-            <button key={opt.v}
-              onClick={() => setSize(opt.v)}
-              className={`px-1.5 py-0.5 text-[10px] font-bold rounded transition ${
-                size === opt.v
-                  ? 'bg-brand-600 text-white'
-                  : 'bg-white text-gray-600 dark:bg-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
-              }`}
-            >{opt.label}</button>
-          ))}
-        </div>
-        {/* Quality */}
-        <div className="flex items-center gap-0.5">
-          {['low', 'medium', 'high'].map(opt => (
-            <button key={opt}
-              onClick={() => setQuality(opt)}
-              className={`px-1.5 py-0.5 text-[10px] font-bold rounded transition uppercase ${
-                quality === opt
-                  ? 'bg-brand-600 text-white'
-                  : 'bg-white text-gray-600 dark:bg-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
-              }`}
-              title={`$${{ low: 0.03, medium: 0.07, high: 0.18 }[opt]} por imagen`}
-            >{opt.charAt(0).toUpperCase()}</button>
-          ))}
-        </div>
-        <span className="text-[9px] text-gray-500 dark:text-gray-400 ml-1 tabular-nums">
-          ~${(n * costoPorImg).toFixed(2)}
-        </span>
-        <div className="ml-auto flex items-center gap-1.5">
-          <button
-            onClick={() => navigator.clipboard?.writeText(promptEs)}
-            className="text-[10px] font-semibold text-brand-600 dark:text-brand-400 hover:underline"
-            title="Copiar prompt al portapapeles"
-          >
-            📋 Copiar
-          </button>
-          <button
-            onClick={handleGenerar}
-            disabled={running}
-            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-white bg-gradient-to-br from-brand-500 to-brand-600 rounded hover:from-brand-700 hover:to-brand-600 transition disabled:opacity-50 shadow-sm"
-          >
-            {running
-              ? <><Loader2 size={10} className="animate-spin" /> Generando…</>
-              : <><Sparkles size={10} /> Generar</>
-            }
-          </button>
-        </div>
-      </div>
-
-      {error && (
-        <div className="px-3 py-2 text-[10px] font-semibold text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/30 border-t border-red-200 dark:border-red-800">
-          ⚠ {error}
-        </div>
-      )}
-
-      {lastBatch && !error && (
-        <div className="px-3 py-2 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/30 border-t border-emerald-200 dark:border-emerald-800">
-          ✓ {lastBatch.count} imagen{lastBatch.count !== 1 ? 'es' : ''} en {Math.floor(lastBatch.durMs / 1000)}s — buscalas en la <strong>Galería</strong>.
-        </div>
-      )}
-
-      <details className="border-t border-brand-200 dark:border-brand-800">
-        <summary className="px-3 py-1.5 text-[10px] font-bold text-brand-700 dark:text-brand-300 uppercase tracking-wider cursor-pointer hover:bg-brand-100/40 dark:hover:bg-brand-900/30">
-          Ver el prompt base que va a usar
-        </summary>
-        <pre className="px-3 pb-3 text-xs text-brand-900 dark:text-brand-200 whitespace-pre-wrap break-words font-sans">{promptEs}</pre>
-      </details>
-    </div>
-  );
-}
-
-function VideoBriefPanel({ idea }) {
-  const [guion, setGuion] = useState(guionToText(idea.guionAdaptado));
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [copied, setCopied] = useState(false);
-  // mountedRef: evita setState sobre componente desmontado (la llamada
-  // tarda 15-40s; si el user cambia de idea en el medio, el panel se
-  // desmonta). autoGenRef: evita que el auto-generar dispare dos veces
-  // (React StrictMode monta el efecto dos veces en dev).
-  const mountedRef = useRef(true);
-  const autoGenRef = useRef(false);
-
-  const generar = async () => {
-    const prod = loadProductos().find(p => String(p.id) === String(idea.productoId));
-    if (!prod) {
-      setError('No encontré el producto de esta idea — recargá la página.');
-      return;
-    }
-    setLoading(true);
-    setError('');
-    try {
-      const resp = await fetch('/api/marketing/adapt-guion', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          idea: {
-            titulo: idea.titulo,
-            hook: idea.hook,
-            angulo: idea.angulo,
-            painPoint: idea.painPoint,
-            copy: idea.copyPostMeta || idea.copy,
-            guionReferencia: guionToText(idea.guion),
-            formato: idea.formato,
-          },
-          producto: {
-            nombre: prod.nombre,
-            descripcion: prod.descripcion,
-            research: prod.docs?.research || prod.research,
-            avatar: prod.docs?.avatar || prod.avatar,
-            stage: prod.stage,
-          },
-          competidorRef: idea.origen?.competidorNombre,
-        }),
-      });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-      logCostsFromResponse(data, `adapt-guion · ${(idea.titulo || '').slice(0, 50)}`);
-      // updateIdea persiste igual aunque el panel se haya desmontado — el
-      // guión queda guardado en la idea. Solo el setState es condicional.
-      // Limpiamos el flag de error: si una corrida previa falló y ahora
-      // anduvo, el guión es válido.
-      updateIdea(idea.id, { guionAdaptado: data.guion || '', guionAdaptadoError: false });
-      if (mountedRef.current) setGuion(data.guion || '');
-    } catch (err) {
-      // Persistimos que falló — así reabrir la idea NO vuelve a auto-generar
-      // (cada llamada a adapt-guion cuesta plata). El user puede reintentar
-      // manualmente con el botón.
-      updateIdea(idea.id, { guionAdaptadoError: true });
-      if (mountedRef.current) setError(err.message || 'Error adaptando el guión');
-    } finally {
-      if (mountedRef.current) setLoading(false);
-    }
-  };
-
-  // Auto-generar al abrir la idea, si todavía no tiene guión adaptado NI
-  // falló antes. Sin botón — el guión aparece solo. El componente se monta
-  // con key={idea.id}, así que esto corre una vez por idea. Si una corrida
-  // previa falló, NO re-dispara solo (evita cobrar en cada reapertura) —
-  // queda el botón "Reintentar".
-  useEffect(() => {
-    mountedRef.current = true;
-    if (!idea.guionAdaptado && !idea.guionAdaptadoError && !autoGenRef.current) {
-      autoGenRef.current = true;
-      generar();
-    }
-    return () => { mountedRef.current = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const copiar = () => {
-    if (!guion) return;
-    try {
-      navigator.clipboard?.writeText(guion);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {}
-  };
-
-  return (
-    <div className="bg-brand-50 dark:bg-brand-900/20 rounded-md border border-brand-200 dark:border-brand-800">
-      <div className="px-3 py-2">
-        <p className="text-[10px] font-bold text-brand-700 dark:text-brand-300 uppercase tracking-wider">
-          🎬 Guión de video — para tus editores
-        </p>
-      </div>
-
-      <div className="px-3 pb-3 space-y-2">
-        {loading && !guion && (
-          <div className="flex items-center gap-2 px-1 py-2 text-xs text-brand-700 dark:text-brand-300">
-            <Loader2 size={14} className="animate-spin" /> Generando el guión adaptado a tu producto…
-          </div>
-        )}
-
-        {guion && (
-          <div className="space-y-2">
-            <p className="text-[10px] font-bold text-brand-700 dark:text-brand-300">✓ Guión adaptado a tu marca</p>
-            <div className="text-xs text-gray-800 dark:text-gray-200 whitespace-pre-wrap leading-relaxed bg-white dark:bg-gray-800/60 rounded-md px-3 py-2 border border-brand-100 dark:border-brand-900/40">
-              {guion}
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              <button onClick={copiar}
-                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-bold text-white bg-brand-600 rounded hover:bg-brand-700 transition">
-                {copied ? <Check size={11} /> : <Download size={11} />} {copied ? 'Copiado' : 'Copiar guión'}
-              </button>
-              <button onClick={generar} disabled={loading}
-                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-gray-800 border border-brand-300 dark:border-brand-700 rounded hover:bg-brand-50 dark:hover:bg-brand-900/30 transition disabled:opacity-50">
-                {loading ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />} Regenerar
-              </button>
-            </div>
-          </div>
-        )}
-
-        {error && !loading && (
-          <div className="space-y-1.5">
-            <p className="text-[10px] text-red-600 dark:text-red-400">⚠ {error}</p>
-            <button onClick={generar}
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-gray-800 border border-brand-300 dark:border-brand-700 rounded hover:bg-brand-50 dark:hover:bg-brand-900/30 transition">
-              <RefreshCw size={11} /> Reintentar
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}

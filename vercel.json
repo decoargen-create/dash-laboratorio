@@ -10,7 +10,7 @@
     "api/marketing/deep-analyze.js":    { "maxDuration": 240 },
     "api/marketing/generate-ideas.js":  { "maxDuration": 300 },
     "api/marketing/generate-creative.js": { "maxDuration": 180 },
-    "api/marketing/crear-creativo-referencial.js": { "maxDuration": 240 },
+    "api/marketing/crear-creativo-referencial.js": { "maxDuration": 300 },
     "api/marketing/adapt-guion.js":     { "maxDuration": 60 },
     "api/marketing/copilot.js":         { "maxDuration": 60 },
     "api/marketing/score-hooks.js":     { "maxDuration": 60 },

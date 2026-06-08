@@ -422,7 +422,9 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       // una variación quedó mejor que otra).
       const ahora = Date.now();
       const imagenes = data.imagenes || [];
+      const variantStyles = data.variantStyles || [];
       for (let i = 0; i < imagenes.length; i++) {
+        const variantStyle = variantStyles[i] || 'reference';
         await saveReferencial({
           id: `ref_${ahora}_${ad.id}_${i}`,
           productoId: String(producto.id),
@@ -431,9 +433,10 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           sourceImageUrl: refImageUrl,
           sourceHeadline: ad.headline || ad.body?.slice(0, 200) || '',
           variantIndex: i,
+          variantStyle,          // 'reference' (palette del ad) | 'rebrand' (palette del producto)
           imageBase64: imagenes[i],
           mimeType: data.mimeType || 'image/png',
-          prompt: data.prompt,
+          prompt: variantStyle === 'rebrand' ? data.promptRebrand : data.promptReference,
           skeleton: data.skeleton || null,
           model: data.model,
           visionModel: data.visionModel || null,

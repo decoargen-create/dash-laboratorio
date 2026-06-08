@@ -389,7 +389,7 @@ function aspectRatioFromSize(size) {
 }
 
 // Prompt builder v2 — usa el skeleton estructurado + producto + research.
-function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio }) {
+function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio, variantStyle = 'reference' }) {
   const nombre = (producto?.nombre || '').trim();
   const descripcion = (producto?.descripcion || '').trim();
   const research = (producto?.research || producto?.docs?.research || '').trim();
@@ -451,7 +451,18 @@ function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio
 
   if (accentColor) {
     parts.push('');
-    parts.push(`Accent color for highlights/arrows/pills: ${accentColor}`);
+    if (variantStyle === 'rebrand') {
+      // Variante B — rebrand: el color del producto domina la escena entera.
+      parts.push(`**BRAND REPALETTING — ${accentColor} IS THE DOMINANT COLOR**:`);
+      parts.push(`  • Override the palette of IMAGE 1. The whole scene should be tonally aligned to ${accentColor}.`);
+      parts.push(`  • Background: pick a wall, fabric, surface, or gradient in ${accentColor} family (same hue, varying value/saturation).`);
+      parts.push(`  • Props secondary (plants, fabrics, accents): pick variants that harmonize with ${accentColor}.`);
+      parts.push(`  • Lighting: subtle tonal tint of ${accentColor} in highlights or shadows is OK.`);
+      parts.push(`  • Skin tones, food, natural elements stay realistic — don't tint people.`);
+      parts.push(`  • Result: same composition as IMAGE 1, but the COLOR STORY is now brand-aligned. Like a re-shoot of the same ad in our brand world.`);
+    } else {
+      parts.push(`Accent color for highlights/arrows/pills/badges: ${accentColor}`);
+    }
   }
 
   parts.push('');
@@ -568,21 +579,60 @@ export default async function handler(req, res) {
       visionCost = result.cost;
     }
 
-    // Paso 4 — construir prompt con aspect ratio target.
-    const prompt = buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio });
+    // Paso 4 — construir prompts. Si tenemos accentColor + n>=2, hacemos
+    // 2 calls PARALELAS con prompts distintos:
+    //   Variante A — palette del ad ref (reference)
+    //   Variante B — rebrand con accentColor dominante en la escena entera
+    // Si no hay accentColor o n=1, hacemos UNA call con n imágenes.
+    const usarRebrandVariant = !!accentColor && n >= 2;
+    const promptRef = buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio, variantStyle: 'reference' });
+    const promptRebrand = usarRebrandVariant
+      ? buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio, variantStyle: 'rebrand' })
+      : null;
 
     // Paso 5 — llamar a gpt-image-2 /v1/images/edits con AMBAS imágenes.
     // Si falla por tamaño no soportado, hacemos un único retry con FALLBACK_SIZE.
     let imagenes;
+    let variantStyles; // array paralelo a imagenes — 'reference' | 'rebrand'
     let sizeUsed = size;
     let sizeFallback = false;
-    try {
-      imagenes = await callGptImage2Edit({
-        apiKey, prompt,
-        refImgBuf, refMime,
-        prodImgBuf: prodBuf, prodMime,
-        size: sizeUsed, quality, n,
+
+    const runCalls = async (useSize) => {
+      if (usarRebrandVariant) {
+        // 2 calls paralelas con n=Math.floor(n/2) cada una (típicamente 1+1).
+        // Si n es impar (3, 5...), la primera variant lleva el extra.
+        const nRef = Math.ceil(n / 2);
+        const nReb = Math.floor(n / 2);
+        const [imgsRef, imgsReb] = await Promise.all([
+          callGptImage2Edit({
+            apiKey, prompt: promptRef,
+            refImgBuf, refMime, prodImgBuf: prodBuf, prodMime,
+            size: useSize, quality, n: nRef,
+          }),
+          callGptImage2Edit({
+            apiKey, prompt: promptRebrand,
+            refImgBuf, refMime, prodImgBuf: prodBuf, prodMime,
+            size: useSize, quality, n: nReb,
+          }),
+        ]);
+        return {
+          imagenes: [...imgsRef, ...imgsReb],
+          variantStyles: [...imgsRef.map(() => 'reference'), ...imgsReb.map(() => 'rebrand')],
+        };
+      }
+      // 1 sola call con n imágenes — todas referencia.
+      const imgs = await callGptImage2Edit({
+        apiKey, prompt: promptRef,
+        refImgBuf, refMime, prodImgBuf: prodBuf, prodMime,
+        size: useSize, quality, n,
       });
+      return { imagenes: imgs, variantStyles: imgs.map(() => 'reference') };
+    };
+
+    try {
+      const result = await runCalls(sizeUsed);
+      imagenes = result.imagenes;
+      variantStyles = result.variantStyles;
     } catch (err) {
       const msg = (err?.message || '').toLowerCase();
       const isSizeErr = msg.includes('size') || msg.includes('dimension') || /unsupported/.test(msg);
@@ -590,19 +640,16 @@ export default async function handler(req, res) {
         console.warn(`gpt-image-2 rechazó size=${sizeUsed} — fallback a ${FALLBACK_SIZE}`);
         sizeUsed = FALLBACK_SIZE;
         sizeFallback = true;
-        imagenes = await callGptImage2Edit({
-          apiKey, prompt,
-          refImgBuf, refMime,
-          prodImgBuf: prodBuf, prodMime,
-          size: sizeUsed, quality, n,
-        });
+        const result = await runCalls(sizeUsed);
+        imagenes = result.imagenes;
+        variantStyles = result.variantStyles;
       } else {
         throw err;
       }
     }
-
     return respondJSON(res, 200, {
       imagenes,
+      variantStyles,         // array paralelo a imagenes — 'reference' | 'rebrand'
       mimeType: 'image/png',
       size: sizeUsed,
       sizeRequested: size,
@@ -614,7 +661,8 @@ export default async function handler(req, res) {
       visionModel: skeleton && !skeletonFromCache ? MODEL_VISION_FALLBACK : null,
       skeleton,
       skeletonFromCache,
-      prompt,
+      promptReference: promptRef,
+      promptRebrand,         // null si no se usó rebrand
       generatedAt: new Date().toISOString(),
       cost: {
         openai: (COST_ESTIMATE[quality] ?? 0.18) * imagenes.length,

@@ -85,68 +85,67 @@ export default function CreativosTab({ producto, onUpdateProducto, addToast }) {
   };
 
   return (
-    <div className="space-y-5">
-      {/* Config + botón generar */}
-      <div className="bg-gradient-to-br from-brand-50 to-brand-100 dark:from-brand-900/20 dark:to-brand-800/20 border border-brand-200 dark:border-brand-800 rounded-xl p-4">
-        <div className="flex items-center gap-2 mb-3">
-          <Sparkles size={16} className="text-brand-600 dark:text-brand-400" />
-          <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Fase 1 — Hooks + diagnóstico</h3>
-          <span className="ml-auto text-[10px] text-gray-500 dark:text-gray-400">Generador de creativos Meta Ads</span>
-        </div>
-        <p className="text-xs text-gray-600 dark:text-gray-300 mb-3">
-          Genera 15-25 hooks categorizados por ángulo (sarcasmo, insight, POV, autoridad, testimonio), basándose en el research + avatar + offer brief del producto + competidores + aprendizajes.
-        </p>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
-          <div>
-            <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">Tono</label>
-            <input
-              type="text"
-              value={hooksTono}
-              onChange={e => setHooksTono(e.target.value)}
-              placeholder="argentino coloquial, directo"
-              className="w-full px-2 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-brand-500"
-            />
-          </div>
-          <div>
-            <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">Objetivo</label>
-            <select
-              value={hooksObjetivo}
-              onChange={e => setHooksObjetivo(e.target.value)}
-              className="w-full px-2 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-brand-500"
-            >
-              <option value="TOFU">TOFU (prospecting)</option>
-              <option value="MOFU">MOFU (consideración)</option>
-              <option value="BOFU">BOFU (conversión)</option>
-              <option value="Retargeting">Retargeting</option>
-              <option value="Mix">Mix</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">Restricciones</label>
-            <input
-              type="text"
-              value={hooksRestricciones}
-              onChange={e => setHooksRestricciones(e.target.value)}
-              placeholder="sin palabras gatillo, sin vulgaridad"
-              className="w-full px-2 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-brand-500"
-            />
+    <div className="space-y-4">
+      {/* Header thin Linear-style — una sola fila con título + última corrida + botón primario */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <Sparkles size={16} className="text-brand-600 dark:text-brand-400 shrink-0" />
+          <div className="min-w-0">
+            <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Generador de hooks</h3>
+            <p className="text-[10px] text-gray-500 dark:text-gray-400 truncate">
+              15-25 hooks categorizados por ángulo · basado en research + avatar + competidores
+              {creativos?.fase1?.generatedAt && ` · último: ${new Date(creativos.fase1.generatedAt).toLocaleDateString('es-AR')}`}
+            </p>
           </div>
         </div>
         <button
           onClick={generarHooks}
           disabled={hooksRunning}
-          className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-gradient-to-br from-brand-600 to-brand-500 rounded-lg hover:from-brand-700 hover:to-brand-600 shadow-sm transition disabled:opacity-40"
+          className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-brand-600 to-brand-500 rounded-lg hover:from-brand-700 hover:to-brand-600 shadow-sm transition disabled:opacity-40 shrink-0"
         >
           {hooksRunning
-            ? <><Loader2 size={14} className="animate-spin" /> Generando…</>
-            : <><Sparkles size={14} /> {yaTieneHooks ? 'Regenerar hooks' : 'Generar hooks'}</>
+            ? <><Loader2 size={12} className="animate-spin" /> Generando…</>
+            : <><Sparkles size={12} /> {yaTieneHooks ? 'Regenerar' : 'Generar hooks'}</>
           }
         </button>
-        {creativos?.fase1?.generatedAt && (
-          <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-2">
-            Última generación: {new Date(creativos.fase1.generatedAt).toLocaleString('es-AR')}
-          </p>
-        )}
+      </div>
+
+      {/* Toolbar de config — todo en una línea (Stripe-style) */}
+      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-2 flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-1.5 flex-1 min-w-[180px]">
+          <span className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase shrink-0">Tono</span>
+          <input
+            type="text"
+            value={hooksTono}
+            onChange={e => setHooksTono(e.target.value)}
+            placeholder="argentino coloquial, directo"
+            className="flex-1 px-2 py-1 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
+          />
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase">Objetivo</span>
+          <select
+            value={hooksObjetivo}
+            onChange={e => setHooksObjetivo(e.target.value)}
+            className="px-2 py-1 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded"
+          >
+            <option value="TOFU">TOFU</option>
+            <option value="MOFU">MOFU</option>
+            <option value="BOFU">BOFU</option>
+            <option value="Retargeting">Retargeting</option>
+            <option value="Mix">Mix</option>
+          </select>
+        </div>
+        <div className="flex items-center gap-1.5 flex-1 min-w-[180px]">
+          <span className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase shrink-0">Restricciones</span>
+          <input
+            type="text"
+            value={hooksRestricciones}
+            onChange={e => setHooksRestricciones(e.target.value)}
+            placeholder="sin palabras gatillo, sin vulgaridad"
+            className="flex-1 px-2 py-1 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
+          />
+        </div>
       </div>
 
       {/* Placeholder del display de hooks (viene en Parte 8.5.3) */}

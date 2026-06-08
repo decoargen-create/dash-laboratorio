@@ -54,9 +54,15 @@ export default async function handler(req, res) {
 
   const startUrl = buildAdLibraryUrl({ keyword: searchKeyword, country });
   const actorId = process.env.APIFY_ACTOR_ID || DEFAULT_ACTOR;
+  // Apify actor cambió: requiere maxItems > 0. Mandamos los 3 nombres para
+  // compatibilidad con cualquier versión del actor (resultsLimit, maxItems,
+  // maxResults).
+  const cappedLimit = Math.min(Math.max(limit, 10), 60);
   const input = {
     startUrls: [{ url: startUrl }],
-    resultsLimit: Math.min(Math.max(limit, 10), 60),
+    resultsLimit: cappedLimit,
+    maxItems: cappedLimit,
+    maxResults: cappedLimit,
     activeStatus: 'active',
     isDetailsPerAd: true,
     includeAboutPage: false,

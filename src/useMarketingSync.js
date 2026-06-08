@@ -38,6 +38,10 @@ export function useMarketingSync({ addToast } = {}) {
   const [status, setStatus] = useState('idle'); // 'idle' | 'pulling' | 'pushing' | 'error' | 'ok'
   const [lastError, setLastError] = useState(null);
   const debounceTimers = useRef(new Map());
+  // Guard: solo permitimos PUSH después de que termine el primer pull.
+  // Sin esto, el render inicial dispara saveJSON([]) → push de localStorage
+  // vacío → pushAllProductos([]) → ANTES borraba todo el cloud.
+  const pullCompletedRef = useRef(false);
 
   // 1. Detect login → pull + soft migration.
   useEffect(() => {
@@ -51,6 +55,7 @@ export function useMarketingSync({ addToast } = {}) {
           const mig = await migrateLocalToCloud();
           if (mig?.migrated) addToast?.({ type: 'success', message: `Migrados ${mig.productos} productos al cloud` });
           await pullMarketingFromCloud();
+          pullCompletedRef.current = true; // habilita pushes
           if (mounted) setStatus('ok');
 
           // Migración soft de creativos IDB → cloud, en background (no
@@ -86,6 +91,7 @@ export function useMarketingSync({ addToast } = {}) {
           setStatus('pulling');
           await migrateLocalToCloud();
           await pullMarketingFromCloud();
+          pullCompletedRef.current = true;
           setStatus('ok');
           // Migración de creativos también acá (caso re-login en misma sesión).
           (async () => {
@@ -119,6 +125,13 @@ export function useMarketingSync({ addToast } = {}) {
     };
 
     const doPush = async (key) => {
+      // Guard: si el primer pull aún no terminó, el localStorage puede no
+      // reflejar lo que hay en el cloud. Pushear ahora puede borrar datos
+      // (race condition que afectó al user el 2026-06-08).
+      if (!pullCompletedRef.current) {
+        console.warn(`[sync] push de ${key} skipped — pull aún no completó`);
+        return;
+      }
       try {
         setStatus('pushing');
         if (key === KEYS.productos) {

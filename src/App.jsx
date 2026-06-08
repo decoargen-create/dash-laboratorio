@@ -2195,6 +2195,7 @@ function SidebarStats({ sidebarOpen, onNavGastos }) {
   if (!sidebarOpen) return null;
   const oa = getRemaining('openai');
   const an = getRemaining('anthropic');
+  const ap = getRemaining('apify');
   const Pill = ({ label, value }) => {
     const isLow = value != null && value < 5;
     const isEmpty = value != null && value < 1;
@@ -2217,6 +2218,7 @@ function SidebarStats({ sidebarOpen, onNavGastos }) {
     <div className="space-y-1 mb-2 px-1">
       <Pill label="OpenAI"    value={oa} />
       <Pill label="Anthropic" value={an} />
+      <Pill label="Apify"     value={ap} />
     </div>
   );
 }

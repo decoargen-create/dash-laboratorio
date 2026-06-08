@@ -39,21 +39,71 @@ function loadProductos() {
   } catch { return []; }
 }
 
-// Coacciona un guión a string. Ideas viejas (anteriores al cambio de guión
-// Construye un prompt listo para pegar en gpt-image-2 en castellano
-// argentino, a partir de los campos de la idea. Lo usa el ticket de ideas
-// (cuando formato es static/carrusel) para que el usuario pueda copiar y
-// generar el creativo afuera sin tener que armar el prompt él.
+// Construye un prompt listo para pegar en gpt-image-2. NO es un mero brief
+// del diseñador — está armado como lo escribiría un media buyer experto en
+// Meta Ads de DTC: optimizado para scroll-stop, jerarquía visual, safe zones,
+// claims defendibles. El user puede copiar este prompt y pegarlo en cualquier
+// generador o el endpoint de la app lo usa como base.
 function buildPromptGptImage2Es(idea) {
   const partes = [];
-  partes.push('Creativo estático para Meta Ads — estética DTC premium, mercado argentino, photorealista, scroll-stop.');
-  if (idea.hook) partes.push(`Concepto: ${idea.hook}`);
-  if (idea.descripcionImagen) partes.push(`Escena: ${idea.descripcionImagen}`);
-  if (idea.estiloVisual) partes.push(`Estilo visual: ${idea.estiloVisual}`);
-  if (idea.painPoint) partes.push(`Pain implícito: ${idea.painPoint}`);
-  if (idea.productoNombre) partes.push(`Producto: ${idea.productoNombre} (respetar el envase exacto).`);
-  if (idea.textoEnImagen) partes.push(`Texto dentro de la imagen:\n${idea.textoEnImagen}`);
-  partes.push('Sin caras gringas. Tonos cálidos, props porteños. Sin texto inventado en el envase.');
+
+  // 1. CONTEXTO + ESTÁNDARES META ADS
+  partes.push(`# CREATIVO ESTÁTICO PARA META ADS — DTC PREMIUM ARGENTINA
+
+Sos un media buyer profesional de Meta Ads especializado en estáticos de DTC en LATAM. Generá una imagen que:
+- Pasa el test SCROLL-STOP de 0.5s: jerarquía clara, foco único, texto BOLD legible al pulgar.
+- Respeta safe zones de Meta: 5% margen interior libre, texto importante en zona segura (no en los bordes que recortan los placements).
+- Photorealista. NO ilustración. NO mockups planos. NO renders 3D obvios.
+- NO caras gringas, NO sonrisas plásticas. Si hay personas, tono mediterráneo/latino, expresión natural.
+- Render de texto: ESPAÑOL exacto, BOLD sans-serif moderno, alto contraste con el fondo. Cero garabato.`);
+
+  // 2. CONCEPTO + ÁNGULO
+  if (idea.hook || idea.angulo) {
+    partes.push(`## CONCEPTO CENTRAL
+${idea.hook ? `Hook: "${idea.hook}"` : ''}${idea.angulo ? `\nÁngulo estratégico: ${idea.angulo}` : ''}${idea.painPoint ? `\nPain point que apalanca: ${idea.painPoint}` : ''}${idea.creenciaApalancada ? `\nCreencia apalancada: ${idea.creenciaApalancada}` : ''}`);
+  }
+
+  // 3. BRIEF VISUAL
+  if (idea.descripcionImagen || idea.escenarioNarrativo || idea.estiloVisual) {
+    partes.push(`## BRIEF VISUAL
+${idea.descripcionImagen ? `Composición: ${idea.descripcionImagen}` : ''}${idea.escenarioNarrativo ? `\nEscenario: ${idea.escenarioNarrativo}` : ''}${idea.estiloVisual ? `\nEstilo: ${idea.estiloVisual}` : ''}`);
+  }
+
+  // 4. PRODUCTO
+  if (idea.productoNombre) {
+    partes.push(`## PRODUCTO
+${idea.productoNombre} (envase real pixel-fiel — si tenés foto del producto, respetar shape/color/label EXACTOS. Cero modificación del label).`);
+  }
+
+  // 5. TEXTO EN IMAGEN (si aplica)
+  if (idea.textoEnImagen) {
+    partes.push(`## OVERLAYS DE TEXTO (renderizar EXACTO como abajo, NO traducir, BOLD sans-serif, máximo contraste)
+${idea.textoEnImagen}`);
+  }
+
+  // 6. AUDIENCIA + TONO
+  if (idea.publicoSugerido) {
+    partes.push(`## AUDIENCIA TARGET
+${idea.publicoSugerido}`);
+  }
+
+  // 7. ESTÁNDARES TÉCNICOS
+  partes.push(`## REGLAS TÉCNICAS
+- Ratio: 1:1 (feed) por default, 4:5 para máxima conversión, 9:16 para Stories.
+- Resolución: 2048×2048 mínimo.
+- Producto ocupa 30-50% del frame (test scroll: focal point único).
+- Texto importante: top 1/3 o bottom 1/3, NUNCA en zona de avatar / CTA del placement.
+- Color contrast mínimo 4.5:1 entre texto y fondo (legibilidad mobile).
+- NO inventes precios, % off, badges regulatorios (FDA, ANMAT) si no se declararon explícitamente.
+- NO inventes texto sobre el envase del producto.`);
+
+  partes.push(`## CHECKLIST FINAL (autocrítica antes de generar)
+□ ¿Hay UN foco visual único o está cluttered?
+□ ¿El hook es legible en 0.5s o necesita lectura cuidadosa?
+□ ¿El texto está dentro de safe zones (no en los bordes)?
+□ ¿La paleta vende confianza Y atención (no solo bonita)?
+□ ¿El producto se reconoce inmediatamente?`);
+
   return partes.filter(Boolean).join('\n\n');
 }
 

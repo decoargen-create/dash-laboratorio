@@ -25,7 +25,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Sparkles, Package, ChevronRight, ChevronDown, Plus, Trash2, Link2, X,
   Loader2, Download, Image as ImageIcon, ExternalLink, Wand2, Search,
-  Images, Check, AlertCircle, LayoutGrid, Rows3, Table2, Settings2,
+  Check, AlertCircle, LayoutGrid, Rows3, Table2, Settings2,
 } from 'lucide-react';
 import { logCostsFromResponse } from './costsStore.js';
 import { addGeneratedIdeas } from './bandejaStore.js';
@@ -33,7 +33,8 @@ import { getProductoImagen, getAccentColor } from './productoImagen.js';
 import { saveReferencial, getUsedAdIdsForProducto } from './galeriaReferenciales.js';
 import { cacheAdImagesBatch, getCachedAdImageUrl } from './adImagesStore.js';
 import { startExecution, updateExecution, finishExecution } from './executionsStore.js';
-import GaleriaReferencialesModal from './GaleriaReferencialesModal.jsx';
+// Galería ahora vive como tab independiente en el workspace (Arranque),
+// no más como modal acá.
 
 // Máximo de ads por tanda: 10. Más allá saturaríamos rate limits de
 // gpt-image-2 (típicamente 5-15 RPM) y el browser quedaría unresponsive.
@@ -158,7 +159,6 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     return m;
   }, [seleccionados]);
   const [creandoAdIds, setCreandoAdIds] = useState(new Set());
-  const [showGaleria, setShowGaleria] = useState(false);
   const [showGenOpts, setShowGenOpts] = useState(false);
   // Set de sourceAdIds que ya fueron usados para generar creativos en este
   // producto — viene de la galería. Se refresca al toque cuando guardamos un
@@ -945,14 +945,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         />
       )}
 
-      {/* Modal de galería */}
-      {showGaleria && producto && (
-        <GaleriaReferencialesModal
-          productoId={producto.id}
-          productoNombre={producto.nombre}
-          onClose={() => setShowGaleria(false)}
-        />
-      )}
+      {/* Galería pasó a ser su propio tab en el workspace — sin modal acá. */}
 
       {/* Header thin (Linear-style 36px) — solo cuando NO está embebido.
           Single line breadcrumb back. Las acciones primarias (Galería, +Marca)
@@ -1230,13 +1223,8 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                   </div>
                 )}
               </div>
-              <button
-                onClick={() => setShowGaleria(true)}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-brand-700 dark:text-brand-200 bg-brand-50 dark:bg-brand-900/30 border border-brand-200 dark:border-brand-800 rounded hover:bg-brand-100 dark:hover:bg-brand-900/50 transition"
-                title="Ver creativos generados"
-              >
-                <Images size={11} /> Galería
-              </button>
+              {/* Galería: ya no vive como botón flotante acá — ahora es su
+                  propio tab "Galería" en el workspace. Quito el modal. */}
               <button
                 onClick={() => setShowAddForm(s => !s)}
                 className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-amber-500 to-brand-500 rounded hover:from-amber-600 hover:to-brand-600 shadow-sm transition"

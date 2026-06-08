@@ -18,6 +18,11 @@ import {
   isSafetyError,
   friendlyOpenAIError,
 } from './_safety.js';
+import {
+  getUserIdFromAuth,
+  uploadCreativoToBucket,
+  insertCreativoRow,
+} from './_supabase-server.js';
 
 const MODEL = 'gpt-image-2';
 
@@ -163,8 +168,47 @@ export default async function handler(req, res) {
 
   try {
     const result = await callOpenAIImage({ apiKey, rawPrompt, size, quality, startAggressive });
+
+    // Background save al cloud (Storage + DB) si el user mandó auth válido
+    // y el body trae productoId. Eso permite cerrar la pestaña sin perder.
+    let cloudCreativo = null;
+    let cloudSaveError = null;
+    const productoId = body?.productoId || body?.producto?.id || null;
+    try {
+      const userId = await getUserIdFromAuth(req);
+      if (userId && productoId) {
+        const ts = Date.now();
+        const refId = `from-bandeja-${idea.id || ts}-${ts}`;
+        const { storagePath, imageUrl } = await uploadCreativoToBucket(userId, refId, result.imageBase64);
+        const row = await insertCreativoRow({
+          id: refId,
+          user_id: userId,
+          producto_id: String(productoId),
+          source_ad_id: `bandeja-${idea.id || ''}`,
+          source_brand: 'Bandeja',
+          source_headline: idea.titulo || idea.hook || '',
+          source_type: 'bandeja-idea',
+          variant_style: 'bandeja',
+          prompt: idea.promptGeneradorImagen || idea.descripcionImagen || '',
+          model: MODEL,
+          size,
+          quality,
+          storage_path: storagePath,
+          image_url: imageUrl,
+          created_at: new Date(ts).toISOString(),
+        });
+        cloudCreativo = { id: row.id, imageUrl };
+      }
+    } catch (err) {
+      console.warn('[cloud save bandeja] error:', err.message);
+      cloudSaveError = err.message;
+    }
+
     return respondJSON(res, 200, {
-      imageBase64: result.imageBase64,
+      // Si guardamos al cloud, omitimos el base64 para ahorrar payload.
+      imageBase64: cloudCreativo ? null : result.imageBase64,
+      cloudCreativo,
+      cloudSaveError,
       mimeType: 'image/png',
       size,
       quality,

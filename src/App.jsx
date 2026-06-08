@@ -30,6 +30,7 @@ import { PipelineRunProvider } from './PipelineRunContext.jsx';
 import PipelineRunOverlay from './PipelineRunOverlay.jsx';
 import ExecutionsTray from './ExecutionsTray.jsx';
 import BalanceBar from './BalanceBar.jsx';
+import ActivityBell from './ActivityBell.jsx';
 import { generateCSV, downloadCSV, parseCSV, toNumber, toBool } from './csv.js';
 import { loadVioraState, saveVioraState, clearVioraState, createBackup } from './vioraStorage.js';
 
@@ -8210,6 +8211,7 @@ function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, textSize, set
         </div>
       </div>
       <div className="flex items-center gap-2 shrink-0">
+        <ActivityBell />
         <BalanceBar />
         <button
           onClick={onOpenCommand}

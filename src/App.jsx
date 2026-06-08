@@ -2074,6 +2074,10 @@ function AppShell({ onExit }) {
               <NavItem icon={Users} label="Mis Clientes" section="mis-clientes" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
             </>
           )}
+          {/* Nav de productos — visible solo cuando Arranque envió contexto.
+              Reemplaza la necesidad de bajar a Probiotico → ProductTabs
+              horizontal para cambiar de tab o producto. */}
+          <ProductNavInSidebar sidebarOpen={sidebarOpen} />
         </nav>
 
         {/* Footer: stats de saldo + pill de usuario con menú personalizado */}
@@ -2184,6 +2188,108 @@ function AppShell({ onExit }) {
   );
 }
 
+
+// Navegador de productos dentro del sidebar — replica el patrón Apify
+// donde cada "proyecto" tiene sus secciones colapsables debajo. El producto
+// activo va expandido mostrando sus 2 grupos (Datos / Creación); los
+// inactivos quedan colapsados como "click para abrir".
+//
+// Se sincroniza con Arranque.jsx vía eventos custom:
+//   listen 'viora:product-ctx' → recibimos {productos, activeId, activeTab}
+//   dispatch 'viora:product-select' → switch de producto
+//   dispatch 'viora:product-tab' → switch de tab dentro del activo
+const PRODUCT_TABS = {
+  datos: [
+    { id: 'dashboard',   label: 'Dashboard',   emoji: '📊' },
+    { id: 'setup',       label: 'Setup',       emoji: '⚙️' },
+    { id: 'documentos',  label: 'Documentos',  emoji: '📄' },
+    { id: 'competencia', label: 'Competencia', emoji: '🎯' },
+  ],
+  creacion: [
+    { id: 'bandeja',     label: 'Bandeja',     emoji: '📥' },
+    { id: 'inspiracion', label: 'Inspiración', emoji: '✨' },
+    { id: 'creativos',   label: 'Creativos',   emoji: '🎨' },
+    { id: 'galeria',     label: 'Galería',     emoji: '🖼️' },
+    { id: 'copiloto',    label: 'Copiloto',    emoji: '🤖' },
+  ],
+};
+
+function ProductNavInSidebar({ sidebarOpen }) {
+  const [ctx, setCtx] = useState(null);
+  useEffect(() => {
+    const onCtx = (e) => setCtx(e.detail || null);
+    const onClear = () => setCtx(null);
+    window.addEventListener('viora:product-ctx', onCtx);
+    window.addEventListener('viora:product-ctx-clear', onClear);
+    return () => {
+      window.removeEventListener('viora:product-ctx', onCtx);
+      window.removeEventListener('viora:product-ctx-clear', onClear);
+    };
+  }, []);
+  if (!ctx || !Array.isArray(ctx.productos) || ctx.productos.length === 0) return null;
+  if (!sidebarOpen) return null; // ocultar en modo icon-only
+
+  const selectProduct = (id) => {
+    window.dispatchEvent(new CustomEvent('viora:product-select', { detail: { productoId: id } }));
+  };
+  const selectTab = (tab) => {
+    window.dispatchEvent(new CustomEvent('viora:product-tab', { detail: { tab } }));
+  };
+  return (
+    <div className="mt-4 pt-3 border-t border-white/10 space-y-2">
+      <div className="px-4 mb-1 text-[10px] font-bold uppercase tracking-wider text-white/40">
+        Productos
+      </div>
+      {ctx.productos.map(p => {
+        const isActive = String(p.id) === String(ctx.activeProductoId);
+        return (
+          <div key={p.id} className="mx-1">
+            <button
+              onClick={() => selectProduct(p.id)}
+              className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition ${
+                isActive
+                  ? 'bg-white/10 text-white shadow-sm'
+                  : 'text-white/60 hover:text-white hover:bg-white/5'
+              }`}
+              title={p.nombre}
+            >
+              <ChevronDown size={11} className={`transition-transform shrink-0 ${isActive ? '' : '-rotate-90'}`} />
+              <span className="truncate">{p.nombre}</span>
+            </button>
+            {isActive && (
+              <div className="mt-1 ml-3 pl-2 border-l border-white/10 space-y-2">
+                {Object.entries(PRODUCT_TABS).map(([group, tabs]) => (
+                  <div key={group}>
+                    <div className="px-2 mb-1 text-[9px] font-bold uppercase tracking-wider text-white/30">
+                      {group === 'datos' ? 'Datos' : 'Creación'}
+                    </div>
+                    {tabs.map(t => {
+                      const tabActive = t.id === ctx.activeTab;
+                      return (
+                        <button
+                          key={t.id}
+                          onClick={() => selectTab(t.id)}
+                          className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs transition ${
+                            tabActive
+                              ? 'bg-gradient-to-r from-pink-600/60 to-rose-500/40 text-white font-semibold'
+                              : 'text-white/60 hover:text-white hover:bg-white/5'
+                          }`}
+                        >
+                          <span className="text-[11px] shrink-0">{t.emoji}</span>
+                          <span className="truncate">{t.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 // Stats footer del sidebar — pills compactos mostrando saldo restante
 // de OpenAI / Anthropic. Click → navega a "Gastos del stack" para detalle.

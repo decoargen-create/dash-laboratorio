@@ -23,7 +23,7 @@
 
 import React, { useState, useEffect } from 'react';
 import {
-  Sparkles, Package, ChevronRight, Plus, Trash2, Link2, X,
+  Sparkles, Package, ChevronRight, ChevronDown, Plus, Trash2, Link2, X,
   Loader2, Download, Image as ImageIcon, ExternalLink, Wand2, Search,
   Images, Check, AlertCircle,
 } from 'lucide-react';

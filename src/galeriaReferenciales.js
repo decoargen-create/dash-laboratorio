@@ -1,7 +1,25 @@
-// Galería de creativos referenciales — los generados al "Adaptar al
-// producto" desde un ad de Inspiración. Cada entrada guarda la imagen
-// generada + la ref del ad origen + metadata. IndexedDB porque las
-// imágenes pesan ~1-2 MB.
+// Galería de creativos referenciales.
+//
+// MODO DUAL (post Opción A de cloud sync):
+// - Si Supabase está configurado + user logueado → CLOUD primero:
+//     • saveReferencial: sube bytes al bucket 'creativos' y metadata a
+//       tabla marketing_creativos. La galería va a leer image_url del row.
+//     • IDB local se sigue usando como cache (fallback offline + speed).
+// - Si NO hay cloud (sin Supabase o sin sesión) → solo IDB (modo viejo).
+//
+// La API pública NO cambia: los componentes que ya consumen estas
+// funciones siguen funcionando.
+
+import {
+  isCloudReady,
+  saveReferencialCloud,
+  getReferencialesByProductoCloud,
+  countReferencialesByProductoCloud,
+  getUsedAdIdsForProductoCloud,
+  patchReferencialesCloud,
+  archiveReferencialCloud,
+  deleteReferencialCloud,
+} from './galeriaReferencialesCloud.js';
 
 const DB_NAME = 'lab-viora-referenciales';
 const DB_VERSION = 1;
@@ -28,10 +46,45 @@ function openDB() {
   return dbPromise;
 }
 
-// Guarda un referencial. `ref` = { id, productoId, sourceAdId, sourceBrand,
-//   imageBase64, mimeType, prompt, model, createdAt }.
+function notify(detail = {}) {
+  if (typeof window !== 'undefined') {
+    try { window.dispatchEvent(new CustomEvent('viora:referencial-saved', { detail })); } catch {}
+  }
+}
+
+// ============================================================
+// SAVE
+// ============================================================
 export async function saveReferencial(ref) {
   if (!ref?.id) throw new Error('saveReferencial: falta id');
+  const cloud = await isCloudReady();
+
+  if (cloud) {
+    try {
+      const enriched = await saveReferencialCloud(ref);
+      // Cache local de metadata (sin imageBase64 para no inflar IDB con la
+      // misma imagen 2 veces — el bucket ya la tiene).
+      try {
+        const { imageBase64, ...metaOnly } = enriched;
+        const db = await openDB();
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction(STORE, 'readwrite');
+          tx.objectStore(STORE).put({ ...metaOnly, createdAt: enriched.createdAt || new Date().toISOString() });
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+        });
+      } catch {}
+      notify({ productoId: ref.productoId, cloud: true });
+      return true;
+    } catch (err) {
+      // Si la nube falla (red, quota, política), caemos a IDB para no perder
+      // el creativo. El user lo va a tener local; al re-loguear se podría
+      // re-subir con una migración (TODO opcional).
+      console.warn('[galería] cloud save falló, cae a IDB:', err.message);
+    }
+  }
+
+  // Path IDB (cloud no disponible o falló).
   const db = await openDB();
   await new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, 'readwrite');
@@ -39,19 +92,26 @@ export async function saveReferencial(ref) {
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
-  // Aviso global para que la galería se refresque al toque.
-  if (typeof window !== 'undefined') {
-    try { window.dispatchEvent(new CustomEvent('viora:referencial-saved', { detail: { productoId: ref.productoId } })); } catch {}
-  }
+  notify({ productoId: ref.productoId, cloud: false });
   return true;
 }
 
-// `opts.includeArchived = false` (default): solo los activos.
-// Los archivados se cargan a pedido (cuando el user toggle "ver archivados")
-// para no inflar la memoria del browser con imágenes que no quiere ver.
+// ============================================================
+// READ
+// ============================================================
 export async function getReferencialesByProducto(productoId, opts = {}) {
-  const { includeArchived = false } = opts;
   if (!productoId) return [];
+  const cloud = await isCloudReady();
+  if (cloud) {
+    try {
+      const items = await getReferencialesByProductoCloud(productoId, opts);
+      return items;
+    } catch (err) {
+      console.warn('[galería] cloud read falló, cae a IDB:', err.message);
+    }
+  }
+  // Path IDB
+  const { includeArchived = false } = opts;
   try {
     const db = await openDB();
     return await new Promise((resolve, reject) => {
@@ -73,12 +133,17 @@ export async function getReferencialesByProducto(productoId, opts = {}) {
   }
 }
 
-// Cuenta items por producto SIN cargar las imágenes a memoria — usa cursor
-// y solo lee los flags. Útil para mostrar "X archivados" en el header sin
-// pagar el costo de leer 100MB de base64. Devuelve { total, active, archived,
-// downloaded }.
 export async function countReferencialesByProducto(productoId) {
   if (!productoId) return { total: 0, active: 0, archived: 0, downloaded: 0 };
+  const cloud = await isCloudReady();
+  if (cloud) {
+    try {
+      return await countReferencialesByProductoCloud(productoId);
+    } catch (err) {
+      console.warn('[galería] cloud count falló:', err.message);
+    }
+  }
+  // Path IDB
   try {
     const db = await openDB();
     return await new Promise((resolve, reject) => {
@@ -104,57 +169,17 @@ export async function countReferencialesByProducto(productoId) {
   }
 }
 
-// Archivar/desarchivar un referencial. Soft-hide: no se borra, queda
-// disponible para restaurar. Por default la galería no los muestra (filtra
-// por archivado=false), pero el counter del header sí los cuenta.
-export async function archiveReferencial(id, archived = true) {
-  if (!id) return false;
-  return patchReferenciales([id], archived
-    ? { archivado: true, archivadoAt: new Date().toISOString() }
-    : { archivado: false, archivadoAt: null }
-  ).then(n => n > 0);
-}
-
-// Marca uno o varios referenciales con un patch (ej. { descargada: true,
-// descargadaAt: timestamp }). Devuelve la cantidad de items actualizados.
-export async function patchReferenciales(ids, patch) {
-  if (!Array.isArray(ids) || ids.length === 0 || !patch) return 0;
-  try {
-    const db = await openDB();
-    return await new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE, 'readwrite');
-      const store = tx.objectStore(STORE);
-      let updated = 0;
-      ids.forEach((id) => {
-        const req = store.get(id);
-        req.onsuccess = () => {
-          if (req.result) {
-            store.put({ ...req.result, ...patch });
-            updated++;
-          }
-        };
-      });
-      tx.oncomplete = () => {
-        if (typeof window !== 'undefined') {
-          try { window.dispatchEvent(new CustomEvent('viora:referencial-saved', { detail: {} })); } catch {}
-        }
-        resolve(updated);
-      };
-      tx.onerror = () => reject(tx.error);
-    });
-  } catch {
-    return 0;
-  }
-}
-
-// Devuelve un Set con los sourceAdId que ya fueron usados para generar
-// creativos en este producto. Usado por InspiracionSection para marcar
-// visualmente los thumbs ya procesados.
-// IMPORTANTE: usa cursor para iterar SIN cargar imageBase64 a memoria.
-// Antes hacía getAll() que cargaba todos los 5-15MB por item → 500MB+ al
-// inicio del workspace y crash del renderer de Chrome (error code 5).
 export async function getUsedAdIdsForProducto(productoId) {
   if (!productoId) return new Set();
+  const cloud = await isCloudReady();
+  if (cloud) {
+    try {
+      return await getUsedAdIdsForProductoCloud(productoId);
+    } catch (err) {
+      console.warn('[galería] cloud usedAdIds falló:', err.message);
+    }
+  }
+  // Path IDB (cursor para no cargar imageBase64 — ver PR #122)
   try {
     const db = await openDB();
     return await new Promise((resolve, reject) => {
@@ -165,7 +190,6 @@ export async function getUsedAdIdsForProducto(productoId) {
       req.onsuccess = (e) => {
         const cursor = e.target.result;
         if (cursor) {
-          // Solo leemos sourceAdId — imageBase64 NO entra a la memoria del JS.
           if (cursor.value.sourceAdId) set.add(String(cursor.value.sourceAdId));
           cursor.continue();
         } else {
@@ -179,8 +203,64 @@ export async function getUsedAdIdsForProducto(productoId) {
   }
 }
 
+// ============================================================
+// PATCH (archive, download flags)
+// ============================================================
+export async function patchReferenciales(ids, patch) {
+  if (!Array.isArray(ids) || ids.length === 0 || !patch) return 0;
+  const cloud = await isCloudReady();
+  let updated = 0;
+  if (cloud) {
+    try {
+      updated = await patchReferencialesCloud(ids, patch);
+    } catch (err) {
+      console.warn('[galería] cloud patch falló:', err.message);
+    }
+  }
+  // Patch IDB también — para que el cache local refleje los cambios.
+  try {
+    const db = await openDB();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      const store = tx.objectStore(STORE);
+      ids.forEach((id) => {
+        const req = store.get(id);
+        req.onsuccess = () => {
+          if (req.result) store.put({ ...req.result, ...patch });
+        };
+      });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {}
+  notify({});
+  return cloud ? updated : ids.length;
+}
+
+export async function archiveReferencial(id, archived = true) {
+  if (!id) return false;
+  return patchReferenciales([id], archived
+    ? { archivado: true, archivadoAt: new Date().toISOString() }
+    : { archivado: false, archivadoAt: null }
+  ).then(n => n > 0);
+}
+
+// ============================================================
+// DELETE
+// ============================================================
 export async function deleteReferencial(id) {
   if (!id) return false;
+  const cloud = await isCloudReady();
+  let cloudOk = true;
+  if (cloud) {
+    try {
+      await deleteReferencialCloud(id);
+    } catch (err) {
+      console.warn('[galería] cloud delete falló:', err.message);
+      cloudOk = false;
+    }
+  }
+  // Borrar también del cache local
   try {
     const db = await openDB();
     await new Promise((resolve, reject) => {
@@ -189,8 +269,7 @@ export async function deleteReferencial(id) {
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
-    return true;
-  } catch {
-    return false;
-  }
+  } catch {}
+  notify({});
+  return cloudOk;
 }

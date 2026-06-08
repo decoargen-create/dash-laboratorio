@@ -428,7 +428,7 @@ function aspectRatioFromSize(size) {
 // Cada variación termina con un prompt distinto → la grilla de N creativos
 // son N ejecuciones distintas de la misma fórmula validada, no N versiones
 // de la misma foto.
-function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentColor, aspectRatio }) {
+function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentColor, aspectRatio, rebrand = false }) {
   const nombre = (producto?.nombre || '').trim();
   const descripcion = (producto?.descripcion || '').trim();
   const research = (producto?.research || producto?.docs?.research || '').trim();
@@ -530,7 +530,22 @@ function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentCol
 
   if (accentColor) {
     parts.push('');
-    parts.push(`Brand accent color: ${accentColor} — use as highlight for arrows, pills, badges.`);
+    if (rebrand) {
+      // Variante rebrand — overridea la paleta de IMAGE 1 para que la
+      // escena entera quede en familia del color de la marca. Útil cuando
+      // la ref es B/N y el producto es de color fuerte (ej: Cellu+ naranja).
+      parts.push(`**BRAND REPALETTING — ${accentColor} ES EL COLOR DOMINANTE DE LA ESCENA**:`);
+      parts.push(`  • OVERRIDEÁ la paleta de IMAGE 1. La escena entera debe estar tonalmente alineada a ${accentColor}.`);
+      parts.push(`  • Background: pared/superficie/gradient en familia ${accentColor} (mismo hue, varying value/saturation).`);
+      parts.push(`  • Si el fondo del ad ref es negro/blanco/oscuro, REEMPLAZALO por un fondo en ${accentColor}.`);
+      parts.push(`  • Props secundarios (telas, accents): que armonicen con ${accentColor}.`);
+      parts.push(`  • Pills/badges/checks/CTAs: usá ${accentColor} para fills donde antes había amarillo/blanco/gris.`);
+      parts.push(`  • Texto blanco SOBRE fondo ${accentColor} oscuro, o texto negro sobre ${accentColor} claro — lo que de mejor contraste.`);
+      parts.push(`  • Skin tones, food, natural elements stay realistic — NO teñas personas.`);
+      parts.push(`  • Resultado: misma composición que IMAGE 1, pero el COLOR STORY ahora es ${accentColor}. Como un re-shoot del mismo ad pero en el mundo de la marca.`);
+    } else {
+      parts.push(`Brand accent color: ${accentColor} — use as highlight for arrows, pills, badges, checks. Background stays as IMAGE 1's palette.`);
+    }
   }
 
   parts.push('');
@@ -879,11 +894,29 @@ export default async function handler(req, res) {
       const startIdx = Math.min(variationStartIndex, plan.variations.length - 1);
       const variationsToUse = plan.variations.slice(startIdx, startIdx + n);
       while (variationsToUse.length < n) variationsToUse.push(plan.variations[plan.variations.length - 1]);
-      prompts = variationsToUse.map((variation, idx) => ({
-        prompt: buildPromptFromPlan({ producto, inspiracion, plan, variation, accentColor, aspectRatio }),
-        variantStyle: idx === variationsToUse.length - 1 && accentColor && startIdx === 0 ? 'rebrand' : 'strategist',
-        variation,
-      }));
+      // Rebrand designation:
+      //   - Single-call legacy mode (n=N): aplica al último idx local
+      //   - Parallel mode (n=1, multiple calls): aplica cuando la call es
+      //     la ÚLTIMA del set planificado (variationStartIndex + n >= nPlan)
+      // Eso garantiza que en una grilla de 4 generadas, la #4 sea la que
+      // viene en el color de la marca.
+      const lastGlobalIdx = startIdx + n - 1;
+      const isLastOverall = lastGlobalIdx >= nPlan - 1;
+      // Rebrand solo si hay 2+ variaciones — para n=1 default es tight
+      // (réplica fiel) porque el user pidió una sola y probablemente quiere
+      // ver la más cercana al ganador validado.
+      prompts = variationsToUse.map((variation, idx) => {
+        const isLastLocal = idx === variationsToUse.length - 1;
+        const shouldRebrand = isLastLocal && isLastOverall && !!accentColor && nPlan >= 2;
+        return {
+          prompt: buildPromptFromPlan({
+            producto, inspiracion, plan, variation, accentColor, aspectRatio,
+            rebrand: shouldRebrand,
+          }),
+          variantStyle: shouldRebrand ? 'rebrand' : 'strategist',
+          variation,
+        };
+      });
     } else {
       // Fallback legacy: reference / rebrand.
       const usarRebrandVariant = !!accentColor && n >= 2;

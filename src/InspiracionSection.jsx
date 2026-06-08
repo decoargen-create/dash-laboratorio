@@ -33,6 +33,7 @@ import { getProductoImagen, getAccentColor } from './productoImagen.js';
 import { saveReferencial, getUsedAdIdsForProducto } from './galeriaReferenciales.js';
 import { cacheAdImagesBatch, getCachedAdImageUrl } from './adImagesStore.js';
 import { startExecution, updateExecution, finishExecution } from './executionsStore.js';
+import { playDoneChime, playBulkDoneChime, playErrorTone } from './sounds.js';
 import EmptyState from './EmptyState.jsx';
 // Galería ahora vive como tab independiente en el workspace (Arranque),
 // no más como modal acá.
@@ -77,6 +78,22 @@ function isKeywordUsable(kw) {
 // "An error occurred...", o un 502 del runtime), no rompe con
 // "Unexpected token 'A', \"An error o\"... is not valid JSON". Detecta el caso
 // y devuelve un error legible.
+// Normaliza el campo `error` de una response del backend a string legible.
+// El backend a veces devuelve `error: "string"` y otras veces `error:
+// { type, message }` (formato de OpenAI/Apify). Sin esto el .message del
+// Error quedaba como "[object Object]" en los toasts.
+function stringifyApiError(err) {
+  if (err == null) return '';
+  if (typeof err === 'string') return err;
+  if (typeof err === 'object') {
+    // Estructura típica: { type, message } o { error: { ... } } anidado.
+    if (err.message) return String(err.message);
+    if (err.error) return stringifyApiError(err.error);
+    try { return JSON.stringify(err); } catch { return String(err); }
+  }
+  return String(err);
+}
+
 async function parseJsonOrThrow(resp, contexto = 'API') {
   const raw = await resp.text();
   let data;
@@ -93,7 +110,7 @@ async function parseJsonOrThrow(resp, contexto = 'API') {
     throw new Error(`${contexto} respuesta inválida (HTTP ${resp.status}): ${raw.slice(0, 120)}`);
   }
   // Es JSON — detectar errores conocidos de OpenAI/Anthropic con mensajes amigables.
-  const errStr = String(data?.error || '').toLowerCase();
+  const errStr = stringifyApiError(data?.error).toLowerCase();
   if (errStr.includes('safety system') || errStr.includes('content policy') || errStr.includes('rejected by the safety')) {
     throw new Error(`OpenAI rechazó por su safety filter — probá con OTRO ad de referencia. Triggers comunes: contenido íntimo explícito, claims médicos fuertes, palabras gatillo. El producto/marca no es el problema, es el ad ref.`);
   }
@@ -1148,7 +1165,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         }),
       });
       const data = await parseJsonOrThrow(resp, 'adapt-inspiracion');
-      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      if (!resp.ok) throw new Error(stringifyApiError(data.error) || `HTTP ${resp.status}`);
       const adaptCost = logCostsFromResponse(data, `adapt-inspiracion · ${brandNombre}`);
 
       const ideas = (data.ideas || []).map(i => ({
@@ -1280,7 +1297,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         }),
       });
       const data = await parseJsonOrThrow(resp, 'crear-creativo-referencial');
-      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      if (!resp.ok) throw new Error(stringifyApiError(data.error) || `HTTP ${resp.status}`);
       return data;
     };
 
@@ -1382,6 +1399,9 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       const msg = `${completed}/${nVar} variaciones generadas${failNote}${cacheNote}`;
       addToast?.({ type: failed > 0 ? 'warning' : 'success', message: msg });
       finishExecution(execId, { ok: failed === 0, message: msg, cost: totalCostAccum.openai + totalCostAccum.anthropic });
+      // Sonido de aviso — útil para seguir trabajando en otra cosa
+      // mientras la generación corre en background.
+      if (failed === 0) playDoneChime(); else if (completed > 0) playDoneChime(); else playErrorTone();
       // Auto-limpiar el estado del progreso después de 2.5s para que se vea el "✓".
       trackedTimeout(() => {
         setProgressById(prev => {
@@ -1397,6 +1417,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       }));
       addToast?.({ type: 'error', message: `No pude generar: ${err.message}` });
       finishExecution(execId, { ok: false, message: err.message || 'Error' });
+      playErrorTone();
       // Limpiar el error después de 5s.
       trackedTimeout(() => {
         setProgressById(prev => {
@@ -1520,6 +1541,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     limpiarSeleccion();
     trackedTimeout(() => setBulkProgress(null), 4000);
     addToast?.({ type: 'success', message: 'Generación bulk completa — revisá la galería' });
+    playBulkDoneChime();
   };
 
   // Permite cerrar la barra de bulk manualmente.
@@ -1571,7 +1593,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         body: JSON.stringify(payload),
       });
       const data = await parseJsonOrThrow(resp, 'apify-ingest');
-      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      if (!resp.ok) throw new Error(stringifyApiError(data.error) || `HTTP ${resp.status}`);
       const scrapeCost = logCostsFromResponse(data, `inspiracion · ${brand.nombre}`);
 
       const allAds = data.ads || [];
@@ -1664,7 +1686,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         body: JSON.stringify(payload),
       });
       const data = await parseJsonOrThrow(resp, 'apify-ingest');
-      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      if (!resp.ok) throw new Error(stringifyApiError(data.error) || `HTTP ${resp.status}`);
       const scrapeCost = logCostsFromResponse(data, `inspiracion · ${comp.nombre}`);
 
       const ads = data.ads || [];

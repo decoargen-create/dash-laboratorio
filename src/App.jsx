@@ -1424,6 +1424,15 @@ function AppShell({ onExit }) {
     return () => window.removeEventListener('viora-goto-marketing', onGoto);
   }, []);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  // Cada vez que cambia el estado del sidebar, avisamos a otros componentes
+  // (ProductTabs en Arranque.jsx) para que oculten su nav redundante cuando
+  // el sidebar lo muestra. Sin esto las tabs se ven duplicadas (vertical en
+  // sidebar + horizontal en el workspace).
+  useEffect(() => {
+    try {
+      window.dispatchEvent(new CustomEvent('viora:sidebar-state', { detail: { open: sidebarOpen } }));
+    } catch {}
+  }, [sidebarOpen]);
   // Estado del menú mobile (sidebar como overlay deslizante en pantallas chicas).
   // En desktop el sidebar siempre está visible (gestionado por sidebarOpen + Tailwind md:).
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);

@@ -12,6 +12,7 @@ import { getBalance, setBalance, getRemaining, subscribeBalance } from './balanc
 const PROVIDERS = [
   { key: 'anthropic', label: 'Anthropic',  rechargeUrl: 'https://console.anthropic.com/settings/billing' },
   { key: 'openai',    label: 'OpenAI',     rechargeUrl: 'https://platform.openai.com/settings/organization/billing/overview' },
+  { key: 'apify',     label: 'Apify',      rechargeUrl: 'https://console.apify.com/billing/subscription' },
 ];
 
 function fmtUsd(v) {

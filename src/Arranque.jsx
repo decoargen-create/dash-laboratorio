@@ -77,7 +77,14 @@ function loadJSON(key, fallback) {
 }
 
 function saveJSON(key, value) {
-  try { localStorage.setItem(key, JSON.stringify(value)); return true; }
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+    // Notificar al sync de Marketing si la key es relevante (productos o brands).
+    if (key.startsWith('viora-marketing-')) {
+      try { window.dispatchEvent(new CustomEvent('viora:marketing-storage-changed', { detail: { key } })); } catch {}
+    }
+    return true;
+  }
   catch (err) {
     // Quota exceeded es lo único que vamos a surface — el resto de errores
     // (storage disabled en navegadores raros) no son accionables y mantienen
@@ -611,9 +618,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   });
 
   // Producto activo — null = vista de lista, id = workspace del producto.
-  const [activeProductoId, setActiveProductoId] = useState(() => {
-    try { return localStorage.getItem('viora-marketing-active-product') || null; } catch { return null; }
-  });
+  // IMPORTANTE: arrancamos siempre en null (vista de lista) — el user pidió
+  // que al entrar a Marketing tenga que elegir el producto, NO que lo
+  // auto-meta en el último que abrió. El click en una card del listado lo
+  // setea. El back button del workspace lo limpia.
+  const [activeProductoId, setActiveProductoId] = useState(null);
   useEffect(() => {
     try {
       if (activeProductoId) localStorage.setItem('viora-marketing-active-product', activeProductoId);
@@ -639,6 +648,57 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   useEffect(() => {
     if (productoTabKey) try { localStorage.setItem(productoTabKey, productoTab); } catch {}
   }, [productoTab, productoTabKey]);
+
+  // Estado del sidebar global (open/closed) — escuchamos el evento que
+  // dispatchea App.jsx para ocultar la barra horizontal de tabs cuando el
+  // sidebar las muestra en vertical (evita duplicación). En mobile o con
+  // sidebar colapsado, las tabs horizontales siguen visibles como fallback.
+  const [sidebarOpenInApp, setSidebarOpenInApp] = useState(true);
+  useEffect(() => {
+    const onSidebar = (e) => {
+      if (e?.detail?.open != null) setSidebarOpenInApp(!!e.detail.open);
+    };
+    window.addEventListener('viora:sidebar-state', onSidebar);
+    return () => window.removeEventListener('viora:sidebar-state', onSidebar);
+  }, []);
+
+  // Sync del contexto del producto activo + lista para que el sidebar de
+  // App.jsx pueda renderizar el nav vertical estilo Apify (lista de productos
+  // con su set de tabs adentro del activo). Usamos eventos en lugar de prop
+  // drilling para no tener que tocar 5 componentes intermedios.
+  useEffect(() => {
+    try {
+      window.dispatchEvent(new CustomEvent('viora:product-ctx', {
+        detail: {
+          productos: productos.map(p => ({ id: String(p.id), nombre: p.nombre || `Producto ${p.id}` })),
+          activeProductoId: activeProductoId != null ? String(activeProductoId) : null,
+          activeTab: productoTab,
+        },
+      }));
+    } catch {}
+    return () => {
+      try { window.dispatchEvent(new CustomEvent('viora:product-ctx-clear')); } catch {}
+    };
+  }, [productos, activeProductoId, productoTab]);
+
+  // Listener: el sidebar dispara 'viora:product-select' cuando el user clickea
+  // otro producto en el menú lateral. Cambiamos el active acá.
+  useEffect(() => {
+    const onSelect = (e) => {
+      const id = e?.detail?.productoId;
+      if (id != null) setActiveProductoId(String(id));
+    };
+    const onTab = (e) => {
+      const tab = e?.detail?.tab;
+      if (tab) setProductoTab(tab);
+    };
+    window.addEventListener('viora:product-select', onSelect);
+    window.addEventListener('viora:product-tab', onTab);
+    return () => {
+      window.removeEventListener('viora:product-select', onSelect);
+      window.removeEventListener('viora:product-tab', onTab);
+    };
+  }, []);
 
   // Cuando estamos parados en tab Setup, el stepper inline ya muestra el
   // progreso detallado del pipeline — el pill flotante sería redundante.
@@ -693,6 +753,29 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
   // Config del generador de ideas (límite diario + mix de formato)
   const [genConfig, setGenConfig] = useState(() => ({ ...DEFAULT_GEN_CONFIG, ...loadJSON(GEN_CONFIG_KEY, {}) }));
+  // Listeners de los eventos custom usados para nav cross-componente:
+  //   - viora:product-select → click en sidebar nav (App.jsx) cambia producto
+  //   - viora:product-tab    → "Marca (en Competencia)" (InspiracionSection)
+  //                            cambia el tab activo del workspace
+  // Se perdieron en un merge conflict anterior. Sin esto, los botones que
+  // dispatchean estos eventos no hacen nada.
+  useEffect(() => {
+    const onSelect = (e) => {
+      const id = e?.detail?.productoId;
+      if (id != null) setActiveProductoId(String(id));
+    };
+    const onTab = (e) => {
+      const tab = e?.detail?.tab;
+      if (tab) setProductoTab(tab);
+    };
+    window.addEventListener('viora:product-select', onSelect);
+    window.addEventListener('viora:product-tab', onTab);
+    return () => {
+      window.removeEventListener('viora:product-select', onSelect);
+      window.removeEventListener('viora:product-tab', onTab);
+    };
+  }, []);
+
   const [showGenConfig, setShowGenConfig] = useState(false);
   // Inicializamos el contador de ideas del día YA filtrado por el producto
   // activo (si lo hay). Antes lo inicializábamos global y el effect lo
@@ -2012,11 +2095,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   if (!producto) {
     return (
       <div className="max-w-6xl mx-auto space-y-6">
-        <BulkProgressBar
-          state={bulkCreativos}
-          onCancel={() => bulkAbortRef.current?.abort()}
-          onClose={() => setBulkCreativos(null)}
-        />
+        {/* Antes había acá <BulkProgressBar state={bulkCreativos} .../> pero
+            bulkCreativos / bulkAbortRef nunca se declararon — era código
+            muerto que crasheaba al primer render. La barra real de bulk
+            progress vive en InspiracionSection (renderizada cuando el bulk
+            está corriendo). */}
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white shadow-sm">
@@ -2198,9 +2281,16 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         )}
       </div>
 
-      {/* Tabs del workspace — Dashboard, Setup, Bandeja, Inspiración, Creativos */}
-      <ProductTabs activeTab={productoTab} onChange={setProductoTab} />
-      <TabsGuide />
+      {/* Tabs del workspace — Dashboard, Setup, Bandeja, Inspiración, Creativos.
+          Ocultas cuando el sidebar está abierto (las muestra ahí en vertical
+          y se ven duplicadas). Visibles cuando el sidebar está colapsado
+          (icon-only) o en mobile. */}
+      {!sidebarOpenInApp && (
+        <>
+          <ProductTabs activeTab={productoTab} onChange={setProductoTab} />
+          <TabsGuide />
+        </>
+      )}
 
       {productoTab === 'dashboard' && (
         <DashboardTab producto={producto} competidores={competidores} runHistory={runHistory} />

@@ -31,6 +31,10 @@ import PipelineRunOverlay from './PipelineRunOverlay.jsx';
 import ExecutionsTray from './ExecutionsTray.jsx';
 import BalanceBar from './BalanceBar.jsx';
 import ActivityBell from './ActivityBell.jsx';
+import { getRemaining, subscribeBalance } from './balanceStore.js';
+import SupabaseAuthScreen from './SupabaseAuth.jsx';
+import { useMarketingSync } from './useMarketingSync.js';
+import { supabase, onAuthChange } from './supabase.js';
 import { generateCSV, downloadCSV, parseCSV, toNumber, toBool } from './csv.js';
 import { loadVioraState, saveVioraState, clearVioraState, createBackup } from './vioraStorage.js';
 
@@ -1341,6 +1345,19 @@ function AppShell({ onExit }) {
   const [state, dispatch] = useReducer(appReducer, INITIAL_STATE);
   const [hydrated, setHydrated] = useState(false);
 
+  // Supabase user state — solo afecta a la plataforma Marketing. Las demás
+  // plataformas siguen funcionando sin Supabase (localStorage / IndexedDB).
+  // Sin user, Marketing muestra el SupabaseAuthScreen (gate).
+  const [supabaseUser, setSupabaseUser] = useState(null);
+  useEffect(() => {
+    if (!supabase) return;
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      setSupabaseUser(session?.user || null);
+    })();
+    return onAuthChange(({ user }) => setSupabaseUser(user));
+  }, []);
+
   // Hidratación inicial — async porque IndexedDB.
   useEffect(() => {
     let alive = true;
@@ -1423,6 +1440,15 @@ function AppShell({ onExit }) {
     return () => window.removeEventListener('viora-goto-marketing', onGoto);
   }, []);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  // Cada vez que cambia el estado del sidebar, avisamos a otros componentes
+  // (ProductTabs en Arranque.jsx) para que oculten su nav redundante cuando
+  // el sidebar lo muestra. Sin esto las tabs se ven duplicadas (vertical en
+  // sidebar + horizontal en el workspace).
+  useEffect(() => {
+    try {
+      window.dispatchEvent(new CustomEvent('viora:sidebar-state', { detail: { open: sidebarOpen } }));
+    } catch {}
+  }, [sidebarOpen]);
   // Estado del menú mobile (sidebar como overlay deslizante en pantallas chicas).
   // En desktop el sidebar siempre está visible (gestionado por sidebarOpen + Tailwind md:).
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -1439,6 +1465,11 @@ function AppShell({ onExit }) {
     setToasts(prev => [...prev, { id, ...toast }]);
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), toast.duration || 3500);
   };
+
+  // Activá el sync de Marketing con Supabase. Pull on mount/login, push
+  // debounced en cambios. Si el user NO está logueado, el hook noopea hasta
+  // que aparezca una session.
+  useMarketingSync({ addToast });
 
   // --------- Background analysis del módulo Marketing ---------
   // Vive a nivel del AppShell (no dentro de MarketingSection) para que siga
@@ -2011,12 +2042,18 @@ function AppShell({ onExit }) {
         <nav className="relative flex-1 p-3 space-y-1 overflow-y-auto">
           {currentUser.role === 'admin' && currentPlatform === 'viora' && (
             <>
-              <NavItem icon={Home} label="Inicio" section="inicio" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={Package} label="Productos" section="productos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={Users} label="Clientes" section="clientes" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={CreditCard} label="Comisiones" section="comisiones" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={Calculator} label="Calculadora" section="calculadora" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={Package} label="Datos" section="datos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              <NavSection title="Operación" sectionKey="vi-op" sidebarOpen={sidebarOpen}>
+                <NavItem icon={Home} label="Inicio" section="inicio" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                <NavItem icon={Package} label="Productos" section="productos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                <NavItem icon={Users} label="Clientes" section="clientes" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              </NavSection>
+              <NavSection title="Finanzas" sectionKey="vi-fin" sidebarOpen={sidebarOpen}>
+                <NavItem icon={CreditCard} label="Comisiones" section="comisiones" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                <NavItem icon={Calculator} label="Calculadora" section="calculadora" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              </NavSection>
+              <NavSection title="Análisis" sectionKey="vi-an" sidebarOpen={sidebarOpen} defaultOpen={false}>
+                <NavItem icon={Package} label="Datos" section="datos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              </NavSection>
             </>
           )}
           {currentUser.role === 'admin' && currentPlatform === 'senydrop' && (
@@ -2026,10 +2063,14 @@ function AppShell({ onExit }) {
           )}
           {currentUser.role === 'admin' && currentPlatform === 'metaads' && (
             <>
-              <NavItem icon={Home} label="Inicio" section="meta-inicio" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={Zap} label="Campañas" section="meta-campanas" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={Activity} label="Métricas" section="meta-metricas" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={Settings} label="Conexión Meta" section="meta-config" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              <NavSection title="Operación" sectionKey="ma-op" sidebarOpen={sidebarOpen}>
+                <NavItem icon={Home} label="Inicio" section="meta-inicio" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                <NavItem icon={Zap} label="Campañas" section="meta-campanas" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                <NavItem icon={Activity} label="Métricas" section="meta-metricas" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              </NavSection>
+              <NavSection title="Configuración" sectionKey="ma-cfg" sidebarOpen={sidebarOpen} defaultOpen={false}>
+                <NavItem icon={Settings} label="Conexión Meta" section="meta-config" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              </NavSection>
             </>
           )}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (
@@ -2038,10 +2079,16 @@ function AppShell({ onExit }) {
                   (aparte por pedido) + Gastos. Bandeja, Inspiración,
                   Competencia y Creativos viven como tabs adentro de cada
                   producto en Arranque. */}
-              <NavItem icon={Play} label="Marketing" section="mk-arranque" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={BarChart3} label="Meta Ads" section="mk-meta-ads" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={Instagram} label="Automatización IG" section="mk-auto-ig" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={DollarSign} label="Gastos del stack" section="mk-gastos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              <NavSection title="Operación" sectionKey="mk-op" sidebarOpen={sidebarOpen}>
+                <NavItem icon={Play} label="Marketing" section="mk-arranque" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                <NavItem icon={BarChart3} label="Meta Ads" section="mk-meta-ads" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              </NavSection>
+              <NavSection title="Automatización" sectionKey="mk-auto" sidebarOpen={sidebarOpen} defaultOpen={false}>
+                <NavItem icon={Instagram} label="Automatización IG" section="mk-auto-ig" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              </NavSection>
+              <NavSection title="Finanzas" sectionKey="mk-fin" sidebarOpen={sidebarOpen}>
+                <NavItem icon={DollarSign} label="Gastos del stack" section="mk-gastos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              </NavSection>
             </>
           )}
           {currentUser.role === 'admin' && currentPlatform === 'consultoria' && (
@@ -2057,11 +2104,19 @@ function AppShell({ onExit }) {
               <NavItem icon={Users} label="Mis Clientes" section="mis-clientes" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
             </>
           )}
+          {/* Nav de productos — visible solo cuando Arranque envió contexto.
+              Reemplaza la necesidad de bajar a Probiotico → ProductTabs
+              horizontal para cambiar de tab o producto. */}
+          <ProductNavInSidebar sidebarOpen={sidebarOpen} />
         </nav>
 
-        {/* Footer: pill de usuario con menú personalizado */}
+        {/* Footer: stats de saldo + pill de usuario con menú personalizado */}
         <div className="relative p-3">
           <div aria-hidden="true" className="mx-1 h-px mb-3 bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+          <SidebarStats
+            sidebarOpen={sidebarOpen}
+            onNavGastos={() => setCurrentSection('mk-gastos')}
+          />
           <UserMenu
             currentUser={currentUser}
             sidebarOpen={sidebarOpen}
@@ -2110,18 +2165,24 @@ function AppShell({ onExit }) {
           {currentUser.role === 'admin' && currentPlatform === 'viora' && currentSection === 'datos' && <DatosSection state={state} dispatch={dispatch} addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'senydrop' && currentSection === 'seny-productos' && <BocetosSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'metaads' && <MetaAdsPlaceholder section={currentSection} />}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (
+          {/* GATE: si estoy en Marketing pero no hay user Supabase logueado,
+              corto el render y muestro el auth screen. El resto de las
+              plataformas (Viora, MetaAds, etc.) NO requieren Supabase. */}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && !supabaseUser && supabase && (
+            <SupabaseAuthScreen onLoggedIn={setSupabaseUser} />
+          )}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && (
             <MetaConnectBanner returnTo={`/acceso?section=${currentSection}`} />
           )}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-arranque' && <ArranqueSection addToast={addToast} onGoToSection={setCurrentSection} />}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-bandeja' && <BandejaSection addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-arranque' && <ArranqueSection addToast={addToast} onGoToSection={setCurrentSection} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-bandeja' && <BandejaSection addToast={addToast} />}
           {/* mk-competencia (sidebar legacy) está redirigido por el effect
               de arriba a mk-arranque — no necesita su propio render. */}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-meta-ads' && <MetaAdsSection addToast={addToast} />}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-auto-ig' && <AutoIGSection addToast={addToast} />}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-inspiracion' && <InspiracionSection addToast={addToast} />}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-gastos' && <GastosStackSection addToast={addToast} />}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && currentSection === 'mk-docs' && (
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-meta-ads' && <MetaAdsSection addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-auto-ig' && <AutoIGSection addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-inspiracion' && <InspiracionSection addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-gastos' && <GastosStackSection addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-docs' && (
             <MarketingSection
               addToast={addToast}
               bgAnalysis={bgAnalysis}
@@ -2163,6 +2224,182 @@ function AppShell({ onExit }) {
   );
 }
 
+
+// Navegador de productos dentro del sidebar — replica el patrón Apify
+// donde cada "proyecto" tiene sus secciones colapsables debajo. El producto
+// activo va expandido mostrando sus 2 grupos (Datos / Creación); los
+// inactivos quedan colapsados como "click para abrir".
+//
+// Se sincroniza con Arranque.jsx vía eventos custom:
+//   listen 'viora:product-ctx' → recibimos {productos, activeId, activeTab}
+//   dispatch 'viora:product-select' → switch de producto
+//   dispatch 'viora:product-tab' → switch de tab dentro del activo
+const PRODUCT_TABS = {
+  datos: [
+    { id: 'dashboard',   label: 'Dashboard',   emoji: '📊' },
+    { id: 'setup',       label: 'Setup',       emoji: '⚙️' },
+    { id: 'documentos',  label: 'Documentos',  emoji: '📄' },
+    { id: 'competencia', label: 'Competencia', emoji: '🎯' },
+  ],
+  creacion: [
+    { id: 'bandeja',     label: 'Bandeja',     emoji: '📥' },
+    { id: 'inspiracion', label: 'Inspiración', emoji: '✨' },
+    { id: 'creativos',   label: 'Creativos',   emoji: '🎨' },
+    { id: 'galeria',     label: 'Galería',     emoji: '🖼️' },
+    { id: 'copiloto',    label: 'Copiloto',    emoji: '🤖' },
+  ],
+};
+
+function ProductNavInSidebar({ sidebarOpen }) {
+  const [ctx, setCtx] = useState(null);
+  useEffect(() => {
+    const onCtx = (e) => setCtx(e.detail || null);
+    const onClear = () => setCtx(null);
+    window.addEventListener('viora:product-ctx', onCtx);
+    window.addEventListener('viora:product-ctx-clear', onClear);
+    return () => {
+      window.removeEventListener('viora:product-ctx', onCtx);
+      window.removeEventListener('viora:product-ctx-clear', onClear);
+    };
+  }, []);
+  if (!ctx || !Array.isArray(ctx.productos) || ctx.productos.length === 0) return null;
+  if (!sidebarOpen) return null; // ocultar en modo icon-only
+
+  const selectProduct = (id) => {
+    window.dispatchEvent(new CustomEvent('viora:product-select', { detail: { productoId: id } }));
+  };
+  const selectTab = (tab) => {
+    window.dispatchEvent(new CustomEvent('viora:product-tab', { detail: { tab } }));
+  };
+  return (
+    <div className="mt-4 pt-3 border-t border-white/10 space-y-2">
+      <div className="px-4 mb-1 text-[10px] font-bold uppercase tracking-wider text-white/40">
+        Productos
+      </div>
+      {ctx.productos.map(p => {
+        const isActive = String(p.id) === String(ctx.activeProductoId);
+        return (
+          <div key={p.id} className="mx-1">
+            <button
+              onClick={() => selectProduct(p.id)}
+              className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition ${
+                isActive
+                  ? 'bg-white/10 text-white shadow-sm'
+                  : 'text-white/60 hover:text-white hover:bg-white/5'
+              }`}
+              title={p.nombre}
+            >
+              <ChevronDown size={11} className={`transition-transform shrink-0 ${isActive ? '' : '-rotate-90'}`} />
+              <span className="truncate">{p.nombre}</span>
+            </button>
+            {isActive && (
+              <div className="mt-1 ml-3 pl-2 border-l border-white/10 space-y-2">
+                {Object.entries(PRODUCT_TABS).map(([group, tabs]) => (
+                  <div key={group}>
+                    <div className="px-2 mb-1 text-[9px] font-bold uppercase tracking-wider text-white/30">
+                      {group === 'datos' ? 'Datos' : 'Creación'}
+                    </div>
+                    {tabs.map(t => {
+                      const tabActive = t.id === ctx.activeTab;
+                      return (
+                        <button
+                          key={t.id}
+                          onClick={() => selectTab(t.id)}
+                          className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs transition ${
+                            tabActive
+                              ? 'bg-gradient-to-r from-pink-600/60 to-rose-500/40 text-white font-semibold'
+                              : 'text-white/60 hover:text-white hover:bg-white/5'
+                          }`}
+                        >
+                          <span className="text-[11px] shrink-0">{t.emoji}</span>
+                          <span className="truncate">{t.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// Stats footer del sidebar — pills compactos mostrando saldo restante
+// de OpenAI / Anthropic. Click → navega a "Gastos del stack" para detalle.
+// Auto-refresca con subscribeBalance cuando se loguea un cost o se carga
+// crédito. En sidebar colapsado se oculta.
+function SidebarStats({ sidebarOpen, onNavGastos }) {
+  const [, force] = useState(0);
+  useEffect(() => subscribeBalance(() => force(x => x + 1)), []);
+  if (!sidebarOpen) return null;
+  const oa = getRemaining('openai');
+  const an = getRemaining('anthropic');
+  const ap = getRemaining('apify');
+  const Pill = ({ label, value }) => {
+    const isLow = value != null && value < 5;
+    const isEmpty = value != null && value < 1;
+    return (
+      <button
+        onClick={onNavGastos}
+        title={`Saldo ${label} — click para detalle`}
+        className={`flex items-center justify-between w-full px-2.5 py-1.5 rounded-md text-[10px] font-bold transition ${
+          isEmpty ? 'bg-red-900/40 text-red-200 hover:bg-red-900/60'
+          : isLow ? 'bg-amber-900/30 text-amber-200 hover:bg-amber-900/50'
+          : 'bg-white/5 text-white/70 hover:bg-white/10'
+        }`}
+      >
+        <span className="opacity-80">{label}</span>
+        <span>{value == null ? '—' : `$${value.toFixed(2)}`}</span>
+      </button>
+    );
+  };
+  return (
+    <div className="space-y-1 mb-2 px-1">
+      <Pill label="OpenAI"    value={oa} />
+      <Pill label="Anthropic" value={an} />
+      <Pill label="Apify"     value={ap} />
+    </div>
+  );
+}
+
+// Agrupador colapsable de NavItems estilo Apify sidebar — título con
+// chevron, recordamos estado abierto/cerrado en localStorage. En modo
+// colapsado del sidebar mostramos solo un divisor sutil entre grupos.
+function NavSection({ title, sectionKey, sidebarOpen, defaultOpen = true, children }) {
+  const [open, setOpen] = useState(() => {
+    try {
+      const v = localStorage.getItem(`viora-navsec-${sectionKey}`);
+      return v == null ? defaultOpen : v === '1';
+    } catch { return defaultOpen; }
+  });
+  const toggle = () => {
+    setOpen(o => {
+      const next = !o;
+      try { localStorage.setItem(`viora-navsec-${sectionKey}`, next ? '1' : '0'); } catch {}
+      return next;
+    });
+  };
+  if (!sidebarOpen) {
+    return <div aria-hidden="true" className="my-2 mx-3 h-px bg-white/10" />;
+  }
+  return (
+    <div className="mt-3 first:mt-0">
+      <button
+        onClick={toggle}
+        className="flex items-center gap-1.5 px-4 mb-1 text-[10px] font-bold uppercase tracking-wider text-white/40 hover:text-white/70 transition w-full"
+      >
+        <ChevronDown size={10} className={`transition-transform duration-200 ${open ? '' : '-rotate-90'}`} />
+        {title}
+      </button>
+      <div className={`space-y-1 overflow-hidden transition-all duration-200 ${open ? 'max-h-screen opacity-100' : 'max-h-0 opacity-0'}`}>
+        {children}
+      </div>
+    </div>
+  );
+}
 
 function NavItem({ icon: Icon, label, section, currentSection, onSelect, sidebarOpen }) {
   const isActive = currentSection === section;

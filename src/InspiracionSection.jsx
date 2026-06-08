@@ -1283,6 +1283,10 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       }
 
       await saveOne(firstData, 0, newPlan);
+      // Limpiar ref del base64 inmediatamente — sin esto Chrome lo mantiene
+      // ~5-15MB en heap hasta el siguiente GC. Con 4 imágenes seguidas
+      // el renderer crashea (Código de error: 5).
+      if (firstData.imagenes) firstData.imagenes.length = 0;
       let completed = 1;
       let failed = 0;
       setProgressById(prev => ({
@@ -1290,30 +1294,30 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         [ad.id]: { ...prev[ad.id], stage: `generando ${completed}/${nVar}` },
       }));
 
-      // CALLS #2..N — concurrency=2.
+      // CALLS #2..N — SECUENCIAL (concurrency=1) para no acumular base64s
+      // en memoria. Con concurrency=2 dos imágenes de 5-15MB conviven en
+      // heap → renderer OOM. Secuencial es 70s más lento por variación pero
+      // estable.
       if (nVar > 1) {
-        const remaining = Array.from({ length: nVar - 1 }, (_, i) => i + 1);
-        const CONCURRENCY = 2;
-        for (let i = 0; i < remaining.length; i += CONCURRENCY) {
-          const batch = remaining.slice(i, i + CONCURRENCY);
-          await Promise.all(batch.map(async (idx) => {
-            try {
-              const data = await doCall(idx, cachedPlan);
-              await saveOne(data, idx, cachedPlan);
-              const c = logCostsFromResponse(data, `crear-creativo-referencial · ${brandNombre} · ${idx + 1}/${nVar}`);
-              totalCostAccum.openai += c?.openai || 0;
-              totalCostAccum.anthropic += c?.anthropic || 0;
-              completed++;
-            } catch (err) {
-              console.warn(`Variación ${idx + 1}/${nVar} de ${brandNombre} falló:`, err.message);
-              failed++;
-            }
-            setProgressById(prev => ({
-              ...prev,
-              [ad.id]: { ...prev[ad.id], stage: `generando ${completed}/${nVar}${failed ? ` (${failed} ✗)` : ''}` },
-            }));
-            updateExecution(execId, { stage: `Generando ${completed}/${nVar}…` });
+        for (let idx = 1; idx < nVar; idx++) {
+          try {
+            const data = await doCall(idx, cachedPlan);
+            await saveOne(data, idx, cachedPlan);
+            const c = logCostsFromResponse(data, `crear-creativo-referencial · ${brandNombre} · ${idx + 1}/${nVar}`);
+            totalCostAccum.openai += c?.openai || 0;
+            totalCostAccum.anthropic += c?.anthropic || 0;
+            // Liberar la referencia al base64 ANTES del próximo call.
+            if (data.imagenes) data.imagenes.length = 0;
+            completed++;
+          } catch (err) {
+            console.warn(`Variación ${idx + 1}/${nVar} de ${brandNombre} falló:`, err.message);
+            failed++;
+          }
+          setProgressById(prev => ({
+            ...prev,
+            [ad.id]: { ...prev[ad.id], stage: `generando ${completed}/${nVar}${failed ? ` (${failed} ✗)` : ''}` },
           }));
+          updateExecution(execId, { stage: `Generando ${completed}/${nVar}…` });
         }
       }
 

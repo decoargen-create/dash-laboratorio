@@ -1222,7 +1222,10 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     setAdaptingAdIds(prev => new Set(prev).add(ad.id));
     const execId = startExecution({
       label: `Adaptando ideas desde ${brandNombre}`,
-      sublabel: ad.headline?.slice(0, 60) || ad.body?.slice(0, 60) || '',
+      // Sanitizamos templates Meta del estilo {{product.name}} que algunos
+      // competidores dejan en el headline — Apify scrapea el raw template
+      // sin que Meta lo interpole para nosotros.
+      sublabel: (ad.headline || ad.body || '').replace(/\{\{[^}]+\}\}/g, '').trim().slice(0, 60),
       kind: 'adapt',
       estimatedMs: 40000,
     });
@@ -1326,7 +1329,10 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     const estimatedCost = nVar * costoPorImg + visionCost;
     const execId = startExecution({
       label: `Creando ${nVar} creativo${nVar !== 1 ? 's' : ''} de ${brandNombre}`,
-      sublabel: ad.headline?.slice(0, 60) || ad.body?.slice(0, 60) || '',
+      // Sanitizamos templates Meta del estilo {{product.name}} que algunos
+      // competidores dejan en el headline — Apify scrapea el raw template
+      // sin que Meta lo interpole para nosotros.
+      sublabel: (ad.headline || ad.body || '').replace(/\{\{[^}]+\}\}/g, '').trim().slice(0, 60),
       kind: 'creative',
       estimatedMs: 80000 * Math.ceil(nVar / 2), // 80s por batch de 2
       estimatedCost,

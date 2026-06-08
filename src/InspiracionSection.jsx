@@ -388,6 +388,7 @@ function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = f
     >
       {thumb ? (
         <img src={thumb} alt="" className="w-full h-full object-cover"
+          loading="lazy" decoding="async"
           onError={(e) => { e.target.style.display = 'none'; }} />
       ) : (
         <div className="w-full h-full flex items-center justify-center">
@@ -743,7 +744,7 @@ function TopListView({ items, seleccionados, selectedOrder, adaptingAdIds, crean
             }`}>{idx + 1}</div>
             {/* Thumb chiquito */}
             <div className="w-12 h-12 rounded bg-gray-100 dark:bg-gray-900 overflow-hidden shrink-0 border border-gray-200 dark:border-gray-700">
-              {thumb && <img src={thumb} alt="" className="w-full h-full object-cover" onError={e => { e.target.style.display = 'none'; }} />}
+              {thumb && <img src={thumb} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" onError={e => { e.target.style.display = 'none'; }} />}
             </div>
             {/* Info */}
             <div className="flex-1 min-w-0">
@@ -847,7 +848,7 @@ function TopTableView({ items, seleccionados, selectedOrder, adaptingAdIds, crea
                 <td className="py-1.5 px-2">
                   <div className="flex items-center gap-2">
                     <div className="w-8 h-8 rounded bg-gray-100 dark:bg-gray-900 overflow-hidden shrink-0 border border-gray-200 dark:border-gray-700">
-                      {thumb && <img src={thumb} alt="" className="w-full h-full object-cover" onError={e => { e.target.style.display = 'none'; }} />}
+                      {thumb && <img src={thumb} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" onError={e => { e.target.style.display = 'none'; }} />}
                     </div>
                     <span className="text-[10px] text-gray-700 dark:text-gray-300 truncate max-w-[200px]">{ad.headline || ad.body?.slice(0, 50) || '—'}</span>
                   </div>
@@ -973,8 +974,27 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   const upsertSkeleton = (adId, skel) => {
     if (!adId || !skel) return;
     setSkeletonCache(prev => {
-      const next = { ...prev, [adId]: skel };
-      try { localStorage.setItem('viora-marketing-skeleton-cache', JSON.stringify(next)); } catch {}
+      // Cap a 50 entries — el plan completo es 5-50KB. Sin tope llegaba al
+      // límite de 5MB de localStorage y rompía writes silenciosamente.
+      // LRU simple: si ya estamos en el cap, descartamos el más antiguo.
+      const MAX_ENTRIES = 50;
+      const entries = Object.entries(prev);
+      let next;
+      if (entries.length >= MAX_ENTRIES && !(adId in prev)) {
+        // Quedarnos con los últimos MAX-1 + el nuevo.
+        next = Object.fromEntries(entries.slice(-(MAX_ENTRIES - 1)));
+        next[adId] = skel;
+      } else {
+        next = { ...prev, [adId]: skel };
+      }
+      try { localStorage.setItem('viora-marketing-skeleton-cache', JSON.stringify(next)); }
+      catch (err) {
+        // Si todavía falla (quota), purgamos a la mitad y reintentamos.
+        const halved = Object.fromEntries(Object.entries(next).slice(-Math.floor(MAX_ENTRIES / 2)));
+        halved[adId] = skel;
+        try { localStorage.setItem('viora-marketing-skeleton-cache', JSON.stringify(halved)); } catch {}
+        return halved;
+      }
       return next;
     });
   };

@@ -25,21 +25,29 @@ export async function runActorSync(actorId, input, token, opts = {}) {
   // Prioridad: input.maxItems → input.maxResults → input.resultsLimit.
   // Si ninguno está, default 50 — Apify rechaza 0/null en PPR actors.
   const maxItems = Math.max(1, Number(input?.maxItems || input?.maxResults || input?.resultsLimit || 50));
-  // Mandamos maxItems redundante: query param (oficial para PPR), input
-  // field y memoryMbytes default. Algunos actors leen uno u otro.
+
+  // BELT + SUSPENDERS para PPR actors:
+  // 1. Query params: maxItems (oficial), también maxItem y max_items
+  //    por si el actor lee variantes alternativas
+  // 2. Body: maxItems, resultsLimit, maxResults, count, maxCharged
+  // 3. memoryMbytes explícito para evitar OOM del actor con feeds grandes
   const params = new URLSearchParams({
     token,
     timeout: String(timeout),
     maxItems: String(maxItems),
+    memory: '1024',
   });
   const url = `${APIFY_API_BASE}/acts/${actorPath}/run-sync-get-dataset-items?${params.toString()}`;
 
-  // Sanitize: garantizar que el body también tenga maxItems > 0.
+  // Sanitize: garantizar que el body también tenga maxItems > 0 en TODOS
+  // los posibles names. Costa poco y blinda contra cambios de API.
   const finalInput = {
     ...input,
     maxItems,
     resultsLimit: maxItems,
     maxResults: maxItems,
+    count: maxItems,
+    maxCharged: maxItems,
   };
 
   const resp = await fetch(url, {
@@ -50,9 +58,9 @@ export async function runActorSync(actorId, input, token, opts = {}) {
 
   if (!resp.ok) {
     const text = await resp.text();
-    // Marcador de version del fix para ver si Vercel sirvió el código nuevo.
-    // Si en el error se ve "[v3-maxItems-qs]" sabemos que este código corrió.
-    throw new Error(`[v3-maxItems-qs=${maxItems}] Apify run failed (${resp.status}): ${text.slice(0, 280)}`);
+    // Marker v4 — si NO se ve "[v4-apify-defensive=N]" sabemos que el deploy
+    // de Vercel no propagó el código nuevo.
+    throw new Error(`[v4-apify-defensive=${maxItems}] Apify run failed (${resp.status}): ${text.slice(0, 260)}`);
   }
   return await resp.json();
 }

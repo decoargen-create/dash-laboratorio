@@ -41,7 +41,6 @@ import GaleriaReferencialesModal from './GaleriaReferencialesModal.jsx';
 // en ~3 min, costo ~$3.60.
 const MAX_SELECCIONADOS = 10;
 const BULK_CONCURRENCY = 5;
-const N_VARIANTES_FIJO = 2;
 
 // Extrae una keyword sensata desde una landing URL — preferimos el hostname
 // COMPLETO con www. si está, porque eso es lo que pegarías a mano en la
@@ -359,9 +358,10 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     // Estimación de costo según opciones (lo mostramos en el tray antes de que la API confirme).
     const costoPorImg = genOpts.quality === 'low' ? 0.03 : genOpts.quality === 'medium' ? 0.07 : 0.18;
     const visionCost = skeletonCache[ad.id] ? 0 : 0.005;
-    const estimatedCost = N_VARIANTES_FIJO * costoPorImg + visionCost;
+    const nVar = Math.max(1, Math.min(10, genOpts.n || 2));
+    const estimatedCost = nVar * costoPorImg + visionCost;
     const execId = startExecution({
-      label: `Creando ${N_VARIANTES_FIJO} creativos de ${brandNombre}`,
+      label: `Creando ${nVar} creativo${nVar !== 1 ? 's' : ''} de ${brandNombre}`,
       sublabel: ad.headline?.slice(0, 60) || ad.body?.slice(0, 60) || '',
       kind: 'creative',
       estimatedMs: 80000,
@@ -405,7 +405,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           // size y quality configurables.
           quality: genOpts.quality,
           size: genOpts.size,
-          n: N_VARIANTES_FIJO,
+          n: nVar,
           // Si ya tenemos un skeleton cacheado del mismo ad, lo mandamos
           // para que el backend saltee la llamada a Vision (~$0.005 + 10s).
           skeletonCached: skeletonCache[ad.id] || null,
@@ -507,11 +507,12 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     // que NO esté ya en cache. n=2 fijo.
     const costoPorImagen = genOpts.quality === 'low' ? 0.03 : genOpts.quality === 'medium' ? 0.07 : 0.18;
     const visionAds = Array.from(seleccionados).filter(adId => !skeletonCache[adId]).length;
-    const costoEstimado = seleccionados.size * N_VARIANTES_FIJO * costoPorImagen + visionAds * 0.005;
-    const total = seleccionados.size * N_VARIANTES_FIJO;
+    const nVarBulk = Math.max(1, Math.min(10, genOpts.n || 2));
+    const costoEstimado = seleccionados.size * nVarBulk * costoPorImagen + visionAds * 0.005;
+    const total = seleccionados.size * nVarBulk;
     const sizeLabel = genOpts.size === '1024x1536' ? '1024×1536 portrait' : genOpts.size === '1024x1024' ? '1024×1024 1:1' : '2048×2048 1:1';
     const cacheNote = visionAds < seleccionados.size ? ` (${seleccionados.size - visionAds} con skeleton cacheado)` : '';
-    if (!window.confirm(`Generar ${N_VARIANTES_FIJO} variantes ${sizeLabel} por cada uno de los ${seleccionados.size} ads${cacheNote} → ${total} imágenes total, ~$${costoEstimado.toFixed(2)}. Corriendo en paralelo, debería tardar ~${Math.ceil(seleccionados.size / BULK_CONCURRENCY) * 90}s. ¿Seguir?`)) return;
+    if (!window.confirm(`Generar ${nVarBulk} variante${nVarBulk !== 1 ? 's' : ''} ${sizeLabel} por cada uno de los ${seleccionados.size} ads${cacheNote} → ${total} imágenes total, ~$${costoEstimado.toFixed(2)}. Corriendo en paralelo, debería tardar ~${Math.ceil(seleccionados.size / BULK_CONCURRENCY) * 90}s. ¿Seguir?`)) return;
 
     // Buscar los ad objects desde adsByBrand + de los competidores (que viven
     // en producto.competidores, no en brands custom).
@@ -863,11 +864,22 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
             <span className="text-gray-500 dark:text-gray-400"> / {MAX_SELECCIONADOS} ads</span>
           </div>
 
-          {/* n=2 fijo — la lógica de "por las dudas que una salga mejor" se
-              cubre con 2 variantes. No agregamos selector para no encarecer. */}
-          <span className="text-[10px] text-gray-500 dark:text-gray-400 px-2 py-0.5 bg-gray-100 dark:bg-gray-700 rounded">
-            2 variantes
-          </span>
+          {/* Selector de variaciones — el user puede elegir entre 1, 2, 4 o 6.
+              Con accentColor + n>=2, el backend alterna prompts (reference +
+              rebrand). Con n=1 sale solo la variante "reference". */}
+          <div className="flex items-center gap-1 text-[10px]">
+            <span className="text-gray-500 dark:text-gray-400">Var:</span>
+            {[1, 2, 4, 6].map(n => (
+              <button key={n}
+                onClick={() => setGenOpts(o => ({ ...o, n }))}
+                className={`px-2 py-0.5 rounded font-bold transition ${
+                  (genOpts.n || 2) === n
+                    ? 'bg-brand-600 text-white'
+                    : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                }`}
+              >{n}</button>
+            ))}
+          </div>
 
           {/* Selector de aspect ratio */}
           <div className="flex items-center gap-1 text-[10px]">
@@ -893,7 +905,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           </button>
           <button onClick={handleBulkCrear}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-brand-600 to-brand-500 rounded-lg hover:from-brand-700 hover:to-brand-600 transition">
-            <Sparkles size={13} /> Generar {seleccionados.size * N_VARIANTES_FIJO} creativos
+            <Sparkles size={13} /> Generar {seleccionados.size * (genOpts.n || 2)} creativos
           </button>
         </div>
       )}

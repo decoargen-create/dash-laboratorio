@@ -37,6 +37,39 @@ function slugify(s) {
     .replace(/[^a-zA-Z0-9]+/g, '-').toLowerCase().slice(0, 40);
 }
 
+// Capitalize: primera letra mayúscula, resto lowercase.
+function capit(s) {
+  const t = String(s || '').trim();
+  if (!t) return '';
+  return t.charAt(0).toUpperCase() + t.slice(1).toLowerCase();
+}
+
+// Toma la primera palabra "limpia" (sin marcas raras) de un nombre.
+function firstWord(s) {
+  const m = String(s || '').match(/[A-Za-zÁ-Úá-úÑñ0-9]+/);
+  return m ? m[0] : '';
+}
+
+// Construye filename según el patrón pedido: "Producto 9-6 Estatico Brand.png"
+// Producto = primera palabra del producto, capitalizada
+// 9-6     = día-mes del createdAt
+// Formato = "Estatico" (1:1) | "Story" (vertical) | etc.
+// Brand   = primera palabra del sourceBrand, capitalizada
+// Si hay variantStyle=rebrand se sufija " Rebrand"
+function buildFileName(it, productoNombre) {
+  const prod = capit(firstWord(productoNombre)) || 'Creativo';
+  const d = it.createdAt ? new Date(it.createdAt) : new Date();
+  const dateStr = `${d.getDate()}-${d.getMonth() + 1}`;
+  const formato = it.size === '1024x1536' ? 'Story'
+    : it.size === '1536x1024' ? 'Landscape'
+    : 'Estatico';
+  const brand = capit(firstWord(it.sourceBrand)) || 'Ref';
+  const rebrand = it.variantStyle === 'rebrand' ? ' Rebrand' : '';
+  // Numeral de variante para evitar colisiones cuando hay 2+ de la misma combinación.
+  const variantSuffix = it.variantIndex != null ? ` v${it.variantIndex + 1}` : '';
+  return `${prod} ${dateStr} ${formato} ${brand}${rebrand}${variantSuffix}.png`;
+}
+
 export default function GaleriaReferencialesModal({ productoId, productoNombre, onClose }) {
   const [items, setItems] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -123,11 +156,18 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
           return;
         }
       }
-      seleccionadosArr.forEach((it, idx) => {
-        const brandSlug = slugify(it.sourceBrand || 'ref');
-        const variantSlug = it.variantStyle || 'ref';
-        const filename = `${String(idx + 1).padStart(2, '0')}_${brandSlug}_${variantSlug}_${String(it.id).slice(0, 8)}.png`;
-        zip.file(filename, base64ToBlob(it.imageBase64, it.mimeType || 'image/png'));
+      // Trackear nombres usados para evitar colisiones (ej. mismo producto +
+      // fecha + brand → agregar _2, _3, etc).
+      const usedNames = new Set();
+      seleccionadosArr.forEach((it) => {
+        let name = buildFileName(it, productoNombre);
+        let dedup = 1;
+        const base = name.replace(/\.png$/, '');
+        while (usedNames.has(name)) {
+          name = `${base} (${++dedup}).png`;
+        }
+        usedNames.add(name);
+        zip.file(name, base64ToBlob(it.imageBase64, it.mimeType || 'image/png'));
       });
       const blob = await zip.generateAsync({ type: 'blob' });
       const ts = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
@@ -162,7 +202,7 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${slugify(it.sourceBrand || 'ref')}_${slugify(productoNombre)}_${String(it.id).slice(0, 8)}.png`;
+      a.download = buildFileName(it, productoNombre);
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -323,6 +363,41 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
   );
 }
 
+// Componente reusable: thumb que al hover muestra preview grande de la
+// variación + del ad original side-by-side. Aparece flotando al lado del
+// thumb (right por default; flip a left si está cerca del borde derecho).
+function HoverPreview({ item, children, className = '' }) {
+  return (
+    <div className={`group/preview relative ${className}`}>
+      {children}
+      <div className="hidden group-hover/preview:flex absolute left-full top-0 ml-2 z-[70] gap-2 pointer-events-none">
+        {/* Inspiración original */}
+        <div className="bg-white dark:bg-gray-900 rounded-lg shadow-2xl border-2 border-gray-200 dark:border-gray-700 p-1.5 w-72">
+          <p className="text-[9px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1 text-center">
+            ANTES — {item.sourceBrand || 'inspiración'}
+          </p>
+          {item.sourceImageUrl ? (
+            <img src={item.sourceImageUrl} alt="" className="w-full max-h-72 object-contain bg-gray-50 dark:bg-gray-800 rounded"
+              onError={e => { e.target.style.opacity = '0.3'; }} />
+          ) : (
+            <div className="w-full h-40 bg-gray-50 dark:bg-gray-800 rounded flex items-center justify-center text-[10px] text-gray-400 italic">
+              Sin ref guardada
+            </div>
+          )}
+        </div>
+        {/* Variación generada */}
+        <div className="bg-white dark:bg-gray-900 rounded-lg shadow-2xl border-2 border-brand-300 dark:border-brand-700 p-1.5 w-72">
+          <p className="text-[9px] font-bold uppercase tracking-wider text-brand-600 dark:text-brand-400 mb-1 text-center">
+            DESPUÉS {item.variantStyle === 'rebrand' && '· REBRAND'}
+          </p>
+          <img src={`data:${item.mimeType || 'image/png'};base64,${item.imageBase64}`} alt=""
+            className="w-full max-h-72 object-contain bg-white rounded" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // VISTA 1 — Grid: thumbs cuadrados con número de selección + badge si ya descargado.
 function GalleryGridView({ items, seleccionados, selectedOrder, onToggleSelect, onOpen }) {
   return (
@@ -331,7 +406,7 @@ function GalleryGridView({ items, seleccionados, selectedOrder, onToggleSelect, 
         const isSel = seleccionados.has(it.id);
         const selIdx = selectedOrder.get(it.id);
         return (
-          <div key={it.id} className="group relative">
+          <HoverPreview key={it.id} item={it} className="group">
             <button
               onClick={() => onOpen(it)}
               className={`block w-full aspect-square rounded-lg overflow-hidden border-2 transition ${
@@ -368,14 +443,14 @@ function GalleryGridView({ items, seleccionados, selectedOrder, onToggleSelect, 
                 <Check size={10} /> ✓
               </div>
             )}
-            {/* Footer con brand + variant + fecha de descarga */}
+            {/* Footer con brand + variant */}
             <div className="absolute bottom-0 left-0 right-0 px-1.5 py-1 bg-gradient-to-t from-black/80 to-transparent text-white pointer-events-none">
               <p className="text-[9px] font-semibold truncate">
                 {it.sourceBrand && <span>Ref: {it.sourceBrand}</span>}
                 {it.variantStyle === 'rebrand' && <span className="ml-1 px-1 bg-brand-500 rounded text-[8px]">REBRAND</span>}
               </p>
             </div>
-          </div>
+          </HoverPreview>
         );
       })}
     </div>
@@ -405,13 +480,15 @@ function GalleryListView({ items, seleccionados, selectedOrder, onToggleSelect, 
             >
               {isSel ? selIdx : <Plus size={12} />}
             </button>
-            <button onClick={() => onOpen(it)} className="shrink-0">
-              <img
-                src={`data:${it.mimeType || 'image/png'};base64,${it.imageBase64}`}
-                alt=""
-                className="w-14 h-14 rounded object-cover border border-gray-200 dark:border-gray-700"
-              />
-            </button>
+            <HoverPreview item={it} className="shrink-0">
+              <button onClick={() => onOpen(it)}>
+                <img
+                  src={`data:${it.mimeType || 'image/png'};base64,${it.imageBase64}`}
+                  alt=""
+                  className="w-14 h-14 rounded object-cover border border-gray-200 dark:border-gray-700 hover:scale-110 transition"
+                />
+              </button>
+            </HoverPreview>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1.5 text-xs">
                 <span className="font-bold text-gray-900 dark:text-gray-100 truncate">
@@ -500,13 +577,15 @@ function GalleryTableView({ items, seleccionados, selectedOrder, onToggleSelect,
                   </button>
                 </td>
                 <td className="py-2 px-2">
-                  <button onClick={() => onOpen(it)}>
-                    <img
-                      src={`data:${it.mimeType || 'image/png'};base64,${it.imageBase64}`}
-                      alt=""
-                      className="w-10 h-10 rounded object-cover border border-gray-200 dark:border-gray-700 hover:scale-110 transition"
-                    />
-                  </button>
+                  <HoverPreview item={it} className="inline-block">
+                    <button onClick={() => onOpen(it)}>
+                      <img
+                        src={`data:${it.mimeType || 'image/png'};base64,${it.imageBase64}`}
+                        alt=""
+                        className="w-10 h-10 rounded object-cover border border-gray-200 dark:border-gray-700 hover:scale-110 transition"
+                      />
+                    </button>
+                  </HoverPreview>
                 </td>
                 <td className="py-2 px-2 text-gray-700 dark:text-gray-200 truncate max-w-[180px]">{it.sourceBrand || '—'}</td>
                 <td className="py-2 px-2">

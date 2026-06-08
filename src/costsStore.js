@@ -45,7 +45,24 @@ export function logCost({ autoTipo, amount, descripcion }) {
   // Capamos a últimos 5000 logs para no explotar localStorage.
   const next = [nuevo, ...logs].slice(0, 5000);
   saveLogs(next);
+  // Aviso global para que widgets de saldo se actualicen al toque.
+  if (typeof window !== 'undefined') {
+    try { window.dispatchEvent(new CustomEvent('viora:cost-logged', { detail: nuevo })); } catch {}
+  }
   return nuevo;
+}
+
+// Total gastado para un autoTipo DESDE un timestamp ISO.
+// Usado por el widget de saldo: vos cargás saldo $20 a las 10am, después
+// el widget muestra $20 - (lo gastado desde las 10am).
+export function spendSince(autoTipo, sinceIso) {
+  if (!sinceIso) return 0;
+  const sinceMs = new Date(sinceIso).getTime();
+  if (isNaN(sinceMs)) return 0;
+  return loadLogs()
+    .filter(l => l.autoTipo === autoTipo)
+    .filter(l => new Date(l.ts).getTime() >= sinceMs)
+    .reduce((sum, l) => sum + (l.amount || 0), 0);
 }
 
 // Helper: loguea de una sola los costs que vinieron en una response del backend.

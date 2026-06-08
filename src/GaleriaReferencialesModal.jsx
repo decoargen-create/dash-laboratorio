@@ -76,6 +76,383 @@ function buildFileName(it, productoNombre) {
 //   embedded=true → renderiza como sección full-width sin backdrop ni modal
 //   chrome. Usado cuando vive dentro de un tab del workspace.
 //   embedded=false (default) → modal sobre backdrop con onClose.
+// ---- inner components moved before export (TDZ fix Vite/Rollup) ----
+
+function HoverPreview({ item, children, className = '' }) {
+  return (
+    <div className={`group/preview relative ${className}`}>
+      {children}
+      <div className="hidden group-hover/preview:flex absolute left-full top-0 ml-2 z-[70] gap-2 pointer-events-none">
+        {/* Inspiración original */}
+        <div className="bg-white dark:bg-gray-900 rounded-lg shadow-2xl border-2 border-gray-200 dark:border-gray-700 p-1.5 w-72">
+          <p className="text-[9px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1 text-center">
+            ANTES — {item.sourceBrand || 'inspiración'}
+          </p>
+          {item.sourceImageUrl ? (
+            <img src={item.sourceImageUrl} alt="" className="w-full max-h-72 object-contain bg-gray-50 dark:bg-gray-800 rounded"
+              onError={e => { e.target.style.opacity = '0.3'; }} />
+          ) : (
+            <div className="w-full h-40 bg-gray-50 dark:bg-gray-800 rounded flex items-center justify-center text-[10px] text-gray-400 italic">
+              Sin ref guardada
+            </div>
+          )}
+        </div>
+        {/* Variación generada */}
+        <div className="bg-white dark:bg-gray-900 rounded-lg shadow-2xl border-2 border-brand-300 dark:border-brand-700 p-1.5 w-72">
+          <p className="text-[9px] font-bold uppercase tracking-wider text-brand-600 dark:text-brand-400 mb-1 text-center">
+            DESPUÉS {item.variantStyle === 'rebrand' && '· REBRAND'}
+          </p>
+          <img src={`data:${item.mimeType || 'image/png'};base64,${item.imageBase64}`} alt=""
+            className="w-full max-h-72 object-contain bg-white rounded" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// VISTA 1 — Grid: thumbs cuadrados con número de selección + badge si ya descargado.
+
+function GalleryGridView({ items, seleccionados, selectedOrder, onToggleSelect, onOpen }) {
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+      {items.map(it => {
+        const isSel = seleccionados.has(it.id);
+        const selIdx = selectedOrder.get(it.id);
+        return (
+          <HoverPreview key={it.id} item={it} className="group">
+            <button
+              onClick={() => onOpen(it)}
+              className={`block w-full aspect-square rounded-lg overflow-hidden border-2 transition ${
+                isSel
+                  ? 'border-brand-500 ring-2 ring-brand-200 dark:ring-brand-900'
+                  : it.descargada
+                    ? 'border-emerald-200 dark:border-emerald-800 hover:border-emerald-400'
+                    : 'border-gray-200 dark:border-gray-700 hover:border-brand-400'
+              }`}
+            >
+              <img
+                src={`data:${it.mimeType || 'image/png'};base64,${it.imageBase64}`}
+                alt=""
+                className="w-full h-full object-cover"
+              />
+            </button>
+            {/* Selector numerado — siempre visible */}
+            <button
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggleSelect(it.id); }}
+              className={`absolute top-2 left-2 z-10 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shadow-md transition-all ${
+                isSel
+                  ? 'bg-brand-600 text-white scale-110 ring-2 ring-white dark:ring-gray-900'
+                  : 'bg-white/90 dark:bg-gray-900/90 text-gray-400 hover:bg-brand-50 hover:text-brand-600 hover:scale-110 opacity-70 group-hover:opacity-100'
+              }`}
+              title={isSel ? `Seleccionado #${selIdx}` : 'Click para seleccionar'}
+            >
+              {isSel ? selIdx : <Plus size={14} />}
+            </button>
+            {/* Badge "descargada" */}
+            {it.descargada && (
+              <div className="absolute top-2 right-2 z-10 inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold text-white bg-emerald-500 rounded-md shadow-md"
+                title={`Descargado ${fmtDate(it.descargadaAt)}`}
+              >
+                <Check size={10} /> ✓
+              </div>
+            )}
+            {/* Footer con brand + variant */}
+            <div className="absolute bottom-0 left-0 right-0 px-1.5 py-1 bg-gradient-to-t from-black/80 to-transparent text-white pointer-events-none">
+              <p className="text-[9px] font-semibold truncate">
+                {it.sourceBrand && <span>Ref: {it.sourceBrand}</span>}
+                {it.variantStyle === 'rebrand' && <span className="ml-1 px-1 bg-brand-500 rounded text-[8px]">REBRAND</span>}
+              </p>
+            </div>
+          </HoverPreview>
+        );
+      })}
+    </div>
+  );
+}
+
+// VISTA 2 — Lista: rows con thumb + info + acciones inline.
+
+function GalleryListView({ items, seleccionados, selectedOrder, onToggleSelect, onOpen, onDownload, onToggleDescargada, onDelete }) {
+  return (
+    <div className="space-y-1.5">
+      {items.map(it => {
+        const isSel = seleccionados.has(it.id);
+        const selIdx = selectedOrder.get(it.id);
+        return (
+          <div key={it.id}
+            className={`flex items-center gap-2.5 p-2 rounded-md border transition ${
+              isSel
+                ? 'bg-brand-50 dark:bg-brand-900/30 border-brand-300 dark:border-brand-700'
+                : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:border-brand-300 dark:hover:border-brand-700'
+            }`}
+          >
+            <button onClick={() => onToggleSelect(it.id)}
+              className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition shrink-0 ${
+                isSel ? 'bg-brand-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-400 hover:bg-brand-50 hover:text-brand-600'
+              }`}
+              title={isSel ? `#${selIdx}` : 'Seleccionar'}
+            >
+              {isSel ? selIdx : <Plus size={12} />}
+            </button>
+            <HoverPreview item={it} className="shrink-0">
+              <button onClick={() => onOpen(it)}>
+                <img
+                  src={`data:${it.mimeType || 'image/png'};base64,${it.imageBase64}`}
+                  alt=""
+                  className="w-14 h-14 rounded object-cover border border-gray-200 dark:border-gray-700 hover:scale-110 transition"
+                />
+              </button>
+            </HoverPreview>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5 text-xs">
+                <span className="font-bold text-gray-900 dark:text-gray-100 truncate">
+                  {it.sourceBrand || 'Sin marca'}
+                </span>
+                {it.variantStyle === 'rebrand' && (
+                  <span className="px-1 py-0.5 text-[8px] font-bold bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 rounded">
+                    REBRAND
+                  </span>
+                )}
+                {it.descargada && (
+                  <span className="inline-flex items-center gap-0.5 px-1 py-0.5 text-[9px] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded"
+                    title={`Descargado ${fmtDate(it.descargadaAt)}`}
+                  >
+                    <Check size={9} /> Descargado
+                  </span>
+                )}
+              </div>
+              <p className="text-[10px] text-gray-600 dark:text-gray-400 truncate mt-0.5">
+                {it.sourceHeadline || <span className="italic">(sin headline)</span>}
+              </p>
+              <div className="flex items-center gap-2 text-[9px] text-gray-500 dark:text-gray-400 mt-0.5">
+                <span>{fmtDate(it.createdAt)}</span>
+                {it.size && <span>· {it.size}</span>}
+                {it.quality && <span>· {it.quality}</span>}
+              </div>
+            </div>
+            <div className="flex items-center gap-1 shrink-0">
+              <button onClick={() => onDownload(it)}
+                className="p-1.5 text-brand-600 dark:text-brand-300 bg-brand-50 dark:bg-brand-900/30 hover:bg-brand-100 dark:hover:bg-brand-900/50 rounded transition"
+                title="Descargar PNG">
+                <Download size={12} />
+              </button>
+              <button onClick={() => onToggleDescargada(it.id, !!it.descargada)}
+                className={`p-1.5 rounded transition ${
+                  it.descargada
+                    ? 'text-emerald-600 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100'
+                    : 'text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                }`}
+                title={it.descargada ? 'Marcar como NO descargado' : 'Marcar como descargado'}>
+                <Check size={12} />
+              </button>
+              <button onClick={() => onDelete(it.id)}
+                className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition"
+                title="Borrar">
+                <Trash2 size={12} />
+              </button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// VISTA 3 — Tabla.
+
+function GalleryTableView({ items, seleccionados, selectedOrder, onToggleSelect, onOpen, onDownload, onToggleDescargada, onDelete }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-[9px] uppercase tracking-wider text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
+            <th className="text-left py-2 pr-2 font-bold w-8"></th>
+            <th className="text-left py-2 px-2 font-bold w-14">Preview</th>
+            <th className="text-left py-2 px-2 font-bold">Inspiración</th>
+            <th className="text-left py-2 px-2 font-bold">Variante</th>
+            <th className="text-left py-2 px-2 font-bold">Tamaño</th>
+            <th className="text-left py-2 px-2 font-bold">Estado</th>
+            <th className="text-left py-2 px-2 font-bold">Generado</th>
+            <th className="text-right py-2 pl-2 font-bold">Acciones</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+          {items.map(it => {
+            const isSel = seleccionados.has(it.id);
+            const selIdx = selectedOrder.get(it.id);
+            return (
+              <tr key={it.id} className={isSel ? 'bg-brand-50/50 dark:bg-brand-900/20' : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'}>
+                <td className="py-2 pr-2">
+                  <button onClick={() => onToggleSelect(it.id)}
+                    className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                      isSel ? 'bg-brand-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-400 hover:bg-brand-50 hover:text-brand-600'
+                    }`}
+                  >
+                    {isSel ? selIdx : <Plus size={10} />}
+                  </button>
+                </td>
+                <td className="py-2 px-2">
+                  <HoverPreview item={it} className="inline-block">
+                    <button onClick={() => onOpen(it)}>
+                      <img
+                        src={`data:${it.mimeType || 'image/png'};base64,${it.imageBase64}`}
+                        alt=""
+                        className="w-10 h-10 rounded object-cover border border-gray-200 dark:border-gray-700 hover:scale-110 transition"
+                      />
+                    </button>
+                  </HoverPreview>
+                </td>
+                <td className="py-2 px-2 text-gray-700 dark:text-gray-200 truncate max-w-[180px]">{it.sourceBrand || '—'}</td>
+                <td className="py-2 px-2">
+                  {it.variantStyle === 'rebrand'
+                    ? <span className="px-1 py-0.5 text-[9px] font-bold bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 rounded">REBRAND</span>
+                    : <span className="text-gray-500 dark:text-gray-400 text-[10px]">Reference</span>}
+                </td>
+                <td className="py-2 px-2 text-gray-500 dark:text-gray-400 text-[10px]">{it.size || '—'}</td>
+                <td className="py-2 px-2">
+                  {it.descargada
+                    ? <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold" title={fmtDate(it.descargadaAt)}>
+                        <Check size={10} /> Descargado
+                      </span>
+                    : <span className="text-gray-400 dark:text-gray-500 text-[10px]">Pendiente</span>}
+                </td>
+                <td className="py-2 px-2 text-gray-500 dark:text-gray-400 text-[10px]">{fmtDate(it.createdAt)}</td>
+                <td className="py-2 pl-2 text-right">
+                  <div className="inline-flex items-center gap-1">
+                    <button onClick={() => onDownload(it)}
+                      className="p-1 text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-900/30 rounded" title="Descargar">
+                      <Download size={11} />
+                    </button>
+                    <button onClick={() => onToggleDescargada(it.id, !!it.descargada)}
+                      className={`p-1 rounded ${it.descargada ? 'text-emerald-600' : 'text-gray-400'} hover:bg-gray-100 dark:hover:bg-gray-700`}
+                      title={it.descargada ? 'Marcar pendiente' : 'Marcar descargado'}>
+                      <Check size={11} />
+                    </button>
+                    <button onClick={() => onDelete(it.id)}
+                      className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded" title="Borrar">
+                      <Trash2 size={11} />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// Lightbox separado para mantener este archivo manejable.
+
+function Lightbox({ item, onClose, showDebug, setShowDebug, onDownload, onDelete, onToggleDescargada }) {
+  return (
+    <div
+      className="fixed inset-0 z-[60] bg-black/90 flex items-start justify-center p-6 overflow-y-auto"
+      onClick={onClose}
+    >
+      <div className="relative w-full max-w-5xl bg-white dark:bg-gray-900 rounded-xl overflow-hidden shadow-2xl my-auto"
+        onClick={e => e.stopPropagation()}>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-px bg-gray-200 dark:bg-gray-700">
+          <div className="bg-white dark:bg-gray-900 p-3 flex flex-col">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">
+              Inspiración original {item.sourceBrand ? `· ${item.sourceBrand}` : ''}
+            </p>
+            {item.sourceImageUrl ? (
+              <img src={item.sourceImageUrl} alt="referencia"
+                className="w-full object-contain bg-gray-50 dark:bg-gray-800 rounded"
+                style={{ maxHeight: '60vh' }}
+                onError={(e) => { e.target.style.opacity = '0.3'; }} />
+            ) : (
+              <div className="flex items-center justify-center bg-gray-50 dark:bg-gray-800 rounded text-[10px] text-gray-400 italic" style={{ minHeight: '40vh' }}>
+                Sin imagen de referencia guardada
+              </div>
+            )}
+            {item.sourceHeadline && (
+              <p className="text-[10px] text-gray-600 dark:text-gray-300 mt-2 line-clamp-2 italic">"{item.sourceHeadline}"</p>
+            )}
+          </div>
+          <div className="bg-white dark:bg-gray-900 p-3 flex flex-col">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-brand-600 dark:text-brand-400 mb-2 flex items-center gap-2">
+              Variación generada {item.variantIndex != null ? `#${item.variantIndex + 1}` : ''}
+              {item.variantStyle === 'rebrand' && (
+                <span className="px-1.5 py-0.5 text-[9px] bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 rounded">REBRAND</span>
+              )}
+              {item.descargada && (
+                <span className="ml-auto inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded" title={fmtDate(item.descargadaAt)}>
+                  <Check size={9} /> Descargado
+                </span>
+              )}
+            </p>
+            <img src={`data:${item.mimeType || 'image/png'};base64,${item.imageBase64}`}
+              alt="" className="w-full object-contain bg-white rounded" style={{ maxHeight: '60vh' }} />
+            <div className="flex items-center gap-2 mt-2 text-[9px] text-gray-500 dark:text-gray-400">
+              {item.size && <span>{item.size}</span>}
+              {item.quality && <span>· quality {item.quality}</span>}
+              {item.sizeFallback && <span className="text-amber-600 dark:text-amber-400">· fallback de tamaño</span>}
+            </div>
+          </div>
+        </div>
+
+        {(item.skeleton || item.prompt) && (
+          <div className="border-t border-gray-200 dark:border-gray-700">
+            <button onClick={() => setShowDebug(s => !s)}
+              className="w-full px-4 py-2 flex items-center justify-between text-[11px] font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition">
+              <span>Cómo se generó (skeleton + prompt)</span>
+              {showDebug ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+            </button>
+            {showDebug && (
+              <div className="px-4 pb-4 grid grid-cols-1 md:grid-cols-2 gap-3 text-[10px]">
+                <div>
+                  <p className="font-bold text-gray-700 dark:text-gray-200 mb-1">Skeleton extraído por Vision</p>
+                  <pre className="bg-gray-50 dark:bg-gray-800 p-2 rounded overflow-auto max-h-60 text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+                    {item.skeleton ? JSON.stringify(item.skeleton, null, 2) : '(sin skeleton)'}
+                  </pre>
+                </div>
+                <div>
+                  <p className="font-bold text-gray-700 dark:text-gray-200 mb-1">Prompt enviado a gpt-image-2</p>
+                  <pre className="bg-gray-50 dark:bg-gray-800 p-2 rounded overflow-auto max-h-60 text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+                    {item.prompt || '(sin prompt guardado)'}
+                  </pre>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="flex items-center justify-between gap-2 p-3 bg-gray-50 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
+          <div className="text-[10px] text-gray-500 dark:text-gray-400">
+            {item.createdAt && <span>{fmtDate(item.createdAt)}</span>}
+          </div>
+          <div className="flex items-center gap-1.5">
+            <button onClick={onDownload}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition">
+              <Download size={13} /> Descargar
+            </button>
+            <button onClick={onToggleDescargada}
+              className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg transition ${
+                item.descargada
+                  ? 'text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100'
+                  : 'text-gray-700 dark:text-gray-200 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300'
+              }`}>
+              <Check size={13} /> {item.descargada ? 'Marcar pendiente' : 'Marcar descargado'}
+            </button>
+            <button onClick={onDelete}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/30 hover:bg-red-100 dark:hover:bg-red-900/50 rounded-lg transition">
+              <Trash2 size={13} /> Borrar
+            </button>
+            <button onClick={onClose}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-gray-700 dark:text-gray-200 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 rounded-lg transition">
+              <X size={13} /> Cerrar
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 export default function GaleriaReferencialesModal({ productoId, productoNombre, onClose, embedded = false }) {
   const [items, setItems] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -414,372 +791,3 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
 // Componente reusable: thumb que al hover muestra preview grande de la
 // variación + del ad original side-by-side. Aparece flotando al lado del
 // thumb (right por default; flip a left si está cerca del borde derecho).
-function HoverPreview({ item, children, className = '' }) {
-  return (
-    <div className={`group/preview relative ${className}`}>
-      {children}
-      <div className="hidden group-hover/preview:flex absolute left-full top-0 ml-2 z-[70] gap-2 pointer-events-none">
-        {/* Inspiración original */}
-        <div className="bg-white dark:bg-gray-900 rounded-lg shadow-2xl border-2 border-gray-200 dark:border-gray-700 p-1.5 w-72">
-          <p className="text-[9px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1 text-center">
-            ANTES — {item.sourceBrand || 'inspiración'}
-          </p>
-          {item.sourceImageUrl ? (
-            <img src={item.sourceImageUrl} alt="" className="w-full max-h-72 object-contain bg-gray-50 dark:bg-gray-800 rounded"
-              onError={e => { e.target.style.opacity = '0.3'; }} />
-          ) : (
-            <div className="w-full h-40 bg-gray-50 dark:bg-gray-800 rounded flex items-center justify-center text-[10px] text-gray-400 italic">
-              Sin ref guardada
-            </div>
-          )}
-        </div>
-        {/* Variación generada */}
-        <div className="bg-white dark:bg-gray-900 rounded-lg shadow-2xl border-2 border-brand-300 dark:border-brand-700 p-1.5 w-72">
-          <p className="text-[9px] font-bold uppercase tracking-wider text-brand-600 dark:text-brand-400 mb-1 text-center">
-            DESPUÉS {item.variantStyle === 'rebrand' && '· REBRAND'}
-          </p>
-          <img src={`data:${item.mimeType || 'image/png'};base64,${item.imageBase64}`} alt=""
-            className="w-full max-h-72 object-contain bg-white rounded" />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// VISTA 1 — Grid: thumbs cuadrados con número de selección + badge si ya descargado.
-function GalleryGridView({ items, seleccionados, selectedOrder, onToggleSelect, onOpen }) {
-  return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-      {items.map(it => {
-        const isSel = seleccionados.has(it.id);
-        const selIdx = selectedOrder.get(it.id);
-        return (
-          <HoverPreview key={it.id} item={it} className="group">
-            <button
-              onClick={() => onOpen(it)}
-              className={`block w-full aspect-square rounded-lg overflow-hidden border-2 transition ${
-                isSel
-                  ? 'border-brand-500 ring-2 ring-brand-200 dark:ring-brand-900'
-                  : it.descargada
-                    ? 'border-emerald-200 dark:border-emerald-800 hover:border-emerald-400'
-                    : 'border-gray-200 dark:border-gray-700 hover:border-brand-400'
-              }`}
-            >
-              <img
-                src={`data:${it.mimeType || 'image/png'};base64,${it.imageBase64}`}
-                alt=""
-                className="w-full h-full object-cover"
-              />
-            </button>
-            {/* Selector numerado — siempre visible */}
-            <button
-              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggleSelect(it.id); }}
-              className={`absolute top-2 left-2 z-10 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shadow-md transition-all ${
-                isSel
-                  ? 'bg-brand-600 text-white scale-110 ring-2 ring-white dark:ring-gray-900'
-                  : 'bg-white/90 dark:bg-gray-900/90 text-gray-400 hover:bg-brand-50 hover:text-brand-600 hover:scale-110 opacity-70 group-hover:opacity-100'
-              }`}
-              title={isSel ? `Seleccionado #${selIdx}` : 'Click para seleccionar'}
-            >
-              {isSel ? selIdx : <Plus size={14} />}
-            </button>
-            {/* Badge "descargada" */}
-            {it.descargada && (
-              <div className="absolute top-2 right-2 z-10 inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold text-white bg-emerald-500 rounded-md shadow-md"
-                title={`Descargado ${fmtDate(it.descargadaAt)}`}
-              >
-                <Check size={10} /> ✓
-              </div>
-            )}
-            {/* Footer con brand + variant */}
-            <div className="absolute bottom-0 left-0 right-0 px-1.5 py-1 bg-gradient-to-t from-black/80 to-transparent text-white pointer-events-none">
-              <p className="text-[9px] font-semibold truncate">
-                {it.sourceBrand && <span>Ref: {it.sourceBrand}</span>}
-                {it.variantStyle === 'rebrand' && <span className="ml-1 px-1 bg-brand-500 rounded text-[8px]">REBRAND</span>}
-              </p>
-            </div>
-          </HoverPreview>
-        );
-      })}
-    </div>
-  );
-}
-
-// VISTA 2 — Lista: rows con thumb + info + acciones inline.
-function GalleryListView({ items, seleccionados, selectedOrder, onToggleSelect, onOpen, onDownload, onToggleDescargada, onDelete }) {
-  return (
-    <div className="space-y-1.5">
-      {items.map(it => {
-        const isSel = seleccionados.has(it.id);
-        const selIdx = selectedOrder.get(it.id);
-        return (
-          <div key={it.id}
-            className={`flex items-center gap-2.5 p-2 rounded-md border transition ${
-              isSel
-                ? 'bg-brand-50 dark:bg-brand-900/30 border-brand-300 dark:border-brand-700'
-                : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:border-brand-300 dark:hover:border-brand-700'
-            }`}
-          >
-            <button onClick={() => onToggleSelect(it.id)}
-              className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition shrink-0 ${
-                isSel ? 'bg-brand-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-400 hover:bg-brand-50 hover:text-brand-600'
-              }`}
-              title={isSel ? `#${selIdx}` : 'Seleccionar'}
-            >
-              {isSel ? selIdx : <Plus size={12} />}
-            </button>
-            <HoverPreview item={it} className="shrink-0">
-              <button onClick={() => onOpen(it)}>
-                <img
-                  src={`data:${it.mimeType || 'image/png'};base64,${it.imageBase64}`}
-                  alt=""
-                  className="w-14 h-14 rounded object-cover border border-gray-200 dark:border-gray-700 hover:scale-110 transition"
-                />
-              </button>
-            </HoverPreview>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5 text-xs">
-                <span className="font-bold text-gray-900 dark:text-gray-100 truncate">
-                  {it.sourceBrand || 'Sin marca'}
-                </span>
-                {it.variantStyle === 'rebrand' && (
-                  <span className="px-1 py-0.5 text-[8px] font-bold bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 rounded">
-                    REBRAND
-                  </span>
-                )}
-                {it.descargada && (
-                  <span className="inline-flex items-center gap-0.5 px-1 py-0.5 text-[9px] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded"
-                    title={`Descargado ${fmtDate(it.descargadaAt)}`}
-                  >
-                    <Check size={9} /> Descargado
-                  </span>
-                )}
-              </div>
-              <p className="text-[10px] text-gray-600 dark:text-gray-400 truncate mt-0.5">
-                {it.sourceHeadline || <span className="italic">(sin headline)</span>}
-              </p>
-              <div className="flex items-center gap-2 text-[9px] text-gray-500 dark:text-gray-400 mt-0.5">
-                <span>{fmtDate(it.createdAt)}</span>
-                {it.size && <span>· {it.size}</span>}
-                {it.quality && <span>· {it.quality}</span>}
-              </div>
-            </div>
-            <div className="flex items-center gap-1 shrink-0">
-              <button onClick={() => onDownload(it)}
-                className="p-1.5 text-brand-600 dark:text-brand-300 bg-brand-50 dark:bg-brand-900/30 hover:bg-brand-100 dark:hover:bg-brand-900/50 rounded transition"
-                title="Descargar PNG">
-                <Download size={12} />
-              </button>
-              <button onClick={() => onToggleDescargada(it.id, !!it.descargada)}
-                className={`p-1.5 rounded transition ${
-                  it.descargada
-                    ? 'text-emerald-600 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100'
-                    : 'text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
-                }`}
-                title={it.descargada ? 'Marcar como NO descargado' : 'Marcar como descargado'}>
-                <Check size={12} />
-              </button>
-              <button onClick={() => onDelete(it.id)}
-                className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition"
-                title="Borrar">
-                <Trash2 size={12} />
-              </button>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// VISTA 3 — Tabla.
-function GalleryTableView({ items, seleccionados, selectedOrder, onToggleSelect, onOpen, onDownload, onToggleDescargada, onDelete }) {
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-xs">
-        <thead>
-          <tr className="text-[9px] uppercase tracking-wider text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
-            <th className="text-left py-2 pr-2 font-bold w-8"></th>
-            <th className="text-left py-2 px-2 font-bold w-14">Preview</th>
-            <th className="text-left py-2 px-2 font-bold">Inspiración</th>
-            <th className="text-left py-2 px-2 font-bold">Variante</th>
-            <th className="text-left py-2 px-2 font-bold">Tamaño</th>
-            <th className="text-left py-2 px-2 font-bold">Estado</th>
-            <th className="text-left py-2 px-2 font-bold">Generado</th>
-            <th className="text-right py-2 pl-2 font-bold">Acciones</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-          {items.map(it => {
-            const isSel = seleccionados.has(it.id);
-            const selIdx = selectedOrder.get(it.id);
-            return (
-              <tr key={it.id} className={isSel ? 'bg-brand-50/50 dark:bg-brand-900/20' : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'}>
-                <td className="py-2 pr-2">
-                  <button onClick={() => onToggleSelect(it.id)}
-                    className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                      isSel ? 'bg-brand-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-400 hover:bg-brand-50 hover:text-brand-600'
-                    }`}
-                  >
-                    {isSel ? selIdx : <Plus size={10} />}
-                  </button>
-                </td>
-                <td className="py-2 px-2">
-                  <HoverPreview item={it} className="inline-block">
-                    <button onClick={() => onOpen(it)}>
-                      <img
-                        src={`data:${it.mimeType || 'image/png'};base64,${it.imageBase64}`}
-                        alt=""
-                        className="w-10 h-10 rounded object-cover border border-gray-200 dark:border-gray-700 hover:scale-110 transition"
-                      />
-                    </button>
-                  </HoverPreview>
-                </td>
-                <td className="py-2 px-2 text-gray-700 dark:text-gray-200 truncate max-w-[180px]">{it.sourceBrand || '—'}</td>
-                <td className="py-2 px-2">
-                  {it.variantStyle === 'rebrand'
-                    ? <span className="px-1 py-0.5 text-[9px] font-bold bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 rounded">REBRAND</span>
-                    : <span className="text-gray-500 dark:text-gray-400 text-[10px]">Reference</span>}
-                </td>
-                <td className="py-2 px-2 text-gray-500 dark:text-gray-400 text-[10px]">{it.size || '—'}</td>
-                <td className="py-2 px-2">
-                  {it.descargada
-                    ? <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold" title={fmtDate(it.descargadaAt)}>
-                        <Check size={10} /> Descargado
-                      </span>
-                    : <span className="text-gray-400 dark:text-gray-500 text-[10px]">Pendiente</span>}
-                </td>
-                <td className="py-2 px-2 text-gray-500 dark:text-gray-400 text-[10px]">{fmtDate(it.createdAt)}</td>
-                <td className="py-2 pl-2 text-right">
-                  <div className="inline-flex items-center gap-1">
-                    <button onClick={() => onDownload(it)}
-                      className="p-1 text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-900/30 rounded" title="Descargar">
-                      <Download size={11} />
-                    </button>
-                    <button onClick={() => onToggleDescargada(it.id, !!it.descargada)}
-                      className={`p-1 rounded ${it.descargada ? 'text-emerald-600' : 'text-gray-400'} hover:bg-gray-100 dark:hover:bg-gray-700`}
-                      title={it.descargada ? 'Marcar pendiente' : 'Marcar descargado'}>
-                      <Check size={11} />
-                    </button>
-                    <button onClick={() => onDelete(it.id)}
-                      className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded" title="Borrar">
-                      <Trash2 size={11} />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-// Lightbox separado para mantener este archivo manejable.
-function Lightbox({ item, onClose, showDebug, setShowDebug, onDownload, onDelete, onToggleDescargada }) {
-  return (
-    <div
-      className="fixed inset-0 z-[60] bg-black/90 flex items-start justify-center p-6 overflow-y-auto"
-      onClick={onClose}
-    >
-      <div className="relative w-full max-w-5xl bg-white dark:bg-gray-900 rounded-xl overflow-hidden shadow-2xl my-auto"
-        onClick={e => e.stopPropagation()}>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-px bg-gray-200 dark:bg-gray-700">
-          <div className="bg-white dark:bg-gray-900 p-3 flex flex-col">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">
-              Inspiración original {item.sourceBrand ? `· ${item.sourceBrand}` : ''}
-            </p>
-            {item.sourceImageUrl ? (
-              <img src={item.sourceImageUrl} alt="referencia"
-                className="w-full object-contain bg-gray-50 dark:bg-gray-800 rounded"
-                style={{ maxHeight: '60vh' }}
-                onError={(e) => { e.target.style.opacity = '0.3'; }} />
-            ) : (
-              <div className="flex items-center justify-center bg-gray-50 dark:bg-gray-800 rounded text-[10px] text-gray-400 italic" style={{ minHeight: '40vh' }}>
-                Sin imagen de referencia guardada
-              </div>
-            )}
-            {item.sourceHeadline && (
-              <p className="text-[10px] text-gray-600 dark:text-gray-300 mt-2 line-clamp-2 italic">"{item.sourceHeadline}"</p>
-            )}
-          </div>
-          <div className="bg-white dark:bg-gray-900 p-3 flex flex-col">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-brand-600 dark:text-brand-400 mb-2 flex items-center gap-2">
-              Variación generada {item.variantIndex != null ? `#${item.variantIndex + 1}` : ''}
-              {item.variantStyle === 'rebrand' && (
-                <span className="px-1.5 py-0.5 text-[9px] bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 rounded">REBRAND</span>
-              )}
-              {item.descargada && (
-                <span className="ml-auto inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded" title={fmtDate(item.descargadaAt)}>
-                  <Check size={9} /> Descargado
-                </span>
-              )}
-            </p>
-            <img src={`data:${item.mimeType || 'image/png'};base64,${item.imageBase64}`}
-              alt="" className="w-full object-contain bg-white rounded" style={{ maxHeight: '60vh' }} />
-            <div className="flex items-center gap-2 mt-2 text-[9px] text-gray-500 dark:text-gray-400">
-              {item.size && <span>{item.size}</span>}
-              {item.quality && <span>· quality {item.quality}</span>}
-              {item.sizeFallback && <span className="text-amber-600 dark:text-amber-400">· fallback de tamaño</span>}
-            </div>
-          </div>
-        </div>
-
-        {(item.skeleton || item.prompt) && (
-          <div className="border-t border-gray-200 dark:border-gray-700">
-            <button onClick={() => setShowDebug(s => !s)}
-              className="w-full px-4 py-2 flex items-center justify-between text-[11px] font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition">
-              <span>Cómo se generó (skeleton + prompt)</span>
-              {showDebug ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-            </button>
-            {showDebug && (
-              <div className="px-4 pb-4 grid grid-cols-1 md:grid-cols-2 gap-3 text-[10px]">
-                <div>
-                  <p className="font-bold text-gray-700 dark:text-gray-200 mb-1">Skeleton extraído por Vision</p>
-                  <pre className="bg-gray-50 dark:bg-gray-800 p-2 rounded overflow-auto max-h-60 text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
-                    {item.skeleton ? JSON.stringify(item.skeleton, null, 2) : '(sin skeleton)'}
-                  </pre>
-                </div>
-                <div>
-                  <p className="font-bold text-gray-700 dark:text-gray-200 mb-1">Prompt enviado a gpt-image-2</p>
-                  <pre className="bg-gray-50 dark:bg-gray-800 p-2 rounded overflow-auto max-h-60 text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
-                    {item.prompt || '(sin prompt guardado)'}
-                  </pre>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        <div className="flex items-center justify-between gap-2 p-3 bg-gray-50 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
-          <div className="text-[10px] text-gray-500 dark:text-gray-400">
-            {item.createdAt && <span>{fmtDate(item.createdAt)}</span>}
-          </div>
-          <div className="flex items-center gap-1.5">
-            <button onClick={onDownload}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition">
-              <Download size={13} /> Descargar
-            </button>
-            <button onClick={onToggleDescargada}
-              className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg transition ${
-                item.descargada
-                  ? 'text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100'
-                  : 'text-gray-700 dark:text-gray-200 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300'
-              }`}>
-              <Check size={13} /> {item.descargada ? 'Marcar pendiente' : 'Marcar descargado'}
-            </button>
-            <button onClick={onDelete}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/30 hover:bg-red-100 dark:hover:bg-red-900/50 rounded-lg transition">
-              <Trash2 size={13} /> Borrar
-            </button>
-            <button onClick={onClose}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-gray-700 dark:text-gray-200 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 rounded-lg transition">
-              <X size={13} /> Cerrar
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}

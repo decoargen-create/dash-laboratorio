@@ -73,134 +73,7 @@ const EMPTY_FORM = {
   threshold: 50, pinnedPosts: 0, webhookUrl: '',
 };
 
-export default function AutoIGSection({ addToast }) {
-  const [automations, setAutomations] = useState(() => loadAutomations());
-  const [view, setView] = useState('list'); // 'list' | 'form'
-  const [editingId, setEditingId] = useState(null);
-  const [metaConnected, setMetaConnected] = useState(null);
-
-  useEffect(() => { saveAutomations(automations); }, [automations]);
-
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const r = await fetch('/api/meta/me');
-        const d = await r.json();
-        if (alive) setMetaConnected(!!d.connected);
-      } catch {
-        if (alive) setMetaConnected(false);
-      }
-    })();
-    return () => { alive = false; };
-  }, []);
-
-  const handleNew = () => { setEditingId(null); setView('form'); };
-  const handleEdit = (id) => { setEditingId(id); setView('form'); };
-  const handleDelete = (id) => {
-    const a = automations.find(x => x.id === id);
-    if (!a) return;
-    if (!confirm(`¿Eliminar la automatización "${a.name}"?`)) return;
-    setAutomations(prev => prev.filter(x => x.id !== id));
-    addToast?.('Automatización eliminada', 'info');
-  };
-  const handleSave = (formData) => {
-    if (editingId) {
-      setAutomations(prev => prev.map(x => x.id === editingId ? { ...x, ...formData } : x));
-      addToast?.('Automatización actualizada', 'success');
-    } else {
-      const newOne = { ...formData, id: `auto_${Date.now()}`, createdAt: new Date().toISOString(), state: { lastPostId: null, activeAdsets: [] }, lastRun: null };
-      setAutomations(prev => [newOne, ...prev]);
-      addToast?.('Automatización creada', 'success');
-    }
-    setView('list');
-    setEditingId(null);
-  };
-
-  const editing = editingId ? automations.find(x => x.id === editingId) : null;
-
-  if (metaConnected === false) {
-    return (
-      <div className="max-w-3xl mx-auto">
-        <div className="rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-800/40 p-6">
-          <div className="flex gap-3">
-            <AlertTriangle className="text-amber-600 dark:text-amber-400 shrink-0" size={22} />
-            <div>
-              <p className="font-semibold text-amber-900 dark:text-amber-100">Meta no está conectado</p>
-              <p className="text-sm text-amber-800 dark:text-amber-200 mt-1">
-                Conectate con Meta desde el banner de arriba para poder crear automatizaciones.
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (view === 'form') {
-    return (
-      <AutomationForm
-        initial={editing || EMPTY_FORM}
-        onCancel={() => { setView('list'); setEditingId(null); }}
-        onSave={handleSave}
-        addToast={addToast}
-      />
-    );
-  }
-
-  return (
-    <div className="max-w-5xl mx-auto space-y-5">
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-600 flex items-center justify-center text-white shadow-sm">
-          <Instagram size={20} />
-        </div>
-        <div className="flex-1">
-          <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Automatización IG</h2>
-          <p className="text-xs text-gray-500 dark:text-gray-400">
-            Renovación diaria de creativos con el último post de un Instagram — por automatización.
-          </p>
-        </div>
-        <button
-          onClick={handleNew}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-br from-brand-500 to-brand-600 text-white text-sm font-semibold hover:opacity-90"
-        >
-          <Plus size={16} />
-          Nueva automatización
-        </button>
-      </div>
-
-      {automations.length === 0 ? (
-        <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-12 text-center">
-          <Instagram size={36} className="mx-auto text-gray-300 dark:text-gray-600 mb-3" />
-          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Sin automatizaciones</p>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 mb-4">
-            Creá tu primera automatización apuntando a una cuenta publicitaria, campaña y URL de IG.
-          </p>
-          <button
-            onClick={handleNew}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-br from-brand-500 to-brand-600 text-white text-sm font-semibold hover:opacity-90"
-          >
-            <Plus size={16} />
-            Crear la primera
-          </button>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {automations.map(a => (
-            <AutomationCard
-              key={a.id}
-              automation={a}
-              onEdit={() => handleEdit(a.id)}
-              onDelete={() => handleDelete(a.id)}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// -------- Card de cada automatización --------
+// ---- inner components moved before export (TDZ fix Vite/Rollup) ----
 
 function AutomationCard({ automation, onEdit, onDelete }) {
   const a = automation;
@@ -247,6 +120,7 @@ function AutomationCard({ automation, onEdit, onDelete }) {
 }
 
 // -------- Form para crear/editar una automatización --------
+
 
 function AutomationForm({ initial, onCancel, onSave, addToast }) {
   const [form, setForm] = useState(initial);
@@ -574,6 +448,7 @@ function AutomationForm({ initial, onCancel, onSave, addToast }) {
   );
 }
 
+
 function Field({ label, children }) {
   return (
     <div>
@@ -585,6 +460,7 @@ function Field({ label, children }) {
   );
 }
 
+
 function Spinner() {
   return (
     <div className="flex items-center gap-2 text-xs text-gray-500">
@@ -592,6 +468,7 @@ function Spinner() {
     </div>
   );
 }
+
 
 function ErrorLine({ msg, onRetry }) {
   return (
@@ -615,6 +492,7 @@ function ErrorLine({ msg, onRetry }) {
 
 // Select buscable — input arriba para filtrar + lista desplegable clickeable.
 // No trae una lib aparte; es una combobox artesanal.
+
 function SearchableSelect({ value, onChange, options, placeholder, searchPlaceholder, emptyMessage }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -703,3 +581,134 @@ function SearchableSelect({ value, onChange, options, placeholder, searchPlaceho
     </div>
   );
 }
+
+
+export default function AutoIGSection({ addToast }) {
+  const [automations, setAutomations] = useState(() => loadAutomations());
+  const [view, setView] = useState('list'); // 'list' | 'form'
+  const [editingId, setEditingId] = useState(null);
+  const [metaConnected, setMetaConnected] = useState(null);
+
+  useEffect(() => { saveAutomations(automations); }, [automations]);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const r = await fetch('/api/meta/me');
+        const d = await r.json();
+        if (alive) setMetaConnected(!!d.connected);
+      } catch {
+        if (alive) setMetaConnected(false);
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  const handleNew = () => { setEditingId(null); setView('form'); };
+  const handleEdit = (id) => { setEditingId(id); setView('form'); };
+  const handleDelete = (id) => {
+    const a = automations.find(x => x.id === id);
+    if (!a) return;
+    if (!confirm(`¿Eliminar la automatización "${a.name}"?`)) return;
+    setAutomations(prev => prev.filter(x => x.id !== id));
+    addToast?.('Automatización eliminada', 'info');
+  };
+  const handleSave = (formData) => {
+    if (editingId) {
+      setAutomations(prev => prev.map(x => x.id === editingId ? { ...x, ...formData } : x));
+      addToast?.('Automatización actualizada', 'success');
+    } else {
+      const newOne = { ...formData, id: `auto_${Date.now()}`, createdAt: new Date().toISOString(), state: { lastPostId: null, activeAdsets: [] }, lastRun: null };
+      setAutomations(prev => [newOne, ...prev]);
+      addToast?.('Automatización creada', 'success');
+    }
+    setView('list');
+    setEditingId(null);
+  };
+
+  const editing = editingId ? automations.find(x => x.id === editingId) : null;
+
+  if (metaConnected === false) {
+    return (
+      <div className="max-w-3xl mx-auto">
+        <div className="rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-800/40 p-6">
+          <div className="flex gap-3">
+            <AlertTriangle className="text-amber-600 dark:text-amber-400 shrink-0" size={22} />
+            <div>
+              <p className="font-semibold text-amber-900 dark:text-amber-100">Meta no está conectado</p>
+              <p className="text-sm text-amber-800 dark:text-amber-200 mt-1">
+                Conectate con Meta desde el banner de arriba para poder crear automatizaciones.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (view === 'form') {
+    return (
+      <AutomationForm
+        initial={editing || EMPTY_FORM}
+        onCancel={() => { setView('list'); setEditingId(null); }}
+        onSave={handleSave}
+        addToast={addToast}
+      />
+    );
+  }
+
+  return (
+    <div className="max-w-5xl mx-auto space-y-5">
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-600 flex items-center justify-center text-white shadow-sm">
+          <Instagram size={20} />
+        </div>
+        <div className="flex-1">
+          <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Automatización IG</h2>
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            Renovación diaria de creativos con el último post de un Instagram — por automatización.
+          </p>
+        </div>
+        <button
+          onClick={handleNew}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-br from-brand-500 to-brand-600 text-white text-sm font-semibold hover:opacity-90"
+        >
+          <Plus size={16} />
+          Nueva automatización
+        </button>
+      </div>
+
+      {automations.length === 0 ? (
+        <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-12 text-center">
+          <Instagram size={36} className="mx-auto text-gray-300 dark:text-gray-600 mb-3" />
+          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Sin automatizaciones</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 mb-4">
+            Creá tu primera automatización apuntando a una cuenta publicitaria, campaña y URL de IG.
+          </p>
+          <button
+            onClick={handleNew}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-br from-brand-500 to-brand-600 text-white text-sm font-semibold hover:opacity-90"
+          >
+            <Plus size={16} />
+            Crear la primera
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {automations.map(a => (
+            <AutomationCard
+              key={a.id}
+              automation={a}
+              onEdit={() => handleEdit(a.id)}
+              onDelete={() => handleDelete(a.id)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// -------- Card de cada automatización --------
+

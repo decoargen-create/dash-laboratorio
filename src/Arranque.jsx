@@ -227,6 +227,362 @@ async function parseJsonResponse(resp, contextLabel) {
   }
 }
 
+// =========================================================
+// Componentes internos ANTES del export — fix TDZ Vite/Rollup.
+// =========================================================
+
+function RunHistoryCard({ history, onClear }) {
+  const [collapsed, setCollapsed] = useState(true);
+  const [expandedRunId, setExpandedRunId] = useState(null);
+
+  if (!history || history.length === 0) return null;
+
+  return (
+    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-5 shadow-sm">
+      <button
+        onClick={() => setCollapsed(c => !c)}
+        className="w-full flex items-center gap-3 text-left"
+      >
+        <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
+          <Clock size={14} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">
+            Historial de corridas
+            <span className="ml-2 text-[10px] font-normal text-gray-500 dark:text-gray-400">
+              {history.length} corrida{history.length !== 1 ? 's' : ''} guardada{history.length !== 1 ? 's' : ''}
+            </span>
+          </h3>
+          <p className="text-[10px] text-gray-500 dark:text-gray-400">
+            Lo que ejecutaste antes no se pierde — click para ver cuándo corriste + qué pasó + cuánto costó.
+          </p>
+        </div>
+        <ChevronDown
+          size={16}
+          className={`text-gray-400 transition-transform shrink-0 ${collapsed ? '' : 'rotate-180'}`}
+        />
+      </button>
+
+      {!collapsed && (
+        <div className="mt-4 space-y-2">
+          {history.map(run => {
+            const fecha = new Date(run.startedAt).toLocaleString('es-AR', {
+              year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+            });
+            const durMin = run.durationMs ? Math.round(run.durationMs / 60000) : 0;
+            const durSec = run.durationMs ? Math.round((run.durationMs % 60000) / 1000) : 0;
+            const dur = durMin > 0 ? `${durMin}m ${durSec}s` : `${durSec}s`;
+            const isExpanded = expandedRunId === run.id;
+            const hasErrors = (run.stats?.stepsError || 0) > 0;
+
+            return (
+              <div key={run.id} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                <button
+                  onClick={() => setExpandedRunId(isExpanded ? null : run.id)}
+                  className="w-full px-3 py-2 flex items-center gap-3 hover:bg-gray-50 dark:hover:bg-gray-700/30 transition text-left"
+                >
+                  <ChevronRight size={14} className={`text-gray-400 transition-transform shrink-0 ${isExpanded ? 'rotate-90' : ''}`} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold text-gray-900 dark:text-gray-100 truncate">
+                      {fecha}
+                      {hasErrors && <span className="ml-2 text-[10px] text-amber-600 dark:text-amber-400 font-bold">⚠ {run.stats.stepsError} error{run.stats.stepsError !== 1 ? 'es' : ''}</span>}
+                    </p>
+                    <div className="flex items-center gap-2 text-[10px] text-gray-500 dark:text-gray-400 flex-wrap mt-0.5">
+                      <span>⏱ {dur}</span>
+                      {run.stats?.competidoresCount > 0 && (
+                        <span>· {run.stats.competidoresOk}/{run.stats.competidoresCount} competidores ok</span>
+                      )}
+                      {run.stats?.breakdown && (
+                        <span className="font-semibold text-gray-700 dark:text-gray-300">
+                          · 💡 {run.stats.breakdown.ideasNuevas} idea{run.stats.breakdown.ideasNuevas !== 1 ? 's' : ''}
+                        </span>
+                      )}
+                      {run.cost?.total > 0 && (
+                        <span className="text-brand-600 dark:text-brand-400 font-mono">· 💰 ${run.cost.total.toFixed(4)}</span>
+                      )}
+                    </div>
+                  </div>
+                </button>
+
+                {isExpanded && (
+                  <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 px-3 py-2">
+                    {run.stats?.breakdown && (
+                      <div className="mb-2 pb-2 border-b border-gray-200 dark:border-gray-700">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5">
+                          📊 Qué generó esta corrida
+                        </p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {[
+                            { label: 'Total ideas', val: run.stats.breakdown.ideasNuevas, cls: 'bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300' },
+                            { label: '🔵 Réplicas', val: run.stats.breakdown.replica },
+                            { label: '🟡 Iteraciones', val: run.stats.breakdown.iteracion },
+                            { label: '🟢 Diferenciación', val: run.stats.breakdown.diferenciacion },
+                            { label: '✨ Desde cero', val: run.stats.breakdown.desde_cero },
+                            { label: '🖼️ Para imagen', val: run.stats.breakdown.imagenes },
+                            { label: '🎬 Para video', val: run.stats.breakdown.videos },
+                            { label: '🏆 Winners analizados', val: run.stats.winnersAnalyzed || 0 },
+                            ...(run.stats.hooksLowScore ? [{ label: '⚠ Hooks flojos', val: run.stats.hooksLowScore, cls: 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300' }] : []),
+                          ].map((p, i) => (
+                            <span key={i} className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold rounded ${p.cls || 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'}`}>
+                              {p.label} <span className="font-bold tabular-nums">{p.val}</span>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    <ul className="space-y-0.5 text-[10px]">
+                      {(run.steps || []).map((s, idx) => (
+                        <li key={idx} className="flex items-start gap-2">
+                          <span className="shrink-0 w-4 text-center">
+                            {s.status === 'done' ? '✓' : s.status === 'error' ? '✗' : '○'}
+                          </span>
+                          <span className={`flex-1 min-w-0 ${s.status === 'error' ? 'text-red-600 dark:text-red-400' : 'text-gray-700 dark:text-gray-300'}`}>
+                            <span className="font-semibold">{s.label}</span>
+                            {s.detail && <span className="block text-gray-500 dark:text-gray-400 ml-0">{s.detail}</span>}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    {run.cost && run.cost.total > 0 && (
+                      <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700 text-[10px] font-mono text-gray-600 dark:text-gray-400 flex flex-wrap gap-2">
+                        <span className="text-brand-600 dark:text-brand-400 font-bold">💰 ${run.cost.total.toFixed(4)}</span>
+                        {run.cost.anthropic > 0 && <span>🧠 ${run.cost.anthropic.toFixed(4)}</span>}
+                        {run.cost.openai > 0 && <span>🎤 ${run.cost.openai.toFixed(4)}</span>}
+                        {run.cost.apify > 0 && <span>🔍 ${run.cost.apify.toFixed(4)}</span>}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          <button
+            onClick={onClear}
+            className="mt-2 text-[10px] text-gray-400 hover:text-red-500 transition"
+          >
+            Borrar historial
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Guía corta del flujo del módulo — se muestra debajo de los tabs para
+// que el user nuevo sepa el orden. Dismissable y persistido.
+
+function TabsGuide() {
+  const [hidden, setHidden] = useState(() => {
+    try { return localStorage.getItem('viora-tabs-guide-hidden') === '1'; } catch { return false; }
+  });
+  if (hidden) return null;
+  return (
+    <div className="flex items-center gap-2 px-3 py-2 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-lg text-[11px] text-brand-800 dark:text-brand-300">
+      <span className="shrink-0">🗺️</span>
+      <span className="flex-1 min-w-0">
+        <strong>Cómo va el flujo:</strong> ⚙️ Setup (cargá producto + competidores) → ▶️ Correr pipeline → 📥 Bandeja (revisá las ideas y generá el creativo en cada una) → 🤖 Copiloto para pedir más.
+      </span>
+      <button
+        onClick={() => { try { localStorage.setItem('viora-tabs-guide-hidden', '1'); } catch {} setHidden(true); }}
+        className="shrink-0 text-brand-400 hover:text-brand-700 dark:hover:text-brand-200 transition"
+        title="Ocultar guía"
+      >
+        <X size={13} />
+      </button>
+    </div>
+  );
+}
+
+// Tabs del workspace de un producto: Setup / Bandeja / Inspiración / Creativos.
+
+function ProductTabs({ activeTab, onChange }) {
+  // Dos grupos para que un usuario nuevo entienda el flujo a primera vista:
+  // - "Datos": configuración + información del producto / competencia.
+  // - "Creación": donde se generan y ven los outputs (ideas + creativos).
+  const groups = [
+    {
+      id: 'datos',
+      label: 'Datos',
+      tabs: [
+        { id: 'dashboard', label: 'Dashboard', emoji: '📊' },
+        { id: 'setup', label: 'Setup', emoji: '⚙️' },
+        { id: 'documentos', label: 'Documentos', emoji: '📄' },
+        { id: 'competencia', label: 'Competencia', emoji: '🎯' },
+      ],
+    },
+    {
+      id: 'creacion',
+      label: 'Creación',
+      tabs: [
+        { id: 'bandeja', label: 'Bandeja', emoji: '📥' },
+        { id: 'inspiracion', label: 'Inspiración', emoji: '✨' },
+        { id: 'creativos', label: 'Creativos', emoji: '🎨' },
+        { id: 'galeria', label: 'Galería', emoji: '🖼️' },
+        { id: 'copiloto', label: 'Copiloto', emoji: '🤖' },
+      ],
+    },
+  ];
+  return (
+    <div className="flex items-stretch gap-2 overflow-x-auto p-1 bg-gray-100 dark:bg-gray-800/70 rounded-xl border border-gray-200 dark:border-gray-700">
+      {groups.map((g, idx) => (
+        <React.Fragment key={g.id}>
+          {idx > 0 && (
+            <div className="w-px bg-gray-300 dark:bg-gray-600 my-1.5 shrink-0" aria-hidden />
+          )}
+          <div className="flex items-center gap-1 shrink-0">
+            <span className="text-[9px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 px-1.5 hidden md:inline">
+              {g.label}
+            </span>
+            {g.tabs.map(t => (
+              <button
+                key={t.id}
+                onClick={() => onChange(t.id)}
+                className={`px-3.5 py-2 text-xs font-bold rounded-lg transition shrink-0 flex items-center gap-1.5 ${
+                  activeTab === t.id
+                    ? 'bg-white dark:bg-gray-700 text-brand-700 dark:text-brand-200 shadow-sm'
+                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-100 hover:bg-white/60 dark:hover:bg-gray-700/40'
+                }`}
+              >
+                <span>{t.emoji}</span>{t.label}
+              </button>
+            ))}
+          </div>
+        </React.Fragment>
+      ))}
+    </div>
+  );
+}
+
+// Mini-stat para los contadores de Bandeja en la card del producto.
+
+function ProdMiniStat({ label, value, color = 'gray', accent = false }) {
+  const colors = {
+    gray: 'bg-gray-50 dark:bg-gray-900/40 text-gray-900 dark:text-gray-100 border-gray-200 dark:border-gray-700',
+    amber: 'bg-amber-50 dark:bg-amber-900/30 text-amber-900 dark:text-amber-200 border-amber-200 dark:border-amber-800',
+    emerald: 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-900 dark:text-emerald-200 border-emerald-200 dark:border-emerald-800',
+    slate: 'bg-slate-50 dark:bg-slate-900/40 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800',
+  };
+  return (
+    <div className={`px-2 py-1.5 rounded-md border ${colors[color]} ${accent ? 'ring-1 ring-brand-300 dark:ring-brand-700' : ''}`}>
+      <p className="text-[8px] font-bold uppercase tracking-wider opacity-60 leading-none">{label}</p>
+      <p className="text-base font-bold tabular-nums leading-tight mt-0.5">{value}</p>
+    </div>
+  );
+}
+
+// Stat plano de reporte para la sección de stats del producto.
+
+function ProdReportStat({ label, value, highlight = false }) {
+  return (
+    <div className={`px-2 py-1.5 rounded border ${
+      highlight
+        ? 'bg-brand-50 dark:bg-brand-900/20 border-brand-200 dark:border-brand-800 text-brand-900 dark:text-brand-200'
+        : 'bg-gray-50 dark:bg-gray-900/30 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300'
+    }`}>
+      <p className="text-[8px] font-bold uppercase tracking-wider opacity-60 leading-none">{label}</p>
+      <p className="text-[11px] font-semibold leading-tight mt-0.5">{value}</p>
+    </div>
+  );
+}
+
+
+function WizardCard({ num, title, done, disabled = false, badge, children }) {
+  return (
+    <div className={`bg-white dark:bg-gray-800 border rounded-xl p-5 shadow-sm transition ${
+      disabled
+        ? 'border-gray-200 dark:border-gray-700 opacity-60'
+        : done
+          ? 'border-emerald-300 dark:border-emerald-700'
+          : 'border-gray-200 dark:border-gray-700'
+    }`}>
+      <div className="flex items-center gap-3 mb-3">
+        <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+          done
+            ? 'bg-emerald-500 text-white'
+            : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+        }`}>
+          {done ? <Check size={14} /> : num}
+        </div>
+        <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 flex-1">{title}</h3>
+        {badge && (
+          <span className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-0.5 rounded-full">
+            {badge}
+          </span>
+        )}
+      </div>
+      <div className="pl-10">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+
+function StepRow({ step, liveIdeas, onRerun, rerunBusy = false }) {
+  const { status, label, detail, startedAt, endedAt } = step;
+  const elapsed = startedAt
+    ? Math.round(((endedAt || Date.now()) - startedAt) / 1000)
+    : null;
+
+  const TIPO_EMOJI = { replica: '🔵', iteracion: '🟡', diferenciacion: '🟢', desde_cero: '✨' };
+
+  return (
+    <li className={`rounded-md text-xs transition ${
+      status === 'running' ? 'bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800' :
+      status === 'done' ? 'bg-emerald-50/50 dark:bg-emerald-900/10' :
+      status === 'error' ? 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800' :
+      'bg-gray-50/50 dark:bg-gray-800/30'
+    }`}>
+      <div className="flex items-start gap-2 px-3 py-2">
+        <span className="mt-0.5 shrink-0">
+          {status === 'running' && <Loader2 size={13} className="animate-spin text-brand-600 dark:text-brand-400" />}
+          {status === 'done' && <Check size={13} className="text-emerald-600 dark:text-emerald-400" />}
+          {status === 'error' && <AlertTriangle size={13} className="text-red-600" />}
+          {status === 'pending' && <Clock size={13} className="text-gray-400" />}
+        </span>
+        <div className="flex-1 min-w-0">
+          <p className={`font-semibold ${
+            status === 'done' ? 'text-emerald-900 dark:text-emerald-200' :
+            status === 'error' ? 'text-red-900 dark:text-red-200' :
+            'text-gray-800 dark:text-gray-200'
+          }`}>{label}</p>
+          <p className="text-[10px] text-gray-600 dark:text-gray-400">{detail}</p>
+        </div>
+        {onRerun && (status === 'done' || status === 'error') && (
+          <button
+            onClick={onRerun}
+            disabled={rerunBusy}
+            className="shrink-0 inline-flex items-center gap-1 px-2 py-1 text-[10px] font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-gray-700 border border-brand-300 dark:border-brand-700 rounded hover:bg-brand-50 dark:hover:bg-brand-900/30 transition disabled:opacity-50"
+            title="Re-ejecutar este paso solo"
+          >
+            {rerunBusy ? <Loader2 size={10} className="animate-spin" /> : <>↻ Re-ejecutar</>}
+          </button>
+        )}
+        {elapsed != null && status !== 'pending' && (
+          <span className="text-[10px] font-mono text-gray-400 shrink-0">{elapsed}s</span>
+        )}
+      </div>
+
+      {/* Mini-lista de ideas cayendo en vivo (solo en el paso 'generate') */}
+      {Array.isArray(liveIdeas) && liveIdeas.length > 0 && status !== 'pending' && (
+        <ul className="px-3 pb-2 pl-9 space-y-1 max-h-52 overflow-y-auto">
+          {liveIdeas.map((idea, i) => (
+            <li key={i} className="flex items-start gap-2 text-[10px] text-gray-700 dark:text-gray-300 animate-fade-in-up">
+              <span className="shrink-0 mt-0.5">{TIPO_EMOJI[idea.tipo] || '•'}</span>
+              <span className="flex-1 min-w-0">
+                <span className="font-semibold truncate block">{idea.titulo}</span>
+                {idea.hook && <span className="text-gray-500 dark:text-gray-400 italic truncate block">"{idea.hook.slice(0, 80)}{idea.hook.length > 80 ? '…' : ''}"</span>}
+              </span>
+              <span className="shrink-0 text-[9px] text-gray-400 font-mono">{idea.formato}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </li>
+  );
+}
+
+
 export default function ArranqueSection({ addToast, onGoToSection }) {
   const [productos, setProductos] = useState(() => {
     const prods = loadJSON(PRODUCTOS_KEY, []);
@@ -2674,347 +3030,3 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 // producto activo. Cada corrida se puede expandir para ver el detalle de
 // pasos, duración y costo. Así el user no pierde info al refrescar o
 // cambiar de sección.
-function RunHistoryCard({ history, onClear }) {
-  const [collapsed, setCollapsed] = useState(true);
-  const [expandedRunId, setExpandedRunId] = useState(null);
-
-  if (!history || history.length === 0) return null;
-
-  return (
-    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-5 shadow-sm">
-      <button
-        onClick={() => setCollapsed(c => !c)}
-        className="w-full flex items-center gap-3 text-left"
-      >
-        <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
-          <Clock size={14} />
-        </div>
-        <div className="flex-1 min-w-0">
-          <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">
-            Historial de corridas
-            <span className="ml-2 text-[10px] font-normal text-gray-500 dark:text-gray-400">
-              {history.length} corrida{history.length !== 1 ? 's' : ''} guardada{history.length !== 1 ? 's' : ''}
-            </span>
-          </h3>
-          <p className="text-[10px] text-gray-500 dark:text-gray-400">
-            Lo que ejecutaste antes no se pierde — click para ver cuándo corriste + qué pasó + cuánto costó.
-          </p>
-        </div>
-        <ChevronDown
-          size={16}
-          className={`text-gray-400 transition-transform shrink-0 ${collapsed ? '' : 'rotate-180'}`}
-        />
-      </button>
-
-      {!collapsed && (
-        <div className="mt-4 space-y-2">
-          {history.map(run => {
-            const fecha = new Date(run.startedAt).toLocaleString('es-AR', {
-              year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-            });
-            const durMin = run.durationMs ? Math.round(run.durationMs / 60000) : 0;
-            const durSec = run.durationMs ? Math.round((run.durationMs % 60000) / 1000) : 0;
-            const dur = durMin > 0 ? `${durMin}m ${durSec}s` : `${durSec}s`;
-            const isExpanded = expandedRunId === run.id;
-            const hasErrors = (run.stats?.stepsError || 0) > 0;
-
-            return (
-              <div key={run.id} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
-                <button
-                  onClick={() => setExpandedRunId(isExpanded ? null : run.id)}
-                  className="w-full px-3 py-2 flex items-center gap-3 hover:bg-gray-50 dark:hover:bg-gray-700/30 transition text-left"
-                >
-                  <ChevronRight size={14} className={`text-gray-400 transition-transform shrink-0 ${isExpanded ? 'rotate-90' : ''}`} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold text-gray-900 dark:text-gray-100 truncate">
-                      {fecha}
-                      {hasErrors && <span className="ml-2 text-[10px] text-amber-600 dark:text-amber-400 font-bold">⚠ {run.stats.stepsError} error{run.stats.stepsError !== 1 ? 'es' : ''}</span>}
-                    </p>
-                    <div className="flex items-center gap-2 text-[10px] text-gray-500 dark:text-gray-400 flex-wrap mt-0.5">
-                      <span>⏱ {dur}</span>
-                      {run.stats?.competidoresCount > 0 && (
-                        <span>· {run.stats.competidoresOk}/{run.stats.competidoresCount} competidores ok</span>
-                      )}
-                      {run.stats?.breakdown && (
-                        <span className="font-semibold text-gray-700 dark:text-gray-300">
-                          · 💡 {run.stats.breakdown.ideasNuevas} idea{run.stats.breakdown.ideasNuevas !== 1 ? 's' : ''}
-                        </span>
-                      )}
-                      {run.cost?.total > 0 && (
-                        <span className="text-brand-600 dark:text-brand-400 font-mono">· 💰 ${run.cost.total.toFixed(4)}</span>
-                      )}
-                    </div>
-                  </div>
-                </button>
-
-                {isExpanded && (
-                  <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 px-3 py-2">
-                    {run.stats?.breakdown && (
-                      <div className="mb-2 pb-2 border-b border-gray-200 dark:border-gray-700">
-                        <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5">
-                          📊 Qué generó esta corrida
-                        </p>
-                        <div className="flex flex-wrap gap-1.5">
-                          {[
-                            { label: 'Total ideas', val: run.stats.breakdown.ideasNuevas, cls: 'bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300' },
-                            { label: '🔵 Réplicas', val: run.stats.breakdown.replica },
-                            { label: '🟡 Iteraciones', val: run.stats.breakdown.iteracion },
-                            { label: '🟢 Diferenciación', val: run.stats.breakdown.diferenciacion },
-                            { label: '✨ Desde cero', val: run.stats.breakdown.desde_cero },
-                            { label: '🖼️ Para imagen', val: run.stats.breakdown.imagenes },
-                            { label: '🎬 Para video', val: run.stats.breakdown.videos },
-                            { label: '🏆 Winners analizados', val: run.stats.winnersAnalyzed || 0 },
-                            ...(run.stats.hooksLowScore ? [{ label: '⚠ Hooks flojos', val: run.stats.hooksLowScore, cls: 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300' }] : []),
-                          ].map((p, i) => (
-                            <span key={i} className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold rounded ${p.cls || 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'}`}>
-                              {p.label} <span className="font-bold tabular-nums">{p.val}</span>
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    <ul className="space-y-0.5 text-[10px]">
-                      {(run.steps || []).map((s, idx) => (
-                        <li key={idx} className="flex items-start gap-2">
-                          <span className="shrink-0 w-4 text-center">
-                            {s.status === 'done' ? '✓' : s.status === 'error' ? '✗' : '○'}
-                          </span>
-                          <span className={`flex-1 min-w-0 ${s.status === 'error' ? 'text-red-600 dark:text-red-400' : 'text-gray-700 dark:text-gray-300'}`}>
-                            <span className="font-semibold">{s.label}</span>
-                            {s.detail && <span className="block text-gray-500 dark:text-gray-400 ml-0">{s.detail}</span>}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                    {run.cost && run.cost.total > 0 && (
-                      <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700 text-[10px] font-mono text-gray-600 dark:text-gray-400 flex flex-wrap gap-2">
-                        <span className="text-brand-600 dark:text-brand-400 font-bold">💰 ${run.cost.total.toFixed(4)}</span>
-                        {run.cost.anthropic > 0 && <span>🧠 ${run.cost.anthropic.toFixed(4)}</span>}
-                        {run.cost.openai > 0 && <span>🎤 ${run.cost.openai.toFixed(4)}</span>}
-                        {run.cost.apify > 0 && <span>🔍 ${run.cost.apify.toFixed(4)}</span>}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-          <button
-            onClick={onClear}
-            className="mt-2 text-[10px] text-gray-400 hover:text-red-500 transition"
-          >
-            Borrar historial
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Guía corta del flujo del módulo — se muestra debajo de los tabs para
-// que el user nuevo sepa el orden. Dismissable y persistido.
-function TabsGuide() {
-  const [hidden, setHidden] = useState(() => {
-    try { return localStorage.getItem('viora-tabs-guide-hidden') === '1'; } catch { return false; }
-  });
-  if (hidden) return null;
-  return (
-    <div className="flex items-center gap-2 px-3 py-2 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-lg text-[11px] text-brand-800 dark:text-brand-300">
-      <span className="shrink-0">🗺️</span>
-      <span className="flex-1 min-w-0">
-        <strong>Cómo va el flujo:</strong> ⚙️ Setup (cargá producto + competidores) → ▶️ Correr pipeline → 📥 Bandeja (revisá las ideas y generá el creativo en cada una) → 🤖 Copiloto para pedir más.
-      </span>
-      <button
-        onClick={() => { try { localStorage.setItem('viora-tabs-guide-hidden', '1'); } catch {} setHidden(true); }}
-        className="shrink-0 text-brand-400 hover:text-brand-700 dark:hover:text-brand-200 transition"
-        title="Ocultar guía"
-      >
-        <X size={13} />
-      </button>
-    </div>
-  );
-}
-
-// Tabs del workspace de un producto: Setup / Bandeja / Inspiración / Creativos.
-function ProductTabs({ activeTab, onChange }) {
-  // Dos grupos para que un usuario nuevo entienda el flujo a primera vista:
-  // - "Datos": configuración + información del producto / competencia.
-  // - "Creación": donde se generan y ven los outputs (ideas + creativos).
-  const groups = [
-    {
-      id: 'datos',
-      label: 'Datos',
-      tabs: [
-        { id: 'dashboard', label: 'Dashboard', emoji: '📊' },
-        { id: 'setup', label: 'Setup', emoji: '⚙️' },
-        { id: 'documentos', label: 'Documentos', emoji: '📄' },
-        { id: 'competencia', label: 'Competencia', emoji: '🎯' },
-      ],
-    },
-    {
-      id: 'creacion',
-      label: 'Creación',
-      tabs: [
-        { id: 'bandeja', label: 'Bandeja', emoji: '📥' },
-        { id: 'inspiracion', label: 'Inspiración', emoji: '✨' },
-        { id: 'creativos', label: 'Creativos', emoji: '🎨' },
-        { id: 'galeria', label: 'Galería', emoji: '🖼️' },
-        { id: 'copiloto', label: 'Copiloto', emoji: '🤖' },
-      ],
-    },
-  ];
-  return (
-    <div className="flex items-stretch gap-2 overflow-x-auto p-1 bg-gray-100 dark:bg-gray-800/70 rounded-xl border border-gray-200 dark:border-gray-700">
-      {groups.map((g, idx) => (
-        <React.Fragment key={g.id}>
-          {idx > 0 && (
-            <div className="w-px bg-gray-300 dark:bg-gray-600 my-1.5 shrink-0" aria-hidden />
-          )}
-          <div className="flex items-center gap-1 shrink-0">
-            <span className="text-[9px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 px-1.5 hidden md:inline">
-              {g.label}
-            </span>
-            {g.tabs.map(t => (
-              <button
-                key={t.id}
-                onClick={() => onChange(t.id)}
-                className={`px-3.5 py-2 text-xs font-bold rounded-lg transition shrink-0 flex items-center gap-1.5 ${
-                  activeTab === t.id
-                    ? 'bg-white dark:bg-gray-700 text-brand-700 dark:text-brand-200 shadow-sm'
-                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-100 hover:bg-white/60 dark:hover:bg-gray-700/40'
-                }`}
-              >
-                <span>{t.emoji}</span>{t.label}
-              </button>
-            ))}
-          </div>
-        </React.Fragment>
-      ))}
-    </div>
-  );
-}
-
-// Mini-stat para los contadores de Bandeja en la card del producto.
-function ProdMiniStat({ label, value, color = 'gray', accent = false }) {
-  const colors = {
-    gray: 'bg-gray-50 dark:bg-gray-900/40 text-gray-900 dark:text-gray-100 border-gray-200 dark:border-gray-700',
-    amber: 'bg-amber-50 dark:bg-amber-900/30 text-amber-900 dark:text-amber-200 border-amber-200 dark:border-amber-800',
-    emerald: 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-900 dark:text-emerald-200 border-emerald-200 dark:border-emerald-800',
-    slate: 'bg-slate-50 dark:bg-slate-900/40 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800',
-  };
-  return (
-    <div className={`px-2 py-1.5 rounded-md border ${colors[color]} ${accent ? 'ring-1 ring-brand-300 dark:ring-brand-700' : ''}`}>
-      <p className="text-[8px] font-bold uppercase tracking-wider opacity-60 leading-none">{label}</p>
-      <p className="text-base font-bold tabular-nums leading-tight mt-0.5">{value}</p>
-    </div>
-  );
-}
-
-// Stat plano de reporte para la sección de stats del producto.
-function ProdReportStat({ label, value, highlight = false }) {
-  return (
-    <div className={`px-2 py-1.5 rounded border ${
-      highlight
-        ? 'bg-brand-50 dark:bg-brand-900/20 border-brand-200 dark:border-brand-800 text-brand-900 dark:text-brand-200'
-        : 'bg-gray-50 dark:bg-gray-900/30 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300'
-    }`}>
-      <p className="text-[8px] font-bold uppercase tracking-wider opacity-60 leading-none">{label}</p>
-      <p className="text-[11px] font-semibold leading-tight mt-0.5">{value}</p>
-    </div>
-  );
-}
-
-function WizardCard({ num, title, done, disabled = false, badge, children }) {
-  return (
-    <div className={`bg-white dark:bg-gray-800 border rounded-xl p-5 shadow-sm transition ${
-      disabled
-        ? 'border-gray-200 dark:border-gray-700 opacity-60'
-        : done
-          ? 'border-emerald-300 dark:border-emerald-700'
-          : 'border-gray-200 dark:border-gray-700'
-    }`}>
-      <div className="flex items-center gap-3 mb-3">
-        <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
-          done
-            ? 'bg-emerald-500 text-white'
-            : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
-        }`}>
-          {done ? <Check size={14} /> : num}
-        </div>
-        <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 flex-1">{title}</h3>
-        {badge && (
-          <span className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-0.5 rounded-full">
-            {badge}
-          </span>
-        )}
-      </div>
-      <div className="pl-10">
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function StepRow({ step, liveIdeas, onRerun, rerunBusy = false }) {
-  const { status, label, detail, startedAt, endedAt } = step;
-  const elapsed = startedAt
-    ? Math.round(((endedAt || Date.now()) - startedAt) / 1000)
-    : null;
-
-  const TIPO_EMOJI = { replica: '🔵', iteracion: '🟡', diferenciacion: '🟢', desde_cero: '✨' };
-
-  return (
-    <li className={`rounded-md text-xs transition ${
-      status === 'running' ? 'bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800' :
-      status === 'done' ? 'bg-emerald-50/50 dark:bg-emerald-900/10' :
-      status === 'error' ? 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800' :
-      'bg-gray-50/50 dark:bg-gray-800/30'
-    }`}>
-      <div className="flex items-start gap-2 px-3 py-2">
-        <span className="mt-0.5 shrink-0">
-          {status === 'running' && <Loader2 size={13} className="animate-spin text-brand-600 dark:text-brand-400" />}
-          {status === 'done' && <Check size={13} className="text-emerald-600 dark:text-emerald-400" />}
-          {status === 'error' && <AlertTriangle size={13} className="text-red-600" />}
-          {status === 'pending' && <Clock size={13} className="text-gray-400" />}
-        </span>
-        <div className="flex-1 min-w-0">
-          <p className={`font-semibold ${
-            status === 'done' ? 'text-emerald-900 dark:text-emerald-200' :
-            status === 'error' ? 'text-red-900 dark:text-red-200' :
-            'text-gray-800 dark:text-gray-200'
-          }`}>{label}</p>
-          <p className="text-[10px] text-gray-600 dark:text-gray-400">{detail}</p>
-        </div>
-        {onRerun && (status === 'done' || status === 'error') && (
-          <button
-            onClick={onRerun}
-            disabled={rerunBusy}
-            className="shrink-0 inline-flex items-center gap-1 px-2 py-1 text-[10px] font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-gray-700 border border-brand-300 dark:border-brand-700 rounded hover:bg-brand-50 dark:hover:bg-brand-900/30 transition disabled:opacity-50"
-            title="Re-ejecutar este paso solo"
-          >
-            {rerunBusy ? <Loader2 size={10} className="animate-spin" /> : <>↻ Re-ejecutar</>}
-          </button>
-        )}
-        {elapsed != null && status !== 'pending' && (
-          <span className="text-[10px] font-mono text-gray-400 shrink-0">{elapsed}s</span>
-        )}
-      </div>
-
-      {/* Mini-lista de ideas cayendo en vivo (solo en el paso 'generate') */}
-      {Array.isArray(liveIdeas) && liveIdeas.length > 0 && status !== 'pending' && (
-        <ul className="px-3 pb-2 pl-9 space-y-1 max-h-52 overflow-y-auto">
-          {liveIdeas.map((idea, i) => (
-            <li key={i} className="flex items-start gap-2 text-[10px] text-gray-700 dark:text-gray-300 animate-fade-in-up">
-              <span className="shrink-0 mt-0.5">{TIPO_EMOJI[idea.tipo] || '•'}</span>
-              <span className="flex-1 min-w-0">
-                <span className="font-semibold truncate block">{idea.titulo}</span>
-                {idea.hook && <span className="text-gray-500 dark:text-gray-400 italic truncate block">"{idea.hook.slice(0, 80)}{idea.hook.length > 80 ? '…' : ''}"</span>}
-              </span>
-              <span className="shrink-0 text-[9px] text-gray-400 font-mono">{idea.formato}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </li>
-  );
-}

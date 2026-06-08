@@ -98,6 +98,89 @@ function costoMensual(svc) {
   return Number(svc.estimadoMensual || 0);
 }
 
+// ---- inner components moved before export (TDZ fix Vite/Rollup) ----
+
+function ServiceFields({ draft, setDraft }) {
+  const u = (k, v) => setDraft(prev => ({ ...prev, [k]: v }));
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <div>
+        <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">Nombre</label>
+        <input type="text" value={draft.nombre || ''} onChange={e => u('nombre', e.target.value)}
+          placeholder="Ej: Anthropic Claude"
+          className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+      </div>
+      <div>
+        <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">Categoría</label>
+        <select value={draft.categoria || 'otros'} onChange={e => u('categoria', e.target.value)}
+          className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500">
+          {Object.entries(CATEGORIAS).map(([k, c]) => <option key={k} value={k}>{c.label}</option>)}
+        </select>
+      </div>
+      <div>
+        <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">Tipo</label>
+        <select value={draft.tipo || 'variable'} onChange={e => u('tipo', e.target.value)}
+          className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500">
+          {Object.entries(TIPOS).map(([k, t]) => <option key={k} value={k}>{t.label}</option>)}
+        </select>
+      </div>
+      <div>
+        <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">URL dashboard (opcional)</label>
+        <input type="url" value={draft.url || ''} onChange={e => u('url', e.target.value)}
+          placeholder="https://..."
+          className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+      </div>
+      {draft.tipo === 'fijo' ? (
+        <div>
+          <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">Monto fijo mensual (USD)</label>
+          <input type="number" step="0.01" min="0" value={draft.montoFijo ?? ''} onChange={e => u('montoFijo', e.target.value)}
+            placeholder="20.00"
+            className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+        </div>
+      ) : (
+        <>
+          <div>
+            <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">Estimado mensual (USD)</label>
+            <input type="number" step="0.01" min="0" value={draft.estimadoMensual ?? ''} onChange={e => u('estimadoMensual', e.target.value)}
+              placeholder="20.00"
+              className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">Gasto real del mes (USD)</label>
+            <input type="number" step="0.01" min="0" value={draft.gastoVariable ?? ''} onChange={e => u('gastoVariable', e.target.value)}
+              placeholder="Si vacío usa el estimado"
+              className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+          </div>
+        </>
+      )}
+      <div className="sm:col-span-2">
+        <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">Notas</label>
+        <input type="text" value={draft.notas || ''} onChange={e => u('notas', e.target.value)}
+          placeholder="Plan, límites, observaciones"
+          className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+      </div>
+    </div>
+  );
+}
+
+
+function ResumenCard({ label, value, sub, color = 'gray', bold = false }) {
+  const colors = {
+    emerald: 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200',
+    amber:   'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200',
+    purple:  'bg-brand-50 dark:bg-brand-900/20 border-brand-200 dark:border-brand-800 text-brand-900 dark:text-brand-200',
+    gray:    'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100',
+  };
+  return (
+    <div className={`p-4 rounded-xl border ${colors[color]} ${bold ? 'ring-2 ring-offset-1 ring-brand-400 dark:ring-offset-gray-900' : ''}`}>
+      <p className="text-[10px] font-bold uppercase tracking-wider opacity-70 mb-1">{label}</p>
+      <p className="text-xl font-bold tabular-nums">{value}</p>
+      <p className="text-[10px] opacity-60 mt-0.5">{sub}</p>
+    </div>
+  );
+}
+
+
 export default function GastosStackSection({ addToast }) {
   const [services, setServices] = useState(() => loadServices());
   const [editing, setEditing] = useState(null); // id del servicio en edición
@@ -399,81 +482,3 @@ export default function GastosStackSection({ addToast }) {
 }
 
 // Campos compartidos entre form de nuevo + edit inline.
-function ServiceFields({ draft, setDraft }) {
-  const u = (k, v) => setDraft(prev => ({ ...prev, [k]: v }));
-  return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-      <div>
-        <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">Nombre</label>
-        <input type="text" value={draft.nombre || ''} onChange={e => u('nombre', e.target.value)}
-          placeholder="Ej: Anthropic Claude"
-          className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500" />
-      </div>
-      <div>
-        <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">Categoría</label>
-        <select value={draft.categoria || 'otros'} onChange={e => u('categoria', e.target.value)}
-          className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500">
-          {Object.entries(CATEGORIAS).map(([k, c]) => <option key={k} value={k}>{c.label}</option>)}
-        </select>
-      </div>
-      <div>
-        <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">Tipo</label>
-        <select value={draft.tipo || 'variable'} onChange={e => u('tipo', e.target.value)}
-          className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500">
-          {Object.entries(TIPOS).map(([k, t]) => <option key={k} value={k}>{t.label}</option>)}
-        </select>
-      </div>
-      <div>
-        <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">URL dashboard (opcional)</label>
-        <input type="url" value={draft.url || ''} onChange={e => u('url', e.target.value)}
-          placeholder="https://..."
-          className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500" />
-      </div>
-      {draft.tipo === 'fijo' ? (
-        <div>
-          <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">Monto fijo mensual (USD)</label>
-          <input type="number" step="0.01" min="0" value={draft.montoFijo ?? ''} onChange={e => u('montoFijo', e.target.value)}
-            placeholder="20.00"
-            className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500" />
-        </div>
-      ) : (
-        <>
-          <div>
-            <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">Estimado mensual (USD)</label>
-            <input type="number" step="0.01" min="0" value={draft.estimadoMensual ?? ''} onChange={e => u('estimadoMensual', e.target.value)}
-              placeholder="20.00"
-              className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500" />
-          </div>
-          <div>
-            <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">Gasto real del mes (USD)</label>
-            <input type="number" step="0.01" min="0" value={draft.gastoVariable ?? ''} onChange={e => u('gastoVariable', e.target.value)}
-              placeholder="Si vacío usa el estimado"
-              className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500" />
-          </div>
-        </>
-      )}
-      <div className="sm:col-span-2">
-        <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">Notas</label>
-        <input type="text" value={draft.notas || ''} onChange={e => u('notas', e.target.value)}
-          placeholder="Plan, límites, observaciones"
-          className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500" />
-      </div>
-    </div>
-  );
-}
-
-function ResumenCard({ label, value, sub, color = 'gray', bold = false }) {
-  const colors = {
-    emerald: 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200',
-    amber:   'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200',
-    purple:  'bg-brand-50 dark:bg-brand-900/20 border-brand-200 dark:border-brand-800 text-brand-900 dark:text-brand-200',
-    gray:    'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100',
-  };
-  return (
-    <div className={`p-4 rounded-xl border ${colors[color]} ${bold ? 'ring-2 ring-offset-1 ring-brand-400 dark:ring-offset-gray-900' : ''}`}>
-      <p className="text-[10px] font-bold uppercase tracking-wider opacity-70 mb-1">{label}</p>
-      <p className="text-xl font-bold tabular-nums">{value}</p>
-      <p className="text-[10px] opacity-60 mt-0.5">{sub}</p>
-    </div>
-  );
-}

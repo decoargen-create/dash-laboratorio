@@ -25,7 +25,7 @@ import {
 import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGeneradorHoy, updateIdea, formatoDeAd } from './bandejaStore.js';
 import { logCostsFromResponse } from './costsStore.js';
 import BandejaSection from './Bandeja.jsx';
-import InspiracionSection from './InspiracionSection.jsx';
+import InspiracionSection, { BulkProgressBar } from './InspiracionSection.jsx';
 import CreativosTab from './CreativosTab.jsx';
 import DocumentacionTab from './DocumentacionTab.jsx';
 import CopilotoTab from './CopilotoTab.jsx';

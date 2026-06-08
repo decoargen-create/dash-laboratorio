@@ -26,6 +26,7 @@ import { logCostsFromResponse } from './costsStore.js';
 import CreativoPanel from './CreativoPanel.jsx';
 import { getProductoImagen, getAccentColor } from './productoImagen.js';
 import { saveReferencial } from './galeriaReferenciales.js';
+import { enqueueGenerate as enqueueGenerarCreativo } from './creativoGeneratorStore.js';
 import { startExecution, updateExecution, finishExecution } from './executionsStore.js';
 
 const PRODUCTOS_KEY = 'viora-marketing-productos-v1';
@@ -337,7 +338,7 @@ function IdeaCard({
               {idea.formato === 'video' ? (
                 <VideoBriefPanel key={idea.id} idea={idea} />
               ) : (idea.hook || idea.titulo || idea.promptGeneradorImagen || idea.descripcionImagen) ? (
-                <CreativoPanel key={idea.id} idea={idea} />
+                <CreativoPanel key={idea.id} idea={idea} productoId={idea.productoId} />
               ) : null}
 
               {(() => { const guionTextoIdea = guionToText(idea.guion); return (guionTextoIdea || editandoGuion) && !/^n\/?a/i.test(guionTextoIdea.trim()) && (
@@ -1927,6 +1928,33 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
               <button onClick={() => setSelected(new Set())}
                 className="px-2.5 py-1.5 text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition">
                 Limpiar
+              </button>
+              <button
+                onClick={() => {
+                  // Encolar las ideas seleccionadas para generar creativo en
+                  // background. La queue procesa 1 por vez (concurrency=1)
+                  // para no congestionar OpenAI. El user puede navegar a
+                  // otra sección — la ActivityBell muestra el progreso.
+                  let qty = 0;
+                  for (const id of selected) {
+                    const idea = ideas.find(i => i.id === id);
+                    if (!idea) continue;
+                    if (!(idea.hook || idea.titulo || idea.promptGeneradorImagen || idea.descripcionImagen)) continue;
+                    if (idea.formato === 'video') continue; // video va por otro flujo
+                    enqueueGenerarCreativo(idea, { quality: 'medium', productoId: activeProductoId || null });
+                    qty++;
+                  }
+                  if (qty === 0) {
+                    addToast?.({ type: 'error', message: 'Las seleccionadas no tienen contenido para generar (o son videos)' });
+                  } else {
+                    addToast?.({ type: 'success', message: `${qty} creativos en cola. Mirá el ActivityBell.` });
+                    setSelected(new Set());
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg hover:from-purple-600 hover:to-pink-600 shadow-sm transition"
+                title="Encola las seleccionadas — la generación corre en background, podés seguir navegando"
+              >
+                <Sparkles size={12} /> Generar {selected.size} creativos
               </button>
               <button onClick={() => exportSelected('docx')}
                 className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-brand-600 rounded-lg hover:from-brand-600 hover:to-brand-700 shadow-sm transition">

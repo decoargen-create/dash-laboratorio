@@ -6,68 +6,66 @@
 import React, { useState, useEffect } from 'react';
 import { Sparkles, Loader2, Download, RefreshCw, AlertCircle } from 'lucide-react';
 import { saveCreativo, getCreativo, deleteCreativo } from './creativosStorage.js';
-import { logCostsFromResponse } from './costsStore.js';
+import {
+  enqueueGenerate,
+  subscribe as subscribeGen,
+  getStatus, getError, getResult,
+  resetIdea,
+} from './creativoGeneratorStore.js';
 
-export default function CreativoPanel({ idea }) {
+export default function CreativoPanel({ idea, productoId }) {
   const [creativo, setCreativo] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [quality, setQuality] = useState('medium');
 
-  // Al montar, miramos si ya hay creativo guardado en IndexedDB.
+  // Al montar, miramos si ya hay creativo guardado en IndexedDB +
+  // chequeamos si esta idea está siendo procesada en background.
   useEffect(() => {
     let alive = true;
     getCreativo(idea.id).then(c => { if (alive) setCreativo(c); });
-    return () => { alive = false; };
+
+    // Sync inicial con el store de generación: si la idea ya está
+    // procesándose o terminó mientras el panel no estaba montado, lo
+    // reflejamos.
+    const status = getStatus(idea.id);
+    if (status === 'running' || status === 'pending') setLoading(true);
+    else if (status === 'error') setError(getError(idea.id) || '');
+    else if (status === 'done') {
+      const r = getResult(idea.id);
+      if (r) setCreativo(r);
+    }
+
+    // Listener: cualquier cambio de estado de NUESTRA idea actualiza el UI.
+    const unsub = subscribeGen((event) => {
+      if (event.ideaId !== idea.id) return;
+      if (event.status === 'pending' || event.status === 'running') {
+        setLoading(true); setError('');
+      } else if (event.status === 'done') {
+        setLoading(false); setError('');
+        if (event.creativo) setCreativo(event.creativo);
+      } else if (event.status === 'error') {
+        setLoading(false);
+        setError(event.error || 'Error generando');
+      }
+    });
+    return () => { alive = false; unsub(); };
   }, [idea.id]);
 
-  const handleGenerate = async () => {
+  const handleGenerate = () => {
     setError('');
     setLoading(true);
-    try {
-      const resp = await fetch('/api/marketing/generate-creative', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          quality,
-          idea: {
-            promptGeneradorImagen: idea.promptGeneradorImagen,
-            descripcionImagen: idea.descripcionImagen,
-            textoEnImagen: idea.textoEnImagen,
-            hook: idea.hook,
-            titulo: idea.titulo,
-            formato: idea.formato,
-            estiloVisual: idea.estiloVisual,
-            copyPostMeta: idea.copyPostMeta || idea.copy,
-          },
-        }),
-      });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-      logCostsFromResponse(data, `generate-creative · gpt-image-2 · ${(idea.titulo || idea.hook || '').slice(0, 50)}`);
-
-      const nuevo = {
-        imageBase64: data.imageBase64,
-        mimeType: data.mimeType || 'image/png',
-        formato: data.formato || idea.formato || 'static',
-        size: data.size,
-        quality: data.quality,
-        model: data.model,
-        generatedAt: data.generatedAt,
-      };
-      await saveCreativo(idea.id, nuevo);
-      setCreativo(nuevo);
-    } catch (err) {
-      setError(err.message || 'Error generando el creativo');
-    } finally {
-      setLoading(false);
-    }
+    // Encolar — la generación corre en background. Si el user navega fuera,
+    // la barra de ActivityBell muestra el progreso y al volver el panel se
+    // re-syncea con el estado final via el listener.
+    enqueueGenerate(idea, { quality, productoId });
   };
 
   const handleRegenerate = async () => {
     await deleteCreativo(idea.id);
     setCreativo(null);
-    await handleGenerate();
+    resetIdea(idea.id);
+    handleGenerate();
   };
 
   const dataUrl = creativo

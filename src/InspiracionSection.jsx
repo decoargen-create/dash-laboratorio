@@ -945,7 +945,13 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   const [genOpts, setGenOpts] = useState(() => {
     try {
       const raw = localStorage.getItem('viora-marketing-gen-opts');
-      return raw ? JSON.parse(raw) : { n: 2, size: '1024x1024', quality: 'high' };
+      const parsed = raw ? JSON.parse(raw) : null;
+      // MIGRACIÓN: si tenían cacheado 2048x2048 del default viejo, los
+      // bajamos a 1024x1024 — 2K tarda 150-250s en gpt-image-2 high y
+      // hace timeout de Vercel con cierta frecuencia. Quien quiera 2K
+      // explícito lo elige a mano en el selector.
+      if (parsed?.size === '2048x2048') parsed.size = '1024x1024';
+      return parsed || { n: 2, size: '1024x1024', quality: 'high' };
     } catch { return { n: 2, size: '1024x1024', quality: 'high' }; }
   });
   useEffect(() => {

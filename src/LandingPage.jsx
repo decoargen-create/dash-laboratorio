@@ -1,13 +1,11 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
-import { ArrowRight, Droplet, Beaker, FlaskConical, Pipette, Clock, FileText, Truck, Moon, Sun, MessageCircle, Sparkles } from 'lucide-react';
-import { VioraLogo, VioraMark } from './logo.jsx';
-
-const WHATSAPP_NUMBER = '5492236877663';
-const WHATSAPP_DISPLAY = '+54 9 2236 87-7663';
-const WHATSAPP_URL = `https://wa.me/${WHATSAPP_NUMBER}`;
+import {
+  ArrowRight, Moon, Sun, Sparkles, Zap, Image as ImageIcon, BarChart3,
+  Target, Bot, Layers, Search, Wand2, Eye, Send,
+} from 'lucide-react';
+import { AdsLabLogo, AdsLabMark } from './logo.jsx';
 
 // Hook minimal para hacer fade-in cuando el elemento entra al viewport.
-// Devuelve un ref y un boolean "isVisible". La transición la maneja Tailwind.
 function useInView(options = { threshold: 0.15 }) {
   const ref = useRef(null);
   const [visible, setVisible] = useState(false);
@@ -26,7 +24,6 @@ function useInView(options = { threshold: 0.15 }) {
   return [ref, visible];
 }
 
-// Wrapper que aplica el fade-in al scroll a sus hijos.
 function FadeIn({ children, delay = 0, className = '', as: Tag = 'div' }) {
   const [ref, visible] = useInView();
   return (
@@ -40,7 +37,6 @@ function FadeIn({ children, delay = 0, className = '', as: Tag = 'div' }) {
   );
 }
 
-// Parallax suave del bloque del hero: se traduce levemente hacia arriba al scrollear.
 function useParallax() {
   const [offset, setOffset] = useState(0);
   useEffect(() => {
@@ -57,8 +53,6 @@ function useParallax() {
   return offset;
 }
 
-// Cuenta animada de 0 → target con easeOutCubic. Inicia recién cuando
-// el elemento entra al viewport (para que el efecto se vea al scrollear).
 function useAnimatedNumber(target, duration = 1200) {
   const [value, setValue] = useState(0);
   const [ref, visible] = useInView({ threshold: 0.3 });
@@ -78,8 +72,6 @@ function useAnimatedNumber(target, duration = 1200) {
   return [ref, value];
 }
 
-// Posición global del cursor (clamped a viewport). Usado por el blob del hero
-// que sigue suavemente al mouse.
 function useMousePosition() {
   const [pos, setPos] = useState({ x: 0, y: 0 });
   useEffect(() => {
@@ -94,8 +86,6 @@ function useMousePosition() {
   return pos;
 }
 
-// Botón con efecto magnético: al acercar el cursor, el botón se atrae
-// suavemente hacia él. Da un feel premium muy sutil.
 function MagneticButton({ children, className = '', strength = 0.25, ...props }) {
   const ref = useRef(null);
   const [t, setT] = useState({ x: 0, y: 0 });
@@ -108,8 +98,9 @@ function MagneticButton({ children, className = '', strength = 0.25, ...props })
     setT({ x: (e.clientX - cx) * strength, y: (e.clientY - cy) * strength });
   };
   const onLeave = () => setT({ x: 0, y: 0 });
+  const Tag = props.href ? 'a' : 'button';
   return (
-    <a
+    <Tag
       ref={ref}
       onMouseMove={onMove}
       onMouseLeave={onLeave}
@@ -118,12 +109,10 @@ function MagneticButton({ children, className = '', strength = 0.25, ...props })
       {...props}
     >
       {children}
-    </a>
+    </Tag>
   );
 }
 
-// Card con efecto tilt 3D: al pasar el mouse, la card rota levemente
-// según la posición relativa del cursor. Disabled en touch devices.
 function TiltCard({ children, className = '', max = 6 }) {
   const ref = useRef(null);
   const [tilt, setTilt] = useState({ rx: 0, ry: 0 });
@@ -149,7 +138,7 @@ function TiltCard({ children, className = '', max = 6 }) {
   );
 }
 
-// ---- inner components moved before export (TDZ fix Vite/Rollup) ----
+// ---- inner components ----
 
 function DataCard({ kpi, kpiPrefix = '', unit, label, detail }) {
   const isNumeric = typeof kpi === 'number';
@@ -162,50 +151,42 @@ function DataCard({ kpi, kpiPrefix = '', unit, label, detail }) {
         <span className="text-4xl md:text-5xl font-light text-gray-900 dark:text-gray-100 tracking-tight tabular-nums">{display}</span>
         <span className="text-sm font-medium text-gray-500 dark:text-gray-400">{unit}</span>
       </div>
-      <p className="mt-2 text-xs uppercase tracking-widest font-semibold text-amber-700 dark:text-amber-300">{label}</p>
+      <p className="mt-2 text-xs uppercase tracking-widest font-semibold text-violet-700 dark:text-violet-300">{label}</p>
       <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 leading-relaxed">{detail}</p>
     </div>
   );
 }
 
-// Marquee: barra horizontal con keywords/productos del lab que se desplazan
-// infinitamente. Genera sensación de continuidad y vida visual sin ser
-// chillón. Pause on hover para legibilidad.
-
 function Marquee() {
   const items = [
-    'Cremas', 'Sérums', 'Aceites', 'Goteros', 'Marca propia',
-    'Tiradas chicas', 'Fórmulas a medida', 'Cosmética artesanal',
-    'Mínimo 100 unidades', 'Despacho 5–9 días',
+    'gpt-image-2', 'Claude Sonnet', 'Meta Ad Library', 'Apify',
+    'Strategist v3', 'Texto en español', 'Multi-marca', 'Bulk generation',
+    'Rebrand automático', 'Galería persistida',
   ];
-  // duplicamos para loop continuo sin "salto"
   const stream = [...items, ...items];
   return (
-    <div className="relative py-6 border-y border-rose-100/60 dark:border-gray-800/60 overflow-hidden bg-gradient-to-r from-rose-50/50 via-amber-50/30 to-rose-50/50 dark:from-gray-900/50 dark:via-gray-800/30 dark:to-gray-900/50">
+    <div className="relative py-6 border-y border-violet-100/60 dark:border-gray-800/60 overflow-hidden bg-gradient-to-r from-violet-50/50 via-purple-50/30 to-violet-50/50 dark:from-gray-900/50 dark:via-gray-800/30 dark:to-gray-900/50">
       <div className="flex gap-12 marquee-track whitespace-nowrap">
         {stream.map((it, i) => (
           <span
             key={i}
             className="text-sm uppercase tracking-[0.25em] font-semibold text-gray-600 dark:text-gray-400 inline-flex items-center gap-3 shrink-0"
           >
-            <Sparkles size={12} className="text-amber-600 dark:text-amber-400" />
+            <Sparkles size={12} className="text-violet-600 dark:text-violet-400" />
             {it}
           </span>
         ))}
       </div>
-      {/* Fade en los bordes para que el loop se sienta natural */}
-      <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0 w-24 bg-gradient-to-r from-rose-50/95 to-transparent dark:from-gray-950/95" />
-      <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-0 w-24 bg-gradient-to-l from-rose-50/95 to-transparent dark:from-gray-950/95" />
+      <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0 w-24 bg-gradient-to-r from-violet-50/95 to-transparent dark:from-gray-950/95" />
+      <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-0 w-24 bg-gradient-to-l from-violet-50/95 to-transparent dark:from-gray-950/95" />
     </div>
   );
 }
 
-// Card de producto: ícono pequeño + título + descripción técnica corta.
-
-function ProductCard({ icon: Icon, title, description }) {
+function FeatureCard({ icon: Icon, title, description }) {
   return (
     <div className="group h-full p-5 rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 hover:shadow-lg hover:-translate-y-1 transition-all duration-300">
-      <div className="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-gradient-to-br from-amber-100 to-amber-200 dark:from-amber-900/40 dark:to-amber-800/40 text-amber-800 dark:text-amber-300 mb-3 group-hover:scale-110 transition-transform">
+      <div className="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-gradient-to-br from-violet-100 to-purple-200 dark:from-violet-900/40 dark:to-purple-800/40 text-violet-800 dark:text-violet-300 mb-3 group-hover:scale-110 transition-transform">
         <Icon size={18} />
       </div>
       <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-1.5">{title}</h3>
@@ -234,20 +215,19 @@ export default function LandingPage({ onAccess }) {
   const mouse = useMousePosition();
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-rose-50 via-white to-rose-50 dark:from-gray-950 dark:via-gray-900 dark:to-gray-950 text-gray-900 dark:text-gray-100 scroll-smooth">
-      {/* Blob ambient que sigue al cursor — fixed sobre todo el viewport.
-          Usa pointer-events:none para no interferir con clicks. */}
+    <div className="min-h-screen bg-gradient-to-b from-violet-50 via-white to-violet-50 dark:from-gray-950 dark:via-gray-900 dark:to-gray-950 text-gray-900 dark:text-gray-100 scroll-smooth">
+      {/* Blob ambient que sigue al cursor */}
       <div
         aria-hidden="true"
-        className="pointer-events-none fixed top-0 left-0 z-[1] w-[420px] h-[420px] rounded-full bg-gradient-to-br from-amber-300/20 via-rose-300/20 to-pink-300/10 dark:from-amber-500/10 dark:via-rose-500/10 dark:to-pink-500/5 blur-3xl mix-blend-multiply dark:mix-blend-screen transition-transform duration-700 ease-out"
+        className="pointer-events-none fixed top-0 left-0 z-[1] w-[420px] h-[420px] rounded-full bg-gradient-to-br from-purple-300/20 via-violet-300/20 to-pink-300/10 dark:from-purple-500/10 dark:via-violet-500/10 dark:to-pink-500/5 blur-3xl mix-blend-multiply dark:mix-blend-screen transition-transform duration-700 ease-out"
         style={{ transform: `translate(${mouse.x - 210}px, ${mouse.y - 210}px)` }}
       />
-      {/* Nav sutil arriba */}
-      <nav className="fixed top-0 left-0 right-0 z-40 backdrop-blur-md bg-white/60 dark:bg-gray-950/60 border-b border-rose-100/50 dark:border-gray-800/50">
+      {/* Nav */}
+      <nav className="fixed top-0 left-0 right-0 z-40 backdrop-blur-md bg-white/60 dark:bg-gray-950/60 border-b border-violet-100/50 dark:border-gray-800/50">
         <div className="max-w-6xl mx-auto px-6 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <VioraMark size={32} />
-            <span className="text-sm font-semibold tracking-widest uppercase text-gray-700 dark:text-gray-200">Viora</span>
+            <AdsLabMark size={32} />
+            <span className="text-sm font-semibold tracking-widest uppercase text-gray-700 dark:text-gray-200">AdsLab</span>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -258,17 +238,9 @@ export default function LandingPage({ onAccess }) {
             >
               {darkMode ? <Sun size={18} /> : <Moon size={18} />}
             </button>
-            <a
-              href={WHATSAPP_URL}
-              target="_blank"
-              rel="noreferrer"
-              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full border border-amber-700/30 text-amber-800 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition"
-            >
-              <MessageCircle size={14} /> WhatsApp
-            </a>
             <button
               onClick={onAccess}
-              className="inline-flex items-center gap-1 px-4 py-1.5 text-xs font-semibold rounded-full bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 hover:opacity-90 transition"
+              className="inline-flex items-center gap-1 px-4 py-1.5 text-xs font-semibold rounded-full bg-gradient-to-r from-violet-600 to-purple-600 text-white hover:from-violet-700 hover:to-purple-700 transition shadow-lg shadow-violet-500/30"
             >
               Acceder <ArrowRight size={14} />
             </button>
@@ -276,28 +248,21 @@ export default function LandingPage({ onAccess }) {
         </div>
       </nav>
 
-      {/* Hero — más sobrio, menos vende-humo */}
+      {/* Hero */}
       <section className="pt-40 pb-20 px-6 relative overflow-hidden">
-        <div
-          aria-hidden="true"
-          className="absolute -top-32 -right-32 w-96 h-96 rounded-full bg-gradient-to-br from-amber-200/30 to-rose-200/20 dark:from-amber-500/10 dark:to-rose-500/10 blur-3xl"
-        />
-        <div
-          aria-hidden="true"
-          className="absolute -bottom-40 -left-32 w-[500px] h-[500px] rounded-full bg-gradient-to-tr from-rose-200/40 to-amber-100/20 dark:from-rose-500/10 dark:to-amber-500/5 blur-3xl"
-        />
-        {/* Elementos decorativos flotantes — drops y sparkles ambient */}
+        <div aria-hidden="true" className="absolute -top-32 -right-32 w-96 h-96 rounded-full bg-gradient-to-br from-violet-200/30 to-purple-200/20 dark:from-violet-500/10 dark:to-purple-500/10 blur-3xl" />
+        <div aria-hidden="true" className="absolute -bottom-40 -left-32 w-[500px] h-[500px] rounded-full bg-gradient-to-tr from-purple-200/40 to-violet-100/20 dark:from-purple-500/10 dark:to-violet-500/5 blur-3xl" />
         <div aria-hidden="true" className="pointer-events-none absolute top-32 left-[8%] float-y opacity-50">
-          <Droplet size={28} className="text-amber-500/60 dark:text-amber-400/40" />
+          <Sparkles size={28} className="text-violet-500/60 dark:text-violet-400/40" />
         </div>
         <div aria-hidden="true" className="pointer-events-none absolute top-44 right-[12%] float-y-slow opacity-60">
-          <Sparkles size={20} className="text-rose-500/50 dark:text-rose-400/40" />
+          <Zap size={20} className="text-purple-500/50 dark:text-purple-400/40" />
         </div>
         <div aria-hidden="true" className="pointer-events-none absolute bottom-24 left-[15%] float-y-slow opacity-50">
-          <Sparkles size={16} className="text-amber-600/50 dark:text-amber-400/30" />
+          <Sparkles size={16} className="text-violet-600/50 dark:text-violet-400/30" />
         </div>
         <div aria-hidden="true" className="pointer-events-none absolute bottom-32 right-[18%] float-y opacity-40">
-          <Droplet size={22} className="text-rose-600/50 dark:text-rose-400/30" />
+          <Zap size={22} className="text-purple-600/50 dark:text-purple-400/30" />
         </div>
 
         <div
@@ -306,242 +271,213 @@ export default function LandingPage({ onAccess }) {
         >
           <FadeIn>
             <div className="flex justify-center mb-8">
-              <VioraLogo size="xl" variant={darkMode ? 'light' : 'default'} />
+              <AdsLabLogo size="xl" variant={darkMode ? 'light' : 'default'} />
             </div>
           </FadeIn>
           <FadeIn delay={120}>
+            <h1 className="text-3xl md:text-5xl font-light text-gray-900 dark:text-gray-100 leading-tight max-w-3xl mx-auto mb-5">
+              Creativos para Meta Ads,
+              <span className="bg-gradient-to-r from-violet-600 to-purple-600 bg-clip-text text-transparent font-semibold"> generados con IA </span>
+              en minutos.
+            </h1>
             <p className="text-base md:text-lg text-gray-600 dark:text-gray-300 max-w-2xl mx-auto leading-relaxed">
-              Laboratorio cosmético argentino. Producimos cremas, sérums, aceites
-              y goteros bajo marca propia, con tiradas chicas y plazos cortos.
+              Scrapeá los ads ganadores de tu competencia, replicá la fórmula validada
+              con tu producto, y exportá una grilla lista para Meta. Sin diseñadores, sin Photoshop.
             </p>
           </FadeIn>
           <FadeIn delay={240}>
             <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-3">
               <MagneticButton
-                href={WHATSAPP_URL}
-                target="_blank"
-                rel="noreferrer"
-                className="group inline-flex items-center gap-2 px-7 py-3.5 rounded-full bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 font-semibold text-sm shadow-lg hover:shadow-2xl"
+                onClick={onAccess}
+                className="group inline-flex items-center gap-2 px-7 py-3.5 rounded-full bg-gradient-to-r from-violet-600 to-purple-600 text-white font-semibold text-sm shadow-lg shadow-violet-500/30 hover:shadow-2xl hover:shadow-violet-500/40 cursor-pointer"
               >
-                <MessageCircle size={16} />
-                Pedir cotización
+                <Sparkles size={16} />
+                Empezar ahora
                 <ArrowRight size={16} className="group-hover:translate-x-0.5 transition-transform" />
               </MagneticButton>
               <MagneticButton
-                href="#productos"
+                href="#features"
                 strength={0.18}
-                className="inline-flex items-center gap-2 px-6 py-3 rounded-full border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 font-semibold text-sm hover:border-gray-900 dark:hover:border-gray-300"
+                className="inline-flex items-center gap-2 px-6 py-3 rounded-full border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 font-semibold text-sm hover:border-violet-600 dark:hover:border-violet-400"
               >
-                Qué fabricamos
+                Cómo funciona
               </MagneticButton>
             </div>
           </FadeIn>
         </div>
       </section>
 
-      {/* Datos clave — números concretos, animados al hacer scroll */}
+      {/* KPIs del producto */}
       <section id="highlights" className="pb-16 px-6 relative z-[2]">
         <div className="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-4">
           <FadeIn delay={0}>
             <TiltCard>
               <DataCard
-                kpi={100}
-                unit="unidades"
-                label="Mínimo de producción"
-                detail="Por producto y por lote. Sirve para validar una marca o repetir clásicos."
+                kpi={70}
+                unit="segundos"
+                label="Por creativo"
+                detail="gpt-image-2 + Sonnet 4.6 Strategist trabajando en paralelo. Listo para Meta."
               />
             </TiltCard>
           </FadeIn>
           <FadeIn delay={120}>
             <TiltCard>
               <DataCard
-                kpi="5–9"
-                unit="días hábiles"
-                label="Despacho"
-                detail="Desde la aprobación de la cotización hasta la entrega del lote."
+                kpi={6}
+                unit="variaciones"
+                label="Por ad ganador"
+                detail="Desde réplica fiel hasta escenas inventadas que mantienen el ángulo validado."
               />
             </TiltCard>
           </FadeIn>
           <FadeIn delay={240}>
             <TiltCard>
               <DataCard
-                kpi={24}
-                kpiPrefix="<"
-                unit="horas"
-                label="Cotización"
-                detail="Te respondemos con costos detallados al día siguiente hábil."
+                kpi="$0.18"
+                unit="USD"
+                label="Costo por imagen"
+                detail="High quality 1024×1024. Pagás solo el modelo, sin markup."
               />
             </TiltCard>
           </FadeIn>
         </div>
       </section>
 
-      {/* Marquee con keywords del laboratorio — barra que se mueve infinita */}
       <Marquee />
 
-
-      {/* Productos — qué fabricamos */}
-      <section id="productos" className="py-20 px-6 border-t border-rose-100/50 dark:border-gray-800/50">
+      {/* Features — qué hace AdsLab */}
+      <section id="features" className="py-20 px-6 border-t border-violet-100/50 dark:border-gray-800/50">
         <div className="max-w-5xl mx-auto">
           <FadeIn>
-            <p className="text-xs tracking-[0.3em] uppercase text-amber-700 dark:text-amber-300 mb-3 text-center">Catálogo</p>
+            <p className="text-xs tracking-[0.3em] uppercase text-violet-700 dark:text-violet-300 mb-3 text-center">Producto</p>
             <h2 className="text-3xl md:text-4xl font-light text-center mb-3 text-gray-900 dark:text-gray-100">
-              Qué fabricamos
+              Todo el workflow del media buyer en una sola app
             </h2>
             <p className="text-center text-gray-600 dark:text-gray-400 max-w-2xl mx-auto mb-12">
-              Trabajamos con cuatro líneas. Cada producto se desarrolla bajo tu fórmula,
-              o adaptamos una de nuestras bases.
+              Inspiración, generación y bandeja de ideas. Conectado directo con Meta Ad Library para que
+              no copies a ciegas — copiá fórmulas que tu competencia YA validó con su plata.
             </p>
           </FadeIn>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <FadeIn delay={0}><TiltCard max={8}><ProductCard
-              icon={Beaker}
-              title="Cremas"
-              description="Faciales y corporales. Hidratantes, nutritivas, anti-edad, exfoliantes."
+            <FadeIn delay={0}><TiltCard max={8}><FeatureCard
+              icon={Search}
+              title="Inspiración"
+              description="Scrapeo de ads activos de tu competencia. Score automático de ganadores por días + variantes."
             /></TiltCard></FadeIn>
-            <FadeIn delay={100}><TiltCard max={8}><ProductCard
-              icon={Pipette}
-              title="Sérums"
-              description="Activos concentrados: vitamina C, ácido hialurónico, niacinamida, retinol."
+            <FadeIn delay={100}><TiltCard max={8}><FeatureCard
+              icon={Wand2}
+              title="Generación"
+              description="Replicá la fórmula del ganador con TU producto y TU marca. Texto en español sin garabatos."
             /></TiltCard></FadeIn>
-            <FadeIn delay={200}><TiltCard max={8}><ProductCard
-              icon={Droplet}
-              title="Aceites"
-              description="Capilares, faciales y corporales. Bases con activos vegetales."
+            <FadeIn delay={200}><TiltCard max={8}><FeatureCard
+              icon={Bot}
+              title="Bandeja de ideas"
+              description="Briefs autogenerados con Claude. Multi-select y bulk para mandar 10 ideas a generar en background."
             /></TiltCard></FadeIn>
-            <FadeIn delay={300}><TiltCard max={8}><ProductCard
-              icon={FlaskConical}
-              title="Goteros"
-              description="Tinturas, esencias y formulaciones líquidas en envase con cuentagotas."
+            <FadeIn delay={300}><TiltCard max={8}><FeatureCard
+              icon={ImageIcon}
+              title="Galería"
+              description="Repositorio de creativos con archive, bulk download ZIP, filtros por estado/variante/origen."
             /></TiltCard></FadeIn>
           </div>
         </div>
       </section>
 
-      {/* Cómo funciona — 4 pasos sobrios */}
-      <section className="py-20 px-6 border-t border-rose-100/50 dark:border-gray-800/50">
+      {/* Cómo funciona — 4 pasos */}
+      <section className="py-20 px-6 border-t border-violet-100/50 dark:border-gray-800/50">
         <div className="max-w-4xl mx-auto">
           <FadeIn>
-            <p className="text-xs tracking-[0.3em] uppercase text-amber-700 dark:text-amber-300 mb-3 text-center">Proceso</p>
+            <p className="text-xs tracking-[0.3em] uppercase text-violet-700 dark:text-violet-300 mb-3 text-center">Proceso</p>
             <h2 className="text-3xl md:text-4xl font-light text-center mb-12 text-gray-900 dark:text-gray-100">
-              Cómo trabajamos
+              De idea a creativo en 4 pasos
             </h2>
           </FadeIn>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             {[
-              {
-                n: '01',
-                icon: MessageCircle,
-                t: 'Contacto',
-                d: 'Nos contás qué producto querés desarrollar y la cantidad estimada.',
-              },
-              {
-                n: '02',
-                icon: FileText,
-                t: 'Cotización',
-                d: 'En menos de 24 hs te enviamos los costos desglosados por contenido, envase y etiqueta.',
-              },
-              {
-                n: '03',
-                icon: FlaskConical,
-                t: 'Producción',
-                d: 'Una vez confirmado el pago, el lote entra al laboratorio.',
-              },
-              {
-                n: '04',
-                icon: Truck,
-                t: 'Despacho',
-                d: 'Entregamos el lote en 5 a 9 días hábiles desde la aprobación.',
-              },
+              { n: '01', icon: Layers,  t: 'Setup', d: 'Cargá tu producto, descripción, research y color de marca. Una sola vez.' },
+              { n: '02', icon: Target,  t: 'Competencia', d: 'Sumá los competidores que querés trackear. AdsLab scrapea sus ads activos.' },
+              { n: '03', icon: Eye,     t: 'Inspiración', d: 'Mirás el Top 10 de ads ganadores rankeados por días corriendo + variantes activas.' },
+              { n: '04', icon: Send,    t: 'Generar', d: 'Click "Crear creativo". Sonnet planifica, gpt-image-2 ejecuta. Listo para Meta.' },
             ].map((step, i) => {
               const Icon = step.icon;
               return (
-              <FadeIn key={step.n} delay={i * 100}>
-                <div className="relative h-full p-5 rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 hover:shadow-lg hover:-translate-y-1 transition-all duration-300">
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-xs font-bold tracking-widest text-amber-600 dark:text-amber-400">{step.n}</span>
-                    <Icon size={16} className="text-gray-400 dark:text-gray-500" />
+                <FadeIn key={step.n} delay={i * 100}>
+                  <div className="relative h-full p-5 rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 hover:shadow-lg hover:-translate-y-1 transition-all duration-300">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-xs font-bold tracking-widest text-violet-600 dark:text-violet-400">{step.n}</span>
+                      <Icon size={16} className="text-gray-400 dark:text-gray-500" />
+                    </div>
+                    <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">{step.t}</h3>
+                    <p className="mt-1.5 text-sm text-gray-600 dark:text-gray-400 leading-relaxed">{step.d}</p>
                   </div>
-                  <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">{step.t}</h3>
-                  <p className="mt-1.5 text-sm text-gray-600 dark:text-gray-400 leading-relaxed">{step.d}</p>
-                </div>
-              </FadeIn>
+                </FadeIn>
               );
             })}
           </div>
         </div>
       </section>
 
-      {/* Detalle técnico — sobrio y honesto */}
-      <section className="py-16 px-6 border-t border-rose-100/50 dark:border-gray-800/50">
+      {/* Lo que recibís — sobrio */}
+      <section className="py-16 px-6 border-t border-violet-100/50 dark:border-gray-800/50">
         <div className="max-w-3xl mx-auto">
           <FadeIn>
             <h2 className="text-2xl md:text-3xl font-light text-gray-900 dark:text-gray-100 mb-6">
-              Lo que vas a recibir
+              Por qué AdsLab y no usar gpt-image-2 a pelo
             </h2>
             <ul className="space-y-3 text-gray-700 dark:text-gray-300">
               <li className="flex items-start gap-3">
-                <span className="mt-1.5 w-1 h-1 rounded-full bg-amber-500 shrink-0" />
-                <span>Cotización detallada con los costos de contenido, envase y etiqueta por separado.</span>
+                <span className="mt-1.5 w-1 h-1 rounded-full bg-violet-500 shrink-0" />
+                <span><strong>Estrategia primero, imagen después</strong> — Sonnet 4.6 actúa como media buyer: lee el ad ganador, extrae ángulo + hook + avatar, ADAPTA badges/claims a tu producto, y planifica N variaciones distintas de la misma fórmula validada.</span>
               </li>
               <li className="flex items-start gap-3">
-                <span className="mt-1.5 w-1 h-1 rounded-full bg-amber-500 shrink-0" />
-                <span>Lote completo terminado: producto envasado, etiquetado y listo para vender.</span>
+                <span className="mt-1.5 w-1 h-1 rounded-full bg-violet-500 shrink-0" />
+                <span><strong>Replica visual + estrategia + texto en simultáneo</strong> — el modelo recibe la imagen del ganador como ref + tu producto + el plan completo. Sale composición fiel con tu producto al medio y texto en español rioplatense.</span>
               </li>
               <li className="flex items-start gap-3">
-                <span className="mt-1.5 w-1 h-1 rounded-full bg-amber-500 shrink-0" />
-                <span>Seguimiento del estado de la orden por WhatsApp en cada etapa.</span>
+                <span className="mt-1.5 w-1 h-1 rounded-full bg-violet-500 shrink-0" />
+                <span><strong>Galería persistida + multi-PC</strong> — todo se guarda en Supabase. Entrá desde otra PC y seguís donde dejaste.</span>
               </li>
               <li className="flex items-start gap-3">
-                <span className="mt-1.5 w-1 h-1 rounded-full bg-amber-500 shrink-0" />
-                <span>Posibilidad de adaptar fórmulas existentes o trabajar con la tuya propia.</span>
+                <span className="mt-1.5 w-1 h-1 rounded-full bg-violet-500 shrink-0" />
+                <span><strong>Bulk + background</strong> — mandás 10 ideas de la Bandeja, te vas a hacer otra cosa y volvés con todo listo en la galería. Concurrency tuneada para no congestionar tu cuenta de OpenAI.</span>
               </li>
             </ul>
           </FadeIn>
         </div>
       </section>
 
-      {/* CTA final — directo */}
-      <section className="py-20 px-6 border-t border-rose-100/50 dark:border-gray-800/50">
+      {/* CTA final */}
+      <section className="py-20 px-6 border-t border-violet-100/50 dark:border-gray-800/50">
         <FadeIn>
           <div className="max-w-2xl mx-auto text-center">
             <h2 className="text-2xl md:text-3xl font-light text-gray-900 dark:text-gray-100 leading-tight">
-              ¿Tenés un producto en mente?
+              Probalo con tu próxima campaña
             </h2>
             <p className="mt-3 text-gray-600 dark:text-gray-400">
-              Escribinos al WhatsApp con el detalle (qué producto, cantidad estimada, envase) y te respondemos con la cotización en menos de 24 hs hábiles.
+              Creá tu cuenta, cargá tu primer producto y generá la primera grilla en menos de 10 minutos.
+              Pagás solo lo que consumís en OpenAI / Anthropic / Apify.
             </p>
             <MagneticButton
-              href={WHATSAPP_URL}
-              target="_blank"
-              rel="noreferrer"
-              className="mt-8 inline-flex items-center gap-2 px-7 py-3.5 rounded-full bg-gradient-to-r from-amber-600 to-amber-700 text-white font-semibold text-sm shadow-lg hover:shadow-2xl"
+              onClick={onAccess}
+              className="mt-8 inline-flex items-center gap-2 px-7 py-3.5 rounded-full bg-gradient-to-r from-violet-600 to-purple-600 text-white font-semibold text-sm shadow-lg shadow-violet-500/30 hover:shadow-2xl cursor-pointer"
             >
-              <MessageCircle size={16} />
-              {WHATSAPP_DISPLAY}
+              <Sparkles size={16} />
+              Crear cuenta
+              <ArrowRight size={16} />
             </MagneticButton>
           </div>
         </FadeIn>
       </section>
 
       {/* Footer */}
-      <footer className="py-8 px-6 border-t border-rose-100/50 dark:border-gray-800/50">
+      <footer className="py-8 px-6 border-t border-violet-100/50 dark:border-gray-800/50">
         <div className="max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-gray-500 dark:text-gray-400">
           <div className="flex items-center gap-2">
-            <VioraMark size={28} />
-            <span className="font-semibold text-gray-700 dark:text-gray-200">Laboratorio Viora</span>
+            <AdsLabMark size={28} />
+            <span className="font-semibold text-gray-700 dark:text-gray-200">AdsLab</span>
           </div>
           <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-6">
-            <a
-              href={WHATSAPP_URL}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1.5 hover:text-amber-700 dark:hover:text-amber-300 transition"
-            >
-              <MessageCircle size={14} />
-              {WHATSAPP_DISPLAY}
-            </a>
-            <span className="text-xs">© {new Date().getFullYear()} Laboratorio Viora</span>
+            <span className="text-xs">© {new Date().getFullYear()} AdsLab — Tool para Meta Ads</span>
           </div>
         </div>
       </footer>
@@ -549,7 +485,3 @@ export default function LandingPage({ onAccess }) {
     </div>
   );
 }
-
-// Card de KPI: número grande + unidad chica + label + detalle.
-// Si kpi es un número, se anima de 0 al valor cuando entra al viewport.
-// Si es string (ej. "5–9"), se muestra tal cual.

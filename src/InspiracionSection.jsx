@@ -872,54 +872,21 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         />
       )}
 
-      {/* Header con breadcrumb — se oculta cuando estamos embebidos. */}
-      {!embedded ? (
-        <div className="flex items-center gap-3">
+      {/* Header thin (Linear-style 36px) — solo cuando NO está embebido.
+          Single line breadcrumb back. Las acciones primarias (Galería, +Marca)
+          viven en la toolbar de abajo para evitar duplicar UI. */}
+      {!embedded && (
+        <div className="flex items-center gap-2 text-xs">
           <button
             onClick={() => setActiveProductoId(null)}
-            className="p-2 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 transition shrink-0"
+            className="inline-flex items-center gap-1 px-2 py-1 text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 transition"
             title="Volver al selector"
           >
-            <ChevronRight size={16} className="rotate-180" />
+            <ChevronRight size={12} className="rotate-180" />
+            <span className="font-semibold">Inspiración</span>
           </button>
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-brand-500 flex items-center justify-center text-white shadow-sm shrink-0">
-            <Sparkles size={20} />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-[10px] text-gray-500 dark:text-gray-400">
-              <button onClick={() => setActiveProductoId(null)} className="hover:text-amber-500 transition">Inspiración</button> / {producto.nombre}
-            </p>
-            <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100 truncate">{producto.nombre}</h2>
-          </div>
-          <button
-            onClick={() => setShowGaleria(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-brand-700 dark:text-brand-200 bg-brand-50 dark:bg-brand-900/30 border border-brand-200 dark:border-brand-800 rounded-lg hover:bg-brand-100 dark:hover:bg-brand-900/50 transition"
-            title="Ver todos los creativos generados"
-          >
-            <Images size={12} /> Galería
-          </button>
-          <button
-            onClick={() => setShowAddForm(s => !s)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-amber-500 to-brand-500 rounded-lg hover:from-amber-600 hover:to-brand-600 shadow-sm transition"
-          >
-            <Plus size={12} /> Agregar marca
-          </button>
-        </div>
-      ) : (
-        <div className="flex justify-end gap-2">
-          <button
-            onClick={() => setShowGaleria(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-brand-700 dark:text-brand-200 bg-brand-50 dark:bg-brand-900/30 border border-brand-200 dark:border-brand-800 rounded-lg hover:bg-brand-100 dark:hover:bg-brand-900/50 transition"
-            title="Ver todos los creativos generados"
-          >
-            <Images size={12} /> Galería
-          </button>
-          <button
-            onClick={() => setShowAddForm(s => !s)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-amber-500 to-brand-500 rounded-lg hover:from-amber-600 hover:to-brand-600 shadow-sm transition"
-          >
-            <Plus size={12} /> Agregar marca
-          </button>
+          <span className="text-gray-300 dark:text-gray-600">/</span>
+          <span className="font-bold text-gray-900 dark:text-gray-100 truncate">{producto.nombre}</span>
         </div>
       )}
 
@@ -1066,37 +1033,54 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
               />
             )}
 
-            {/* Barra de filtros + ordenamiento */}
-            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-3 flex flex-wrap gap-2 items-center">
-              <div className="relative flex-1 min-w-[180px]">
+            {/* Toolbar consolidada (Stripe/Linear) — search + filtros + counter + acciones
+                en una sola línea. Reemplaza la antigua barra de filtros + los botones
+                Galería/Agregar marca del header. Densidad alta. */}
+            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-2 flex flex-wrap gap-2 items-center">
+              <div className="relative flex-1 min-w-[200px]">
                 <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
                   type="text" value={query} onChange={e => setQuery(e.target.value)}
-                  placeholder="Buscar por nombre, URL, notas…"
-                  className="w-full pl-7 pr-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  placeholder="Buscar marca, URL, notas…"
+                  className="w-full pl-7 pr-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded focus:outline-none focus:ring-1 focus:ring-amber-500"
                 />
               </div>
               <select value={tipoFiltro} onChange={e => setTipoFiltro(e.target.value)}
-                className="px-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md">
-                <option value="all">Tipo: todos</option>
-                <option value="competidor">Solo competidores</option>
-                <option value="custom">Solo custom</option>
+                className="px-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded">
+                <option value="all">Todos</option>
+                <option value="competidor">Competidores</option>
+                <option value="custom">Custom</option>
               </select>
               <select value={estadoFiltro} onChange={e => setEstadoFiltro(e.target.value)}
-                className="px-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md">
-                <option value="all">Estado: todos</option>
-                <option value="con-ads">Con ads cargados</option>
+                className="px-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded">
+                <option value="all">Todos</option>
+                <option value="con-ads">Con ads</option>
                 <option value="sin-scrapear">Sin scrapear</option>
               </select>
               <select value={orderBy} onChange={e => setOrderBy(e.target.value)}
-                className="px-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md">
-                <option value="reciente">Ordenar: más reciente</option>
-                <option value="ads-count">Ordenar: más ads</option>
-                <option value="nombre">Ordenar: nombre</option>
+                className="px-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded">
+                <option value="reciente">Reciente</option>
+                <option value="ads-count">Más ads</option>
+                <option value="nombre">Nombre</option>
               </select>
-              <span className="text-[10px] text-gray-500 dark:text-gray-400 ml-auto">
-                {unif.length} marca{unif.length !== 1 ? 's' : ''}
+              <span className="text-[10px] tabular-nums text-gray-500 dark:text-gray-400 px-1">
+                {unif.length}
               </span>
+              {/* Separador visual + acciones primarias */}
+              <div className="w-px h-5 bg-gray-200 dark:bg-gray-700 mx-1" aria-hidden />
+              <button
+                onClick={() => setShowGaleria(true)}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-brand-700 dark:text-brand-200 bg-brand-50 dark:bg-brand-900/30 border border-brand-200 dark:border-brand-800 rounded hover:bg-brand-100 dark:hover:bg-brand-900/50 transition"
+                title="Ver creativos generados"
+              >
+                <Images size={11} /> Galería
+              </button>
+              <button
+                onClick={() => setShowAddForm(s => !s)}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-amber-500 to-brand-500 rounded hover:from-amber-600 hover:to-brand-600 shadow-sm transition"
+              >
+                <Plus size={11} /> Marca
+              </button>
             </div>
 
             {/* Grilla unificada */}
@@ -1139,9 +1123,9 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
 function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, seleccionados, progressById, onScrape, onAdapt, onCrearReferencial, onToggleSelect, onRemove }) {
   const isCompetidor = !!brand.isCompetidor;
   return (
-    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 shadow-sm">
-      <div className="flex items-start gap-3">
-        <div className={`w-12 h-12 rounded-lg flex items-center justify-center text-white font-bold text-lg shrink-0 ${
+    <div className="group bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 hover:border-amber-300 dark:hover:border-amber-700 transition">
+      <div className="flex items-center gap-2.5">
+        <div className={`w-9 h-9 rounded-md flex items-center justify-center text-white font-bold text-sm shrink-0 ${
           isCompetidor
             ? 'bg-gradient-to-br from-brand-600 to-brand-500'
             : 'bg-gradient-to-br from-amber-400 to-brand-400'
@@ -1149,66 +1133,57 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
           {brand.nombre?.charAt(0)?.toUpperCase() || '?'}
         </div>
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 min-w-0">
             <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{brand.nombre}</p>
             {isCompetidor && (
-              <span className="px-1.5 py-0.5 text-[9px] font-bold bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 rounded">
-                competidor
+              <span className="px-1 py-px text-[8px] font-bold bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 rounded uppercase tracking-wider shrink-0">
+                comp
               </span>
             )}
           </div>
-          {brand.landingUrl && (
-            <a href={brand.landingUrl} target="_blank" rel="noreferrer"
-              className="inline-flex items-center gap-1 text-[10px] text-brand-600 hover:underline truncate max-w-full">
-              <Link2 size={10} /> {brand.landingUrl.replace(/^https?:\/\//, '').replace(/^www\./, '')}
-            </a>
-          )}
-          {brand.fbPageUrl && (
-            <p className="text-[10px] text-gray-500 dark:text-gray-400 truncate">FB: {brand.fbPageUrl.replace(/^https?:\/\//, '').replace(/^www\.facebook\.com\//, '@')}</p>
-          )}
-          {brand.notas && (
-            <p className="text-[11px] text-gray-700 dark:text-gray-300 italic mt-1 line-clamp-2">"{brand.notas}"</p>
-          )}
-          <div className="flex items-center gap-2 mt-2 text-[10px] text-gray-500 dark:text-gray-400">
-            {brand.lastScraped ? (
-              <span>Última corrida: {new Date(brand.lastScraped).toLocaleDateString('es-AR')}</span>
-            ) : (
-              <span className="italic">Aún sin scrapear</span>
+          <div className="flex items-center gap-1.5 text-[10px] text-gray-500 dark:text-gray-400 truncate">
+            {brand.landingUrl && (
+              <a href={brand.landingUrl} target="_blank" rel="noreferrer"
+                className="inline-flex items-center gap-0.5 text-brand-600 hover:underline truncate">
+                <Link2 size={9} /> {brand.landingUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0]}
+              </a>
             )}
-            {brand.seenAdIds?.length > 0 && (
-              <span>· {brand.seenAdIds.length} ads vistos</span>
+            {brand.lastScraped && (
+              <span className="shrink-0">· {new Date(brand.lastScraped).toLocaleDateString('es-AR')}</span>
             )}
+            {!brand.lastScraped && <span className="italic shrink-0">· sin scrapear</span>}
           </div>
         </div>
-        {onRemove && (
-          <button onClick={onRemove}
-            className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition shrink-0"
-            title="Eliminar marca">
-            <Trash2 size={14} />
-          </button>
-        )}
-      </div>
-
-      {/* Botón scrapear — ahora aparece en TODAS las cards (competidores y
-          custom). Para competidores re-scrapea contra producto.competidores;
-          para custom contra brands locales. */}
-      {onScrape && (
-        <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700 flex items-center gap-2">
+        {/* Botón scrape inline en el header — más compacto que antes (estaba en una fila aparte) */}
+        {onScrape && (
           <button
             onClick={onScrape}
             disabled={isScraping}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-amber-500 to-brand-500 rounded-md hover:from-amber-600 hover:to-brand-600 transition disabled:opacity-50 shadow-sm"
+            className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold text-white bg-gradient-to-br from-amber-500 to-brand-500 rounded hover:from-amber-600 hover:to-brand-600 transition disabled:opacity-50 shrink-0"
+            title={brand.lastScraped ? 'Volver a scrapear' : 'Scrapear ads'}
           >
             {isScraping
-              ? <><Loader2 size={12} className="animate-spin" /> Scrapeando ads de Meta…</>
-              : <><Download size={12} /> {brand.lastScraped ? 'Volver a scrapear ads' : 'Scrapear ads ahora'}</>
+              ? <><Loader2 size={10} className="animate-spin" /> Scrapeando…</>
+              : <><Download size={10} /> {brand.lastScraped ? 'Re-scrape' : 'Scrape'}</>
             }
           </button>
-          {ads.length > 0 && (
-            <span className="text-[10px] text-gray-500 dark:text-gray-400">
-              {ads.length} estáticos cargados
-            </span>
-          )}
+        )}
+        {onRemove && (
+          <button onClick={onRemove}
+            className="p-1 text-gray-300 opacity-0 group-hover:opacity-100 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition shrink-0"
+            title="Eliminar marca">
+            <Trash2 size={12} />
+          </button>
+        )}
+      </div>
+      {/* Notas — solo si hay, en línea aparte chiquita */}
+      {brand.notas && (
+        <p className="text-[10px] text-gray-600 dark:text-gray-400 italic mt-1.5 line-clamp-1">"{brand.notas}"</p>
+      )}
+      {/* Contador de ads cargados — solo si hay ads */}
+      {ads.length > 0 && (
+        <div className="mt-1.5 text-[10px] text-gray-500 dark:text-gray-400">
+          {ads.length} estáticos cargados
         </div>
       )}
 

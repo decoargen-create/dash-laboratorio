@@ -8,6 +8,9 @@
 -- =========================================================================
 -- PROFILES — extiende auth.users con metadata propia
 -- =========================================================================
+-- IMPORTANTE: si public.profiles ya existía de un proyecto anterior, el
+-- `create table if not exists` queda en no-op y la columna `role` NO se
+-- agrega. Para forzar la columna, correr 0002_profiles_add_role.sql.
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   email text,

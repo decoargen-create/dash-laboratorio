@@ -25,9 +25,15 @@ import React, { useState, useEffect } from 'react';
 import {
   Sparkles, Package, ChevronRight, Plus, Trash2, Link2, X,
   Loader2, Download, Image as ImageIcon, ExternalLink, Wand2, Search,
+  Images, Check, AlertCircle,
 } from 'lucide-react';
 import { logCostsFromResponse } from './costsStore.js';
 import { addGeneratedIdeas } from './bandejaStore.js';
+import { getProductoImagen, getAccentColor } from './productoImagen.js';
+import { saveReferencial } from './galeriaReferenciales.js';
+import GaleriaReferencialesModal from './GaleriaReferencialesModal.jsx';
+
+const MAX_SELECCIONADOS = 5;
 
 const PRODUCTOS_KEY = 'viora-marketing-productos-v1';
 const ACTIVE_KEY = 'viora-marketing-inspiracion-active-product';
@@ -74,6 +80,10 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   const [adsByBrand, setAdsByBrand] = useState({});
   // ad.id → bool, true mientras se adapta al producto (loading).
   const [adaptingAdIds, setAdaptingAdIds] = useState(new Set());
+  // Multi-select para generar creativos referenciales en bulk (max 5).
+  const [seleccionados, setSeleccionados] = useState(new Set());
+  const [creandoAdIds, setCreandoAdIds] = useState(new Set());
+  const [showGaleria, setShowGaleria] = useState(false);
 
   // Filtros + ordenamiento (vistas)
   const [query, setQuery] = useState('');
@@ -186,6 +196,116 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         const next = new Set(prev); next.delete(ad.id); return next;
       });
     }
+  };
+
+  // Toggle un ad en la selección — cap MAX_SELECCIONADOS.
+  const toggleSeleccion = (adId) => {
+    setSeleccionados(prev => {
+      const next = new Set(prev);
+      if (next.has(adId)) {
+        next.delete(adId);
+      } else {
+        if (next.size >= MAX_SELECCIONADOS) {
+          addToast?.({ type: 'info', message: `Máximo ${MAX_SELECCIONADOS} ads por tanda. Deseleccioná alguno.` });
+          return prev;
+        }
+        next.add(adId);
+      }
+      return next;
+    });
+  };
+
+  const limpiarSeleccion = () => setSeleccionados(new Set());
+
+  // Genera 2 variaciones de creativo referencial para UN ad de inspiración.
+  // Lo usan el botón individual y el bulk. Guarda en la galería al toque.
+  const crearReferencialDeAd = async (brandNombre, ad) => {
+    if (!producto) return;
+    const prodImg = getProductoImagen(producto.id);
+    if (!prodImg) {
+      addToast?.({ type: 'error', message: 'Cargá la foto del producto en Setup primero.' });
+      return;
+    }
+    setCreandoAdIds(prev => new Set(prev).add(ad.id));
+    try {
+      const resp = await fetch('/api/marketing/crear-creativo-referencial', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          producto: {
+            nombre: producto.nombre,
+            descripcion: producto.descripcion,
+            research: producto.docs?.research,
+          },
+          inspiracion: {
+            brandNombre,
+            body: ad.body, headline: ad.headline,
+            formato: ad.formato,
+            analysis: ad.analysis || null,
+            visual: ad.visual || null,
+          },
+          productoImagen: prodImg,
+          accentColor: getAccentColor(producto.id) || '',
+          quality: 'medium',
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      logCostsFromResponse(data, `crear-creativo-referencial · ${brandNombre}`);
+
+      // Guardar las 2 variaciones en la galería.
+      const ahora = Date.now();
+      const imagenes = data.imagenes || [];
+      for (let i = 0; i < imagenes.length; i++) {
+        await saveReferencial({
+          id: `ref_${ahora}_${ad.id}_${i}`,
+          productoId: String(producto.id),
+          sourceAdId: ad.id,
+          sourceBrand: brandNombre,
+          imageBase64: imagenes[i],
+          mimeType: data.mimeType || 'image/png',
+          prompt: data.prompt,
+          model: data.model,
+          size: data.size,
+          createdAt: new Date(ahora + i).toISOString(),
+        });
+      }
+      addToast?.({ type: 'success', message: `${imagenes.length} variaciones generadas y guardadas en galería` });
+    } catch (err) {
+      addToast?.({ type: 'error', message: `No pude generar: ${err.message}` });
+    } finally {
+      setCreandoAdIds(prev => {
+        const next = new Set(prev); next.delete(ad.id); return next;
+      });
+    }
+  };
+
+  // Bulk: itera los seleccionados en SECUENCIAL (gpt-image-2 toma 30-60s
+  // por llamada y queremos evitar rate limits).
+  const handleBulkCrear = async () => {
+    if (seleccionados.size === 0) return;
+    if (!producto) return;
+    const prodImg = getProductoImagen(producto.id);
+    if (!prodImg) {
+      addToast?.({ type: 'error', message: 'Cargá la foto del producto en Setup primero.' });
+      return;
+    }
+    if (!window.confirm(`Generar 2 variaciones por cada uno de los ${seleccionados.size} ads seleccionados (${seleccionados.size * 2} imágenes en total, ~$${(seleccionados.size * 2 * 0.07).toFixed(2)}). ¿Seguir?`)) return;
+
+    // Buscar los ad objects desde adsByBrand.
+    const adsAGenerar = [];
+    for (const [brandId, lista] of Object.entries(adsByBrand)) {
+      const b = brands.find(x => x.id === brandId);
+      const brandNombre = b?.nombre || 'Inspiración';
+      for (const ad of (lista || [])) {
+        if (seleccionados.has(ad.id)) adsAGenerar.push({ brandNombre, ad });
+      }
+    }
+
+    for (const { brandNombre, ad } of adsAGenerar) {
+      await crearReferencialDeAd(brandNombre, ad);
+    }
+    limpiarSeleccion();
+    addToast?.({ type: 'success', message: 'Generación bulk completa — revisá la galería' });
   };
 
   // Scrapea ads activos de una marca via Apify. Si tiene fbPageUrl, prefiere
@@ -327,6 +447,45 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   // ====================================================================
   return (
     <div className="max-w-5xl mx-auto space-y-5">
+      {/* Botón flotante de Galería de referenciales — siempre visible para
+          acceso rápido a los creativos generados. */}
+      {producto && (
+        <button
+          onClick={() => setShowGaleria(true)}
+          className="fixed top-20 right-6 z-30 inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-brand-600 to-brand-500 rounded-lg shadow-lg hover:from-brand-700 hover:to-brand-600 transition"
+          title="Ver todos los creativos referenciales generados"
+        >
+          <Images size={14} /> Galería
+        </button>
+      )}
+
+      {/* Barra flotante cuando hay ads seleccionados — bulk action. */}
+      {seleccionados.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-white dark:bg-gray-800 border border-brand-300 dark:border-brand-700 rounded-xl shadow-2xl px-4 py-3 flex items-center gap-3">
+          <div className="text-xs">
+            <span className="font-bold text-gray-900 dark:text-gray-100">{seleccionados.size}</span>
+            <span className="text-gray-500 dark:text-gray-400"> / {MAX_SELECCIONADOS} ads seleccionados</span>
+          </div>
+          <button onClick={limpiarSeleccion}
+            className="text-[11px] text-gray-500 hover:text-red-500 transition">
+            Limpiar
+          </button>
+          <button onClick={handleBulkCrear}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-brand-600 to-brand-500 rounded-lg hover:from-brand-700 hover:to-brand-600 transition">
+            <Sparkles size={13} /> Generar {seleccionados.size * 2} creativos
+          </button>
+        </div>
+      )}
+
+      {/* Modal de galería */}
+      {showGaleria && producto && (
+        <GaleriaReferencialesModal
+          productoId={producto.id}
+          productoNombre={producto.nombre}
+          onClose={() => setShowGaleria(false)}
+        />
+      )}
+
       {/* Header con breadcrumb — se oculta cuando estamos embebidos. */}
       {!embedded ? (
         <div className="flex items-center gap-3">
@@ -522,8 +681,12 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                     ads={b.__ads}
                     isScraping={!b.isCompetidor && scrapingBrandId === b.id}
                     adaptingAdIds={adaptingAdIds}
+                    creandoAdIds={creandoAdIds}
+                    seleccionados={seleccionados}
                     onScrape={b.isCompetidor ? null : () => handleScrapeBrand(b)}
                     onAdapt={(ad) => handleAdapt(b.nombre, ad)}
+                    onCrearReferencial={(ad) => crearReferencialDeAd(b.nombre, ad)}
+                    onToggleSelect={(adId) => toggleSeleccion(adId)}
                     onRemove={b.isCompetidor ? null : () => handleRemoveBrand(b.id)}
                   />
                 ))}
@@ -536,7 +699,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   );
 }
 
-function BrandCard({ brand, ads, isScraping, adaptingAdIds, onScrape, onAdapt, onRemove }) {
+function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, seleccionados, onScrape, onAdapt, onCrearReferencial, onToggleSelect, onRemove }) {
   const isCompetidor = !!brand.isCompetidor;
   return (
     <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 shadow-sm">
@@ -618,12 +781,23 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, onScrape, onAdapt, o
       )}
 
       {/* Grilla de estáticos scrapeados */}
-      {ads.length > 0 && <BrandAdsGrid ads={ads} brandNombre={brand.nombre} adaptingAdIds={adaptingAdIds} onAdapt={onAdapt} />}
+      {ads.length > 0 && (
+        <BrandAdsGrid
+          ads={ads}
+          brandNombre={brand.nombre}
+          adaptingAdIds={adaptingAdIds}
+          creandoAdIds={creandoAdIds}
+          seleccionados={seleccionados}
+          onAdapt={onAdapt}
+          onCrearReferencial={onCrearReferencial}
+          onToggleSelect={onToggleSelect}
+        />
+      )}
     </div>
   );
 }
 
-function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, onAdapt }) {
+function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccionados, onAdapt, onCrearReferencial, onToggleSelect }) {
   const [showRepeated, setShowRepeated] = useState(false);
   const fresh = ads.filter(a => a.isFresh !== false);
   const repeated = ads.filter(a => a.isFresh === false);
@@ -637,7 +811,20 @@ function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, onAdapt }) {
             ✨ Nuevos del día <span className="text-gray-400 font-normal">({fresh.length})</span>
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            {fresh.slice(0, 30).map(ad => <AdThumb key={ad.id} ad={ad} fresh adapting={adaptingAdIds?.has(ad.id)} onAdapt={onAdapt ? () => onAdapt(ad) : null} />)}
+            {fresh.slice(0, 30).map(ad => (
+              <AdThumb
+                key={ad.id}
+                ad={ad}
+                brandNombre={brandNombre}
+                fresh
+                adapting={adaptingAdIds?.has(ad.id)}
+                creando={creandoAdIds?.has(ad.id)}
+                selected={seleccionados?.has(ad.id)}
+                onAdapt={onAdapt ? () => onAdapt(ad) : null}
+                onCrearReferencial={onCrearReferencial ? () => onCrearReferencial(ad) : null}
+                onToggleSelect={onToggleSelect ? () => onToggleSelect(ad.id) : null}
+              />
+            ))}
             {fresh.length > 30 && (
               <div className="aspect-square rounded-md flex items-center justify-center bg-gray-50 dark:bg-gray-900 border-2 border-dashed border-gray-200 dark:border-gray-700 text-[10px] text-gray-500 dark:text-gray-400 italic">
                 +{fresh.length - 30} más
@@ -663,7 +850,19 @@ function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, onAdapt }) {
           </button>
           {showRepeated && (
             <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2 opacity-60">
-              {repeated.slice(0, 30).map(ad => <AdThumb key={ad.id} ad={ad} adapting={adaptingAdIds?.has(ad.id)} onAdapt={onAdapt ? () => onAdapt(ad) : null} />)}
+              {repeated.slice(0, 30).map(ad => (
+                <AdThumb
+                  key={ad.id}
+                  ad={ad}
+                  brandNombre={brandNombre}
+                  adapting={adaptingAdIds?.has(ad.id)}
+                  creando={creandoAdIds?.has(ad.id)}
+                  selected={seleccionados?.has(ad.id)}
+                  onAdapt={onAdapt ? () => onAdapt(ad) : null}
+                  onCrearReferencial={onCrearReferencial ? () => onCrearReferencial(ad) : null}
+                  onToggleSelect={onToggleSelect ? () => onToggleSelect(ad.id) : null}
+                />
+              ))}
               {repeated.length > 30 && (
                 <div className="aspect-square rounded-md flex items-center justify-center bg-gray-50 dark:bg-gray-900 border-2 border-dashed border-gray-200 dark:border-gray-700 text-[10px] text-gray-400 italic">
                   +{repeated.length - 30}
@@ -677,15 +876,17 @@ function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, onAdapt }) {
   );
 }
 
-function AdThumb({ ad, fresh = false, adapting = false, onAdapt }) {
+function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = false, selected = false, onAdapt, onCrearReferencial, onToggleSelect }) {
   const thumb = ad.imageUrls?.[0];
   const fbUrl = ad.snapshotUrl;
   return (
     <div
-      className={`group relative aspect-square rounded-md overflow-hidden bg-gray-100 dark:bg-gray-900 border transition ${
-        fresh
-          ? 'border-emerald-300 dark:border-emerald-700 hover:border-emerald-500'
-          : 'border-gray-200 dark:border-gray-700 hover:border-amber-400'
+      className={`group relative aspect-square rounded-md overflow-hidden bg-gray-100 dark:bg-gray-900 border-2 transition ${
+        selected
+          ? 'border-brand-500 ring-2 ring-brand-300 dark:ring-brand-700'
+          : fresh
+            ? 'border-emerald-300 dark:border-emerald-700 hover:border-emerald-500'
+            : 'border-gray-200 dark:border-gray-700 hover:border-amber-400'
       }`}
       title={ad.body?.slice(0, 200) || ad.headline || ''}
     >
@@ -697,16 +898,46 @@ function AdThumb({ ad, fresh = false, adapting = false, onAdapt }) {
           <ImageIcon size={20} className="text-gray-300" />
         </div>
       )}
+
+      {/* Checkbox de selección — siempre visible si está seleccionado, sino on-hover. */}
+      {onToggleSelect && (
+        <button
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggleSelect(); }}
+          className={`absolute top-1 left-1 w-5 h-5 rounded flex items-center justify-center transition ${
+            selected
+              ? 'bg-brand-500 text-white opacity-100'
+              : 'bg-white/90 dark:bg-gray-800/90 border border-gray-300 dark:border-gray-600 text-transparent opacity-0 group-hover:opacity-100 hover:border-brand-500'
+          }`}
+          title={selected ? 'Deseleccionar' : 'Seleccionar para bulk'}
+        >
+          {selected && <Check size={12} />}
+        </button>
+      )}
+
       <div className="absolute inset-0 bg-black/0 group-hover:bg-black/60 transition flex flex-col items-stretch justify-end gap-1 p-1.5">
+        {onCrearReferencial && (
+          <button
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onCrearReferencial(); }}
+            disabled={creando}
+            className="opacity-0 group-hover:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded disabled:opacity-70"
+            title="Genera 2 variaciones con tu producto real"
+          >
+            {creando
+              ? <><Loader2 size={10} className="animate-spin" /> Generando…</>
+              : <><Sparkles size={10} /> Crear creativo</>
+            }
+          </button>
+        )}
         {onAdapt && (
           <button
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); onAdapt(); }}
             disabled={adapting}
-            className="opacity-0 group-hover:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-bold text-white bg-amber-500 hover:bg-amber-600 rounded disabled:opacity-70"
+            className="opacity-0 group-hover:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-amber-500/90 hover:bg-amber-600 rounded disabled:opacity-70"
+            title="Genera ideas (texto) en la Bandeja"
           >
             {adapting
               ? <><Loader2 size={10} className="animate-spin" /> Adaptando…</>
-              : <><Wand2 size={10} /> Adaptar al producto</>
+              : <><Wand2 size={10} /> + ideas en Bandeja</>
             }
           </button>
         )}

@@ -31,6 +31,7 @@ import DocumentacionTab from './DocumentacionTab.jsx';
 import CopilotoTab from './CopilotoTab.jsx';
 import DashboardTab from './DashboardTab.jsx';
 import GeneradorRapido from './GeneradorRapido.jsx';
+import ProductoImagenUploader from './ProductoImagenUploader.jsx';
 import { usePipelineRun } from './PipelineRunContext.jsx';
 
 // Etiquetas cortas de la etapa de awareness del prospecto — para el chip
@@ -2106,6 +2107,10 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 </div>
               );
             })()}
+
+            {/* Foto del producto para usar como referencia en gpt-image-2
+                cuando se generan creativos referenciales desde Inspiración. */}
+            <ProductoImagenUploader productoId={producto.id} addToast={addToast} />
 
             {/* Activo visual de marca — elemento icónico reutilizable que se
                 propaga a todos los prompts de imagen. */}

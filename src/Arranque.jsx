@@ -753,6 +753,29 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
   // Config del generador de ideas (límite diario + mix de formato)
   const [genConfig, setGenConfig] = useState(() => ({ ...DEFAULT_GEN_CONFIG, ...loadJSON(GEN_CONFIG_KEY, {}) }));
+  // Listeners de los eventos custom usados para nav cross-componente:
+  //   - viora:product-select → click en sidebar nav (App.jsx) cambia producto
+  //   - viora:product-tab    → "Marca (en Competencia)" (InspiracionSection)
+  //                            cambia el tab activo del workspace
+  // Se perdieron en un merge conflict anterior. Sin esto, los botones que
+  // dispatchean estos eventos no hacen nada.
+  useEffect(() => {
+    const onSelect = (e) => {
+      const id = e?.detail?.productoId;
+      if (id != null) setActiveProductoId(String(id));
+    };
+    const onTab = (e) => {
+      const tab = e?.detail?.tab;
+      if (tab) setProductoTab(tab);
+    };
+    window.addEventListener('viora:product-select', onSelect);
+    window.addEventListener('viora:product-tab', onTab);
+    return () => {
+      window.removeEventListener('viora:product-select', onSelect);
+      window.removeEventListener('viora:product-tab', onTab);
+    };
+  }, []);
+
   const [showGenConfig, setShowGenConfig] = useState(false);
   // Inicializamos el contador de ideas del día YA filtrado por el producto
   // activo (si lo hay). Antes lo inicializábamos global y el effect lo

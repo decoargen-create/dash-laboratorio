@@ -32,6 +32,7 @@ import CopilotoTab from './CopilotoTab.jsx';
 import DashboardTab from './DashboardTab.jsx';
 import GeneradorRapido from './GeneradorRapido.jsx';
 import ProductoImagenUploader from './ProductoImagenUploader.jsx';
+import GaleriaReferencialesModal from './GaleriaReferencialesModal.jsx';
 import { usePipelineRun } from './PipelineRunContext.jsx';
 
 // Etiquetas cortas de la etapa de awareness del prospecto — para el chip
@@ -2013,6 +2014,14 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         </div>
       )}
 
+      {productoTab === 'galeria' && (
+        <GaleriaReferencialesModal
+          productoId={producto.id}
+          productoNombre={producto.nombre}
+          embedded
+        />
+      )}
+
       {productoTab === 'creativos' && (
         <CreativosTab
           producto={producto}
@@ -2849,6 +2858,7 @@ function ProductTabs({ activeTab, onChange }) {
         { id: 'bandeja', label: 'Bandeja', emoji: '📥' },
         { id: 'inspiracion', label: 'Inspiración', emoji: '✨' },
         { id: 'creativos', label: 'Creativos', emoji: '🎨' },
+        { id: 'galeria', label: 'Galería', emoji: '🖼️' },
         { id: 'copiloto', label: 'Copiloto', emoji: '🤖' },
       ],
     },

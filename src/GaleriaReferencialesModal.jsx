@@ -70,7 +70,11 @@ function buildFileName(it, productoNombre) {
   return `${prod} ${dateStr} ${formato} ${brand}${rebrand}${variantSuffix}.png`;
 }
 
-export default function GaleriaReferencialesModal({ productoId, productoNombre, onClose }) {
+// Props:
+//   embedded=true → renderiza como sección full-width sin backdrop ni modal
+//   chrome. Usado cuando vive dentro de un tab del workspace.
+//   embedded=false (default) → modal sobre backdrop con onClose.
+export default function GaleriaReferencialesModal({ productoId, productoNombre, onClose, embedded = false }) {
   const [items, setItems] = useState([]);
   const [selected, setSelected] = useState(null);
   const [cargando, setCargando] = useState(true);
@@ -226,15 +230,29 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
   const visibleItems = items.filter(it => !soloNoDescargados || !it.descargada);
   const yaDescargadosCount = items.filter(it => it.descargada).length;
 
+  // Wrapper: modal (con backdrop) o sección embebida (full width).
+  const Wrapper = embedded
+    ? ({ children }) => (
+        <div className="w-full bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+          {children}
+        </div>
+      )
+    : ({ children }) => (
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center px-4 py-8 bg-black/60 backdrop-blur-sm overflow-y-auto"
+          onClick={onClose}
+        >
+          <div
+            className="relative w-full max-w-6xl bg-white dark:bg-gray-900 rounded-xl shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          >
+            {children}
+          </div>
+        </div>
+      );
+
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center px-4 py-8 bg-black/60 backdrop-blur-sm overflow-y-auto"
-      onClick={onClose}
-    >
-      <div
-        className="relative w-full max-w-6xl bg-white dark:bg-gray-900 rounded-xl shadow-2xl"
-        onClick={e => e.stopPropagation()}
-      >
+    <Wrapper>
         {/* Header */}
         <div className="px-5 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2.5 min-w-0">
@@ -319,7 +337,6 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
               onDownload={handleSingleDownload} onToggleDescargada={toggleDescargadaFlag} onDelete={handleDelete} />
           )}
         </div>
-      </div>
 
       {/* Barra flotante de bulk action — visible cuando hay seleccionados */}
       {seleccionados.size > 0 && (
@@ -359,7 +376,7 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
           onToggleDescargada={() => toggleDescargadaFlag(selected.id, !!selected.descargada)}
         />
       )}
-    </div>
+    </Wrapper>
   );
 }
 

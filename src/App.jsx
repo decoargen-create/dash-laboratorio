@@ -31,6 +31,7 @@ import PipelineRunOverlay from './PipelineRunOverlay.jsx';
 import ExecutionsTray from './ExecutionsTray.jsx';
 import BalanceBar from './BalanceBar.jsx';
 import ActivityBell from './ActivityBell.jsx';
+import { getRemaining, subscribeBalance } from './balanceStore.js';
 import { generateCSV, downloadCSV, parseCSV, toNumber, toBool } from './csv.js';
 import { loadVioraState, saveVioraState, clearVioraState, createBackup } from './vioraStorage.js';
 
@@ -2011,12 +2012,18 @@ function AppShell({ onExit }) {
         <nav className="relative flex-1 p-3 space-y-1 overflow-y-auto">
           {currentUser.role === 'admin' && currentPlatform === 'viora' && (
             <>
-              <NavItem icon={Home} label="Inicio" section="inicio" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={Package} label="Productos" section="productos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={Users} label="Clientes" section="clientes" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={CreditCard} label="Comisiones" section="comisiones" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={Calculator} label="Calculadora" section="calculadora" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={Package} label="Datos" section="datos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              <NavSection title="Operación" sectionKey="vi-op" sidebarOpen={sidebarOpen}>
+                <NavItem icon={Home} label="Inicio" section="inicio" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                <NavItem icon={Package} label="Productos" section="productos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                <NavItem icon={Users} label="Clientes" section="clientes" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              </NavSection>
+              <NavSection title="Finanzas" sectionKey="vi-fin" sidebarOpen={sidebarOpen}>
+                <NavItem icon={CreditCard} label="Comisiones" section="comisiones" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                <NavItem icon={Calculator} label="Calculadora" section="calculadora" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              </NavSection>
+              <NavSection title="Análisis" sectionKey="vi-an" sidebarOpen={sidebarOpen} defaultOpen={false}>
+                <NavItem icon={Package} label="Datos" section="datos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              </NavSection>
             </>
           )}
           {currentUser.role === 'admin' && currentPlatform === 'senydrop' && (
@@ -2026,10 +2033,14 @@ function AppShell({ onExit }) {
           )}
           {currentUser.role === 'admin' && currentPlatform === 'metaads' && (
             <>
-              <NavItem icon={Home} label="Inicio" section="meta-inicio" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={Zap} label="Campañas" section="meta-campanas" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={Activity} label="Métricas" section="meta-metricas" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={Settings} label="Conexión Meta" section="meta-config" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              <NavSection title="Operación" sectionKey="ma-op" sidebarOpen={sidebarOpen}>
+                <NavItem icon={Home} label="Inicio" section="meta-inicio" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                <NavItem icon={Zap} label="Campañas" section="meta-campanas" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                <NavItem icon={Activity} label="Métricas" section="meta-metricas" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              </NavSection>
+              <NavSection title="Configuración" sectionKey="ma-cfg" sidebarOpen={sidebarOpen} defaultOpen={false}>
+                <NavItem icon={Settings} label="Conexión Meta" section="meta-config" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              </NavSection>
             </>
           )}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (
@@ -2038,10 +2049,16 @@ function AppShell({ onExit }) {
                   (aparte por pedido) + Gastos. Bandeja, Inspiración,
                   Competencia y Creativos viven como tabs adentro de cada
                   producto en Arranque. */}
-              <NavItem icon={Play} label="Marketing" section="mk-arranque" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={BarChart3} label="Meta Ads" section="mk-meta-ads" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={Instagram} label="Automatización IG" section="mk-auto-ig" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              <NavItem icon={DollarSign} label="Gastos del stack" section="mk-gastos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              <NavSection title="Operación" sectionKey="mk-op" sidebarOpen={sidebarOpen}>
+                <NavItem icon={Play} label="Marketing" section="mk-arranque" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                <NavItem icon={BarChart3} label="Meta Ads" section="mk-meta-ads" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              </NavSection>
+              <NavSection title="Automatización" sectionKey="mk-auto" sidebarOpen={sidebarOpen} defaultOpen={false}>
+                <NavItem icon={Instagram} label="Automatización IG" section="mk-auto-ig" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              </NavSection>
+              <NavSection title="Finanzas" sectionKey="mk-fin" sidebarOpen={sidebarOpen}>
+                <NavItem icon={DollarSign} label="Gastos del stack" section="mk-gastos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              </NavSection>
             </>
           )}
           {currentUser.role === 'admin' && currentPlatform === 'consultoria' && (
@@ -2059,9 +2076,13 @@ function AppShell({ onExit }) {
           )}
         </nav>
 
-        {/* Footer: pill de usuario con menú personalizado */}
+        {/* Footer: stats de saldo + pill de usuario con menú personalizado */}
         <div className="relative p-3">
           <div aria-hidden="true" className="mx-1 h-px mb-3 bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+          <SidebarStats
+            sidebarOpen={sidebarOpen}
+            onNavGastos={() => setCurrentSection('mk-gastos')}
+          />
           <UserMenu
             currentUser={currentUser}
             sidebarOpen={sidebarOpen}
@@ -2163,6 +2184,78 @@ function AppShell({ onExit }) {
   );
 }
 
+
+// Stats footer del sidebar — pills compactos mostrando saldo restante
+// de OpenAI / Anthropic. Click → navega a "Gastos del stack" para detalle.
+// Auto-refresca con subscribeBalance cuando se loguea un cost o se carga
+// crédito. En sidebar colapsado se oculta.
+function SidebarStats({ sidebarOpen, onNavGastos }) {
+  const [, force] = useState(0);
+  useEffect(() => subscribeBalance(() => force(x => x + 1)), []);
+  if (!sidebarOpen) return null;
+  const oa = getRemaining('openai');
+  const an = getRemaining('anthropic');
+  const Pill = ({ label, value }) => {
+    const isLow = value != null && value < 5;
+    const isEmpty = value != null && value < 1;
+    return (
+      <button
+        onClick={onNavGastos}
+        title={`Saldo ${label} — click para detalle`}
+        className={`flex items-center justify-between w-full px-2.5 py-1.5 rounded-md text-[10px] font-bold transition ${
+          isEmpty ? 'bg-red-900/40 text-red-200 hover:bg-red-900/60'
+          : isLow ? 'bg-amber-900/30 text-amber-200 hover:bg-amber-900/50'
+          : 'bg-white/5 text-white/70 hover:bg-white/10'
+        }`}
+      >
+        <span className="opacity-80">{label}</span>
+        <span>{value == null ? '—' : `$${value.toFixed(2)}`}</span>
+      </button>
+    );
+  };
+  return (
+    <div className="space-y-1 mb-2 px-1">
+      <Pill label="OpenAI"    value={oa} />
+      <Pill label="Anthropic" value={an} />
+    </div>
+  );
+}
+
+// Agrupador colapsable de NavItems estilo Apify sidebar — título con
+// chevron, recordamos estado abierto/cerrado en localStorage. En modo
+// colapsado del sidebar mostramos solo un divisor sutil entre grupos.
+function NavSection({ title, sectionKey, sidebarOpen, defaultOpen = true, children }) {
+  const [open, setOpen] = useState(() => {
+    try {
+      const v = localStorage.getItem(`viora-navsec-${sectionKey}`);
+      return v == null ? defaultOpen : v === '1';
+    } catch { return defaultOpen; }
+  });
+  const toggle = () => {
+    setOpen(o => {
+      const next = !o;
+      try { localStorage.setItem(`viora-navsec-${sectionKey}`, next ? '1' : '0'); } catch {}
+      return next;
+    });
+  };
+  if (!sidebarOpen) {
+    return <div aria-hidden="true" className="my-2 mx-3 h-px bg-white/10" />;
+  }
+  return (
+    <div className="mt-3 first:mt-0">
+      <button
+        onClick={toggle}
+        className="flex items-center gap-1.5 px-4 mb-1 text-[10px] font-bold uppercase tracking-wider text-white/40 hover:text-white/70 transition w-full"
+      >
+        <ChevronDown size={10} className={`transition-transform duration-200 ${open ? '' : '-rotate-90'}`} />
+        {title}
+      </button>
+      <div className={`space-y-1 overflow-hidden transition-all duration-200 ${open ? 'max-h-screen opacity-100' : 'max-h-0 opacity-0'}`}>
+        {children}
+      </div>
+    </div>
+  );
+}
 
 function NavItem({ icon: Icon, label, section, currentSection, onSelect, sidebarOpen }) {
   const isActive = currentSection === section;

@@ -692,7 +692,8 @@ function buildEditForm({ prompt, refImgBuf, refMime, prodImgBuf, prodMime, size,
 // Time budget global del handler — para que callGptImage2Edit no haga
 // retries inútiles cuando ya estamos cerca del timeout de Vercel (300s).
 const HANDLER_TIMEOUT_MS = 290000; // 290s — Vercel kill a los 300s.
-const PER_CALL_TIMEOUT_MS = 220000; // 220s por fetch individual a OpenAI.
+const PER_CALL_TIMEOUT_MS = 275000; // 275s por fetch individual a OpenAI —
+// gpt-image-2 a 2K high a veces tarda 200-250s. 220s era muy ajustado.
 
 async function callGptImage2Edit(params) {
   const { apiKey, budgetStartedAt = Date.now() } = params;
@@ -902,15 +903,17 @@ export default async function handler(req, res) {
     let variantStyles; // array paralelo a imagenes — 'reference' | 'rebrand'
     let sizeUsed = size;
     let sizeFallback = false;
+    let qualityUsed = quality;
+    let qualityFallback = false;
 
-    const runCalls = async (useSize) => {
+    const runCalls = async (useSize, useQuality = quality) => {
       // MODO STRATEGIST: N llamadas paralelas, una por cada plan.variation.
       if (prompts && prompts.length > 0) {
         const results = await Promise.all(prompts.map(p =>
           callGptImage2Edit({
             apiKey, prompt: p.prompt,
             refImgBuf, refMime, prodImgBuf: prodBuf, prodMime,
-            size: useSize, quality, n: 1,
+            size: useSize, quality: useQuality, n: 1,
             budgetStartedAt,
           })
         ));
@@ -927,13 +930,13 @@ export default async function handler(req, res) {
           callGptImage2Edit({
             apiKey, prompt: __legacyPromptRef,
             refImgBuf, refMime, prodImgBuf: prodBuf, prodMime,
-            size: useSize, quality, n: nRef,
+            size: useSize, quality: useQuality, n: nRef,
             budgetStartedAt,
           }),
           callGptImage2Edit({
             apiKey, prompt: __legacyPromptRebrand,
             refImgBuf, refMime, prodImgBuf: prodBuf, prodMime,
-            size: useSize, quality, n: nReb,
+            size: useSize, quality: useQuality, n: nReb,
             budgetStartedAt,
           }),
         ]);
@@ -946,24 +949,39 @@ export default async function handler(req, res) {
       const imgs = await callGptImage2Edit({
         apiKey, prompt: __legacyPromptRef,
         refImgBuf, refMime, prodImgBuf: prodBuf, prodMime,
-        size: useSize, quality, n,
+        size: useSize, quality: useQuality, n,
         budgetStartedAt,
       });
       return { imagenes: imgs, variantStyles: imgs.map(() => 'reference') };
     };
 
     try {
-      const result = await runCalls(sizeUsed);
+      const result = await runCalls(sizeUsed, qualityUsed);
       imagenes = result.imagenes;
       variantStyles = result.variantStyles;
     } catch (err) {
       const msg = (err?.message || '').toLowerCase();
       const isSizeErr = msg.includes('size') || msg.includes('dimension') || /unsupported/.test(msg);
+      // Detectar timeout/abort: OpenAI tardó más que PER_CALL_TIMEOUT_MS.
+      // En vez de fallar, bajamos quality (high → medium) que es ~3x más
+      // rápido, y reintentamos. Mejor entregar algo en menor calidad que
+      // nada.
+      const isTimeoutErr = /tardó más|abort|timeout|cancel/i.test(err?.message || '');
+      const elapsedNow = Date.now() - budgetStartedAt;
+      const hasBudgetForRetry = elapsedNow < HANDLER_TIMEOUT_MS - 80000;
+
       if (isSizeErr && sizeUsed !== FALLBACK_SIZE) {
         console.warn(`gpt-image-2 rechazó size=${sizeUsed} — fallback a ${FALLBACK_SIZE}`);
         sizeUsed = FALLBACK_SIZE;
         sizeFallback = true;
-        const result = await runCalls(sizeUsed);
+        const result = await runCalls(sizeUsed, qualityUsed);
+        imagenes = result.imagenes;
+        variantStyles = result.variantStyles;
+      } else if (isTimeoutErr && qualityUsed === 'high' && hasBudgetForRetry) {
+        console.warn(`gpt-image-2 timeout en quality=high — fallback a medium`);
+        qualityUsed = 'medium';
+        qualityFallback = true;
+        const result = await runCalls(sizeUsed, qualityUsed);
         imagenes = result.imagenes;
         variantStyles = result.variantStyles;
       } else {
@@ -977,7 +995,9 @@ export default async function handler(req, res) {
       size: sizeUsed,
       sizeRequested: size,
       sizeFallback,
-      quality,
+      quality: qualityUsed,
+      qualityRequested: quality,
+      qualityFallback,
       n: imagenes.length,
       aspectRatio,
       model: MODEL_IMAGE,
@@ -994,7 +1014,7 @@ export default async function handler(req, res) {
       cost: {
         // Estimación basada en quality + size REAL (no la requested). Si
         // hubo size fallback, usa el size finalmente usado.
-        openai: estimateImageCost(quality, sizeUsed) * imagenes.length,
+        openai: estimateImageCost(qualityUsed, sizeUsed) * imagenes.length,
         anthropic: visionCost,
       },
     });

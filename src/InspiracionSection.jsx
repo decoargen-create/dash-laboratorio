@@ -1243,6 +1243,179 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
   );
 }
 
+function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = false, selected = false, selectionIndex = null, onAdapt, onCrearReferencial, onToggleSelect, progress = null }) {
+  const cdnThumb = ad.imageUrls?.[0];
+  const fbUrl = ad.snapshotUrl;
+  // Si tenemos el ad cacheado en IndexedDB (sobreviven el TTL de 24h del CDN),
+  // preferimos el blob URL. Sino, caemos al CDN.
+  // Perf: NO ejecutamos la lookup en mount — usamos IntersectionObserver para
+  // que solo corra cuando el thumb está cerca del viewport. Con 400+ thumbs
+  // en pantalla, mount-time lookups eran el principal bottleneck.
+  const [cachedUrl, setCachedUrl] = useState(null);
+  const containerRef = React.useRef(null);
+  useEffect(() => {
+    let active = true;
+    if (!ad?.id || !containerRef.current) return;
+
+    const fetchCached = () => {
+      getCachedAdImageUrl(ad.id).then(url => { if (active) setCachedUrl(url); });
+    };
+
+    // Si IntersectionObserver no está disponible (browsers viejos), fetch sync.
+    if (typeof IntersectionObserver === 'undefined') {
+      fetchCached();
+      return;
+    }
+
+    const io = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          fetchCached();
+          io.disconnect();
+          break;
+        }
+      }
+    }, { rootMargin: '200px' }); // pre-fetch 200px antes de que entre en pantalla
+
+    io.observe(containerRef.current);
+
+    const onSaved = (e) => {
+      if (String(e?.detail?.adId || '') === String(ad?.id)) fetchCached();
+    };
+    window.addEventListener('viora:ad-image-cached', onSaved);
+
+    return () => {
+      active = false;
+      io.disconnect();
+      window.removeEventListener('viora:ad-image-cached', onSaved);
+    };
+  }, [ad?.id]);
+  const thumb = cachedUrl || cdnThumb;
+  return (
+    <div
+      ref={containerRef}
+      className={`group/thumb relative aspect-square rounded-md overflow-hidden bg-gray-100 dark:bg-gray-900 border-2 transition ${
+        selected
+          ? 'border-brand-500 ring-2 ring-brand-300 dark:ring-brand-700'
+          : fresh
+            ? 'border-emerald-300 dark:border-emerald-700 hover:border-emerald-500'
+            : 'border-gray-200 dark:border-gray-700 hover:border-amber-400'
+      }`}
+      title={ad.body?.slice(0, 200) || ad.headline || ''}
+    >
+      {thumb ? (
+        <img src={thumb} alt="" className="w-full h-full object-cover"
+          onError={(e) => { e.target.style.display = 'none'; }} />
+      ) : (
+        <div className="w-full h-full flex items-center justify-center">
+          <ImageIcon size={20} className="text-gray-300" />
+        </div>
+      )}
+      {/* Indicador de imagen cacheada localmente — solo on-hover para no
+          contaminar. Le da feedback al usuario de que las imágenes están
+          seguras de la expiración del CDN. */}
+      {cachedUrl && (
+        <div className="absolute top-1 right-7 w-1.5 h-1.5 rounded-full bg-emerald-400/80 opacity-0 group-hover/thumb:opacity-100 transition" title="Imagen cacheada localmente" />
+      )}
+
+      {/* Selector numerado — siempre visible (más prominente que el checkbox).
+          Cuando seleccionás muestra el ORDEN (1, 2, 3...) según el orden en
+          que clickeaste. Sin selección, muestra un + suave. */}
+      {onToggleSelect && (
+        <button
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggleSelect(); }}
+          className={`absolute top-1.5 left-1.5 z-10 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all shadow-md ${
+            selected
+              ? 'bg-brand-600 text-white scale-110 ring-2 ring-white dark:ring-gray-900'
+              : 'bg-white/90 dark:bg-gray-900/90 text-gray-400 dark:text-gray-500 hover:bg-brand-50 hover:text-brand-600 dark:hover:bg-brand-900/40 dark:hover:text-brand-300 hover:scale-110 opacity-70 group-hover/thumb:opacity-100'
+          }`}
+          title={selected ? `Seleccionado #${selectionIndex} — click para deseleccionar` : 'Click para seleccionar'}
+        >
+          {selected ? (selectionIndex || <Check size={14} />) : <Plus size={14} />}
+        </button>
+      )}
+
+      {/* Progress overlay — visible mientras el ad se está generando o
+          acaba de terminar/fallar. Tapa todo el thumb para que se vea claro. */}
+      {progress && (
+        <div className="absolute inset-0 bg-gray-900/85 z-10 flex flex-col items-center justify-center gap-2 p-3 text-white">
+          {progress.stage === 'done' ? (
+            <Check size={28} className="text-emerald-400" />
+          ) : progress.stage === 'error' ? (
+            <AlertCircle size={28} className="text-red-400" />
+          ) : (
+            <Loader2 size={20} className="text-brand-300 animate-spin" />
+          )}
+          <p className="text-[10px] font-bold text-center leading-tight">
+            {stageLabel(progress.stage)}
+          </p>
+          {progress.stage !== 'done' && progress.stage !== 'error' && (
+            <>
+              <div className="w-full h-1.5 bg-white/20 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-brand-400 to-brand-200 transition-all duration-500"
+                  style={{ width: `${estimateProgress(progress)}%` }}
+                />
+              </div>
+              <p className="text-[9px] text-white/70">
+                {formatMs(Date.now() - progress.startedAt)}
+              </p>
+            </>
+          )}
+          {progress.stage === 'error' && progress.error && (
+            <p className="text-[9px] text-red-200 text-center line-clamp-2">{progress.error}</p>
+          )}
+        </div>
+      )}
+
+      <div className="absolute inset-0 bg-black/0 group-hover/thumb:bg-black/60 transition flex flex-col items-stretch justify-end gap-1 p-1.5">
+        {onCrearReferencial && (
+          <button
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onCrearReferencial(); }}
+            disabled={creando}
+            className="opacity-0 group-hover/thumb:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded disabled:opacity-70"
+            title="Genera 2 variaciones con tu producto real"
+          >
+            {creando
+              ? <><Loader2 size={10} className="animate-spin" /> Generando…</>
+              : <><Sparkles size={10} /> Crear creativo</>
+            }
+          </button>
+        )}
+        {onAdapt && (
+          <button
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onAdapt(); }}
+            disabled={adapting}
+            className="opacity-0 group-hover/thumb:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-amber-500/90 hover:bg-amber-600 rounded disabled:opacity-70"
+            title="Genera ideas (texto) en la Bandeja"
+          >
+            {adapting
+              ? <><Loader2 size={10} className="animate-spin" /> Adaptando…</>
+              : <><Wand2 size={10} /> + ideas en Bandeja</>
+            }
+          </button>
+        )}
+        <a
+          href={fbUrl} target="_blank" rel="noreferrer"
+          className="opacity-0 group-hover/thumb:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-black/70 hover:bg-black/90 rounded"
+        >
+          <ExternalLink size={10} /> Ver en FB
+        </a>
+      </div>
+      {ad.daysRunning > 0 && (
+        <div className="absolute top-1 left-1 px-1.5 py-0.5 text-[9px] font-bold rounded bg-black/60 text-white pointer-events-none">
+          {ad.daysRunning}d
+        </div>
+      )}
+      {fresh && (
+        <div className="absolute top-1 right-1 px-1 py-0.5 text-[8px] font-bold rounded bg-emerald-500 text-white pointer-events-none">
+          NUEVO
+        </div>
+      )}
+    </div>
+  );
+}
+
 function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, progressById, onAdapt, onCrearReferencial, onToggleSelect }) {
   const [showRepeated, setShowRepeated] = useState(false);
   const fresh = ads.filter(a => a.isFresh !== false);
@@ -1497,175 +1670,3 @@ function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, se
   );
 }
 
-function AdThumbImpl({ ad, brandNombre, fresh = false, adapting = false, creando = false, selected = false, selectionIndex = null, onAdapt, onCrearReferencial, onToggleSelect, progress = null }) {
-  const cdnThumb = ad.imageUrls?.[0];
-  const fbUrl = ad.snapshotUrl;
-  // Si tenemos el ad cacheado en IndexedDB (sobreviven el TTL de 24h del CDN),
-  // preferimos el blob URL. Sino, caemos al CDN.
-  // Perf: NO ejecutamos la lookup en mount — usamos IntersectionObserver para
-  // que solo corra cuando el thumb está cerca del viewport. Con 400+ thumbs
-  // en pantalla, mount-time lookups eran el principal bottleneck.
-  const [cachedUrl, setCachedUrl] = useState(null);
-  const containerRef = React.useRef(null);
-  useEffect(() => {
-    let active = true;
-    if (!ad?.id || !containerRef.current) return;
-
-    const fetchCached = () => {
-      getCachedAdImageUrl(ad.id).then(url => { if (active) setCachedUrl(url); });
-    };
-
-    // Si IntersectionObserver no está disponible (browsers viejos), fetch sync.
-    if (typeof IntersectionObserver === 'undefined') {
-      fetchCached();
-      return;
-    }
-
-    const io = new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        if (entry.isIntersecting) {
-          fetchCached();
-          io.disconnect();
-          break;
-        }
-      }
-    }, { rootMargin: '200px' }); // pre-fetch 200px antes de que entre en pantalla
-
-    io.observe(containerRef.current);
-
-    const onSaved = (e) => {
-      if (String(e?.detail?.adId || '') === String(ad?.id)) fetchCached();
-    };
-    window.addEventListener('viora:ad-image-cached', onSaved);
-
-    return () => {
-      active = false;
-      io.disconnect();
-      window.removeEventListener('viora:ad-image-cached', onSaved);
-    };
-  }, [ad?.id]);
-  const thumb = cachedUrl || cdnThumb;
-  return (
-    <div
-      ref={containerRef}
-      className={`group/thumb relative aspect-square rounded-md overflow-hidden bg-gray-100 dark:bg-gray-900 border-2 transition ${
-        selected
-          ? 'border-brand-500 ring-2 ring-brand-300 dark:ring-brand-700'
-          : fresh
-            ? 'border-emerald-300 dark:border-emerald-700 hover:border-emerald-500'
-            : 'border-gray-200 dark:border-gray-700 hover:border-amber-400'
-      }`}
-      title={ad.body?.slice(0, 200) || ad.headline || ''}
-    >
-      {thumb ? (
-        <img src={thumb} alt="" className="w-full h-full object-cover"
-          onError={(e) => { e.target.style.display = 'none'; }} />
-      ) : (
-        <div className="w-full h-full flex items-center justify-center">
-          <ImageIcon size={20} className="text-gray-300" />
-        </div>
-      )}
-      {/* Indicador de imagen cacheada localmente — solo on-hover para no
-          contaminar. Le da feedback al usuario de que las imágenes están
-          seguras de la expiración del CDN. */}
-      {cachedUrl && (
-        <div className="absolute top-1 right-7 w-1.5 h-1.5 rounded-full bg-emerald-400/80 opacity-0 group-hover/thumb:opacity-100 transition" title="Imagen cacheada localmente" />
-      )}
-
-      {/* Selector numerado — siempre visible (más prominente que el checkbox).
-          Cuando seleccionás muestra el ORDEN (1, 2, 3...) según el orden en
-          que clickeaste. Sin selección, muestra un + suave. */}
-      {onToggleSelect && (
-        <button
-          onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggleSelect(); }}
-          className={`absolute top-1.5 left-1.5 z-10 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all shadow-md ${
-            selected
-              ? 'bg-brand-600 text-white scale-110 ring-2 ring-white dark:ring-gray-900'
-              : 'bg-white/90 dark:bg-gray-900/90 text-gray-400 dark:text-gray-500 hover:bg-brand-50 hover:text-brand-600 dark:hover:bg-brand-900/40 dark:hover:text-brand-300 hover:scale-110 opacity-70 group-hover/thumb:opacity-100'
-          }`}
-          title={selected ? `Seleccionado #${selectionIndex} — click para deseleccionar` : 'Click para seleccionar'}
-        >
-          {selected ? (selectionIndex || <Check size={14} />) : <Plus size={14} />}
-        </button>
-      )}
-
-      {/* Progress overlay — visible mientras el ad se está generando o
-          acaba de terminar/fallar. Tapa todo el thumb para que se vea claro. */}
-      {progress && (
-        <div className="absolute inset-0 bg-gray-900/85 z-10 flex flex-col items-center justify-center gap-2 p-3 text-white">
-          {progress.stage === 'done' ? (
-            <Check size={28} className="text-emerald-400" />
-          ) : progress.stage === 'error' ? (
-            <AlertCircle size={28} className="text-red-400" />
-          ) : (
-            <Loader2 size={20} className="text-brand-300 animate-spin" />
-          )}
-          <p className="text-[10px] font-bold text-center leading-tight">
-            {stageLabel(progress.stage)}
-          </p>
-          {progress.stage !== 'done' && progress.stage !== 'error' && (
-            <>
-              <div className="w-full h-1.5 bg-white/20 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-brand-400 to-brand-200 transition-all duration-500"
-                  style={{ width: `${estimateProgress(progress)}%` }}
-                />
-              </div>
-              <p className="text-[9px] text-white/70">
-                {formatMs(Date.now() - progress.startedAt)}
-              </p>
-            </>
-          )}
-          {progress.stage === 'error' && progress.error && (
-            <p className="text-[9px] text-red-200 text-center line-clamp-2">{progress.error}</p>
-          )}
-        </div>
-      )}
-
-      <div className="absolute inset-0 bg-black/0 group-hover/thumb:bg-black/60 transition flex flex-col items-stretch justify-end gap-1 p-1.5">
-        {onCrearReferencial && (
-          <button
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onCrearReferencial(); }}
-            disabled={creando}
-            className="opacity-0 group-hover/thumb:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded disabled:opacity-70"
-            title="Genera 2 variaciones con tu producto real"
-          >
-            {creando
-              ? <><Loader2 size={10} className="animate-spin" /> Generando…</>
-              : <><Sparkles size={10} /> Crear creativo</>
-            }
-          </button>
-        )}
-        {onAdapt && (
-          <button
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onAdapt(); }}
-            disabled={adapting}
-            className="opacity-0 group-hover/thumb:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-amber-500/90 hover:bg-amber-600 rounded disabled:opacity-70"
-            title="Genera ideas (texto) en la Bandeja"
-          >
-            {adapting
-              ? <><Loader2 size={10} className="animate-spin" /> Adaptando…</>
-              : <><Wand2 size={10} /> + ideas en Bandeja</>
-            }
-          </button>
-        )}
-        <a
-          href={fbUrl} target="_blank" rel="noreferrer"
-          className="opacity-0 group-hover/thumb:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-black/70 hover:bg-black/90 rounded"
-        >
-          <ExternalLink size={10} /> Ver en FB
-        </a>
-      </div>
-      {ad.daysRunning > 0 && (
-        <div className="absolute top-1 left-1 px-1.5 py-0.5 text-[9px] font-bold rounded bg-black/60 text-white pointer-events-none">
-          {ad.daysRunning}d
-        </div>
-      )}
-      {fresh && (
-        <div className="absolute top-1 right-1 px-1 py-0.5 text-[8px] font-bold rounded bg-emerald-500 text-white pointer-events-none">
-          NUEVO
-        </div>
-      )}
-    </div>
-  );
-}

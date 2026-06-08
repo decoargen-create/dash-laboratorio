@@ -10,6 +10,7 @@
 import React, { useEffect, useState } from 'react';
 import { Loader2, Check, AlertCircle, X, ChevronDown, ChevronUp } from 'lucide-react';
 import { subscribeExecutions, estimateProgress, dismissExecution } from './executionsStore.js';
+import { fetchDolarCripto, subscribeDolar, usdToArsString, getDolarCriptoCached } from './dolarStore.js';
 
 function fmtElapsed(ms) {
   const s = Math.floor(ms / 1000);
@@ -27,8 +28,16 @@ export default function ExecutionsTray() {
   const [execs, setExecs] = useState([]);
   const [collapsed, setCollapsed] = useState(false);
   const [, setTick] = useState(0);
+  const [dolar, setDolar] = useState(() => getDolarCriptoCached());
 
   useEffect(() => subscribeExecutions(setExecs), []);
+
+  // Dispara fetch del dólar cripto al montar y se suscribe a cambios.
+  // Si falla el fetch, dolar queda null y el tray solo muestra USD.
+  useEffect(() => {
+    fetchDolarCripto().catch(() => {});
+    return subscribeDolar(setDolar);
+  }, []);
 
   // Re-render cada 250ms mientras haya algo running, para que la barra
   // de progreso y el elapsed se actualicen suaves.
@@ -79,6 +88,11 @@ export default function ExecutionsTray() {
           {totalCost > 0 && (
             <span className="text-[10px] font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
               ${totalCost.toFixed(3)}
+              {dolar?.venta && (
+                <span className="ml-1 font-normal text-emerald-700 dark:text-emerald-500 opacity-80">
+                  · {usdToArsString(totalCost, dolar)}
+                </span>
+              )}
             </span>
           )}
           {collapsed ? <ChevronUp size={12} className="text-gray-400" /> : <ChevronDown size={12} className="text-gray-400" />}
@@ -88,7 +102,7 @@ export default function ExecutionsTray() {
       {!collapsed && (
         <div className="max-h-[60vh] overflow-y-auto divide-y divide-gray-100 dark:divide-gray-800">
           {execs.map(e => (
-            <ExecutionCard key={e.id} exec={e} />
+            <ExecutionCard key={e.id} exec={e} dolar={dolar} />
           ))}
         </div>
       )}
@@ -96,7 +110,7 @@ export default function ExecutionsTray() {
   );
 }
 
-function ExecutionCard({ exec }) {
+function ExecutionCard({ exec, dolar }) {
   const elapsed = Date.now() - exec.startedAt;
   const pct = estimateProgress(exec);
   const isDone = exec.status === 'done';
@@ -148,20 +162,22 @@ function ExecutionCard({ exec }) {
         {/* Costo: si terminó OK con cost, mostrarlo. Si está corriendo y hay
             estimatedCost, mostrar el estimado en gris para que el user sepa
             cuánto va a salir antes de gastar. */}
-        {(exec.cost > 0 || (exec.status === 'running' && exec.estimatedCost > 0)) && (
-          <p className={`text-[9px] font-bold tabular-nums ${
-            exec.status === 'running'
-              ? 'text-gray-500 dark:text-gray-400'
-              : isError
-                ? 'text-red-500'
-                : 'text-emerald-600 dark:text-emerald-400'
-          }`}>
-            {exec.status === 'running'
-              ? `~$${Number(exec.estimatedCost).toFixed(3)}`
-              : `$${Number(exec.cost).toFixed(3)}`
-            }
-          </p>
-        )}
+        {(exec.cost > 0 || (exec.status === 'running' && exec.estimatedCost > 0)) && (() => {
+          const usd = exec.status === 'running' ? Number(exec.estimatedCost) : Number(exec.cost);
+          const prefix = exec.status === 'running' ? '~' : '';
+          const arsLabel = dolar?.venta ? ` · ${usdToArsString(usd, dolar)}` : '';
+          return (
+            <p className={`text-[9px] font-bold tabular-nums ${
+              exec.status === 'running'
+                ? 'text-gray-500 dark:text-gray-400'
+                : isError
+                  ? 'text-red-500'
+                  : 'text-emerald-600 dark:text-emerald-400'
+            }`}>
+              {prefix}${usd.toFixed(3)}<span className="font-normal opacity-80">{arsLabel}</span>
+            </p>
+          );
+        })()}
       </div>
     </div>
   );

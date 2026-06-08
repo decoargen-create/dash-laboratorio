@@ -37,6 +37,40 @@ const FALLBACK_SIZE = '1024x1024';
 const DEFAULT_QUALITY = 'high';
 const COST_ESTIMATE = { low: 0.03, medium: 0.07, high: 0.18 };
 
+// Detecta el FORMATO físico del producto (gomitas / cápsulas / crema / etc.)
+// para que gpt-image-2 NO dibuje un formato equivocado (ej. cápsulas en un
+// ad de gomitas) y para que Vision REESCRIBA cualquier mención al formato
+// equivocado en los textos adaptados.
+// Heurística: regex sobre nombre + descripción + research. Devuelve string
+// canónico ("gomitas", "cápsulas", "crema", etc.) o null si no detecta.
+function inferProductForm(producto) {
+  const haystack = [
+    producto?.nombre || '',
+    producto?.descripcion || '',
+    String(producto?.research || producto?.docs?.research || ''),
+  ].join(' ').toLowerCase();
+  const patterns = [
+    { canon: 'gomitas',      re: /\b(gomitas?|gummies|gummys?)\b/ },
+    { canon: 'cápsulas',     re: /\b(c[áa]psulas?|capsules?|softgels?|pastillas?|tabletas?|tablets?)\b/ },
+    { canon: 'polvo',        re: /\b(polvo|powder|mix en polvo)\b/ },
+    { canon: 'sérum',        re: /\b(s[ée]rum|serum)\b/ },
+    { canon: 'crema',        re: /\b(crema|cream|loci[óo]n|lotion|emulsi[óo]n)\b/ },
+    { canon: 'gotas',        re: /\b(gotas|drops|d[íi]as? en gotas)\b/ },
+    { canon: 'aceite',       re: /\b(aceite|oil)\b/ },
+    { canon: 'bálsamo',      re: /\b(b[áa]lsamo|balm)\b/ },
+    { canon: 'spray',        re: /\b(spray|atomizador)\b/ },
+    { canon: 'stick',        re: /\b(stick|barra|bar)\b/ },
+    { canon: 'sachet',       re: /\b(sachet|sobre|sticks individuales)\b/ },
+    { canon: 'shot',         re: /\b(shot|chupito|liquid shot)\b/ },
+    { canon: 'mascarilla',   re: /\b(mascarilla|m[áa]scara|mask)\b/ },
+    { canon: 'parches',      re: /\b(parches|patches)\b/ },
+  ];
+  for (const p of patterns) {
+    if (p.re.test(haystack)) return p.canon;
+  }
+  return null;
+}
+
 async function readBody(req) {
   if (req.body && typeof req.body === 'object') return req.body;
   if (typeof req.body === 'string') {
@@ -245,11 +279,19 @@ async function extractSkeletonHaiku({ apiKey, refImgBuf, refMime, producto }) {
   const client = new Anthropic({ apiKey });
   const b64 = refImgBuf.toString('base64');
 
+  // Detectamos el formato físico del producto del usuario (gomitas/cápsulas/etc.)
+  // Vision lo usa para REESCRIBIR cualquier mención al formato equivocado del
+  // ad de referencia (ej: "60 cápsulas" → "60 gomitas").
+  const productoForm = inferProductForm(producto);
+
   // Contexto del producto para que Vision pueda escribir textos VERDADERAMENTE
   // adaptados (no solo traducción cosmética).
+  const offerBrief = (producto?.offerBrief || producto?.docs?.offerBrief || '').toString().trim();
   const productoCtx = [
     `Nombre: ${producto?.nombre || 'N/A'}`,
+    productoForm ? `**FORMATO FÍSICO: ${productoForm.toUpperCase()}** (este producto viene en ${productoForm} — NO es otro formato).` : '',
     producto?.descripcion ? `Descripción: ${producto.descripcion.slice(0, 300)}` : '',
+    offerBrief ? `**OFERTAS / CLAIMS REALES DEL PRODUCTO** (las únicas que podés mencionar):\n${offerBrief.slice(0, 1000)}` : '**SIN OFERTAS NI CLAIMS DECLARADOS** — NO inventes descuentos, % off, "comprá 3 y ahorrá", FDA, ANMAT, ni claims médicos.',
     producto?.research ? `Audiencia y pain points:\n${String(producto.research).slice(0, 1500)}` : '',
   ].filter(Boolean).join('\n');
 
@@ -298,6 +340,9 @@ Reglas estrictas para content_adapted:
 - Si el original menciona un brand/producto ajeno, reemplazar por el nombre del producto del usuario o algo neutro.
 - Si menciona TV/programas/hashtags virales específicos, sustituir por trigger genérico que funcione para LA AUDIENCIA del producto.
 - Si la pieza tiene pain point implícito y NO matchea con los pain points del research, ajustalo al pain del research.
+- **CRÍTICO — FORMATO FÍSICO**: Si el texto original menciona un formato de producto (cápsulas, pastillas, polvo, gotas, crema, etc.) y NO COINCIDE con el formato del producto del usuario${productoForm ? ` (${productoForm})` : ''}, REEMPLAZÁ por el formato correcto. Ejemplo: si el ad ref dice "60 cápsulas veganas" y nuestro producto son gomitas, en content_adapted debe decir "60 gomitas veganas". Nunca dejar mención de un formato equivocado — confunde al consumidor.
+
+- **CRÍTICO — OFERTAS Y CLAIMS**: Si el texto original menciona una promo concreta ("25% off", "3x2", "envío gratis", "comprá 3 y ahorrá", "PAGO CONTRA REEMBOLSO") o un claim regulado ("FDA Approved", "ANMAT", "dermatológicamente testeado", "sin gluten") y vos NO tenés esa info en "OFERTAS / CLAIMS REALES" del contexto, REMOVELO del content_adapted. Reemplazá por un CTA neutro ("Probalo ya", "Conocé más", "Empezá hoy") o un beneficio genérico verificable. Mejor decir menos que inventar una oferta que no existe (es mentir al consumidor y posible violación de Meta).
 
 Si no hay texto visible, devolvé textBlocks: [].`;
 
@@ -348,6 +393,7 @@ function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio
   const nombre = (producto?.nombre || '').trim();
   const descripcion = (producto?.descripcion || '').trim();
   const research = (producto?.research || producto?.docs?.research || '').trim();
+  const productoForm = inferProductForm(producto);
 
   const parts = [];
   parts.push('Premium DTC creative for Meta Ads — editorial production, scroll-stop composition. PHOTOREALISTIC, NO AI plastic look, NO uncanny faces, NO garbled text.');
@@ -369,8 +415,8 @@ function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio
     if (skeleton.lighting) parts.push(`  - Lighting: ${skeleton.lighting}`);
     if (Array.isArray(skeleton.palette) && skeleton.palette.length) parts.push(`  - Palette: ${skeleton.palette.join(', ')}`);
     if (Array.isArray(skeleton.props) && skeleton.props.length) parts.push(`  - Props (use similar ones, not identical): ${skeleton.props.join('; ')}`);
-    if (Array.isArray(skeleton.badges) && skeleton.badges.length) parts.push(`  - Graphic badges/seals to include in similar positions (but with generic text or no text — the model is bad at text): ${skeleton.badges.join('; ')}`);
-    if (Array.isArray(skeleton.ctaElements) && skeleton.ctaElements.length) parts.push(`  - CTA-like graphic elements (pills, buttons) in their original positions: ${skeleton.ctaElements.join('; ')}`);
+    if (Array.isArray(skeleton.badges) && skeleton.badges.length) parts.push(`  - Graphic badges/seals to replicate AS SHAPES (no specific claim text unless the user provided one in their offer brief): ${skeleton.badges.join('; ')}`);
+    if (Array.isArray(skeleton.ctaElements) && skeleton.ctaElements.length) parts.push(`  - CTA-like graphic elements (pills, buttons) in their original positions — but with NEUTRAL CTA text ("Probalo ya" / "Conocé más") unless the user has explicit offer info: ${skeleton.ctaElements.join('; ')}`);
     if (Array.isArray(skeleton.textBlocks) && skeleton.textBlocks.length) {
       parts.push('  - TEXT OVERLAYS to render IN THE IMAGE (Spanish, exact wording — do NOT paraphrase, do NOT translate to English):');
       skeleton.textBlocks.forEach((b, i) => {
@@ -395,6 +441,11 @@ function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio
   parts.push('');
   parts.push('THE PRODUCT (IMAGE 2):');
   if (nombre) parts.push(`  - Product name: ${nombre}`);
+  if (productoForm) {
+    // CRÍTICO: si el ad ref muestra cápsulas y nuestro producto son gomitas,
+    // el modelo replica cápsulas. Hay que decírselo EXPLÍCITO.
+    parts.push(`  - **PHYSICAL FORM**: ${productoForm} (NOT capsules, NOT pills, NOT another format). If the reference ad shows the product contents (a single capsule on a hand, powder in a glass, etc.), YOU MUST show ${productoForm} instead. Any spilled/displayed product detail must visually be ${productoForm}.`);
+  }
   if (descripcion) parts.push(`  - Description: ${descripcion.slice(0, 400)}`);
   if (research) parts.push(`  - Audience and pain points (use to choose props/scene): ${research.slice(0, 1500)}`);
 

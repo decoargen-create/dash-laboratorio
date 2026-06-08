@@ -25,7 +25,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Sparkles, Package, ChevronRight, ChevronDown, Plus, Trash2, Link2, X,
   Loader2, Download, Image as ImageIcon, ExternalLink, Wand2, Search,
-  Images, Check, AlertCircle, LayoutGrid, Rows3, Table2,
+  Images, Check, AlertCircle, LayoutGrid, Rows3, Table2, Settings2,
 } from 'lucide-react';
 import { logCostsFromResponse } from './costsStore.js';
 import { addGeneratedIdeas } from './bandejaStore.js';
@@ -159,6 +159,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   }, [seleccionados]);
   const [creandoAdIds, setCreandoAdIds] = useState(new Set());
   const [showGaleria, setShowGaleria] = useState(false);
+  const [showGenOpts, setShowGenOpts] = useState(false);
   // Opciones de generación (las elige el usuario en la barra de bulk o en
   // el control de la sección). Persistimos en localStorage para que no se
   // pierdan entre sesiones.
@@ -1130,6 +1131,84 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
               </span>
               {/* Separador visual + acciones primarias */}
               <div className="w-px h-5 bg-gray-200 dark:bg-gray-700 mx-1" aria-hidden />
+              {/* Opciones de generación — popover con variantes/ratio/quality.
+                  Antes solo se veían en la barra de bulk; ahora siempre accesibles. */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowGenOpts(s => !s)}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition"
+                  title={`Opciones de generación · ${genOpts.n || 2} var · ${genOpts.size === '1024x1536' ? 'Portrait' : '1:1'} · ${genOpts.quality}`}
+                >
+                  <Settings2 size={11} /> {genOpts.n || 2}v · {genOpts.size === '1024x1536' ? '9:16' : '1:1'} · {genOpts.quality === 'low' ? 'L' : genOpts.quality === 'medium' ? 'M' : 'H'}
+                </button>
+                {showGenOpts && (
+                  <div className="absolute top-full right-0 mt-1.5 z-40 w-64 bg-white dark:bg-gray-800 border-2 border-brand-300 dark:border-brand-700 rounded-lg shadow-2xl p-3"
+                    onMouseLeave={() => setShowGenOpts(false)}
+                  >
+                    <p className="text-[10px] font-bold text-gray-900 dark:text-gray-100 mb-1.5">Opciones para crear creativos</p>
+
+                    <div className="mb-2.5">
+                      <p className="text-[9px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">Variantes por ad</p>
+                      <div className="flex items-center gap-1">
+                        {[1, 2, 4, 6].map(n => (
+                          <button key={n}
+                            onClick={() => setGenOpts(o => ({ ...o, n }))}
+                            className={`flex-1 px-2 py-1 text-[11px] font-bold rounded transition ${
+                              (genOpts.n || 2) === n
+                                ? 'bg-brand-600 text-white shadow-sm'
+                                : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                            }`}
+                          >{n}</button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="mb-2.5">
+                      <p className="text-[9px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">Tamaño</p>
+                      <div className="flex items-center gap-1">
+                        {[
+                          { v: '2048x2048', label: '1:1 (feed)' },
+                          { v: '1024x1536', label: 'Portrait (story)' },
+                        ].map(opt => (
+                          <button key={opt.v}
+                            onClick={() => setGenOpts(o => ({ ...o, size: opt.v }))}
+                            className={`flex-1 px-2 py-1 text-[10px] font-bold rounded transition ${
+                              genOpts.size === opt.v
+                                ? 'bg-brand-600 text-white shadow-sm'
+                                : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                            }`}
+                          >{opt.label}</button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="mb-1">
+                      <p className="text-[9px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">Calidad</p>
+                      <div className="flex items-center gap-1">
+                        {[
+                          { v: 'low',    label: 'Low',    cost: '$0.03'  },
+                          { v: 'medium', label: 'Medium', cost: '$0.07'  },
+                          { v: 'high',   label: 'High',   cost: '$0.18'  },
+                        ].map(opt => (
+                          <button key={opt.v}
+                            onClick={() => setGenOpts(o => ({ ...o, quality: opt.v }))}
+                            className={`flex-1 px-1 py-1 text-[10px] font-bold rounded transition ${
+                              genOpts.quality === opt.v
+                                ? 'bg-brand-600 text-white shadow-sm'
+                                : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                            }`}
+                            title={`${opt.cost} por imagen`}
+                          >{opt.label}<br /><span className="text-[8px] opacity-70 font-normal">{opt.cost}</span></button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <p className="mt-2 text-[9px] text-gray-500 dark:text-gray-400 italic">
+                      Aplica tanto a "Crear creativo" individual como al bulk. Costo por ad: ~${((genOpts.n || 2) * (genOpts.quality === 'low' ? 0.03 : genOpts.quality === 'medium' ? 0.07 : 0.18)).toFixed(2)}.
+                    </p>
+                  </div>
+                )}
+              </div>
               <button
                 onClick={() => setShowGaleria(true)}
                 className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-brand-700 dark:text-brand-200 bg-brand-50 dark:bg-brand-900/30 border border-brand-200 dark:border-brand-800 rounded hover:bg-brand-100 dark:hover:bg-brand-900/50 transition"

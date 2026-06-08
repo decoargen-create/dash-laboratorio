@@ -1814,11 +1814,7 @@ function AppShell({ onExit }) {
     if (supabase) {
       try { await supabase.auth.signOut(); } catch {}
     }
-<<<<<<< HEAD
     localStorage.removeItem('adslab-session');
-=======
-    localStorage.removeItem('viora-session');
->>>>>>> origin/main
     setCurrentUser(null);
     setSupabaseUser(null);
     setCurrentSection('mk-arranque');

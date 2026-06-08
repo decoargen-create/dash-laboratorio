@@ -535,8 +535,12 @@ function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = f
 
 function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect }) {
   const [showRepeated, setShowRepeated] = useState(false);
+  const [showAllFresh, setShowAllFresh] = useState(false);
+  const [showAllRepeated, setShowAllRepeated] = useState(false);
   const fresh = ads.filter(a => a.isFresh !== false);
   const repeated = ads.filter(a => a.isFresh === false);
+  const FRESH_LIMIT = showAllFresh ? fresh.length : 30;
+  const REPEATED_LIMIT = showAllRepeated ? repeated.length : 30;
 
   return (
     <div className="mt-3 space-y-3">
@@ -547,7 +551,7 @@ function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccion
             ✨ Nuevos del día <span className="text-gray-400 font-normal">({fresh.length})</span>
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            {fresh.slice(0, 30).map(ad => (
+            {fresh.slice(0, FRESH_LIMIT).map(ad => (
               <AdThumb
                 key={ad.id}
                 ad={ad}
@@ -565,9 +569,13 @@ function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccion
               />
             ))}
             {fresh.length > 30 && (
-              <div className="aspect-square rounded-md flex items-center justify-center bg-gray-50 dark:bg-gray-900 border-2 border-dashed border-gray-200 dark:border-gray-700 text-[10px] text-gray-500 dark:text-gray-400 italic">
-                +{fresh.length - 30} más
-              </div>
+              <button
+                onClick={() => setShowAllFresh(s => !s)}
+                className="aspect-square rounded-md flex items-center justify-center bg-gray-50 dark:bg-gray-900 border-2 border-dashed border-gray-200 dark:border-gray-700 text-[10px] text-gray-500 dark:text-gray-400 italic hover:bg-gray-100 dark:hover:bg-gray-800 hover:border-brand-400 dark:hover:border-brand-600 hover:text-brand-600 dark:hover:text-brand-300 transition cursor-pointer"
+                title={showAllFresh ? 'Ver solo los 30 primeros' : `Ver los ${fresh.length - 30} restantes`}
+              >
+                {showAllFresh ? 'Mostrar menos' : `+${fresh.length - 30} más`}
+              </button>
             )}
           </div>
         </div>
@@ -589,7 +597,7 @@ function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccion
           </button>
           {showRepeated && (
             <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2 opacity-60">
-              {repeated.slice(0, 30).map(ad => (
+              {repeated.slice(0, REPEATED_LIMIT).map(ad => (
                 <AdThumb
                   key={ad.id}
                   ad={ad}
@@ -604,9 +612,13 @@ function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccion
                 />
               ))}
               {repeated.length > 30 && (
-                <div className="aspect-square rounded-md flex items-center justify-center bg-gray-50 dark:bg-gray-900 border-2 border-dashed border-gray-200 dark:border-gray-700 text-[10px] text-gray-400 italic">
-                  +{repeated.length - 30}
-                </div>
+                <button
+                  onClick={() => setShowAllRepeated(s => !s)}
+                  className="aspect-square rounded-md flex items-center justify-center bg-gray-50 dark:bg-gray-900 border-2 border-dashed border-gray-200 dark:border-gray-700 text-[10px] text-gray-400 italic hover:bg-gray-100 dark:hover:bg-gray-800 hover:border-brand-400 hover:text-brand-600 transition cursor-pointer"
+                  title={showAllRepeated ? 'Ver solo los 30 primeros' : `Ver los ${repeated.length - 30} restantes`}
+                >
+                  {showAllRepeated ? 'Menos' : `+${repeated.length - 30} más`}
+                </button>
               )}
             </div>
           )}

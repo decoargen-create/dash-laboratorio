@@ -609,13 +609,28 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     }
     if (mutated) {
       saveJSON(PRODUCTOS_KEY, prods);
-      // Limpiamos las keys globales ya migradas para que no vuelvan a
-      // contaminar a otros productos en corridas futuras.
       try { localStorage.removeItem(COMPETIDORES_KEY); } catch {}
       try { localStorage.removeItem(META_ACCOUNT_KEY); } catch {}
     }
     return prods;
   });
+
+  // Re-leer productos del localStorage cuando termina el pull del cloud.
+  // Sin esto, si el user entra con localStorage vacío en la URL nueva,
+  // el pull baja los productos a localStorage pero Arranque queda con
+  // su state inicial = [] → user ve "Sin productos" hasta que refresca.
+  useEffect(() => {
+    const onPulled = () => {
+      try {
+        const fresh = loadJSON(PRODUCTOS_KEY, []);
+        if (Array.isArray(fresh) && fresh.length > 0) {
+          setProductos(fresh);
+        }
+      } catch {}
+    };
+    window.addEventListener('viora:marketing-pulled', onPulled);
+    return () => window.removeEventListener('viora:marketing-pulled', onPulled);
+  }, []);
 
   // Producto activo — null = vista de lista, id = workspace del producto.
   // IMPORTANTE: arrancamos siempre en null (vista de lista) — el user pidió

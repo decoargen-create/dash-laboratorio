@@ -640,6 +640,19 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     if (productoTabKey) try { localStorage.setItem(productoTabKey, productoTab); } catch {}
   }, [productoTab, productoTabKey]);
 
+  // Estado del sidebar global (open/closed) — escuchamos el evento que
+  // dispatchea App.jsx para ocultar la barra horizontal de tabs cuando el
+  // sidebar las muestra en vertical (evita duplicación). En mobile o con
+  // sidebar colapsado, las tabs horizontales siguen visibles como fallback.
+  const [sidebarOpenInApp, setSidebarOpenInApp] = useState(true);
+  useEffect(() => {
+    const onSidebar = (e) => {
+      if (e?.detail?.open != null) setSidebarOpenInApp(!!e.detail.open);
+    };
+    window.addEventListener('viora:sidebar-state', onSidebar);
+    return () => window.removeEventListener('viora:sidebar-state', onSidebar);
+  }, []);
+
   // Sync del contexto del producto activo + lista para que el sidebar de
   // App.jsx pueda renderizar el nav vertical estilo Apify (lista de productos
   // con su set de tabs adentro del activo). Usamos eventos en lugar de prop
@@ -2236,9 +2249,16 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         )}
       </div>
 
-      {/* Tabs del workspace — Dashboard, Setup, Bandeja, Inspiración, Creativos */}
-      <ProductTabs activeTab={productoTab} onChange={setProductoTab} />
-      <TabsGuide />
+      {/* Tabs del workspace — Dashboard, Setup, Bandeja, Inspiración, Creativos.
+          Ocultas cuando el sidebar está abierto (las muestra ahí en vertical
+          y se ven duplicadas). Visibles cuando el sidebar está colapsado
+          (icon-only) o en mobile. */}
+      {!sidebarOpenInApp && (
+        <>
+          <ProductTabs activeTab={productoTab} onChange={setProductoTab} />
+          <TabsGuide />
+        </>
+      )}
 
       {productoTab === 'dashboard' && (
         <DashboardTab producto={producto} competidores={competidores} runHistory={runHistory} />

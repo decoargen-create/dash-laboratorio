@@ -68,6 +68,26 @@ function isKeywordUsable(kw) {
   return true;
 }
 
+// Parse seguro de respuestas: si el server devuelve HTML (típico Vercel 504
+// "An error occurred...", o un 502 del runtime), no rompe con
+// "Unexpected token 'A', \"An error o\"... is not valid JSON". Detecta el caso
+// y devuelve un error legible.
+async function parseJsonOrThrow(resp, contexto = 'API') {
+  const raw = await resp.text();
+  try {
+    return JSON.parse(raw);
+  } catch {
+    // Heurísticas para errores conocidos
+    if (resp.status === 504 || /timeout/i.test(raw) || /An error occurred with your deployment/i.test(raw)) {
+      throw new Error(`${contexto} timeout — la operación tardó más que el límite del servidor. Reintentá con menos ads seleccionados.`);
+    }
+    if (resp.status >= 500) {
+      throw new Error(`${contexto} error ${resp.status} — el servidor devolvió HTML/texto en vez de JSON. Probá de nuevo en unos segundos.`);
+    }
+    throw new Error(`${contexto} respuesta inválida (HTTP ${resp.status}): ${raw.slice(0, 120)}`);
+  }
+}
+
 const PRODUCTOS_KEY = 'viora-marketing-productos-v1';
 const ACTIVE_KEY = 'viora-marketing-inspiracion-active-product';
 const brandsKey = (productoId) => `viora-marketing-inspiracion-brands-${productoId}`;
@@ -260,7 +280,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           inspiracion: { brandNombre, ad },
         }),
       });
-      const data = await resp.json();
+      const data = await parseJsonOrThrow(resp, 'adapt-inspiracion');
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
       const adaptCost = logCostsFromResponse(data, `adapt-inspiracion · ${brandNombre}`);
 
@@ -381,7 +401,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           skeletonCached: skeletonCache[ad.id] || null,
         }),
       });
-      const data = await resp.json();
+      const data = await parseJsonOrThrow(resp, 'crear-creativo-referencial');
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
       const costo = logCostsFromResponse(data, `crear-creativo-referencial · ${brandNombre}`);
 
@@ -603,7 +623,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const data = await resp.json();
+      const data = await parseJsonOrThrow(resp, 'apify-ingest');
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
       const scrapeCost = logCostsFromResponse(data, `inspiracion · ${brand.nombre}`);
 
@@ -696,7 +716,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const data = await resp.json();
+      const data = await parseJsonOrThrow(resp, 'apify-ingest');
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
       const scrapeCost = logCostsFromResponse(data, `inspiracion · ${comp.nombre}`);
 
@@ -1137,7 +1157,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
 function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, progressById, onScrape, onAdapt, onCrearReferencial, onToggleSelect, onRemove }) {
   const isCompetidor = !!brand.isCompetidor;
   return (
-    <div className="group bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 hover:border-amber-300 dark:hover:border-amber-700 transition">
+    <div className="group/brand bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 hover:border-amber-300 dark:hover:border-amber-700 transition">
       <div className="flex items-center gap-2.5">
         <div className={`w-9 h-9 rounded-md flex items-center justify-center text-white font-bold text-sm shrink-0 ${
           isCompetidor
@@ -1184,7 +1204,7 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
         )}
         {onRemove && (
           <button onClick={onRemove}
-            className="p-1 text-gray-300 opacity-0 group-hover:opacity-100 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition shrink-0"
+            className="p-1 text-gray-300 opacity-0 group-hover/brand:opacity-100 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition shrink-0"
             title="Eliminar marca">
             <Trash2 size={12} />
           </button>
@@ -1474,30 +1494,58 @@ function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, se
   );
 }
 
-function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = false, selected = false, selectionIndex = null, onAdapt, onCrearReferencial, onToggleSelect, progress = null }) {
+function AdThumbImpl({ ad, brandNombre, fresh = false, adapting = false, creando = false, selected = false, selectionIndex = null, onAdapt, onCrearReferencial, onToggleSelect, progress = null }) {
   const cdnThumb = ad.imageUrls?.[0];
   const fbUrl = ad.snapshotUrl;
   // Si tenemos el ad cacheado en IndexedDB (sobreviven el TTL de 24h del CDN),
-  // preferimos el blob URL. Sino, caemos al CDN. Si el CDN falla (URL expirada),
-  // el onError oculta el <img> y queda el placeholder.
+  // preferimos el blob URL. Sino, caemos al CDN.
+  // Perf: NO ejecutamos la lookup en mount — usamos IntersectionObserver para
+  // que solo corra cuando el thumb está cerca del viewport. Con 400+ thumbs
+  // en pantalla, mount-time lookups eran el principal bottleneck.
   const [cachedUrl, setCachedUrl] = useState(null);
+  const containerRef = React.useRef(null);
   useEffect(() => {
     let active = true;
-    if (ad?.id) {
+    if (!ad?.id || !containerRef.current) return;
+
+    const fetchCached = () => {
       getCachedAdImageUrl(ad.id).then(url => { if (active) setCachedUrl(url); });
+    };
+
+    // Si IntersectionObserver no está disponible (browsers viejos), fetch sync.
+    if (typeof IntersectionObserver === 'undefined') {
+      fetchCached();
+      return;
     }
-    const onSaved = (e) => {
-      if (String(e?.detail?.adId || '') === String(ad?.id)) {
-        getCachedAdImageUrl(ad.id).then(url => { if (active) setCachedUrl(url); });
+
+    const io = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          fetchCached();
+          io.disconnect();
+          break;
+        }
       }
+    }, { rootMargin: '200px' }); // pre-fetch 200px antes de que entre en pantalla
+
+    io.observe(containerRef.current);
+
+    const onSaved = (e) => {
+      if (String(e?.detail?.adId || '') === String(ad?.id)) fetchCached();
     };
     window.addEventListener('viora:ad-image-cached', onSaved);
-    return () => { active = false; window.removeEventListener('viora:ad-image-cached', onSaved); };
+
+    return () => {
+      active = false;
+      io.disconnect();
+      window.removeEventListener('viora:ad-image-cached', onSaved);
+    };
   }, [ad?.id]);
   const thumb = cachedUrl || cdnThumb;
   return (
     <div
-      className={`group relative aspect-square rounded-md overflow-hidden bg-gray-100 dark:bg-gray-900 border-2 transition ${
+      ref={containerRef}
+      className={`group/thumb relative aspect-square rounded-md overflow-hidden bg-gray-100 dark:bg-gray-900 border-2 transition ${
         selected
           ? 'border-brand-500 ring-2 ring-brand-300 dark:ring-brand-700'
           : fresh
@@ -1518,7 +1566,7 @@ function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = f
           contaminar. Le da feedback al usuario de que las imágenes están
           seguras de la expiración del CDN. */}
       {cachedUrl && (
-        <div className="absolute top-1 right-7 w-1.5 h-1.5 rounded-full bg-emerald-400/80 opacity-0 group-hover:opacity-100 transition" title="Imagen cacheada localmente" />
+        <div className="absolute top-1 right-7 w-1.5 h-1.5 rounded-full bg-emerald-400/80 opacity-0 group-hover/thumb:opacity-100 transition" title="Imagen cacheada localmente" />
       )}
 
       {/* Selector numerado — siempre visible (más prominente que el checkbox).
@@ -1530,7 +1578,7 @@ function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = f
           className={`absolute top-1.5 left-1.5 z-10 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all shadow-md ${
             selected
               ? 'bg-brand-600 text-white scale-110 ring-2 ring-white dark:ring-gray-900'
-              : 'bg-white/90 dark:bg-gray-900/90 text-gray-400 dark:text-gray-500 hover:bg-brand-50 hover:text-brand-600 dark:hover:bg-brand-900/40 dark:hover:text-brand-300 hover:scale-110 opacity-70 group-hover:opacity-100'
+              : 'bg-white/90 dark:bg-gray-900/90 text-gray-400 dark:text-gray-500 hover:bg-brand-50 hover:text-brand-600 dark:hover:bg-brand-900/40 dark:hover:text-brand-300 hover:scale-110 opacity-70 group-hover/thumb:opacity-100'
           }`}
           title={selected ? `Seleccionado #${selectionIndex} — click para deseleccionar` : 'Click para seleccionar'}
         >
@@ -1571,12 +1619,12 @@ function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = f
         </div>
       )}
 
-      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/60 transition flex flex-col items-stretch justify-end gap-1 p-1.5">
+      <div className="absolute inset-0 bg-black/0 group-hover/thumb:bg-black/60 transition flex flex-col items-stretch justify-end gap-1 p-1.5">
         {onCrearReferencial && (
           <button
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); onCrearReferencial(); }}
             disabled={creando}
-            className="opacity-0 group-hover:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded disabled:opacity-70"
+            className="opacity-0 group-hover/thumb:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded disabled:opacity-70"
             title="Genera 2 variaciones con tu producto real"
           >
             {creando
@@ -1589,7 +1637,7 @@ function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = f
           <button
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); onAdapt(); }}
             disabled={adapting}
-            className="opacity-0 group-hover:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-amber-500/90 hover:bg-amber-600 rounded disabled:opacity-70"
+            className="opacity-0 group-hover/thumb:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-amber-500/90 hover:bg-amber-600 rounded disabled:opacity-70"
             title="Genera ideas (texto) en la Bandeja"
           >
             {adapting
@@ -1600,7 +1648,7 @@ function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = f
         )}
         <a
           href={fbUrl} target="_blank" rel="noreferrer"
-          className="opacity-0 group-hover:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-black/70 hover:bg-black/90 rounded"
+          className="opacity-0 group-hover/thumb:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-black/70 hover:bg-black/90 rounded"
         >
           <ExternalLink size={10} /> Ver en FB
         </a>

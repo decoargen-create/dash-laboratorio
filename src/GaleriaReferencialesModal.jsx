@@ -119,7 +119,10 @@ function GalleryGridView({ items, seleccionados, selectedOrder, onToggleSelect, 
         const isSel = seleccionados.has(it.id);
         const selIdx = selectedOrder.get(it.id);
         return (
-          <HoverPreview key={it.id} item={it} className="group">
+          // Sin HoverPreview en grid: la imagen ya se ve grande, el preview
+          // flotante tapaba thumbnails vecinos y resultaba molesto. Se mantiene
+          // en list/table view donde los thumbs son chicos.
+          <div key={it.id} className="group relative">
             <button
               onClick={() => onOpen(it)}
               className={`block w-full aspect-square rounded-lg overflow-hidden border-2 transition ${
@@ -163,7 +166,7 @@ function GalleryGridView({ items, seleccionados, selectedOrder, onToggleSelect, 
                 {it.variantStyle === 'rebrand' && <span className="ml-1 px-1 bg-brand-500 rounded text-[8px]">REBRAND</span>}
               </p>
             </div>
-          </HoverPreview>
+          </div>
         );
       })}
     </div>

@@ -13,9 +13,13 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   X, Download, Trash2, Images, ChevronDown, ChevronUp, ExternalLink,
   LayoutGrid, Rows3, Table2, Plus, Check, FileArchive, EyeOff, Eye,
+  Archive, ArchiveRestore,
 } from 'lucide-react';
 import JSZip from 'jszip';
-import { getReferencialesByProducto, deleteReferencial, patchReferenciales } from './galeriaReferenciales.js';
+import {
+  getReferencialesByProducto, deleteReferencial, patchReferenciales,
+  archiveReferencial, countReferencialesByProducto,
+} from './galeriaReferenciales.js';
 import { SkeletonGrid } from './Skeleton.jsx';
 import EmptyState from './EmptyState.jsx';
 
@@ -31,6 +35,29 @@ function base64ToBlob(b64, mimeType = 'image/png') {
   const byteNumbers = new Array(byteChars.length);
   for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
   return new Blob([new Uint8Array(byteNumbers)], { type: mimeType });
+}
+
+// Hook: convierte los items en blob URLs y los REVOCA al unmount o cambio.
+// Usar blob URLs en vez de `data:image/png;base64,...` evita que Chrome
+// decodifique cada PNG en RAM como pixel buffer separado. Con 50+ imágenes
+// 2048x2048 quality=high (5-15MB cada una), las data URIs hacen crashear
+// el renderer (Chrome "Código de error 5" — out of memory). Blob URLs
+// dejan los bytes en un solo Blob compartido y el browser los decodifica
+// on-demand cuando el <img> es visible.
+function useBlobUrls(items) {
+  return useMemo(() => {
+    const map = new Map();
+    for (const it of items) {
+      if (!it?.imageBase64) continue;
+      try {
+        const blob = base64ToBlob(it.imageBase64, it.mimeType || 'image/png');
+        map.set(it.id, URL.createObjectURL(blob));
+      } catch {
+        // base64 corrupto — el render usará fallback de data: URI o vacío.
+      }
+    }
+    return map;
+  }, [items]);
 }
 
 function slugify(s) {
@@ -78,7 +105,7 @@ function buildFileName(it, productoNombre) {
 //   embedded=false (default) → modal sobre backdrop con onClose.
 // ---- inner components moved before export (TDZ fix Vite/Rollup) ----
 
-function HoverPreview({ item, children, className = '' }) {
+function HoverPreview({ item, imgSrc, children, className = '' }) {
   return (
     <div className={`group/preview relative ${className}`}>
       {children}
@@ -102,7 +129,7 @@ function HoverPreview({ item, children, className = '' }) {
           <p className="text-[9px] font-bold uppercase tracking-wider text-brand-600 dark:text-brand-400 mb-1 text-center">
             DESPUÉS {item.variantStyle === 'rebrand' && '· REBRAND'}
           </p>
-          <img src={`data:${item.mimeType || 'image/png'};base64,${item.imageBase64}`} alt=""
+          <img src={imgSrc} alt=""
             className="w-full max-h-72 object-contain bg-white rounded" />
         </div>
       </div>
@@ -112,14 +139,18 @@ function HoverPreview({ item, children, className = '' }) {
 
 // VISTA 1 — Grid: thumbs cuadrados con número de selección + badge si ya descargado.
 
-function GalleryGridView({ items, seleccionados, selectedOrder, onToggleSelect, onOpen }) {
+function GalleryGridView({ items, blobUrls, seleccionados, selectedOrder, onToggleSelect, onOpen }) {
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
       {items.map(it => {
         const isSel = seleccionados.has(it.id);
         const selIdx = selectedOrder.get(it.id);
+        const imgSrc = blobUrls.get(it.id) || '';
         return (
-          <HoverPreview key={it.id} item={it} className="group">
+          // Sin HoverPreview en grid: la imagen ya se ve grande, el preview
+          // flotante tapaba thumbnails vecinos y resultaba molesto. Se mantiene
+          // en list/table view donde los thumbs son chicos.
+          <div key={it.id} className="group relative">
             <button
               onClick={() => onOpen(it)}
               className={`block w-full aspect-square rounded-lg overflow-hidden border-2 transition ${
@@ -131,8 +162,9 @@ function GalleryGridView({ items, seleccionados, selectedOrder, onToggleSelect, 
               }`}
             >
               <img
-                src={`data:${it.mimeType || 'image/png'};base64,${it.imageBase64}`}
+                src={imgSrc}
                 alt=""
+                loading="lazy"
                 className="w-full h-full object-cover"
               />
             </button>
@@ -163,7 +195,7 @@ function GalleryGridView({ items, seleccionados, selectedOrder, onToggleSelect, 
                 {it.variantStyle === 'rebrand' && <span className="ml-1 px-1 bg-brand-500 rounded text-[8px]">REBRAND</span>}
               </p>
             </div>
-          </HoverPreview>
+          </div>
         );
       })}
     </div>
@@ -172,12 +204,13 @@ function GalleryGridView({ items, seleccionados, selectedOrder, onToggleSelect, 
 
 // VISTA 2 — Lista: rows con thumb + info + acciones inline.
 
-function GalleryListView({ items, seleccionados, selectedOrder, onToggleSelect, onOpen, onDownload, onToggleDescargada, onDelete }) {
+function GalleryListView({ items, blobUrls, seleccionados, selectedOrder, onToggleSelect, onOpen, onDownload, onToggleDescargada, onArchive, onDelete }) {
   return (
     <div className="space-y-1.5">
       {items.map(it => {
         const isSel = seleccionados.has(it.id);
         const selIdx = selectedOrder.get(it.id);
+        const imgSrc = blobUrls.get(it.id) || '';
         return (
           <div key={it.id}
             className={`flex items-center gap-2.5 p-2 rounded-md border transition ${
@@ -194,11 +227,12 @@ function GalleryListView({ items, seleccionados, selectedOrder, onToggleSelect, 
             >
               {isSel ? selIdx : <Plus size={12} />}
             </button>
-            <HoverPreview item={it} className="shrink-0">
+            <HoverPreview item={it} imgSrc={imgSrc} className="shrink-0">
               <button onClick={() => onOpen(it)}>
                 <img
-                  src={`data:${it.mimeType || 'image/png'};base64,${it.imageBase64}`}
+                  src={imgSrc}
                   alt=""
+                  loading="lazy"
                   className="w-14 h-14 rounded object-cover border border-gray-200 dark:border-gray-700 hover:scale-110 transition"
                 />
               </button>
@@ -245,6 +279,15 @@ function GalleryListView({ items, seleccionados, selectedOrder, onToggleSelect, 
                 title={it.descargada ? 'Marcar como NO descargado' : 'Marcar como descargado'}>
                 <Check size={12} />
               </button>
+              <button onClick={() => onArchive(it.id, !!it.archivado)}
+                className={`p-1.5 rounded transition ${
+                  it.archivado
+                    ? 'text-amber-600 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/30 hover:bg-amber-100'
+                    : 'text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                }`}
+                title={it.archivado ? 'Restaurar' : 'Archivar'}>
+                {it.archivado ? <ArchiveRestore size={12} /> : <Archive size={12} />}
+              </button>
               <button onClick={() => onDelete(it.id)}
                 className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition"
                 title="Borrar">
@@ -260,7 +303,7 @@ function GalleryListView({ items, seleccionados, selectedOrder, onToggleSelect, 
 
 // VISTA 3 — Tabla.
 
-function GalleryTableView({ items, seleccionados, selectedOrder, onToggleSelect, onOpen, onDownload, onToggleDescargada, onDelete }) {
+function GalleryTableView({ items, blobUrls, seleccionados, selectedOrder, onToggleSelect, onOpen, onDownload, onToggleDescargada, onArchive, onDelete }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-xs">
@@ -280,6 +323,7 @@ function GalleryTableView({ items, seleccionados, selectedOrder, onToggleSelect,
           {items.map(it => {
             const isSel = seleccionados.has(it.id);
             const selIdx = selectedOrder.get(it.id);
+            const imgSrc = blobUrls.get(it.id) || '';
             return (
               <tr key={it.id} className={isSel ? 'bg-brand-50/50 dark:bg-brand-900/20' : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'}>
                 <td className="py-2 pr-2">
@@ -292,11 +336,12 @@ function GalleryTableView({ items, seleccionados, selectedOrder, onToggleSelect,
                   </button>
                 </td>
                 <td className="py-2 px-2">
-                  <HoverPreview item={it} className="inline-block">
+                  <HoverPreview item={it} imgSrc={imgSrc} className="inline-block">
                     <button onClick={() => onOpen(it)}>
                       <img
-                        src={`data:${it.mimeType || 'image/png'};base64,${it.imageBase64}`}
+                        src={imgSrc}
                         alt=""
+                        loading="lazy"
                         className="w-10 h-10 rounded object-cover border border-gray-200 dark:border-gray-700 hover:scale-110 transition"
                       />
                     </button>
@@ -328,6 +373,11 @@ function GalleryTableView({ items, seleccionados, selectedOrder, onToggleSelect,
                       title={it.descargada ? 'Marcar pendiente' : 'Marcar descargado'}>
                       <Check size={11} />
                     </button>
+                    <button onClick={() => onArchive(it.id, !!it.archivado)}
+                      className={`p-1 rounded ${it.archivado ? 'text-amber-600' : 'text-gray-400'} hover:bg-gray-100 dark:hover:bg-gray-700`}
+                      title={it.archivado ? 'Restaurar' : 'Archivar'}>
+                      {it.archivado ? <ArchiveRestore size={11} /> : <Archive size={11} />}
+                    </button>
                     <button onClick={() => onDelete(it.id)}
                       className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded" title="Borrar">
                       <Trash2 size={11} />
@@ -345,7 +395,7 @@ function GalleryTableView({ items, seleccionados, selectedOrder, onToggleSelect,
 
 // Lightbox separado para mantener este archivo manejable.
 
-function Lightbox({ item, onClose, showDebug, setShowDebug, onDownload, onDelete, onToggleDescargada }) {
+function Lightbox({ item, imgSrc, onClose, showDebug, setShowDebug, onDownload, onDelete, onToggleDescargada, onArchive }) {
   return (
     <div
       className="fixed inset-0 z-[60] bg-black/90 flex items-start justify-center p-6 overflow-y-auto"
@@ -384,7 +434,7 @@ function Lightbox({ item, onClose, showDebug, setShowDebug, onDownload, onDelete
                 </span>
               )}
             </p>
-            <img src={`data:${item.mimeType || 'image/png'};base64,${item.imageBase64}`}
+            <img src={imgSrc}
               alt="" className="w-full object-contain bg-white rounded" style={{ maxHeight: '60vh' }} />
             <div className="flex items-center gap-2 mt-2 text-[9px] text-gray-500 dark:text-gray-400">
               {item.size && <span>{item.size}</span>}
@@ -437,6 +487,15 @@ function Lightbox({ item, onClose, showDebug, setShowDebug, onDownload, onDelete
               }`}>
               <Check size={13} /> {item.descargada ? 'Marcar pendiente' : 'Marcar descargado'}
             </button>
+            <button onClick={onArchive}
+              className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg transition ${
+                item.archivado
+                  ? 'text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/30 hover:bg-amber-100'
+                  : 'text-gray-700 dark:text-gray-200 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300'
+              }`}>
+              {item.archivado ? <ArchiveRestore size={13} /> : <Archive size={13} />}
+              {item.archivado ? 'Restaurar' : 'Archivar'}
+            </button>
             <button onClick={onDelete}
               className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/30 hover:bg-red-100 dark:hover:bg-red-900/50 rounded-lg transition">
               <Trash2 size={13} /> Borrar
@@ -455,6 +514,8 @@ function Lightbox({ item, onClose, showDebug, setShowDebug, onDownload, onDelete
 
 export default function GaleriaReferencialesModal({ productoId, productoNombre, onClose, embedded = false }) {
   const [items, setItems] = useState([]);
+  const [counts, setCounts] = useState({ total: 0, active: 0, archived: 0, downloaded: 0 });
+  const [verArchivados, setVerArchivados] = useState(false);
   const [selected, setSelected] = useState(null);
   const [cargando, setCargando] = useState(true);
   const [showDebug, setShowDebug] = useState(false);
@@ -483,8 +544,11 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
 
   const refresh = () => {
     setCargando(true);
-    getReferencialesByProducto(productoId)
-      .then(setItems)
+    Promise.all([
+      getReferencialesByProducto(productoId, { includeArchived: verArchivados }),
+      countReferencialesByProducto(productoId),
+    ])
+      .then(([its, cs]) => { setItems(its); setCounts(cs); })
       .finally(() => setCargando(false));
   };
 
@@ -498,7 +562,19 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
     window.addEventListener('viora:referencial-saved', onSaved);
     return () => window.removeEventListener('viora:referencial-saved', onSaved);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [productoId]);
+  }, [productoId, verArchivados]);
+
+  // Blob URLs por item — se revoca el set anterior al regenerar.
+  // SIN esto, cada <img src="data:..."> hacía Chrome decodificar PNG 2K en
+  // RAM (5-15MB cada uno) y crashear el renderer con 50+ creativos.
+  const blobUrls = useBlobUrls(items);
+  useEffect(() => {
+    return () => {
+      for (const url of blobUrls.values()) {
+        try { URL.revokeObjectURL(url); } catch {}
+      }
+    };
+  }, [blobUrls]);
 
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') { if (selected) setSelected(null); else onClose(); } };
@@ -608,6 +684,15 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
     refresh();
   };
 
+  // Archivar / restaurar — soft-hide. El item queda en IDB pero por default
+  // no se carga en la galería ni se decodifica a memoria.
+  const handleArchive = async (id, currentValue) => {
+    await archiveReferencial(id, !currentValue);
+    // Si estamos archivando algo y el lightbox lo tiene abierto, cerralo.
+    if (!currentValue && selected?.id === id) setSelected(null);
+    refresh();
+  };
+
   const visibleItems = items.filter(it => {
     if (filtroEstado === 'pending' && it.descargada) return false;
     if (filtroEstado === 'downloaded' && !it.descargada) return false;
@@ -629,8 +714,22 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
             <div className="min-w-0">
               <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">Repositorio de creativos</h3>
               <p className="text-[10px] text-gray-500 dark:text-gray-400 truncate">
-                {productoNombre} · {items.length} creativo{items.length !== 1 ? 's' : ''}
-                {yaDescargadosCount > 0 && ` · ${yaDescargadosCount} ya descargado${yaDescargadosCount !== 1 ? 's' : ''}`}
+                {productoNombre} · {counts.active} activo{counts.active !== 1 ? 's' : ''}
+                {counts.downloaded > 0 && ` · ${counts.downloaded} descargado${counts.downloaded !== 1 ? 's' : ''}`}
+                {counts.archived > 0 && (
+                  <button
+                    onClick={() => setVerArchivados(v => !v)}
+                    className={`ml-1 px-1.5 py-0.5 rounded text-[9px] font-bold transition ${
+                      verArchivados
+                        ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300'
+                        : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-amber-50 dark:hover:bg-amber-900/30'
+                    }`}
+                    title={verArchivados ? 'Ocultar archivados' : 'Mostrar archivados'}
+                  >
+                    {verArchivados ? <ArchiveRestore size={9} className="inline -mt-0.5 mr-0.5" /> : <Archive size={9} className="inline -mt-0.5 mr-0.5" />}
+                    {counts.archived} archivado{counts.archived !== 1 ? 's' : ''}
+                  </button>
+                )}
               </p>
             </div>
           </div>
@@ -709,19 +808,19 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
               icon={Check}
               title="¡Todo descargado!"
               description='Apagá el filtro "Solo no descargados" para ver todo el repositorio.'
-              secondaryAction={{ label: 'Mostrar todo', onClick: () => setSoloNoDescargados(false) }}
+              secondaryAction={{ label: 'Mostrar todo', onClick: () => { setFiltroEstado('all'); setFiltroVariante('all'); setFiltroOrigen('all'); } }}
             />
           ) : viewMode === 'grid' ? (
-            <GalleryGridView items={visibleItems} seleccionados={seleccionados} selectedOrder={selectedOrder}
+            <GalleryGridView items={visibleItems} blobUrls={blobUrls} seleccionados={seleccionados} selectedOrder={selectedOrder}
               onToggleSelect={toggleSeleccion} onOpen={setSelected} />
           ) : viewMode === 'list' ? (
-            <GalleryListView items={visibleItems} seleccionados={seleccionados} selectedOrder={selectedOrder}
+            <GalleryListView items={visibleItems} blobUrls={blobUrls} seleccionados={seleccionados} selectedOrder={selectedOrder}
               onToggleSelect={toggleSeleccion} onOpen={setSelected}
-              onDownload={handleSingleDownload} onToggleDescargada={toggleDescargadaFlag} onDelete={handleDelete} />
+              onDownload={handleSingleDownload} onToggleDescargada={toggleDescargadaFlag} onArchive={handleArchive} onDelete={handleDelete} />
           ) : (
-            <GalleryTableView items={visibleItems} seleccionados={seleccionados} selectedOrder={selectedOrder}
+            <GalleryTableView items={visibleItems} blobUrls={blobUrls} seleccionados={seleccionados} selectedOrder={selectedOrder}
               onToggleSelect={toggleSeleccion} onOpen={setSelected}
-              onDownload={handleSingleDownload} onToggleDescargada={toggleDescargadaFlag} onDelete={handleDelete} />
+              onDownload={handleSingleDownload} onToggleDescargada={toggleDescargadaFlag} onArchive={handleArchive} onDelete={handleDelete} />
           )}
         </div>
 
@@ -755,12 +854,14 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
       {selected && (
         <Lightbox
           item={selected}
+          imgSrc={blobUrls.get(selected.id) || ''}
           onClose={() => { setSelected(null); setShowDebug(false); }}
           showDebug={showDebug}
           setShowDebug={setShowDebug}
           onDownload={() => handleSingleDownload(selected)}
           onDelete={() => handleDelete(selected.id)}
           onToggleDescargada={() => toggleDescargadaFlag(selected.id, !!selected.descargada)}
+          onArchive={() => handleArchive(selected.id, !!selected.archivado)}
         />
       )}
     </>

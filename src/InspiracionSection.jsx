@@ -388,6 +388,7 @@ function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = f
     >
       {thumb ? (
         <img src={thumb} alt="" className="w-full h-full object-cover"
+          loading="lazy" decoding="async"
           onError={(e) => { e.target.style.display = 'none'; }} />
       ) : (
         <div className="w-full h-full flex items-center justify-center">
@@ -743,7 +744,7 @@ function TopListView({ items, seleccionados, selectedOrder, adaptingAdIds, crean
             }`}>{idx + 1}</div>
             {/* Thumb chiquito */}
             <div className="w-12 h-12 rounded bg-gray-100 dark:bg-gray-900 overflow-hidden shrink-0 border border-gray-200 dark:border-gray-700">
-              {thumb && <img src={thumb} alt="" className="w-full h-full object-cover" onError={e => { e.target.style.display = 'none'; }} />}
+              {thumb && <img src={thumb} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" onError={e => { e.target.style.display = 'none'; }} />}
             </div>
             {/* Info */}
             <div className="flex-1 min-w-0">
@@ -847,7 +848,7 @@ function TopTableView({ items, seleccionados, selectedOrder, adaptingAdIds, crea
                 <td className="py-1.5 px-2">
                   <div className="flex items-center gap-2">
                     <div className="w-8 h-8 rounded bg-gray-100 dark:bg-gray-900 overflow-hidden shrink-0 border border-gray-200 dark:border-gray-700">
-                      {thumb && <img src={thumb} alt="" className="w-full h-full object-cover" onError={e => { e.target.style.display = 'none'; }} />}
+                      {thumb && <img src={thumb} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" onError={e => { e.target.style.display = 'none'; }} />}
                     </div>
                     <span className="text-[10px] text-gray-700 dark:text-gray-300 truncate max-w-[200px]">{ad.headline || ad.body?.slice(0, 50) || '—'}</span>
                   </div>
@@ -944,12 +945,23 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   const [genOpts, setGenOpts] = useState(() => {
     try {
       const raw = localStorage.getItem('viora-marketing-gen-opts');
-      return raw ? JSON.parse(raw) : { n: 2, size: '2048x2048', quality: 'high' };
-    } catch { return { n: 2, size: '2048x2048', quality: 'high' }; }
+      return raw ? JSON.parse(raw) : { n: 2, size: '1024x1024', quality: 'high' };
+    } catch { return { n: 2, size: '1024x1024', quality: 'high' }; }
   });
   useEffect(() => {
     try { localStorage.setItem('viora-marketing-gen-opts', JSON.stringify(genOpts)); } catch {}
   }, [genOpts]);
+  // Estimación de costo por imagen alineada con backend (_costs.js). Incluye
+  // size porque 2048×2048 es ~4× más caro que 1024×1024 — antes lo ignorábamos
+  // y subestimábamos por 3-4x el burn de OpenAI.
+  const costPerImage = (quality, size) => {
+    const TABLE = {
+      low:    { '1024x1024': 0.013, '1024x1536': 0.020, '1536x1024': 0.020, '2048x2048': 0.050 },
+      medium: { '1024x1024': 0.046, '1024x1536': 0.068, '1536x1024': 0.068, '2048x2048': 0.175 },
+      high:   { '1024x1024': 0.180, '1024x1536': 0.262, '1536x1024': 0.262, '2048x2048': 0.680 },
+    };
+    return TABLE[quality]?.[size] ?? 0.18;
+  };
   // Cache de skeletons extraídos por Vision — { [adId]: skeleton }. Si
   // re-generamos sobre el mismo ad, reusamos el skeleton y nos saltamos
   // Vision por completo. Se persiste en localStorage para sobrevivir refresh.
@@ -962,8 +974,27 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   const upsertSkeleton = (adId, skel) => {
     if (!adId || !skel) return;
     setSkeletonCache(prev => {
-      const next = { ...prev, [adId]: skel };
-      try { localStorage.setItem('viora-marketing-skeleton-cache', JSON.stringify(next)); } catch {}
+      // Cap a 50 entries — el plan completo es 5-50KB. Sin tope llegaba al
+      // límite de 5MB de localStorage y rompía writes silenciosamente.
+      // LRU simple: si ya estamos en el cap, descartamos el más antiguo.
+      const MAX_ENTRIES = 50;
+      const entries = Object.entries(prev);
+      let next;
+      if (entries.length >= MAX_ENTRIES && !(adId in prev)) {
+        // Quedarnos con los últimos MAX-1 + el nuevo.
+        next = Object.fromEntries(entries.slice(-(MAX_ENTRIES - 1)));
+        next[adId] = skel;
+      } else {
+        next = { ...prev, [adId]: skel };
+      }
+      try { localStorage.setItem('viora-marketing-skeleton-cache', JSON.stringify(next)); }
+      catch (err) {
+        // Si todavía falla (quota), purgamos a la mitad y reintentamos.
+        const halved = Object.fromEntries(Object.entries(next).slice(-Math.floor(MAX_ENTRIES / 2)));
+        halved[adId] = skel;
+        try { localStorage.setItem('viora-marketing-skeleton-cache', JSON.stringify(halved)); } catch {}
+        return halved;
+      }
       return next;
     });
   };
@@ -1137,9 +1168,20 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
 
   const limpiarSeleccion = () => setSeleccionados(new Set());
 
-  // Genera 2 variaciones de creativo referencial para UN ad de inspiración.
-  // Lo usan el botón individual y el bulk. Guarda en la galería al toque.
-  // Actualiza progressById con stage por etapa para feedback al usuario.
+  // Genera N variaciones de creativo referencial para UN ad de inspiración.
+  // ESTRATEGIA — parallel client-side:
+  //   • Call#1: pide n=1, nPlan=N, variationStartIndex=0. Backend corre
+  //     Strategist con nPlan variations, genera 1 imagen (variation #0),
+  //     devuelve plan completo. Frontend cachea el plan.
+  //   • Calls#2..N en batches de 2 (concurrency=2): pide n=1 cada uno,
+  //     skeletonCached=plan, variationStartIndex=i. Backend usa la
+  //     variation[i] del plan cacheado sin re-correr Strategist.
+  //
+  // Ventajas vs n=N en un solo call:
+  //   • Cada call ~70s — lejos del timeout de Vercel (300s).
+  //   • Falla 1 → las otras 3 siguen funcionando.
+  //   • Progreso real (1/4, 2/4, ...).
+  //   • Mismo costo de Sonnet ($0.04 una vez) gracias al cache.
   const crearReferencialDeAd = async (brandNombre, ad) => {
     if (!producto) return false;
     const prodImg = getProductoImagen(producto.id);
@@ -1152,119 +1194,162 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       ...prev,
       [ad.id]: { startedAt: Date.now(), stage: 'preparando' },
     }));
-    // Estimación de costo según opciones (lo mostramos en el tray antes de que la API confirme).
-    const costoPorImg = genOpts.quality === 'low' ? 0.03 : genOpts.quality === 'medium' ? 0.07 : 0.18;
-    const visionCost = skeletonCache[ad.id] ? 0 : 0.005;
+    const costoPorImg = costPerImage(genOpts.quality, genOpts.size);
+    const visionCost = skeletonCache[ad.id] ? 0 : 0.04; // Sonnet Strategist
     const nVar = Math.max(1, Math.min(10, genOpts.n || 2));
     const estimatedCost = nVar * costoPorImg + visionCost;
     const execId = startExecution({
       label: `Creando ${nVar} creativo${nVar !== 1 ? 's' : ''} de ${brandNombre}`,
       sublabel: ad.headline?.slice(0, 60) || ad.body?.slice(0, 60) || '',
       kind: 'creative',
-      estimatedMs: 80000,
+      estimatedMs: 80000 * Math.ceil(nVar / 2), // 80s por batch de 2
       estimatedCost,
     });
-    try {
-      // Pequeña pausa visual para que se vea el stage "preparando".
-      await new Promise(r => setTimeout(r, 150));
-      setProgressById(prev => ({
-        ...prev,
-        [ad.id]: { ...prev[ad.id], stage: 'generando' },
-      }));
-      updateExecution(execId, { stage: 'Generando con gpt-image-2…' });
 
-      const refImageUrl = ad.imageUrls?.[0];
-      if (!refImageUrl) {
-        throw new Error('Este ad no tiene imagen para usar como referencia');
-      }
+    const refImageUrl = ad.imageUrls?.[0];
+    if (!refImageUrl) {
+      addToast?.({ type: 'error', message: 'Este ad no tiene imagen para usar como referencia' });
+      finishExecution(execId, { ok: false, message: 'sin imagen' });
+      setCreandoAdIds(prev => { const n = new Set(prev); n.delete(ad.id); return n; });
+      return false;
+    }
+
+    const baseBody = {
+      producto: {
+        nombre: producto.nombre,
+        descripcion: producto.descripcion,
+        research: producto.docs?.research,
+        offerBrief: producto.ofertasReales || producto.docs?.offerBrief || '',
+      },
+      inspiracion: {
+        brandNombre,
+        body: ad.body, headline: ad.headline,
+        formato: ad.formato,
+        analysis: ad.analysis || null,
+        visual: ad.visual || null,
+      },
+      inspiracionImageUrl: refImageUrl,
+      productoImagen: prodImg,
+      accentColor: getAccentColor(producto.id) || '',
+      quality: genOpts.quality,
+      size: genOpts.size,
+    };
+
+    // Helper: una sola llamada (devuelve { data } o lanza).
+    const doCall = async (variationStartIndex, planCached) => {
       const resp = await fetch('/api/marketing/crear-creativo-referencial', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          producto: {
-            nombre: producto.nombre,
-            descripcion: producto.descripcion,
-            research: producto.docs?.research,
-            // Ofertas y claims reales del usuario (declarados en Setup). Si está vacío,
-            // Vision removerá cualquier promo/claim del ad ref (más conservador).
-            offerBrief: producto.ofertasReales || producto.docs?.offerBrief || '',
-          },
-          inspiracion: {
-            brandNombre,
-            body: ad.body, headline: ad.headline,
-            formato: ad.formato,
-            analysis: ad.analysis || null,
-            visual: ad.visual || null,
-          },
-          inspiracionImageUrl: refImageUrl,
-          productoImagen: prodImg,
-          accentColor: getAccentColor(producto.id) || '',
-          // n=2 fijo (la lógica "por las dudas" se cubre con 2 variantes).
-          // size y quality configurables.
-          quality: genOpts.quality,
-          size: genOpts.size,
-          n: nVar,
-          // Si ya tenemos un skeleton cacheado del mismo ad, lo mandamos
-          // para que el backend saltee la llamada a Vision (~$0.005 + 10s).
-          skeletonCached: skeletonCache[ad.id] || null,
+          ...baseBody,
+          n: 1,
+          nPlan: nVar,
+          variationStartIndex,
+          skeletonCached: planCached || null,
         }),
       });
       const data = await parseJsonOrThrow(resp, 'crear-creativo-referencial');
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-      const costo = logCostsFromResponse(data, `crear-creativo-referencial · ${brandNombre}`);
+      return data;
+    };
 
+    // Helper: persiste UNA imagen del response a galería.
+    const saveOne = async (data, variantIndex, plan) => {
+      const variantStyle = data.variantStyles?.[0] || 'strategist';
+      const promptStr = data.prompts?.[0]?.prompt || data.promptReference || '';
+      await saveReferencial({
+        id: `ref_${Date.now()}_${ad.id}_${variantIndex}`,
+        productoId: String(producto.id),
+        sourceAdId: ad.id,
+        sourceBrand: brandNombre,
+        sourceImageUrl: refImageUrl,
+        sourceHeadline: ad.headline || ad.body?.slice(0, 200) || '',
+        variantIndex,
+        variantStyle,
+        imageBase64: data.imagenes?.[0] || '',
+        mimeType: data.mimeType || 'image/png',
+        prompt: promptStr,
+        skeleton: plan?.visual || data.skeleton || null,
+        model: data.model,
+        visionModel: data.visionModel || null,
+        size: data.size,
+        sizeFallback: !!data.sizeFallback,
+        quality: data.quality || 'high',
+        createdAt: new Date().toISOString(),
+      });
+    };
+
+    try {
+      await new Promise(r => setTimeout(r, 150));
       setProgressById(prev => ({
         ...prev,
-        [ad.id]: { ...prev[ad.id], stage: 'guardando' },
+        [ad.id]: { ...prev[ad.id], stage: `generando 1/${nVar}` },
       }));
-      updateExecution(execId, { stage: 'Guardando en galería…' });
+      updateExecution(execId, { stage: `Generando 1/${nVar}…` });
 
-      // Cachear skeleton del ad para futuras re-generaciones (saltea Vision).
-      // Cacheamos el plan COMPLETO si vino del Strategist (incluye visual +
-      // strategy + variations), sino el skeleton solo. Próxima vez sobre el
-      // mismo ad reutilizamos sin re-pagar Sonnet.
-      if (!data.skeletonFromCache) {
-        if (data.plan) upsertSkeleton(ad.id, data.plan);
-        else if (data.skeleton) upsertSkeleton(ad.id, data.skeleton);
+      // CALL #1 — solo, para obtener el plan y poblar el cache.
+      let cachedPlan = skeletonCache[ad.id] || null;
+      const firstData = await doCall(0, cachedPlan);
+      const totalCostAccum = { openai: 0, anthropic: 0 };
+      const c1 = logCostsFromResponse(firstData, `crear-creativo-referencial · ${brandNombre} · 1/${nVar}`);
+      totalCostAccum.openai += c1?.openai || 0;
+      totalCostAccum.anthropic += c1?.anthropic || 0;
+
+      const newPlan = firstData.plan || cachedPlan;
+      if (newPlan && !firstData.skeletonFromCache) {
+        upsertSkeleton(ad.id, newPlan);
+        cachedPlan = newPlan;
+      } else if (cachedPlan == null && firstData.skeleton) {
+        upsertSkeleton(ad.id, firstData.skeleton);
       }
 
-      // Guardar las N variaciones en la galería. Persistimos skeleton +
-      // sourceImageUrl + prompt para que después se pueda inspeccionar qué
-      // entró exactamente al modelo (útil para debug y para entender por qué
-      // una variación quedó mejor que otra).
-      const ahora = Date.now();
-      const imagenes = data.imagenes || [];
-      const variantStyles = data.variantStyles || [];
-      for (let i = 0; i < imagenes.length; i++) {
-        const variantStyle = variantStyles[i] || 'reference';
-        await saveReferencial({
-          id: `ref_${ahora}_${ad.id}_${i}`,
-          productoId: String(producto.id),
-          sourceAdId: ad.id,
-          sourceBrand: brandNombre,
-          sourceImageUrl: refImageUrl,
-          sourceHeadline: ad.headline || ad.body?.slice(0, 200) || '',
-          variantIndex: i,
-          variantStyle,          // 'reference' (palette del ad) | 'rebrand' (palette del producto)
-          imageBase64: imagenes[i],
-          mimeType: data.mimeType || 'image/png',
-          prompt: variantStyle === 'rebrand' ? data.promptRebrand : data.promptReference,
-          skeleton: data.skeleton || null,
-          model: data.model,
-          visionModel: data.visionModel || null,
-          size: data.size,
-          sizeFallback: !!data.sizeFallback,
-          quality: data.quality || 'high',
-          createdAt: new Date(ahora + i).toISOString(),
-        });
+      await saveOne(firstData, 0, newPlan);
+      // Limpiar ref del base64 inmediatamente — sin esto Chrome lo mantiene
+      // ~5-15MB en heap hasta el siguiente GC. Con 4 imágenes seguidas
+      // el renderer crashea (Código de error: 5).
+      if (firstData.imagenes) firstData.imagenes.length = 0;
+      let completed = 1;
+      let failed = 0;
+      setProgressById(prev => ({
+        ...prev,
+        [ad.id]: { ...prev[ad.id], stage: `generando ${completed}/${nVar}` },
+      }));
+
+      // CALLS #2..N — SECUENCIAL (concurrency=1) para no acumular base64s
+      // en memoria. Con concurrency=2 dos imágenes de 5-15MB conviven en
+      // heap → renderer OOM. Secuencial es 70s más lento por variación pero
+      // estable.
+      if (nVar > 1) {
+        for (let idx = 1; idx < nVar; idx++) {
+          try {
+            const data = await doCall(idx, cachedPlan);
+            await saveOne(data, idx, cachedPlan);
+            const c = logCostsFromResponse(data, `crear-creativo-referencial · ${brandNombre} · ${idx + 1}/${nVar}`);
+            totalCostAccum.openai += c?.openai || 0;
+            totalCostAccum.anthropic += c?.anthropic || 0;
+            // Liberar la referencia al base64 ANTES del próximo call.
+            if (data.imagenes) data.imagenes.length = 0;
+            completed++;
+          } catch (err) {
+            console.warn(`Variación ${idx + 1}/${nVar} de ${brandNombre} falló:`, err.message);
+            failed++;
+          }
+          setProgressById(prev => ({
+            ...prev,
+            [ad.id]: { ...prev[ad.id], stage: `generando ${completed}/${nVar}${failed ? ` (${failed} ✗)` : ''}` },
+          }));
+          updateExecution(execId, { stage: `Generando ${completed}/${nVar}…` });
+        }
       }
+
       setProgressById(prev => ({
         ...prev,
         [ad.id]: { ...prev[ad.id], stage: 'done' },
       }));
-      const cacheNote = data.skeletonFromCache ? ' (skeleton cacheado, ahorraste ~$0.005)' : '';
-      const msg = `${imagenes.length} variaciones generadas y guardadas en galería${cacheNote}`;
-      addToast?.({ type: 'success', message: msg });
-      finishExecution(execId, { ok: true, message: msg, cost: costo?.total || estimatedCost });
+      const cacheNote = firstData.skeletonFromCache ? ' (plan cacheado)' : '';
+      const failNote = failed > 0 ? ` (${failed} fallaron)` : '';
+      const msg = `${completed}/${nVar} variaciones generadas${failNote}${cacheNote}`;
+      addToast?.({ type: failed > 0 ? 'warning' : 'success', message: msg });
+      finishExecution(execId, { ok: failed === 0, message: msg, cost: totalCostAccum.openai + totalCostAccum.anthropic });
       // Auto-limpiar el estado del progreso después de 2.5s para que se vea el "✓".
       setTimeout(() => {
         setProgressById(prev => {
@@ -1306,7 +1391,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     }
     // Costo: $0.18/imagen (high) × 2 variantes + ~$0.005 vision (Haiku) por ad
     // que NO esté ya en cache. n=2 fijo.
-    const costoPorImagen = genOpts.quality === 'low' ? 0.03 : genOpts.quality === 'medium' ? 0.07 : 0.18;
+    const costoPorImagen = costPerImage(genOpts.quality, genOpts.size);
     const visionAds = Array.from(seleccionados).filter(adId => !skeletonCache[adId]).length;
     const nVarBulk = Math.max(1, Math.min(10, genOpts.n || 2));
     const costoEstimado = seleccionados.size * nVarBulk * costoPorImagen + visionAds * 0.005;
@@ -1684,8 +1769,9 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           <div className="flex items-center gap-1 text-[10px]">
             <span className="text-gray-500 dark:text-gray-400">Ratio:</span>
             {[
-              { v: '2048x2048', label: '1:1' },
+              { v: '1024x1024', label: '1:1' },
               { v: '1024x1536', label: 'Portrait' },
+              { v: '2048x2048', label: '1:1 2K (4×$)' },
             ].map(opt => (
               <button key={opt.v}
                 onClick={() => setGenOpts(o => ({ ...o, size: opt.v }))}
@@ -1955,8 +2041,9 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                       <p className="text-[9px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">Tamaño</p>
                       <div className="flex items-center gap-1">
                         {[
-                          { v: '2048x2048', label: '1:1 (feed)' },
+                          { v: '1024x1024', label: '1:1 (feed)' },
                           { v: '1024x1536', label: 'Portrait (story)' },
+                          { v: '2048x2048', label: '2K (4× costo)' },
                         ].map(opt => (
                           <button key={opt.v}
                             onClick={() => setGenOpts(o => ({ ...o, size: opt.v }))}
@@ -1974,10 +2061,12 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                       <p className="text-[9px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">Calidad</p>
                       <div className="flex items-center gap-1">
                         {[
-                          { v: 'low',    label: 'Low',    cost: '$0.03'  },
-                          { v: 'medium', label: 'Medium', cost: '$0.07'  },
-                          { v: 'high',   label: 'High',   cost: '$0.18'  },
-                        ].map(opt => (
+                          { v: 'low',    label: 'Low'    },
+                          { v: 'medium', label: 'Medium' },
+                          { v: 'high',   label: 'High'   },
+                        ].map(opt => {
+                          const cost = costPerImage(opt.v, genOpts.size);
+                          return (
                           <button key={opt.v}
                             onClick={() => setGenOpts(o => ({ ...o, quality: opt.v }))}
                             className={`flex-1 px-1 py-1 text-[10px] font-bold rounded transition ${
@@ -1985,14 +2074,15 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                                 ? 'bg-brand-600 text-white shadow-sm'
                                 : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
                             }`}
-                            title={`${opt.cost} por imagen`}
-                          >{opt.label}<br /><span className="text-[8px] opacity-70 font-normal">{opt.cost}</span></button>
-                        ))}
+                            title={`$${cost.toFixed(3)} por imagen a ${genOpts.size}`}
+                          >{opt.label}<br /><span className="text-[8px] opacity-70 font-normal">${cost.toFixed(3)}</span></button>
+                          );
+                        })}
                       </div>
                     </div>
 
                     <p className="mt-2 text-[9px] text-gray-500 dark:text-gray-400 italic">
-                      Aplica tanto a "Crear creativo" individual como al bulk. Costo por ad: ~${((genOpts.n || 2) * (genOpts.quality === 'low' ? 0.03 : genOpts.quality === 'medium' ? 0.07 : 0.18)).toFixed(2)}.
+                      Aplica tanto a "Crear creativo" individual como al bulk. Costo por ad: ~${((genOpts.n || 2) * costPerImage(genOpts.quality, genOpts.size)).toFixed(2)} ({genOpts.size} {genOpts.quality}).
                     </p>
                   </div>
                 )}

@@ -8481,6 +8481,14 @@ export default function App() {
   useEffect(() => {
     const onPop = () => setPath(window.location.pathname);
     window.addEventListener('popstate', onPop);
+    // Tag de build visible en consola — confirma qué bundle está corriendo
+    // cuando hay duda entre producción y preview de Vercel.
+    try {
+      const tag = typeof __VIORA_BUILD__ !== 'undefined' ? __VIORA_BUILD__ : 'unknown';
+      // eslint-disable-next-line no-console
+      console.info(`%c[Viora build] ${tag}`, 'color: #c026d3; font-weight: bold');
+      window.__VIORA_BUILD__ = tag;
+    } catch {}
     return () => window.removeEventListener('popstate', onPop);
   }, []);
 

@@ -12,22 +12,55 @@ const APIFY_API_BASE = 'https://api.apify.com/v2';
 //
 // Endpoint de Apify: /acts/{actorId}/run-sync-get-dataset-items
 // Docs: https://docs.apify.com/api/v2#/reference/actors/run-actor-synchronously-and-get-dataset-items
+//
+// IMPORTANTE — Pay Per Result actors (como apify/facebook-ads-scraper):
+// requieren `maxItems` como QUERY PARAM, no en el body del input. Es el cap
+// de gasto que Apify enforces antes de invocar al actor. Sin esto, devuelve
+// "Maximum charged results must be greater than zero" (HTTP 400). Lo sacamos
+// del input.maxItems / input.resultsLimit y lo mandamos al URL.
 export async function runActorSync(actorId, input, token, opts = {}) {
   const { timeout = 240 } = opts;
-  // Apify acepta actor IDs en 2 formatos: "username/actorName" o "actorId".
-  // Si viene con "/", lo encodeamos para el URL path.
   const actorPath = actorId.replace('/', '~');
-  const url = `${APIFY_API_BASE}/acts/${actorPath}/run-sync-get-dataset-items?token=${encodeURIComponent(token)}&timeout=${timeout}`;
+
+  // Prioridad: input.maxItems → input.maxResults → input.resultsLimit.
+  // Si ninguno está, default 50 — Apify rechaza 0/null en PPR actors.
+  const maxItems = Math.max(1, Number(input?.maxItems || input?.maxResults || input?.resultsLimit || 50));
+
+  // BELT + SUSPENDERS para PPR actors:
+  // 1. Query params: maxItems (oficial), también maxItem y max_items
+  //    por si el actor lee variantes alternativas
+  // 2. Body: maxItems, resultsLimit, maxResults, count, maxCharged
+  // 3. memoryMbytes explícito para evitar OOM del actor con feeds grandes
+  const params = new URLSearchParams({
+    token,
+    timeout: String(timeout),
+    maxItems: String(maxItems),
+    memory: '1024',
+  });
+  const url = `${APIFY_API_BASE}/acts/${actorPath}/run-sync-get-dataset-items?${params.toString()}`;
+
+  // Sanitize: garantizar que el body también tenga maxItems > 0 en TODOS
+  // los posibles names. Costa poco y blinda contra cambios de API.
+  const finalInput = {
+    ...input,
+    maxItems,
+    resultsLimit: maxItems,
+    maxResults: maxItems,
+    count: maxItems,
+    maxCharged: maxItems,
+  };
 
   const resp = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(input),
+    body: JSON.stringify(finalInput),
   });
 
   if (!resp.ok) {
     const text = await resp.text();
-    throw new Error(`Apify run failed (${resp.status}): ${text.slice(0, 300)}`);
+    // Marker v4 — si NO se ve "[v4-apify-defensive=N]" sabemos que el deploy
+    // de Vercel no propagó el código nuevo.
+    throw new Error(`[v4-apify-defensive=${maxItems}] Apify run failed (${resp.status}): ${text.slice(0, 260)}`);
   }
   return await resp.json();
 }

@@ -89,24 +89,34 @@ export async function pushProducto(producto) {
 }
 
 // PUSH: lista completa de productos. Útil al cambiar algo grande (reorder,
-// bulk import). Borra los que ya no están y upsertea el resto.
+// bulk import). Upsertea el resto.
+//
+// SAFETY GUARD (post-incidente del 2026-06-08 donde se borraron 2 productos
+// por race condition entre push y pull):
+// - Si productos.length === 0 → SKIP. Nunca borramos masivo desde un array
+//   vacío porque puede ser una race condition (Arranque montó con local
+//   vacío antes de que pull traiga del cloud) y borraría todo.
+// - Para borrar un producto explícitamente, usar deleteProducto(productoId).
 export async function pushAllProductos(productos) {
   if (!supabase) throw new Error('Supabase no configurado');
   const user = await getCurrentUser();
   if (!user) throw new Error('No hay user logueado');
-  // Upsert masivo.
-  if (productos.length > 0) {
-    const rows = productos.map(p => ({
-      id: String(p.id),
-      user_id: user.id,
-      data: p,
-    }));
-    const { error } = await supabase
-      .from('marketing_productos')
-      .upsert(rows, { onConflict: 'user_id,id' });
-    if (error) throw new Error(`Push productos bulk: ${error.message}`);
+  // ⚠️ GUARD CRÍTICO: array vacío = posible race, NO destruir cloud.
+  if (productos.length === 0) {
+    console.warn('[sync] push de productos vacíos — skipping para no borrar cloud (race protection)');
+    return;
   }
-  // Borrar los que ya no existen.
+  // Upsert masivo.
+  const rows = productos.map(p => ({
+    id: String(p.id),
+    user_id: user.id,
+    data: p,
+  }));
+  const { error } = await supabase
+    .from('marketing_productos')
+    .upsert(rows, { onConflict: 'user_id,id' });
+  if (error) throw new Error(`Push productos bulk: ${error.message}`);
+  // Borrar los que ya no existen (solo aplica cuando productos.length > 0).
   const idsActuales = productos.map(p => String(p.id));
   const { data: enServer } = await supabase
     .from('marketing_productos')
@@ -136,18 +146,21 @@ export async function pushBrandsForProducto(productoId, brands) {
   if (!supabase) throw new Error('Supabase no configurado');
   const user = await getCurrentUser();
   if (!user) throw new Error('No hay user logueado');
-  if (brands.length > 0) {
-    const rows = brands.map(b => ({
-      producto_id: String(productoId),
-      brand_id: String(b.id),
-      user_id: user.id,
-      data: b,
-    }));
-    const { error } = await supabase
-      .from('marketing_brands')
-      .upsert(rows, { onConflict: 'user_id,producto_id,brand_id' });
-    if (error) throw new Error(`Push brands: ${error.message}`);
+  // ⚠️ Race protection idéntica a pushAllProductos.
+  if (brands.length === 0) {
+    console.warn(`[sync] push brands vacíos para producto ${productoId} — skipping`);
+    return;
   }
+  const rows = brands.map(b => ({
+    producto_id: String(productoId),
+    brand_id: String(b.id),
+    user_id: user.id,
+    data: b,
+  }));
+  const { error } = await supabase
+    .from('marketing_brands')
+    .upsert(rows, { onConflict: 'user_id,producto_id,brand_id' });
+  if (error) throw new Error(`Push brands: ${error.message}`);
   // Borrar los que ya no están.
   const idsActuales = brands.map(b => String(b.id));
   const { data: enServer } = await supabase

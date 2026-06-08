@@ -24,23 +24,35 @@ export async function runActorSync(actorId, input, token, opts = {}) {
 
   // Prioridad: input.maxItems → input.maxResults → input.resultsLimit.
   // Si ninguno está, default 50 — Apify rechaza 0/null en PPR actors.
-  const maxItems = Number(input?.maxItems || input?.maxResults || input?.resultsLimit || 50);
+  const maxItems = Math.max(1, Number(input?.maxItems || input?.maxResults || input?.resultsLimit || 50));
+  // Mandamos maxItems redundante: query param (oficial para PPR), input
+  // field y memoryMbytes default. Algunos actors leen uno u otro.
   const params = new URLSearchParams({
     token,
     timeout: String(timeout),
-    maxItems: String(Math.max(1, maxItems)),
+    maxItems: String(maxItems),
   });
   const url = `${APIFY_API_BASE}/acts/${actorPath}/run-sync-get-dataset-items?${params.toString()}`;
+
+  // Sanitize: garantizar que el body también tenga maxItems > 0.
+  const finalInput = {
+    ...input,
+    maxItems,
+    resultsLimit: maxItems,
+    maxResults: maxItems,
+  };
 
   const resp = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(input),
+    body: JSON.stringify(finalInput),
   });
 
   if (!resp.ok) {
     const text = await resp.text();
-    throw new Error(`Apify run failed (${resp.status}): ${text.slice(0, 300)}`);
+    // Marcador de version del fix para ver si Vercel sirvió el código nuevo.
+    // Si en el error se ve "[v3-maxItems-qs]" sabemos que este código corrió.
+    throw new Error(`[v3-maxItems-qs=${maxItems}] Apify run failed (${resp.status}): ${text.slice(0, 280)}`);
   }
   return await resp.json();
 }

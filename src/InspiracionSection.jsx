@@ -30,7 +30,7 @@ import {
 import { logCostsFromResponse } from './costsStore.js';
 import { addGeneratedIdeas } from './bandejaStore.js';
 import { getProductoImagen, getAccentColor } from './productoImagen.js';
-import { saveReferencial } from './galeriaReferenciales.js';
+import { saveReferencial, getUsedAdIdsForProducto } from './galeriaReferenciales.js';
 import { cacheAdImagesBatch, getCachedAdImageUrl } from './adImagesStore.js';
 import { startExecution, updateExecution, finishExecution } from './executionsStore.js';
 import GaleriaReferencialesModal from './GaleriaReferencialesModal.jsx';
@@ -160,6 +160,22 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   const [creandoAdIds, setCreandoAdIds] = useState(new Set());
   const [showGaleria, setShowGaleria] = useState(false);
   const [showGenOpts, setShowGenOpts] = useState(false);
+  // Set de sourceAdIds que ya fueron usados para generar creativos en este
+  // producto — viene de la galería. Se refresca al toque cuando guardamos un
+  // nuevo referencial (evento viora:referencial-saved).
+  const [usedAdIds, setUsedAdIds] = useState(new Set());
+  useEffect(() => {
+    if (!producto?.id) return;
+    let active = true;
+    const refresh = () => {
+      getUsedAdIdsForProducto(producto.id).then(set => { if (active) setUsedAdIds(set); });
+    };
+    refresh();
+    const onSaved = () => refresh();
+    window.addEventListener('viora:referencial-saved', onSaved);
+    return () => { active = false; window.removeEventListener('viora:referencial-saved', onSaved); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [producto?.id]);
   // Opciones de generación (las elige el usuario en la barra de bulk o en
   // el control de la sección). Persistimos en localStorage para que no se
   // pierdan entre sesiones.
@@ -1093,6 +1109,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                 creandoAdIds={creandoAdIds}
                 seleccionados={seleccionados}
                 selectedOrder={selectedOrder}
+                usedAdIds={usedAdIds}
                 progressById={progressById}
                 onAdapt={(brandNombre, ad) => handleAdapt(brandNombre, ad)}
                 onCrearReferencial={(brandNombre, ad) => crearReferencialDeAd(brandNombre, ad)}
@@ -1249,6 +1266,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                     creandoAdIds={creandoAdIds}
                     seleccionados={seleccionados}
                     selectedOrder={selectedOrder}
+                    usedAdIds={usedAdIds}
                     progressById={progressById}
                     onScrape={() => b.isCompetidor ? handleScrapeCompetidor(b) : handleScrapeBrand(b)}
                     onAdapt={(ad) => handleAdapt(b.nombre, ad)}
@@ -1266,7 +1284,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   );
 }
 
-function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, progressById, onScrape, onAdapt, onCrearReferencial, onToggleSelect, onRemove }) {
+function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onScrape, onAdapt, onCrearReferencial, onToggleSelect, onRemove }) {
   const isCompetidor = !!brand.isCompetidor;
   return (
     <div className="group/brand bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 hover:border-amber-300 dark:hover:border-amber-700 transition">
@@ -1342,6 +1360,7 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
           creandoAdIds={creandoAdIds}
           seleccionados={seleccionados}
           selectedOrder={selectedOrder}
+          usedAdIds={usedAdIds}
           progressById={progressById}
           onAdapt={onAdapt}
           onCrearReferencial={onCrearReferencial}
@@ -1352,7 +1371,7 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
   );
 }
 
-function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = false, selected = false, selectionIndex = null, onAdapt, onCrearReferencial, onToggleSelect, progress = null }) {
+function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = false, selected = false, selectionIndex = null, used = false, onAdapt, onCrearReferencial, onToggleSelect, progress = null }) {
   const cdnThumb = ad.imageUrls?.[0];
   const fbUrl = ad.snapshotUrl;
   // Si tenemos el ad cacheado en IndexedDB (sobreviven el TTL de 24h del CDN),
@@ -1404,6 +1423,8 @@ function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = f
     <div
       ref={containerRef}
       className={`group/thumb relative aspect-square rounded-md overflow-hidden bg-gray-100 dark:bg-gray-900 border-2 transition ${
+        used && !selected ? 'opacity-50 grayscale-[40%] hover:opacity-100 hover:grayscale-0' : ''
+      } ${
         selected
           ? 'border-brand-500 ring-2 ring-brand-300 dark:ring-brand-700'
           : fresh
@@ -1516,16 +1537,21 @@ function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = f
           {ad.daysRunning}d
         </div>
       )}
-      {fresh && (
+      {fresh && !used && (
         <div className="absolute top-1 right-1 px-1 py-0.5 text-[8px] font-bold rounded bg-emerald-500 text-white pointer-events-none">
           NUEVO
+        </div>
+      )}
+      {used && (
+        <div className="absolute top-1 right-1 px-1 py-0.5 text-[8px] font-bold rounded bg-gray-700 text-white pointer-events-none inline-flex items-center gap-0.5" title="Ya usaste este ad para generar creativos — ver Galería">
+          <Check size={8} /> Usado
         </div>
       )}
     </div>
   );
 }
 
-function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, progressById, onAdapt, onCrearReferencial, onToggleSelect }) {
+function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect }) {
   const [showRepeated, setShowRepeated] = useState(false);
   const fresh = ads.filter(a => a.isFresh !== false);
   const repeated = ads.filter(a => a.isFresh === false);
@@ -1549,6 +1575,7 @@ function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccion
                 creando={creandoAdIds?.has(ad.id)}
                 selected={seleccionados?.has(ad.id)}
                 selectionIndex={selectedOrder?.get(ad.id) || null}
+                used={usedAdIds?.has(ad.id)}
                 progress={progressById?.[ad.id]}
                 onAdapt={onAdapt ? () => onAdapt(ad) : null}
                 onCrearReferencial={onCrearReferencial ? () => onCrearReferencial(ad) : null}
@@ -1714,7 +1741,7 @@ function BulkProgressBar({ state, onClose }) {
 // multiplatform + pageLikeCount + penalty pause early), y los muestra en una
 // strip horizontal. Cada item es un AdThumb con sus acciones normales
 // (Crear creativo, + ideas en Bandeja, multi-select).
-function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, progressById, onAdapt, onCrearReferencial, onToggleSelect }) {
+function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect }) {
   const [expanded, setExpanded] = useState(true);
   // Vista del Top 10 — persistida en localStorage. 3 opciones:
   //   grid: strip horizontal de 10 thumbs (default, denso)
@@ -1778,7 +1805,7 @@ function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, se
         <div className="px-3 pb-3 pt-3">
           {viewMode === 'grid' && (
             <TopGridView items={items} adaptingAdIds={adaptingAdIds} creandoAdIds={creandoAdIds}
-              seleccionados={seleccionados} selectedOrder={selectedOrder} progressById={progressById}
+              seleccionados={seleccionados} selectedOrder={selectedOrder} usedAdIds={usedAdIds} progressById={progressById}
               onAdapt={onAdapt} onCrearReferencial={onCrearReferencial} onToggleSelect={onToggleSelect} />
           )}
           {viewMode === 'list' && (
@@ -1798,7 +1825,7 @@ function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, se
 }
 
 // VISTA 1 — Grid: el strip horizontal original con 10 thumbs grandes.
-function TopGridView({ items, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, progressById, onAdapt, onCrearReferencial, onToggleSelect }) {
+function TopGridView({ items, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect }) {
   return (
     <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-10 gap-2">
       {items.map(({ ad, brandNombre, isCompetidor }, idx) => (
@@ -1811,7 +1838,7 @@ function TopGridView({ items, adaptingAdIds, creandoAdIds, seleccionados, select
           <AdThumb
             ad={ad} brandNombre={brandNombre} fresh={ad.isFresh !== false}
             adapting={adaptingAdIds?.has(ad.id)} creando={creandoAdIds?.has(ad.id)}
-            selected={seleccionados?.has(ad.id)} selectionIndex={selectedOrder?.get(ad.id) || null}
+            selected={seleccionados?.has(ad.id)} selectionIndex={selectedOrder?.get(ad.id) || null} used={usedAdIds?.has(ad.id)}
             progress={progressById?.[ad.id]}
             onAdapt={onAdapt ? () => onAdapt(brandNombre, ad) : null}
             onCrearReferencial={onCrearReferencial ? () => onCrearReferencial(brandNombre, ad) : null}

@@ -99,6 +99,23 @@ export async function patchReferenciales(ids, patch) {
   }
 }
 
+// Devuelve un Set con los sourceAdId que ya fueron usados para generar
+// creativos en este producto. Usado por InspiracionSection para marcar
+// visualmente los thumbs ya procesados.
+export async function getUsedAdIdsForProducto(productoId) {
+  if (!productoId) return new Set();
+  try {
+    const items = await getReferencialesByProducto(productoId);
+    const set = new Set();
+    for (const it of items) {
+      if (it.sourceAdId) set.add(String(it.sourceAdId));
+    }
+    return set;
+  } catch {
+    return new Set();
+  }
+}
+
 export async function deleteReferencial(id) {
   if (!id) return false;
   try {

@@ -203,20 +203,38 @@ Analizá la imagen del ad ganador adjunto y devolvé EXACTAMENTE este JSON (sin 
     }
   ],
   "variations": [
-    // EXACTAMENTE ${n} items — todas ejecuciones DISTINTAS de la MISMA fórmula
+    // EXACTAMENTE ${n} items con DIVERGENCIA PROGRESIVA — cada una se aleja
+    // más de la composición original del ad ref, pero MANTIENE la misma
+    // estrategia (angle/hook/avatar/value_prop).
     {
       "id": 1,
-      "label": "ej: Modelo joven 28-35",
-      "execution_diff": "Detalle MUY específico de qué cambiar en esta variación SIN cambiar el concepto: modelo demográfica X, ángulo cámara Y, prop secundario Z, momento del día W, paleta levemente shift, etc.",
-      "scene_notes": "Notas adicionales para esta variación específica"
+      "label": "ej: Réplica fiel",
+      "divergence_level": "tight",   // copia composición exacta del ad ref
+      "execution_diff": "Réplica fiel del ad ref. Mismo encuadre, mismo prop, misma escena. Cambia solo el modelo demográfico para encajar con avatar del producto.",
+      "scene_notes": "Pegado al original."
+    },
+    {
+      "id": 2,
+      "label": "ej: Mismo concepto, distinto modelo + ángulo",
+      "divergence_level": "medium",  // mismo concepto, distinta ejecución
+      "execution_diff": "Mantené angle/hook/badges pero cambia composición: distinto ángulo de cámara, modelo demográfico distinto, prop secundario distinto.",
+      "scene_notes": ""
+    },
+    {
+      "id": 3,
+      "label": "ej: Reinterpretación libre",
+      "divergence_level": "loose",   // misma estrategia, escena INVENTADA
+      "execution_diff": "INVENTÁ una composición NUEVA que comunique el MISMO angle/hook/value_prop. Diferente escenario, distintos props, distinto tipo de plano. NO copies la composición del ad ref. Pensá: '¿qué OTRA escena vendería este mismo ángulo?'",
+      "scene_notes": "Libertad creativa total para el escenario, manteniendo solo la estrategia."
     }
-    // ... ${n - 1} más
+    // ... el resto sigue divergiendo más (variations 4+ = loose o más experimental)
   ]
 }
 
 REGLAS:
 - "adapted_content" debe ser conservador: si no tenemos el equivalente regulatorio, dejalo vacío o sustituí por algo genérico defendible (ej: "Calidad premium" en vez de inventar "FDA Approved").
-- "variations" tiene que tener EXACTAMENTE ${n} items, todas ejecutando la MISMA estrategia con diffs mínimos pero distintos entre sí.
+- "variations" tiene que tener EXACTAMENTE ${n} items.
+- **DIVERGENCIA PROGRESIVA**: variation #1 SIEMPRE es "tight" (réplica fiel del ad ref). Variation #2 es "medium". Variations #3 y posteriores son "loose" (escena inventada, solo se mantiene la estrategia). Esto da al usuario una grilla que va desde "lo seguro y validado" hasta "creatividad libre con la misma fórmula".
 - Si la imagen no tiene badges o CTA elements, devolvé arrays vacíos — NO inventes.
 - "research" del producto debe informar qué modelo demográfica usar en cada variación.`;
 
@@ -436,10 +454,22 @@ function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentCol
   if (v.mood) parts.push(`  • Mood: ${v.mood}`);
   if (v.style) parts.push(`  • Style: ${v.style}`);
 
-  // Variación específica — el diff de ejecución
+  // Variación específica — el diff de ejecución + nivel de divergencia.
+  // tight   = copia composición fiel (variación #1)
+  // medium  = mismo concepto, distinto ángulo/modelo/props
+  // loose   = INVENTÁ una escena nueva con la misma estrategia
+  const div = variation.divergence_level || 'medium';
   parts.push('');
-  parts.push(`THIS VARIATION (#${variation.id} — "${variation.label || 'Variación'}"):`);
-  parts.push(`  • Execution diff: ${variation.execution_diff || '(sin diff específico — usá composición base)'}`);
+  parts.push(`THIS VARIATION (#${variation.id} — "${variation.label || 'Variación'}" — divergence: ${div.toUpperCase()}):`);
+  if (div === 'tight') {
+    parts.push(`  • Hew CLOSELY to IMAGE 1's composition. Same framing, same prop, same scene. This is the "safe play" variation.`);
+  } else if (div === 'loose') {
+    parts.push(`  • DO NOT copy IMAGE 1's composition. Invent a NEW scene/framing/prop that communicates the SAME strategy (angle/hook/avatar). The product (IMAGE 2) still stays pixel-faithful, but the surrounding scene is original.`);
+    parts.push(`  • Think: "what is ANOTHER scene that sells this same emotional benefit?" Apply the strategy, not the layout.`);
+  } else {
+    parts.push(`  • Keep the COMPOSITION TYPE of IMAGE 1 but vary the execution: different camera angle, different model demographic, different secondary props, different time of day.`);
+  }
+  parts.push(`  • Execution diff: ${variation.execution_diff || '(sin diff específico)'}`);
   if (variation.scene_notes) parts.push(`  • Scene notes: ${variation.scene_notes}`);
 
   // Textos adaptados con contenido válido para NUESTRO producto

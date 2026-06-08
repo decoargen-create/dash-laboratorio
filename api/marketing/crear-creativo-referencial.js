@@ -124,10 +124,22 @@ function extForMime(mime) {
 }
 
 async function fetchImage(url) {
-  const resp = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+  let resp;
+  try {
+    resp = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+  } catch (err) {
+    throw new Error(`No se pudo conectar a la URL de la imagen ref (${err.message}). Quizás expiró o la red está caída.`);
+  }
+  // 403/410: Meta CDN expira las URLs después de ~1 hora. Mensaje accionable.
+  if (resp.status === 403 || resp.status === 410) {
+    throw new Error(`La URL de la imagen del ad ref expiró (HTTP ${resp.status}). Las URLs de Meta CDN duran ~1h. Volvé a hacer scrape de esa marca para refrescarlas.`);
+  }
   if (!resp.ok) throw new Error(`No pude bajar la ref (HTTP ${resp.status})`);
   const ab = await resp.arrayBuffer();
   const buf = Buffer.from(ab);
+  if (buf.length < 100) {
+    throw new Error('La URL de la ref devolvió contenido vacío. Verificá la URL o re-scrapeá la marca.');
+  }
   const mime = detectImageType(buf) || 'image/jpeg';
   return { buf, mime };
 }
@@ -428,7 +440,7 @@ function aspectRatioFromSize(size) {
 // Cada variación termina con un prompt distinto → la grilla de N creativos
 // son N ejecuciones distintas de la misma fórmula validada, no N versiones
 // de la misma foto.
-function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentColor, aspectRatio }) {
+function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentColor, aspectRatio, rebrand = false }) {
   const nombre = (producto?.nombre || '').trim();
   const descripcion = (producto?.descripcion || '').trim();
   const research = (producto?.research || producto?.docs?.research || '').trim();
@@ -530,7 +542,22 @@ function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentCol
 
   if (accentColor) {
     parts.push('');
-    parts.push(`Brand accent color: ${accentColor} — use as highlight for arrows, pills, badges.`);
+    if (rebrand) {
+      // Variante rebrand — overridea la paleta de IMAGE 1 para que la
+      // escena entera quede en familia del color de la marca. Útil cuando
+      // la ref es B/N y el producto es de color fuerte (ej: Cellu+ naranja).
+      parts.push(`**BRAND REPALETTING — ${accentColor} ES EL COLOR DOMINANTE DE LA ESCENA**:`);
+      parts.push(`  • OVERRIDEÁ la paleta de IMAGE 1. La escena entera debe estar tonalmente alineada a ${accentColor}.`);
+      parts.push(`  • Background: pared/superficie/gradient en familia ${accentColor} (mismo hue, varying value/saturation).`);
+      parts.push(`  • Si el fondo del ad ref es negro/blanco/oscuro, REEMPLAZALO por un fondo en ${accentColor}.`);
+      parts.push(`  • Props secundarios (telas, accents): que armonicen con ${accentColor}.`);
+      parts.push(`  • Pills/badges/checks/CTAs: usá ${accentColor} para fills donde antes había amarillo/blanco/gris.`);
+      parts.push(`  • Texto blanco SOBRE fondo ${accentColor} oscuro, o texto negro sobre ${accentColor} claro — lo que de mejor contraste.`);
+      parts.push(`  • Skin tones, food, natural elements stay realistic — NO teñas personas.`);
+      parts.push(`  • Resultado: misma composición que IMAGE 1, pero el COLOR STORY ahora es ${accentColor}. Como un re-shoot del mismo ad pero en el mundo de la marca.`);
+    } else {
+      parts.push(`Brand accent color: ${accentColor} — use as highlight for arrows, pills, badges, checks. Background stays as IMAGE 1's palette.`);
+    }
   }
 
   parts.push('');
@@ -647,7 +674,26 @@ function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio
 // Nota: OpenAI NO permite desactivar el safety filter por completo —
 // 'moderation: low' es el setting más permisivo. Esto es la capa extra para
 // minimizar rechazos.
-function sanitizePromptForSafety(text) {
+// Heurística: si el producto tiene palabras gatillo de wellness/cuidado
+// íntimo, arrancamos directo en modo agresivo de sanitización. Evita el
+// reject del primer call (que cuesta el mismo tiempo que un OK) y resta
+// 1 round-trip a OpenAI.
+function isHighRiskCategory(producto) {
+  const haystack = [
+    producto?.nombre || '',
+    producto?.descripcion || '',
+    String(producto?.research || producto?.docs?.research || ''),
+  ].join(' ').toLowerCase();
+  const triggers = [
+    /íntim[oa]/, /intimate/, /vagina/, /vulva/, /menstru/, /period/,
+    /flora/, /probioti/, /candidi/, /fem(in)?(a|e)/, /mujer/, /woman/,
+    /antibio/, /infecci/, /sangra/, /bleed/, /pee/, /pis/, /orina/,
+    /sex/, /sexual/, /erecci/, /testoster/,
+  ];
+  return triggers.some(re => re.test(haystack));
+}
+
+function sanitizePromptForSafety(text, aggressive = false) {
   if (!text) return text;
   const swaps = [
     // Anatomía clínica → genérica
@@ -656,6 +702,8 @@ function sanitizePromptForSafety(text) {
     [/\bvulvas?\b/gi, 'zona íntima'],
     [/\bgenitales?\b/gi, 'íntimo'],
     [/\bsexuales?\b/gi, 'íntimo'],
+    [/\bpechos?\b/gi, 'busto'],
+    [/\bsenos?\b/gi, 'busto'],
     // Procesos clínicos → suaves
     [/\bmenstruales?\b/gi, 'mensual'],
     [/\bmenstruaci[óo]n\b/gi, 'ciclo'],
@@ -663,23 +711,51 @@ function sanitizePromptForSafety(text) {
     [/\binfeccion(es)?\b/gi, 'molestia$1'],
     [/\bhongos?\b/gi, 'desequilibrio'],
     [/\bcandidiasis\b/gi, 'desequilibrio'],
+    [/\bbacterian?a?s?\b/gi, 'microbiota'],
+    [/\bantibioticos?\b/gi, 'fórmula natural'],
+    [/\bclamidia\b/gi, 'desequilibrio'],
+    [/\bcistitis\b/gi, 'molestia'],
+    // Claims médicos fuertes → genéricos
+    [/\bcura(n|r|do|s)?\b/gi, 'mejor$1'],
+    [/\btrata(n|r|do|miento)?\b/gi, 'cuid$1'],
+    [/\bdolor(es)?\b/gi, 'molestia$1'],
+    [/\bsangre\b/gi, 'flujo'],
+    [/\benferma|enferme(dad|s)\b/gi, 'condición'],
     // Inglés
     [/\bvagina(l)?\b/gi, 'intimate$1'],
     [/\bvulva\b/gi, 'intimate area'],
     [/\bgenital\b/gi, 'intimate'],
+    [/\bbreasts?\b/gi, 'bust'],
     [/\bnaked\b/gi, ''],
     [/\bnude\b/gi, ''],
+    [/\binfection(s)?\b/gi, 'discomfort$1'],
+    [/\byeast\b/gi, 'imbalance'],
+    [/\bantibiotics?\b/gi, 'natural formula'],
+    [/\bbleed(ing)?\b/gi, 'flow$1'],
   ];
+  // En modo agresivo (retry tras rejection) sumamos swaps adicionales que
+  // pueden cambiar más el tono pero evitan más triggers conocidos.
+  if (aggressive) {
+    swaps.push(
+      [/\b(antes|despu[ée]s)\s+y\s+despu[ée]s\b/gi, 'transformación'],
+      [/\bbefore\s*(\/|and|\&)\s*after\b/gi, 'transformation'],
+      [/\bíntim[oa]s?\b/gi, 'personal'],
+      [/\bintimate\b/gi, 'personal'],
+      [/\bzona personal\b/gi, 'cuidado personal'],
+      [/\b(sin|sin más)\s+olor\b/gi, 'fresca'],
+      [/\bodor\b/gi, 'freshness'],
+    );
+  }
   let out = text;
   for (const [re, rep] of swaps) out = out.replace(re, rep);
   return out;
 }
 
 // Construye la FormData para gpt-image-2 — extraído para reusar en retries.
-function buildEditForm({ prompt, refImgBuf, refMime, prodImgBuf, prodMime, size, quality, n }) {
+function buildEditForm({ prompt, refImgBuf, refMime, prodImgBuf, prodMime, size, quality, n, aggressiveSanitization = false }) {
   const form = new FormData();
   form.append('model', MODEL_IMAGE);
-  form.append('prompt', sanitizePromptForSafety(prompt));
+  form.append('prompt', sanitizePromptForSafety(prompt, aggressiveSanitization));
   form.append('size', size);
   form.append('quality', quality);
   form.append('n', String(Math.min(10, Math.max(1, n || 2))));
@@ -696,19 +772,20 @@ const PER_CALL_TIMEOUT_MS = 275000; // 275s por fetch individual a OpenAI —
 // gpt-image-2 a 2K high a veces tarda 200-250s. 220s era muy ajustado.
 
 async function callGptImage2Edit(params) {
-  const { apiKey, budgetStartedAt = Date.now() } = params;
+  const { apiKey, budgetStartedAt = Date.now(), initialAggressive = false } = params;
   // Auto-retry contra rate limit: hasta 2 reintentos con backoff 15s, 30s.
   // PERO solo si tenemos budget — si ya gastamos >80% del handler timeout,
   // no retry: mejor fallar limpio que dejar al usuario esperando 300s.
   const RETRY_DELAYS = [15000, 30000];
   let lastErr = null;
+  let aggressiveSanitization = initialAggressive; // se activa tras safety rejection o desde el inicio para wellness
   for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
     const elapsed = Date.now() - budgetStartedAt;
     if (elapsed > HANDLER_TIMEOUT_MS - 30000) {
       // Sin tiempo para otro intento. Fallar inmediato.
       throw new Error(`crear-creativo-referencial sin budget de tiempo (${Math.round(elapsed/1000)}s). Probá con menos ads o quality medium.`);
     }
-    const form = buildEditForm(params);
+    const form = buildEditForm({ ...params, aggressiveSanitization });
     // AbortController por call individual — si OpenAI se cuelga > 220s
     // matamos esa request y dejamos margen para el handler cleanup.
     const controller = new AbortController();
@@ -737,6 +814,14 @@ async function callGptImage2Edit(params) {
     if (resp.ok) {
       const imagenes = (data?.data || []).map(d => d.b64_json).filter(Boolean);
       if (imagenes.length === 0) throw new Error('OpenAI no devolvió imágenes (b64_json ausente)');
+      // Detección defensiva: una imagen base64 válida de gpt-image-2 quality
+      // high a 1024x1024 pesa 200KB-800KB. Si vino algo MUY chico (<10KB),
+      // probablemente sea un placeholder negro/blanco o un fallo silent de
+      // safety. Mejor fallar limpio que guardar basura.
+      const tooSmall = imagenes.filter(b => b.length < 10000);
+      if (tooSmall.length === imagenes.length) {
+        throw new Error('OpenAI devolvió imágenes sospechosamente chicas — probablemente safety reject silent. Probá con otro ad ref.');
+      }
       return imagenes;
     }
     const msg = data?.error?.message || `HTTP ${resp.status}`;
@@ -744,6 +829,21 @@ async function callGptImage2Edit(params) {
     const isRateLimit = resp.status === 429 ||
                         /rate limit/i.test(msg) ||
                         /too many requests/i.test(msg);
+    const isSafetyReject = /safety system|content policy|rejected by the safety|violates.*policy|moderation/i.test(msg) ||
+                           code === 'content_policy_violation' ||
+                           code === 'moderation_blocked';
+    // Si el reject fue safety y NO estábamos ya en modo agresivo → retry
+    // inmediato con sanitización extra. Vale la pena el costo del 2do call
+    // porque el problema es palabras gatillo, no infraestructura.
+    if (isSafetyReject && !aggressiveSanitization && attempt < RETRY_DELAYS.length) {
+      const elapsedNow = Date.now() - budgetStartedAt;
+      if (elapsedNow + 130000 > HANDLER_TIMEOUT_MS) {
+        throw new Error(`OpenAI rechazó por safety filter. Sin budget para retry sanitizado. Probá con OTRO ad de referencia (sin claims clínicos fuertes).`);
+      }
+      console.warn(`Safety reject. Retry con sanitización agresiva.`);
+      aggressiveSanitization = true;
+      continue; // sin backoff — el problema es el prompt, no el rate
+    }
     if (isRateLimit && attempt < RETRY_DELAYS.length) {
       const delay = RETRY_DELAYS[attempt];
       // Solo retry si tenemos budget para la espera + el próximo intento (~120s).
@@ -756,7 +856,21 @@ async function callGptImage2Edit(params) {
       await new Promise(r => setTimeout(r, delay));
       continue;
     }
-    lastErr = new Error(`OpenAI rechazó: ${msg}`);
+    // Mensajes accionables para los errors más comunes — antes el user veía
+    // "OpenAI rechazó: insufficient_quota" sin saber qué hacer.
+    if (isSafetyReject) {
+      lastErr = new Error(`OpenAI rechazó por safety filter incluso con sanitización agresiva. Probá con OTRO ad de referencia que NO tenga claims clínicos fuertes (infección, dolor, sangrado, etc.).`);
+    } else if (/insufficient_quota|exceeded.*quota|billing|payment/i.test(msg) || code === 'insufficient_quota') {
+      lastErr = new Error(`OpenAI sin saldo. Cargá crédito en https://platform.openai.com/settings/organization/billing/overview y reintentá.`);
+    } else if (/invalid.*api.*key|incorrect.*api.*key/i.test(msg) || code === 'invalid_api_key') {
+      lastErr = new Error(`OPENAI_API_KEY inválida en el servidor. Avisale al admin para que la rote en Vercel → Settings → Environment Variables.`);
+    } else if (/model.*(not.*(found|exist)|invalid)|the model.*does not exist/i.test(msg) || code === 'model_not_found') {
+      lastErr = new Error(`El modelo ${MODEL_IMAGE} no está disponible en tu cuenta de OpenAI. Puede que necesite acceso explícito — avisale al admin.`);
+    } else if (resp.status >= 500) {
+      lastErr = new Error(`OpenAI con problemas (HTTP ${resp.status}). Reintentá en 30-60s.`);
+    } else {
+      lastErr = new Error(`OpenAI rechazó: ${msg}`);
+    }
     lastErr.code = code;
     lastErr.status = resp.status;
     throw lastErr;
@@ -879,11 +993,29 @@ export default async function handler(req, res) {
       const startIdx = Math.min(variationStartIndex, plan.variations.length - 1);
       const variationsToUse = plan.variations.slice(startIdx, startIdx + n);
       while (variationsToUse.length < n) variationsToUse.push(plan.variations[plan.variations.length - 1]);
-      prompts = variationsToUse.map((variation, idx) => ({
-        prompt: buildPromptFromPlan({ producto, inspiracion, plan, variation, accentColor, aspectRatio }),
-        variantStyle: idx === variationsToUse.length - 1 && accentColor && startIdx === 0 ? 'rebrand' : 'strategist',
-        variation,
-      }));
+      // Rebrand designation:
+      //   - Single-call legacy mode (n=N): aplica al último idx local
+      //   - Parallel mode (n=1, multiple calls): aplica cuando la call es
+      //     la ÚLTIMA del set planificado (variationStartIndex + n >= nPlan)
+      // Eso garantiza que en una grilla de 4 generadas, la #4 sea la que
+      // viene en el color de la marca.
+      const lastGlobalIdx = startIdx + n - 1;
+      const isLastOverall = lastGlobalIdx >= nPlan - 1;
+      // Rebrand solo si hay 2+ variaciones — para n=1 default es tight
+      // (réplica fiel) porque el user pidió una sola y probablemente quiere
+      // ver la más cercana al ganador validado.
+      prompts = variationsToUse.map((variation, idx) => {
+        const isLastLocal = idx === variationsToUse.length - 1;
+        const shouldRebrand = isLastLocal && isLastOverall && !!accentColor && nPlan >= 2;
+        return {
+          prompt: buildPromptFromPlan({
+            producto, inspiracion, plan, variation, accentColor, aspectRatio,
+            rebrand: shouldRebrand,
+          }),
+          variantStyle: shouldRebrand ? 'rebrand' : 'strategist',
+          variation,
+        };
+      });
     } else {
       // Fallback legacy: reference / rebrand.
       const usarRebrandVariant = !!accentColor && n >= 2;
@@ -906,6 +1038,7 @@ export default async function handler(req, res) {
     let qualityUsed = quality;
     let qualityFallback = false;
 
+    const isHighRisk = isHighRiskCategory(producto);
     const runCalls = async (useSize, useQuality = quality) => {
       // MODO STRATEGIST: N llamadas paralelas, una por cada plan.variation.
       if (prompts && prompts.length > 0) {
@@ -915,6 +1048,7 @@ export default async function handler(req, res) {
             refImgBuf, refMime, prodImgBuf: prodBuf, prodMime,
             size: useSize, quality: useQuality, n: 1,
             budgetStartedAt,
+            initialAggressive: isHighRisk,
           })
         ));
         return {
@@ -931,13 +1065,13 @@ export default async function handler(req, res) {
             apiKey, prompt: __legacyPromptRef,
             refImgBuf, refMime, prodImgBuf: prodBuf, prodMime,
             size: useSize, quality: useQuality, n: nRef,
-            budgetStartedAt,
+            budgetStartedAt, initialAggressive: isHighRisk,
           }),
           callGptImage2Edit({
             apiKey, prompt: __legacyPromptRebrand,
             refImgBuf, refMime, prodImgBuf: prodBuf, prodMime,
             size: useSize, quality: useQuality, n: nReb,
-            budgetStartedAt,
+            budgetStartedAt, initialAggressive: isHighRisk,
           }),
         ]);
         return {
@@ -950,7 +1084,7 @@ export default async function handler(req, res) {
         apiKey, prompt: __legacyPromptRef,
         refImgBuf, refMime, prodImgBuf: prodBuf, prodMime,
         size: useSize, quality: useQuality, n,
-        budgetStartedAt,
+        budgetStartedAt, initialAggressive: isHighRisk,
       });
       return { imagenes: imgs, variantStyles: imgs.map(() => 'reference') };
     };

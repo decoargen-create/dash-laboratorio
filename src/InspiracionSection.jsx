@@ -33,6 +33,7 @@ import { getProductoImagen, getAccentColor } from './productoImagen.js';
 import { saveReferencial, getUsedAdIdsForProducto } from './galeriaReferenciales.js';
 import { cacheAdImagesBatch, getCachedAdImageUrl } from './adImagesStore.js';
 import { startExecution, updateExecution, finishExecution } from './executionsStore.js';
+import { playDoneChime, playBulkDoneChime, playErrorTone } from './sounds.js';
 import EmptyState from './EmptyState.jsx';
 // Galería ahora vive como tab independiente en el workspace (Arranque),
 // no más como modal acá.
@@ -46,7 +47,13 @@ const MAX_SELECCIONADOS = 10;
 // para no triggear el rate limit. El endpoint igual hace auto-retry con
 // backoff (15s, 30s) si OpenAI tira 429, así que los pico que sí lleguen
 // los salva transparente.
-const BULK_CONCURRENCY = 3;
+// BULK_CONCURRENCY=1: procesamos los ads UNO POR VEZ. Antes era 3 (3 ads en
+// paralelo) pero la cuenta OpenAI del user encolaba los 3+ calls concurrentes
+// → cada call tardaba 2-3x más por congestión. Total ≈ igual pero la UX era
+// peor: imágenes salían desordenadas a la galería.
+// Sequential = ad1 (4 imgs) → ad2 (4 imgs) → ad3 (4 imgs). Cada call corre
+// sin cola = ~75s en vez de ~150s. Galería se llena en orden predecible.
+const BULK_CONCURRENCY = 1;
 
 // Extrae una keyword sensata desde una landing URL — preferimos el hostname
 // COMPLETO con www. si está, porque eso es lo que pegarías a mano en la
@@ -77,6 +84,22 @@ function isKeywordUsable(kw) {
 // "An error occurred...", o un 502 del runtime), no rompe con
 // "Unexpected token 'A', \"An error o\"... is not valid JSON". Detecta el caso
 // y devuelve un error legible.
+// Normaliza el campo `error` de una response del backend a string legible.
+// El backend a veces devuelve `error: "string"` y otras veces `error:
+// { type, message }` (formato de OpenAI/Apify). Sin esto el .message del
+// Error quedaba como "[object Object]" en los toasts.
+function stringifyApiError(err) {
+  if (err == null) return '';
+  if (typeof err === 'string') return err;
+  if (typeof err === 'object') {
+    // Estructura típica: { type, message } o { error: { ... } } anidado.
+    if (err.message) return String(err.message);
+    if (err.error) return stringifyApiError(err.error);
+    try { return JSON.stringify(err); } catch { return String(err); }
+  }
+  return String(err);
+}
+
 async function parseJsonOrThrow(resp, contexto = 'API') {
   const raw = await resp.text();
   let data;
@@ -93,7 +116,7 @@ async function parseJsonOrThrow(resp, contexto = 'API') {
     throw new Error(`${contexto} respuesta inválida (HTTP ${resp.status}): ${raw.slice(0, 120)}`);
   }
   // Es JSON — detectar errores conocidos de OpenAI/Anthropic con mensajes amigables.
-  const errStr = String(data?.error || '').toLowerCase();
+  const errStr = stringifyApiError(data?.error).toLowerCase();
   if (errStr.includes('safety system') || errStr.includes('content policy') || errStr.includes('rejected by the safety')) {
     throw new Error(`OpenAI rechazó por su safety filter — probá con OTRO ad de referencia. Triggers comunes: contenido íntimo explícito, claims médicos fuertes, palabras gatillo. El producto/marca no es el problema, es el ad ref.`);
   }
@@ -161,7 +184,11 @@ function formatMs(ms) {
 
 // Barra flotante de progreso del bulk. Muestra ad current, % total, ETA
 // y un pill por cada ad para ver qué está done/doing/pending/error.
-function BulkProgressBar({ state, onClose }) {
+export function BulkProgressBar({ state, onClose }) {
+  // Guard: si no hay bulk corriendo (state=null), no renderizamos nada.
+  // El caller siempre debería check pero por defensiva acá lo doblamos —
+  // Arranque renderiza esto en el shell del producto sin condicional.
+  if (!state) return null;
   const { total, completed, currentIdx, current, startedAt, adsList, errors, adDurations } = state;
   const elapsedMs = Date.now() - startedAt;
   // ETA basado en duración promedio de los ads ya completos. Fallback: 45s/ad.
@@ -1215,7 +1242,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         }),
       });
       const data = await parseJsonOrThrow(resp, 'adapt-inspiracion');
-      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      if (!resp.ok) throw new Error(stringifyApiError(data.error) || `HTTP ${resp.status}`);
       const adaptCost = logCostsFromResponse(data, `adapt-inspiracion · ${brandNombre}`);
 
       const ideas = (data.ideas || []).map(i => ({
@@ -1347,7 +1374,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         }),
       });
       const data = await parseJsonOrThrow(resp, 'crear-creativo-referencial');
-      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      if (!resp.ok) throw new Error(stringifyApiError(data.error) || `HTTP ${resp.status}`);
       return data;
     };
 
@@ -1449,6 +1476,9 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       const msg = `${completed}/${nVar} variaciones generadas${failNote}${cacheNote}`;
       addToast?.({ type: failed > 0 ? 'warning' : 'success', message: msg });
       finishExecution(execId, { ok: failed === 0, message: msg, cost: totalCostAccum.openai + totalCostAccum.anthropic });
+      // Sonido de aviso — útil para seguir trabajando en otra cosa
+      // mientras la generación corre en background.
+      if (failed === 0) playDoneChime(); else if (completed > 0) playDoneChime(); else playErrorTone();
       // Auto-limpiar el estado del progreso después de 2.5s para que se vea el "✓".
       trackedTimeout(() => {
         setProgressById(prev => {
@@ -1464,6 +1494,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       }));
       addToast?.({ type: 'error', message: `No pude generar: ${err.message}` });
       finishExecution(execId, { ok: false, message: err.message || 'Error' });
+      playErrorTone();
       // Limpiar el error después de 5s.
       trackedTimeout(() => {
         setProgressById(prev => {
@@ -1587,6 +1618,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     limpiarSeleccion();
     trackedTimeout(() => setBulkProgress(null), 4000);
     addToast?.({ type: 'success', message: 'Generación bulk completa — revisá la galería' });
+    playBulkDoneChime();
   };
 
   // Permite cerrar la barra de bulk manualmente.
@@ -1638,7 +1670,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         body: JSON.stringify(payload),
       });
       const data = await parseJsonOrThrow(resp, 'apify-ingest');
-      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      if (!resp.ok) throw new Error(stringifyApiError(data.error) || `HTTP ${resp.status}`);
       const scrapeCost = logCostsFromResponse(data, `inspiracion · ${brand.nombre}`);
 
       const allAds = data.ads || [];
@@ -1731,7 +1763,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         body: JSON.stringify(payload),
       });
       const data = await parseJsonOrThrow(resp, 'apify-ingest');
-      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      if (!resp.ok) throw new Error(stringifyApiError(data.error) || `HTTP ${resp.status}`);
       const scrapeCost = logCostsFromResponse(data, `inspiracion · ${comp.nombre}`);
 
       const ads = data.ads || [];
@@ -2149,6 +2181,25 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                           >{n}</button>
                         ))}
                       </div>
+                      {/* Explicación dinámica de qué saca cada cantidad de variantes.
+                          Quita la pregunta "qué hace cada N" antes de generar y
+                          ayuda a entender por qué con 1-2 sale "fiel" y con 4+
+                          empieza a inventar escenarios nuevos respetando el
+                          ángulo de venta. */}
+                      <p className="text-[9px] text-gray-600 dark:text-gray-400 mt-1 leading-snug">
+                        {(genOpts.n || 2) === 1 && (
+                          <><strong className="text-gray-800 dark:text-gray-200">Tight:</strong> réplica fiel del ad ganador. Misma composición y escena, solo cambia el producto.</>
+                        )}
+                        {(genOpts.n || 2) === 2 && (
+                          <><strong className="text-gray-800 dark:text-gray-200">Tight + Rebrand:</strong> #1 réplica fiel · #2 misma composición pero con la paleta de tu marca dominando la escena.</>
+                        )}
+                        {(genOpts.n || 2) === 4 && (
+                          <><strong className="text-gray-800 dark:text-gray-200">Tight → Medium → Loose → Rebrand:</strong> #1 fiel · #2 mismo concepto distinto modelo/ángulo · #3 escena <em>nueva inventada</em> manteniendo el ángulo de venta · #4 paleta de marca.</>
+                        )}
+                        {(genOpts.n || 2) === 6 && (
+                          <><strong className="text-gray-800 dark:text-gray-200">Mix amplio:</strong> #1 fiel · #2 medium · #3-5 escenas <em>nuevas inventadas</em> que comunican el mismo ángulo (cambia escenario, props, plano) · #6 paleta de marca.</>
+                        )}
+                      </p>
                     </div>
 
                     <div className="mb-2.5">

@@ -1987,16 +1987,16 @@ function AppShell({ onExit }) {
         />
       )}
       {/* Sidebar — desktop: lateral fijo. Mobile: overlay deslizante.
-          En la plataforma Marketing el gradient sigue el color de acento
-          elegido (variables --brand-*); las demás plataformas mantienen su
-          identidad propia. */}
+          En Marketing/AdsLab usamos el MISMO bg que el main wrapper para
+          que se sienta una sola superficie (pedido user: "el menu esta
+          raro" cuando contrastaba con violet). Border-r sutil para delinear.
+          Las otras plataformas mantienen su identidad propia. */}
       <aside
-        style={currentPlatform === 'marketing'
-          ? { backgroundImage: 'linear-gradient(to bottom, rgb(var(--brand-900)), rgb(var(--brand-800)), rgb(var(--brand-950)))' }
-          : undefined}
         className={`
         ${effectiveSidebarOpen ? 'w-64' : 'w-20'}
-        relative ${currentPlatform === 'marketing' ? '' : `bg-gradient-to-b ${getPlatform(currentPlatform).sidebarGradient}`} text-white shadow-2xl
+        relative ${currentPlatform === 'marketing'
+          ? 'bg-gray-50 dark:bg-gray-900 text-gray-700 dark:text-gray-100 border-r border-gray-200 dark:border-gray-800'
+          : `bg-gradient-to-b ${getPlatform(currentPlatform).sidebarGradient} text-white shadow-2xl`}
         transition-all duration-500 ease-out flex flex-col
         max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 max-md:w-72
         max-md:transform max-md:transition-transform

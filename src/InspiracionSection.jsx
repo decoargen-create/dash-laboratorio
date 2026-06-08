@@ -74,18 +74,28 @@ function isKeywordUsable(kw) {
 // y devuelve un error legible.
 async function parseJsonOrThrow(resp, contexto = 'API') {
   const raw = await resp.text();
+  let data;
   try {
-    return JSON.parse(raw);
+    data = JSON.parse(raw);
   } catch {
-    // Heurísticas para errores conocidos
+    // No es JSON — heurísticas para errores conocidos del servidor.
     if (resp.status === 504 || /timeout/i.test(raw) || /An error occurred with your deployment/i.test(raw)) {
-      throw new Error(`${contexto} timeout — la operación tardó más que el límite del servidor. Reintentá con menos ads seleccionados.`);
+      throw new Error(`${contexto} timeout — la operación tardó más que el límite del servidor. Reintentá con menos ads seleccionados o quality medium.`);
     }
     if (resp.status >= 500) {
       throw new Error(`${contexto} error ${resp.status} — el servidor devolvió HTML/texto en vez de JSON. Probá de nuevo en unos segundos.`);
     }
     throw new Error(`${contexto} respuesta inválida (HTTP ${resp.status}): ${raw.slice(0, 120)}`);
   }
+  // Es JSON — detectar errores conocidos de OpenAI/Anthropic con mensajes amigables.
+  const errStr = String(data?.error || '').toLowerCase();
+  if (errStr.includes('safety system') || errStr.includes('content policy') || errStr.includes('rejected by the safety')) {
+    throw new Error(`OpenAI rechazó por su safety filter — probá con OTRO ad de referencia. Triggers comunes: contenido íntimo explícito, claims médicos fuertes, palabras gatillo. El producto/marca no es el problema, es el ad ref.`);
+  }
+  if (errStr.includes('rate limit') || errStr.includes('too many requests')) {
+    throw new Error(`OpenAI rate limit — reintentá en 20-30s con menos ads en paralelo.`);
+  }
+  return data;
 }
 
 const PRODUCTOS_KEY = 'viora-marketing-productos-v1';

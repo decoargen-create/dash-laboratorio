@@ -958,13 +958,6 @@ function IdeaCard({
                 <CreativoPanel key={idea.id} idea={idea} />
               ) : null}
 
-              {(idea.copyPostMeta || idea.copy) && (
-                <div>
-                  <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1">📱 Copy del post en Meta (arriba del creativo)</p>
-                  <div className="text-xs text-gray-800 dark:text-gray-200 whitespace-pre-wrap bg-gray-50 dark:bg-gray-800/50 rounded-md px-3 py-2 border border-gray-200 dark:border-gray-700">{idea.copyPostMeta || idea.copy}</div>
-                </div>
-              )}
-
               {(() => { const guionTextoIdea = guionToText(idea.guion); return (guionTextoIdea || editandoGuion) && !/^n\/?a/i.test(guionTextoIdea.trim()) && (
                 <div className="bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700">
                   <div className="flex items-center justify-between px-3 py-2">

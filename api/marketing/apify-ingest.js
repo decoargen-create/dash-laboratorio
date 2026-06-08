@@ -67,9 +67,15 @@ export default async function handler(req, res) {
   }
 
   const actorId = process.env.APIFY_ACTOR_ID || DEFAULT_ACTOR;
+  // El actor de Apify cambió su API: ahora requiere maxItems > 0 además de
+  // resultsLimit (que dejó de ser el field principal). Mandamos ambos para
+  // compatibilidad con cualquier versión del actor.
+  const cappedLimit = Math.min(Math.max(limit, 5), 200);
   const input = {
     startUrls: [{ url: startUrl }],
-    resultsLimit: Math.min(Math.max(limit, 5), 200),
+    resultsLimit: cappedLimit,
+    maxItems: cappedLimit,        // field nuevo requerido por la API actualizada
+    maxResults: cappedLimit,      // alias por si el actor lo lee con otro nombre
     activeStatus: 'active',
     isDetailsPerAd: true,
     includeAboutPage: false,
@@ -103,7 +109,7 @@ export default async function handler(req, res) {
       const reducedLimit = Math.max(25, Math.floor(usedLimit / 4));
       console.warn(`apify-ingest: primer intento falló (${msg.slice(0, 100)}). Retry con limit ${reducedLimit}.`);
       try {
-        items = await runActorSync(actorId, { ...input, resultsLimit: reducedLimit }, token, { timeout: 240 });
+        items = await runActorSync(actorId, { ...input, resultsLimit: reducedLimit, maxItems: reducedLimit, maxResults: reducedLimit }, token, { timeout: 240 });
         usedLimit = reducedLimit;
         attemptNote = `Apify abortó con limit ${input.resultsLimit}. Reintentado con limit ${reducedLimit} y funcionó.`;
       } catch (err2) {

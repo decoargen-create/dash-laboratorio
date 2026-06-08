@@ -93,6 +93,13 @@ function safeJSON(str) {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   return {
+    build: {
+      // Habilitamos sourcemaps en prod para poder identificar errores TDZ
+      // que aparecen solo en bundles minificados. Permite que el browser
+      // muestre la línea original del código fuente en lugar de variables
+      // minificadas como 'q' o 'U'.
+      sourcemap: true,
+    },
     plugins: [
       react(),
       apiDevPlugin(env),

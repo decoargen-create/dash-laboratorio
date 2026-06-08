@@ -111,6 +111,24 @@ export async function driveCreateJson(token, parentId, name, obj) {
   return r.json();
 }
 
+// Crea un archivo binario (PNG, JPG, etc.) dentro de un folder de Drive.
+// Devuelve { id, name, webViewLink }.
+export async function driveCreateBinary(token, parentId, name, mimeType, buffer) {
+  const boundary = 'bin_' + crypto.randomBytes(8).toString('hex');
+  const metadata = { name, parents: [parentId], mimeType };
+  const head =
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
+    `--${boundary}\r\nContent-Type: ${mimeType}\r\nContent-Transfer-Encoding: binary\r\n\r\n`;
+  const tail = `\r\n--${boundary}--`;
+  const body = Buffer.concat([Buffer.from(head, 'utf-8'), Buffer.from(buffer), Buffer.from(tail, 'utf-8')]);
+  const r = await authedFetch(token, `${UPLOAD}?uploadType=multipart&supportsAllDrives=true&fields=id,name,webViewLink`, {
+    method: 'POST',
+    headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+    body,
+  });
+  return r.json();
+}
+
 // Devuelve el id del subfolder `name` dentro de parentId, creándolo si no existe.
 export async function driveEnsureFolder(token, parentId, name) {
   const q = `'${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and name='${name.replace(/'/g, "\\'")}' and trashed=false`;

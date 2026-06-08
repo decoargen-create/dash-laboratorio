@@ -21,7 +21,7 @@
 //   4. (Parte 7.2): grilla de ads del scrape, con dedup día a día
 //   5. (Parte 7.4): botón "Adaptar a {producto}" en cada ad
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Sparkles, Package, ChevronRight, ChevronDown, Plus, Trash2, Link2, X,
   Loader2, Download, Image as ImageIcon, ExternalLink, Wand2, Search,
@@ -904,6 +904,30 @@ function TopTableView({ items, seleccionados, selectedOrder, adaptingAdIds, crea
 
 
 export default function InspiracionSection({ addToast, forcedProductoId, embedded = false }) {
+  // Refs de cleanup — guards contra setState en componente desmontado,
+  // doble-click en bulk generate, y setTimeouts sin cancel al unmount.
+  // Sin esto se filtraban warnings de React + memoria de timeouts colgados
+  // si el user navega fuera durante async ops (40-90s típico).
+  const mountedRef = useRef(true);
+  const bulkRunningRef = useRef(false);
+  const timeoutsRef = useRef(new Set());
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      for (const id of timeoutsRef.current) clearTimeout(id);
+      timeoutsRef.current.clear();
+    };
+  }, []);
+  const trackedTimeout = (fn, ms) => {
+    const id = setTimeout(() => {
+      timeoutsRef.current.delete(id);
+      if (mountedRef.current) fn();
+    }, ms);
+    timeoutsRef.current.add(id);
+    return id;
+  };
+
   const [productos, setProductos] = useState(() => loadProductos());
   const [activeProductoIdRaw, setActiveProductoIdRaw] = useState(() => {
     try { return localStorage.getItem(ACTIVE_KEY) || null; } catch { return null; }
@@ -1149,9 +1173,11 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       addToast?.({ type: 'error', message: `No pude adaptar: ${err.message}` });
       finishExecution(execId, { ok: false, message: err.message || 'Error' });
     } finally {
-      setAdaptingAdIds(prev => {
-        const next = new Set(prev); next.delete(ad.id); return next;
-      });
+      if (mountedRef.current) {
+        setAdaptingAdIds(prev => {
+          const next = new Set(prev); next.delete(ad.id); return next;
+        });
+      }
     }
   };
 
@@ -1357,13 +1383,14 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       addToast?.({ type: failed > 0 ? 'warning' : 'success', message: msg });
       finishExecution(execId, { ok: failed === 0, message: msg, cost: totalCostAccum.openai + totalCostAccum.anthropic });
       // Auto-limpiar el estado del progreso después de 2.5s para que se vea el "✓".
-      setTimeout(() => {
+      trackedTimeout(() => {
         setProgressById(prev => {
           const next = { ...prev }; delete next[ad.id]; return next;
         });
       }, 2500);
       return true;
     } catch (err) {
+      if (!mountedRef.current) return false; // user navegó fuera durante async
       setProgressById(prev => ({
         ...prev,
         [ad.id]: { ...prev[ad.id], stage: 'error', error: err?.message || 'Error' },
@@ -1371,16 +1398,18 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       addToast?.({ type: 'error', message: `No pude generar: ${err.message}` });
       finishExecution(execId, { ok: false, message: err.message || 'Error' });
       // Limpiar el error después de 5s.
-      setTimeout(() => {
+      trackedTimeout(() => {
         setProgressById(prev => {
           const next = { ...prev }; delete next[ad.id]; return next;
         });
       }, 5000);
       return false;
     } finally {
-      setCreandoAdIds(prev => {
-        const next = new Set(prev); next.delete(ad.id); return next;
-      });
+      if (mountedRef.current) {
+        setCreandoAdIds(prev => {
+          const next = new Set(prev); next.delete(ad.id); return next;
+        });
+      }
     }
   };
 
@@ -1388,6 +1417,12 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   // por llamada y queremos evitar rate limits). Mantiene bulkProgress
   // actualizado para que la barra flotante muestre ETA real.
   const handleBulkCrear = async () => {
+    // Guard contra doble-click. Sin esto, dos workers procesaban el mismo
+    // index del queue por race en nextIndex → ads generados 2x o skipped.
+    if (bulkRunningRef.current) {
+      addToast?.({ type: 'info', message: 'Ya hay un bulk corriendo. Esperá a que termine.' });
+      return;
+    }
     if (seleccionados.size === 0) return;
     if (!producto) return;
     const prodImg = getProductoImagen(producto.id);
@@ -1395,6 +1430,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       addToast?.({ type: 'error', message: 'Cargá la foto del producto en Setup primero.' });
       return;
     }
+    bulkRunningRef.current = true;
     // Costo: $0.18/imagen (high) × 2 variantes + ~$0.005 vision (Haiku) por ad
     // que NO esté ya en cache. n=2 fijo.
     const costoPorImagen = costPerImage(genOpts.quality, genOpts.size);
@@ -1474,10 +1510,15 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       { length: Math.min(BULK_CONCURRENCY, adsAGenerar.length) },
       () => worker()
     );
-    await Promise.all(workers);
+    try {
+      await Promise.all(workers);
+    } finally {
+      bulkRunningRef.current = false;
+    }
 
+    if (!mountedRef.current) return; // user navegó fuera durante el bulk
     limpiarSeleccion();
-    setTimeout(() => setBulkProgress(null), 4000);
+    trackedTimeout(() => setBulkProgress(null), 4000);
     addToast?.({ type: 'success', message: 'Generación bulk completa — revisá la galería' });
   };
 

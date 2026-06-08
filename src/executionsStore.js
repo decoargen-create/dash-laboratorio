@@ -27,7 +27,7 @@ function emit() {
   });
 }
 
-export function startExecution({ label, sublabel, kind, estimatedMs }) {
+export function startExecution({ label, sublabel, kind, estimatedMs, estimatedCost }) {
   const id = `exec_${Date.now()}_${++seq}`;
   executions.set(id, {
     id,
@@ -36,6 +36,8 @@ export function startExecution({ label, sublabel, kind, estimatedMs }) {
     kind: kind || 'generic',
     startedAt: Date.now(),
     estimatedMs: estimatedMs || 30000,
+    estimatedCost: estimatedCost || 0,  // USD, opcional — para mostrar pre-cálculo
+    cost: 0,                            // USD acumulado real (se setea en finish)
     stage: '',
     progress: null, // null → estimar; número 0-100 → usar literal
     status: 'running',
@@ -53,12 +55,13 @@ export function updateExecution(id, patch) {
   emit();
 }
 
-export function finishExecution(id, { ok = true, message = '' } = {}) {
+export function finishExecution(id, { ok = true, message = '', cost = 0 } = {}) {
   const exec = executions.get(id);
   if (!exec) return;
   exec.status = ok ? 'done' : 'error';
   exec.finishedAt = Date.now();
   exec.message = message;
+  exec.cost = Number(cost) || 0;
   emit();
 
   // Auto-dismiss después de 3s si OK, 12s si error (le da tiempo al user

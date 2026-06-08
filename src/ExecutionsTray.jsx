@@ -43,6 +43,9 @@ export default function ExecutionsTray() {
 
   const running = execs.filter(e => e.status === 'running').length;
   const errored = execs.filter(e => e.status === 'error').length;
+  // Costo total acumulado de las ejecuciones visibles (done + en curso con
+  // estimación). Le da al usuario una idea de cuánto está gastando en vivo.
+  const totalCost = execs.reduce((sum, e) => sum + (e.cost || (e.status === 'running' ? e.estimatedCost : 0) || 0), 0);
 
   return (
     <div className="fixed bottom-4 right-4 z-[55] w-[340px] max-w-[calc(100vw-2rem)] bg-white dark:bg-gray-900 border-2 border-brand-300 dark:border-brand-800 rounded-xl shadow-2xl overflow-hidden">
@@ -72,7 +75,12 @@ export default function ExecutionsTray() {
             · {execs.length - running} {execs.length - running === 1 ? 'reciente' : 'recientes'}
           </span>
         )}
-        <span className="ml-auto">
+        <span className="ml-auto flex items-center gap-2">
+          {totalCost > 0 && (
+            <span className="text-[10px] font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
+              ${totalCost.toFixed(3)}
+            </span>
+          )}
           {collapsed ? <ChevronUp size={12} className="text-gray-400" /> : <ChevronDown size={12} className="text-gray-400" />}
         </span>
       </button>
@@ -133,9 +141,28 @@ function ExecutionCard({ exec }) {
           style={{ width: `${isError ? (exec.progress ?? 100) : pct}%` }}
         />
       </div>
-      <p className="text-[9px] text-gray-500 dark:text-gray-400 mt-0.5">
-        {fmtElapsed(elapsed)}{exec.status === 'running' && exec.estimatedMs ? ` / ~${fmtElapsed(exec.estimatedMs)}` : ''}
-      </p>
+      <div className="flex items-center justify-between gap-2 mt-0.5">
+        <p className="text-[9px] text-gray-500 dark:text-gray-400">
+          {fmtElapsed(elapsed)}{exec.status === 'running' && exec.estimatedMs ? ` / ~${fmtElapsed(exec.estimatedMs)}` : ''}
+        </p>
+        {/* Costo: si terminó OK con cost, mostrarlo. Si está corriendo y hay
+            estimatedCost, mostrar el estimado en gris para que el user sepa
+            cuánto va a salir antes de gastar. */}
+        {(exec.cost > 0 || (exec.status === 'running' && exec.estimatedCost > 0)) && (
+          <p className={`text-[9px] font-bold tabular-nums ${
+            exec.status === 'running'
+              ? 'text-gray-500 dark:text-gray-400'
+              : isError
+                ? 'text-red-500'
+                : 'text-emerald-600 dark:text-emerald-400'
+          }`}>
+            {exec.status === 'running'
+              ? `~$${Number(exec.estimatedCost).toFixed(3)}`
+              : `$${Number(exec.cost).toFixed(3)}`
+            }
+          </p>
+        )}
+      </div>
     </div>
   );
 }

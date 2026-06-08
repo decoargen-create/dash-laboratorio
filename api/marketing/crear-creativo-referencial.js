@@ -675,20 +675,45 @@ function buildEditForm({ prompt, refImgBuf, refMime, prodImgBuf, prodMime, size,
   return form;
 }
 
+// Time budget global del handler — para que callGptImage2Edit no haga
+// retries inútiles cuando ya estamos cerca del timeout de Vercel (300s).
+const HANDLER_TIMEOUT_MS = 290000; // 290s — Vercel kill a los 300s.
+const PER_CALL_TIMEOUT_MS = 220000; // 220s por fetch individual a OpenAI.
+
 async function callGptImage2Edit(params) {
-  const { apiKey } = params;
+  const { apiKey, budgetStartedAt = Date.now() } = params;
   // Auto-retry contra rate limit: hasta 2 reintentos con backoff 15s, 30s.
-  // OpenAI gpt-image-2 tier 1 = 5 RPM. Cuando el bulk hace burst de calls
-  // paralelos, algunos vuelven 429 — reintentar suele bastar.
+  // PERO solo si tenemos budget — si ya gastamos >80% del handler timeout,
+  // no retry: mejor fallar limpio que dejar al usuario esperando 300s.
   const RETRY_DELAYS = [15000, 30000];
   let lastErr = null;
   for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
+    const elapsed = Date.now() - budgetStartedAt;
+    if (elapsed > HANDLER_TIMEOUT_MS - 30000) {
+      // Sin tiempo para otro intento. Fallar inmediato.
+      throw new Error(`crear-creativo-referencial sin budget de tiempo (${Math.round(elapsed/1000)}s). Probá con menos ads o quality medium.`);
+    }
     const form = buildEditForm(params);
-    const resp = await fetch('https://api.openai.com/v1/images/edits', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${apiKey}` },
-      body: form,
-    });
+    // AbortController por call individual — si OpenAI se cuelga > 220s
+    // matamos esa request y dejamos margen para el handler cleanup.
+    const controller = new AbortController();
+    const callTimeout = setTimeout(() => controller.abort(), PER_CALL_TIMEOUT_MS);
+    let resp;
+    try {
+      resp = await fetch('https://api.openai.com/v1/images/edits', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${apiKey}` },
+        body: form,
+        signal: controller.signal,
+      });
+    } catch (err) {
+      clearTimeout(callTimeout);
+      if (err.name === 'AbortError') {
+        throw new Error(`OpenAI tardó más de ${PER_CALL_TIMEOUT_MS/1000}s en responder. Cancelado.`);
+      }
+      throw err;
+    }
+    clearTimeout(callTimeout);
     const raw = await resp.text();
     let data;
     try { data = JSON.parse(raw); } catch {
@@ -706,6 +731,12 @@ async function callGptImage2Edit(params) {
                         /too many requests/i.test(msg);
     if (isRateLimit && attempt < RETRY_DELAYS.length) {
       const delay = RETRY_DELAYS[attempt];
+      // Solo retry si tenemos budget para la espera + el próximo intento (~120s).
+      const elapsedNow = Date.now() - budgetStartedAt;
+      const needBudget = delay + 130000; // backoff + tiempo típico del próximo call
+      if (elapsedNow + needBudget > HANDLER_TIMEOUT_MS) {
+        throw new Error(`OpenAI rate limit, sin budget para retry. Reintentá en 30s con menos ads.`);
+      }
       console.warn(`Rate limit hit. Retry ${attempt + 1}/${RETRY_DELAYS.length} en ${delay}ms`);
       await new Promise(r => setTimeout(r, delay));
       continue;
@@ -715,7 +746,6 @@ async function callGptImage2Edit(params) {
     lastErr.status = resp.status;
     throw lastErr;
   }
-  // Si salió del loop sin return ni throw (todos los retries fallaron por rate limit).
   throw lastErr || new Error('OpenAI rate limit — agotados los retries');
 }
 

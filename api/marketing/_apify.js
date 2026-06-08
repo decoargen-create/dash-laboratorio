@@ -12,12 +12,25 @@ const APIFY_API_BASE = 'https://api.apify.com/v2';
 //
 // Endpoint de Apify: /acts/{actorId}/run-sync-get-dataset-items
 // Docs: https://docs.apify.com/api/v2#/reference/actors/run-actor-synchronously-and-get-dataset-items
+//
+// IMPORTANTE — Pay Per Result actors (como apify/facebook-ads-scraper):
+// requieren `maxItems` como QUERY PARAM, no en el body del input. Es el cap
+// de gasto que Apify enforces antes de invocar al actor. Sin esto, devuelve
+// "Maximum charged results must be greater than zero" (HTTP 400). Lo sacamos
+// del input.maxItems / input.resultsLimit y lo mandamos al URL.
 export async function runActorSync(actorId, input, token, opts = {}) {
   const { timeout = 240 } = opts;
-  // Apify acepta actor IDs en 2 formatos: "username/actorName" o "actorId".
-  // Si viene con "/", lo encodeamos para el URL path.
   const actorPath = actorId.replace('/', '~');
-  const url = `${APIFY_API_BASE}/acts/${actorPath}/run-sync-get-dataset-items?token=${encodeURIComponent(token)}&timeout=${timeout}`;
+
+  // Prioridad: input.maxItems → input.maxResults → input.resultsLimit.
+  // Si ninguno está, default 50 — Apify rechaza 0/null en PPR actors.
+  const maxItems = Number(input?.maxItems || input?.maxResults || input?.resultsLimit || 50);
+  const params = new URLSearchParams({
+    token,
+    timeout: String(timeout),
+    maxItems: String(Math.max(1, maxItems)),
+  });
+  const url = `${APIFY_API_BASE}/acts/${actorPath}/run-sync-get-dataset-items?${params.toString()}`;
 
   const resp = await fetch(url, {
     method: 'POST',

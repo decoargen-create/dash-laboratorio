@@ -237,13 +237,33 @@ REGLAS:
 // integremos el Strategist completo. Cuando esté, este alias se borra.
 const extractSkeleton = (...args) => extractSkeletonHaiku(...args);
 
-// Fallback: si el Strategist falla, usamos Haiku solo para sacar visual skeleton
-// y caemos al pipeline v2 (UNA call gpt-image-2 con n=N, todas variaciones random).
-async function extractSkeletonHaiku({ apiKey, refImgBuf, refMime }) {
+// Fallback: si el Strategist falla, usamos Haiku para sacar visual skeleton
+// + textos del ad. El skeleton incluye el contenido LITERAL de cada bloque
+// de texto y una versión ADAPTADA al producto del usuario (su angle, su
+// pain point, su audiencia, su tono — no solo cambio de palabras).
+async function extractSkeletonHaiku({ apiKey, refImgBuf, refMime, producto }) {
   const client = new Anthropic({ apiKey });
   const b64 = refImgBuf.toString('base64');
-  const system = `Sos analista visual de creativos DTC. Devolvé el visual skeleton del ad en JSON.`;
-  const userPrompt = `Analizá esta imagen y devolvé EXACTAMENTE:
+
+  // Contexto del producto para que Vision pueda escribir textos VERDADERAMENTE
+  // adaptados (no solo traducción cosmética).
+  const productoCtx = [
+    `Nombre: ${producto?.nombre || 'N/A'}`,
+    producto?.descripcion ? `Descripción: ${producto.descripcion.slice(0, 300)}` : '',
+    producto?.research ? `Audiencia y pain points:\n${String(producto.research).slice(0, 1500)}` : '',
+  ].filter(Boolean).join('\n');
+
+  const system = `Sos analista visual + copywriter de DTC argentino. Tu trabajo es leer un ad ganador y devolver:
+1. Visual skeleton (composición, paleta, etc.)
+2. Para CADA bloque de texto visible: el texto literal + UNA VERSIÓN ADAPTADA al producto del usuario, en castellano rioplatense con voseo, respetando el ÁNGULO emocional del original pero hablándole a la audiencia y pain points del producto.
+
+NO traduzcas palabra por palabra. ENTENDÉ qué función cumple cada texto (hook de curiosidad, social proof, urgencia, etc.) y reescribilo para que esa misma función opere en EL PRODUCTO DEL USUARIO.`;
+
+  const userPrompt = `# Producto del usuario
+${productoCtx}
+
+# Tarea
+Analizá la imagen del ad ganador y devolvé EXACTAMENTE este JSON (sin markdown):
 
 {
   "framing": "",
@@ -253,7 +273,16 @@ async function extractSkeletonHaiku({ apiKey, refImgBuf, refMime }) {
   "lighting": "",
   "palette": [],
   "props": [],
-  "textBlocks": [],
+  "textBlocks": [
+    {
+      "position": "top | center | bottom | left | right",
+      "size": "L | M | S",
+      "style": "ej: bold sans-serif blanco sobre fondo amarillo, sticker IG estilo nota",
+      "function": "hook_curiosidad | social_proof | testimonial | urgencia | autoridad | pregunta_retorica | cta",
+      "content_literal": "el texto EXACTO que aparece en la imagen",
+      "content_adapted": "versión NUEVA en castellano argentino que cumpla la MISMA función emocional pero hable de mi producto, mi audiencia, mi pain. Voseo natural. Sin brands ajenos. Sin hashtags de programas/famosos puntuales. Pensá: '¿qué diría una mujer de mi target argentina hablando de este producto, copiando el ESPÍRITU de este texto?'"
+    }
+  ],
   "badges": [],
   "ctaElements": [],
   "mood": "",
@@ -261,7 +290,16 @@ async function extractSkeletonHaiku({ apiKey, refImgBuf, refMime }) {
   "aspectRatio": ""
 }
 
-Sin markdown, sin texto extra. Vacío si no aplica, no inventes.`;
+Reglas estrictas para content_adapted:
+- NO traducir literal. Adaptar al ángulo del producto + audiencia + pain points del research.
+- Mantener la FUNCIÓN del texto original (si era pregunta de hook, que sea pregunta de hook; si era testimonial, testimonial).
+- Mantener longitud aproximada y tono coloquial.
+- Voseo argentino. Modismos naturales ("posta", "me re pasa", "che", "de una") si encajan con el tono original.
+- Si el original menciona un brand/producto ajeno, reemplazar por el nombre del producto del usuario o algo neutro.
+- Si menciona TV/programas/hashtags virales específicos, sustituir por trigger genérico que funcione para LA AUDIENCIA del producto.
+- Si la pieza tiene pain point implícito y NO matchea con los pain points del research, ajustalo al pain del research.
+
+Si no hay texto visible, devolvé textBlocks: [].`;
 
   try {
     const resp = await client.messages.create({
@@ -334,8 +372,17 @@ function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio
     if (Array.isArray(skeleton.badges) && skeleton.badges.length) parts.push(`  - Graphic badges/seals to include in similar positions (but with generic text or no text — the model is bad at text): ${skeleton.badges.join('; ')}`);
     if (Array.isArray(skeleton.ctaElements) && skeleton.ctaElements.length) parts.push(`  - CTA-like graphic elements (pills, buttons) in their original positions: ${skeleton.ctaElements.join('; ')}`);
     if (Array.isArray(skeleton.textBlocks) && skeleton.textBlocks.length) {
-      const tb = skeleton.textBlocks.map(b => `${b.position || '?'}@${b.size || '?'}`).join(', ');
-      parts.push(`  - Text block layout slots (LEAVE EMPTY or with placeholder rectangles — we will overlay real text later): ${tb}`);
+      parts.push('  - TEXT OVERLAYS to render IN THE IMAGE (Spanish, exact wording — do NOT paraphrase, do NOT translate to English):');
+      skeleton.textBlocks.forEach((b, i) => {
+        const txt = b.content_adapted || b.content_literal || '';
+        if (!txt) return;
+        const pos = b.position || 'top';
+        const size = b.size || 'M';
+        const style = b.style || '';
+        const fn = b.function ? ` (function: ${b.function})` : '';
+        parts.push(`     ${i + 1}. ${pos} · size ${size}${fn} · style: ${style}`);
+        parts.push(`        TEXT: "${txt}"`);
+      });
     }
     if (skeleton.mood) parts.push(`  - Mood: ${skeleton.mood}`);
     if (skeleton.style) parts.push(`  - Style: ${skeleton.style}`);
@@ -363,9 +410,10 @@ function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio
   parts.push('');
   parts.push('CRITICAL RULES:');
   parts.push('  • Replace the original product in IMAGE 1 with the product from IMAGE 2 — same scene, same lighting, same composition, but the new product takes its exact spot at the same scale and rotation.');
-  parts.push('  • Keep the packaging artwork of IMAGE 2 PIXEL-FAITHFUL. Do not redraw labels.');
+  parts.push('  • Keep the packaging artwork of IMAGE 2 PIXEL-FAITHFUL. Do not redraw labels. Do NOT invent new text on the PRODUCT PACKAGING ITSELF.');
   parts.push('  • Generated image should be photorealistic, premium DTC, ready for Meta Ads.');
-  parts.push('  • NO new text on the image (no headlines, no captions). Badges/pills/seals from IMAGE 1 can be replicated as graphic shapes, but with generic content or empty — the model is bad at typography.');
+  parts.push('  • TEXT OVERLAYS on the canvas (stickers, headlines, captions): render the Spanish texts listed above EXACTLY as written. Keep their original visual style (sticker, pill, handwritten note, bold sans, etc). gpt-image-2 renders Spanish text reasonably well — prioritize legibility over perfect typography.');
+  parts.push('  • Badges/seals from IMAGE 1: replicate as graphic shapes with their adapted content (or empty if no content was provided).');
   parts.push(`  • Output aspect ratio: ${aspectRatio || '1:1'}. High resolution.`);
 
   return parts.join('\n');
@@ -464,7 +512,7 @@ export default async function handler(req, res) {
       skeleton = skeletonCached;
       skeletonFromCache = true;
     } else if (anthropicKey) {
-      const result = await extractSkeleton({ apiKey: anthropicKey, refImgBuf, refMime });
+      const result = await extractSkeleton({ apiKey: anthropicKey, refImgBuf, refMime, producto });
       skeleton = result.skeleton;
       visionCost = result.cost;
     }

@@ -35,7 +35,13 @@ import { cacheAdImagesBatch, getCachedAdImageUrl } from './adImagesStore.js';
 import { startExecution, updateExecution, finishExecution } from './executionsStore.js';
 import GaleriaReferencialesModal from './GaleriaReferencialesModal.jsx';
 
-const MAX_SELECCIONADOS = 5;
+// Máximo de ads por tanda: 10. Más allá saturaríamos rate limits de
+// gpt-image-2 (típicamente 5-15 RPM) y el browser quedaría unresponsive.
+// Con concurrencia 5 paralela y n=2 fijo, 10 ads × 2 variantes = 20 imágenes
+// en ~3 min, costo ~$3.60.
+const MAX_SELECCIONADOS = 10;
+const BULK_CONCURRENCY = 5;
+const N_VARIANTES_FIJO = 2;
 
 // Extrae una keyword sensata desde una landing URL — preferimos el hostname
 // COMPLETO con www. si está, porque eso es lo que pegarías a mano en la
@@ -247,7 +253,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-      logCostsFromResponse(data, `adapt-inspiracion · ${brandNombre}`);
+      const adaptCost = logCostsFromResponse(data, `adapt-inspiracion · ${brandNombre}`);
 
       const ideas = (data.ideas || []).map(i => ({
         ...i,
@@ -266,7 +272,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
 
       const msg = `${ideas.length} ideas adaptadas en la Bandeja de ${producto.nombre}`;
       addToast?.({ type: 'success', message: msg });
-      finishExecution(execId, { ok: true, message: msg });
+      finishExecution(execId, { ok: true, message: msg, cost: adaptCost?.total });
     } catch (err) {
       addToast?.({ type: 'error', message: `No pude adaptar: ${err.message}` });
       finishExecution(execId, { ok: false, message: err.message || 'Error' });
@@ -311,6 +317,17 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       ...prev,
       [ad.id]: { startedAt: Date.now(), stage: 'preparando' },
     }));
+    // Estimación de costo según opciones (lo mostramos en el tray antes de que la API confirme).
+    const costoPorImg = genOpts.quality === 'low' ? 0.03 : genOpts.quality === 'medium' ? 0.07 : 0.18;
+    const visionCost = skeletonCache[ad.id] ? 0 : 0.005;
+    const estimatedCost = N_VARIANTES_FIJO * costoPorImg + visionCost;
+    const execId = startExecution({
+      label: `Creando ${N_VARIANTES_FIJO} creativos de ${brandNombre}`,
+      sublabel: ad.headline?.slice(0, 60) || ad.body?.slice(0, 60) || '',
+      kind: 'creative',
+      estimatedMs: 80000,
+      estimatedCost,
+    });
     try {
       // Pequeña pausa visual para que se vea el stage "preparando".
       await new Promise(r => setTimeout(r, 150));
@@ -318,6 +335,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         ...prev,
         [ad.id]: { ...prev[ad.id], stage: 'generando' },
       }));
+      updateExecution(execId, { stage: 'Generando con gpt-image-2…' });
 
       const refImageUrl = ad.imageUrls?.[0];
       if (!refImageUrl) {
@@ -341,11 +359,11 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           inspiracionImageUrl: refImageUrl,
           productoImagen: prodImg,
           accentColor: getAccentColor(producto.id) || '',
-          // Opciones configurables (n / size / quality) — el usuario las
-          // elige en el panel de opciones. Default: 2 / 2048x2048 / high.
+          // n=2 fijo (la lógica "por las dudas" se cubre con 2 variantes).
+          // size y quality configurables.
           quality: genOpts.quality,
           size: genOpts.size,
-          n: genOpts.n,
+          n: N_VARIANTES_FIJO,
           // Si ya tenemos un skeleton cacheado del mismo ad, lo mandamos
           // para que el backend saltee la llamada a Vision (~$0.005 + 10s).
           skeletonCached: skeletonCache[ad.id] || null,
@@ -353,12 +371,13 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-      logCostsFromResponse(data, `crear-creativo-referencial · ${brandNombre}`);
+      const costo = logCostsFromResponse(data, `crear-creativo-referencial · ${brandNombre}`);
 
       setProgressById(prev => ({
         ...prev,
         [ad.id]: { ...prev[ad.id], stage: 'guardando' },
       }));
+      updateExecution(execId, { stage: 'Guardando en galería…' });
 
       // Cachear skeleton del ad para futuras re-generaciones (saltea Vision).
       if (data.skeleton && !data.skeletonFromCache) {
@@ -397,7 +416,9 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         [ad.id]: { ...prev[ad.id], stage: 'done' },
       }));
       const cacheNote = data.skeletonFromCache ? ' (skeleton cacheado, ahorraste ~$0.005)' : '';
-      addToast?.({ type: 'success', message: `${imagenes.length} variaciones generadas y guardadas en galería${cacheNote}` });
+      const msg = `${imagenes.length} variaciones generadas y guardadas en galería${cacheNote}`;
+      addToast?.({ type: 'success', message: msg });
+      finishExecution(execId, { ok: true, message: msg, cost: costo?.total || estimatedCost });
       // Auto-limpiar el estado del progreso después de 2.5s para que se vea el "✓".
       setTimeout(() => {
         setProgressById(prev => {
@@ -411,6 +432,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         [ad.id]: { ...prev[ad.id], stage: 'error', error: err?.message || 'Error' },
       }));
       addToast?.({ type: 'error', message: `No pude generar: ${err.message}` });
+      finishExecution(execId, { ok: false, message: err.message || 'Error' });
       // Limpiar el error después de 5s.
       setTimeout(() => {
         setProgressById(prev => {
@@ -436,25 +458,32 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       addToast?.({ type: 'error', message: 'Cargá la foto del producto en Setup primero.' });
       return;
     }
-    // Costo: $0.18/imagen (high) × N variaciones + ~$0.005 vision (Haiku) por ad
-    // que NO esté ya en cache.
+    // Costo: $0.18/imagen (high) × 2 variantes + ~$0.005 vision (Haiku) por ad
+    // que NO esté ya en cache. n=2 fijo.
     const costoPorImagen = genOpts.quality === 'low' ? 0.03 : genOpts.quality === 'medium' ? 0.07 : 0.18;
     const visionAds = Array.from(seleccionados).filter(adId => !skeletonCache[adId]).length;
-    const costoEstimado = seleccionados.size * genOpts.n * costoPorImagen + visionAds * 0.005;
-    const total = seleccionados.size * genOpts.n;
+    const costoEstimado = seleccionados.size * N_VARIANTES_FIJO * costoPorImagen + visionAds * 0.005;
+    const total = seleccionados.size * N_VARIANTES_FIJO;
     const sizeLabel = genOpts.size === '1024x1536' ? '1024×1536 portrait' : genOpts.size === '1024x1024' ? '1024×1024 1:1' : '2048×2048 1:1';
     const cacheNote = visionAds < seleccionados.size ? ` (${seleccionados.size - visionAds} con skeleton cacheado)` : '';
-    if (!window.confirm(`Generar ${genOpts.n} variaciones ${sizeLabel} (calidad ${genOpts.quality}) por cada uno de los ${seleccionados.size} ads${cacheNote} → ${total} imágenes total, ~$${costoEstimado.toFixed(2)}. ¿Seguir?`)) return;
+    if (!window.confirm(`Generar ${N_VARIANTES_FIJO} variantes ${sizeLabel} por cada uno de los ${seleccionados.size} ads${cacheNote} → ${total} imágenes total, ~$${costoEstimado.toFixed(2)}. Corriendo en paralelo, debería tardar ~${Math.ceil(seleccionados.size / BULK_CONCURRENCY) * 90}s. ¿Seguir?`)) return;
 
-    // Buscar los ad objects desde adsByBrand.
+    // Buscar los ad objects desde adsByBrand + de los competidores (que viven
+    // en producto.competidores, no en brands custom).
     const adsAGenerar = [];
-    for (const [brandId, lista] of Object.entries(adsByBrand)) {
+    const adsCompetidores = (producto.competidores || []).flatMap(c =>
+      (c.ads || [])
+        .filter(a => seleccionados.has(a.id) && (a.imageUrls?.length || 0) > 0)
+        .map(a => ({ brandNombre: c.nombre, ad: a }))
+    );
+    const adsCustom = Object.entries(adsByBrand).flatMap(([brandId, lista]) => {
       const b = brands.find(x => x.id === brandId);
       const brandNombre = b?.nombre || 'Inspiración';
-      for (const ad of (lista || [])) {
-        if (seleccionados.has(ad.id)) adsAGenerar.push({ brandNombre, ad });
-      }
-    }
+      return (lista || [])
+        .filter(a => seleccionados.has(a.id))
+        .map(a => ({ brandNombre, ad: a }));
+    });
+    adsAGenerar.push(...adsCompetidores, ...adsCustom);
 
     // Inicializar barra de progreso del bulk.
     setBulkProgress({
@@ -467,38 +496,49 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       adsList: adsAGenerar.map((x, i) => ({
         adId: x.ad.id,
         brandNombre: x.brandNombre,
-        status: i === 0 ? 'doing' : 'pending',
+        status: 'pending',
       })),
       errors: [],
     });
 
-    for (let i = 0; i < adsAGenerar.length; i++) {
-      const { brandNombre, ad } = adsAGenerar[i];
-      setBulkProgress(prev => prev ? ({
-        ...prev,
-        currentIdx: i,
-        current: { adId: ad.id, brandNombre, adHeadline: ad.headline || ad.body?.slice(0, 60) || '' },
-        adsList: prev.adsList.map((x, idx) => ({
-          ...x,
-          status: idx < i ? x.status : idx === i ? 'doing' : 'pending',
-        })),
-      }) : prev);
-      const adStartedAt = Date.now();
-      const ok = await crearReferencialDeAd(brandNombre, ad);
-      const adDuration = Date.now() - adStartedAt;
-      setBulkProgress(prev => prev ? ({
-        ...prev,
-        completed: prev.completed + 1,
-        adDurations: [...prev.adDurations, adDuration],
-        adsList: prev.adsList.map((x, idx) =>
-          idx === i ? { ...x, status: ok ? 'done' : 'error' } : x
-        ),
-        errors: ok ? prev.errors : [...prev.errors, brandNombre],
-      }) : prev);
-    }
-    const finalErrors = adsAGenerar.length - adsAGenerar.filter((_, i) => true).length; // recalc abajo
+    // Ejecución en PARALELO con concurrencia BULK_CONCURRENCY.
+    // Cada worker toma del queue y procesa hasta vaciarlo. Mucho más rápido
+    // que el for-await secuencial anterior.
+    let nextIndex = 0;
+    const indexOf = new Map(adsAGenerar.map((x, i) => [x.ad.id, i]));
+    const worker = async () => {
+      while (true) {
+        const i = nextIndex++;
+        if (i >= adsAGenerar.length) return;
+        const { brandNombre, ad } = adsAGenerar[i];
+        setBulkProgress(prev => prev ? ({
+          ...prev,
+          adsList: prev.adsList.map((x, idx) =>
+            idx === i ? { ...x, status: 'doing' } : x
+          ),
+        }) : prev);
+        const adStartedAt = Date.now();
+        const ok = await crearReferencialDeAd(brandNombre, ad);
+        const adDuration = Date.now() - adStartedAt;
+        setBulkProgress(prev => prev ? ({
+          ...prev,
+          completed: prev.completed + 1,
+          currentIdx: Math.min(prev.currentIdx + 1, prev.total - 1),
+          adDurations: [...prev.adDurations, adDuration],
+          adsList: prev.adsList.map((x, idx) =>
+            idx === i ? { ...x, status: ok ? 'done' : 'error' } : x
+          ),
+          errors: ok ? prev.errors : [...prev.errors, brandNombre],
+        }) : prev);
+      }
+    };
+    const workers = Array.from(
+      { length: Math.min(BULK_CONCURRENCY, adsAGenerar.length) },
+      () => worker()
+    );
+    await Promise.all(workers);
+
     limpiarSeleccion();
-    // Cerrar la barra después de 4s para que se vea el "completo".
     setTimeout(() => setBulkProgress(null), 4000);
     addToast?.({ type: 'success', message: 'Generación bulk completa — revisá la galería' });
   };
@@ -553,7 +593,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-      logCostsFromResponse(data, `inspiracion · ${brand.nombre}`);
+      const scrapeCost = logCostsFromResponse(data, `inspiracion · ${brand.nombre}`);
 
       const allAds = data.ads || [];
       // Solo statics (sin video) — para Inspiración nos interesan los estáticos.
@@ -588,7 +628,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       // Cacheo de imágenes en background — para que sobrevivan a las 24h del CDN.
       cacheNewAdsInBackground(enriched, { productoId: producto?.id, brandId: brand.id, brandNombre: brand.nombre });
 
-      finishExecution(execId, { ok: true, message: msg });
+      finishExecution(execId, { ok: true, message: msg, cost: scrapeCost?.total });
     } catch (err) {
       addToast?.({ type: 'error', message: `No pude scrapear ${brand.nombre}: ${err.message}` });
       finishExecution(execId, { ok: false, message: err.message || 'Error' });
@@ -646,7 +686,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-      logCostsFromResponse(data, `inspiracion · ${comp.nombre}`);
+      const scrapeCost = logCostsFromResponse(data, `inspiracion · ${comp.nombre}`);
 
       const ads = data.ads || [];
       const prevIds = new Set((comp.ads || []).map(a => a.id));
@@ -678,7 +718,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       const staticAds = ads.filter(a => (a.imageUrls?.length || 0) > 0 && (a.videoUrls?.length || 0) === 0);
       cacheNewAdsInBackground(staticAds, { productoId: producto.id, brandId: brand.id, brandNombre: comp.nombre });
 
-      finishExecution(execId, { ok: true, message: msg });
+      finishExecution(execId, { ok: true, message: msg, cost: scrapeCost?.total });
     } catch (err) {
       addToast?.({ type: 'error', message: `No pude scrapear ${brand.nombre}: ${err.message}` });
       finishExecution(execId, { ok: false, message: err.message || 'Error' });
@@ -770,18 +810,6 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   // ====================================================================
   return (
     <div className="max-w-5xl mx-auto space-y-5">
-      {/* Botón flotante de Galería de referenciales — siempre visible para
-          acceso rápido a los creativos generados. */}
-      {producto && (
-        <button
-          onClick={() => setShowGaleria(true)}
-          className="fixed top-20 right-6 z-30 inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-brand-600 to-brand-500 rounded-lg shadow-lg hover:from-brand-700 hover:to-brand-600 transition"
-          title="Ver todos los creativos referenciales generados"
-        >
-          <Images size={14} /> Galería
-        </button>
-      )}
-
       {/* Barra flotante cuando hay ads seleccionados — bulk action + opciones. */}
       {seleccionados.size > 0 && !bulkProgress && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-white dark:bg-gray-800 border border-brand-300 dark:border-brand-700 rounded-xl shadow-2xl px-4 py-3 flex flex-wrap items-center gap-3 max-w-[calc(100vw-3rem)]">
@@ -790,20 +818,11 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
             <span className="text-gray-500 dark:text-gray-400"> / {MAX_SELECCIONADOS} ads</span>
           </div>
 
-          {/* Selector de n variaciones */}
-          <div className="flex items-center gap-1 text-[10px]">
-            <span className="text-gray-500 dark:text-gray-400">Variantes:</span>
-            {[2, 4, 6].map(opt => (
-              <button key={opt}
-                onClick={() => setGenOpts(o => ({ ...o, n: opt }))}
-                className={`px-2 py-0.5 rounded font-bold transition ${
-                  genOpts.n === opt
-                    ? 'bg-brand-600 text-white'
-                    : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
-                }`}
-              >{opt}</button>
-            ))}
-          </div>
+          {/* n=2 fijo — la lógica de "por las dudas que una salga mejor" se
+              cubre con 2 variantes. No agregamos selector para no encarecer. */}
+          <span className="text-[10px] text-gray-500 dark:text-gray-400 px-2 py-0.5 bg-gray-100 dark:bg-gray-700 rounded">
+            2 variantes
+          </span>
 
           {/* Selector de aspect ratio */}
           <div className="flex items-center gap-1 text-[10px]">
@@ -829,7 +848,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           </button>
           <button onClick={handleBulkCrear}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-brand-600 to-brand-500 rounded-lg hover:from-brand-700 hover:to-brand-600 transition">
-            <Sparkles size={13} /> Generar {seleccionados.size * genOpts.n} creativos
+            <Sparkles size={13} /> Generar {seleccionados.size * N_VARIANTES_FIJO} creativos
           </button>
         </div>
       )}
@@ -873,6 +892,13 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
             <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100 truncate">{producto.nombre}</h2>
           </div>
           <button
+            onClick={() => setShowGaleria(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-brand-700 dark:text-brand-200 bg-brand-50 dark:bg-brand-900/30 border border-brand-200 dark:border-brand-800 rounded-lg hover:bg-brand-100 dark:hover:bg-brand-900/50 transition"
+            title="Ver todos los creativos generados"
+          >
+            <Images size={12} /> Galería
+          </button>
+          <button
             onClick={() => setShowAddForm(s => !s)}
             className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-amber-500 to-brand-500 rounded-lg hover:from-amber-600 hover:to-brand-600 shadow-sm transition"
           >
@@ -880,7 +906,14 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           </button>
         </div>
       ) : (
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={() => setShowGaleria(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-brand-700 dark:text-brand-200 bg-brand-50 dark:bg-brand-900/30 border border-brand-200 dark:border-brand-800 rounded-lg hover:bg-brand-100 dark:hover:bg-brand-900/50 transition"
+            title="Ver todos los creativos generados"
+          >
+            <Images size={12} /> Galería
+          </button>
           <button
             onClick={() => setShowAddForm(s => !s)}
             className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-amber-500 to-brand-500 rounded-lg hover:from-amber-600 hover:to-brand-600 shadow-sm transition"
@@ -967,7 +1000,10 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
             __ads: staticAds,
             __sourceComp: c,
           };
-        }).filter(b => b.__ads.length > 0); // competidores sin ads no aparecen
+        });
+        // Antes filtrábamos competidores SIN ads — eso los ocultaba en Inspiración
+        // y obligaba a ir a Setup primero. Ahora aparecen siempre con un card
+        // vacío y botón "Scrapear ads ahora" — más directo.
         const customUnif = brands.map(b => ({
           ...b,
           isCompetidor: false,

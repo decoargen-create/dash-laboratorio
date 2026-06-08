@@ -20,6 +20,7 @@ import {
   migrateLocalToCloud,
 } from './marketingSync.js';
 import { onAuthChange, getCurrentUser } from './supabase.js';
+import { migrateIDBCreativosToCloud, countIDBCreativos } from './galeriaMigration.js';
 
 const KEYS = {
   productos: 'viora-marketing-productos-v1',
@@ -51,6 +52,26 @@ export function useMarketingSync({ addToast } = {}) {
           if (mig?.migrated) addToast?.({ type: 'success', message: `Migrados ${mig.productos} productos al cloud` });
           await pullMarketingFromCloud();
           if (mounted) setStatus('ok');
+
+          // Migración soft de creativos IDB → cloud, en background (no
+          // bloquea el resto del sync). Solo corre la primera vez por user.
+          (async () => {
+            try {
+              const count = await countIDBCreativos();
+              if (count > 0) {
+                addToast?.({ type: 'info', message: `Subiendo ${count} creativos locales al cloud — esto puede tardar un poco.` });
+              }
+              const migCreativos = await migrateIDBCreativosToCloud();
+              if (migCreativos?.migrated > 0) {
+                addToast?.({
+                  type: 'success',
+                  message: `${migCreativos.migrated} creativos subidos al cloud${migCreativos.failed ? ` (${migCreativos.failed} fallaron)` : ''}`,
+                });
+              }
+            } catch (err) {
+              console.warn('[migración creativos] error:', err.message);
+            }
+          })();
         } catch (err) {
           console.warn('[sync] pull error:', err.message);
           if (mounted) { setStatus('error'); setLastError(err.message); }
@@ -66,6 +87,10 @@ export function useMarketingSync({ addToast } = {}) {
           await migrateLocalToCloud();
           await pullMarketingFromCloud();
           setStatus('ok');
+          // Migración de creativos también acá (caso re-login en misma sesión).
+          (async () => {
+            try { await migrateIDBCreativosToCloud(); } catch {}
+          })();
         } catch (err) {
           setStatus('error'); setLastError(err.message);
         }

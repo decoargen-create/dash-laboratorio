@@ -153,9 +153,9 @@ export default defineConfig(({ mode }) => {
           ],
         },
         manifest: {
-          name: 'Laboratorio Viora',
-          short_name: 'Viora',
-          description: 'Panel de gestión del Laboratorio Viora — órdenes, clientes, producción, comisiones y pagos.',
+          name: 'AdsLab',
+          short_name: 'AdsLab',
+          description: 'AdsLab — Plataforma de creación de creativos para Meta Ads.',
           theme_color: '#4a0f22',
           background_color: '#0d0d0d',
           display: 'standalone',

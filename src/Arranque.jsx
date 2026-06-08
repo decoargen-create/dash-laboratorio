@@ -618,9 +618,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   });
 
   // Producto activo — null = vista de lista, id = workspace del producto.
-  const [activeProductoId, setActiveProductoId] = useState(() => {
-    try { return localStorage.getItem('viora-marketing-active-product') || null; } catch { return null; }
-  });
+  // IMPORTANTE: arrancamos siempre en null (vista de lista) — el user pidió
+  // que al entrar a Marketing tenga que elegir el producto, NO que lo
+  // auto-meta en el último que abrió. El click en una card del listado lo
+  // setea. El back button del workspace lo limpia.
+  const [activeProductoId, setActiveProductoId] = useState(null);
   useEffect(() => {
     try {
       if (activeProductoId) localStorage.setItem('viora-marketing-active-product', activeProductoId);

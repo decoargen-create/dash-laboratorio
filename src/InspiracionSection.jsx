@@ -185,6 +185,10 @@ function formatMs(ms) {
 // Barra flotante de progreso del bulk. Muestra ad current, % total, ETA
 // y un pill por cada ad para ver qué está done/doing/pending/error.
 export function BulkProgressBar({ state, onClose }) {
+  // Guard: si no hay bulk corriendo (state=null), no renderizamos nada.
+  // El caller siempre debería check pero por defensiva acá lo doblamos —
+  // Arranque renderiza esto en el shell del producto sin condicional.
+  if (!state) return null;
   const { total, completed, currentIdx, current, startedAt, adsList, errors, adDurations } = state;
   const elapsedMs = Date.now() - startedAt;
   // ETA basado en duración promedio de los ads ya completos. Fallback: 45s/ad.

@@ -102,35 +102,41 @@ export async function saveReferencial(ref) {
 export async function getReferencialesByProducto(productoId, opts = {}) {
   if (!productoId) return [];
   const cloud = await isCloudReady();
+  let cloudItems = [];
   if (cloud) {
     try {
-      const items = await getReferencialesByProductoCloud(productoId, opts);
-      return items;
+      cloudItems = await getReferencialesByProductoCloud(productoId, opts);
     } catch (err) {
       console.warn('[galería] cloud read falló, cae a IDB:', err.message);
     }
   }
-  // Path IDB
+  // SIEMPRE intentamos leer IDB también — algunos creativos pueden estar
+  // solo local (fallback de cloud, generados antes del bucket setup, etc).
+  // Dedupe por id, cloud gana si hay conflicto.
   const { includeArchived = false } = opts;
+  let idbItems = [];
   try {
     const db = await openDB();
-    return await new Promise((resolve, reject) => {
+    idbItems = await new Promise((resolve, reject) => {
       const tx = db.transaction(STORE, 'readonly');
       const idx = tx.objectStore(STORE).index('productoId');
       const req = idx.getAll(String(productoId));
       req.onsuccess = () => {
         const all = req.result || [];
         const filtered = includeArchived ? all : all.filter(it => !it.archivado);
-        const items = filtered.slice().sort((a, b) =>
-          (b.createdAt || '').localeCompare(a.createdAt || '')
-        );
-        resolve(items);
+        resolve(filtered);
       };
       req.onerror = () => reject(req.error);
     });
-  } catch {
-    return [];
-  }
+  } catch {}
+
+  // Merge cloud + IDB con dedupe por id. Cloud gana.
+  const byId = new Map();
+  for (const it of cloudItems) byId.set(it.id, it);
+  for (const it of idbItems) if (!byId.has(it.id)) byId.set(it.id, it);
+  const merged = Array.from(byId.values());
+  merged.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  return merged;
 }
 
 export async function countReferencialesByProducto(productoId) {
@@ -138,7 +144,10 @@ export async function countReferencialesByProducto(productoId) {
   const cloud = await isCloudReady();
   if (cloud) {
     try {
-      return await countReferencialesByProductoCloud(productoId);
+      const cloudCounts = await countReferencialesByProductoCloud(productoId);
+      // Si cloud tiene items, lo usamos. Si está vacío, intentamos IDB
+      // (puede ser que aún no migramos, o el cloud save falló y vivimos local).
+      if (cloudCounts.total > 0) return cloudCounts;
     } catch (err) {
       console.warn('[galería] cloud count falló:', err.message);
     }

@@ -67,6 +67,38 @@ export async function getReferencialesByProducto(productoId) {
   }
 }
 
+// Marca uno o varios referenciales con un patch (ej. { descargada: true,
+// descargadaAt: timestamp }). Devuelve la cantidad de items actualizados.
+export async function patchReferenciales(ids, patch) {
+  if (!Array.isArray(ids) || ids.length === 0 || !patch) return 0;
+  try {
+    const db = await openDB();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      const store = tx.objectStore(STORE);
+      let updated = 0;
+      ids.forEach((id) => {
+        const req = store.get(id);
+        req.onsuccess = () => {
+          if (req.result) {
+            store.put({ ...req.result, ...patch });
+            updated++;
+          }
+        };
+      });
+      tx.oncomplete = () => {
+        if (typeof window !== 'undefined') {
+          try { window.dispatchEvent(new CustomEvent('viora:referencial-saved', { detail: {} })); } catch {}
+        }
+        resolve(updated);
+      };
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {
+    return 0;
+  }
+}
+
 export async function deleteReferencial(id) {
   if (!id) return false;
   try {

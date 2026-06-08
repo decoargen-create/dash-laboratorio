@@ -344,6 +344,8 @@ Reglas estrictas para content_adapted:
 
 - **CRÍTICO — OFERTAS Y CLAIMS**: Si el texto original menciona una promo concreta ("25% off", "3x2", "envío gratis", "comprá 3 y ahorrá", "PAGO CONTRA REEMBOLSO") o un claim regulado ("FDA Approved", "ANMAT", "dermatológicamente testeado", "sin gluten") y vos NO tenés esa info en "OFERTAS / CLAIMS REALES" del contexto, REMOVELO del content_adapted. Reemplazá por un CTA neutro ("Probalo ya", "Conocé más", "Empezá hoy") o un beneficio genérico verificable. Mejor decir menos que inventar una oferta que no existe (es mentir al consumidor y posible violación de Meta).
 
+- **CRÍTICO — PRECIOS Y MONEDAS**: Si el texto original menciona un PRECIO específico ("$9.99", "USD 25", "$1500", "10€", "por solo $X") y NO tenés un precio real del producto en "OFERTAS / CLAIMS REALES", REMOVÉ el precio. Especialmente cuidado con precios en USD (típicos de ads gringos) — el target argentino paga en ARS y un precio falso confunde y deslegitima. Reemplazá la frase con el BENEFICIO emocional/funcional que el precio implicaba ("Gasté $9.99 y me mandaron probióticos" → "Lo probé y me cambió la vida" / "No podía creer lo simple que fue"). NUNCA inventes un precio en ARS — es mejor sin precio.
+
 Si no hay texto visible, devolvé textBlocks: [].`;
 
   try {

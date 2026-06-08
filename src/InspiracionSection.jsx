@@ -36,6 +36,31 @@ import GaleriaReferencialesModal from './GaleriaReferencialesModal.jsx';
 
 const MAX_SELECCIONADOS = 5;
 
+// Extrae una keyword sensata desde una landing URL — preferimos el hostname
+// COMPLETO con www. si está, porque eso es lo que pegarías a mano en la
+// Ads Library de Meta. La búsqueda con dominio devuelve los ads reales del
+// brand, no basura genérica.
+function landingToKeyword(url) {
+  if (!url) return '';
+  try {
+    const u = new URL(url.startsWith('http') ? url : `https://${url}`);
+    return u.hostname; // ej: "www.vitamiplus.com"
+  } catch {
+    return String(url).replace(/^https?:\/\//, '').split('/')[0];
+  }
+}
+
+// Valida que el keyword sea utilizable. Refuse si es muy corto o solo
+// dígitos — para no caer en el bug de scrapear con nombre="1" y traer
+// phone cases / cuchillos / random.
+function isKeywordUsable(kw) {
+  if (!kw) return false;
+  const s = String(kw).trim();
+  if (s.length < 4) return false;
+  if (/^\d+$/.test(s)) return false;
+  return true;
+}
+
 const PRODUCTOS_KEY = 'viora-marketing-productos-v1';
 const ACTIVE_KEY = 'viora-marketing-inspiracion-active-product';
 const brandsKey = (productoId) => `viora-marketing-inspiracion-brands-${productoId}`;
@@ -489,16 +514,23 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           const d = await r.json();
           if (d.pageUrl) {
             payload.fbPageUrl = d.pageUrl;
-            // Persistimos el fbPageUrl encontrado.
             setBrands(prev => prev.map(x => x.id === brand.id ? { ...x, fbPageUrl: d.pageUrl } : x));
           } else {
-            payload.searchKeyword = brand.nombre;
+            // Fallback: usar el HOSTNAME del landing como keyword (no el nombre).
+            // Antes esto era brand.nombre y traía basura cuando el nombre era
+            // genérico ("1", "Acme", etc.).
+            payload.searchKeyword = landingToKeyword(brand.landingUrl);
           }
         } catch {
-          payload.searchKeyword = brand.nombre;
+          payload.searchKeyword = landingToKeyword(brand.landingUrl);
         }
-      } else {
+      } else if (isKeywordUsable(brand.nombre)) {
         payload.searchKeyword = brand.nombre;
+      } else {
+        throw new Error('Sin landing URL ni nombre utilizable. Cargá la landing o el FB page URL del competidor en Setup.');
+      }
+      if (!payload.fbPageUrl && !isKeywordUsable(payload.searchKeyword)) {
+        throw new Error(`Keyword "${payload.searchKeyword}" no es utilizable (muy genérica). Cargá el FB page URL del competidor en Setup.`);
       }
 
       const resp = await fetch('/api/marketing/apify-ingest', {
@@ -570,12 +602,17 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           });
           const d = await r.json();
           if (d.pageUrl) payload.fbPageUrl = d.pageUrl;
-          else payload.searchKeyword = comp.nombre;
+          else payload.searchKeyword = landingToKeyword(comp.landingUrl);
         } catch {
-          payload.searchKeyword = comp.nombre;
+          payload.searchKeyword = landingToKeyword(comp.landingUrl);
         }
-      } else {
+      } else if (isKeywordUsable(comp.nombre)) {
         payload.searchKeyword = comp.nombre;
+      } else {
+        throw new Error('Sin landing URL ni nombre utilizable. Cargá la landing o el FB page URL en Setup.');
+      }
+      if (!payload.fbPageUrl && !isKeywordUsable(payload.searchKeyword)) {
+        throw new Error(`Keyword "${payload.searchKeyword}" no es utilizable (muy genérica). Cargá el FB page URL en Setup.`);
       }
 
       const resp = await fetch('/api/marketing/apify-ingest', {

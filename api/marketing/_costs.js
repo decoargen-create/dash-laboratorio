@@ -31,3 +31,42 @@ export function whisperCost(durationSeconds) {
   const minutes = durationSeconds / 60;
   return Math.round(minutes * 0.006 * 10000) / 10000;
 }
+
+// Pricing de gpt-image-2 (token-based, similar a gpt-image-1):
+//   text input:   $5  / 1M tokens
+//   image input:  $10 / 1M tokens (relevante para /v1/images/edits con refs)
+//   image output: $40 / 1M tokens
+//
+// Si la response de OpenAI incluye `usage` con counts, calculamos REAL.
+// Si no, fallback a tabla por size+quality (educated guess basado en cuántos
+// tokens genera cada combinación).
+export function gptImageCost(usageOrEstimate, opts = {}) {
+  // Caso A — calculamos REAL desde `usage` de la response de OpenAI.
+  if (usageOrEstimate && typeof usageOrEstimate === 'object' && (usageOrEstimate.input_tokens != null || usageOrEstimate.output_tokens != null)) {
+    const u = usageOrEstimate;
+    const textIn  = Number(u.input_tokens_details?.text_tokens || 0);
+    const imageIn = Number(u.input_tokens_details?.image_tokens || 0);
+    const outTok  = Number(u.output_tokens || 0);
+    // Fallback si no vinieron los details: estimamos que TODO el input es image.
+    const totalIn = Number(u.input_tokens || 0);
+    const imageInEff = imageIn || Math.max(0, totalIn - textIn);
+    const cost = (textIn * 5 + imageInEff * 10 + outTok * 40) / 1_000_000;
+    return Math.round(cost * 10000) / 10000;
+  }
+  // Caso B — estimación por size + quality. Basado en token counts conocidos
+  // de gpt-image-1 escalados por pixel ratio para 2048×2048 (~4x el de 1024).
+  // Incluye ~2 input images chicas + texto típico de ~1500 tokens.
+  const size = opts.size || '1024x1024';
+  const quality = opts.quality || 'high';
+  // Output tokens aproximados según size + quality.
+  const OUT_TOKENS = {
+    'low':    { '1024x1024': 272,  '1024x1536': 408,  '1536x1024': 408,  '2048x2048': 1088 },
+    'medium': { '1024x1024': 1056, '1024x1536': 1584, '1536x1024': 1584, '2048x2048': 4224 },
+    'high':   { '1024x1024': 4160, '1024x1536': 6240, '1536x1024': 6240, '2048x2048': 16640 },
+  };
+  const out = OUT_TOKENS[quality]?.[size] ?? OUT_TOKENS.high['1024x1024'];
+  const textIn  = 1500;
+  const imageIn = 1280; // 2 refs típicas a ~640 cada una
+  const cost = (textIn * 5 + imageIn * 10 + out * 40) / 1_000_000;
+  return Math.round(cost * 10000) / 10000;
+}

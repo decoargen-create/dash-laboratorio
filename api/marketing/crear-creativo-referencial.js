@@ -32,10 +32,24 @@ import { anthropicCost } from './_costs.js';
 const MODEL_IMAGE = 'gpt-image-2';
 const MODEL_STRATEGIST = 'claude-sonnet-4-6';
 const MODEL_VISION_FALLBACK = 'claude-haiku-4-5-20251001';
-const DEFAULT_SIZE = '2048x2048';
+// Default 1024×1024 — quality/precio óptimo. 2048×2048 era ~4x más caro
+// (~$0.65/imagen vs $0.18 a 1024) y la diferencia visual en feed de Meta
+// es marginal: a 1024 ya se ve nítido y baja el costo por variante a un
+// nivel sano. Quien necesite 2K puede pedir size: '2048x2048' explícito.
+const DEFAULT_SIZE = '1024x1024';
 const FALLBACK_SIZE = '1024x1024';
 const DEFAULT_QUALITY = 'high';
-const COST_ESTIMATE = { low: 0.03, medium: 0.07, high: 0.18 };
+// Estimaciones por imagen (output + 2 input refs + texto). Calibradas con
+// gptImageCost() en _costs.js. Si la response trae `usage`, se usa el costo
+// real en vez de esta tabla.
+const COST_ESTIMATE_BY_SIZE = {
+  low:    { '1024x1024': 0.013, '1024x1536': 0.020, '1536x1024': 0.020, '2048x2048': 0.050 },
+  medium: { '1024x1024': 0.046, '1024x1536': 0.068, '1536x1024': 0.068, '2048x2048': 0.175 },
+  high:   { '1024x1024': 0.180, '1024x1536': 0.262, '1536x1024': 0.262, '2048x2048': 0.680 },
+};
+function estimateImageCost(quality, size) {
+  return COST_ESTIMATE_BY_SIZE[quality]?.[size] ?? COST_ESTIMATE_BY_SIZE.high['1024x1024'];
+}
 
 // Detecta el FORMATO físico del producto (gomitas / cápsulas / crema / etc.)
 // para que gpt-image-2 NO dibuje un formato equivocado (ej. cápsulas en un
@@ -751,6 +765,7 @@ async function callGptImage2Edit(params) {
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
+  const budgetStartedAt = Date.now(); // arrancamos el budget del handler
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -781,6 +796,16 @@ export default async function handler(req, res) {
   const quality = ['low', 'medium', 'high'].includes(body?.quality) ? body.quality : DEFAULT_QUALITY;
   let size = sizeForFormato(inspiracion?.formato, body?.size);
   const n = Math.min(10, Math.max(1, Number(body?.n) || 2));
+  // nPlan: cuántas variaciones planificar en el Strategist. Default = n.
+  // Caso de uso: el frontend pide N=1 imagen ahora pero quiere que el plan
+  // tenga 4 variations para reusarlas en próximos calls (paralelización
+  // del lado del cliente). Si no se especifica, mismo valor que n.
+  const nPlan = Math.min(10, Math.max(1, Number(body?.nPlan) || n));
+  // variationStartIndex: cuál de las variations del plan usar como #0 local.
+  // Permite que call#2 use plan.variations[1], call#3 use plan.variations[2],
+  // etc. — todos comparten el mismo plan cacheado pero generan imágenes
+  // distintas.
+  const variationStartIndex = Math.max(0, Number(body?.variationStartIndex) || 0);
   const aspectRatio = aspectRatioFromSize(size);
 
   try {
@@ -819,10 +844,12 @@ export default async function handler(req, res) {
       // Cache solo tiene skeleton legacy (Haiku) — reusarlo pero no como plan.
       skeleton = skeletonCached;
       skeletonFromCache = true;
-    } else if (anthropicKey && n >= 2) {
-      // Sin cache: intentar Strategist (Sonnet).
+    } else if (anthropicKey && nPlan >= 2) {
+      // Sin cache: intentar Strategist (Sonnet) — planificá nPlan variations
+      // aunque generemos solo `n` imágenes ahora. Las restantes quedan en el
+      // plan que devolvemos al cliente para que las use en próximos calls.
       const stratResult = await planStrategyAndVariations({
-        apiKey: anthropicKey, refImgBuf, refMime, producto, accentColor, n,
+        apiKey: anthropicKey, refImgBuf, refMime, producto, accentColor, n: nPlan,
       });
       if (stratResult.plan && Array.isArray(stratResult.plan.variations) && stratResult.plan.variations.length > 0) {
         plan = stratResult.plan;
@@ -846,12 +873,14 @@ export default async function handler(req, res) {
     let prompts; // array de objetos { prompt, variantStyle }
     if (plan && plan.variations && plan.variations.length > 0) {
       // Usar plan.variations — un prompt distinto por variación.
-      // Si plan devolvió menos variations que N, completamos repitiendo la última.
-      const variationsToUse = plan.variations.slice(0, n);
+      // variationStartIndex permite pickear desde X en adelante (parallel
+      // generation client-side: call#1 → idx 0, call#2 → idx 1, etc).
+      const startIdx = Math.min(variationStartIndex, plan.variations.length - 1);
+      const variationsToUse = plan.variations.slice(startIdx, startIdx + n);
       while (variationsToUse.length < n) variationsToUse.push(plan.variations[plan.variations.length - 1]);
       prompts = variationsToUse.map((variation, idx) => ({
         prompt: buildPromptFromPlan({ producto, inspiracion, plan, variation, accentColor, aspectRatio }),
-        variantStyle: idx === variationsToUse.length - 1 && accentColor ? 'rebrand' : 'strategist',
+        variantStyle: idx === variationsToUse.length - 1 && accentColor && startIdx === 0 ? 'rebrand' : 'strategist',
         variation,
       }));
     } else {
@@ -882,6 +911,7 @@ export default async function handler(req, res) {
             apiKey, prompt: p.prompt,
             refImgBuf, refMime, prodImgBuf: prodBuf, prodMime,
             size: useSize, quality, n: 1,
+            budgetStartedAt,
           })
         ));
         return {
@@ -898,11 +928,13 @@ export default async function handler(req, res) {
             apiKey, prompt: __legacyPromptRef,
             refImgBuf, refMime, prodImgBuf: prodBuf, prodMime,
             size: useSize, quality, n: nRef,
+            budgetStartedAt,
           }),
           callGptImage2Edit({
             apiKey, prompt: __legacyPromptRebrand,
             refImgBuf, refMime, prodImgBuf: prodBuf, prodMime,
             size: useSize, quality, n: nReb,
+            budgetStartedAt,
           }),
         ]);
         return {
@@ -915,6 +947,7 @@ export default async function handler(req, res) {
         apiKey, prompt: __legacyPromptRef,
         refImgBuf, refMime, prodImgBuf: prodBuf, prodMime,
         size: useSize, quality, n,
+        budgetStartedAt,
       });
       return { imagenes: imgs, variantStyles: imgs.map(() => 'reference') };
     };
@@ -953,12 +986,15 @@ export default async function handler(req, res) {
       skeleton,              // visual skeleton (compat con cache viejo)
       plan,                  // plan completo del strategist (null si no aplica)
       skeletonFromCache,
+      variationStartIndex,   // qué índice del plan se usó como base de este call
       promptReference: prompts ? prompts[0]?.prompt : (typeof __legacyPromptRef !== 'undefined' ? __legacyPromptRef : null),
       promptRebrand: prompts ? null : (typeof __legacyPromptRebrand !== 'undefined' ? __legacyPromptRebrand : null),
       prompts: prompts ? prompts.map(p => ({ variantStyle: p.variantStyle, variation: p.variation, prompt: p.prompt })) : null,
       generatedAt: new Date().toISOString(),
       cost: {
-        openai: (COST_ESTIMATE[quality] ?? 0.18) * imagenes.length,
+        // Estimación basada en quality + size REAL (no la requested). Si
+        // hubo size fallback, usa el size finalmente usado.
+        openai: estimateImageCost(quality, sizeUsed) * imagenes.length,
         anthropic: visionCost,
       },
     });

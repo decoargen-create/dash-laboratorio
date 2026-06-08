@@ -163,8 +163,10 @@ drop policy if exists "auth full access" on creativos;
 create policy "auth full access" on creativos for all using (auth.role() = 'authenticated');
 
 -- ============================================================
--- STORAGE BUCKET para los PNGs de creativos
+-- STORAGE BUCKETS
 -- ============================================================
+-- Bucket privado para los PNGs de creativos generados — solo accesible
+-- con usuario autenticado.
 insert into storage.buckets (id, name, public)
 values ('creativos', 'creativos', false)
 on conflict (id) do nothing;
@@ -184,3 +186,19 @@ create policy "auth update creativos" on storage.objects for update
 drop policy if exists "auth delete creativos" on storage.objects;
 create policy "auth delete creativos" on storage.objects for delete
   using (bucket_id = 'creativos' and auth.role() = 'authenticated');
+
+-- Bucket PÚBLICO para imágenes de ads de competencia — para evitar que
+-- las URLs de Meta CDN se expiren a las 24h. El backend (con
+-- service_role) sube; cualquiera lee (no expone nada sensible: son ads
+-- públicos de Meta Ad Library).
+insert into storage.buckets (id, name, public)
+values ('competidores-ads', 'competidores-ads', true)
+on conflict (id) do nothing;
+
+drop policy if exists "public read competidores-ads" on storage.objects;
+create policy "public read competidores-ads" on storage.objects for select
+  using (bucket_id = 'competidores-ads');
+
+drop policy if exists "service write competidores-ads" on storage.objects;
+create policy "service write competidores-ads" on storage.objects for insert
+  with check (bucket_id = 'competidores-ads');

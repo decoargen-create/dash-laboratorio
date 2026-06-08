@@ -37,6 +37,23 @@ function loadProductos() {
 }
 
 // Coacciona un guión a string. Ideas viejas (anteriores al cambio de guión
+// Construye un prompt listo para pegar en gpt-image-2 en castellano
+// argentino, a partir de los campos de la idea. Lo usa el ticket de ideas
+// (cuando formato es static/carrusel) para que el usuario pueda copiar y
+// generar el creativo afuera sin tener que armar el prompt él.
+function buildPromptGptImage2Es(idea) {
+  const partes = [];
+  partes.push('Creativo estático para Meta Ads — estética DTC premium, mercado argentino, photorealista, scroll-stop.');
+  if (idea.hook) partes.push(`Concepto: ${idea.hook}`);
+  if (idea.descripcionImagen) partes.push(`Escena: ${idea.descripcionImagen}`);
+  if (idea.estiloVisual) partes.push(`Estilo visual: ${idea.estiloVisual}`);
+  if (idea.painPoint) partes.push(`Pain implícito: ${idea.painPoint}`);
+  if (idea.productoNombre) partes.push(`Producto: ${idea.productoNombre} (respetar el envase exacto).`);
+  if (idea.textoEnImagen) partes.push(`Texto dentro de la imagen:\n${idea.textoEnImagen}`);
+  partes.push('Sin caras gringas. Tonos cálidos, props porteños. Sin texto inventado en el envase.');
+  return partes.filter(Boolean).join('\n\n');
+}
+
 // a texto corrido) tienen `guion`/`guionAdaptado` guardado como objeto
 // estructurado { duracionSegundos, tono, ganchoVisual, beats, ... }.
 // Renderizar ese objeto crudo crashea React (error #31: objects are not
@@ -909,38 +926,28 @@ function IdeaCard({
                 <Field label="🎯 Hook" text={idea.hook} highlight />
               )}
 
-              {idea.escenarioNarrativo && (
-                <Field label="📖 Escenario narrativo" text={idea.escenarioNarrativo} />
-              )}
-
-              {idea.descripcionImagen && (
-                <Field label="🖼 Descripción de imagen (para el diseñador)" text={idea.descripcionImagen} />
-              )}
-
-              {idea.promptGeneradorImagen && (
-                <details open className="bg-brand-50 dark:bg-brand-900/20 rounded-md border border-brand-200 dark:border-brand-800">
-                  <summary className="cursor-pointer px-3 py-2 text-[10px] font-bold text-brand-700 dark:text-brand-300 uppercase tracking-wider flex items-center justify-between">
-                    <span>🤖 Prompt para Nano Banana / Midjourney (inglés)</span>
-                    <button
-                      onClick={(e) => {
-                        e.preventDefault();
-                        navigator.clipboard?.writeText(idea.promptGeneradorImagen);
-                      }}
-                      className="text-[10px] font-normal text-brand-600 dark:text-brand-400 hover:underline"
-                    >
-                      📋 copiar
-                    </button>
-                  </summary>
-                  <p className="px-3 pb-3 text-xs font-mono text-brand-900 dark:text-brand-200 whitespace-pre-wrap break-words">{idea.promptGeneradorImagen}</p>
-                </details>
-              )}
-
-              {idea.textoEnImagen && (
-                <div>
-                  <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1">✍️ Texto dentro de la imagen (layout)</p>
-                  <pre className="text-[11px] font-mono whitespace-pre-wrap bg-gray-50 dark:bg-gray-800/50 rounded-md px-3 py-2 text-gray-800 dark:text-gray-200 border border-gray-200 dark:border-gray-700">{idea.textoEnImagen}</pre>
-                </div>
-              )}
+              {/* Prompt listo para pegar en gpt-image-2 — solo si es imagen
+                  o carrusel. El prompt está en castellano argentino y combina
+                  los campos relevantes de la idea en un solo bloque copiable. */}
+              {idea.formato !== 'video' && (idea.hook || idea.descripcionImagen) && (() => {
+                const promptEs = buildPromptGptImage2Es(idea);
+                return (
+                  <div className="bg-brand-50 dark:bg-brand-900/20 rounded-md border border-brand-200 dark:border-brand-800">
+                    <div className="flex items-center justify-between px-3 py-2">
+                      <p className="text-[10px] font-bold text-brand-700 dark:text-brand-300 uppercase tracking-wider">
+                        🤖 Prompt para gpt-image-2 (ES)
+                      </p>
+                      <button
+                        onClick={() => navigator.clipboard?.writeText(promptEs)}
+                        className="text-[10px] font-semibold text-brand-600 dark:text-brand-400 hover:underline inline-flex items-center gap-1"
+                      >
+                        📋 Copiar prompt
+                      </button>
+                    </div>
+                    <pre className="px-3 pb-3 text-xs text-brand-900 dark:text-brand-200 whitespace-pre-wrap break-words font-sans">{promptEs}</pre>
+                  </div>
+                );
+              })()}
 
               {/* Para video → brief con guion para mandar a producción
                   humana. Para imagen/carrusel → panel de generación con
@@ -997,43 +1004,10 @@ function IdeaCard({
 
             {/* COLUMNA DERECHA — contexto estratégico + metadata (2/5 del espacio) */}
             <div className="lg:col-span-2 space-y-3">
-              {idea.tipo === 'iteracion' && idea.origen?.razonIteracion && (
-                <div className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md">
-                  <p className="text-[10px] font-bold text-amber-800 dark:text-amber-300 uppercase tracking-wider mb-1">
-                    🔄 ¿Por qué iterar?
-                  </p>
-                  <p className="text-xs text-amber-900 dark:text-amber-200">
-                    <span className="font-semibold">Ad base:</span> {idea.origen.adNombre || '(sin nombre)'}
-                  </p>
-                  <p className="text-xs text-amber-900 dark:text-amber-200 mt-1">{idea.origen.razonIteracion}</p>
-                </div>
-              )}
-              {idea.tipo !== 'iteracion' && idea.origen?.razonamiento && (
-                <div className="p-3 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-md">
-                  <p className="text-[10px] font-bold text-brand-800 dark:text-brand-300 uppercase tracking-wider mb-1">
-                    💡 Por qué esta idea
-                  </p>
-                  <p className="text-xs text-brand-900 dark:text-brand-200">{idea.origen.razonamiento}</p>
-                </div>
-              )}
-
+              {/* Visible siempre: ángulo + pain point (los dos datos
+                  estratégicos clave) + riesgo Meta si aplica. */}
               {idea.angulo && <Field label="📐 Ángulo" text={idea.angulo} />}
               {idea.painPoint && <Field label="💥 Pain point" text={idea.painPoint} />}
-              {idea.estiloVisual && <Field label="🎨 Estilo visual" text={idea.estiloVisual} />}
-
-              {idea.testHipotesis && (
-                <div className="p-3 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-md">
-                  <p className="text-[10px] font-bold text-brand-800 dark:text-brand-300 uppercase tracking-wider mb-1">
-                    🔬 Hipótesis a validar
-                  </p>
-                  {VARIABLE_META[idea.variableDeTesteo] && (
-                    <p className="text-[10px] text-brand-700 dark:text-brand-400 mb-1">
-                      Variable: <strong>{VARIABLE_META[idea.variableDeTesteo].emoji} {VARIABLE_META[idea.variableDeTesteo].label}</strong>
-                    </p>
-                  )}
-                  <p className="text-xs text-brand-900 dark:text-brand-200">{idea.testHipotesis}</p>
-                </div>
-              )}
 
               {idea.metaRiesgo?.tieneRiesgo && (
                 <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md">
@@ -1051,8 +1025,62 @@ function IdeaCard({
                 </div>
               )}
 
-              {idea.publicoSugerido && (
-                <Field label="🎯 Público sugerido" text={idea.publicoSugerido} />
+              {/* Detalles estratégicos colapsados — agrupa todo el contexto
+                  secundario (escenario, razonamiento, hipótesis, estilo,
+                  público) en UN solo bloque expandible. Antes esto eran 5
+                  cards sueltas que saturaban el ticket. */}
+              {(idea.origen?.razonamiento || idea.origen?.razonIteracion || idea.escenarioNarrativo || idea.testHipotesis || idea.estiloVisual || idea.publicoSugerido) && (
+                <details className="bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700">
+                  <summary className="cursor-pointer px-3 py-2 text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider hover:bg-gray-50 dark:hover:bg-gray-700/30 rounded-md">
+                    💭 Detalles estratégicos
+                  </summary>
+                  <div className="px-3 pb-3 pt-1 space-y-2.5">
+                    {idea.tipo === 'iteracion' && idea.origen?.razonIteracion && (
+                      <div>
+                        <p className="text-[10px] font-bold text-amber-700 dark:text-amber-300 uppercase tracking-wider mb-0.5">🔄 Por qué iterar</p>
+                        <p className="text-[11px] text-gray-700 dark:text-gray-300">
+                          <span className="font-semibold">Ad base:</span> {idea.origen.adNombre || '(sin nombre)'}
+                        </p>
+                        <p className="text-[11px] text-gray-700 dark:text-gray-300 mt-0.5">{idea.origen.razonIteracion}</p>
+                      </div>
+                    )}
+                    {idea.tipo !== 'iteracion' && idea.origen?.razonamiento && (
+                      <div>
+                        <p className="text-[10px] font-bold text-brand-700 dark:text-brand-300 uppercase tracking-wider mb-0.5">💡 Por qué esta idea</p>
+                        <p className="text-[11px] text-gray-700 dark:text-gray-300">{idea.origen.razonamiento}</p>
+                      </div>
+                    )}
+                    {idea.escenarioNarrativo && (
+                      <div>
+                        <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-0.5">📖 Escenario narrativo</p>
+                        <p className="text-[11px] text-gray-700 dark:text-gray-300">{idea.escenarioNarrativo}</p>
+                      </div>
+                    )}
+                    {idea.testHipotesis && (
+                      <div>
+                        <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-0.5">🔬 Hipótesis a validar</p>
+                        {VARIABLE_META[idea.variableDeTesteo] && (
+                          <p className="text-[10px] text-gray-500 dark:text-gray-400 mb-0.5">
+                            Variable: <strong>{VARIABLE_META[idea.variableDeTesteo].emoji} {VARIABLE_META[idea.variableDeTesteo].label}</strong>
+                          </p>
+                        )}
+                        <p className="text-[11px] text-gray-700 dark:text-gray-300">{idea.testHipotesis}</p>
+                      </div>
+                    )}
+                    {idea.estiloVisual && (
+                      <div>
+                        <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-0.5">🎨 Estilo visual</p>
+                        <p className="text-[11px] text-gray-700 dark:text-gray-300">{idea.estiloVisual}</p>
+                      </div>
+                    )}
+                    {idea.publicoSugerido && (
+                      <div>
+                        <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-0.5">🎯 Público sugerido</p>
+                        <p className="text-[11px] text-gray-700 dark:text-gray-300">{idea.publicoSugerido}</p>
+                      </div>
+                    )}
+                  </div>
+                </details>
               )}
 
               {idea.launchedAsAdId && (

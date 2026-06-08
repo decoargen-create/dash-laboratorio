@@ -31,6 +31,7 @@ import { logCostsFromResponse } from './costsStore.js';
 import { addGeneratedIdeas } from './bandejaStore.js';
 import { getProductoImagen, getAccentColor } from './productoImagen.js';
 import { saveReferencial } from './galeriaReferenciales.js';
+import { cacheAdImagesBatch, getCachedAdImageUrl } from './adImagesStore.js';
 import GaleriaReferencialesModal from './GaleriaReferencialesModal.jsx';
 
 const MAX_SELECCIONADOS = 5;
@@ -84,6 +85,49 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   const [seleccionados, setSeleccionados] = useState(new Set());
   const [creandoAdIds, setCreandoAdIds] = useState(new Set());
   const [showGaleria, setShowGaleria] = useState(false);
+  // Opciones de generación (las elige el usuario en la barra de bulk o en
+  // el control de la sección). Persistimos en localStorage para que no se
+  // pierdan entre sesiones.
+  const [genOpts, setGenOpts] = useState(() => {
+    try {
+      const raw = localStorage.getItem('viora-marketing-gen-opts');
+      return raw ? JSON.parse(raw) : { n: 2, size: '2048x2048', quality: 'high' };
+    } catch { return { n: 2, size: '2048x2048', quality: 'high' }; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('viora-marketing-gen-opts', JSON.stringify(genOpts)); } catch {}
+  }, [genOpts]);
+  // Cache de skeletons extraídos por Vision — { [adId]: skeleton }. Si
+  // re-generamos sobre el mismo ad, reusamos el skeleton y nos saltamos
+  // Vision por completo. Se persiste en localStorage para sobrevivir refresh.
+  const [skeletonCache, setSkeletonCache] = useState(() => {
+    try {
+      const raw = localStorage.getItem('viora-marketing-skeleton-cache');
+      return raw ? JSON.parse(raw) : {};
+    } catch { return {}; }
+  });
+  const upsertSkeleton = (adId, skel) => {
+    if (!adId || !skel) return;
+    setSkeletonCache(prev => {
+      const next = { ...prev, [adId]: skel };
+      try { localStorage.setItem('viora-marketing-skeleton-cache', JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+  // Progreso per-ad: { [adId]: { startedAt, stage, error? } }
+  // stages: 'preparando' | 'generando' | 'guardando' | 'done' | 'error'
+  const [progressById, setProgressById] = useState({});
+  // Progreso del bulk: null cuando no hay bulk en curso.
+  // { total, completed, currentIdx, current: {adId, brandNombre, adHeadline}, startedAt,
+  //   adsList: [{adId, brandNombre, status: 'pending'|'doing'|'done'|'error'}], errors: [] }
+  const [bulkProgress, setBulkProgress] = useState(null);
+  // Tick para re-renderizar progress bars (elapsed/ETA).
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (creandoAdIds.size === 0 && !bulkProgress) return;
+    const t = setInterval(() => setTick(x => x + 1), 250);
+    return () => clearInterval(t);
+  }, [creandoAdIds.size, bulkProgress]);
 
   // Filtros + ordenamiento (vistas)
   const [query, setQuery] = useState('');
@@ -219,15 +263,31 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
 
   // Genera 2 variaciones de creativo referencial para UN ad de inspiración.
   // Lo usan el botón individual y el bulk. Guarda en la galería al toque.
+  // Actualiza progressById con stage por etapa para feedback al usuario.
   const crearReferencialDeAd = async (brandNombre, ad) => {
-    if (!producto) return;
+    if (!producto) return false;
     const prodImg = getProductoImagen(producto.id);
     if (!prodImg) {
       addToast?.({ type: 'error', message: 'Cargá la foto del producto en Setup primero.' });
-      return;
+      return false;
     }
     setCreandoAdIds(prev => new Set(prev).add(ad.id));
+    setProgressById(prev => ({
+      ...prev,
+      [ad.id]: { startedAt: Date.now(), stage: 'preparando' },
+    }));
     try {
+      // Pequeña pausa visual para que se vea el stage "preparando".
+      await new Promise(r => setTimeout(r, 150));
+      setProgressById(prev => ({
+        ...prev,
+        [ad.id]: { ...prev[ad.id], stage: 'generando' },
+      }));
+
+      const refImageUrl = ad.imageUrls?.[0];
+      if (!refImageUrl) {
+        throw new Error('Este ad no tiene imagen para usar como referencia');
+      }
       const resp = await fetch('/api/marketing/crear-creativo-referencial', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -243,16 +303,37 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
             analysis: ad.analysis || null,
             visual: ad.visual || null,
           },
+          inspiracionImageUrl: refImageUrl,
           productoImagen: prodImg,
           accentColor: getAccentColor(producto.id) || '',
-          quality: 'medium',
+          // Opciones configurables (n / size / quality) — el usuario las
+          // elige en el panel de opciones. Default: 2 / 2048x2048 / high.
+          quality: genOpts.quality,
+          size: genOpts.size,
+          n: genOpts.n,
+          // Si ya tenemos un skeleton cacheado del mismo ad, lo mandamos
+          // para que el backend saltee la llamada a Vision (~$0.005 + 10s).
+          skeletonCached: skeletonCache[ad.id] || null,
         }),
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
       logCostsFromResponse(data, `crear-creativo-referencial · ${brandNombre}`);
 
-      // Guardar las 2 variaciones en la galería.
+      setProgressById(prev => ({
+        ...prev,
+        [ad.id]: { ...prev[ad.id], stage: 'guardando' },
+      }));
+
+      // Cachear skeleton del ad para futuras re-generaciones (saltea Vision).
+      if (data.skeleton && !data.skeletonFromCache) {
+        upsertSkeleton(ad.id, data.skeleton);
+      }
+
+      // Guardar las N variaciones en la galería. Persistimos skeleton +
+      // sourceImageUrl + prompt para que después se pueda inspeccionar qué
+      // entró exactamente al modelo (útil para debug y para entender por qué
+      // una variación quedó mejor que otra).
       const ahora = Date.now();
       const imagenes = data.imagenes || [];
       for (let i = 0; i < imagenes.length; i++) {
@@ -261,17 +342,47 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           productoId: String(producto.id),
           sourceAdId: ad.id,
           sourceBrand: brandNombre,
+          sourceImageUrl: refImageUrl,
+          sourceHeadline: ad.headline || ad.body?.slice(0, 200) || '',
+          variantIndex: i,
           imageBase64: imagenes[i],
           mimeType: data.mimeType || 'image/png',
           prompt: data.prompt,
+          skeleton: data.skeleton || null,
           model: data.model,
+          visionModel: data.visionModel || null,
           size: data.size,
+          sizeFallback: !!data.sizeFallback,
+          quality: data.quality || 'high',
           createdAt: new Date(ahora + i).toISOString(),
         });
       }
-      addToast?.({ type: 'success', message: `${imagenes.length} variaciones generadas y guardadas en galería` });
+      setProgressById(prev => ({
+        ...prev,
+        [ad.id]: { ...prev[ad.id], stage: 'done' },
+      }));
+      const cacheNote = data.skeletonFromCache ? ' (skeleton cacheado, ahorraste ~$0.005)' : '';
+      addToast?.({ type: 'success', message: `${imagenes.length} variaciones generadas y guardadas en galería${cacheNote}` });
+      // Auto-limpiar el estado del progreso después de 2.5s para que se vea el "✓".
+      setTimeout(() => {
+        setProgressById(prev => {
+          const next = { ...prev }; delete next[ad.id]; return next;
+        });
+      }, 2500);
+      return true;
     } catch (err) {
+      setProgressById(prev => ({
+        ...prev,
+        [ad.id]: { ...prev[ad.id], stage: 'error', error: err?.message || 'Error' },
+      }));
       addToast?.({ type: 'error', message: `No pude generar: ${err.message}` });
+      // Limpiar el error después de 5s.
+      setTimeout(() => {
+        setProgressById(prev => {
+          const next = { ...prev }; delete next[ad.id]; return next;
+        });
+      }, 5000);
+      return false;
     } finally {
       setCreandoAdIds(prev => {
         const next = new Set(prev); next.delete(ad.id); return next;
@@ -280,7 +391,8 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   };
 
   // Bulk: itera los seleccionados en SECUENCIAL (gpt-image-2 toma 30-60s
-  // por llamada y queremos evitar rate limits).
+  // por llamada y queremos evitar rate limits). Mantiene bulkProgress
+  // actualizado para que la barra flotante muestre ETA real.
   const handleBulkCrear = async () => {
     if (seleccionados.size === 0) return;
     if (!producto) return;
@@ -289,7 +401,15 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       addToast?.({ type: 'error', message: 'Cargá la foto del producto en Setup primero.' });
       return;
     }
-    if (!window.confirm(`Generar 2 variaciones por cada uno de los ${seleccionados.size} ads seleccionados (${seleccionados.size * 2} imágenes en total, ~$${(seleccionados.size * 2 * 0.07).toFixed(2)}). ¿Seguir?`)) return;
+    // Costo: $0.18/imagen (high) × N variaciones + ~$0.005 vision (Haiku) por ad
+    // que NO esté ya en cache.
+    const costoPorImagen = genOpts.quality === 'low' ? 0.03 : genOpts.quality === 'medium' ? 0.07 : 0.18;
+    const visionAds = Array.from(seleccionados).filter(adId => !skeletonCache[adId]).length;
+    const costoEstimado = seleccionados.size * genOpts.n * costoPorImagen + visionAds * 0.005;
+    const total = seleccionados.size * genOpts.n;
+    const sizeLabel = genOpts.size === '1024x1536' ? '1024×1536 portrait' : genOpts.size === '1024x1024' ? '1024×1024 1:1' : '2048×2048 1:1';
+    const cacheNote = visionAds < seleccionados.size ? ` (${seleccionados.size - visionAds} con skeleton cacheado)` : '';
+    if (!window.confirm(`Generar ${genOpts.n} variaciones ${sizeLabel} (calidad ${genOpts.quality}) por cada uno de los ${seleccionados.size} ads${cacheNote} → ${total} imágenes total, ~$${costoEstimado.toFixed(2)}. ¿Seguir?`)) return;
 
     // Buscar los ad objects desde adsByBrand.
     const adsAGenerar = [];
@@ -301,12 +421,55 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       }
     }
 
-    for (const { brandNombre, ad } of adsAGenerar) {
-      await crearReferencialDeAd(brandNombre, ad);
+    // Inicializar barra de progreso del bulk.
+    setBulkProgress({
+      total: adsAGenerar.length,
+      completed: 0,
+      currentIdx: 0,
+      startedAt: Date.now(),
+      adDurations: [],
+      current: { adId: adsAGenerar[0].ad.id, brandNombre: adsAGenerar[0].brandNombre, adHeadline: adsAGenerar[0].ad.headline || adsAGenerar[0].ad.body?.slice(0, 60) || '' },
+      adsList: adsAGenerar.map((x, i) => ({
+        adId: x.ad.id,
+        brandNombre: x.brandNombre,
+        status: i === 0 ? 'doing' : 'pending',
+      })),
+      errors: [],
+    });
+
+    for (let i = 0; i < adsAGenerar.length; i++) {
+      const { brandNombre, ad } = adsAGenerar[i];
+      setBulkProgress(prev => prev ? ({
+        ...prev,
+        currentIdx: i,
+        current: { adId: ad.id, brandNombre, adHeadline: ad.headline || ad.body?.slice(0, 60) || '' },
+        adsList: prev.adsList.map((x, idx) => ({
+          ...x,
+          status: idx < i ? x.status : idx === i ? 'doing' : 'pending',
+        })),
+      }) : prev);
+      const adStartedAt = Date.now();
+      const ok = await crearReferencialDeAd(brandNombre, ad);
+      const adDuration = Date.now() - adStartedAt;
+      setBulkProgress(prev => prev ? ({
+        ...prev,
+        completed: prev.completed + 1,
+        adDurations: [...prev.adDurations, adDuration],
+        adsList: prev.adsList.map((x, idx) =>
+          idx === i ? { ...x, status: ok ? 'done' : 'error' } : x
+        ),
+        errors: ok ? prev.errors : [...prev.errors, brandNombre],
+      }) : prev);
     }
+    const finalErrors = adsAGenerar.length - adsAGenerar.filter((_, i) => true).length; // recalc abajo
     limpiarSeleccion();
+    // Cerrar la barra después de 4s para que se vea el "completo".
+    setTimeout(() => setBulkProgress(null), 4000);
     addToast?.({ type: 'success', message: 'Generación bulk completa — revisá la galería' });
   };
+
+  // Permite cerrar la barra de bulk manualmente.
+  const cerrarBulkProgress = () => setBulkProgress(null);
 
   // Scrapea ads activos de una marca via Apify. Si tiene fbPageUrl, prefiere
   // eso (más estable). Sino, deriva keyword del landingUrl.
@@ -375,11 +538,108 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         ? `${freshCount} estáticos NUEVOS de ${brand.nombre}${repeatedCount > 0 ? ` (+${repeatedCount} repetidos)` : ''}`
         : `${repeatedCount} estáticos de ${brand.nombre} (todos ya vistos antes)`;
       addToast?.({ type: 'success', message: msg });
+
+      // Cacheo de imágenes en background — para que sobrevivan a las 24h del CDN.
+      cacheNewAdsInBackground(enriched, { productoId: producto?.id, brandId: brand.id, brandNombre: brand.nombre });
     } catch (err) {
       addToast?.({ type: 'error', message: `No pude scrapear ${brand.nombre}: ${err.message}` });
     } finally {
       setScrapingBrandId(null);
     }
+  };
+
+  // Scrape específico para una marca COMPETIDOR (vive en producto.competidores).
+  // Reusa apify-ingest pero el resultado lo escribimos en el producto, no en
+  // `brands`. Después triggereamos refresh de productos.
+  const handleScrapeCompetidor = async (brand) => {
+    setScrapingBrandId(brand.id);
+    const comp = brand.__sourceComp;
+    if (!comp || !producto) {
+      setScrapingBrandId(null);
+      return;
+    }
+    try {
+      const payload = { country: 'ALL', limit: 100 };
+      if (comp.fbPageUrl) {
+        payload.fbPageUrl = comp.fbPageUrl.startsWith('http') ? comp.fbPageUrl : `https://www.facebook.com/${comp.fbPageUrl}`;
+      } else if (comp.landingUrl) {
+        try {
+          const r = await fetch('/api/marketing/resolve-fb-page', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ landingUrl: comp.landingUrl }),
+          });
+          const d = await r.json();
+          if (d.pageUrl) payload.fbPageUrl = d.pageUrl;
+          else payload.searchKeyword = comp.nombre;
+        } catch {
+          payload.searchKeyword = comp.nombre;
+        }
+      } else {
+        payload.searchKeyword = comp.nombre;
+      }
+
+      const resp = await fetch('/api/marketing/apify-ingest', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      logCostsFromResponse(data, `inspiracion · ${comp.nombre}`);
+
+      const ads = data.ads || [];
+      const prevIds = new Set((comp.ads || []).map(a => a.id));
+      const newAds = ads.filter(a => !prevIds.has(a.id));
+
+      // Actualizamos el producto en localStorage (donde viven los competidores).
+      const fresh = loadProductos();
+      const updated = fresh.map(p => {
+        if (String(p.id) !== String(producto.id)) return p;
+        const comps = (p.competidores || []).map(c => {
+          if (c.id !== comp.id) return c;
+          return {
+            ...c, ads,
+            adsTotal: data.total || 0, winnersCount: data.winners || 0,
+            lastAdsCheck: new Date().toISOString(),
+          };
+        });
+        return { ...p, competidores: comps, updated_at: new Date().toISOString() };
+      });
+      try { localStorage.setItem(PRODUCTOS_KEY, JSON.stringify(updated)); } catch {}
+      setProductos(updated);
+
+      addToast?.({
+        type: 'success',
+        message: newAds.length > 0
+          ? `${newAds.length} estáticos NUEVOS de ${comp.nombre} (${ads.length} total)`
+          : `${ads.length} estáticos de ${comp.nombre} (sin nuevos)`,
+      });
+
+      // Cache en background. Para Inspiración solo nos interesan los estáticos.
+      const staticAds = ads.filter(a => (a.imageUrls?.length || 0) > 0 && (a.videoUrls?.length || 0) === 0);
+      cacheNewAdsInBackground(staticAds, { productoId: producto.id, brandId: brand.id, brandNombre: comp.nombre });
+    } catch (err) {
+      addToast?.({ type: 'error', message: `No pude scrapear ${brand.nombre}: ${err.message}` });
+    } finally {
+      setScrapingBrandId(null);
+    }
+  };
+
+  // Cacheo asíncrono de imágenes — corre en background sin bloquear UI.
+  // Avisa por toast al terminar (solo si cacheó algo significativo).
+  const cacheNewAdsInBackground = (ads, { productoId, brandId, brandNombre }) => {
+    if (!ads || ads.length === 0) return;
+    // No await — fire and forget.
+    cacheAdImagesBatch(ads, {
+      productoId, brandId,
+      concurrency: 4,
+    }).then(({ cached, total }) => {
+      if (cached > 0) {
+        addToast?.({
+          type: 'info',
+          message: `${cached}/${total} imágenes de ${brandNombre} cacheadas localmente`,
+        });
+      }
+    }).catch(() => {});
   };
 
   // ====================================================================
@@ -459,22 +719,66 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         </button>
       )}
 
-      {/* Barra flotante cuando hay ads seleccionados — bulk action. */}
-      {seleccionados.size > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-white dark:bg-gray-800 border border-brand-300 dark:border-brand-700 rounded-xl shadow-2xl px-4 py-3 flex items-center gap-3">
+      {/* Barra flotante cuando hay ads seleccionados — bulk action + opciones. */}
+      {seleccionados.size > 0 && !bulkProgress && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-white dark:bg-gray-800 border border-brand-300 dark:border-brand-700 rounded-xl shadow-2xl px-4 py-3 flex flex-wrap items-center gap-3 max-w-[calc(100vw-3rem)]">
           <div className="text-xs">
             <span className="font-bold text-gray-900 dark:text-gray-100">{seleccionados.size}</span>
-            <span className="text-gray-500 dark:text-gray-400"> / {MAX_SELECCIONADOS} ads seleccionados</span>
+            <span className="text-gray-500 dark:text-gray-400"> / {MAX_SELECCIONADOS} ads</span>
           </div>
+
+          {/* Selector de n variaciones */}
+          <div className="flex items-center gap-1 text-[10px]">
+            <span className="text-gray-500 dark:text-gray-400">Variantes:</span>
+            {[2, 4, 6].map(opt => (
+              <button key={opt}
+                onClick={() => setGenOpts(o => ({ ...o, n: opt }))}
+                className={`px-2 py-0.5 rounded font-bold transition ${
+                  genOpts.n === opt
+                    ? 'bg-brand-600 text-white'
+                    : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                }`}
+              >{opt}</button>
+            ))}
+          </div>
+
+          {/* Selector de aspect ratio */}
+          <div className="flex items-center gap-1 text-[10px]">
+            <span className="text-gray-500 dark:text-gray-400">Ratio:</span>
+            {[
+              { v: '2048x2048', label: '1:1' },
+              { v: '1024x1536', label: 'Portrait' },
+            ].map(opt => (
+              <button key={opt.v}
+                onClick={() => setGenOpts(o => ({ ...o, size: opt.v }))}
+                className={`px-2 py-0.5 rounded font-bold transition ${
+                  genOpts.size === opt.v
+                    ? 'bg-brand-600 text-white'
+                    : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                }`}
+              >{opt.label}</button>
+            ))}
+          </div>
+
           <button onClick={limpiarSeleccion}
             className="text-[11px] text-gray-500 hover:text-red-500 transition">
             Limpiar
           </button>
           <button onClick={handleBulkCrear}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-brand-600 to-brand-500 rounded-lg hover:from-brand-700 hover:to-brand-600 transition">
-            <Sparkles size={13} /> Generar {seleccionados.size * 2} creativos
+            <Sparkles size={13} /> Generar {seleccionados.size * genOpts.n} creativos
           </button>
         </div>
+      )}
+
+      {/* Barra de progreso del bulk — reemplaza a la barra de seleccionados
+          mientras está corriendo. Muestra current ad, % total, ETA y pills
+          por cada ad para ver qué está pendiente/listo/fallado. */}
+      {bulkProgress && (
+        <BulkProgressBar
+          state={bulkProgress}
+          onClose={cerrarBulkProgress}
+        />
       )}
 
       {/* Modal de galería */}
@@ -679,11 +983,12 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                     key={b.id}
                     brand={b}
                     ads={b.__ads}
-                    isScraping={!b.isCompetidor && scrapingBrandId === b.id}
+                    isScraping={scrapingBrandId === b.id}
                     adaptingAdIds={adaptingAdIds}
                     creandoAdIds={creandoAdIds}
                     seleccionados={seleccionados}
-                    onScrape={b.isCompetidor ? null : () => handleScrapeBrand(b)}
+                    progressById={progressById}
+                    onScrape={() => b.isCompetidor ? handleScrapeCompetidor(b) : handleScrapeBrand(b)}
                     onAdapt={(ad) => handleAdapt(b.nombre, ad)}
                     onCrearReferencial={(ad) => crearReferencialDeAd(b.nombre, ad)}
                     onToggleSelect={(adId) => toggleSeleccion(adId)}
@@ -699,7 +1004,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   );
 }
 
-function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, seleccionados, onScrape, onAdapt, onCrearReferencial, onToggleSelect, onRemove }) {
+function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, seleccionados, progressById, onScrape, onAdapt, onCrearReferencial, onToggleSelect, onRemove }) {
   const isCompetidor = !!brand.isCompetidor;
   return (
     <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 shadow-sm">
@@ -752,17 +1057,19 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
         )}
       </div>
 
-      {/* Botón scrapear (solo brands custom; competidores se manejan en Setup) */}
+      {/* Botón scrapear — ahora aparece en TODAS las cards (competidores y
+          custom). Para competidores re-scrapea contra producto.competidores;
+          para custom contra brands locales. */}
       {onScrape && (
         <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700 flex items-center gap-2">
           <button
             onClick={onScrape}
             disabled={isScraping}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-amber-500 to-brand-500 rounded-md hover:from-amber-600 hover:to-brand-600 transition disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-amber-500 to-brand-500 rounded-md hover:from-amber-600 hover:to-brand-600 transition disabled:opacity-50 shadow-sm"
           >
             {isScraping
-              ? <><Loader2 size={12} className="animate-spin" /> Scrapeando…</>
-              : <><Download size={12} /> {brand.lastScraped ? 'Re-scrapear ads' : 'Scrapear ads'}</>
+              ? <><Loader2 size={12} className="animate-spin" /> Scrapeando ads de Meta…</>
+              : <><Download size={12} /> {brand.lastScraped ? 'Volver a scrapear ads' : 'Scrapear ads ahora'}</>
             }
           </button>
           {ads.length > 0 && (
@@ -770,13 +1077,6 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
               {ads.length} estáticos cargados
             </span>
           )}
-        </div>
-      )}
-      {!onScrape && ads.length > 0 && (
-        <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
-          <span className="text-[10px] text-gray-500 dark:text-gray-400">
-            {ads.length} estáticos · scrapeados desde Setup
-          </span>
         </div>
       )}
 
@@ -788,6 +1088,7 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
           adaptingAdIds={adaptingAdIds}
           creandoAdIds={creandoAdIds}
           seleccionados={seleccionados}
+          progressById={progressById}
           onAdapt={onAdapt}
           onCrearReferencial={onCrearReferencial}
           onToggleSelect={onToggleSelect}
@@ -797,7 +1098,7 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
   );
 }
 
-function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccionados, onAdapt, onCrearReferencial, onToggleSelect }) {
+function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccionados, progressById, onAdapt, onCrearReferencial, onToggleSelect }) {
   const [showRepeated, setShowRepeated] = useState(false);
   const fresh = ads.filter(a => a.isFresh !== false);
   const repeated = ads.filter(a => a.isFresh === false);
@@ -820,6 +1121,7 @@ function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccion
                 adapting={adaptingAdIds?.has(ad.id)}
                 creando={creandoAdIds?.has(ad.id)}
                 selected={seleccionados?.has(ad.id)}
+                progress={progressById?.[ad.id]}
                 onAdapt={onAdapt ? () => onAdapt(ad) : null}
                 onCrearReferencial={onCrearReferencial ? () => onCrearReferencial(ad) : null}
                 onToggleSelect={onToggleSelect ? () => onToggleSelect(ad.id) : null}
@@ -876,9 +1178,129 @@ function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccion
   );
 }
 
-function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = false, selected = false, onAdapt, onCrearReferencial, onToggleSelect }) {
-  const thumb = ad.imageUrls?.[0];
+// Estima un % de progreso "honesto" para una llamada de gpt-image-2.
+// preparando: 0-8% / generando: 8-92% asintótico ~45s / guardando: 92-99% / done: 100%.
+function estimateProgress(progress) {
+  if (!progress) return 0;
+  const elapsed = (Date.now() - progress.startedAt) / 1000;
+  if (progress.stage === 'preparando') return Math.min(8, elapsed * 4);
+  if (progress.stage === 'generando') {
+    // Asintótica hacia 92% con τ=30s.
+    return 8 + (92 - 8) * (1 - Math.exp(-Math.max(0, elapsed - 0.5) / 30));
+  }
+  if (progress.stage === 'guardando') return 95;
+  if (progress.stage === 'done') return 100;
+  return 0;
+}
+
+function stageLabel(stage) {
+  if (stage === 'preparando') return 'Preparando prompt…';
+  if (stage === 'generando') return 'Generando con gpt-image-2…';
+  if (stage === 'guardando') return 'Guardando en galería…';
+  if (stage === 'done') return '¡Listo!';
+  if (stage === 'error') return 'Falló';
+  return '';
+}
+
+function formatMs(ms) {
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  return `${Math.floor(s / 60)}m ${s % 60}s`;
+}
+
+// Barra flotante de progreso del bulk. Muestra ad current, % total, ETA
+// y un pill por cada ad para ver qué está done/doing/pending/error.
+function BulkProgressBar({ state, onClose }) {
+  const { total, completed, currentIdx, current, startedAt, adsList, errors, adDurations } = state;
+  const elapsedMs = Date.now() - startedAt;
+  // ETA basado en duración promedio de los ads ya completos. Fallback: 45s/ad.
+  const avgMs = adDurations.length > 0
+    ? adDurations.reduce((a, b) => a + b, 0) / adDurations.length
+    : 45000;
+  const remainingMs = Math.max(0, (total - completed) * avgMs);
+  const pct = Math.round((completed / total) * 100);
+  const isDone = completed === total;
+
+  return (
+    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-white dark:bg-gray-800 border-2 border-brand-400 dark:border-brand-700 rounded-xl shadow-2xl w-[420px] max-w-[calc(100vw-3rem)] overflow-hidden">
+      <div className="p-3.5">
+        <div className="flex items-center gap-2 mb-2">
+          {isDone
+            ? <Check size={16} className="text-emerald-500" />
+            : <Loader2 size={14} className="text-brand-500 animate-spin" />
+          }
+          <p className="text-xs font-bold text-gray-900 dark:text-gray-100 flex-1 truncate">
+            {isDone
+              ? `Completo · ${completed - errors.length}/${total} OK${errors.length > 0 ? ` · ${errors.length} fallaron` : ''}`
+              : `Generando ${currentIdx + 1} de ${total}`
+            }
+          </p>
+          <button onClick={onClose} className="p-1 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition" title="Cerrar">
+            <X size={14} />
+          </button>
+        </div>
+
+        {!isDone && current && (
+          <p className="text-[10px] text-gray-500 dark:text-gray-400 truncate mb-2">
+            <span className="font-semibold text-brand-600 dark:text-brand-400">{current.brandNombre}</span>
+            {current.adHeadline && <span> · {current.adHeadline}</span>}
+          </p>
+        )}
+
+        {/* Barra de progreso total (basado en ads completos) */}
+        <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden mb-1">
+          <div
+            className={`h-full transition-all duration-500 ${isDone ? 'bg-emerald-500' : 'bg-gradient-to-r from-brand-500 to-brand-400'}`}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+
+        <div className="flex items-center justify-between text-[10px] text-gray-500 dark:text-gray-400">
+          <span>{pct}% · transcurrido {formatMs(elapsedMs)}</span>
+          {!isDone && <span>ETA {formatMs(remainingMs)}</span>}
+        </div>
+
+        {/* Pills por ad — visual mini-status. */}
+        <div className="flex flex-wrap gap-1 mt-2.5 pt-2.5 border-t border-gray-100 dark:border-gray-700">
+          {adsList.map((x, i) => (
+            <div
+              key={x.adId + i}
+              title={`${x.brandNombre} · ${x.status}`}
+              className={`w-2.5 h-2.5 rounded-full ${
+                x.status === 'done' ? 'bg-emerald-500'
+                : x.status === 'error' ? 'bg-red-500'
+                : x.status === 'doing' ? 'bg-brand-500 animate-pulse'
+                : 'bg-gray-300 dark:bg-gray-600'
+              }`}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = false, selected = false, onAdapt, onCrearReferencial, onToggleSelect, progress = null }) {
+  const cdnThumb = ad.imageUrls?.[0];
   const fbUrl = ad.snapshotUrl;
+  // Si tenemos el ad cacheado en IndexedDB (sobreviven el TTL de 24h del CDN),
+  // preferimos el blob URL. Sino, caemos al CDN. Si el CDN falla (URL expirada),
+  // el onError oculta el <img> y queda el placeholder.
+  const [cachedUrl, setCachedUrl] = useState(null);
+  useEffect(() => {
+    let active = true;
+    if (ad?.id) {
+      getCachedAdImageUrl(ad.id).then(url => { if (active) setCachedUrl(url); });
+    }
+    const onSaved = (e) => {
+      if (String(e?.detail?.adId || '') === String(ad?.id)) {
+        getCachedAdImageUrl(ad.id).then(url => { if (active) setCachedUrl(url); });
+      }
+    };
+    window.addEventListener('viora:ad-image-cached', onSaved);
+    return () => { active = false; window.removeEventListener('viora:ad-image-cached', onSaved); };
+  }, [ad?.id]);
+  const thumb = cachedUrl || cdnThumb;
   return (
     <div
       className={`group relative aspect-square rounded-md overflow-hidden bg-gray-100 dark:bg-gray-900 border-2 transition ${
@@ -898,6 +1320,12 @@ function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = f
           <ImageIcon size={20} className="text-gray-300" />
         </div>
       )}
+      {/* Indicador de imagen cacheada localmente — solo on-hover para no
+          contaminar. Le da feedback al usuario de que las imágenes están
+          seguras de la expiración del CDN. */}
+      {cachedUrl && (
+        <div className="absolute top-1 right-7 w-1.5 h-1.5 rounded-full bg-emerald-400/80 opacity-0 group-hover:opacity-100 transition" title="Imagen cacheada localmente" />
+      )}
 
       {/* Checkbox de selección — siempre visible si está seleccionado, sino on-hover. */}
       {onToggleSelect && (
@@ -912,6 +1340,39 @@ function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = f
         >
           {selected && <Check size={12} />}
         </button>
+      )}
+
+      {/* Progress overlay — visible mientras el ad se está generando o
+          acaba de terminar/fallar. Tapa todo el thumb para que se vea claro. */}
+      {progress && (
+        <div className="absolute inset-0 bg-gray-900/85 z-10 flex flex-col items-center justify-center gap-2 p-3 text-white">
+          {progress.stage === 'done' ? (
+            <Check size={28} className="text-emerald-400" />
+          ) : progress.stage === 'error' ? (
+            <AlertCircle size={28} className="text-red-400" />
+          ) : (
+            <Loader2 size={20} className="text-brand-300 animate-spin" />
+          )}
+          <p className="text-[10px] font-bold text-center leading-tight">
+            {stageLabel(progress.stage)}
+          </p>
+          {progress.stage !== 'done' && progress.stage !== 'error' && (
+            <>
+              <div className="w-full h-1.5 bg-white/20 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-brand-400 to-brand-200 transition-all duration-500"
+                  style={{ width: `${estimateProgress(progress)}%` }}
+                />
+              </div>
+              <p className="text-[9px] text-white/70">
+                {formatMs(Date.now() - progress.startedAt)}
+              </p>
+            </>
+          )}
+          {progress.stage === 'error' && progress.error && (
+            <p className="text-[9px] text-red-200 text-center line-clamp-2">{progress.error}</p>
+          )}
+        </div>
       )}
 
       <div className="absolute inset-0 bg-black/0 group-hover:bg-black/60 transition flex flex-col items-stretch justify-end gap-1 p-1.5">

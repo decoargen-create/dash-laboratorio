@@ -2794,30 +2794,57 @@ function TabsGuide() {
 
 // Tabs del workspace de un producto: Setup / Bandeja / Inspiración / Creativos.
 function ProductTabs({ activeTab, onChange }) {
-  const tabs = [
-    { id: 'dashboard', label: 'Dashboard', emoji: '📊' },
-    { id: 'setup', label: 'Setup', emoji: '⚙️' },
-    { id: 'documentos', label: 'Documentos', emoji: '📄' },
-    { id: 'competencia', label: 'Competencia', emoji: '🎯' },
-    { id: 'bandeja', label: 'Bandeja', emoji: '📥' },
-    { id: 'inspiracion', label: 'Inspiración', emoji: '✨' },
-    { id: 'creativos', label: 'Creativos', emoji: '🎨' },
-    { id: 'copiloto', label: 'Copiloto', emoji: '🤖' },
+  // Dos grupos para que un usuario nuevo entienda el flujo a primera vista:
+  // - "Datos": configuración + información del producto / competencia.
+  // - "Creación": donde se generan y ven los outputs (ideas + creativos).
+  const groups = [
+    {
+      id: 'datos',
+      label: 'Datos',
+      tabs: [
+        { id: 'dashboard', label: 'Dashboard', emoji: '📊' },
+        { id: 'setup', label: 'Setup', emoji: '⚙️' },
+        { id: 'documentos', label: 'Documentos', emoji: '📄' },
+        { id: 'competencia', label: 'Competencia', emoji: '🎯' },
+      ],
+    },
+    {
+      id: 'creacion',
+      label: 'Creación',
+      tabs: [
+        { id: 'bandeja', label: 'Bandeja', emoji: '📥' },
+        { id: 'inspiracion', label: 'Inspiración', emoji: '✨' },
+        { id: 'creativos', label: 'Creativos', emoji: '🎨' },
+        { id: 'copiloto', label: 'Copiloto', emoji: '🤖' },
+      ],
+    },
   ];
   return (
-    <div className="flex items-center gap-1 overflow-x-auto p-1 bg-gray-100 dark:bg-gray-800/70 rounded-xl border border-gray-200 dark:border-gray-700">
-      {tabs.map(t => (
-        <button
-          key={t.id}
-          onClick={() => onChange(t.id)}
-          className={`px-3.5 py-2 text-xs font-bold rounded-lg transition shrink-0 flex items-center gap-1.5 ${
-            activeTab === t.id
-              ? 'bg-white dark:bg-gray-700 text-brand-700 dark:text-brand-200 shadow-sm'
-              : 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-100 hover:bg-white/60 dark:hover:bg-gray-700/40'
-          }`}
-        >
-          <span>{t.emoji}</span>{t.label}
-        </button>
+    <div className="flex items-stretch gap-2 overflow-x-auto p-1 bg-gray-100 dark:bg-gray-800/70 rounded-xl border border-gray-200 dark:border-gray-700">
+      {groups.map((g, idx) => (
+        <React.Fragment key={g.id}>
+          {idx > 0 && (
+            <div className="w-px bg-gray-300 dark:bg-gray-600 my-1.5 shrink-0" aria-hidden />
+          )}
+          <div className="flex items-center gap-1 shrink-0">
+            <span className="text-[9px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 px-1.5 hidden md:inline">
+              {g.label}
+            </span>
+            {g.tabs.map(t => (
+              <button
+                key={t.id}
+                onClick={() => onChange(t.id)}
+                className={`px-3.5 py-2 text-xs font-bold rounded-lg transition shrink-0 flex items-center gap-1.5 ${
+                  activeTab === t.id
+                    ? 'bg-white dark:bg-gray-700 text-brand-700 dark:text-brand-200 shadow-sm'
+                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-100 hover:bg-white/60 dark:hover:bg-gray-700/40'
+                }`}
+              >
+                <span>{t.emoji}</span>{t.label}
+              </button>
+            ))}
+          </div>
+        </React.Fragment>
       ))}
     </div>
   );

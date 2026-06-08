@@ -935,19 +935,9 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   // Set de sourceAdIds que ya fueron usados para generar creativos en este
   // producto — viene de la galería. Se refresca al toque cuando guardamos un
   // nuevo referencial (evento viora:referencial-saved).
+  // NOTA: el useEffect que lo refresca vive MÁS ABAJO, después de la
+  // declaración del const `producto`. Acá solo declaramos el state.
   const [usedAdIds, setUsedAdIds] = useState(new Set());
-  useEffect(() => {
-    if (!producto?.id) return;
-    let active = true;
-    const refresh = () => {
-      getUsedAdIdsForProducto(producto.id).then(set => { if (active) setUsedAdIds(set); });
-    };
-    refresh();
-    const onSaved = () => refresh();
-    window.addEventListener('viora:referencial-saved', onSaved);
-    return () => { active = false; window.removeEventListener('viora:referencial-saved', onSaved); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [producto?.id]);
   // Opciones de generación (las elige el usuario en la barra de bulk o en
   // el control de la sección). Persistimos en localStorage para que no se
   // pierdan entre sesiones.
@@ -1022,6 +1012,20 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   }, [brands, activeProductoId]);
 
   const producto = productos.find(p => String(p.id) === String(activeProductoId)) || null;
+
+  // useEffect para usedAdIds — ahora SÍ podemos referenciar `producto`.
+  useEffect(() => {
+    if (!producto?.id) return;
+    let active = true;
+    const refresh = () => {
+      getUsedAdIdsForProducto(producto.id).then(set => { if (active) setUsedAdIds(set); });
+    };
+    refresh();
+    const onSaved = () => refresh();
+    window.addEventListener('viora:referencial-saved', onSaved);
+    return () => { active = false; window.removeEventListener('viora:referencial-saved', onSaved); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [producto?.id]);
 
   const handleAddBrand = () => {
     const nombre = draft.nombre.trim();

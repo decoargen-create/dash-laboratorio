@@ -39,12 +39,45 @@ export async function pullMarketingFromCloud() {
   }
   console.info(`[sync] pull recibió ${productos?.length || 0} productos del cloud`);
 
-  const productosArr = (productos || []).map(row => row.data);
+  // Stripear campos pesados legacy antes de guardar a localStorage:
+  // - producto.creativos: legacy embebido — ahora vive en marketing_creativos
+  // - producto.docs[*].raw: texto crudo de docs (puede ser muchos KB)
+  // Sin esto: producto "Probiotico" con creativos legacy pesa 1.46 MB y
+  // hace exceeder la quota de localStorage (5-10MB) cuando hay 2+ productos
+  // pesados. Resultado: el setItem falla y el user ve "Sin productos".
+  const productosArr = (productos || []).map(row => {
+    const p = row.data || {};
+    // Clonamos shallow y removemos campos legacy pesados.
+    const { creativos, ...slim } = p;
+    return slim;
+  });
+
   try {
     localStorage.setItem(KEYS.productos, JSON.stringify(productosArr));
-    console.info(`[sync] localStorage productos actualizado, ahora tiene ${productosArr.length}`);
+    console.info(`[sync] localStorage productos actualizado: ${productosArr.length} productos, ${JSON.stringify(productosArr).length} bytes`);
   } catch (e) {
-    console.warn('[sync] no pude escribir localStorage:', e.message);
+    console.warn('[sync] no pude escribir localStorage (quota?):', e.message);
+    // Fallback: intentar con solo la metadata mínima — sin docs/research grandes
+    try {
+      const tinyArr = productosArr.map(p => ({
+        id: p.id,
+        nombre: p.nombre,
+        descripcion: (p.descripcion || '').slice(0, 500),
+        landingUrl: p.landingUrl,
+        stage: p.stage,
+        competidores: p.competidores,
+        metaAccount: p.metaAccount,
+      }));
+      localStorage.setItem(KEYS.productos, JSON.stringify(tinyArr));
+      console.warn(`[sync] guardé versión liviana: ${tinyArr.length} productos`);
+    } catch (e2) {
+      console.warn('[sync] ni siquiera la versión mínima entra. Limpiando otras keys.', e2.message);
+      // Liberamos espacio borrando caches que no son críticos.
+      try { localStorage.removeItem('adslab-marketing-skeleton-cache'); } catch {}
+      try { localStorage.removeItem('adslab-marketing-creative-refresh-cache'); } catch {}
+      // Retry
+      try { localStorage.setItem(KEYS.productos, JSON.stringify(productosArr.map(p => ({ id: p.id, nombre: p.nombre })))); } catch {}
+    }
   }
 
   // 2) prefs (active_producto_id + gen_opts)

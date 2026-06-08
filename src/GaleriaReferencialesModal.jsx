@@ -16,6 +16,8 @@ import {
 } from 'lucide-react';
 import JSZip from 'jszip';
 import { getReferencialesByProducto, deleteReferencial, patchReferenciales } from './galeriaReferenciales.js';
+import { SkeletonGrid } from './Skeleton.jsx';
+import EmptyState from './EmptyState.jsx';
 
 function fmtDate(iso) {
   if (!iso) return '';
@@ -96,8 +98,10 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
     for (const id of seleccionados) m.set(id, ++i);
     return m;
   }, [seleccionados]);
-  // Filtro: ocultar los ya descargados (default off).
-  const [soloNoDescargados, setSoloNoDescargados] = useState(false);
+  // Filtros: estado / variante / origen — formato dropdown.
+  const [filtroEstado, setFiltroEstado] = useState('all');     // 'all' | 'pending' | 'downloaded'
+  const [filtroVariante, setFiltroVariante] = useState('all'); // 'all' | 'reference' | 'rebrand' | 'tight' | 'medium' | 'loose'
+  const [filtroOrigen, setFiltroOrigen] = useState('all');     // 'all' | 'inspiracion' | 'bandeja-idea'
   const [zipping, setZipping] = useState(false);
 
   const refresh = () => {
@@ -227,7 +231,15 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
     refresh();
   };
 
-  const visibleItems = items.filter(it => !soloNoDescargados || !it.descargada);
+  const visibleItems = items.filter(it => {
+    if (filtroEstado === 'pending' && it.descargada) return false;
+    if (filtroEstado === 'downloaded' && !it.descargada) return false;
+    if (filtroVariante !== 'all' && it.variantStyle !== filtroVariante) return false;
+    if (filtroOrigen === 'inspiracion' && it.sourceType === 'bandeja-idea') return false;
+    if (filtroOrigen === 'bandeja-idea' && it.sourceType !== 'bandeja-idea') return false;
+    return true;
+  });
+  const anyFilterActive = filtroEstado !== 'all' || filtroVariante !== 'all' || filtroOrigen !== 'all';
   const yaDescargadosCount = items.filter(it => it.descargada).length;
 
   // Contenido principal — se renderiza dentro del modal o embebido.
@@ -245,20 +257,41 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            {/* Filtro: solo no descargados */}
-            <button
-              onClick={() => setSoloNoDescargados(s => !s)}
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-bold rounded-md transition ${
-                soloNoDescargados
-                  ? 'bg-amber-500 text-white'
-                  : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
-              }`}
-              title="Filtrar para ver solo los que no descargaste"
+          <div className="flex items-center gap-2 shrink-0 flex-wrap">
+            {/* Filtros estilo dropdown (linear-style). Compactos. */}
+            <select
+              value={filtroEstado}
+              onChange={e => setFiltroEstado(e.target.value)}
+              className="px-2 py-1.5 text-[10px] font-bold bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
+              title="Filtrar por estado"
             >
-              {soloNoDescargados ? <Eye size={11} /> : <EyeOff size={11} />}
-              {soloNoDescargados ? 'Solo no descargados' : 'Todos'}
-            </button>
+              <option value="all">Estado: todos</option>
+              <option value="pending">Pendientes</option>
+              <option value="downloaded">Descargados</option>
+            </select>
+            <select
+              value={filtroVariante}
+              onChange={e => setFiltroVariante(e.target.value)}
+              className="px-2 py-1.5 text-[10px] font-bold bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
+              title="Filtrar por tipo de variante"
+            >
+              <option value="all">Variante: todas</option>
+              <option value="reference">Reference (fiel)</option>
+              <option value="rebrand">Rebrand (paleta marca)</option>
+              <option value="tight">Tight (réplica)</option>
+              <option value="medium">Medium (mismo concepto)</option>
+              <option value="loose">Loose (inventada)</option>
+            </select>
+            <select
+              value={filtroOrigen}
+              onChange={e => setFiltroOrigen(e.target.value)}
+              className="px-2 py-1.5 text-[10px] font-bold bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
+              title="Filtrar por origen"
+            >
+              <option value="all">Origen: todos</option>
+              <option value="inspiracion">Inspiración (competencia)</option>
+              <option value="bandeja-idea">Idea de Bandeja</option>
+            </select>
             {/* Vista toggle */}
             <div className="flex items-center gap-0.5 bg-gray-100 dark:bg-gray-800 rounded-md p-0.5">
               {[
@@ -287,23 +320,20 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
         {/* Body */}
         <div className="p-5 max-h-[75vh] overflow-y-auto">
           {cargando ? (
-            <p className="text-xs text-gray-500 dark:text-gray-400 text-center py-12">Cargando…</p>
+            <SkeletonGrid count={8} />
           ) : items.length === 0 ? (
-            <div className="text-center py-12 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-lg">
-              <Images size={32} className="mx-auto text-gray-300 dark:text-gray-600 mb-2" />
-              <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">Sin referenciales todavía</p>
-              <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
-                Elegí ads en Inspiración y dale "Crear creativo" — los generados aparecen acá.
-              </p>
-            </div>
+            <EmptyState
+              icon={Images}
+              title="Sin referenciales todavía"
+              description='Elegí ads en Inspiración y dale "Crear creativo" — los generados aparecen acá.'
+            />
           ) : visibleItems.length === 0 ? (
-            <div className="text-center py-12 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-lg">
-              <Check size={32} className="mx-auto text-emerald-400 mb-2" />
-              <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">¡Todo descargado!</p>
-              <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
-                Apagá el filtro "Solo no descargados" para ver todo el repositorio.
-              </p>
-            </div>
+            <EmptyState
+              icon={Check}
+              title="¡Todo descargado!"
+              description='Apagá el filtro "Solo no descargados" para ver todo el repositorio.'
+              secondaryAction={{ label: 'Mostrar todo', onClick: () => setSoloNoDescargados(false) }}
+            />
           ) : viewMode === 'grid' ? (
             <GalleryGridView items={visibleItems} seleccionados={seleccionados} selectedOrder={selectedOrder}
               onToggleSelect={toggleSeleccion} onOpen={setSelected} />

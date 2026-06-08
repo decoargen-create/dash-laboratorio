@@ -33,6 +33,7 @@ import { getProductoImagen, getAccentColor } from './productoImagen.js';
 import { saveReferencial, getUsedAdIdsForProducto } from './galeriaReferenciales.js';
 import { cacheAdImagesBatch, getCachedAdImageUrl } from './adImagesStore.js';
 import { startExecution, updateExecution, finishExecution } from './executionsStore.js';
+import EmptyState from './EmptyState.jsx';
 // Galería ahora vive como tab independiente en el workspace (Arranque),
 // no más como modal acá.
 
@@ -229,6 +230,677 @@ function BulkProgressBar({ state, onClose }) {
     </div>
   );
 }
+
+// =========================================================
+// Componentes internos definidos ANTES del export — fix TDZ
+// para Vite/Rollup en builds minificados.
+// =========================================================
+
+function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onScrape, onAdapt, onCrearReferencial, onToggleSelect, onRemove }) {
+  const isCompetidor = !!brand.isCompetidor;
+  return (
+    <div className="group/brand bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 hover:border-amber-300 dark:hover:border-amber-700 transition">
+      <div className="flex items-center gap-2.5">
+        <div className={`w-9 h-9 rounded-md flex items-center justify-center text-white font-bold text-sm shrink-0 ${
+          isCompetidor
+            ? 'bg-gradient-to-br from-brand-500 to-brand-600'
+            : 'bg-gradient-to-br from-amber-400 to-brand-400'
+        }`}>
+          {brand.nombre?.charAt(0)?.toUpperCase() || '?'}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{brand.nombre}</p>
+            {isCompetidor && (
+              <span className="px-1 py-px text-[8px] font-bold bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 rounded uppercase tracking-wider shrink-0">
+                comp
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5 text-[10px] text-gray-500 dark:text-gray-400 truncate">
+            {brand.landingUrl && (
+              <a href={brand.landingUrl} target="_blank" rel="noreferrer"
+                className="inline-flex items-center gap-0.5 text-brand-600 hover:underline truncate">
+                <Link2 size={9} /> {brand.landingUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0]}
+              </a>
+            )}
+            {brand.lastScraped && (
+              <span className="shrink-0">· {new Date(brand.lastScraped).toLocaleDateString('es-AR')}</span>
+            )}
+            {!brand.lastScraped && <span className="italic shrink-0">· sin scrapear</span>}
+          </div>
+        </div>
+        {/* Botón scrape inline en el header — más compacto que antes (estaba en una fila aparte) */}
+        {onScrape && (
+          <button
+            onClick={onScrape}
+            disabled={isScraping}
+            className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold text-white bg-gradient-to-br from-amber-500 to-brand-500 rounded hover:from-amber-600 hover:to-brand-600 transition disabled:opacity-50 shrink-0"
+            title={brand.lastScraped ? 'Volver a scrapear' : 'Scrapear ads'}
+          >
+            {isScraping
+              ? <><Loader2 size={10} className="animate-spin" /> Scrapeando…</>
+              : <><Download size={10} /> {brand.lastScraped ? 'Re-scrape' : 'Scrape'}</>
+            }
+          </button>
+        )}
+        {onRemove && (
+          <button onClick={onRemove}
+            className="p-1 text-gray-300 opacity-0 group-hover/brand:opacity-100 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition shrink-0"
+            title="Eliminar marca">
+            <Trash2 size={12} />
+          </button>
+        )}
+      </div>
+      {/* Notas — solo si hay, en línea aparte chiquita */}
+      {brand.notas && (
+        <p className="text-[10px] text-gray-600 dark:text-gray-400 italic mt-1.5 line-clamp-1">"{brand.notas}"</p>
+      )}
+      {/* Contador de ads cargados — solo si hay ads */}
+      {ads.length > 0 && (
+        <div className="mt-1.5 text-[10px] text-gray-500 dark:text-gray-400">
+          {ads.length} estáticos cargados
+        </div>
+      )}
+
+      {/* Grilla de estáticos scrapeados */}
+      {ads.length > 0 && (
+        <BrandAdsGrid
+          ads={ads}
+          brandNombre={brand.nombre}
+          adaptingAdIds={adaptingAdIds}
+          creandoAdIds={creandoAdIds}
+          seleccionados={seleccionados}
+          selectedOrder={selectedOrder}
+          usedAdIds={usedAdIds}
+          progressById={progressById}
+          onAdapt={onAdapt}
+          onCrearReferencial={onCrearReferencial}
+          onToggleSelect={onToggleSelect}
+        />
+      )}
+    </div>
+  );
+}
+
+
+function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = false, selected = false, selectionIndex = null, used = false, onAdapt, onCrearReferencial, onToggleSelect, progress = null }) {
+  const cdnThumb = ad.imageUrls?.[0];
+  const fbUrl = ad.snapshotUrl;
+  // Si tenemos el ad cacheado en IndexedDB (sobreviven el TTL de 24h del CDN),
+  // preferimos el blob URL. Sino, caemos al CDN.
+  // Perf: NO ejecutamos la lookup en mount — usamos IntersectionObserver para
+  // que solo corra cuando el thumb está cerca del viewport. Con 400+ thumbs
+  // en pantalla, mount-time lookups eran el principal bottleneck.
+  const [cachedUrl, setCachedUrl] = useState(null);
+  const containerRef = React.useRef(null);
+  useEffect(() => {
+    let active = true;
+    if (!ad?.id || !containerRef.current) return;
+
+    const fetchCached = () => {
+      getCachedAdImageUrl(ad.id).then(url => { if (active) setCachedUrl(url); });
+    };
+
+    // Si IntersectionObserver no está disponible (browsers viejos), fetch sync.
+    if (typeof IntersectionObserver === 'undefined') {
+      fetchCached();
+      return;
+    }
+
+    const io = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          fetchCached();
+          io.disconnect();
+          break;
+        }
+      }
+    }, { rootMargin: '200px' }); // pre-fetch 200px antes de que entre en pantalla
+
+    io.observe(containerRef.current);
+
+    const onSaved = (e) => {
+      if (String(e?.detail?.adId || '') === String(ad?.id)) fetchCached();
+    };
+    window.addEventListener('viora:ad-image-cached', onSaved);
+
+    return () => {
+      active = false;
+      io.disconnect();
+      window.removeEventListener('viora:ad-image-cached', onSaved);
+    };
+  }, [ad?.id]);
+  const thumb = cachedUrl || cdnThumb;
+  return (
+    <div
+      ref={containerRef}
+      className={`group/thumb relative aspect-square rounded-md overflow-hidden bg-gray-100 dark:bg-gray-900 border-2 transition ${
+        used && !selected ? 'opacity-50 grayscale-[40%] hover:opacity-100 hover:grayscale-0' : ''
+      } ${
+        selected
+          ? 'border-brand-500 ring-2 ring-brand-300 dark:ring-brand-700'
+          : fresh
+            ? 'border-emerald-300 dark:border-emerald-700 hover:border-emerald-500'
+            : 'border-gray-200 dark:border-gray-700 hover:border-amber-400'
+      }`}
+      title={ad.body?.slice(0, 200) || ad.headline || ''}
+    >
+      {thumb ? (
+        <img src={thumb} alt="" className="w-full h-full object-cover"
+          onError={(e) => { e.target.style.display = 'none'; }} />
+      ) : (
+        <div className="w-full h-full flex items-center justify-center">
+          <ImageIcon size={20} className="text-gray-300" />
+        </div>
+      )}
+      {/* Indicador de imagen cacheada localmente — solo on-hover para no
+          contaminar. Le da feedback al usuario de que las imágenes están
+          seguras de la expiración del CDN. */}
+      {cachedUrl && (
+        <div className="absolute top-1 right-7 w-1.5 h-1.5 rounded-full bg-emerald-400/80 opacity-0 group-hover/thumb:opacity-100 transition" title="Imagen cacheada localmente" />
+      )}
+
+      {/* Selector numerado — siempre visible (más prominente que el checkbox).
+          Cuando seleccionás muestra el ORDEN (1, 2, 3...) según el orden en
+          que clickeaste. Sin selección, muestra un + suave. */}
+      {onToggleSelect && (
+        <button
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggleSelect(); }}
+          className={`absolute top-1.5 left-1.5 z-10 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all shadow-md ${
+            selected
+              ? 'bg-brand-600 text-white scale-110 ring-2 ring-white dark:ring-gray-900'
+              : 'bg-white/90 dark:bg-gray-900/90 text-gray-400 dark:text-gray-500 hover:bg-brand-50 hover:text-brand-600 dark:hover:bg-brand-900/40 dark:hover:text-brand-300 hover:scale-110 opacity-70 group-hover/thumb:opacity-100'
+          }`}
+          title={selected ? `Seleccionado #${selectionIndex} — click para deseleccionar` : 'Click para seleccionar'}
+        >
+          {selected ? (selectionIndex || <Check size={14} />) : <Plus size={14} />}
+        </button>
+      )}
+
+      {/* Progress overlay — visible mientras el ad se está generando o
+          acaba de terminar/fallar. Tapa todo el thumb para que se vea claro. */}
+      {progress && (
+        <div className="absolute inset-0 bg-gray-900/85 z-10 flex flex-col items-center justify-center gap-2 p-3 text-white">
+          {progress.stage === 'done' ? (
+            <Check size={28} className="text-emerald-400" />
+          ) : progress.stage === 'error' ? (
+            <AlertCircle size={28} className="text-red-400" />
+          ) : (
+            <Loader2 size={20} className="text-brand-300 animate-spin" />
+          )}
+          <p className="text-[10px] font-bold text-center leading-tight">
+            {stageLabel(progress.stage)}
+          </p>
+          {progress.stage !== 'done' && progress.stage !== 'error' && (
+            <>
+              <div className="w-full h-1.5 bg-white/20 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-brand-400 to-brand-200 transition-all duration-500"
+                  style={{ width: `${estimateProgress(progress)}%` }}
+                />
+              </div>
+              <p className="text-[9px] text-white/70">
+                {formatMs(Date.now() - progress.startedAt)}
+              </p>
+            </>
+          )}
+          {progress.stage === 'error' && progress.error && (
+            <p className="text-[9px] text-red-200 text-center line-clamp-2">{progress.error}</p>
+          )}
+        </div>
+      )}
+
+      <div className="absolute inset-0 bg-black/0 group-hover/thumb:bg-black/60 transition flex flex-col items-stretch justify-end gap-1 p-1.5">
+        {onCrearReferencial && (
+          <button
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onCrearReferencial(); }}
+            disabled={creando}
+            className="opacity-0 group-hover/thumb:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded disabled:opacity-70"
+            title="Genera 2 variaciones con tu producto real"
+          >
+            {creando
+              ? <><Loader2 size={10} className="animate-spin" /> Generando…</>
+              : <><Sparkles size={10} /> Crear creativo</>
+            }
+          </button>
+        )}
+        {onAdapt && (
+          <button
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onAdapt(); }}
+            disabled={adapting}
+            className="opacity-0 group-hover/thumb:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-amber-500/90 hover:bg-amber-600 rounded disabled:opacity-70"
+            title="Genera ideas (texto) en la Bandeja"
+          >
+            {adapting
+              ? <><Loader2 size={10} className="animate-spin" /> Adaptando…</>
+              : <><Wand2 size={10} /> + ideas en Bandeja</>
+            }
+          </button>
+        )}
+        <a
+          href={fbUrl} target="_blank" rel="noreferrer"
+          className="opacity-0 group-hover/thumb:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-black/70 hover:bg-black/90 rounded"
+        >
+          <ExternalLink size={10} /> Ver en FB
+        </a>
+      </div>
+      {ad.daysRunning > 0 && (
+        <div className="absolute top-1 left-1 px-1.5 py-0.5 text-[9px] font-bold rounded bg-black/60 text-white pointer-events-none">
+          {ad.daysRunning}d
+        </div>
+      )}
+      {fresh && !used && (
+        <div className="absolute top-1 right-1 px-1 py-0.5 text-[8px] font-bold rounded bg-emerald-500 text-white pointer-events-none">
+          NUEVO
+        </div>
+      )}
+      {used && (
+        <div className="absolute top-1 right-1 px-1 py-0.5 text-[8px] font-bold rounded bg-gray-700 text-white pointer-events-none inline-flex items-center gap-0.5" title="Ya usaste este ad para generar creativos — ver Galería">
+          <Check size={8} /> Usado
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect }) {
+  const [showRepeated, setShowRepeated] = useState(false);
+  const fresh = ads.filter(a => a.isFresh !== false);
+  const repeated = ads.filter(a => a.isFresh === false);
+
+  return (
+    <div className="mt-3 space-y-3">
+      {/* Frescos del día */}
+      {fresh.length > 0 ? (
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400 mb-1.5 flex items-center gap-1">
+            ✨ Nuevos del día <span className="text-gray-400 font-normal">({fresh.length})</span>
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {fresh.slice(0, 30).map(ad => (
+              <AdThumb
+                key={ad.id}
+                ad={ad}
+                brandNombre={brandNombre}
+                fresh
+                adapting={adaptingAdIds?.has(ad.id)}
+                creando={creandoAdIds?.has(ad.id)}
+                selected={seleccionados?.has(ad.id)}
+                selectionIndex={selectedOrder?.get(ad.id) || null}
+                used={usedAdIds?.has(ad.id)}
+                progress={progressById?.[ad.id]}
+                onAdapt={onAdapt ? () => onAdapt(ad) : null}
+                onCrearReferencial={onCrearReferencial ? () => onCrearReferencial(ad) : null}
+                onToggleSelect={onToggleSelect ? () => onToggleSelect(ad.id) : null}
+              />
+            ))}
+            {fresh.length > 30 && (
+              <div className="aspect-square rounded-md flex items-center justify-center bg-gray-50 dark:bg-gray-900 border-2 border-dashed border-gray-200 dark:border-gray-700 text-[10px] text-gray-500 dark:text-gray-400 italic">
+                +{fresh.length - 30} más
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        <p className="text-[10px] italic text-gray-500 dark:text-gray-400 text-center py-2 bg-gray-50 dark:bg-gray-900/30 rounded">
+          Sin estáticos nuevos hoy — todos ya los habías visto.
+        </p>
+      )}
+
+      {/* Repetidos colapsables */}
+      {repeated.length > 0 && (
+        <div>
+          <button
+            onClick={() => setShowRepeated(s => !s)}
+            className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition flex items-center gap-1"
+          >
+            <ChevronRight size={10} className={`transition-transform ${showRepeated ? 'rotate-90' : ''}`} />
+            Ya vistos ({repeated.length})
+          </button>
+          {showRepeated && (
+            <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2 opacity-60">
+              {repeated.slice(0, 30).map(ad => (
+                <AdThumb
+                  key={ad.id}
+                  ad={ad}
+                  brandNombre={brandNombre}
+                  adapting={adaptingAdIds?.has(ad.id)}
+                  creando={creandoAdIds?.has(ad.id)}
+                  selected={seleccionados?.has(ad.id)}
+                  selectionIndex={selectedOrder?.get(ad.id) || null}
+                  onAdapt={onAdapt ? () => onAdapt(ad) : null}
+                  onCrearReferencial={onCrearReferencial ? () => onCrearReferencial(ad) : null}
+                  onToggleSelect={onToggleSelect ? () => onToggleSelect(ad.id) : null}
+                />
+              ))}
+              {repeated.length > 30 && (
+                <div className="aspect-square rounded-md flex items-center justify-center bg-gray-50 dark:bg-gray-900 border-2 border-dashed border-gray-200 dark:border-gray-700 text-[10px] text-gray-400 italic">
+                  +{repeated.length - 30}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Estima un % de progreso "honesto" para una llamada de gpt-image-2.
+// preparando: 0-8% / generando: 8-92% asintótico ~45s / guardando: 92-99% / done: 100%.
+
+// Top 10 escalados — agrega ads de todas las brands del producto, los rankea
+// por score (que el backend ya calcula con daysRunning + variantes +
+// multiplatform + pageLikeCount + penalty pause early), y los muestra en una
+// strip horizontal. Cada item es un AdThumb con sus acciones normales
+// (Crear creativo, + ideas en Bandeja, multi-select).
+
+function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect }) {
+  const [expanded, setExpanded] = useState(true);
+  // Vista del Top 10 — persistida en localStorage. 3 opciones:
+  //   grid: strip horizontal de 10 thumbs (default, denso)
+  //   list: rows con thumb chico + brand + métricas + acciones inline
+  //   table: tabla compacta con columnas para escanear rápido
+  const [viewMode, setViewMode] = useState(() => {
+    try { return localStorage.getItem('viora-top10-view') || 'grid'; }
+    catch { return 'grid'; }
+  });
+  const setMode = (m) => {
+    setViewMode(m);
+    try { localStorage.setItem('viora-top10-view', m); } catch {}
+  };
+  return (
+    <div className="bg-gradient-to-br from-amber-50 to-brand-50 dark:from-amber-950/30 dark:to-brand-950/30 border border-amber-200 dark:border-amber-800 rounded-xl overflow-hidden">
+      <div className="px-4 py-2.5 flex items-center gap-2.5 border-b border-amber-200/50 dark:border-amber-800/50">
+        <button
+          onClick={() => setExpanded(e => !e)}
+          className="flex items-center gap-2.5 text-left flex-1 min-w-0 hover:opacity-80 transition"
+        >
+          <span className="text-base">🏆</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-bold text-amber-900 dark:text-amber-200">
+              Top {items.length} escalados de tu competencia
+            </p>
+            <p className="text-[10px] text-amber-700 dark:text-amber-300/80 truncate">
+              Rankeados por: días corriendo + variantes activas + multiplataforma + popularidad de marca
+            </p>
+          </div>
+        </button>
+        {/* Toggle de vista — 3 iconos. Solo visible cuando está expanded. */}
+        {expanded && (
+          <div className="flex items-center gap-0.5 bg-white/60 dark:bg-gray-800/60 rounded-md p-0.5 shrink-0">
+            {[
+              { v: 'grid',  Icon: LayoutGrid, label: 'Grid'   },
+              { v: 'list',  Icon: Rows3,      label: 'Lista'  },
+              { v: 'table', Icon: Table2,     label: 'Tabla'  },
+            ].map(({ v, Icon, label }) => (
+              <button
+                key={v}
+                onClick={() => setMode(v)}
+                className={`p-1 rounded transition ${viewMode === v
+                  ? 'bg-amber-500 text-white shadow-sm'
+                  : 'text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/30'}`}
+                title={`Ver como ${label}`}
+              >
+                <Icon size={12} />
+              </button>
+            ))}
+          </div>
+        )}
+        <button
+          onClick={() => setExpanded(e => !e)}
+          className="p-1 rounded transition text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/30 shrink-0"
+          title={expanded ? 'Colapsar' : 'Expandir'}
+        >
+          <ChevronDown size={14} className={`transition-transform ${expanded ? 'rotate-180' : ''}`} />
+        </button>
+      </div>
+      {expanded && (
+        <div className="px-3 pb-3 pt-3">
+          {viewMode === 'grid' && (
+            <TopGridView items={items} adaptingAdIds={adaptingAdIds} creandoAdIds={creandoAdIds}
+              seleccionados={seleccionados} selectedOrder={selectedOrder} usedAdIds={usedAdIds} progressById={progressById}
+              onAdapt={onAdapt} onCrearReferencial={onCrearReferencial} onToggleSelect={onToggleSelect} />
+          )}
+          {viewMode === 'list' && (
+            <TopListView items={items} seleccionados={seleccionados} selectedOrder={selectedOrder}
+              adaptingAdIds={adaptingAdIds} creandoAdIds={creandoAdIds}
+              onAdapt={onAdapt} onCrearReferencial={onCrearReferencial} onToggleSelect={onToggleSelect} />
+          )}
+          {viewMode === 'table' && (
+            <TopTableView items={items} seleccionados={seleccionados} selectedOrder={selectedOrder}
+              adaptingAdIds={adaptingAdIds} creandoAdIds={creandoAdIds}
+              onAdapt={onAdapt} onCrearReferencial={onCrearReferencial} onToggleSelect={onToggleSelect} />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// VISTA 1 — Grid: el strip horizontal original con 10 thumbs grandes.
+
+function TopGridView({ items, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect }) {
+  return (
+    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-10 gap-2">
+      {items.map(({ ad, brandNombre, isCompetidor }, idx) => (
+        <div key={ad.id} className="relative">
+          <div className={`absolute -top-1 -left-1 z-20 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shadow-md ${
+            idx === 0 ? 'bg-gradient-to-br from-amber-400 to-amber-600'
+            : idx < 3 ? 'bg-gradient-to-br from-amber-500 to-brand-500'
+            : 'bg-gradient-to-br from-gray-600 to-gray-700'
+          }`}>{idx + 1}</div>
+          <AdThumb
+            ad={ad} brandNombre={brandNombre} fresh={ad.isFresh !== false}
+            adapting={adaptingAdIds?.has(ad.id)} creando={creandoAdIds?.has(ad.id)}
+            selected={seleccionados?.has(ad.id)} selectionIndex={selectedOrder?.get(ad.id) || null} used={usedAdIds?.has(ad.id)}
+            progress={progressById?.[ad.id]}
+            onAdapt={onAdapt ? () => onAdapt(brandNombre, ad) : null}
+            onCrearReferencial={onCrearReferencial ? () => onCrearReferencial(brandNombre, ad) : null}
+            onToggleSelect={onToggleSelect ? () => onToggleSelect(ad.id) : null}
+          />
+          <div className="mt-1 px-0.5">
+            <p className="text-[9px] font-semibold text-gray-700 dark:text-gray-200 truncate">
+              {isCompetidor && <span className="text-brand-600 dark:text-brand-400">●</span>} {brandNombre}
+            </p>
+            <div className="flex items-center gap-1.5 text-[9px] text-gray-500 dark:text-gray-400">
+              {ad.daysRunning != null && <span title="Días corriendo">{ad.daysRunning}d</span>}
+              {ad.variantes > 0 && <span title="Variantes activas">·{ad.variantes}v</span>}
+              {typeof ad.score === 'number' && <span className="ml-auto font-bold text-amber-600 dark:text-amber-400" title="Score compuesto">{Math.round(ad.score)}</span>}
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// VISTA 2 — List: rows compactas con thumb chico + métricas + acciones inline.
+// Para escanear más rápido y ver el headline / body de cada ad.
+
+function TopListView({ items, seleccionados, selectedOrder, adaptingAdIds, creandoAdIds, onAdapt, onCrearReferencial, onToggleSelect }) {
+  return (
+    <div className="space-y-1.5">
+      {items.map(({ ad, brandNombre, isCompetidor }, idx) => {
+        const isSel = seleccionados?.has(ad.id);
+        const selIdx = selectedOrder?.get(ad.id);
+        const thumb = ad.imageUrls?.[0];
+        return (
+          <div key={ad.id}
+            className={`flex items-center gap-2.5 p-1.5 rounded-md border transition ${
+              isSel
+                ? 'bg-brand-50 dark:bg-brand-900/30 border-brand-300 dark:border-brand-700'
+                : 'bg-white/60 dark:bg-gray-800/60 border-transparent hover:border-amber-300 dark:hover:border-amber-700'
+            }`}
+          >
+            {/* Ranking badge */}
+            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0 shadow-sm ${
+              idx === 0 ? 'bg-gradient-to-br from-amber-400 to-amber-600'
+              : idx < 3 ? 'bg-gradient-to-br from-amber-500 to-brand-500'
+              : 'bg-gradient-to-br from-gray-600 to-gray-700'
+            }`}>{idx + 1}</div>
+            {/* Thumb chiquito */}
+            <div className="w-12 h-12 rounded bg-gray-100 dark:bg-gray-900 overflow-hidden shrink-0 border border-gray-200 dark:border-gray-700">
+              {thumb && <img src={thumb} alt="" className="w-full h-full object-cover" onError={e => { e.target.style.display = 'none'; }} />}
+            </div>
+            {/* Info */}
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5 text-xs">
+                {isCompetidor && <span className="text-brand-600 dark:text-brand-400 text-[10px]">●</span>}
+                <span className="font-bold text-gray-900 dark:text-gray-100 truncate">{brandNombre}</span>
+                {typeof ad.score === 'number' && (
+                  <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 tabular-nums shrink-0">score {Math.round(ad.score)}</span>
+                )}
+              </div>
+              <p className="text-[10px] text-gray-600 dark:text-gray-300 truncate">
+                {ad.headline || ad.body?.slice(0, 80) || <span className="italic text-gray-400">(sin texto)</span>}
+              </p>
+              <div className="flex items-center gap-2 text-[9px] text-gray-500 dark:text-gray-400 mt-0.5">
+                {ad.daysRunning != null && <span>{ad.daysRunning}d corriendo</span>}
+                {ad.variantes > 0 && <span>· {ad.variantes} variantes</span>}
+                {ad.isMultiplatform && <span>· multiplataforma</span>}
+              </div>
+            </div>
+            {/* Acciones */}
+            <div className="flex items-center gap-1 shrink-0">
+              {onToggleSelect && (
+                <button
+                  onClick={() => onToggleSelect(ad.id)}
+                  className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition ${
+                    isSel ? 'bg-brand-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-400 hover:bg-brand-50 hover:text-brand-600'
+                  }`}
+                  title={isSel ? `Seleccionado #${selIdx}` : 'Seleccionar'}
+                >
+                  {isSel ? selIdx : <Plus size={12} />}
+                </button>
+              )}
+              {onCrearReferencial && (
+                <button
+                  onClick={() => onCrearReferencial(brandNombre, ad)}
+                  disabled={creandoAdIds?.has(ad.id)}
+                  className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded disabled:opacity-50"
+                  title="Crear creativo"
+                >
+                  {creandoAdIds?.has(ad.id) ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />}
+                </button>
+              )}
+              {onAdapt && (
+                <button
+                  onClick={() => onAdapt(brandNombre, ad)}
+                  disabled={adaptingAdIds?.has(ad.id)}
+                  className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold text-white bg-amber-500 hover:bg-amber-600 rounded disabled:opacity-50"
+                  title="+ ideas en Bandeja"
+                >
+                  {adaptingAdIds?.has(ad.id) ? <Loader2 size={10} className="animate-spin" /> : <Wand2 size={10} />}
+                </button>
+              )}
+              {ad.snapshotUrl && (
+                <a href={ad.snapshotUrl} target="_blank" rel="noreferrer"
+                  className="inline-flex items-center px-2 py-1 text-[10px] text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
+                  title="Ver en FB"
+                >
+                  <ExternalLink size={10} />
+                </a>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// VISTA 3 — Table: tabla densa para escanear varias métricas a la vez.
+
+function TopTableView({ items, seleccionados, selectedOrder, adaptingAdIds, creandoAdIds, onAdapt, onCrearReferencial, onToggleSelect }) {
+  return (
+    <div className="overflow-x-auto -mx-3 px-3">
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-[9px] uppercase tracking-wider text-amber-700 dark:text-amber-300/80 border-b border-amber-200/50 dark:border-amber-800/50">
+            <th className="text-left py-1.5 pr-2 font-bold">#</th>
+            <th className="text-left py-1.5 px-2 font-bold">Ad</th>
+            <th className="text-left py-1.5 px-2 font-bold">Marca</th>
+            <th className="text-right py-1.5 px-2 font-bold">Días</th>
+            <th className="text-right py-1.5 px-2 font-bold">Variantes</th>
+            <th className="text-right py-1.5 px-2 font-bold">Multi</th>
+            <th className="text-right py-1.5 px-2 font-bold">Score</th>
+            <th className="text-right py-1.5 pl-2 font-bold">Acciones</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-amber-200/30 dark:divide-amber-800/30">
+          {items.map(({ ad, brandNombre, isCompetidor }, idx) => {
+            const isSel = seleccionados?.has(ad.id);
+            const selIdx = selectedOrder?.get(ad.id);
+            const thumb = ad.imageUrls?.[0];
+            return (
+              <tr key={ad.id} className={`${isSel ? 'bg-brand-50/50 dark:bg-brand-900/20' : 'hover:bg-amber-100/30 dark:hover:bg-amber-900/20'} transition`}>
+                <td className="py-1.5 pr-2">
+                  <span className={`inline-flex w-5 h-5 rounded-full items-center justify-center text-[9px] font-bold text-white ${
+                    idx === 0 ? 'bg-gradient-to-br from-amber-400 to-amber-600'
+                    : idx < 3 ? 'bg-gradient-to-br from-amber-500 to-brand-500'
+                    : 'bg-gradient-to-br from-gray-600 to-gray-700'
+                  }`}>{idx + 1}</span>
+                </td>
+                <td className="py-1.5 px-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded bg-gray-100 dark:bg-gray-900 overflow-hidden shrink-0 border border-gray-200 dark:border-gray-700">
+                      {thumb && <img src={thumb} alt="" className="w-full h-full object-cover" onError={e => { e.target.style.display = 'none'; }} />}
+                    </div>
+                    <span className="text-[10px] text-gray-700 dark:text-gray-300 truncate max-w-[200px]">{ad.headline || ad.body?.slice(0, 50) || '—'}</span>
+                  </div>
+                </td>
+                <td className="py-1.5 px-2 text-gray-700 dark:text-gray-200">
+                  {isCompetidor && <span className="text-brand-600 dark:text-brand-400 text-[10px]">●</span>} {brandNombre}
+                </td>
+                <td className="py-1.5 px-2 text-right tabular-nums text-gray-600 dark:text-gray-400">{ad.daysRunning ?? '—'}</td>
+                <td className="py-1.5 px-2 text-right tabular-nums text-gray-600 dark:text-gray-400">{ad.variantes || 0}</td>
+                <td className="py-1.5 px-2 text-right text-gray-600 dark:text-gray-400">{ad.isMultiplatform ? '✓' : '—'}</td>
+                <td className="py-1.5 px-2 text-right font-bold tabular-nums text-amber-600 dark:text-amber-400">{typeof ad.score === 'number' ? Math.round(ad.score) : '—'}</td>
+                <td className="py-1.5 pl-2 text-right">
+                  <div className="inline-flex items-center gap-1">
+                    {onToggleSelect && (
+                      <button onClick={() => onToggleSelect(ad.id)}
+                        className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold transition ${
+                          isSel ? 'bg-brand-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-400 hover:bg-brand-50 hover:text-brand-600'
+                        }`}
+                        title={isSel ? `Seleccionado #${selIdx}` : 'Seleccionar'}
+                      >
+                        {isSel ? selIdx : <Plus size={10} />}
+                      </button>
+                    )}
+                    {onCrearReferencial && (
+                      <button onClick={() => onCrearReferencial(brandNombre, ad)}
+                        disabled={creandoAdIds?.has(ad.id)}
+                        className="p-1 text-white bg-brand-600 hover:bg-brand-700 rounded disabled:opacity-50"
+                        title="Crear creativo"
+                      >
+                        {creandoAdIds?.has(ad.id) ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />}
+                      </button>
+                    )}
+                    {onAdapt && (
+                      <button onClick={() => onAdapt(brandNombre, ad)}
+                        disabled={adaptingAdIds?.has(ad.id)}
+                        className="p-1 text-white bg-amber-500 hover:bg-amber-600 rounded disabled:opacity-50"
+                        title="+ ideas en Bandeja"
+                      >
+                        {adaptingAdIds?.has(ad.id) ? <Loader2 size={10} className="animate-spin" /> : <Wand2 size={10} />}
+                      </button>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+
 
 export default function InspiracionSection({ addToast, forcedProductoId, embedded = false }) {
   const [productos, setProductos] = useState(() => loadProductos());
@@ -935,13 +1607,11 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         </div>
 
         {productos.length === 0 ? (
-          <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-12 text-center">
-            <Package size={36} className="mx-auto text-gray-300 dark:text-gray-600 mb-3" />
-            <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Sin productos cargados</p>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-              Andá a Arranque y creá un producto primero.
-            </p>
-          </div>
+          <EmptyState
+            icon={Package}
+            title="Sin productos cargados"
+            description="Andá a Arranque y creá un producto primero. La inspiración compite contra la competencia de un producto específico — necesitás al menos uno."
+          />
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {productos.map(p => {
@@ -1335,13 +2005,12 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
 
             {/* Grilla unificada */}
             {unif.length === 0 ? (
-              <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-12 text-center">
-                <Sparkles size={32} className="mx-auto text-gray-300 dark:text-gray-600 mb-2" />
-                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Ninguna marca coincide con el filtro</p>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  Probá ajustar los filtros o agregá marcas custom con el botón de arriba.
-                </p>
-              </div>
+              <EmptyState
+                icon={Sparkles}
+                title="Ninguna marca coincide con el filtro"
+                description="Probá ajustar los filtros o agregá marcas custom con el botón de arriba."
+                primaryAction={{ label: 'Agregar marca', icon: Plus, onClick: () => setShowAddForm(true) }}
+              />
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {unif.map(b => (
@@ -1368,664 +2037,6 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           </div>
         );
       })()}
-    </div>
-  );
-}
-
-function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onScrape, onAdapt, onCrearReferencial, onToggleSelect, onRemove }) {
-  const isCompetidor = !!brand.isCompetidor;
-  return (
-    <div className="group/brand bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 hover:border-amber-300 dark:hover:border-amber-700 transition">
-      <div className="flex items-center gap-2.5">
-        <div className={`w-9 h-9 rounded-md flex items-center justify-center text-white font-bold text-sm shrink-0 ${
-          isCompetidor
-            ? 'bg-gradient-to-br from-brand-500 to-brand-600'
-            : 'bg-gradient-to-br from-amber-400 to-brand-400'
-        }`}>
-          {brand.nombre?.charAt(0)?.toUpperCase() || '?'}
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5 min-w-0">
-            <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{brand.nombre}</p>
-            {isCompetidor && (
-              <span className="px-1 py-px text-[8px] font-bold bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 rounded uppercase tracking-wider shrink-0">
-                comp
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-1.5 text-[10px] text-gray-500 dark:text-gray-400 truncate">
-            {brand.landingUrl && (
-              <a href={brand.landingUrl} target="_blank" rel="noreferrer"
-                className="inline-flex items-center gap-0.5 text-brand-600 hover:underline truncate">
-                <Link2 size={9} /> {brand.landingUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0]}
-              </a>
-            )}
-            {brand.lastScraped && (
-              <span className="shrink-0">· {new Date(brand.lastScraped).toLocaleDateString('es-AR')}</span>
-            )}
-            {!brand.lastScraped && <span className="italic shrink-0">· sin scrapear</span>}
-          </div>
-        </div>
-        {/* Botón scrape inline en el header — más compacto que antes (estaba en una fila aparte) */}
-        {onScrape && (
-          <button
-            onClick={onScrape}
-            disabled={isScraping}
-            className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold text-white bg-gradient-to-br from-amber-500 to-brand-500 rounded hover:from-amber-600 hover:to-brand-600 transition disabled:opacity-50 shrink-0"
-            title={brand.lastScraped ? 'Volver a scrapear' : 'Scrapear ads'}
-          >
-            {isScraping
-              ? <><Loader2 size={10} className="animate-spin" /> Scrapeando…</>
-              : <><Download size={10} /> {brand.lastScraped ? 'Re-scrape' : 'Scrape'}</>
-            }
-          </button>
-        )}
-        {onRemove && (
-          <button onClick={onRemove}
-            className="p-1 text-gray-300 opacity-0 group-hover/brand:opacity-100 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition shrink-0"
-            title="Eliminar marca">
-            <Trash2 size={12} />
-          </button>
-        )}
-      </div>
-      {/* Notas — solo si hay, en línea aparte chiquita */}
-      {brand.notas && (
-        <p className="text-[10px] text-gray-600 dark:text-gray-400 italic mt-1.5 line-clamp-1">"{brand.notas}"</p>
-      )}
-      {/* Contador de ads cargados — solo si hay ads */}
-      {ads.length > 0 && (
-        <div className="mt-1.5 text-[10px] text-gray-500 dark:text-gray-400">
-          {ads.length} estáticos cargados
-        </div>
-      )}
-
-      {/* Grilla de estáticos scrapeados */}
-      {ads.length > 0 && (
-        <BrandAdsGrid
-          ads={ads}
-          brandNombre={brand.nombre}
-          adaptingAdIds={adaptingAdIds}
-          creandoAdIds={creandoAdIds}
-          seleccionados={seleccionados}
-          selectedOrder={selectedOrder}
-          usedAdIds={usedAdIds}
-          progressById={progressById}
-          onAdapt={onAdapt}
-          onCrearReferencial={onCrearReferencial}
-          onToggleSelect={onToggleSelect}
-        />
-      )}
-    </div>
-  );
-}
-
-function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = false, selected = false, selectionIndex = null, used = false, onAdapt, onCrearReferencial, onToggleSelect, progress = null }) {
-  const cdnThumb = ad.imageUrls?.[0];
-  const fbUrl = ad.snapshotUrl;
-  // Si tenemos el ad cacheado en IndexedDB (sobreviven el TTL de 24h del CDN),
-  // preferimos el blob URL. Sino, caemos al CDN.
-  // Perf: NO ejecutamos la lookup en mount — usamos IntersectionObserver para
-  // que solo corra cuando el thumb está cerca del viewport. Con 400+ thumbs
-  // en pantalla, mount-time lookups eran el principal bottleneck.
-  const [cachedUrl, setCachedUrl] = useState(null);
-  const containerRef = React.useRef(null);
-  useEffect(() => {
-    let active = true;
-    if (!ad?.id || !containerRef.current) return;
-
-    const fetchCached = () => {
-      getCachedAdImageUrl(ad.id).then(url => { if (active) setCachedUrl(url); });
-    };
-
-    // Si IntersectionObserver no está disponible (browsers viejos), fetch sync.
-    if (typeof IntersectionObserver === 'undefined') {
-      fetchCached();
-      return;
-    }
-
-    const io = new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        if (entry.isIntersecting) {
-          fetchCached();
-          io.disconnect();
-          break;
-        }
-      }
-    }, { rootMargin: '200px' }); // pre-fetch 200px antes de que entre en pantalla
-
-    io.observe(containerRef.current);
-
-    const onSaved = (e) => {
-      if (String(e?.detail?.adId || '') === String(ad?.id)) fetchCached();
-    };
-    window.addEventListener('viora:ad-image-cached', onSaved);
-
-    return () => {
-      active = false;
-      io.disconnect();
-      window.removeEventListener('viora:ad-image-cached', onSaved);
-    };
-  }, [ad?.id]);
-  const thumb = cachedUrl || cdnThumb;
-  return (
-    <div
-      ref={containerRef}
-      className={`group/thumb relative aspect-square rounded-md overflow-hidden bg-gray-100 dark:bg-gray-900 border-2 transition ${
-        used && !selected ? 'opacity-50 grayscale-[40%] hover:opacity-100 hover:grayscale-0' : ''
-      } ${
-        selected
-          ? 'border-brand-500 ring-2 ring-brand-300 dark:ring-brand-700'
-          : fresh
-            ? 'border-emerald-300 dark:border-emerald-700 hover:border-emerald-500'
-            : 'border-gray-200 dark:border-gray-700 hover:border-amber-400'
-      }`}
-      title={ad.body?.slice(0, 200) || ad.headline || ''}
-    >
-      {thumb ? (
-        <img src={thumb} alt="" className="w-full h-full object-cover"
-          onError={(e) => { e.target.style.display = 'none'; }} />
-      ) : (
-        <div className="w-full h-full flex items-center justify-center">
-          <ImageIcon size={20} className="text-gray-300" />
-        </div>
-      )}
-      {/* Indicador de imagen cacheada localmente — solo on-hover para no
-          contaminar. Le da feedback al usuario de que las imágenes están
-          seguras de la expiración del CDN. */}
-      {cachedUrl && (
-        <div className="absolute top-1 right-7 w-1.5 h-1.5 rounded-full bg-emerald-400/80 opacity-0 group-hover/thumb:opacity-100 transition" title="Imagen cacheada localmente" />
-      )}
-
-      {/* Selector numerado — siempre visible (más prominente que el checkbox).
-          Cuando seleccionás muestra el ORDEN (1, 2, 3...) según el orden en
-          que clickeaste. Sin selección, muestra un + suave. */}
-      {onToggleSelect && (
-        <button
-          onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggleSelect(); }}
-          className={`absolute top-1.5 left-1.5 z-10 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all shadow-md ${
-            selected
-              ? 'bg-brand-600 text-white scale-110 ring-2 ring-white dark:ring-gray-900'
-              : 'bg-white/90 dark:bg-gray-900/90 text-gray-400 dark:text-gray-500 hover:bg-brand-50 hover:text-brand-600 dark:hover:bg-brand-900/40 dark:hover:text-brand-300 hover:scale-110 opacity-70 group-hover/thumb:opacity-100'
-          }`}
-          title={selected ? `Seleccionado #${selectionIndex} — click para deseleccionar` : 'Click para seleccionar'}
-        >
-          {selected ? (selectionIndex || <Check size={14} />) : <Plus size={14} />}
-        </button>
-      )}
-
-      {/* Progress overlay — visible mientras el ad se está generando o
-          acaba de terminar/fallar. Tapa todo el thumb para que se vea claro. */}
-      {progress && (
-        <div className="absolute inset-0 bg-gray-900/85 z-10 flex flex-col items-center justify-center gap-2 p-3 text-white">
-          {progress.stage === 'done' ? (
-            <Check size={28} className="text-emerald-400" />
-          ) : progress.stage === 'error' ? (
-            <AlertCircle size={28} className="text-red-400" />
-          ) : (
-            <Loader2 size={20} className="text-brand-300 animate-spin" />
-          )}
-          <p className="text-[10px] font-bold text-center leading-tight">
-            {stageLabel(progress.stage)}
-          </p>
-          {progress.stage !== 'done' && progress.stage !== 'error' && (
-            <>
-              <div className="w-full h-1.5 bg-white/20 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-brand-400 to-brand-200 transition-all duration-500"
-                  style={{ width: `${estimateProgress(progress)}%` }}
-                />
-              </div>
-              <p className="text-[9px] text-white/70">
-                {formatMs(Date.now() - progress.startedAt)}
-              </p>
-            </>
-          )}
-          {progress.stage === 'error' && progress.error && (
-            <p className="text-[9px] text-red-200 text-center line-clamp-2">{progress.error}</p>
-          )}
-        </div>
-      )}
-
-      <div className="absolute inset-0 bg-black/0 group-hover/thumb:bg-black/60 transition flex flex-col items-stretch justify-end gap-1 p-1.5">
-        {onCrearReferencial && (
-          <button
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onCrearReferencial(); }}
-            disabled={creando}
-            className="opacity-0 group-hover/thumb:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded disabled:opacity-70"
-            title="Genera 2 variaciones con tu producto real"
-          >
-            {creando
-              ? <><Loader2 size={10} className="animate-spin" /> Generando…</>
-              : <><Sparkles size={10} /> Crear creativo</>
-            }
-          </button>
-        )}
-        {onAdapt && (
-          <button
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onAdapt(); }}
-            disabled={adapting}
-            className="opacity-0 group-hover/thumb:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-amber-500/90 hover:bg-amber-600 rounded disabled:opacity-70"
-            title="Genera ideas (texto) en la Bandeja"
-          >
-            {adapting
-              ? <><Loader2 size={10} className="animate-spin" /> Adaptando…</>
-              : <><Wand2 size={10} /> + ideas en Bandeja</>
-            }
-          </button>
-        )}
-        <a
-          href={fbUrl} target="_blank" rel="noreferrer"
-          className="opacity-0 group-hover/thumb:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-black/70 hover:bg-black/90 rounded"
-        >
-          <ExternalLink size={10} /> Ver en FB
-        </a>
-      </div>
-      {ad.daysRunning > 0 && (
-        <div className="absolute top-1 left-1 px-1.5 py-0.5 text-[9px] font-bold rounded bg-black/60 text-white pointer-events-none">
-          {ad.daysRunning}d
-        </div>
-      )}
-      {fresh && !used && (
-        <div className="absolute top-1 right-1 px-1 py-0.5 text-[8px] font-bold rounded bg-emerald-500 text-white pointer-events-none">
-          NUEVO
-        </div>
-      )}
-      {used && (
-        <div className="absolute top-1 right-1 px-1 py-0.5 text-[8px] font-bold rounded bg-gray-700 text-white pointer-events-none inline-flex items-center gap-0.5" title="Ya usaste este ad para generar creativos — ver Galería">
-          <Check size={8} /> Usado
-        </div>
-      )}
-    </div>
-  );
-}
-
-function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect }) {
-  const [showRepeated, setShowRepeated] = useState(false);
-  const fresh = ads.filter(a => a.isFresh !== false);
-  const repeated = ads.filter(a => a.isFresh === false);
-
-  return (
-    <div className="mt-3 space-y-3">
-      {/* Frescos del día */}
-      {fresh.length > 0 ? (
-        <div>
-          <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400 mb-1.5 flex items-center gap-1">
-            ✨ Nuevos del día <span className="text-gray-400 font-normal">({fresh.length})</span>
-          </p>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            {fresh.slice(0, 30).map(ad => (
-              <AdThumb
-                key={ad.id}
-                ad={ad}
-                brandNombre={brandNombre}
-                fresh
-                adapting={adaptingAdIds?.has(ad.id)}
-                creando={creandoAdIds?.has(ad.id)}
-                selected={seleccionados?.has(ad.id)}
-                selectionIndex={selectedOrder?.get(ad.id) || null}
-                used={usedAdIds?.has(ad.id)}
-                progress={progressById?.[ad.id]}
-                onAdapt={onAdapt ? () => onAdapt(ad) : null}
-                onCrearReferencial={onCrearReferencial ? () => onCrearReferencial(ad) : null}
-                onToggleSelect={onToggleSelect ? () => onToggleSelect(ad.id) : null}
-              />
-            ))}
-            {fresh.length > 30 && (
-              <div className="aspect-square rounded-md flex items-center justify-center bg-gray-50 dark:bg-gray-900 border-2 border-dashed border-gray-200 dark:border-gray-700 text-[10px] text-gray-500 dark:text-gray-400 italic">
-                +{fresh.length - 30} más
-              </div>
-            )}
-          </div>
-        </div>
-      ) : (
-        <p className="text-[10px] italic text-gray-500 dark:text-gray-400 text-center py-2 bg-gray-50 dark:bg-gray-900/30 rounded">
-          Sin estáticos nuevos hoy — todos ya los habías visto.
-        </p>
-      )}
-
-      {/* Repetidos colapsables */}
-      {repeated.length > 0 && (
-        <div>
-          <button
-            onClick={() => setShowRepeated(s => !s)}
-            className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition flex items-center gap-1"
-          >
-            <ChevronRight size={10} className={`transition-transform ${showRepeated ? 'rotate-90' : ''}`} />
-            Ya vistos ({repeated.length})
-          </button>
-          {showRepeated && (
-            <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2 opacity-60">
-              {repeated.slice(0, 30).map(ad => (
-                <AdThumb
-                  key={ad.id}
-                  ad={ad}
-                  brandNombre={brandNombre}
-                  adapting={adaptingAdIds?.has(ad.id)}
-                  creando={creandoAdIds?.has(ad.id)}
-                  selected={seleccionados?.has(ad.id)}
-                  selectionIndex={selectedOrder?.get(ad.id) || null}
-                  onAdapt={onAdapt ? () => onAdapt(ad) : null}
-                  onCrearReferencial={onCrearReferencial ? () => onCrearReferencial(ad) : null}
-                  onToggleSelect={onToggleSelect ? () => onToggleSelect(ad.id) : null}
-                />
-              ))}
-              {repeated.length > 30 && (
-                <div className="aspect-square rounded-md flex items-center justify-center bg-gray-50 dark:bg-gray-900 border-2 border-dashed border-gray-200 dark:border-gray-700 text-[10px] text-gray-400 italic">
-                  +{repeated.length - 30}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Estima un % de progreso "honesto" para una llamada de gpt-image-2.
-// preparando: 0-8% / generando: 8-92% asintótico ~45s / guardando: 92-99% / done: 100%.
-
-// Top 10 escalados — agrega ads de todas las brands del producto, los rankea
-// por score (que el backend ya calcula con daysRunning + variantes +
-// multiplatform + pageLikeCount + penalty pause early), y los muestra en una
-// strip horizontal. Cada item es un AdThumb con sus acciones normales
-// (Crear creativo, + ideas en Bandeja, multi-select).
-function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect }) {
-  const [expanded, setExpanded] = useState(true);
-  // Vista del Top 10 — persistida en localStorage. 3 opciones:
-  //   grid: strip horizontal de 10 thumbs (default, denso)
-  //   list: rows con thumb chico + brand + métricas + acciones inline
-  //   table: tabla compacta con columnas para escanear rápido
-  const [viewMode, setViewMode] = useState(() => {
-    try { return localStorage.getItem('viora-top10-view') || 'grid'; }
-    catch { return 'grid'; }
-  });
-  const setMode = (m) => {
-    setViewMode(m);
-    try { localStorage.setItem('viora-top10-view', m); } catch {}
-  };
-  return (
-    <div className="bg-gradient-to-br from-amber-50 to-brand-50 dark:from-amber-950/30 dark:to-brand-950/30 border border-amber-200 dark:border-amber-800 rounded-xl overflow-hidden">
-      <div className="px-4 py-2.5 flex items-center gap-2.5 border-b border-amber-200/50 dark:border-amber-800/50">
-        <button
-          onClick={() => setExpanded(e => !e)}
-          className="flex items-center gap-2.5 text-left flex-1 min-w-0 hover:opacity-80 transition"
-        >
-          <span className="text-base">🏆</span>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-bold text-amber-900 dark:text-amber-200">
-              Top {items.length} escalados de tu competencia
-            </p>
-            <p className="text-[10px] text-amber-700 dark:text-amber-300/80 truncate">
-              Rankeados por: días corriendo + variantes activas + multiplataforma + popularidad de marca
-            </p>
-          </div>
-        </button>
-        {/* Toggle de vista — 3 iconos. Solo visible cuando está expanded. */}
-        {expanded && (
-          <div className="flex items-center gap-0.5 bg-white/60 dark:bg-gray-800/60 rounded-md p-0.5 shrink-0">
-            {[
-              { v: 'grid',  Icon: LayoutGrid, label: 'Grid'   },
-              { v: 'list',  Icon: Rows3,      label: 'Lista'  },
-              { v: 'table', Icon: Table2,     label: 'Tabla'  },
-            ].map(({ v, Icon, label }) => (
-              <button
-                key={v}
-                onClick={() => setMode(v)}
-                className={`p-1 rounded transition ${viewMode === v
-                  ? 'bg-amber-500 text-white shadow-sm'
-                  : 'text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/30'}`}
-                title={`Ver como ${label}`}
-              >
-                <Icon size={12} />
-              </button>
-            ))}
-          </div>
-        )}
-        <button
-          onClick={() => setExpanded(e => !e)}
-          className="p-1 rounded transition text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/30 shrink-0"
-          title={expanded ? 'Colapsar' : 'Expandir'}
-        >
-          <ChevronDown size={14} className={`transition-transform ${expanded ? 'rotate-180' : ''}`} />
-        </button>
-      </div>
-      {expanded && (
-        <div className="px-3 pb-3 pt-3">
-          {viewMode === 'grid' && (
-            <TopGridView items={items} adaptingAdIds={adaptingAdIds} creandoAdIds={creandoAdIds}
-              seleccionados={seleccionados} selectedOrder={selectedOrder} usedAdIds={usedAdIds} progressById={progressById}
-              onAdapt={onAdapt} onCrearReferencial={onCrearReferencial} onToggleSelect={onToggleSelect} />
-          )}
-          {viewMode === 'list' && (
-            <TopListView items={items} seleccionados={seleccionados} selectedOrder={selectedOrder}
-              adaptingAdIds={adaptingAdIds} creandoAdIds={creandoAdIds}
-              onAdapt={onAdapt} onCrearReferencial={onCrearReferencial} onToggleSelect={onToggleSelect} />
-          )}
-          {viewMode === 'table' && (
-            <TopTableView items={items} seleccionados={seleccionados} selectedOrder={selectedOrder}
-              adaptingAdIds={adaptingAdIds} creandoAdIds={creandoAdIds}
-              onAdapt={onAdapt} onCrearReferencial={onCrearReferencial} onToggleSelect={onToggleSelect} />
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// VISTA 1 — Grid: el strip horizontal original con 10 thumbs grandes.
-function TopGridView({ items, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect }) {
-  return (
-    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-10 gap-2">
-      {items.map(({ ad, brandNombre, isCompetidor }, idx) => (
-        <div key={ad.id} className="relative">
-          <div className={`absolute -top-1 -left-1 z-20 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shadow-md ${
-            idx === 0 ? 'bg-gradient-to-br from-amber-400 to-amber-600'
-            : idx < 3 ? 'bg-gradient-to-br from-amber-500 to-brand-500'
-            : 'bg-gradient-to-br from-gray-600 to-gray-700'
-          }`}>{idx + 1}</div>
-          <AdThumb
-            ad={ad} brandNombre={brandNombre} fresh={ad.isFresh !== false}
-            adapting={adaptingAdIds?.has(ad.id)} creando={creandoAdIds?.has(ad.id)}
-            selected={seleccionados?.has(ad.id)} selectionIndex={selectedOrder?.get(ad.id) || null} used={usedAdIds?.has(ad.id)}
-            progress={progressById?.[ad.id]}
-            onAdapt={onAdapt ? () => onAdapt(brandNombre, ad) : null}
-            onCrearReferencial={onCrearReferencial ? () => onCrearReferencial(brandNombre, ad) : null}
-            onToggleSelect={onToggleSelect ? () => onToggleSelect(ad.id) : null}
-          />
-          <div className="mt-1 px-0.5">
-            <p className="text-[9px] font-semibold text-gray-700 dark:text-gray-200 truncate">
-              {isCompetidor && <span className="text-brand-600 dark:text-brand-400">●</span>} {brandNombre}
-            </p>
-            <div className="flex items-center gap-1.5 text-[9px] text-gray-500 dark:text-gray-400">
-              {ad.daysRunning != null && <span title="Días corriendo">{ad.daysRunning}d</span>}
-              {ad.variantes > 0 && <span title="Variantes activas">·{ad.variantes}v</span>}
-              {typeof ad.score === 'number' && <span className="ml-auto font-bold text-amber-600 dark:text-amber-400" title="Score compuesto">{Math.round(ad.score)}</span>}
-            </div>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// VISTA 2 — List: rows compactas con thumb chico + métricas + acciones inline.
-// Para escanear más rápido y ver el headline / body de cada ad.
-function TopListView({ items, seleccionados, selectedOrder, adaptingAdIds, creandoAdIds, onAdapt, onCrearReferencial, onToggleSelect }) {
-  return (
-    <div className="space-y-1.5">
-      {items.map(({ ad, brandNombre, isCompetidor }, idx) => {
-        const isSel = seleccionados?.has(ad.id);
-        const selIdx = selectedOrder?.get(ad.id);
-        const thumb = ad.imageUrls?.[0];
-        return (
-          <div key={ad.id}
-            className={`flex items-center gap-2.5 p-1.5 rounded-md border transition ${
-              isSel
-                ? 'bg-brand-50 dark:bg-brand-900/30 border-brand-300 dark:border-brand-700'
-                : 'bg-white/60 dark:bg-gray-800/60 border-transparent hover:border-amber-300 dark:hover:border-amber-700'
-            }`}
-          >
-            {/* Ranking badge */}
-            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0 shadow-sm ${
-              idx === 0 ? 'bg-gradient-to-br from-amber-400 to-amber-600'
-              : idx < 3 ? 'bg-gradient-to-br from-amber-500 to-brand-500'
-              : 'bg-gradient-to-br from-gray-600 to-gray-700'
-            }`}>{idx + 1}</div>
-            {/* Thumb chiquito */}
-            <div className="w-12 h-12 rounded bg-gray-100 dark:bg-gray-900 overflow-hidden shrink-0 border border-gray-200 dark:border-gray-700">
-              {thumb && <img src={thumb} alt="" className="w-full h-full object-cover" onError={e => { e.target.style.display = 'none'; }} />}
-            </div>
-            {/* Info */}
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5 text-xs">
-                {isCompetidor && <span className="text-brand-600 dark:text-brand-400 text-[10px]">●</span>}
-                <span className="font-bold text-gray-900 dark:text-gray-100 truncate">{brandNombre}</span>
-                {typeof ad.score === 'number' && (
-                  <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 tabular-nums shrink-0">score {Math.round(ad.score)}</span>
-                )}
-              </div>
-              <p className="text-[10px] text-gray-600 dark:text-gray-300 truncate">
-                {ad.headline || ad.body?.slice(0, 80) || <span className="italic text-gray-400">(sin texto)</span>}
-              </p>
-              <div className="flex items-center gap-2 text-[9px] text-gray-500 dark:text-gray-400 mt-0.5">
-                {ad.daysRunning != null && <span>{ad.daysRunning}d corriendo</span>}
-                {ad.variantes > 0 && <span>· {ad.variantes} variantes</span>}
-                {ad.isMultiplatform && <span>· multiplataforma</span>}
-              </div>
-            </div>
-            {/* Acciones */}
-            <div className="flex items-center gap-1 shrink-0">
-              {onToggleSelect && (
-                <button
-                  onClick={() => onToggleSelect(ad.id)}
-                  className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition ${
-                    isSel ? 'bg-brand-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-400 hover:bg-brand-50 hover:text-brand-600'
-                  }`}
-                  title={isSel ? `Seleccionado #${selIdx}` : 'Seleccionar'}
-                >
-                  {isSel ? selIdx : <Plus size={12} />}
-                </button>
-              )}
-              {onCrearReferencial && (
-                <button
-                  onClick={() => onCrearReferencial(brandNombre, ad)}
-                  disabled={creandoAdIds?.has(ad.id)}
-                  className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded disabled:opacity-50"
-                  title="Crear creativo"
-                >
-                  {creandoAdIds?.has(ad.id) ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />}
-                </button>
-              )}
-              {onAdapt && (
-                <button
-                  onClick={() => onAdapt(brandNombre, ad)}
-                  disabled={adaptingAdIds?.has(ad.id)}
-                  className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold text-white bg-amber-500 hover:bg-amber-600 rounded disabled:opacity-50"
-                  title="+ ideas en Bandeja"
-                >
-                  {adaptingAdIds?.has(ad.id) ? <Loader2 size={10} className="animate-spin" /> : <Wand2 size={10} />}
-                </button>
-              )}
-              {ad.snapshotUrl && (
-                <a href={ad.snapshotUrl} target="_blank" rel="noreferrer"
-                  className="inline-flex items-center px-2 py-1 text-[10px] text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
-                  title="Ver en FB"
-                >
-                  <ExternalLink size={10} />
-                </a>
-              )}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// VISTA 3 — Table: tabla densa para escanear varias métricas a la vez.
-function TopTableView({ items, seleccionados, selectedOrder, adaptingAdIds, creandoAdIds, onAdapt, onCrearReferencial, onToggleSelect }) {
-  return (
-    <div className="overflow-x-auto -mx-3 px-3">
-      <table className="w-full text-xs">
-        <thead>
-          <tr className="text-[9px] uppercase tracking-wider text-amber-700 dark:text-amber-300/80 border-b border-amber-200/50 dark:border-amber-800/50">
-            <th className="text-left py-1.5 pr-2 font-bold">#</th>
-            <th className="text-left py-1.5 px-2 font-bold">Ad</th>
-            <th className="text-left py-1.5 px-2 font-bold">Marca</th>
-            <th className="text-right py-1.5 px-2 font-bold">Días</th>
-            <th className="text-right py-1.5 px-2 font-bold">Variantes</th>
-            <th className="text-right py-1.5 px-2 font-bold">Multi</th>
-            <th className="text-right py-1.5 px-2 font-bold">Score</th>
-            <th className="text-right py-1.5 pl-2 font-bold">Acciones</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-amber-200/30 dark:divide-amber-800/30">
-          {items.map(({ ad, brandNombre, isCompetidor }, idx) => {
-            const isSel = seleccionados?.has(ad.id);
-            const selIdx = selectedOrder?.get(ad.id);
-            const thumb = ad.imageUrls?.[0];
-            return (
-              <tr key={ad.id} className={`${isSel ? 'bg-brand-50/50 dark:bg-brand-900/20' : 'hover:bg-amber-100/30 dark:hover:bg-amber-900/20'} transition`}>
-                <td className="py-1.5 pr-2">
-                  <span className={`inline-flex w-5 h-5 rounded-full items-center justify-center text-[9px] font-bold text-white ${
-                    idx === 0 ? 'bg-gradient-to-br from-amber-400 to-amber-600'
-                    : idx < 3 ? 'bg-gradient-to-br from-amber-500 to-brand-500'
-                    : 'bg-gradient-to-br from-gray-600 to-gray-700'
-                  }`}>{idx + 1}</span>
-                </td>
-                <td className="py-1.5 px-2">
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded bg-gray-100 dark:bg-gray-900 overflow-hidden shrink-0 border border-gray-200 dark:border-gray-700">
-                      {thumb && <img src={thumb} alt="" className="w-full h-full object-cover" onError={e => { e.target.style.display = 'none'; }} />}
-                    </div>
-                    <span className="text-[10px] text-gray-700 dark:text-gray-300 truncate max-w-[200px]">{ad.headline || ad.body?.slice(0, 50) || '—'}</span>
-                  </div>
-                </td>
-                <td className="py-1.5 px-2 text-gray-700 dark:text-gray-200">
-                  {isCompetidor && <span className="text-brand-600 dark:text-brand-400 text-[10px]">●</span>} {brandNombre}
-                </td>
-                <td className="py-1.5 px-2 text-right tabular-nums text-gray-600 dark:text-gray-400">{ad.daysRunning ?? '—'}</td>
-                <td className="py-1.5 px-2 text-right tabular-nums text-gray-600 dark:text-gray-400">{ad.variantes || 0}</td>
-                <td className="py-1.5 px-2 text-right text-gray-600 dark:text-gray-400">{ad.isMultiplatform ? '✓' : '—'}</td>
-                <td className="py-1.5 px-2 text-right font-bold tabular-nums text-amber-600 dark:text-amber-400">{typeof ad.score === 'number' ? Math.round(ad.score) : '—'}</td>
-                <td className="py-1.5 pl-2 text-right">
-                  <div className="inline-flex items-center gap-1">
-                    {onToggleSelect && (
-                      <button onClick={() => onToggleSelect(ad.id)}
-                        className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold transition ${
-                          isSel ? 'bg-brand-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-400 hover:bg-brand-50 hover:text-brand-600'
-                        }`}
-                        title={isSel ? `Seleccionado #${selIdx}` : 'Seleccionar'}
-                      >
-                        {isSel ? selIdx : <Plus size={10} />}
-                      </button>
-                    )}
-                    {onCrearReferencial && (
-                      <button onClick={() => onCrearReferencial(brandNombre, ad)}
-                        disabled={creandoAdIds?.has(ad.id)}
-                        className="p-1 text-white bg-brand-600 hover:bg-brand-700 rounded disabled:opacity-50"
-                        title="Crear creativo"
-                      >
-                        {creandoAdIds?.has(ad.id) ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />}
-                      </button>
-                    )}
-                    {onAdapt && (
-                      <button onClick={() => onAdapt(brandNombre, ad)}
-                        disabled={adaptingAdIds?.has(ad.id)}
-                        className="p-1 text-white bg-amber-500 hover:bg-amber-600 rounded disabled:opacity-50"
-                        title="+ ideas en Bandeja"
-                      >
-                        {adaptingAdIds?.has(ad.id) ? <Loader2 size={10} className="animate-spin" /> : <Wand2 size={10} />}
-                      </button>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
     </div>
   );
 }

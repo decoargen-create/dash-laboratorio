@@ -620,16 +620,42 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // el pull baja los productos a localStorage pero Arranque queda con
   // su state inicial = [] → user ve "Sin productos" hasta que refresca.
   useEffect(() => {
-    const onPulled = () => {
+    const reload = () => {
       try {
         const fresh = loadJSON(PRODUCTOS_KEY, []);
-        if (Array.isArray(fresh) && fresh.length > 0) {
-          setProductos(fresh);
+        if (Array.isArray(fresh)) {
+          // Solo cambiamos si la lista del localStorage difiere del state.
+          // Comparamos por largo + ids para evitar re-renders innecesarios.
+          setProductos(prev => {
+            if (prev.length !== fresh.length) return fresh;
+            const prevIds = prev.map(p => String(p.id)).sort().join(',');
+            const freshIds = fresh.map(p => String(p.id)).sort().join(',');
+            return prevIds === freshIds ? prev : fresh;
+          });
         }
       } catch {}
     };
-    window.addEventListener('viora:marketing-pulled', onPulled);
-    return () => window.removeEventListener('viora:marketing-pulled', onPulled);
+    // Triple cobertura para no perder el pull:
+    // 1. Evento explícito de marketingSync cuando termina pullMarketingFromCloud
+    // 2. Storage event nativo (cuando otra tab cambia localStorage)
+    // 3. Polling cada 3s durante los primeros 15s tras mount (defensivo si
+    //    el evento se pierde por race de mount/unmount)
+    window.addEventListener('viora:marketing-pulled', reload);
+    const onStorage = (e) => {
+      if (!e.key || e.key === PRODUCTOS_KEY) reload();
+    };
+    window.addEventListener('storage', onStorage);
+    let polls = 0;
+    const pollId = setInterval(() => {
+      polls++;
+      reload();
+      if (polls >= 5) clearInterval(pollId);
+    }, 3000);
+    return () => {
+      window.removeEventListener('viora:marketing-pulled', reload);
+      window.removeEventListener('storage', onStorage);
+      clearInterval(pollId);
+    };
   }, []);
 
   // Producto activo — null = vista de lista, id = workspace del producto.

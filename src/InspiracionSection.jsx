@@ -1497,7 +1497,7 @@ function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, se
   );
 }
 
-function AdThumbImpl({ ad, brandNombre, fresh = false, adapting = false, creando = false, selected = false, selectionIndex = null, onAdapt, onCrearReferencial, onToggleSelect, progress = null }) {
+function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = false, selected = false, selectionIndex = null, onAdapt, onCrearReferencial, onToggleSelect, progress = null }) {
   const cdnThumb = ad.imageUrls?.[0];
   const fbUrl = ad.snapshotUrl;
   // Si tenemos el ad cacheado en IndexedDB (sobreviven el TTL de 24h del CDN),

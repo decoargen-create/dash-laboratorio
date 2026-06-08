@@ -9,7 +9,7 @@ import {
   Moon, Sun, ChevronDown, ChevronRight, Search, X, Command, Check, Bell,
   AlignJustify, LayoutGrid, Columns3, Sparkles, Bot, Zap, Activity, FileText, Settings, Loader2, Calculator, Copy, Save, RotateCcw, Target, Play, Inbox, BarChart3, Instagram, SlidersHorizontal, ClipboardList
 } from 'lucide-react';
-import { VioraLogo, VioraMark } from './logo.jsx';
+import { VioraLogo, VioraMark, AdsLabLogo, AdsLabMark } from './logo.jsx';
 import LandingPage from './LandingPage.jsx';
 import BocetosSection from './Bocetos.jsx';
 import MarketingSection from './Marketing.jsx';
@@ -595,44 +595,17 @@ const ACCENT_PRESETS = {
 // propio look (sidebar gradient + acento) y sus datos aislados.
 // Para agregar una nueva plataforma: sumala acá + agregá su sidebar en el
 // render del AppShell (bloque condicional por currentPlatform).
+// Plataformas disponibles. Sacamos Viora, Senydrop y Meta Ads del switcher
+// (decisión user: confidencialidad + foco solo en lo de Marketing). Los
+// archivos / componentes siguen existiendo en el repo por si en algún
+// momento se reactivan, pero el sidebar no los muestra y el routing no los
+// renderiza.
 const PLATFORMS = [
   {
-    id: 'viora',
-    name: 'Laboratorio Viora',
-    shortName: 'Viora',
-    initials: 'LV',
-    // Tailwind clases para el gradient del sidebar.
-    sidebarGradient: 'from-[#4a0f22] via-pink-900 to-[#3f0c1e]',
-    // Clase del "badge" cuadrado en el switcher.
-    badgeBg: 'bg-gradient-to-br from-pink-600 to-rose-500',
-    badgeText: 'text-white',
-    defaultSection: 'inicio',
-  },
-  {
-    id: 'senydrop',
-    name: 'Senydrop',
-    shortName: 'Senydrop',
-    initials: 'SD',
-    sidebarGradient: 'from-gray-900 via-gray-800 to-black',
-    badgeBg: 'bg-[#FFD33D]',
-    badgeText: 'text-gray-900',
-    defaultSection: 'seny-productos',
-  },
-  {
-    id: 'metaads',
-    name: 'Meta Ads',
-    shortName: 'Meta Ads',
-    initials: 'MA',
-    sidebarGradient: 'from-[#0668E1] via-[#1877F2] to-[#0053A0]',
-    badgeBg: 'bg-gradient-to-br from-[#0668E1] to-[#1877F2]',
-    badgeText: 'text-white',
-    defaultSection: 'meta-inicio',
-  },
-  {
     id: 'marketing',
-    name: 'Marketing',
-    shortName: 'Marketing',
-    initials: 'MK',
+    name: 'AdsLab',
+    shortName: 'AdsLab',
+    initials: 'AL',
     sidebarGradient: 'from-purple-900 via-purple-700 to-violet-800',
     badgeBg: 'bg-gradient-to-br from-purple-600 to-violet-500',
     badgeText: 'text-white',
@@ -650,8 +623,20 @@ const PLATFORMS = [
   },
 ];
 
+// Plataformas ocultas — el código de Viora/Senydrop/MetaAds quedó por si
+// necesitás re-habilitarlas. Para hacerlo, moverlas de acá a PLATFORMS arriba.
+const HIDDEN_PLATFORMS = [
+  { id: 'viora',    name: 'Laboratorio Viora', shortName: 'Viora',    initials: 'LV', sidebarGradient: 'from-[#4a0f22] via-pink-900 to-[#3f0c1e]', badgeBg: 'bg-gradient-to-br from-pink-600 to-rose-500', badgeText: 'text-white', defaultSection: 'inicio' },
+  { id: 'senydrop', name: 'Senydrop',          shortName: 'Senydrop', initials: 'SD', sidebarGradient: 'from-gray-900 via-gray-800 to-black',     badgeBg: 'bg-[#FFD33D]',                                badgeText: 'text-gray-900', defaultSection: 'seny-productos' },
+  { id: 'metaads',  name: 'Meta Ads',          shortName: 'Meta Ads', initials: 'MA', sidebarGradient: 'from-[#0668E1] via-[#1877F2] to-[#0053A0]', badgeBg: 'bg-gradient-to-br from-[#0668E1] to-[#1877F2]', badgeText: 'text-white', defaultSection: 'meta-inicio' },
+];
+
 function getPlatform(id) {
-  return PLATFORMS.find(p => p.id === id) || PLATFORMS[0];
+  // Si por algún motivo (localStorage viejo) el user tiene una plataforma
+  // oculta en su preferencia, devolvemos AdsLab (marketing).
+  return PLATFORMS.find(p => p.id === id)
+    || HIDDEN_PLATFORMS.find(p => p.id === id)
+    || PLATFORMS[0];
 }
 
 // Switcher al tope del sidebar. Muestra la plataforma activa y, al hacer click,
@@ -1414,13 +1399,26 @@ function AppShell({ onExit }) {
   // Plataforma actual (switcher en el tope del sidebar). Cada plataforma tiene
   // su propio sidebar (logo, colores, secciones) y sus datos aislados.
   const [currentPlatform, setCurrentPlatform] = useState(() => {
-    try { return localStorage.getItem('viora-current-platform') || 'viora'; } catch { return 'viora'; }
+    try {
+      const saved = localStorage.getItem('viora-current-platform');
+      // Si tenía guardada una plataforma que ya no existe (viora, senydrop,
+      // metaads), forzamos marketing como default.
+      const valid = ['marketing', 'consultoria'];
+      return valid.includes(saved) ? saved : 'marketing';
+    } catch { return 'marketing'; }
   });
   useEffect(() => {
     try { localStorage.setItem('viora-current-platform', currentPlatform); } catch {}
   }, [currentPlatform]);
   const [currentSection, setCurrentSection] = useState(() => {
-    try { return localStorage.getItem('viora-last-section') || 'inicio'; } catch { return 'inicio'; }
+    try {
+      const saved = localStorage.getItem('viora-last-section');
+      // Si tenía una sección de Viora/Senydrop/MetaAds, defaulteamos a la
+      // de Marketing. Lista de secciones válidas en las plataformas activas:
+      const validSections = ['mk-arranque', 'mk-bandeja', 'mk-meta-ads', 'mk-auto-ig',
+        'mk-inspiracion', 'mk-gastos', 'mk-docs', 'con-acta'];
+      return validSections.includes(saved) ? saved : 'mk-arranque';
+    } catch { return 'mk-arranque'; }
   });
   useEffect(() => {
     try { localStorage.setItem('viora-last-section', currentSection); } catch {}
@@ -2523,7 +2521,7 @@ function LoginScreen({ onLogin, onSessionAuth, darkMode, toggleDarkMode }) {
       </button>
       <div className="w-full max-w-md bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-8">
         <div className="text-center mb-8 flex flex-col items-center">
-          <VioraLogo size="md" variant={darkMode ? 'light' : 'default'} />
+          <AdsLabLogo size="md" variant={darkMode ? 'light' : 'default'} />
           <p className="text-gray-600 dark:text-gray-400 mt-1 text-xs tracking-widest uppercase">Panel de gestión</p>
         </div>
 
@@ -8057,7 +8055,7 @@ function getSectionTitle(user, section) {
     resumen: 'Mi Balance',
     'mis-clientes': 'Mis Clientes',
   };
-  return (user?.role === 'admin' ? admin[section] : mentor[section]) || 'Laboratorio Viora';
+  return (user?.role === 'admin' ? admin[section] : mentor[section]) || 'AdsLab';
 }
 
 // Header sticky que agrega blur + border al hacer scroll. Incluye el botón
@@ -8674,7 +8672,7 @@ function CommandPalette({ state, currentUser, onClose, onNavigate, onNewSale, on
             <span className="inline-flex items-center gap-1"><kbd className="font-mono">↑↓</kbd> navegar</span>
             <span className="inline-flex items-center gap-1"><kbd className="font-mono">↵</kbd> ejecutar</span>
           </div>
-          <span>Laboratorio Viora</span>
+          <span>AdsLab</span>
         </div>
       </div>
     </div>
@@ -8723,7 +8721,7 @@ export default function App() {
     try {
       const tag = typeof __VIORA_BUILD__ !== 'undefined' ? __VIORA_BUILD__ : 'unknown';
       // eslint-disable-next-line no-console
-      console.info(`%c[Viora build] ${tag}`, 'color: #c026d3; font-weight: bold');
+      console.info(`%c[AdsLab build] ${tag}`, 'color: #c026d3; font-weight: bold');
       window.__VIORA_BUILD__ = tag;
     } catch {}
     return () => window.removeEventListener('popstate', onPop);

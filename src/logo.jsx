@@ -1,5 +1,38 @@
 import React from 'react';
 
+// Logo de AdsLab — wordmark simple para reemplazar al de Viora en el header
+// y login screen. La versión SVG full de Viora queda como VioraLogo abajo
+// por compatibilidad si después la necesitamos.
+export function AdsLabLogo({ variant = 'default', size = 'md', className = '' }) {
+  const sizes = {
+    sm: 'text-xl',
+    md: 'text-3xl',
+    lg: 'text-5xl',
+    xl: 'text-6xl',
+  };
+  const color = variant === 'light' ? 'text-white' : 'text-gray-900 dark:text-white';
+  return (
+    <div className={`inline-flex items-baseline gap-1 ${className}`}>
+      <span className={`font-extrabold tracking-tight ${sizes[size] || sizes.md} ${color}`}>
+        Ads
+      </span>
+      <span className={`font-extrabold tracking-tight ${sizes[size] || sizes.md} bg-gradient-to-r from-purple-500 to-violet-500 bg-clip-text text-transparent`}>
+        Lab
+      </span>
+    </div>
+  );
+}
+
+export function AdsLabMark({ size = 24, className = '' }) {
+  return (
+    <div className={`inline-flex items-center justify-center rounded-md bg-gradient-to-br from-purple-600 to-violet-500 text-white font-bold ${className}`}
+      style={{ width: size, height: size, fontSize: size * 0.45 }}
+    >
+      AL
+    </div>
+  );
+}
+
 // Logo del Laboratorio Viora recreado como SVG inline.
 // - variant: 'default' (claro) para fondos claros, 'light' para fondos oscuros
 //   (el texto principal pasa a blanco y el label "LABORATORIO" a crema).

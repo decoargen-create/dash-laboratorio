@@ -67,7 +67,7 @@ export default function SupabaseAuthScreen({ onLoggedIn }) {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-pink-950 via-rose-900 to-purple-950 p-4">
       <div className="w-full max-w-sm bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl p-6">
         <div className="text-center mb-5">
-          <h1 className="text-xl font-bold text-white mb-1">Laboratorio Viora — Marketing</h1>
+          <h1 className="text-xl font-bold text-white mb-1">AdsLab</h1>
           <p className="text-xs text-white/60">
             {mode === 'login' ? 'Entrá con tu cuenta' : 'Creá una cuenta nueva'}
           </p>

@@ -1031,8 +1031,41 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           return bT - aT;
         });
 
+        // ====================================================================
+        // TOP 10 ESCALADOS — agregamos ads de TODAS las brands (competidores
+        // y custom), filtramos estáticos, ordenamos por score desc.
+        // El score ya considera daysRunning + variantes + multiplatform +
+        // pageLikeCount + penalty pause early (ver _apify.js scoreAd).
+        // ====================================================================
+        const allAdsForRanking = [];
+        unif.forEach(b => {
+          (b.__ads || []).forEach(ad => {
+            // Solo ads con imagen + score conocido (ya pasaron por scoreAd).
+            if ((ad.imageUrls?.length || 0) === 0) return;
+            if (typeof ad.score !== 'number') return;
+            allAdsForRanking.push({ ad, brandNombre: b.nombre, isCompetidor: b.isCompetidor });
+          });
+        });
+        const topEscalados = allAdsForRanking
+          .sort((a, b) => (b.ad.score || 0) - (a.ad.score || 0))
+          .slice(0, 10);
+
         return (
           <div className="space-y-4">
+            {/* Top 10 escalados — solo aparece si hay 3+ ads para rankear. */}
+            {topEscalados.length >= 3 && (
+              <TopEscaladosBar
+                items={topEscalados}
+                adaptingAdIds={adaptingAdIds}
+                creandoAdIds={creandoAdIds}
+                seleccionados={seleccionados}
+                progressById={progressById}
+                onAdapt={(brandNombre, ad) => handleAdapt(brandNombre, ad)}
+                onCrearReferencial={(brandNombre, ad) => crearReferencialDeAd(brandNombre, ad)}
+                onToggleSelect={(adId) => toggleSeleccion(adId)}
+              />
+            )}
+
             {/* Barra de filtros + ordenamiento */}
             <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-3 flex flex-wrap gap-2 items-center">
               <div className="relative flex-1 min-w-[180px]">
@@ -1375,6 +1408,75 @@ function BulkProgressBar({ state, onClose }) {
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+// Top 10 escalados — agrega ads de todas las brands del producto, los rankea
+// por score (que el backend ya calcula con daysRunning + variantes +
+// multiplatform + pageLikeCount + penalty pause early), y los muestra en una
+// strip horizontal. Cada item es un AdThumb con sus acciones normales
+// (Crear creativo, + ideas en Bandeja, multi-select).
+function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, progressById, onAdapt, onCrearReferencial, onToggleSelect }) {
+  const [expanded, setExpanded] = useState(true);
+  return (
+    <div className="bg-gradient-to-br from-amber-50 to-brand-50 dark:from-amber-950/30 dark:to-brand-950/30 border border-amber-200 dark:border-amber-800 rounded-xl overflow-hidden">
+      <button
+        onClick={() => setExpanded(e => !e)}
+        className="w-full px-4 py-2.5 flex items-center gap-2.5 text-left hover:bg-amber-100/40 dark:hover:bg-amber-900/20 transition"
+      >
+        <span className="text-base">🏆</span>
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-bold text-amber-900 dark:text-amber-200">
+            Top {items.length} escalados de tu competencia
+          </p>
+          <p className="text-[10px] text-amber-700 dark:text-amber-300/80">
+            Rankeados por: días corriendo + variantes activas + multiplataforma + popularidad de marca
+          </p>
+        </div>
+        <ChevronDown size={14} className={`text-amber-700 dark:text-amber-300 transition-transform shrink-0 ${expanded ? 'rotate-180' : ''}`} />
+      </button>
+      {expanded && (
+        <div className="px-3 pb-3">
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-10 gap-2">
+            {items.map(({ ad, brandNombre, isCompetidor }, idx) => (
+              <div key={ad.id} className="relative">
+                {/* Badge de ranking — esquina superior izquierda */}
+                <div className={`absolute -top-1 -left-1 z-20 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shadow-md ${
+                  idx === 0 ? 'bg-gradient-to-br from-amber-400 to-amber-600'
+                  : idx < 3 ? 'bg-gradient-to-br from-amber-500 to-brand-500'
+                  : 'bg-gradient-to-br from-gray-600 to-gray-700'
+                }`}>
+                  {idx + 1}
+                </div>
+                <AdThumb
+                  ad={ad}
+                  brandNombre={brandNombre}
+                  fresh={ad.isFresh !== false}
+                  adapting={adaptingAdIds?.has(ad.id)}
+                  creando={creandoAdIds?.has(ad.id)}
+                  selected={seleccionados?.has(ad.id)}
+                  progress={progressById?.[ad.id]}
+                  onAdapt={onAdapt ? () => onAdapt(brandNombre, ad) : null}
+                  onCrearReferencial={onCrearReferencial ? () => onCrearReferencial(brandNombre, ad) : null}
+                  onToggleSelect={onToggleSelect ? () => onToggleSelect(ad.id) : null}
+                />
+                {/* Footer chico con brand + métricas para que no sea solo thumb */}
+                <div className="mt-1 px-0.5">
+                  <p className="text-[9px] font-semibold text-gray-700 dark:text-gray-200 truncate">
+                    {isCompetidor && <span className="text-brand-600 dark:text-brand-400">●</span>} {brandNombre}
+                  </p>
+                  <div className="flex items-center gap-1.5 text-[9px] text-gray-500 dark:text-gray-400">
+                    {ad.daysRunning != null && <span title="Días corriendo">{ad.daysRunning}d</span>}
+                    {ad.variantes > 0 && <span title="Variantes activas">·{ad.variantes}v</span>}
+                    {typeof ad.score === 'number' && <span className="ml-auto font-bold text-amber-600 dark:text-amber-400" title="Score compuesto">{Math.round(ad.score)}</span>}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

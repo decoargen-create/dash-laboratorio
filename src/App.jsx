@@ -1806,11 +1806,18 @@ function AppShell({ onExit }) {
     addToast({ type: 'success', message: `Bienvenido, ${user.name}` });
   };
 
-  const handleLogout = () => {
-    // Limpiamos la sesión de magic link también, por si el user vino por ahí.
+  const handleLogout = async () => {
+    // Sign out de Supabase Auth — la principal puerta ahora. El listener
+    // onAuthChange (en el useEffect arriba) limpia supabaseUser → el
+    // useEffect que sincroniza supabaseUser ↔ currentUser hace setCurrentUser
+    // (null). Pero por las dudas también limpiamos acá la sesión legacy.
+    if (supabase) {
+      try { await supabase.auth.signOut(); } catch {}
+    }
     localStorage.removeItem('viora-session');
     setCurrentUser(null);
-    setCurrentSection('inicio');
+    setSupabaseUser(null);
+    setCurrentSection('mk-arranque');
     // Al cerrar sesión, volvemos a la landing pública si el parent lo soporta.
     if (typeof onExit === 'function') onExit();
   };
@@ -1946,12 +1953,33 @@ function AppShell({ onExit }) {
     setMobileMenuOpen(false);
   }, [currentSection]);
 
+  // Auto-derivamos currentUser desde la sesión de Supabase. Si hay sesión,
+  // tratamos al user como admin (el dueño de la app). Eso reemplaza el flujo
+  // viejo de login local con AUTH_USERS — Supabase Auth es ahora la única
+  // puerta. El componente LoginScreen y el endpoint /api/auth siguen en el
+  // repo intactos por si en algún momento se necesitan de nuevo.
+  useEffect(() => {
+    if (supabaseUser && !currentUser) {
+      setCurrentUser({
+        role: 'admin',
+        name: supabaseUser.user_metadata?.display_name || supabaseUser.email?.split('@')[0] || 'Admin',
+        email: supabaseUser.email,
+        id: 'admin',
+      });
+    } else if (!supabaseUser && currentUser) {
+      // Si la sesión de Supabase expiró/salió, deslogueamos del dashboard.
+      setCurrentUser(null);
+    }
+  }, [supabaseUser, currentUser]);
+
   if (!currentUser) {
-    // Renderizamos también el ToastContainer para que los avisos del
-    // bootstrap de auth (link inválido, link enviado) sean visibles.
+    // Sin sesión de Supabase → pantalla de auth Supabase (la única ahora).
+    // Renderizamos toasts en paralelo por avisos del bootstrap.
     return (
       <>
-        <LoginScreen onLogin={handleLogin} onSessionAuth={handleSessionAuth} darkMode={darkMode} toggleDarkMode={toggleDarkMode} />
+        {supabase
+          ? <SupabaseAuthScreen onLoggedIn={setSupabaseUser} />
+          : <LoginScreen onLogin={handleLogin} onSessionAuth={handleSessionAuth} darkMode={darkMode} toggleDarkMode={toggleDarkMode} />}
         <ToastContainer toasts={toasts} />
       </>
     );
@@ -2163,12 +2191,9 @@ function AppShell({ onExit }) {
           {currentUser.role === 'admin' && currentPlatform === 'viora' && currentSection === 'datos' && <DatosSection state={state} dispatch={dispatch} addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'senydrop' && currentSection === 'seny-productos' && <BocetosSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'metaads' && <MetaAdsPlaceholder section={currentSection} />}
-          {/* GATE: si estoy en Marketing pero no hay user Supabase logueado,
-              corto el render y muestro el auth screen. El resto de las
-              plataformas (Viora, MetaAds, etc.) NO requieren Supabase. */}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && !supabaseUser && supabase && (
-            <SupabaseAuthScreen onLoggedIn={setSupabaseUser} />
-          )}
+          {/* Gate doble de Supabase removido — ahora la auth Supabase es la
+              ÚNICA puerta global (ver checkpoint arriba). Si llegamos acá,
+              ya hay supabaseUser. */}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && (
             <MetaConnectBanner returnTo={`/acceso?section=${currentSection}`} />
           )}

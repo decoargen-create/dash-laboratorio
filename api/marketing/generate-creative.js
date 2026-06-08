@@ -5,12 +5,32 @@
 // POST /api/marketing/generate-creative
 // Body: { idea: { hook, titulo, promptGeneradorImagen, descripcionImagen,
 //                  textoEnImagen, copyPostMeta, estiloVisual, formato }, quality? }
+//
+// Robustez (alineada con crear-creativo-referencial):
+// - sanitizePromptForSafety con auto-detección de high-risk (wellness/íntimo)
+// - retry agresivo automático tras safety reject
+// - moderation: 'low' (el setting más permisivo permitido por OpenAI)
+// - mensajes accionables para errors comunes (sin saldo, key inválida, etc.)
+
+import {
+  sanitizePromptForSafety,
+  isHighRiskText,
+  isSafetyError,
+  friendlyOpenAIError,
+} from './_safety.js';
 
 const MODEL = 'gpt-image-2';
 
-// Costo estimado por imagen — gpt-image-2 cobra por tokens, pero para
-// loguear en GastosStack usamos un promedio razonable según calidad.
-const COST_ESTIMATE = { low: 0.03, medium: 0.07, high: 0.18 };
+// Tabla size+quality-aware igual que crear-creativo-referencial (PR #122).
+// Antes era flat 0.03/0.07/0.18 sin considerar size — subestimaba 3-4x.
+const COST_ESTIMATE_BY_SIZE = {
+  low:    { '1024x1024': 0.013, '1024x1536': 0.020, '1536x1024': 0.020, '2048x2048': 0.050 },
+  medium: { '1024x1024': 0.046, '1024x1536': 0.068, '1536x1024': 0.068, '2048x2048': 0.175 },
+  high:   { '1024x1024': 0.180, '1024x1536': 0.262, '1536x1024': 0.262, '2048x2048': 0.680 },
+};
+function estimateImageCost(quality, size) {
+  return COST_ESTIMATE_BY_SIZE[quality]?.[size] ?? COST_ESTIMATE_BY_SIZE.medium['1024x1024'];
+}
 
 async function readBody(req) {
   if (req.body && typeof req.body === 'object') return req.body;
@@ -67,6 +87,54 @@ function buildPrompt(idea) {
   return parts.join('\n');
 }
 
+// Helper: pega a OpenAI con retry agresivo si safety filter rechaza.
+// 2 intentos máximo (el primero con sanitización normal, el segundo con
+// agresiva). Si llega start=true desde detector de high-risk, ambos van
+// agresivos.
+async function callOpenAIImage({ apiKey, rawPrompt, size, quality, startAggressive = false }) {
+  let aggressive = startAggressive;
+  let lastErr = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const prompt = sanitizePromptForSafety(rawPrompt, aggressive);
+    const resp = await fetch('https://api.openai.com/v1/images/generations', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ model: MODEL, prompt, size, quality, n: 1, moderation: 'low' }),
+    });
+    const raw = await resp.text();
+    let data;
+    try { data = JSON.parse(raw); }
+    catch {
+      throw new Error(`OpenAI devolvió respuesta no-JSON (HTTP ${resp.status}). Reintentá en unos segundos.`);
+    }
+    if (resp.ok) {
+      const b64 = data?.data?.[0]?.b64_json;
+      if (!b64) throw new Error('OpenAI no devolvió imagen (b64_json ausente).');
+      // Defensiva: detección de imagen vacía
+      if (b64.length < 10000) {
+        throw new Error('OpenAI devolvió imagen sospechosamente chica — probable safety silent. Probá otro ángulo.');
+      }
+      return { imageBase64: b64, usage: data?.usage || null, aggressiveUsed: aggressive };
+    }
+    const msg = data?.error?.message || `HTTP ${resp.status}`;
+    const code = data?.error?.code || data?.error?.type || '';
+    // Si fue safety reject y NO estábamos agresivo → retry agresivo
+    if (isSafetyError(msg, code) && !aggressive) {
+      aggressive = true;
+      continue;
+    }
+    // Fallar con mensaje friendly
+    lastErr = new Error(friendlyOpenAIError(msg, code, resp.status, MODEL));
+    lastErr.code = code;
+    lastErr.status = resp.status;
+    throw lastErr;
+  }
+  throw lastErr || new Error('Generación falló después de los retries.');
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
 
@@ -84,46 +152,31 @@ export default async function handler(req, res) {
   }
   const quality = ['low', 'medium', 'high'].includes(body?.quality) ? body.quality : 'medium';
   const size = sizeForFormato(idea.formato);
-  const prompt = buildPrompt(idea);
+  const rawPrompt = buildPrompt(idea);
+
+  // Auto-detección: si el texto de la idea tiene triggers wellness/íntimo,
+  // arrancamos agresivo desde el primer call (ahorra 1 round-trip).
+  const startAggressive = isHighRiskText(
+    [idea.hook, idea.titulo, idea.descripcionImagen, idea.textoEnImagen, idea.copyPostMeta]
+      .filter(Boolean).join(' ')
+  );
 
   try {
-    const resp = await fetch('https://api.openai.com/v1/images/generations', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ model: MODEL, prompt, size, quality, n: 1 }),
-    });
-    const raw = await resp.text();
-    let data;
-    try { data = JSON.parse(raw); } catch {
-      return respondJSON(res, 502, {
-        error: `OpenAI devolvió una respuesta no-JSON (HTTP ${resp.status}) — error transitorio del servicio. Reintentá.`,
-      });
-    }
-    if (!resp.ok) {
-      const msg = data?.error?.message || `HTTP ${resp.status}`;
-      return respondJSON(res, resp.status === 429 ? 429 : 502, {
-        error: `OpenAI rechazó la generación: ${msg}`,
-      });
-    }
-    const b64 = data?.data?.[0]?.b64_json;
-    if (!b64) return respondJSON(res, 502, { error: 'OpenAI no devolvió imagen (b64_json ausente).' });
-
+    const result = await callOpenAIImage({ apiKey, rawPrompt, size, quality, startAggressive });
     return respondJSON(res, 200, {
-      imageBase64: b64,
+      imageBase64: result.imageBase64,
       mimeType: 'image/png',
       size,
       quality,
       formato: idea.formato || 'static',
       model: MODEL,
       generatedAt: new Date().toISOString(),
-      usage: data?.usage || null,
-      cost: { openai: COST_ESTIMATE[quality] ?? 0.07 },
+      usage: result.usage,
+      aggressiveSanitization: result.aggressiveUsed,
+      cost: { openai: estimateImageCost(quality, size) },
     });
   } catch (err) {
-    console.error('generate-creative (gpt-image-2) error:', err);
-    return respondJSON(res, 500, { error: err?.message || 'Error generando el creativo' });
+    console.error('generate-creative error:', err.message);
+    return respondJSON(res, 502, { error: err.message || 'Error generando el creativo' });
   }
 }

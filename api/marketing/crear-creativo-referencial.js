@@ -1031,6 +1031,14 @@ export default async function handler(req, res) {
       visionModel = MODEL_VISION_FALLBACK;
     }
 
+    // Variables del fallback legacy. Antes estaban declaradas con `var` DENTRO
+    // del else (líneas 1076-1078) — funcionaba por hoisting pero era un
+    // ReferenceError esperando una migración a let/const. Hoisteadas a let
+    // para ser explícitas.
+    let __legacyPromptRef = null;
+    let __legacyPromptRebrand = null;
+    let __legacyUsarRebrand = false;
+
     // Paso 4 — construir prompts.
     // Si tenemos PLAN: N prompts distintos (uno por variación del plan).
     // Si no: pipeline legacy reference + rebrand (cuando hay accentColor + n>=2).
@@ -1073,9 +1081,9 @@ export default async function handler(req, res) {
         ? buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio, variantStyle: 'rebrand' })
         : null;
       prompts = null; // marcador para que runCalls use el path viejo
-      var __legacyPromptRef = promptRef;
-      var __legacyPromptRebrand = promptRebrand;
-      var __legacyUsarRebrand = usarRebrandVariant;
+      __legacyPromptRef = promptRef;
+      __legacyPromptRebrand = promptRebrand;
+      __legacyUsarRebrand = usarRebrandVariant;
     }
 
     // Paso 5 — llamar a gpt-image-2 /v1/images/edits con AMBAS imágenes.
@@ -1216,7 +1224,10 @@ export default async function handler(req, res) {
 
         cloudCreativos = await Promise.all(imagenes.map(async (b64, i) => {
           const localVariantIndex = i + variationStartIndex;
-          const refId = `ref_${ts}_${sourceAdId}_${localVariantIndex}`;
+          // Suffix random para evitar colisión entre flow single + bulk
+          // disparados al mismo ms (rare pero posible via double-click).
+          // Mismo patrón que crear-imagen-desde-idea.refId.
+          const refId = `ref_${ts}_${sourceAdId}_${localVariantIndex}_${Math.random().toString(36).slice(2, 8)}`;
           const variantStyle = variantStyles[i] || 'strategist';
           const promptStr = prompts?.[i]?.prompt
             || (typeof __legacyPromptRef !== 'undefined' ? __legacyPromptRef : null);

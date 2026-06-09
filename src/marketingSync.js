@@ -201,15 +201,44 @@ export async function pushAllProductos(productos) {
 
 // Defense-in-depth: filtramos por user_id además de RLS para que un id
 // incorrecto/colisionado de otro user no se borre por error.
+// CASCADE: también borramos brands + creativos del mismo producto. Sin
+// esto quedaban huérfanos en el cloud + el localStorage de brands del
+// producto borrado nunca se limpiaba, reapareciendo al próximo pull.
 export async function deleteProducto(productoId) {
   if (!supabase) throw new Error('Supabase no configurado');
   const user = await getCurrentUser();
   if (!user) return;
+  const idStr = String(productoId);
+  // Brands del producto
+  await supabase
+    .from('marketing_brands')
+    .delete()
+    .eq('user_id', user.id)
+    .eq('producto_id', idStr);
+  // Creativos del producto (rows en marketing_creativos).
+  // Para borrar también los bytes del Storage haría falta listar
+  // storage_path antes de delete; lo dejamos por ahora porque (a) los
+  // bytes ocupan poco si están en bucket Supabase con free tier generoso
+  // y (b) la URL queda huérfana pero no afecta nada.
+  await supabase
+    .from('marketing_creativos')
+    .delete()
+    .eq('user_id', user.id)
+    .eq('producto_id', idStr);
+  // Producto al final.
   await supabase
     .from('marketing_productos')
     .delete()
-    .eq('id', String(productoId))
+    .eq('id', idStr)
     .eq('user_id', user.id);
+  // Limpiar la key local de brands para que el próximo pull no la
+  // re-popule. Y notificar al sync para que el otro state se entere.
+  try {
+    localStorage.removeItem(`adslab-marketing-inspiracion-brands-${idStr}`);
+    window.dispatchEvent(new CustomEvent('viora:marketing-storage-changed', {
+      detail: { key: `adslab-marketing-inspiracion-brands-${idStr}` },
+    }));
+  } catch {}
 }
 
 // ============================================================
@@ -219,27 +248,31 @@ export async function pushBrandsForProducto(productoId, brands) {
   if (!supabase) throw new Error('Supabase no configurado');
   const user = await getCurrentUser();
   if (!user) throw new Error('No hay user logueado');
-  // ⚠️ Race protection idéntica a pushAllProductos.
-  if (brands.length === 0) {
-    console.warn(`[sync] push brands vacíos para producto ${productoId} — skipping`);
-    return;
+  // NOTA: antes había un early return en brands.length === 0 como race
+  // protection. Eso impedía borrar la última brand de un producto (siempre
+  // reaparecía en el próximo pull). La race protection real ahora vive
+  // upstream en useMarketingSync (pullCompletedRef bloquea pushes antes
+  // del primer pull) y acá podemos confiar en el delta calculado.
+  if (brands.length > 0) {
+    const rows = brands.map(b => ({
+      producto_id: String(productoId),
+      brand_id: String(b.id),
+      user_id: user.id,
+      data: b,
+    }));
+    const { error } = await supabase
+      .from('marketing_brands')
+      .upsert(rows, { onConflict: 'user_id,producto_id,brand_id' });
+    if (error) throw new Error(`Push brands: ${error.message}`);
   }
-  const rows = brands.map(b => ({
-    producto_id: String(productoId),
-    brand_id: String(b.id),
-    user_id: user.id,
-    data: b,
-  }));
-  const { error } = await supabase
-    .from('marketing_brands')
-    .upsert(rows, { onConflict: 'user_id,producto_id,brand_id' });
-  if (error) throw new Error(`Push brands: ${error.message}`);
-  // Borrar los que ya no están.
+  // Diff-delete — siempre, aunque brands esté vacío.
+  // brands=[] → borrar TODAS las brands del producto en cloud.
   const idsActuales = brands.map(b => String(b.id));
   const { data: enServer } = await supabase
     .from('marketing_brands')
     .select('brand_id')
-    .eq('producto_id', String(productoId));
+    .eq('producto_id', String(productoId))
+    .eq('user_id', user.id);
   const aBorrar = (enServer || [])
     .map(r => r.brand_id)
     .filter(id => !idsActuales.includes(id));
@@ -247,6 +280,7 @@ export async function pushBrandsForProducto(productoId, brands) {
     await supabase
       .from('marketing_brands')
       .delete()
+      .eq('user_id', user.id)
       .eq('producto_id', String(productoId))
       .in('brand_id', aBorrar);
   }

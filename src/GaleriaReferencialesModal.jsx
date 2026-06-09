@@ -600,7 +600,13 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
   }, [blobUrls]);
 
   useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape') { if (selected) setSelected(null); else onClose(); } };
+    // Esc: si hay lightbox abierto cierra eso, si no cierra el modal.
+    // En modo embedded NO hay modal a cerrar (onClose no se pasa) → ignorar.
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return;
+      if (selected) setSelected(null);
+      else onClose?.();
+    };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [selected, onClose]);

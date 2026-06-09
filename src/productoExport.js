@@ -149,10 +149,21 @@ export async function importProductoFromJson(jsonText) {
   const oldId = parsed.producto.id;
   const stamp = new Date().toISOString();
 
+  // Re-mapear ids de competidores también — si no, importar el mismo JSON
+  // dos veces hace que competidores de ambos productos compartan id,
+  // y borrar una brand en uno borra el competidor del otro (cross-product
+  // collision).
+  const remappedComps = (parsed.producto.competidores || []).map((c, i) => ({
+    ...c,
+    id: `comp-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`,
+    importedFromId: c.id,
+  }));
+
   const importedProducto = {
     ...parsed.producto,
     id: newId,
     nombre: `${parsed.producto.nombre} (importado)`,
+    competidores: remappedComps,
     importedAt: stamp,
     importedFromId: oldId || null,
     updated_at: stamp,
@@ -163,9 +174,16 @@ export async function importProductoFromJson(jsonText) {
   saveProductos([importedProducto, ...productos]);
 
   // 2) Brands → re-mapear productoId en la key del localStorage.
+  // También re-mapeamos los ids de brands para evitar colisiones con
+  // brands existentes en otros productos.
   if (Array.isArray(parsed.brands) && parsed.brands.length > 0) {
     try {
-      localStorage.setItem(brandsKey(newId), JSON.stringify(parsed.brands));
+      const remappedBrands = parsed.brands.map((b, i) => ({
+        ...b,
+        id: `brand-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`,
+        importedFromId: b.id,
+      }));
+      localStorage.setItem(brandsKey(newId), JSON.stringify(remappedBrands));
       notifyMarketingChange(brandsKey(newId));
     } catch (err) {
       console.warn('[import] brands falló:', err.message);
@@ -173,12 +191,15 @@ export async function importProductoFromJson(jsonText) {
   }
 
   // 3) Ideas → reasignamos productoId al nuevo + re-generamos id para no
-  //    colisionar con ideas existentes.
+  //    colisionar con ideas existentes. Incluye índice i en el id para
+  //    evitar colisión cuando Date.now() es el mismo entre iteraciones
+  //    (todas las iteraciones sync corren en el mismo ms).
   if (Array.isArray(parsed.ideas) && parsed.ideas.length > 0) {
     const existing = loadIdeas();
-    const remappedIdeas = parsed.ideas.map(i => ({
+    const ts = Date.now();
+    const remappedIdeas = parsed.ideas.map((i, idx) => ({
       ...i,
-      id: `idea-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      id: `idea-${ts}-${idx}-${Math.random().toString(36).slice(2, 8)}`,
       productoId: newId,
       importedFromIdeaId: i.id,
     }));

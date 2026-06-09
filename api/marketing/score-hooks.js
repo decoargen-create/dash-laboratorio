@@ -133,7 +133,9 @@ export default async function handler(req, res) {
           try {
             const parsed = JSON.parse(match[0]);
             if (Array.isArray(parsed.scores)) scores = parsed.scores;
-          } catch {}
+          } catch (err) {
+            console.warn('[score-hooks] fallback parse falló:', err.message, 'raw:', match[0].slice(0, 200));
+          }
         }
       }
     }

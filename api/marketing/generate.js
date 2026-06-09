@@ -141,6 +141,14 @@ export default async function handler(req, res) {
 
   const body = await readBody(req);
   const { productoUrl, productoNombre, descripcion: descripcionManual, landingContent, memoria, productoId } = body || {};
+  // Validación de input PRIMERO — antes era después de leer auth + Supabase,
+  // lo que hacía round-trips inútiles cuando el body venía mal.
+  if (!productoNombre || typeof productoNombre !== 'string') {
+    res.statusCode = 400;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ error: 'Falta productoNombre' }));
+    return;
+  }
   // Si el frontend mandó producto.id + Authorization, persistimos cada paso
   // server-side a marketing_productos.data.docs. Esto hace que si el user
   // cierra la pestaña a mitad del pipeline, los docs ya completados queden
@@ -152,10 +160,13 @@ export default async function handler(req, res) {
   // válido NO se vuelven a generar — ahorra costo + tiempo + dura ≤5min.
   let existingDocs = {};
   if (productoId) {
-    try { userId = await getUserIdFromAuth(req); } catch {}
+    try { userId = await getUserIdFromAuth(req); } catch (err) {
+      console.warn('[generate] getUserIdFromAuth falló:', err.message);
+    }
     if (!userId) console.info('[generate] sin auth válido — no se persiste server-side');
     else {
-      try { existingDocs = await readProductoDocs(userId, String(productoId)); } catch {}
+      try { existingDocs = await readProductoDocs(userId, String(productoId)); }
+      catch (err) { console.warn('[generate] readProductoDocs falló:', err.message); }
       const completed = Object.entries(existingDocs)
         .filter(([_, v]) => isDocComplete(v))
         .map(([k]) => k);
@@ -172,12 +183,6 @@ export default async function handler(req, res) {
       console.warn(`[generate] persist ${key} falló:`, err.message);
     }
   };
-  if (!productoNombre || typeof productoNombre !== 'string') {
-    res.statusCode = 400;
-    res.setHeader('Content-Type', 'application/json');
-    res.end(JSON.stringify({ error: 'Falta productoNombre' }));
-    return;
-  }
 
   // Setup SSE.
   res.statusCode = 200;

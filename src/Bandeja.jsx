@@ -28,6 +28,7 @@ import { getProductoImagen, getAccentColor } from './productoImagen.js';
 import { saveReferencial } from './galeriaReferenciales.js';
 import { supabase } from './supabase.js';
 import { bulkGenerateFromIdeas } from './bandejaBulkGenerate.js';
+import { parseJsonOrThrow } from './apiHelpers.js';
 import { deleteCreativo } from './creativosStorage.js';
 import { enqueueGenerate as enqueueGenerarCreativo } from './creativoGeneratorStore.js';
 import { startExecution, updateExecution, finishExecution } from './executionsStore.js';
@@ -328,20 +329,16 @@ function IdeaCard({
                 <Field label="🎯 Hook" text={idea.hook} highlight />
               )}
 
-              {/* Prompt listo para pegar en gpt-image-2 — solo si es imagen
-                  o carrusel. El prompt está en castellano argentino y combina
-                  los campos relevantes de la idea en un solo bloque copiable. */}
-              {idea.formato !== 'video' && (idea.hook || idea.descripcionImagen) && (
-                <IdeaImageGenerator idea={idea} addToast={addToast} />
-              )}
-
-              {/* Para video → brief con guion para mandar a producción
-                  humana. Para imagen/carrusel → panel de generación con
-                  gpt-image-2 (renderiza texto multilingüe bien por sí solo). */}
+              {/* Para video → brief con guion para mandar a producción.
+                  Para imagen/carrusel → IdeaImageGenerator (gpt-image-2 +
+                  cloud save automático). Antes acá también se renderizaba
+                  CreativoPanel (legacy IDB-only) — duplicaba la UI con dos
+                  paneles de generación stackeados. Eliminado para que el
+                  user vea un solo generador. */}
               {idea.formato === 'video' ? (
                 <VideoBriefPanel key={idea.id} idea={idea} />
-              ) : (idea.hook || idea.titulo || idea.promptGeneradorImagen || idea.descripcionImagen) ? (
-                <CreativoPanel key={idea.id} idea={idea} productoId={idea.productoId} />
+              ) : (idea.hook || idea.descripcionImagen) ? (
+                <IdeaImageGenerator idea={idea} addToast={addToast} />
               ) : null}
 
               {(() => { const guionTextoIdea = guionToText(idea.guion); return (guionTextoIdea || editandoGuion) && !/^n\/?a/i.test(guionTextoIdea.trim()) && (
@@ -1107,7 +1104,10 @@ function IdeaDetailModal({ idea, onClose, ...cardProps }) {
 function IdeaImageGenerator({ idea, addToast }) {
   const promptEs = buildPromptGptImage2Es(idea);
   const [n, setN] = useState(2);
-  const [size, setSize] = useState('2048x2048');
+  // Default 1024x1024 — antes era 2048x2048 que regularmente time-outea
+  // en Vercel a quality high (150-250s vs limit 300s). InspiracionSection
+  // ya hace este mismo default; Bandeja se desincronizó.
+  const [size, setSize] = useState('1024x1024');
   const [quality, setQuality] = useState('high');
   const [running, setRunning] = useState(false);
   const [error, setError] = useState('');
@@ -1180,7 +1180,7 @@ function IdeaImageGenerator({ idea, addToast }) {
           n, size, quality,
         }),
       });
-      const data = await resp.json();
+      const data = await parseJsonOrThrow(resp, 'crear-imagen-desde-idea');
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
       const costo = logCostsFromResponse(data, `crear-imagen-desde-idea · ${idea.hook?.slice(0, 40) || 'idea'}`);
 
@@ -1382,15 +1382,22 @@ function VideoBriefPanel({ idea }) {
           competidorRef: idea.origen?.competidorNombre,
         }),
       });
-      const data = await resp.json();
+      const data = await parseJsonOrThrow(resp, 'adapt-guion');
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
       logCostsFromResponse(data, `adapt-guion · ${(idea.titulo || '').slice(0, 50)}`);
       // updateIdea persiste igual aunque el panel se haya desmontado — el
       // guión queda guardado en la idea. Solo el setState es condicional.
-      // Limpiamos el flag de error: si una corrida previa falló y ahora
-      // anduvo, el guión es válido.
-      updateIdea(idea.id, { guionAdaptado: data.guion || '', guionAdaptadoError: false });
-      if (mountedRef.current) setGuion(data.guion || '');
+      // Si data.guion es vacío lo tratamos como error (sino re-disparaba
+      // en cada reapertura porque el useEffect chequea !idea.guionAdaptado
+      // que es true para empty string también).
+      const guionTexto = data.guion || '';
+      if (guionTexto) {
+        updateIdea(idea.id, { guionAdaptado: guionTexto, guionAdaptadoError: false });
+        if (mountedRef.current) setGuion(guionTexto);
+      } else {
+        updateIdea(idea.id, { guionAdaptadoError: true });
+        if (mountedRef.current) setError('El servidor devolvió un guión vacío. Reintentá.');
+      }
     } catch (err) {
       // Persistimos que falló — así reabrir la idea NO vuelve a auto-generar
       // (cada llamada a adapt-guion cuesta plata). El user puede reintentar
@@ -1560,8 +1567,9 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
     const patch = { customColumnId: null, estado };
     if (estado === 'usada') {
       patch.usedAt = new Date().toISOString();
-      const adId = (window.prompt('¿Con qué ad ID de Meta la lanzaste? (opcional)') || '').trim();
-      if (adId) patch.launchedAsAdId = adId;
+      // Antes acá había un window.prompt() pidiendo el ad ID — bloqueaba
+      // el flow de drag (mobile no lo muestra, desktop molesta tras un
+      // drag). Ahora el user lo puede agregar después en el detail modal.
     }
     const list = updateIdea(ideaId, patch);
     setIdeas(list);
@@ -1587,6 +1595,10 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
   // setea esto antes de apretar "Generar". Persisten entre selecciones.
   const [bulkN, setBulkN] = useState(2);
   const [bulkQuality, setBulkQuality] = useState('high');
+  // Size fijo en 1024 para bulk — antes se mandaba undefined al endpoint
+  // y dependía del default del server. Mejor explícito + acorde al límite
+  // de 300s de Vercel.
+  const bulkSize = '1024x1024';
   const [bulkRunning, setBulkRunning] = useState(false);
 
   // Re-sincronizar cuando otras secciones agregan o MODIFICAN ideas (event
@@ -2028,6 +2040,7 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
                       producto,
                       n: bulkN,
                       quality: bulkQuality,
+                      size: bulkSize,
                       addToast,
                     });
                     if (result.ok > 0) setSelected(new Set());

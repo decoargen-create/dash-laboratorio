@@ -312,14 +312,29 @@ export default function MetaAdsSection({ addToast }) {
   });
   const [activeTab, setActiveTab] = useState('ads'); // 'ads' | 'refresh'
 
-  // Refrescamos productos cada 3s — si el user agrega/edita en Arranque,
-  // se refleja acá sin recargar.
+  // Re-sync cuando otra parte del código modifica productos (Arranque
+  // edita, pipeline termina, pull del cloud). Comparación deep por JSON
+  // — antes era shallow length-compare que se perdía edits in-place.
   useEffect(() => {
-    const t = setInterval(() => {
-      const fresh = loadProductos();
-      setProductos(prev => (prev.length !== fresh.length ? fresh : prev));
-    }, 3000);
-    return () => clearInterval(t);
+    const reload = () => {
+      try {
+        const fresh = loadProductos();
+        setProductos(prev => {
+          return JSON.stringify(prev) === JSON.stringify(fresh) ? prev : fresh;
+        });
+      } catch {}
+    };
+    window.addEventListener('viora:marketing-pulled', reload);
+    window.addEventListener('viora:marketing-storage-changed', reload);
+    const onStorage = (e) => {
+      if (!e.key || e.key === PRODUCTOS_KEY) reload();
+    };
+    window.addEventListener('storage', onStorage);
+    return () => {
+      window.removeEventListener('viora:marketing-pulled', reload);
+      window.removeEventListener('viora:marketing-storage-changed', reload);
+      window.removeEventListener('storage', onStorage);
+    };
   }, []);
 
   useEffect(() => {

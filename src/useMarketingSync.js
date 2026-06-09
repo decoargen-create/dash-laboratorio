@@ -182,8 +182,14 @@ export function useMarketingSync({ addToast } = {}) {
       // Guard: si el primer pull aún no terminó, el localStorage puede no
       // reflejar lo que hay en el cloud. Pushear ahora puede borrar datos
       // (race condition que afectó al user el 2026-06-08).
+      // Antes: skipeábamos silenciosamente → edits hechos durante el pull
+      // se perdían. Ahora: re-encolamos el push para después del pull.
       if (!pullCompletedRef.current) {
-        console.warn(`[sync] push de ${key} skipped — pull aún no completó`);
+        console.warn(`[sync] push de ${key} diferido — pull aún no completó`);
+        // Re-queue con un timeout corto. Si el pull aún no terminó al
+        // dispararse, vuelve a re-encolar. Cuando pull termine, queuePush
+        // del próximo tick va a poder ejecutarse.
+        setTimeout(() => queuePush(key), 500);
         return;
       }
       try {

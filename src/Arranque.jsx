@@ -2325,7 +2325,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                     </div>
 
                     {/* Bandeja: contadores por estado (igual que Bandeja) */}
-                    <div className="grid grid-cols-4 gap-1.5 mb-2">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 mb-2">
                       <ProdMiniStat label="Pendientes" value={ideasByEstado.pendiente || 0} accent />
                       <ProdMiniStat label="En uso" value={ideasByEstado.en_uso || 0} color="amber" />
                       <ProdMiniStat label="Usadas" value={ideasByEstado.usada || 0} color="emerald" />

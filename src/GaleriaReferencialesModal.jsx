@@ -9,7 +9,7 @@
 // - Filtro "Solo no descargados" para no perder de vista lo nuevo
 // - Lightbox comparativo ref vs variación con panel debug skeleton+prompt
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   X, Download, Trash2, Images, ChevronDown, ChevronUp, ExternalLink,
   LayoutGrid, Rows3, Table2, Plus, Check, FileArchive, EyeOff, Eye,
@@ -177,7 +177,7 @@ function GalleryGridView({ items, blobUrls, seleccionados, selectedOrder, onTogg
             </button>
             {/* Selector numerado — siempre visible */}
             <button
-              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggleSelect(it.id); }}
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggleSelect(it.id, e); }}
               className={`absolute top-2 left-2 z-10 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shadow-md transition-all ${
                 isSel
                   ? 'bg-brand-600 text-white scale-110 ring-2 ring-white dark:ring-gray-900'
@@ -242,7 +242,7 @@ function GalleryListView({ items, blobUrls, seleccionados, selectedOrder, onTogg
                 : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:border-brand-300 dark:hover:border-brand-700'
             }`}
           >
-            <button onClick={() => onToggleSelect(it.id)}
+            <button onClick={(e) => onToggleSelect(it.id, e)}
               className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition shrink-0 ${
                 isSel ? 'bg-brand-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-400 hover:bg-brand-50 hover:text-brand-600'
               }`}
@@ -350,7 +350,7 @@ function GalleryTableView({ items, blobUrls, seleccionados, selectedOrder, onTog
             return (
               <tr key={it.id} className={isSel ? 'bg-brand-50/50 dark:bg-brand-900/20' : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'}>
                 <td className="py-2 pr-2">
-                  <button onClick={() => onToggleSelect(it.id)}
+                  <button onClick={(e) => onToggleSelect(it.id, e)}
                     className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${
                       isSel ? 'bg-brand-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-400 hover:bg-brand-50 hover:text-brand-600'
                     }`}
@@ -553,6 +553,9 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
   };
   // Multi-select. Set preserva orden de inserción.
   const [seleccionados, setSeleccionados] = useState(new Set());
+  // Último ID clickeado — usado para shift+click range selection
+  // (estilo Finder/Gmail: click en A, shift+click en F → selecciona A-F).
+  const lastClickedRef = useRef(null);
   const selectedOrder = useMemo(() => {
     const m = new Map();
     let i = 0;
@@ -611,12 +614,32 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
     return () => document.removeEventListener('keydown', onKey);
   }, [selected, onClose]);
 
-  const toggleSeleccion = (id) => {
+  const toggleSeleccion = (id, e) => {
+    // Shift+click: rango desde el último clickeado hasta este id (inclusive).
+    // Si no hay último, o el ID es el mismo, toggle normal.
+    if (e?.shiftKey && lastClickedRef.current && lastClickedRef.current !== id) {
+      const ids = visibleItems.map(it => it.id);
+      const fromIdx = ids.indexOf(lastClickedRef.current);
+      const toIdx = ids.indexOf(id);
+      if (fromIdx !== -1 && toIdx !== -1) {
+        const [start, end] = fromIdx < toIdx ? [fromIdx, toIdx] : [toIdx, fromIdx];
+        const rango = ids.slice(start, end + 1);
+        setSeleccionados(prev => {
+          const next = new Set(prev);
+          for (const rid of rango) next.add(rid);
+          return next;
+        });
+        lastClickedRef.current = id;
+        return;
+      }
+    }
+    // Toggle normal — click sin shift.
     setSeleccionados(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
+    lastClickedRef.current = id;
   };
   const limpiarSeleccion = () => setSeleccionados(new Set());
   const seleccionarTodos = () => setSeleccionados(new Set(visibleItems.map(i => i.id)));
@@ -899,9 +922,13 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
             Limpiar
           </button>
           <button onClick={seleccionarTodos}
-            className="text-[11px] text-brand-600 hover:text-brand-700 transition">
+            className="text-[11px] text-brand-600 hover:text-brand-700 transition"
+            title="Atajos: click = uno · shift+click = rango desde el anterior · este botón = todos los visibles">
             Seleccionar todos los visibles
           </button>
+          <span className="text-[9px] text-gray-400 dark:text-gray-500 italic hidden md:inline">
+            tip: shift+click selecciona un rango
+          </span>
           <button
             onClick={handleBulkArchive}
             disabled={zipping}

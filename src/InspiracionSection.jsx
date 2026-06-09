@@ -976,6 +976,31 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   };
 
   const [productos, setProductos] = useState(() => loadProductos());
+  // Re-sync productos cuando otra parte del código (Arranque, useMarketingSync,
+  // otro tab) modifica localStorage. Sin esto el state de InspiracionSection
+  // queda stale después de un pull o un cambio en Setup. Comparación deep por
+  // JSON para detectar cambios DENTRO de p.competidores.
+  useEffect(() => {
+    const reload = () => {
+      try {
+        const fresh = loadProductos();
+        setProductos(prev => {
+          return JSON.stringify(prev) === JSON.stringify(fresh) ? prev : fresh;
+        });
+      } catch {}
+    };
+    window.addEventListener('viora:marketing-pulled', reload);
+    window.addEventListener('viora:marketing-storage-changed', reload);
+    const onStorage = (e) => {
+      if (!e.key || e.key === PRODUCTOS_KEY) reload();
+    };
+    window.addEventListener('storage', onStorage);
+    return () => {
+      window.removeEventListener('viora:marketing-pulled', reload);
+      window.removeEventListener('viora:marketing-storage-changed', reload);
+      window.removeEventListener('storage', onStorage);
+    };
+  }, []);
   const [activeProductoIdRaw, setActiveProductoIdRaw] = useState(() => {
     try { return localStorage.getItem(ACTIVE_KEY) || null; } catch { return null; }
   });

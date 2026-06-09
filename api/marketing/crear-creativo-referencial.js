@@ -167,10 +167,18 @@ async function planStrategyAndVariations({ apiKey, refImgBuf, refMime, producto,
   const b64 = refImgBuf.toString('base64');
 
   const research = (producto?.research || producto?.docs?.research || '').slice(0, 2000);
+  // ofertasReales = lista de promos/precios REALES de la tienda del user.
+  // Cuando está cargado, el plan REEMPLAZA las promos del ad ref con éstas
+  // (en vez de removerlas como cuando está vacío). Esto evita que el creativo
+  // diga "$29" del competidor cuando nuestro precio es otro.
+  const ofertasReales = (producto?.ofertasReales || producto?.offerBrief || producto?.docs?.offerBrief || '').toString().trim();
   const productCtx = [
     `Producto: ${producto?.nombre || 'N/A'}`,
     producto?.descripcion ? `Descripción: ${producto.descripcion.slice(0, 400)}` : '',
     research ? `Research / audiencia / pain points:\n${research}` : '',
+    ofertasReales
+      ? `**OFERTAS / PRECIOS / CLAIMS REALES DEL USUARIO** (estos son los ÚNICOS que podés mencionar — si el ad ref menciona algo distinto, REEMPLAZALO por esto):\n${ofertasReales.slice(0, 1500)}`
+      : '**SIN OFERTAS DECLARADAS** — si el ad ref menciona promos/precios/claims regulatorios, REMOVELOS (no los inventes).',
     accentColor ? `Color de acento de la marca: ${accentColor}` : '',
   ].filter(Boolean).join('\n');
 
@@ -263,7 +271,11 @@ Analizá la imagen del ad ganador adjunto y devolvé EXACTAMENTE este JSON (sin 
 }
 
 REGLAS:
-- "adapted_content" debe ser conservador: si no tenemos el equivalente regulatorio, dejalo vacío o sustituí por algo genérico defendible (ej: "Calidad premium" en vez de inventar "FDA Approved").
+- **"adapted_content" — REEMPLAZO vs REMOCIÓN**:
+  • Si el ad ref muestra una oferta/precio/claim Y tenemos un equivalente en "OFERTAS / PRECIOS / CLAIMS REALES" → **REEMPLAZÁ** con el del usuario. Ej: ad dice "$29" y usuario tiene "USD 49 + envío gratis" → adapted_content = "USD 49 + envío gratis".
+  • Si el ad ref muestra una oferta y NO tenemos un equivalente → dejá vacío o sustituí por algo genérico defendible ("Calidad premium" en vez de inventar "FDA Approved").
+  • NUNCA copies literal una oferta del ad ref si no la tenemos. Inventar una oferta = mentir al consumidor + violación Meta.
+  • Si el ad ref dice "lleva 2 + 1 gratis" y nosotros tenemos "3x2", el adapted_content es "3x2" (función equivalente: multi-buy promo, contenido nuestro).
 - "variations" tiene que tener EXACTAMENTE ${n} items.
 - **DIVERGENCIA PROGRESIVA**: variation #1 SIEMPRE es "tight" (réplica fiel del ad ref). Variation #2 es "medium". Variations #3 y posteriores son "loose" (escena inventada, solo se mantiene la estrategia). Esto da al usuario una grilla que va desde "lo seguro y validado" hasta "creatividad libre con la misma fórmula".
 - Si la imagen no tiene badges o CTA elements, devolvé arrays vacíos — NO inventes.
@@ -334,13 +346,17 @@ async function extractSkeletonHaiku({ apiKey, refImgBuf, refMime, producto }) {
   const productoForm = inferProductForm(producto);
 
   // Contexto del producto para que Vision pueda escribir textos VERDADERAMENTE
-  // adaptados (no solo traducción cosmética).
-  const offerBrief = (producto?.offerBrief || producto?.docs?.offerBrief || '').toString().trim();
+  // adaptados (no solo traducción cosmética). ofertasReales tiene prioridad
+  // sobre offerBrief — es el campo focalizado que el user llena en Setup
+  // con su precio/promo real (ej: "USD 49 + envío gratis").
+  const ofertasReales = (producto?.ofertasReales || producto?.offerBrief || producto?.docs?.offerBrief || '').toString().trim();
   const productoCtx = [
     `Nombre: ${producto?.nombre || 'N/A'}`,
     productoForm ? `**FORMATO FÍSICO: ${productoForm.toUpperCase()}** (este producto viene en ${productoForm} — NO es otro formato).` : '',
     producto?.descripcion ? `Descripción: ${producto.descripcion.slice(0, 300)}` : '',
-    offerBrief ? `**OFERTAS / CLAIMS REALES DEL PRODUCTO** (las únicas que podés mencionar):\n${offerBrief.slice(0, 1000)}` : '**SIN OFERTAS NI CLAIMS DECLARADOS** — NO inventes descuentos, % off, "comprá 3 y ahorrá", FDA, ANMAT, ni claims médicos.',
+    ofertasReales
+      ? `**OFERTAS / PRECIOS / CLAIMS REALES DEL USUARIO** (estos son los ÚNICOS que podés mencionar — si el ad ref menciona algo distinto, REEMPLAZALO por esto, NO lo dejes literal):\n${ofertasReales.slice(0, 1500)}`
+      : '**SIN OFERTAS NI CLAIMS DECLARADOS** — NO inventes descuentos, % off, "comprá 3 y ahorrá", FDA, ANMAT, ni claims médicos.',
     producto?.research ? `Audiencia y pain points:\n${String(producto.research).slice(0, 1500)}` : '',
   ].filter(Boolean).join('\n');
 
@@ -391,9 +407,15 @@ Reglas estrictas para content_adapted:
 - Si la pieza tiene pain point implícito y NO matchea con los pain points del research, ajustalo al pain del research.
 - **CRÍTICO — FORMATO FÍSICO**: Si el texto original menciona un formato de producto (cápsulas, pastillas, polvo, gotas, crema, etc.) y NO COINCIDE con el formato del producto del usuario${productoForm ? ` (${productoForm})` : ''}, REEMPLAZÁ por el formato correcto. Ejemplo: si el ad ref dice "60 cápsulas veganas" y nuestro producto son gomitas, en content_adapted debe decir "60 gomitas veganas". Nunca dejar mención de un formato equivocado — confunde al consumidor.
 
-- **CRÍTICO — OFERTAS Y CLAIMS**: Si el texto original menciona una promo concreta ("25% off", "3x2", "envío gratis", "comprá 3 y ahorrá", "PAGO CONTRA REEMBOLSO") o un claim regulado ("FDA Approved", "ANMAT", "dermatológicamente testeado", "sin gluten") y vos NO tenés esa info en "OFERTAS / CLAIMS REALES" del contexto, REMOVELO del content_adapted. Reemplazá por un CTA neutro ("Probalo ya", "Conocé más", "Empezá hoy") o un beneficio genérico verificable. Mejor decir menos que inventar una oferta que no existe (es mentir al consumidor y posible violación de Meta).
+- **CRÍTICO — OFERTAS Y CLAIMS — REEMPLAZO vs REMOCIÓN**:
+  • Si el texto original menciona una promo ("25% off", "3x2", "lleva 2 + 1 gratis", "envío gratis", "comprá 3 y ahorrá", "PAGO CONTRA REEMBOLSO") o un claim regulado ("FDA Approved", "ANMAT", "dermatológicamente testeado", "sin gluten") Y TENÉS un equivalente en "OFERTAS / PRECIOS / CLAIMS REALES" → **REEMPLAZALO POR LA OFERTA DEL USUARIO**. Ej: ad ref dice "lleva 2 + 1 gratis" y user tiene "3x2" → content_adapted dice "3x2". Ad ref dice "FDA Approved" y user tiene "ANMAT registrado" → content_adapted dice "ANMAT registrado".
+  • Si NO tenés equivalente en "OFERTAS / PRECIOS / CLAIMS REALES" → REMOVELO. Reemplazá por CTA neutro ("Probalo ya", "Conocé más", "Empezá hoy") o un beneficio genérico verificable. Mejor decir menos que inventar.
+  • NUNCA dejes literal una oferta del ad ref si no la tenemos. Inventar = mentir al consumidor + posible violación Meta.
 
-- **CRÍTICO — PRECIOS Y MONEDAS**: Si el texto original menciona un PRECIO específico ("$9.99", "USD 25", "$1500", "10€", "por solo $X") y NO tenés un precio real del producto en "OFERTAS / CLAIMS REALES", REMOVÉ el precio. Especialmente cuidado con precios en USD (típicos de ads gringos) — el target argentino paga en ARS y un precio falso confunde y deslegitima. Reemplazá la frase con el BENEFICIO emocional/funcional que el precio implicaba ("Gasté $9.99 y me mandaron probióticos" → "Lo probé y me cambió la vida" / "No podía creer lo simple que fue"). NUNCA inventes un precio en ARS — es mejor sin precio.
+- **CRÍTICO — PRECIOS Y MONEDAS — REEMPLAZO vs REMOCIÓN**:
+  • Si el texto original menciona un PRECIO específico ("$9.99", "USD 25", "$1500", "10€", "por solo $X") Y TENÉS un precio real en "OFERTAS / PRECIOS / CLAIMS REALES" → **REEMPLAZALO POR EL PRECIO DEL USUARIO** en su moneda. Ej: ad ref dice "$29 USD" y user tiene "USD 49 — envío gratis" → content_adapted dice "USD 49 — envío gratis".
+  • Si NO tenés precio real → REMOVÉ el precio. Especialmente cuidado con USD en ads gringos — el target argentino paga en ARS y un precio falso deslegitima. Reemplazá por el BENEFICIO ("Gasté $9.99 y me mandaron probióticos" → "Lo probé y me cambió la vida").
+  • NUNCA inventes un precio en ARS si no lo tenemos — mejor sin precio.
 
 Si no hay texto visible, devolvé textBlocks: [].`;
 
@@ -449,6 +471,7 @@ function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentCol
   const nombre = (producto?.nombre || '').trim();
   const descripcion = (producto?.descripcion || '').trim();
   const research = (producto?.research || producto?.docs?.research || '').trim();
+  const ofertasReales = (producto?.ofertasReales || producto?.offerBrief || producto?.docs?.offerBrief || '').toString().trim();
   const productoForm = inferProductForm(producto);
   const v = plan?.visual || {};
   const s = plan?.strategy || {};
@@ -544,6 +567,17 @@ function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentCol
   }
   if (descripcion) parts.push(`  • Description: ${descripcion.slice(0, 400)}`);
   if (research) parts.push(`  • Audience and pain points: ${research.slice(0, 1500)}`);
+  // Ofertas reales del user — para que gpt-image-2 NO copie precios/promos
+  // del ad ref cuando hay overlays de texto con números. Si el plan ya
+  // adaptó los badges_adapted/ctaElements_adapted con esto, los text overlays
+  // de arriba ya están bien. Esto es un refuerzo: si el modelo "ve" un "$29"
+  // en IMAGE 1 e iba a copiarlo, le decimos que use la oferta nuestra.
+  if (ofertasReales) {
+    parts.push('');
+    parts.push(`**USER'S REAL OFFERS / PRICES (use ONLY these in any text overlay — NEVER copy a price or promo from IMAGE 1)**:`);
+    parts.push(ofertasReales.slice(0, 800).split('\n').map(line => `  • ${line}`).join('\n'));
+    parts.push(`  • If IMAGE 1 shows a price or promo NOT in this list, DO NOT render that text — render the closest matching offer from the list above, or omit the text block entirely.`);
+  }
 
   if (accentColor) {
     parts.push('');
@@ -584,6 +618,7 @@ function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio
   const nombre = (producto?.nombre || '').trim();
   const descripcion = (producto?.descripcion || '').trim();
   const research = (producto?.research || producto?.docs?.research || '').trim();
+  const ofertasReales = (producto?.ofertasReales || producto?.offerBrief || producto?.docs?.offerBrief || '').toString().trim();
   const productoForm = inferProductForm(producto);
 
   const parts = [];
@@ -639,6 +674,15 @@ function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio
   }
   if (descripcion) parts.push(`  - Description: ${descripcion.slice(0, 400)}`);
   if (research) parts.push(`  - Audience and pain points (use to choose props/scene): ${research.slice(0, 1500)}`);
+  // Ofertas reales del user — refuerzo para que gpt-image-2 NO copie precios
+  // del ad ref. Si IMAGE 1 muestra un overlay "$29" y no coincide con nuestras
+  // ofertas, debe usar las del user o omitir.
+  if (ofertasReales) {
+    parts.push('');
+    parts.push(`**USER'S REAL OFFERS / PRICES (use ONLY these in text overlays — NEVER copy a price or promo from IMAGE 1)**:`);
+    parts.push(ofertasReales.slice(0, 800).split('\n').map(line => `  • ${line}`).join('\n'));
+    parts.push(`  - If IMAGE 1 shows a price/promo NOT in this list, do NOT render it. Use the closest offer from the list above or omit the overlay.`);
+  }
 
   if (accentColor) {
     parts.push('');
@@ -1138,6 +1182,31 @@ export default async function handler(req, res) {
     try {
       const userId = await getUserIdFromAuth(req);
       const productoId = producto?.id != null ? String(producto.id) : null;
+      // Logging defensivo — si el background save no anda, los logs de Vercel
+      // tienen que decir por qué. Antes esto era un silent skip y no
+      // sabíamos si era auth, productoId, o env vars faltando.
+      const hasAuthHeader = !!(req.headers?.authorization || req.headers?.Authorization);
+      const hasSupabaseEnv = !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY);
+      console.info('[cloud save] pre-check', {
+        hasAuthHeader,
+        hasSupabaseEnv,
+        userId: userId ? `${String(userId).slice(0, 8)}...` : null,
+        productoId,
+        imagenesCount: imagenes.length,
+      });
+      if (!hasSupabaseEnv) {
+        cloudSaveError = 'SUPABASE_URL o SUPABASE_SERVICE_KEY no están seteadas en Vercel — el background save no puede correr.';
+        console.warn('[cloud save]', cloudSaveError);
+      } else if (!hasAuthHeader) {
+        cloudSaveError = 'Sin Authorization header — el frontend no mandó el JWT del user. Background save skipped.';
+        console.warn('[cloud save]', cloudSaveError);
+      } else if (!userId) {
+        cloudSaveError = 'Authorization header presente pero el JWT no validó — token expirado o inválido.';
+        console.warn('[cloud save]', cloudSaveError);
+      } else if (!productoId) {
+        cloudSaveError = 'producto.id ausente — no podemos asociar el creativo a un producto.';
+        console.warn('[cloud save]', cloudSaveError);
+      }
       if (userId && productoId) {
         const ts = Date.now();
         const sourceAdId = inspiracion?.adId || inspiracion?.id || `unknown-${ts}`;
@@ -1153,6 +1222,7 @@ export default async function handler(req, res) {
             || (typeof __legacyPromptRef !== 'undefined' ? __legacyPromptRef : null);
           try {
             const { storagePath, imageUrl } = await uploadCreativoToBucket(userId, refId, b64);
+            console.info(`[cloud save] imagen ${i + 1}/${imagenes.length} subida → ${storagePath}`);
             const row = await insertCreativoRow({
               id: refId,
               user_id: userId,
@@ -1181,8 +1251,15 @@ export default async function handler(req, res) {
             return null;
           }
         }));
+        const totalRequested = imagenes.length;
         cloudCreativos = cloudCreativos.filter(Boolean);
-        if (cloudCreativos.length === 0) cloudCreativos = null;
+        console.info(`[cloud save] resultado: ${cloudCreativos.length}/${totalRequested} subidas al cloud`);
+        if (cloudCreativos.length === 0) {
+          cloudCreativos = null;
+          cloudSaveError = cloudSaveError || `Todas las ${totalRequested} subidas al cloud fallaron (ver logs anteriores)`;
+        } else if (cloudCreativos.length < totalRequested) {
+          cloudSaveError = `Solo ${cloudCreativos.length}/${totalRequested} subidas al cloud OK — el resto fallaron`;
+        }
       }
     } catch (err) {
       console.warn('[cloud save] error general:', err.message);

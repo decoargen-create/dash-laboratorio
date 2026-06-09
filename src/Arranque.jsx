@@ -23,6 +23,7 @@ import {
   Plus, X, Sparkles, Link2, Search, Clock, Inbox, Trash2,
 } from 'lucide-react';
 import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGeneradorHoy, updateIdea, formatoDeAd } from './bandejaStore.js';
+import { deleteProducto as deleteProductoFromCloud } from './marketingSync.js';
 import { logCostsFromResponse } from './costsStore.js';
 import BandejaSection from './Bandeja.jsx';
 import InspiracionSection from './InspiracionSection.jsx';
@@ -668,6 +669,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     try {
       if (activeProductoId) localStorage.setItem('adslab-marketing-active-product', activeProductoId);
       else localStorage.removeItem('adslab-marketing-active-product');
+      // Notificar al hook de sync — sin esto el cambio queda solo local
+      // (el evento 'storage' nativo no se dispara en la misma tab que escribe).
+      window.dispatchEvent(new CustomEvent('viora:marketing-storage-changed', {
+        detail: { key: 'adslab-marketing-active-product' },
+      }));
     } catch {}
   }, [activeProductoId]);
 
@@ -2271,12 +2277,20 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                     </div>
                   </button>
                   <button
-                    onClick={(e) => {
+                    onClick={async (e) => {
                       e.stopPropagation();
-                      if (window.confirm(`¿Eliminar "${p.nombre}"? Se borran sus competidores, cuenta Meta y research. No se pueden recuperar.`)) {
-                        setProductos(prev => prev.filter(x => String(x.id) !== String(p.id)));
-                        if (String(p.id) === String(activeProductoId)) setActiveProductoId(null);
+                      if (!window.confirm(`¿Eliminar "${p.nombre}"? Se borran sus competidores, cuenta Meta y research. No se pueden recuperar.`)) return;
+                      // BORRAR DEL CLOUD PRIMERO — si falla, abortar el delete
+                      // local. Sin esto, el producto quedaba huérfano en
+                      // Supabase y aparecía "fantasma" en otra PC.
+                      try {
+                        await deleteProductoFromCloud(p.id);
+                      } catch (err) {
+                        addToast?.({ type: 'error', message: `No pude borrar del cloud: ${err.message}. Intentá de nuevo.` });
+                        return;
                       }
+                      setProductos(prev => prev.filter(x => String(x.id) !== String(p.id)));
+                      if (String(p.id) === String(activeProductoId)) setActiveProductoId(null);
                     }}
                     className="p-2.5 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition shrink-0"
                     title="Eliminar producto"
@@ -2652,12 +2666,12 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             <details className="mt-3 group">
               <summary className="cursor-pointer inline-flex items-center gap-1 text-[10px] font-semibold text-gray-600 dark:text-gray-300 hover:text-brand-600 dark:hover:text-brand-400">
                 <ChevronDown size={10} className="group-open:rotate-180 transition-transform" />
-                💰 Ofertas y claims reales (opcional)
+                💰 Tus ofertas reales — precio, promos, claims (recomendado)
                 {producto.ofertasReales?.trim() && <span className="text-emerald-600 dark:text-emerald-400">✓ cargado</span>}
               </summary>
               <div className="mt-2 space-y-2 pl-4">
                 <p className="text-[10px] text-gray-500 dark:text-gray-400">
-                  Promos, descuentos y claims regulatorios que SÍ podés usar en tus ads. Sin esto, el generador de creativos referenciales remueve cualquier "25% off", "FDA Approved", etc. del ad ref — para no inventar. Cuando cargás esto, Vision puede mantenerlos en el texto adaptado.
+                  Precio actual, promos vigentes y claims regulatorios de TU tienda. Cuando lo cargás, el generador REEMPLAZA las ofertas del ad de la competencia ("$29", "lleva 2 + 1 gratis", "FDA Approved") por las tuyas. Sin esto, las quita por defecto (no inventa). Ejemplo: si el ad ref dice "$29 USD" y vos ponés "USD 49 + envío gratis", el creativo va a decir "USD 49 + envío gratis".
                 </p>
                 <textarea
                   value={producto.ofertasReales || ''}
@@ -2667,7 +2681,8 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                       : p
                   ))}
                   placeholder={`Ejemplos:
-• Comprá 3 frascos y ahorrás 20%
+• Precio: USD 49 (o ARS 49.900)
+• 3x2 — Comprá 3 frascos y pagás 2
 • Envío gratis a todo el país
 • 30 días para devolverlo si no te gusta
 • ANMAT registrado

@@ -140,11 +140,15 @@ function buildPromptForIdeaVariation({ idea, producto, accentColor, aspectRatio,
     parts.push(idea.textoEnImagen);
   }
 
-  // Ofertas reales (conservador si no hay)
-  const offer = producto?.offerBrief || producto?.ofertasReales || '';
+  // Ofertas reales — ofertasReales tiene prioridad (campo focalizado del user
+  // en Setup). offerBrief es fallback. Si hay overlays con precios/promos en
+  // textoEnImagen que no coinciden, hay que reemplazarlos por estos.
+  const offer = (producto?.ofertasReales || producto?.offerBrief || '').toString().trim();
   if (offer) {
     parts.push('');
-    parts.push(`REAL OFFERS / CLAIMS (only ones approved for use):\n${offer.slice(0, 600)}`);
+    parts.push(`**REAL OFFERS / PRICES / CLAIMS (only these are valid — REPLACE any other price/promo in text overlays with these)**:`);
+    parts.push(offer.slice(0, 800).split('\n').map(line => `  • ${line}`).join('\n'));
+    parts.push(`  • If a text overlay mentions a price or promo NOT in this list, use the closest matching one from above instead.`);
   } else {
     parts.push('');
     parts.push('NO OFFERS DECLARED — do NOT invent prices, % off, FDA, ANMAT, claims. Keep text neutral (CTA like "Probalo ya", "Conocé más").');

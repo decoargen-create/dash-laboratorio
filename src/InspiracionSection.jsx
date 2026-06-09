@@ -36,6 +36,7 @@ import { startExecution, updateExecution, finishExecution } from './executionsSt
 import { playDoneChime, playBulkDoneChime, playErrorTone } from './sounds.js';
 import EmptyState from './EmptyState.jsx';
 import { supabase } from './supabase.js';
+import { notifyMarketingChange } from './useMarketingSync.js';
 // Galería ahora vive como tab independiente en el workspace (Arranque),
 // no más como modal acá.
 
@@ -148,7 +149,13 @@ function loadBrands(productoId) {
 
 function saveBrands(productoId, brands) {
   if (!productoId) return;
-  try { localStorage.setItem(brandsKey(productoId), JSON.stringify(brands)); } catch {}
+  const key = brandsKey(productoId);
+  try {
+    localStorage.setItem(key, JSON.stringify(brands));
+    // Notificar al sync hook — sin esto el push al cloud nunca corre y
+    // al recargar el pull pisa los cambios con datos viejos.
+    notifyMarketingChange(key);
+  } catch {}
 }
 
 // Props:
@@ -1361,9 +1368,14 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
 
     const baseBody = {
       producto: {
+        id: producto.id,
         nombre: producto.nombre,
         descripcion: producto.descripcion,
         research: producto.docs?.research,
+        // Ofertas: pasamos ambos campos para que el server pueda preferir
+        // ofertasReales (focalizado, llenado en Setup) y caer a offerBrief
+        // (doc generado por la pipeline) como fallback.
+        ofertasReales: producto.ofertasReales || '',
         offerBrief: producto.ofertasReales || producto.docs?.offerBrief || '',
       },
       inspiracion: {
@@ -1420,6 +1432,16 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       if (Array.isArray(data.cloudCreativos) && data.cloudCreativos.length > 0) {
         try { window.dispatchEvent(new CustomEvent('viora:referencial-saved', { detail: { productoId: String(producto.id), cloud: true } })); } catch {}
         return;
+      }
+      // El backend nos dice por qué no pudo guardar al cloud — mostrar al
+      // user para que sepa que si cierra la pestaña, pierde el creativo.
+      // (cloudSaveError viene del endpoint con detalle: auth, env, productoId).
+      if (data.cloudSaveError) {
+        console.warn('[crear-creativo-referencial] cloudSaveError:', data.cloudSaveError);
+        addToast?.({
+          type: 'warning',
+          message: `Cloud save no funcionó (${data.cloudSaveError}). Guardando local — NO cierres la pestaña.`,
+        });
       }
       // Fallback: backend NO guardó al cloud (sin auth o sin Storage). Save
       // local como antes.
@@ -1827,7 +1849,13 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         });
         return { ...p, competidores: comps, updated_at: new Date().toISOString() };
       });
-      try { localStorage.setItem(PRODUCTOS_KEY, JSON.stringify(updated)); } catch {}
+      try {
+        localStorage.setItem(PRODUCTOS_KEY, JSON.stringify(updated));
+        // Sin esto, el scrape del competidor NO se pushea al cloud y al
+        // recargar la página el pull pisa lastAdsCheck con null. Resultado:
+        // "ya scrapie varias veces y queda igual" (PR fix de Aurivita).
+        notifyMarketingChange(PRODUCTOS_KEY);
+      } catch {}
       setProductos(updated);
 
       const msg = newAds.length > 0
@@ -2100,7 +2128,30 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           isCompetidor: false,
           __ads: adsByBrand[b.id] || [],
         }));
-        let unif = [...competidoresUnif, ...customUnif];
+        // Dedup competidor vs brand-from-comp: si una brand vino del competidor
+        // (fromCompetidorId), o su host/nombre coincide con un competidor,
+        // ocultamos la versión "custom" — la COMP tiene los datos sincronizados
+        // con producto.competidores (lastAdsCheck, ads cache, etc.) y es la
+        // que el user ve scrapeada cuando aprieta Scrape en cualquiera.
+        const compHosts = new Set();
+        const compNombres = new Set();
+        const compIds = new Set();
+        for (const c of competidoresUnif) {
+          const host = (c.landingUrl || '').replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+          if (host) compHosts.add(host);
+          const n = (c.nombre || '').toLowerCase().trim();
+          if (n) compNombres.add(n);
+          if (c.__sourceComp?.id != null) compIds.add(String(c.__sourceComp.id));
+        }
+        const customDeduped = customUnif.filter(b => {
+          if (b.fromCompetidorId && compIds.has(String(b.fromCompetidorId))) return false;
+          const host = (b.landingUrl || '').replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+          if (host && compHosts.has(host)) return false;
+          const n = (b.nombre || '').toLowerCase().trim();
+          if (n && compNombres.has(n)) return false;
+          return true;
+        });
+        let unif = [...competidoresUnif, ...customDeduped];
 
         // Filtros
         if (tipoFiltro === 'competidor') unif = unif.filter(b => b.isCompetidor);

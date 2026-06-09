@@ -79,8 +79,14 @@ export async function saveReferencial(ref) {
     } catch (err) {
       // Si la nube falla (red, quota, política), caemos a IDB para no perder
       // el creativo. El user lo va a tener local; al re-loguear se podría
-      // re-subir con una migración (TODO opcional).
+      // re-subir con una migración (TODO opcional). Disparamos evento para
+      // que la UI muestre un toast — el user debe saber que el cloud falló.
       console.warn('[galería] cloud save falló, cae a IDB:', err.message);
+      try {
+        window.dispatchEvent(new CustomEvent('viora:referencial-cloud-failed', {
+          detail: { id: ref.id, productoId: ref.productoId, error: err.message },
+        }));
+      } catch {}
     }
   }
 
@@ -267,6 +273,11 @@ export async function deleteReferencial(id) {
     } catch (err) {
       console.warn('[galería] cloud delete falló:', err.message);
       cloudOk = false;
+      try {
+        window.dispatchEvent(new CustomEvent('viora:referencial-cloud-failed', {
+          detail: { id, op: 'delete', error: err.message },
+        }));
+      } catch {}
     }
   }
   // Borrar también del cache local

@@ -48,7 +48,11 @@ export default function ActivityBell() {
     return () => document.removeEventListener('mousedown', onDown);
   }, [open]);
 
-  const unreadErrorCount = getUnreadErrorCount();
+  // Antes: getUnreadErrorCount() hacía localStorage read en cada render
+  // (la bell vive en el header, re-renderea con cualquier cambio de
+  // AppShell). Ahora derivamos del `items` que ya tenemos en memoria
+  // suscrito por subscribeActivity.
+  const unreadErrorCount = items.filter(i => !i.read && i.status === 'error').length;
   const visible = filter === 'errors' ? items.filter(i => i.status === 'error') : items;
   const doneCount = items.filter(i => i.status === 'done').length;
   const errorCount = items.filter(i => i.status === 'error').length;

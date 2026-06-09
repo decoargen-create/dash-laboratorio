@@ -1601,20 +1601,30 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
   const bulkSize = '1024x1024';
   const [bulkRunning, setBulkRunning] = useState(false);
 
-  // Re-sincronizar cuando otras secciones agregan o MODIFICAN ideas (event
-  // storage no es ideal para same-tab — usamos un polling liviano cada 3s).
-  // Comparamos un signature de id+estado+score+columna: si solo mirábamos
-  // la longitud, los cambios de estado/score (ej. el scoring del pipeline
-  // marcando lowScore) nunca se reflejaban hasta recargar.
+  // Re-sincronizar cuando otras secciones agregan o MODIFICAN ideas.
+  // Antes era polling cada 3s — interrumpía drag-and-drop del kanban
+  // (cada array reset cancelaba el drag in-flight). Ahora event-based
+  // (viora:marketing-storage-changed dispara cuando otro componente
+  // escribe localStorage). Si no hay evento → no re-cargamos.
+  // Polling defensivo a 10s como red de seguridad (era 3s).
   useEffect(() => {
     const sig = (list) => list.map(i => `${i.id}:${i.estado || ''}:${i.lowScore ? 1 : 0}:${i.scoreValue || ''}:${i.customColumnId || ''}`).join('|');
-    const interval = setInterval(() => {
+    const reload = () => {
       const fresh = loadIdeas();
       setIdeas(prev => (sig(prev) !== sig(fresh) ? fresh : prev));
       const freshProds = loadProductos();
-      setProductos(prev => (prev.length !== freshProds.length ? freshProds : prev));
-    }, 3000);
-    return () => clearInterval(interval);
+      setProductos(prev => {
+        return JSON.stringify(prev) === JSON.stringify(freshProds) ? prev : freshProds;
+      });
+    };
+    window.addEventListener('viora:marketing-pulled', reload);
+    window.addEventListener('viora:marketing-storage-changed', reload);
+    const interval = setInterval(reload, 10000);
+    return () => {
+      window.removeEventListener('viora:marketing-pulled', reload);
+      window.removeEventListener('viora:marketing-storage-changed', reload);
+      clearInterval(interval);
+    };
   }, []);
 
   const setEstado = (id, estado) => {

@@ -109,7 +109,15 @@ function loadProductos() {
 }
 
 function saveProductos(list) {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); } catch {}
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+    // Notificar al sync layer + a otros componentes (Arranque, InspiracionSection)
+    // que tienen su propio state de productos. Sin este dispatch, Marketing
+    // podía quedar fuera de sync con los otros.
+    window.dispatchEvent(new CustomEvent('viora:marketing-storage-changed', {
+      detail: { key: STORAGE_KEY },
+    }));
+  } catch {}
 }
 
 function downloadText(content, filename) {
@@ -768,6 +776,32 @@ export default function MarketingSection({ addToast, bgAnalysis, onStart, onCanc
   const readerRef = useRef(null);
 
   useEffect(() => { saveProductos(productos); }, [productos]);
+
+  // Re-sync productos cuando otra parte del código modifica localStorage
+  // (Arranque, InspiracionSection, useMarketingSync pull, otra tab).
+  // Sin esto, navegar a Documentos después de scrapear en Inspiración
+  // podría mostrar el estado anterior. Comparación deep por JSON.
+  useEffect(() => {
+    const reload = () => {
+      try {
+        const fresh = loadProductos();
+        setProductos(prev => {
+          return JSON.stringify(prev) === JSON.stringify(fresh) ? prev : fresh;
+        });
+      } catch {}
+    };
+    window.addEventListener('viora:marketing-pulled', reload);
+    window.addEventListener('viora:marketing-storage-changed', reload);
+    const onStorage = (e) => {
+      if (!e.key || e.key === STORAGE_KEY) reload();
+    };
+    window.addEventListener('storage', onStorage);
+    return () => {
+      window.removeEventListener('viora:marketing-pulled', reload);
+      window.removeEventListener('viora:marketing-storage-changed', reload);
+      window.removeEventListener('storage', onStorage);
+    };
+  }, []);
 
   // ------------------------------------------------------------------------
   // Auto-refresh de competidores.

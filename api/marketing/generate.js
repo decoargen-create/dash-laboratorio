@@ -22,6 +22,7 @@ import {
   BELIEFS_SYSTEM, PIPELINE_STEPS,
 } from './_lib.js';
 import { anthropicCost } from './_costs.js';
+import { getUserIdFromAuth, patchProductoDocs } from './_supabase-server.js';
 
 // Alineado con el resto del codebase (deep-analyze, generate-ideas,
 // post-research, copilot, etc. usan todos 4-6). Tener 4-5 acá hacía que el
@@ -131,7 +132,24 @@ export default async function handler(req, res) {
   }
 
   const body = await readBody(req);
-  const { productoUrl, productoNombre, descripcion: descripcionManual, landingContent, memoria } = body || {};
+  const { productoUrl, productoNombre, descripcion: descripcionManual, landingContent, memoria, productoId } = body || {};
+  // Si el frontend mandó producto.id + Authorization, persistimos cada paso
+  // server-side a marketing_productos.data.docs. Esto hace que si el user
+  // cierra la pestaña a mitad del pipeline, los docs ya completados queden
+  // guardados — en el próximo pull los recupera.
+  let userId = null;
+  if (productoId) {
+    try { userId = await getUserIdFromAuth(req); } catch {}
+    if (!userId) console.info('[generate] sin auth válido — no se persiste server-side');
+  }
+  const persistStep = async (key, content) => {
+    if (!userId || !productoId || !content) return;
+    try {
+      await patchProductoDocs(userId, String(productoId), { [key]: content });
+    } catch (err) {
+      console.warn(`[generate] persist ${key} falló:`, err.message);
+    }
+  };
   if (!productoNombre || typeof productoNombre !== 'string') {
     res.statusCode = 400;
     res.setHeader('Content-Type', 'application/json');
@@ -225,6 +243,7 @@ ${landingText ? `\n---LANDING PAGE (texto extraído)---\n${landingText}\n---FIN 
     outputs.research = researchResp.content?.[0]?.type === 'text' ? researchResp.content[0].text : '';
     trackStepCost(researchResp.usage, MODEL_SONNET, 'research', 'Research Doc');
     sseWrite(res, { type: 'step-done', key: 'research', label: 'Research Doc', content: outputs.research });
+    await persistStep('research', outputs.research);
 
     // ------ Paso 2: Avatar ------
     sseWrite(res, { type: 'step-start', key: 'avatar', label: 'Avatar Sheet' });
@@ -240,6 +259,7 @@ ${landingText ? `\n---LANDING PAGE (texto extraído)---\n${landingText}\n---FIN 
     outputs.avatar = avatarResp.content?.[0]?.type === 'text' ? avatarResp.content[0].text : '';
     trackStepCost(avatarResp.usage, MODEL_HAIKU, 'avatar', 'Avatar Sheet');
     sseWrite(res, { type: 'step-done', key: 'avatar', label: 'Avatar Sheet', content: outputs.avatar });
+    await persistStep('avatar', outputs.avatar);
 
     // ------ Paso 3: Offer Brief ------
     sseWrite(res, { type: 'step-start', key: 'offerBrief', label: 'Offer Brief' });
@@ -255,6 +275,7 @@ ${landingText ? `\n---LANDING PAGE (texto extraído)---\n${landingText}\n---FIN 
     outputs.offerBrief = offerResp.content?.[0]?.type === 'text' ? offerResp.content[0].text : '';
     trackStepCost(offerResp.usage, MODEL_HAIKU, 'offerBrief', 'Offer Brief');
     sseWrite(res, { type: 'step-done', key: 'offerBrief', label: 'Offer Brief', content: outputs.offerBrief });
+    await persistStep('offerBrief', outputs.offerBrief);
 
     // ------ Paso 4: Beliefs ------
     sseWrite(res, { type: 'step-start', key: 'beliefs', label: 'Creencias necesarias' });
@@ -270,6 +291,7 @@ ${landingText ? `\n---LANDING PAGE (texto extraído)---\n${landingText}\n---FIN 
     outputs.beliefs = beliefsResp.content?.[0]?.type === 'text' ? beliefsResp.content[0].text : '';
     trackStepCost(beliefsResp.usage, MODEL_HAIKU, 'beliefs', 'Creencias necesarias');
     sseWrite(res, { type: 'step-done', key: 'beliefs', label: 'Creencias necesarias', content: outputs.beliefs });
+    await persistStep('beliefs', outputs.beliefs);
 
     // ------ Paso 5 (bonus): Resumen ejecutivo ------
     // Síntesis 2-3 líneas de TODO lo generado, para mostrar en la cabecera
@@ -289,6 +311,7 @@ ${landingText ? `\n---LANDING PAGE (texto extraído)---\n${landingText}\n---FIN 
       console.error('resumen-ejecutivo error:', err?.message);
     }
     sseWrite(res, { type: 'step-done', key: 'resumenEjecutivo', label: 'Resumen ejecutivo', content: outputs.resumenEjecutivo });
+    await persistStep('resumenEjecutivo', outputs.resumenEjecutivo);
 
     // ------ Fin ------
     sseWrite(res, {

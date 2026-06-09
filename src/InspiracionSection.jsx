@@ -36,6 +36,7 @@ import { startExecution, updateExecution, finishExecution } from './executionsSt
 import { playDoneChime, playBulkDoneChime, playErrorTone } from './sounds.js';
 import EmptyState from './EmptyState.jsx';
 import { supabase } from './supabase.js';
+import { notifyMarketingChange } from './useMarketingSync.js';
 // Galería ahora vive como tab independiente en el workspace (Arranque),
 // no más como modal acá.
 
@@ -148,7 +149,13 @@ function loadBrands(productoId) {
 
 function saveBrands(productoId, brands) {
   if (!productoId) return;
-  try { localStorage.setItem(brandsKey(productoId), JSON.stringify(brands)); } catch {}
+  const key = brandsKey(productoId);
+  try {
+    localStorage.setItem(key, JSON.stringify(brands));
+    // Notificar al sync hook — sin esto el push al cloud nunca corre y
+    // al recargar el pull pisa los cambios con datos viejos.
+    notifyMarketingChange(key);
+  } catch {}
 }
 
 // Props:
@@ -1842,7 +1849,13 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         });
         return { ...p, competidores: comps, updated_at: new Date().toISOString() };
       });
-      try { localStorage.setItem(PRODUCTOS_KEY, JSON.stringify(updated)); } catch {}
+      try {
+        localStorage.setItem(PRODUCTOS_KEY, JSON.stringify(updated));
+        // Sin esto, el scrape del competidor NO se pushea al cloud y al
+        // recargar la página el pull pisa lastAdsCheck con null. Resultado:
+        // "ya scrapie varias veces y queda igual" (PR fix de Aurivita).
+        notifyMarketingChange(PRODUCTOS_KEY);
+      } catch {}
       setProductos(updated);
 
       const msg = newAds.length > 0
@@ -2115,7 +2128,30 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           isCompetidor: false,
           __ads: adsByBrand[b.id] || [],
         }));
-        let unif = [...competidoresUnif, ...customUnif];
+        // Dedup competidor vs brand-from-comp: si una brand vino del competidor
+        // (fromCompetidorId), o su host/nombre coincide con un competidor,
+        // ocultamos la versión "custom" — la COMP tiene los datos sincronizados
+        // con producto.competidores (lastAdsCheck, ads cache, etc.) y es la
+        // que el user ve scrapeada cuando aprieta Scrape en cualquiera.
+        const compHosts = new Set();
+        const compNombres = new Set();
+        const compIds = new Set();
+        for (const c of competidoresUnif) {
+          const host = (c.landingUrl || '').replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+          if (host) compHosts.add(host);
+          const n = (c.nombre || '').toLowerCase().trim();
+          if (n) compNombres.add(n);
+          if (c.__sourceComp?.id != null) compIds.add(String(c.__sourceComp.id));
+        }
+        const customDeduped = customUnif.filter(b => {
+          if (b.fromCompetidorId && compIds.has(String(b.fromCompetidorId))) return false;
+          const host = (b.landingUrl || '').replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+          if (host && compHosts.has(host)) return false;
+          const n = (b.nombre || '').toLowerCase().trim();
+          if (n && compNombres.has(n)) return false;
+          return true;
+        });
+        let unif = [...competidoresUnif, ...customDeduped];
 
         // Filtros
         if (tipoFiltro === 'competidor') unif = unif.filter(b => b.isCompetidor);

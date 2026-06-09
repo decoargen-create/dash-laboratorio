@@ -382,7 +382,9 @@ export default async function handler(req, res) {
         const ts = Date.now();
         const sourceIdeaId = idea?.id || `idea-${ts}`;
         cloudCreativos = await Promise.all(imagenes.map(async (b64, i) => {
-          const refId = `idea_${ts}_${sourceIdeaId}_${i}`;
+          // Suffix random para evitar colisión entre flow single + bulk
+          // disparados en la misma ms (raro pero posible con double-click).
+          const refId = `idea_${ts}_${sourceIdeaId}_${i}_${Math.random().toString(36).slice(2, 8)}`;
           const variantStyle = variations[i]?.divergence_level || 'tight';
           try {
             const { storagePath, imageUrl } = await uploadCreativoToBucket(userId, refId, b64);

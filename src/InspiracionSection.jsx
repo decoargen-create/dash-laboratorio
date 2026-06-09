@@ -1210,28 +1210,28 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     // Cascade delete: si la brand vino de un competidor (o matchea por
     // landingUrl / nombre), borramos también el competidor del producto.
     // Source of truth unificado.
-    setProductos(prev => {
-      const updated = prev.map(p => {
-        if (String(p.id) !== String(activeProductoId)) return p;
-        const comps = p.competidores || [];
-        const host = (b.landingUrl || '').replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
-        const brandNombre = (b.nombre || '').toLowerCase().trim();
-        const next = comps.filter(c => {
-          if (b.fromCompetidorId && String(c.id) === String(b.fromCompetidorId)) return false;
-          const cHost = (c.landingUrl || '').replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
-          if (host && cHost === host) return false;
-          if (brandNombre && (c.nombre || '').toLowerCase().trim() === brandNombre) return false;
-          return true;
-        });
-        return { ...p, competidores: next };
+    // Computamos updated FUERA del setter para evitar side effects en el
+    // updater (StrictMode dev dispara updaters dos veces → doble write +
+    // doble dispatch). Y usamos notifyMarketingChange para consistencia.
+    const updated = loadProductos().map(p => {
+      if (String(p.id) !== String(activeProductoId)) return p;
+      const comps = p.competidores || [];
+      const host = (b.landingUrl || '').replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+      const brandNombre = (b.nombre || '').toLowerCase().trim();
+      const next = comps.filter(c => {
+        if (b.fromCompetidorId && String(c.id) === String(b.fromCompetidorId)) return false;
+        const cHost = (c.landingUrl || '').replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+        if (host && cHost === host) return false;
+        if (brandNombre && (c.nombre || '').toLowerCase().trim() === brandNombre) return false;
+        return true;
       });
-      // Persistir a localStorage como hacen otros lugares en este archivo.
-      try {
-        localStorage.setItem(PRODUCTOS_KEY, JSON.stringify(updated));
-        window.dispatchEvent(new CustomEvent('viora:marketing-storage-changed', { detail: { key: PRODUCTOS_KEY } }));
-      } catch {}
-      return updated;
+      return { ...p, competidores: next };
     });
+    try {
+      localStorage.setItem(PRODUCTOS_KEY, JSON.stringify(updated));
+      notifyMarketingChange(PRODUCTOS_KEY);
+    } catch {}
+    setProductos(updated);
   };
 
   // Adapta un ad de inspiración al producto activo: llama al endpoint

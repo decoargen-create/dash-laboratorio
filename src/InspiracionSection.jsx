@@ -291,6 +291,24 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
                 comp
               </span>
             )}
+            {(() => {
+              // Badge "estable" — marcas que el smart scrape va a saltear porque
+              // devolvieron 0 ads nuevos 3 veces seguidas. El user puede forzar
+              // si quiere. Lo mostramos para que el user entienda por qué a
+              // veces el smart scrape salta marcas.
+              const z = isCompetidor
+                ? (brand.__sourceComp?.consecutiveZeroAds || 0)
+                : (brand.consecutiveZeroAds || 0);
+              if (z < 3) return null;
+              return (
+                <span
+                  className="px-1 py-px text-[8px] font-bold bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded uppercase tracking-wider shrink-0"
+                  title={`Estable: ${z} scrapes sin ads nuevos. Smart scrape la saltea, usá "Forzar" para igual scrapearla.`}
+                >
+                  estable
+                </span>
+              );
+            })()}
           </div>
           <div className="flex items-center gap-1.5 text-[10px] text-gray-500 dark:text-gray-400 truncate">
             {brand.landingUrl && (
@@ -2458,7 +2476,9 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                       className="inline-flex items-center gap-1.5 px-2 py-1.5 text-xs font-semibold text-purple-700 dark:text-purple-300 bg-white dark:bg-gray-800 border border-purple-300 dark:border-purple-700 rounded hover:bg-purple-50 dark:hover:bg-purple-900/20 transition disabled:opacity-50 disabled:cursor-not-allowed"
                       title="Re-scrapea TODAS las marcas ignorando cache de 24h y estables. Gasta más cuota de Apify."
                     >
-                      <RefreshCw size={11} /> Forzar
+                      {scrapingBrandIds.size > 0
+                        ? <><Loader2 size={11} className="animate-spin" /> En curso…</>
+                        : <><RefreshCw size={11} /> Forzar todas</>}
                     </button>
                   </>
                 );

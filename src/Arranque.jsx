@@ -1585,9 +1585,14 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             winners: data.winners || 0,
             newAds: newAds.length,
           }].slice(-10);
+          // consecutiveZeroAds: tracking para "estable" en el smart scrape.
+          // Se inicializa acá y se incrementa/resetea en InspiracionSection
+          // según haya o no ads nuevos en cada refresh.
+          const prevZeroes = x.consecutiveZeroAds || 0;
           return {
             ...x, ads, adsTotal: data.total || 0, winnersCount: data.winners || 0,
             lastAdsCheck: new Date().toISOString(), adsHistory: history,
+            consecutiveZeroAds: newAds.length > 0 ? 0 : prevZeroes + 1,
           };
         }));
 

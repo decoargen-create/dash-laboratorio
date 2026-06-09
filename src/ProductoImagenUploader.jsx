@@ -21,13 +21,19 @@ export default function ProductoImagenUploader({ productoId, addToast }) {
   const inputRef = useRef(null);
 
   useEffect(() => {
-    const img = getProductoImagen(productoId);
-    setImagen(img);
-    setAccent(getAccentColor(productoId) || '');
-    setError('');
-    setPalette([]);
-    // Auto-extraer paleta al montar si ya hay imagen guardada.
-    if (img) extractPalette(img, 5).then(setPalette).catch(() => {});
+    let cancelled = false;
+    (async () => {
+      try {
+        const img = await getProductoImagen(productoId);
+        if (cancelled) return;
+        setImagen(img);
+        setAccent(getAccentColor(productoId) || '');
+        setError('');
+        setPalette([]);
+        if (img) extractPalette(img, 5).then(setPalette).catch(() => {});
+      } catch {}
+    })();
+    return () => { cancelled = true; };
   }, [productoId]);
 
   const onArchivo = async (e) => {
@@ -38,7 +44,7 @@ export default function ProductoImagenUploader({ productoId, addToast }) {
     setError('');
     try {
       const dataUrl = await comprimirImagen(file);
-      setProductoImagen(productoId, dataUrl);
+      await setProductoImagen(productoId, dataUrl);
       setImagen(dataUrl);
       addToast?.({ type: 'success', message: 'Foto del producto cargada' });
       // Extraer paleta en background — si tarda no bloquea la UI.
@@ -58,8 +64,8 @@ export default function ProductoImagenUploader({ productoId, addToast }) {
     }
   };
 
-  const quitar = () => {
-    removeProductoImagen(productoId);
+  const quitar = async () => {
+    await removeProductoImagen(productoId);
     setImagen(null);
     setError('');
     setPalette([]);

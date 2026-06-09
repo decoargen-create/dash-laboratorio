@@ -1121,7 +1121,7 @@ function IdeaImageGenerator({ idea, addToast }) {
       setError('No encontré el producto de esta idea — recargá la página.');
       return;
     }
-    const prodImg = getProductoImagen(producto.id);
+    const prodImg = await getProductoImagen(producto.id);
     if (!prodImg) {
       setError('Cargá la foto del producto en Setup (Arranque) antes de generar.');
       return;

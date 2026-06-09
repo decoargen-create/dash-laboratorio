@@ -132,7 +132,7 @@ export async function bulkGenerateFromIdeas({
     addToast?.({ type: 'error', message: 'Falta producto (cargá uno en Setup).' });
     return { ok: 0, failed: ideas.length, totalImages: 0, costoUSD: 0 };
   }
-  const prodImg = getProductoImagen(producto.id);
+  const prodImg = await getProductoImagen(producto.id);
   if (!prodImg) {
     addToast?.({ type: 'error', message: 'Falta la foto del producto en Setup (Arranque).' });
     return { ok: 0, failed: ideas.length, totalImages: 0, costoUSD: 0 };

@@ -19,6 +19,30 @@ import {
   verifyState, signState, setMetaCookie, clearMetaCookie,
   readMetaCookie, getOrigin, respondJSON, graphGet, graphPost,
 } from './_lib.js';
+import {
+  isSupabaseConfigured, getUserIdFromAuth,
+  listMetaConnections, insertMetaConnection,
+  getMetaConnectionToken, deleteMetaConnection,
+} from '../marketing/_supabase-server.js';
+
+// Resuelve el access token a usar para un request. Dos fuentes:
+//   - connection_id (query/body) → conexión guardada en Supabase (multi-cuenta).
+//     Requiere JWT de Supabase en Authorization para identificar al dueño.
+//   - cookie viora-meta-session → modo legacy single-token (sin Supabase).
+// Devuelve { token } o { error, status }.
+async function resolveAccessToken(req, url) {
+  const connId = url?.searchParams?.get('connection_id');
+  if (connId) {
+    const userId = await getUserIdFromAuth(req);
+    if (!userId) return { error: 'No autenticado — falta sesión de Supabase', status: 401 };
+    const token = await getMetaConnectionToken(userId, connId);
+    if (!token) return { error: 'Conexión no encontrada o sin acceso', status: 404 };
+    return { token };
+  }
+  const session = readMetaCookie(req);
+  if (session?.accessToken) return { token: session.accessToken };
+  return { error: 'Meta no conectado', status: 401 };
+}
 
 // --- helpers locales ---
 
@@ -191,11 +215,12 @@ async function handleMe(req, res) {
 // elija en un dropdown de "¿cuál usamos?".
 async function handleAdAccounts(req, res) {
   if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
-  const session = readMetaCookie(req);
-  if (!session?.accessToken) return respondJSON(res, 401, { error: 'Meta no conectado' });
+  const url = new URL(req.url, getOrigin(req));
+  const { token, error, status } = await resolveAccessToken(req, url);
+  if (!token) return respondJSON(res, status || 401, { error: error || 'Meta no conectado' });
 
   try {
-    const data = await graphGet('me/adaccounts', session.accessToken, {
+    const data = await graphGet('me/adaccounts', token, {
       fields: 'id,account_id,name,account_status,currency,timezone_name,business_name',
       limit: 100,
     });
@@ -1276,6 +1301,28 @@ async function handleConnectToken(req, res) {
     return respondJSON(res, 401, { error: `Token inválido: ${msg}` });
   }
 
+  // Si hay Supabase + JWT del user, guardamos la conexión en DB (multi-cuenta):
+  // así se pueden tener varias cuentas/clientes conectados a la vez.
+  const userId = isSupabaseConfigured() ? await getUserIdFromAuth(req) : null;
+  if (userId) {
+    try {
+      const connection = await insertMetaConnection(userId, {
+        label: body?.label,
+        metaUserId: me.id,
+        metaUserName: me.name || null,
+        accessToken,
+      });
+      return respondJSON(res, 200, {
+        stored: 'db',
+        connection,
+        user: { id: me.id, name: me.name || null },
+      });
+    } catch (err) {
+      return respondJSON(res, 502, { error: `No pude guardar la conexión: ${err.message}` });
+    }
+  }
+
+  // Fallback legacy: sin Supabase guardamos en cookie (una sola conexión).
   const cookiePayload = {
     accessToken,
     metaUserId: me.id,
@@ -1286,9 +1333,43 @@ async function handleConnectToken(req, res) {
   setMetaCookie(res, signState(cookiePayload, authSecret));
 
   return respondJSON(res, 200, {
+    stored: 'cookie',
     connected: true,
     user: { id: me.id, name: me.name || null },
   });
+}
+
+// Lista (GET) y borra (DELETE) las conexiones guardadas del user. Requiere
+// JWT de Supabase. La lista NUNCA incluye el access_token.
+async function handleConnections(req, res) {
+  if (req.method === 'GET') {
+    if (!isSupabaseConfigured()) {
+      // Sin Supabase no hay multi-conexión: el front cae a modo cookie.
+      return respondJSON(res, 200, { supabase: false, authenticated: false, connections: [] });
+    }
+    const userId = await getUserIdFromAuth(req);
+    if (!userId) return respondJSON(res, 200, { supabase: true, authenticated: false, connections: [] });
+    try {
+      const connections = await listMetaConnections(userId);
+      return respondJSON(res, 200, { supabase: true, authenticated: true, connections });
+    } catch (err) {
+      return respondJSON(res, 502, { error: err.message });
+    }
+  }
+  if (req.method === 'DELETE') {
+    const userId = await getUserIdFromAuth(req);
+    if (!userId) return respondJSON(res, 401, { error: 'No autenticado' });
+    const url = new URL(req.url, getOrigin(req));
+    const connId = url.searchParams.get('connection_id');
+    if (!connId) return respondJSON(res, 400, { error: 'Falta connection_id' });
+    try {
+      await deleteMetaConnection(userId, connId);
+      return respondJSON(res, 200, { ok: true });
+    } catch (err) {
+      return respondJSON(res, 502, { error: err.message });
+    }
+  }
+  return respondJSON(res, 405, { error: 'Method not allowed' });
 }
 
 // ========================================================================
@@ -1303,11 +1384,12 @@ async function handleConnectToken(req, res) {
 //   date_preset  (opcional, default last_7d)
 async function handleCampaignsInsights(req, res) {
   if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
-  const session = readMetaCookie(req);
-  if (!session?.accessToken) return respondJSON(res, 401, { error: 'Meta no conectado' });
 
   const origin = getOrigin(req);
   const url = new URL(req.url, origin);
+  const { token, error, status } = await resolveAccessToken(req, url);
+  if (!token) return respondJSON(res, status || 401, { error: error || 'Meta no conectado' });
+
   const accountId = url.searchParams.get('account_id');
   if (!accountId) return respondJSON(res, 400, { error: 'Falta account_id (con prefijo act_)' });
 
@@ -1339,7 +1421,7 @@ async function handleCampaignsInsights(req, res) {
         effective_status: effectiveStatus,
       };
       if (next) params.after = next;
-      const data = await graphGet(`${accountId}/campaigns`, session.accessToken, params);
+      const data = await graphGet(`${accountId}/campaigns`, token, params);
       for (const c of data.data || []) all.push(c);
       next = data.paging?.cursors?.after && data.paging?.next ? data.paging.cursors.after : null;
       guard++;
@@ -1393,6 +1475,7 @@ const actions = {
   connect: handleConnect,
   callback: handleCallback,
   'connect-token': handleConnectToken,
+  connections: handleConnections,
   disconnect: handleDisconnect,
   me: handleMe,
   'ad-accounts': handleAdAccounts,

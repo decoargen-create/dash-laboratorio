@@ -9,6 +9,7 @@
 // cualquier write.
 
 import { createClient } from '@supabase/supabase-js';
+import crypto from 'node:crypto';
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
@@ -21,6 +22,12 @@ function getClient() {
     auth: { persistSession: false, autoRefreshToken: false },
   });
   return _client;
+}
+
+// ¿Está configurado Supabase server-side? Lo usa /api/meta para decidir si
+// guarda las conexiones en DB (multi-cuenta) o cae al modo cookie (single).
+export function isSupabaseConfigured() {
+  return !!getClient();
 }
 
 // Lee Authorization: Bearer <token>, verifica con Supabase y devuelve el
@@ -38,6 +45,109 @@ export async function getUserIdFromAuth(req) {
   } catch {
     return null;
   }
+}
+
+// =========================================================================
+// META_CONNECTIONS — cuentas publicitarias guardadas por el user
+// =========================================================================
+// El access_token se cifra en reposo con AES-256-GCM usando una clave
+// derivada de AUTH_SECRET. Si AUTH_SECRET no está seteada, se guarda en claro
+// (no ideal, pero la tabla ya es service_role-only y queda funcional).
+
+function tokenKey() {
+  const secret = process.env.AUTH_SECRET;
+  if (!secret) return null;
+  return crypto.createHash('sha256').update(String(secret)).digest(); // 32 bytes
+}
+
+function encryptToken(plain) {
+  const key = tokenKey();
+  if (!key) return plain; // sin clave → plano
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const enc = Buffer.concat([cipher.update(String(plain), 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  // Prefijo de versión para distinguir de tokens en claro legacy.
+  return 'v1:' + Buffer.concat([iv, tag, enc]).toString('base64');
+}
+
+function decryptToken(stored) {
+  if (!stored) return null;
+  if (!String(stored).startsWith('v1:')) return stored; // claro legacy
+  const key = tokenKey();
+  if (!key) return null;
+  try {
+    const raw = Buffer.from(String(stored).slice(3), 'base64');
+    const iv = raw.subarray(0, 12);
+    const tag = raw.subarray(12, 28);
+    const enc = raw.subarray(28);
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(enc), decipher.final()]).toString('utf8');
+  } catch {
+    return null;
+  }
+}
+
+// Lista las conexiones del user SIN el access_token (nunca se expone).
+export async function listMetaConnections(userId) {
+  const supabase = getClient();
+  if (!supabase || !userId) return [];
+  const { data, error } = await supabase
+    .from('meta_connections')
+    .select('id,label,meta_user_id,meta_user_name,created_at,updated_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true });
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+
+// Inserta una conexión nueva. Devuelve la fila SIN el token.
+export async function insertMetaConnection(userId, { label, metaUserId, metaUserName, accessToken }) {
+  const supabase = getClient();
+  if (!supabase) throw new Error('Supabase no configurado');
+  const id = crypto.randomUUID();
+  const row = {
+    id,
+    user_id: userId,
+    label: (label && String(label).trim()) || metaUserName || 'Cuenta Meta',
+    meta_user_id: metaUserId || null,
+    meta_user_name: metaUserName || null,
+    access_token: encryptToken(accessToken),
+  };
+  const { data, error } = await supabase
+    .from('meta_connections')
+    .insert(row)
+    .select('id,label,meta_user_id,meta_user_name,created_at,updated_at')
+    .single();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+// Devuelve el access_token (descifrado) de una conexión del user. Server-only.
+export async function getMetaConnectionToken(userId, connectionId) {
+  const supabase = getClient();
+  if (!supabase || !userId || !connectionId) return null;
+  const { data, error } = await supabase
+    .from('meta_connections')
+    .select('access_token')
+    .eq('user_id', userId)
+    .eq('id', connectionId)
+    .maybeSingle();
+  if (error || !data) return null;
+  return decryptToken(data.access_token);
+}
+
+export async function deleteMetaConnection(userId, connectionId) {
+  const supabase = getClient();
+  if (!supabase || !userId || !connectionId) return false;
+  const { error } = await supabase
+    .from('meta_connections')
+    .delete()
+    .eq('user_id', userId)
+    .eq('id', connectionId);
+  if (error) throw new Error(error.message);
+  return true;
 }
 
 // Sube un base64 al bucket `creativos` con path `<userId>/<refId>.png` y

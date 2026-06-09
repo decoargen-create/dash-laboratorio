@@ -1,34 +1,38 @@
-// Campañas — tracker simple de cuentas publicitarias de Meta.
+// Campañas — tracker de cuentas publicitarias de Meta (multi-conexión).
 //
 // Objetivo: conectar CUALQUIER cuenta publicitaria (propia o de otra persona)
 // y trackear sus campañas con métricas, sin depender del flujo OAuth (que
 // requiere una app de Meta Developer con App Review).
 //
-// Flujo:
-//   1. Si no hay conexión → form para pegar un Access Token de Meta. El token
-//      determina a qué cuentas se puede acceder. Se valida contra Graph /me y
-//      se guarda en una cookie HttpOnly firmada (server-side).
-//   2. Conectado → selector de cuenta (dropdown de las cuentas accesibles +
-//      entrada manual de un act_XXXX para cuentas compartidas vía Business
-//      Manager) + selector de período.
-//   3. Tabla de campañas con gasto, CTR, CPM, ROAS, compras, CPA y estado.
+// Modelo de datos:
+//   - Con Supabase configurado → cada conexión (un token por cuenta/cliente)
+//     se guarda en la tabla meta_connections (token CIFRADO, server-side). Se
+//     pueden tener VARIAS conexiones a la vez y switchear entre ellas.
+//   - Sin Supabase → fallback a una sola conexión guardada en cookie HttpOnly.
 //
-// Para conectar la cuenta de OTRA persona hay dos caminos:
-//   a) Esa persona te comparte su cuenta publicitaria con tu Business Manager
-//      (Configuración del negocio → Socios / Cuentas publicitarias) y usás un
-//      token de System User de tu BM — un solo token ve todas las cuentas.
-//   b) Esa persona genera un token con acceso a su cuenta y te lo pasa; lo
-//      pegás acá. Para cambiar de cuenta, desconectás y pegás otro token.
+// El token NUNCA llega al browser: el backend lo guarda y lo usa para hablar
+// con Graph API. El front solo maneja connection_id + el JWT de Supabase.
+//
+// Flujo:
+//   1. Sin conexiones → form para pegar un Access Token (+ etiqueta).
+//   2. Con conexiones → selector de conexión + "Nueva" + "Eliminar".
+//   3. Por conexión: selector de cuenta (dropdown de cuentas accesibles +
+//      entrada manual de un act_XXXX) + selector de período + tabla de
+//      campañas con gasto, CTR, CPM, ROAS, compras, CPA y estado.
 
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Zap, Check, Loader2, LogOut, AlertCircle, RefreshCw, ExternalLink,
-  TrendingUp, KeyRound, ChevronDown, Search,
+  Zap, Check, Loader2, Trash2, AlertCircle, RefreshCw, ExternalLink,
+  TrendingUp, KeyRound, ChevronDown, Search, Plus, X,
 } from 'lucide-react';
+import { supabase } from './supabase.js';
 
 const TOKEN_HELP_URL = 'https://developers.facebook.com/tools/explorer/';
-const LS_ACCOUNT = 'adslab-campanas-account-id';
 const LS_PRESET = 'adslab-campanas-date-preset';
+const LS_ACCT_PREFIX = 'adslab-campanas-acct-';
+
+// Con Supabase configurado usamos conexiones persistidas en DB (multi-cuenta).
+const DB_MODE = !!supabase;
 
 const PRESETS = [
   { value: 'today', label: 'Hoy' },
@@ -40,6 +44,22 @@ const PRESETS = [
   { value: 'last_month', label: 'Mes pasado' },
   { value: 'maximum', label: 'Histórico' },
 ];
+
+// Headers con el JWT de Supabase (para que el backend identifique al dueño de
+// las conexiones). En modo cookie no hace falta, pero mandarlo no molesta.
+async function authHeaders(json = false) {
+  let token = '';
+  try {
+    if (supabase) {
+      const { data: { session } } = await supabase.auth.getSession();
+      token = session?.access_token || '';
+    }
+  } catch {}
+  return {
+    ...(json ? { 'Content-Type': 'application/json' } : {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
 
 // --- helpers de formato ---
 
@@ -76,8 +96,9 @@ function StatusBadge({ status }) {
 // ========================================================================
 // Form de conexión por token
 // ========================================================================
-function ConnectTokenForm({ onConnected, addToast }) {
+function ConnectTokenForm({ onConnect, onCancel, canCancel }) {
   const [token, setToken] = useState('');
+  const [label, setLabel] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
@@ -87,16 +108,8 @@ function ConnectTokenForm({ onConnected, addToast }) {
     if (!t) { setError('Pegá un access token.'); return; }
     setBusy(true); setError(null);
     try {
-      const r = await fetch('/api/meta/connect-token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accessToken: t }),
-      });
-      const d = await r.json();
-      if (!r.ok || !d.connected) throw new Error(d.error || 'No se pudo conectar.');
-      setToken('');
-      addToast?.({ type: 'success', message: `Conectado a Meta como ${d.user?.name || d.user?.id}` });
-      onConnected?.(d.user);
+      await onConnect({ accessToken: t, label: label.trim() });
+      setToken(''); setLabel('');
     } catch (err) {
       setError(err.message);
     } finally {
@@ -110,25 +123,37 @@ function ConnectTokenForm({ onConnected, addToast }) {
         <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-[#0668E1] to-[#1877F2] flex items-center justify-center text-white shadow-sm shrink-0">
           <KeyRound size={20} />
         </div>
-        <div>
+        <div className="flex-1 min-w-0">
           <h3 className="text-base font-bold text-gray-900 dark:text-gray-100">Conectar cuenta publicitaria</h3>
           <p className="text-xs text-gray-600 dark:text-gray-300">
             Pegá un Access Token de Meta. Sirve para tu cuenta o la de cualquier persona que te dé acceso.
           </p>
         </div>
+        {canCancel && (
+          <button onClick={onCancel} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition shrink-0" aria-label="Cancelar">
+            <X size={16} />
+          </button>
+        )}
       </div>
 
       <form onSubmit={submit} className="space-y-3">
         <div>
           <label className="block text-[11px] font-bold text-gray-700 dark:text-gray-300 mb-1 uppercase tracking-wider">
+            Etiqueta <span className="font-normal normal-case text-gray-400">(para reconocerla — ej. "Cliente X")</span>
+          </label>
+          <input
+            type="text" value={label} onChange={e => setLabel(e.target.value)}
+            placeholder="Cuenta de…"
+            className="w-full px-3 py-2 text-xs bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+          />
+        </div>
+        <div>
+          <label className="block text-[11px] font-bold text-gray-700 dark:text-gray-300 mb-1 uppercase tracking-wider">
             Access Token
           </label>
           <textarea
-            value={token}
-            onChange={e => setToken(e.target.value)}
-            placeholder="EAAB..."
-            rows={3}
-            spellCheck={false}
+            value={token} onChange={e => setToken(e.target.value)}
+            placeholder="EAAB..." rows={3} spellCheck={false}
             className="w-full px-3 py-2 text-xs font-mono bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none break-all"
           />
         </div>
@@ -141,8 +166,7 @@ function ConnectTokenForm({ onConnected, addToast }) {
         )}
 
         <button
-          type="submit"
-          disabled={busy}
+          type="submit" disabled={busy}
           className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-bold text-white bg-gradient-to-br from-[#0668E1] to-[#1877F2] rounded-lg hover:from-[#0556BE] hover:to-[#1668D8] shadow-sm transition disabled:opacity-50"
         >
           {busy ? <Loader2 size={15} className="animate-spin" /> : <Zap size={15} />}
@@ -167,7 +191,7 @@ function ConnectTokenForm({ onConnected, addToast }) {
           </li>
         </ul>
         <p className="text-[11px] text-gray-500 dark:text-gray-500 mt-2">
-          El token se guarda en una cookie HttpOnly del servidor (no accesible por JavaScript).
+          El token se guarda {DB_MODE ? 'cifrado en el servidor (tabla protegida)' : 'en una cookie HttpOnly del servidor'} — nunca queda accesible desde el navegador.
         </p>
       </div>
     </div>
@@ -266,114 +290,81 @@ function CampaignsTable({ data, currency }) {
 }
 
 // ========================================================================
-// Componente principal
+// Panel de una conexión: cuenta + período + tabla
 // ========================================================================
-export default function CampanasTracker({ addToast }) {
-  const [conn, setConn] = useState({ loading: true, connected: false, user: null });
+function ConnectionPanel({ connection, addToast }) {
+  // En modo cookie la conexión sintética usa id '__cookie__' → no manda connection_id.
+  const connId = connection.id;
+  const usesConnParam = DB_MODE && connId && connId !== '__cookie__';
 
-  // Cuentas + selección
   const [accounts, setAccounts] = useState([]);
   const [accountsLoading, setAccountsLoading] = useState(false);
   const [selectedAccount, setSelectedAccount] = useState(() => {
-    try { return localStorage.getItem(LS_ACCOUNT) || ''; } catch { return ''; }
+    try { return localStorage.getItem(LS_ACCT_PREFIX + connId) || ''; } catch { return ''; }
   });
   const [manualId, setManualId] = useState('');
   const [useManual, setUseManual] = useState(false);
-
   const [preset, setPreset] = useState(() => {
     try { return localStorage.getItem(LS_PRESET) || 'last_7d'; } catch { return 'last_7d'; }
   });
-
-  // Campañas
   const [campaignsData, setCampaignsData] = useState(null);
   const [campaignsLoading, setCampaignsLoading] = useState(false);
   const [campaignsError, setCampaignsError] = useState(null);
 
-  // Moneda de la cuenta seleccionada (para formatear montos).
   const currentAccountObj = accounts.find(a => a.id === selectedAccount) || null;
   const currency = currentAccountObj?.currency || null;
-
-  const checkConnection = useCallback(async () => {
-    try {
-      const r = await fetch('/api/meta/me');
-      const d = await r.json();
-      setConn({ loading: false, connected: !!d.connected, user: d.user || null });
-    } catch {
-      setConn({ loading: false, connected: false, user: null });
-    }
-  }, []);
 
   const loadAccounts = useCallback(async () => {
     setAccountsLoading(true);
     try {
-      const r = await fetch('/api/meta/ad-accounts');
+      const qs = usesConnParam ? `?connection_id=${encodeURIComponent(connId)}` : '';
+      const r = await fetch(`/api/meta/ad-accounts${qs}`, { headers: await authHeaders(false) });
       const d = await r.json();
-      if (r.ok && Array.isArray(d.accounts)) {
-        setAccounts(d.accounts);
-        // Si no hay cuenta elegida y hay alguna, no auto-seleccionamos
-        // (dejamos que el user elija) salvo que la guardada exista.
-      } else if (!r.ok) {
-        addToast?.({ type: 'error', message: d.error || 'No pude listar las cuentas.' });
-      }
+      if (r.ok && Array.isArray(d.accounts)) setAccounts(d.accounts);
+      else if (!r.ok) addToast?.({ type: 'error', message: d.error || 'No pude listar las cuentas.' });
     } catch (err) {
       addToast?.({ type: 'error', message: err.message });
     } finally {
       setAccountsLoading(false);
     }
-  }, [addToast]);
+  }, [connId, usesConnParam, addToast]);
 
   const loadCampaigns = useCallback(async (accountId, datePreset) => {
     if (!accountId) return;
-    setCampaignsLoading(true);
-    setCampaignsError(null);
+    setCampaignsLoading(true); setCampaignsError(null);
     try {
-      const url = `/api/meta/campaigns-insights?account_id=${encodeURIComponent(accountId)}&date_preset=${encodeURIComponent(datePreset)}`;
-      const r = await fetch(url);
+      let url = `/api/meta/campaigns-insights?account_id=${encodeURIComponent(accountId)}&date_preset=${encodeURIComponent(datePreset)}`;
+      if (usesConnParam) url += `&connection_id=${encodeURIComponent(connId)}`;
+      const r = await fetch(url, { headers: await authHeaders(false) });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || `Error ${r.status}`);
       setCampaignsData(d);
     } catch (err) {
-      setCampaignsError(err.message);
-      setCampaignsData(null);
+      setCampaignsError(err.message); setCampaignsData(null);
     } finally {
       setCampaignsLoading(false);
     }
-  }, []);
+  }, [connId, usesConnParam]);
 
-  // Mount: chequear conexión.
-  useEffect(() => { checkConnection(); }, [checkConnection]);
-
-  // Cuando se confirma conexión, traer cuentas.
+  // Al montar / cambiar de conexión: traer cuentas y resetear estado.
   useEffect(() => {
-    if (conn.connected) loadAccounts();
-  }, [conn.connected, loadAccounts]);
+    setCampaignsData(null); setCampaignsError(null);
+    try { setSelectedAccount(localStorage.getItem(LS_ACCT_PREFIX + connId) || ''); } catch { setSelectedAccount(''); }
+    loadAccounts();
+  }, [connId, loadAccounts]);
 
   // Persistir selección + período.
   useEffect(() => {
-    try {
-      if (selectedAccount) localStorage.setItem(LS_ACCOUNT, selectedAccount);
-    } catch {}
-  }, [selectedAccount]);
+    try { if (selectedAccount) localStorage.setItem(LS_ACCT_PREFIX + connId, selectedAccount); } catch {}
+  }, [selectedAccount, connId]);
   useEffect(() => {
     try { localStorage.setItem(LS_PRESET, preset); } catch {}
   }, [preset]);
 
   // Auto-cargar campañas cuando hay cuenta + período.
   useEffect(() => {
-    if (conn.connected && selectedAccount) loadCampaigns(selectedAccount, preset);
-  }, [conn.connected, selectedAccount, preset, loadCampaigns]);
-
-  const handleDisconnect = async () => {
-    if (!window.confirm('¿Desconectar la cuenta de Meta? Vas a tener que volver a pegar un token.')) return;
-    try {
-      await fetch('/api/meta/disconnect', { method: 'POST' });
-    } finally {
-      setConn({ loading: false, connected: false, user: null });
-      setAccounts([]);
-      setCampaignsData(null);
-      setSelectedAccount('');
-    }
-  };
+    if (selectedAccount) loadCampaigns(selectedAccount, preset);
+  }, [selectedAccount, preset, loadCampaigns]);
 
   const applyManualId = () => {
     const id = manualId.trim();
@@ -382,94 +373,32 @@ export default function CampanasTracker({ addToast }) {
     setSelectedAccount(normalized);
   };
 
-  // ---- Header ----
-  const header = (
-    <div className="flex items-center gap-3">
-      <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-400 flex items-center justify-center text-white shadow-sm shrink-0">
-        <TrendingUp size={20} />
-      </div>
-      <div className="flex-1 min-w-0">
-        <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Campañas</h2>
-        <p className="text-xs text-gray-500 dark:text-gray-400">
-          Conectá una cuenta publicitaria y trackeá sus campañas con métricas reales.
-        </p>
-      </div>
-    </div>
-  );
-
-  if (conn.loading) {
-    return (
-      <div className="max-w-6xl mx-auto space-y-5">
-        {header}
-        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-8 flex items-center gap-3">
-          <Loader2 size={18} className="animate-spin text-gray-400" />
-          <span className="text-sm text-gray-500 dark:text-gray-400">Verificando conexión con Meta…</span>
-        </div>
-      </div>
-    );
-  }
-
-  if (!conn.connected) {
-    return (
-      <div className="max-w-3xl mx-auto space-y-5">
-        {header}
-        <ConnectTokenForm onConnected={() => checkConnection()} addToast={addToast} />
-      </div>
-    );
-  }
-
   return (
-    <div className="max-w-6xl mx-auto space-y-5">
-      {header}
-
-      {/* Barra de conexión */}
-      <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl px-4 py-2.5 flex items-center gap-2 flex-wrap">
-        <Check size={14} className="text-emerald-600 dark:text-emerald-400" />
-        <span className="text-xs text-emerald-800 dark:text-emerald-200">
-          Conectado como <span className="font-semibold">{conn.user?.name || conn.user?.id}</span>
-        </span>
-        <button
-          onClick={handleDisconnect}
-          className="ml-auto inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-red-50 hover:text-red-700 hover:border-red-200 dark:hover:bg-red-900/20 transition"
-        >
-          <LogOut size={12} /> Desconectar
-        </button>
-      </div>
-
+    <div className="space-y-4">
       {/* Controles: cuenta + período */}
       <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-3 flex flex-wrap gap-2 items-center">
         {!useManual ? (
           <div className="relative flex-1 min-w-[220px]">
             <select
-              value={selectedAccount}
-              onChange={e => setSelectedAccount(e.target.value)}
+              value={selectedAccount} onChange={e => setSelectedAccount(e.target.value)}
               className="w-full pl-3 pr-8 py-2 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md appearance-none focus:outline-none focus:ring-2 focus:ring-brand-500"
             >
               <option value="">{accountsLoading ? 'Cargando cuentas…' : '— Elegí una cuenta publicitaria —'}</option>
               {accounts.map(a => (
-                <option key={a.id} value={a.id}>
-                  {a.name} · {a.accountId} {a.currency ? `(${a.currency})` : ''}
-                </option>
+                <option key={a.id} value={a.id}>{a.name} · {a.accountId} {a.currency ? `(${a.currency})` : ''}</option>
               ))}
             </select>
             <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
           </div>
         ) : (
           <div className="flex-1 min-w-[220px] flex gap-2">
-            <div className="relative flex-1">
-              <input
-                type="text"
-                value={manualId}
-                onChange={e => setManualId(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') applyManualId(); }}
-                placeholder="act_1234567890 o 1234567890"
-                className="w-full pl-3 pr-2 py-2 text-xs font-mono bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500"
-              />
-            </div>
-            <button onClick={applyManualId}
-              className="px-3 py-2 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-md transition">
-              Cargar
-            </button>
+            <input
+              type="text" value={manualId} onChange={e => setManualId(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') applyManualId(); }}
+              placeholder="act_1234567890 o 1234567890"
+              className="flex-1 pl-3 pr-2 py-2 text-xs font-mono bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500"
+            />
+            <button onClick={applyManualId} className="px-3 py-2 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-md transition">Cargar</button>
           </div>
         )}
 
@@ -482,8 +411,7 @@ export default function CampanasTracker({ addToast }) {
         </button>
 
         <select
-          value={preset}
-          onChange={e => setPreset(e.target.value)}
+          value={preset} onChange={e => setPreset(e.target.value)}
           className="px-2.5 py-2 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500"
         >
           {PRESETS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
@@ -526,6 +454,168 @@ export default function CampanasTracker({ addToast }) {
       ) : (
         <CampaignsTable data={campaignsData} currency={currency} />
       )}
+    </div>
+  );
+}
+
+// ========================================================================
+// Componente principal — maneja la lista de conexiones
+// ========================================================================
+export default function CampanasTracker({ addToast }) {
+  const [boot, setBoot] = useState({ loading: true });
+  const [connections, setConnections] = useState([]);
+  const [activeConnId, setActiveConnId] = useState('');
+  const [showAddForm, setShowAddForm] = useState(false);
+
+  const reload = useCallback(async () => {
+    if (DB_MODE) {
+      const r = await fetch('/api/meta/connections', { headers: await authHeaders(false) });
+      const d = await r.json();
+      const conns = (d.connections || []).map(c => ({
+        id: c.id, label: c.label, metaUserName: c.meta_user_name,
+      }));
+      setConnections(conns);
+      setActiveConnId(prev => (conns.find(c => c.id === prev) ? prev : (conns[0]?.id || '')));
+      setShowAddForm(conns.length === 0);
+    } else {
+      // Modo cookie: una sola conexión sintética según /api/meta/me.
+      const r = await fetch('/api/meta/me');
+      const d = await r.json();
+      if (d.connected) {
+        setConnections([{ id: '__cookie__', label: d.user?.name || 'Cuenta Meta', metaUserName: d.user?.name }]);
+        setActiveConnId('__cookie__');
+        setShowAddForm(false);
+      } else {
+        setConnections([]); setActiveConnId(''); setShowAddForm(true);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try { await reload(); } catch (err) { addToast?.({ type: 'error', message: err.message }); }
+      finally { setBoot({ loading: false }); }
+    })();
+  }, [reload, addToast]);
+
+  const handleConnect = async ({ accessToken, label }) => {
+    const r = await fetch('/api/meta/connect-token', {
+      method: 'POST',
+      headers: await authHeaders(true),
+      body: JSON.stringify({ accessToken, label }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'No se pudo conectar.');
+    addToast?.({ type: 'success', message: `Conectado a Meta como ${d.user?.name || d.user?.id}` });
+    await reload();
+    if (d.connection?.id) setActiveConnId(d.connection.id);
+    setShowAddForm(false);
+  };
+
+  const handleDelete = async (conn) => {
+    if (!window.confirm(`¿Eliminar la conexión "${conn.label}"? Vas a tener que volver a pegar el token para usarla.`)) return;
+    try {
+      if (conn.id === '__cookie__') {
+        await fetch('/api/meta/disconnect', { method: 'POST' });
+      } else {
+        await fetch(`/api/meta/connections?connection_id=${encodeURIComponent(conn.id)}`, {
+          method: 'DELETE', headers: await authHeaders(false),
+        });
+      }
+      addToast?.({ type: 'info', message: 'Conexión eliminada.' });
+      await reload();
+    } catch (err) {
+      addToast?.({ type: 'error', message: err.message });
+    }
+  };
+
+  const header = (
+    <div className="flex items-center gap-3">
+      <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-400 flex items-center justify-center text-white shadow-sm shrink-0">
+        <TrendingUp size={20} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Campañas</h2>
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          Conectá una o varias cuentas publicitarias y trackeá sus campañas con métricas reales.
+        </p>
+      </div>
+    </div>
+  );
+
+  if (boot.loading) {
+    return (
+      <div className="max-w-6xl mx-auto space-y-5">
+        {header}
+        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-8 flex items-center gap-3">
+          <Loader2 size={18} className="animate-spin text-gray-400" />
+          <span className="text-sm text-gray-500 dark:text-gray-400">Cargando conexiones…</span>
+        </div>
+      </div>
+    );
+  }
+
+  const activeConn = connections.find(c => c.id === activeConnId) || null;
+
+  // Sin conexiones (o agregando una nueva): mostrar el form.
+  if (connections.length === 0 || showAddForm) {
+    return (
+      <div className="max-w-3xl mx-auto space-y-5">
+        {header}
+        <ConnectTokenForm
+          onConnect={handleConnect}
+          onCancel={() => setShowAddForm(false)}
+          canCancel={connections.length > 0}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-6xl mx-auto space-y-5">
+      {header}
+
+      {/* Selector de conexiones */}
+      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-2 flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-1.5 flex-wrap flex-1 min-w-0">
+          {connections.map(c => {
+            const active = c.id === activeConnId;
+            return (
+              <button
+                key={c.id}
+                onClick={() => setActiveConnId(c.id)}
+                className={`group inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition ${
+                  active
+                    ? 'bg-brand-50 dark:bg-brand-900/30 border-brand-300 dark:border-brand-700 text-brand-700 dark:text-brand-300'
+                    : 'bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:border-gray-300'
+                }`}
+              >
+                {active && <Check size={12} />}
+                <span className="truncate max-w-[160px]">{c.label}</span>
+                <span
+                  role="button" tabIndex={0}
+                  onClick={(e) => { e.stopPropagation(); handleDelete(c); }}
+                  className="ml-0.5 text-gray-400 hover:text-red-500 transition opacity-60 group-hover:opacity-100"
+                  title="Eliminar conexión"
+                >
+                  <Trash2 size={12} />
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        {DB_MODE && (
+          <button
+            onClick={() => setShowAddForm(true)}
+            className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-[#0668E1] to-[#1877F2] rounded-lg hover:from-[#0556BE] hover:to-[#1668D8] transition shrink-0"
+          >
+            <Plus size={13} /> Nueva conexión
+          </button>
+        )}
+      </div>
+
+      {/* Panel de la conexión activa */}
+      {activeConn && <ConnectionPanel key={activeConn.id} connection={activeConn} addToast={addToast} />}
     </div>
   );
 }

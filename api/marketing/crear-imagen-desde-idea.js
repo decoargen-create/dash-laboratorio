@@ -11,6 +11,15 @@
 //    manteniendo el concepto.
 // 4. Llamadas PARALELAS a gpt-image-2 /v1/images/edits con n=1 cada una.
 // 5. Devolvemos N imágenes en b64.
+// 6. Background save al cloud (mirror del flow de crear-creativo-referencial):
+//    sube bytes al bucket + inserta fila en marketing_creativos. Permite que
+//    el user cierre la pestaña sin perder el creativo.
+
+import {
+  getUserIdFromAuth,
+  uploadCreativoToBucket,
+  insertCreativoRow,
+} from './_supabase-server.js';
 
 const MODEL = 'gpt-image-2';
 const DEFAULT_SIZE = '2048x2048';
@@ -328,9 +337,80 @@ export default async function handler(req, res) {
       }
     }
 
+    // Background save al cloud — mismo patrón que crear-creativo-referencial.
+    // Sube cada imagen al bucket + inserta fila en marketing_creativos. Si el
+    // user cierra la pestaña antes de que vuelva la response, el creativo ya
+    // quedó persistido. Si falla, devolvemos imagenes en base64 igual.
+    let cloudCreativos = null;
+    let cloudSaveError = null;
+    try {
+      const userId = await getUserIdFromAuth(req);
+      const productoId = producto?.id != null ? String(producto.id) : null;
+      const hasAuthHeader = !!(req.headers?.authorization || req.headers?.Authorization);
+      const hasSupabaseEnv = !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY);
+      console.info('[cloud save bandeja] pre-check', {
+        hasAuthHeader, hasSupabaseEnv,
+        userId: userId ? `${String(userId).slice(0, 8)}...` : null,
+        productoId, imagenesCount: imagenes.length,
+      });
+      if (!hasSupabaseEnv) cloudSaveError = 'SUPABASE_URL/SUPABASE_SERVICE_KEY no seteadas';
+      else if (!hasAuthHeader) cloudSaveError = 'Sin Authorization header del frontend';
+      else if (!userId) cloudSaveError = 'JWT inválido o expirado';
+      else if (!productoId) cloudSaveError = 'producto.id ausente en el payload';
+      if (userId && productoId) {
+        const ts = Date.now();
+        const sourceIdeaId = idea?.id || `idea-${ts}`;
+        cloudCreativos = await Promise.all(imagenes.map(async (b64, i) => {
+          const refId = `idea_${ts}_${sourceIdeaId}_${i}`;
+          const variantStyle = variations[i]?.divergence_level || 'tight';
+          try {
+            const { storagePath, imageUrl } = await uploadCreativoToBucket(userId, refId, b64);
+            const row = await insertCreativoRow({
+              id: refId,
+              user_id: userId,
+              producto_id: productoId,
+              source_ad_id: sourceIdeaId,
+              source_brand: null,
+              source_image_url: null,
+              source_headline: (idea?.hook || '').slice(0, 200),
+              source_type: 'bandeja-idea',
+              variant_index: i,
+              variant_style: variantStyle,
+              prompt: prompts[i]?.prompt || null,
+              skeleton: null,
+              model: MODEL,
+              vision_model: null,
+              size: sizeUsed,
+              size_fallback: !!sizeFallback,
+              quality,
+              storage_path: storagePath,
+              image_url: imageUrl,
+              created_at: new Date(ts + i).toISOString(),
+            });
+            return { id: row.id, imageUrl, variantIndex: i, variantStyle };
+          } catch (err) {
+            console.warn(`[cloud save bandeja] imagen ${i} falló:`, err.message);
+            return null;
+          }
+        }));
+        const total = cloudCreativos.length;
+        cloudCreativos = cloudCreativos.filter(Boolean);
+        console.info(`[cloud save bandeja] ${cloudCreativos.length}/${total} OK`);
+        if (cloudCreativos.length === 0) {
+          cloudCreativos = null;
+          cloudSaveError = cloudSaveError || 'Todas las subidas fallaron';
+        }
+      }
+    } catch (err) {
+      console.warn('[cloud save bandeja] error general:', err.message);
+      cloudSaveError = err.message;
+    }
+
     return respondJSON(res, 200, {
-      imagenes,
-      variantStyles: variations.map(v => v.divergence_level), // 'tight'|'medium'|'loose'
+      imagenes: cloudCreativos ? [] : imagenes, // ahorra payload si ya subió
+      cloudCreativos,
+      cloudSaveError,
+      variantStyles: variations.map(v => v.divergence_level),
       mimeType: 'image/png',
       size: sizeUsed,
       sizeRequested: size,

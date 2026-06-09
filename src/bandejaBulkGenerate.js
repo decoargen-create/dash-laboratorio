@@ -6,8 +6,16 @@
 // - Este flow usa /api/marketing/crear-imagen-desde-idea (mismo que la UI
 //   single-idea de IdeaImageGenerator) que tiene plan de N divergence levels
 //   y cloud save server-side automático.
-// - El bulk corre secuencial (concurrency=1) para no congestionar OpenAI ni
-//   acumular base64 en memoria del browser.
+//
+// FIRE-ALL-AT-ONCE — para que sobreviva cerrar pestaña:
+// - Disparamos las N requests al toque (sin concurrency throttle local).
+// - El browser pool de conexiones limita ~6 simultáneas; el resto encola
+//   en el browser network stack. Si el user cierra la pestaña, las que ya
+//   se dispararon completan server-side (Vercel no mata serverless functions
+//   al desconectarse el cliente). Las que están en cola del browser quedan
+//   sin disparar — para esos casos el user debe esperar 5-10s antes de cerrar.
+// - El server retry handler (RETRY_DELAYS en crear-imagen-desde-idea)
+//   absorbe los 429 de rate limit naturales con backoff.
 
 import { supabase } from './supabase.js';
 import { getProductoImagen, getAccentColor } from './productoImagen.js';
@@ -16,10 +24,101 @@ import { saveReferencial } from './galeriaReferenciales.js';
 import { logCostsFromResponse } from './costsStore.js';
 import { playDoneChime, playBulkDoneChime, playErrorTone } from './sounds.js';
 
-// Genera N variantes para CADA idea en `ideas[]`, secuencial. Devuelve
-// { ok, failed, totalImages, costoUSD } al terminar.
-//
-// addToast es opcional (la mayoría de los errores se reportan vía toast).
+// Procesa la respuesta de una idea — si cloud OK no hace nada (el server
+// ya guardó), si no cae a IDB local.
+async function processResponse(data, idea, producto, quality) {
+  const cloudOk = Array.isArray(data.cloudCreativos) && data.cloudCreativos.length > 0;
+  if (cloudOk) {
+    try {
+      window.dispatchEvent(new CustomEvent('viora:referencial-saved', {
+        detail: { productoId: String(producto.id), cloud: true },
+      }));
+    } catch {}
+    return { saved: data.cloudCreativos.length, cloud: true };
+  }
+  if (data.cloudSaveError) {
+    console.warn(`[bulk] idea ${idea.id} cloudSaveError:`, data.cloudSaveError);
+  }
+  // Fallback IDB local. Esto SÍ requiere que la pestaña esté abierta —
+  // si el user cerró, este código no corre y los base64 se pierden.
+  const imagenes = data.imagenes || [];
+  const variantStyles = data.variantStyles || [];
+  const prompts = data.prompts || [];
+  const ts = Date.now();
+  for (let j = 0; j < imagenes.length; j++) {
+    await saveReferencial({
+      id: `idea_${ts}_${idea.id}_${j}`,
+      productoId: String(producto.id),
+      sourceType: 'bandeja-idea',
+      sourceIdeaId: idea.id,
+      sourceBrand: 'Idea propia',
+      sourceHeadline: idea.hook || idea.titulo || '',
+      variantIndex: j,
+      variantStyle: variantStyles[j] || 'tight',
+      imageBase64: imagenes[j],
+      mimeType: data.mimeType || 'image/png',
+      prompt: prompts[j]?.prompt || '',
+      model: data.model,
+      size: data.size,
+      sizeFallback: !!data.sizeFallback,
+      quality: data.quality || quality,
+      createdAt: new Date(ts + j).toISOString(),
+    });
+  }
+  if (data.imagenes) data.imagenes.length = 0;
+  return { saved: imagenes.length, cloud: false };
+}
+
+// Lanza UNA idea — devuelve la promesa del fetch + processResponse.
+// La promesa SE EJECUTA al llamar (no se espera) — eso es lo que permite
+// disparar N en paralelo.
+function fireIdea({ idea, producto, prodImg, accentColor, n, quality, size, authToken }) {
+  return fetch('/api/marketing/crear-imagen-desde-idea', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
+    },
+    body: JSON.stringify({
+      idea: {
+        id: idea.id,
+        hook: idea.hook,
+        titulo: idea.titulo,
+        angulo: idea.angulo,
+        painPoint: idea.painPoint,
+        escenarioNarrativo: idea.escenarioNarrativo,
+        descripcionImagen: idea.descripcionImagen,
+        estiloVisual: idea.estiloVisual,
+        publicoSugerido: idea.publicoSugerido,
+        creenciaApalancada: idea.creenciaApalancada,
+        textoEnImagen: idea.textoEnImagen,
+        formato: idea.formato,
+      },
+      producto: {
+        id: producto.id,
+        nombre: producto.nombre,
+        descripcion: producto.descripcion,
+        research: producto.docs?.research,
+        ofertasReales: producto.ofertasReales || '',
+        offerBrief: producto.ofertasReales || producto.docs?.offerBrief || '',
+      },
+      productoImagen: prodImg,
+      accentColor,
+      n,
+      size,
+      quality,
+    }),
+  }).then(async resp => {
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+    return data;
+  });
+}
+
+// Genera N variantes para CADA idea en `ideas[]`, EN PARALELO.
+// El UI registra progreso a medida que cada idea termina. Si el user cierra
+// la pestaña: las requests que ya se dispararon completan server-side (cloud
+// save) y los creativos aparecen en Galería en el próximo login.
 export async function bulkGenerateFromIdeas({
   ideas,
   producto,
@@ -38,20 +137,14 @@ export async function bulkGenerateFromIdeas({
     return { ok: 0, failed: ideas.length, totalImages: 0, costoUSD: 0 };
   }
 
-  // Una sola execution con sublabel dinámico — el user ve "3/10 ideas" en
-  // el ActivityBell sin spamearlo con 10 entradas.
   const execId = startExecution({
-    label: `Generando creativos en bulk · ${ideas.length} ideas × ${n} var`,
-    sublabel: `gpt-image-2 · ${quality}`,
+    label: `Bulk · ${ideas.length} ideas × ${n} variantes`,
+    sublabel: `gpt-image-2 · ${quality} · podés cerrar la pestaña`,
     kind: 'bulk-creative-from-idea',
-    estimatedMs: ideas.length * 60000 * n / 2, // ~60s por par de variantes
+    estimatedMs: ideas.length * 60000,
     estimatedCost: ideas.length * n * (quality === 'low' ? 0.013 : quality === 'medium' ? 0.046 : 0.180),
   });
 
-  let ok = 0;
-  let failed = 0;
-  let totalImages = 0;
-  let costoUSD = 0;
   let authToken = '';
   try {
     const { data: { session } } = await supabase.auth.getSession();
@@ -59,104 +152,44 @@ export async function bulkGenerateFromIdeas({
   } catch {}
   const accentColor = getAccentColor(producto.id) || '';
 
-  for (let i = 0; i < ideas.length; i++) {
-    const idea = ideas[i];
-    updateExecution(execId, { stage: `${i + 1}/${ideas.length}: ${(idea.hook || idea.titulo || '').slice(0, 50)}` });
-    try {
-      const resp = await fetch('/api/marketing/crear-imagen-desde-idea', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
-        },
-        body: JSON.stringify({
-          idea: {
-            id: idea.id,
-            hook: idea.hook,
-            titulo: idea.titulo,
-            angulo: idea.angulo,
-            painPoint: idea.painPoint,
-            escenarioNarrativo: idea.escenarioNarrativo,
-            descripcionImagen: idea.descripcionImagen,
-            estiloVisual: idea.estiloVisual,
-            publicoSugerido: idea.publicoSugerido,
-            creenciaApalancada: idea.creenciaApalancada,
-            textoEnImagen: idea.textoEnImagen,
-            formato: idea.formato,
-          },
-          producto: {
-            id: producto.id,
-            nombre: producto.nombre,
-            descripcion: producto.descripcion,
-            research: producto.docs?.research,
-            ofertasReales: producto.ofertasReales || '',
-            offerBrief: producto.ofertasReales || producto.docs?.offerBrief || '',
-          },
-          productoImagen: prodImg,
-          accentColor,
-          n,
-          size,
-          quality,
-        }),
-      });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+  // Disparar TODAS las requests sincrónicamente al inicio. Esto asegura
+  // que estén en flight (browser network stack) antes de que el user pueda
+  // cerrar la pestaña. El browser limita ~6 simultáneas; el resto encola
+  // localmente y se manda apenas se libera una conexión.
+  const promises = ideas.map(idea =>
+    fireIdea({ idea, producto, prodImg, accentColor, n, quality, size, authToken })
+      .then(async data => {
+        const costo = logCostsFromResponse(data, `bulk-bandeja · ${(idea.hook || idea.titulo || '').slice(0, 40)}`);
+        const result = await processResponse(data, idea, producto, quality);
+        return { ok: true, idea, cost: costo?.total || 0, ...result };
+      })
+      .catch(err => {
+        console.warn(`[bulk] idea ${idea.id} falló:`, err.message);
+        return { ok: false, idea, error: err.message, saved: 0 };
+      })
+  );
 
-      const costo = logCostsFromResponse(data, `bulk-bandeja · ${(idea.hook || idea.titulo || '').slice(0, 40)}`);
-      costoUSD += costo?.total || 0;
+  // Reporter de progreso en vivo — cuenta cuántas terminaron.
+  let completed = 0;
+  promises.forEach(p => p.then(() => {
+    completed++;
+    updateExecution(execId, { stage: `${completed}/${ideas.length} ideas listas` });
+  }));
 
-      // Si el server-side cloud save funcionó, listo. Si no, fallback a IDB.
-      const cloudOk = Array.isArray(data.cloudCreativos) && data.cloudCreativos.length > 0;
-      if (cloudOk) {
-        try {
-          window.dispatchEvent(new CustomEvent('viora:referencial-saved', {
-            detail: { productoId: String(producto.id), cloud: true },
-          }));
-        } catch {}
-        totalImages += data.cloudCreativos.length;
-      } else {
-        if (data.cloudSaveError) {
-          console.warn(`[bulk] idea ${idea.id} cloudSaveError:`, data.cloudSaveError);
-        }
-        const imagenes = data.imagenes || [];
-        const variantStyles = data.variantStyles || [];
-        const prompts = data.prompts || [];
-        const ts = Date.now();
-        for (let j = 0; j < imagenes.length; j++) {
-          await saveReferencial({
-            id: `idea_${ts}_${idea.id}_${j}`,
-            productoId: String(producto.id),
-            sourceType: 'bandeja-idea',
-            sourceIdeaId: idea.id,
-            sourceBrand: 'Idea propia',
-            sourceHeadline: idea.hook || idea.titulo || '',
-            variantIndex: j,
-            variantStyle: variantStyles[j] || 'tight',
-            imageBase64: imagenes[j],
-            mimeType: data.mimeType || 'image/png',
-            prompt: prompts[j]?.prompt || '',
-            model: data.model,
-            size: data.size,
-            sizeFallback: !!data.sizeFallback,
-            quality: data.quality || quality,
-            createdAt: new Date(ts + j).toISOString(),
-          });
-        }
-        totalImages += imagenes.length;
-        // Liberar refs del base64 para que el GC pueda recuperar la RAM
-        // antes de la siguiente idea. Con 10 ideas × 2 imágenes high quality
-        // (5-15MB cada una) el browser puede quedarse sin RAM.
-        if (data.imagenes) data.imagenes.length = 0;
-      }
-      ok++;
-    } catch (err) {
-      failed++;
-      console.warn(`[bulk] idea ${idea.id} falló:`, err.message);
-      addToast?.({ type: 'error', message: `Idea "${(idea.hook || idea.titulo || '').slice(0, 40)}": ${err.message}` });
-    }
-    // Pequeña pausa entre ideas para no congestionar OpenAI rate limit.
-    if (i < ideas.length - 1) await new Promise(r => setTimeout(r, 500));
-  }
+  // Notificar al user que YA se dispararon todas — puede cerrar.
+  addToast?.({
+    type: 'info',
+    message: `${ideas.length} ideas disparadas en paralelo. Podés cerrar la pestaña — el cloud save sigue.`,
+  });
+
+  // Esperar a que todas terminen (para reportar resumen y reproducir chime).
+  // Si el user cierra antes, este await muere pero las fetches en flight
+  // continúan server-side.
+  const results = await Promise.all(promises);
+  const ok = results.filter(r => r.ok).length;
+  const failed = results.length - ok;
+  const totalImages = results.reduce((acc, r) => acc + (r.saved || 0), 0);
+  const costoUSD = results.reduce((acc, r) => acc + (r.cost || 0), 0);
 
   const message = failed === 0
     ? `${ok} ideas listas — ${totalImages} imágenes en Galería`

@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGeneradorHoy, updateIdea, formatoDeAd } from './bandejaStore.js';
 import { deleteProducto as deleteProductoFromCloud } from './marketingSync.js';
+import { supabase } from './supabase.js';
 import { logCostsFromResponse } from './costsStore.js';
 import BandejaSection from './Bandeja.jsx';
 import InspiracionSection from './InspiracionSection.jsx';
@@ -105,11 +106,17 @@ function saveJSON(key, value) {
 // cuando el stream se completa. onProgress recibe strings de estado para
 // mostrar en el stepper mientras corre. onCost recibe el breakdown { anthropic, total }
 // emitido por el server por step (incremental) y al final como total.
-async function streamGenerateDocs({ productoNombre, productoUrl, descripcion, onProgress, onCost }) {
+async function streamGenerateDocs({ productoNombre, productoUrl, descripcion, productoId, authToken, onProgress, onCost }) {
+  // producto.id + auth token van server-side para que cada step se persista a
+  // Supabase apenas se completa. Si el user cierra la pestaña a mitad, los
+  // docs ya hechos están guardados — en el próximo login los recupera.
   const resp = await fetch('/api/marketing/generate', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ productoNombre, productoUrl, descripcion }),
+    headers: {
+      'Content-Type': 'application/json',
+      ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
+    },
+    body: JSON.stringify({ productoNombre, productoUrl, descripcion, productoId }),
   });
   if (!resp.ok || !resp.body) {
     throw new Error(`/api/marketing/generate HTTP ${resp.status}`);
@@ -1354,10 +1361,19 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     } else if (necesitaDocs && !cancelledRef.current) {
       updateStep('docs-gen', { status: 'running', startedAt: Date.now() });
       try {
+        // Auth token + productoId van server-side para persistir cada paso
+        // a Supabase. Si el user cierra la pestaña, los docs igual quedan.
+        let authToken = '';
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          authToken = session?.access_token || '';
+        } catch {}
         const docs = await streamGenerateDocs({
           productoNombre: producto.nombre,
           productoUrl: producto.landingUrl || '',
           descripcion: producto.descripcion || '',
+          productoId: producto.id,
+          authToken,
           onProgress: (msg) => updateStep('docs-gen', { detail: msg }),
           // Cada step-cost del SSE se traduce en un trackCost para que el
           // gasto del docs-gen aparezca en vivo en "💰 $X" y persista en

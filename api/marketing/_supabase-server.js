@@ -68,3 +68,45 @@ export async function insertCreativoRow(row) {
   if (error) throw new Error(`Insert marketing_creativos: ${error.message}`);
   return data;
 }
+
+// Hace patch a producto.data.docs[key] = content. Lee el row, mergea, escribe.
+// Útil para que el pipeline server-side persista cada paso a medida que
+// los termina — así si el usuario cierra la pestaña, los docs no se pierden
+// (en el próximo pull aparecen). Si el producto no existe (todavía no se
+// pusheó del cliente), no-op silencioso.
+export async function patchProductoDocs(userId, productoId, partialDocs) {
+  const supabase = getClient();
+  if (!supabase || !userId || !productoId) return null;
+  // Leer el row actual (necesitamos el data completo para mergear)
+  const { data: row, error: errRead } = await supabase
+    .from('marketing_productos')
+    .select('data')
+    .eq('user_id', userId)
+    .eq('id', String(productoId))
+    .maybeSingle();
+  if (errRead) {
+    console.warn(`[patchProductoDocs] read failed: ${errRead.message}`);
+    return null;
+  }
+  if (!row) {
+    // Producto no existe server-side todavía — es probable que el frontend
+    // aún no haya pushed. No fallamos; el frontend va a sincronizar después.
+    console.info(`[patchProductoDocs] producto ${productoId} no existe en cloud — skip`);
+    return null;
+  }
+  const merged = {
+    ...(row.data || {}),
+    docs: { ...(row.data?.docs || {}), ...partialDocs },
+    updated_at: new Date().toISOString(),
+  };
+  const { error: errWrite } = await supabase
+    .from('marketing_productos')
+    .update({ data: merged })
+    .eq('user_id', userId)
+    .eq('id', String(productoId));
+  if (errWrite) {
+    console.warn(`[patchProductoDocs] write failed: ${errWrite.message}`);
+    return null;
+  }
+  return merged;
+}

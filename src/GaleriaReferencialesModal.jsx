@@ -37,7 +37,9 @@ function base64ToBlob(b64, mimeType = 'image/png') {
   return new Blob([new Uint8Array(byteNumbers)], { type: mimeType });
 }
 
-// Hook: convierte los items en blob URLs y los REVOCA al unmount o cambio.
+// Hook: convierte los items en URLs renderizables.
+// - Items IDB legacy (con imageBase64) → blob URL (revoca al unmount).
+// - Items cloud (con imageUrl del bucket) → la URL directa.
 // Usar blob URLs en vez de `data:image/png;base64,...` evita que Chrome
 // decodifique cada PNG en RAM como pixel buffer separado. Con 50+ imágenes
 // 2048x2048 quality=high (5-15MB cada una), las data URIs hacen crashear
@@ -48,12 +50,17 @@ function useBlobUrls(items) {
   return useMemo(() => {
     const map = new Map();
     for (const it of items) {
-      if (!it?.imageBase64) continue;
-      try {
-        const blob = base64ToBlob(it.imageBase64, it.mimeType || 'image/png');
-        map.set(it.id, URL.createObjectURL(blob));
-      } catch {
-        // base64 corrupto — el render usará fallback de data: URI o vacío.
+      if (it?.imageBase64) {
+        try {
+          const blob = base64ToBlob(it.imageBase64, it.mimeType || 'image/png');
+          map.set(it.id, URL.createObjectURL(blob));
+        } catch {
+          // base64 corrupto — caer al imageUrl del cloud si existe.
+          if (it.imageUrl) map.set(it.id, it.imageUrl);
+        }
+      } else if (it?.imageUrl) {
+        // Item cloud — usar la URL pública del bucket directo.
+        map.set(it.id, it.imageUrl);
       }
     }
     return map;
@@ -636,7 +643,9 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
       // Trackear nombres usados para evitar colisiones (ej. mismo producto +
       // fecha + brand → agregar _2, _3, etc).
       const usedNames = new Set();
-      seleccionadosArr.forEach((it) => {
+      // Para items cloud (sin imageBase64) bajamos los bytes del imageUrl en
+      // paralelo. Para items IDB legacy seguimos usando el base64 directo.
+      await Promise.all(seleccionadosArr.map(async (it) => {
         let name = buildFileName(it, productoNombre);
         let dedup = 1;
         const base = name.replace(/\.png$/, '');
@@ -644,8 +653,14 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
           name = `${base} (${++dedup}).png`;
         }
         usedNames.add(name);
-        zip.file(name, base64ToBlob(it.imageBase64, it.mimeType || 'image/png'));
-      });
+        if (it.imageBase64) {
+          zip.file(name, base64ToBlob(it.imageBase64, it.mimeType || 'image/png'));
+        } else if (it.imageUrl) {
+          const resp = await fetch(it.imageUrl);
+          const blob = await resp.blob();
+          zip.file(name, blob);
+        }
+      }));
       const blob = await zip.generateAsync({ type: 'blob' });
       const ts = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
       const zipName = `creativos-${slugify(productoNombre)}-${ts}.zip`;
@@ -675,7 +690,18 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
   // Descarga individual + marca como descargada.
   const handleSingleDownload = async (it) => {
     try {
-      const blob = base64ToBlob(it.imageBase64, it.mimeType || 'image/png');
+      // Cloud items no tienen imageBase64 — usar imageUrl directo. Para
+      // marcar como "descargada" igual hace falta el fetch (no podemos
+      // forzar el navegador a descargar sin tener los bytes).
+      let blob;
+      if (it.imageBase64) {
+        blob = base64ToBlob(it.imageBase64, it.mimeType || 'image/png');
+      } else if (it.imageUrl) {
+        const resp = await fetch(it.imageUrl);
+        blob = await resp.blob();
+      } else {
+        throw new Error('Sin imageBase64 ni imageUrl — no hay bytes para descargar');
+      }
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;

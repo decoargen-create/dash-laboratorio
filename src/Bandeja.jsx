@@ -27,6 +27,7 @@ import CreativoPanel from './CreativoPanel.jsx';
 import { getProductoImagen, getAccentColor } from './productoImagen.js';
 import { saveReferencial } from './galeriaReferenciales.js';
 import { supabase } from './supabase.js';
+import { bulkGenerateFromIdeas } from './bandejaBulkGenerate.js';
 import { enqueueGenerate as enqueueGenerarCreativo } from './creativoGeneratorStore.js';
 import { startExecution, updateExecution, finishExecution } from './executionsStore.js';
 
@@ -1581,6 +1582,11 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
   const [editandoGuionId, setEditandoGuionId] = useState(null);
   const [guionDraft, setGuionDraft] = useState('');
   const [selected, setSelected] = useState(() => new Set());
+  // Opciones de generación bulk — N variantes por idea + quality. El user
+  // setea esto antes de apretar "Generar". Persisten entre selecciones.
+  const [bulkN, setBulkN] = useState(2);
+  const [bulkQuality, setBulkQuality] = useState('high');
+  const [bulkRunning, setBulkRunning] = useState(false);
 
   // Re-sincronizar cuando otras secciones agregan o MODIFICAN ideas (event
   // storage no es ideal para same-tab — usamos un polling liviano cada 3s).
@@ -1958,32 +1964,81 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
                 className="px-2.5 py-1.5 text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition">
                 Limpiar
               </button>
+              {/* Selector de N variantes por idea — el user setea cuántas
+                  imágenes quiere por cada idea seleccionada. Total = N × selected. */}
+              <div className="inline-flex items-center gap-0.5 px-1 py-0.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded">
+                <span className="text-[10px] text-gray-500 dark:text-gray-400 px-1">var:</span>
+                {[1, 2, 4].map(opt => (
+                  <button key={opt}
+                    onClick={() => setBulkN(opt)}
+                    disabled={bulkRunning}
+                    className={`px-1.5 py-0.5 text-[10px] font-bold rounded transition ${
+                      bulkN === opt
+                        ? 'bg-purple-600 text-white'
+                        : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                    }`}
+                  >{opt}</button>
+                ))}
+              </div>
+              {/* Quality: medium ahorra 4x respecto de high con calidad razonable */}
+              <div className="inline-flex items-center gap-0.5 px-1 py-0.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded">
+                {['medium', 'high'].map(opt => (
+                  <button key={opt}
+                    onClick={() => setBulkQuality(opt)}
+                    disabled={bulkRunning}
+                    className={`px-1.5 py-0.5 text-[10px] font-bold rounded transition ${
+                      bulkQuality === opt
+                        ? 'bg-purple-600 text-white'
+                        : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                    }`}
+                  >{opt}</button>
+                ))}
+              </div>
               <button
-                onClick={() => {
-                  // Encolar las ideas seleccionadas para generar creativo en
-                  // background. La queue procesa 1 por vez (concurrency=1)
-                  // para no congestionar OpenAI. El user puede navegar a
-                  // otra sección — la ActivityBell muestra el progreso.
-                  let qty = 0;
+                disabled={bulkRunning}
+                onClick={async () => {
+                  // Filtrar las ideas válidas (con contenido + no video).
+                  const valid = [];
                   for (const id of selected) {
                     const idea = ideas.find(i => i.id === id);
                     if (!idea) continue;
-                    if (!(idea.hook || idea.titulo || idea.promptGeneradorImagen || idea.descripcionImagen)) continue;
-                    if (idea.formato === 'video') continue; // video va por otro flujo
-                    enqueueGenerarCreativo(idea, { quality: 'medium', productoId: activeProductoId || null });
-                    qty++;
+                    if (!(idea.hook || idea.titulo || idea.descripcionImagen)) continue;
+                    if (idea.formato === 'video') continue;
+                    valid.push(idea);
                   }
-                  if (qty === 0) {
-                    addToast?.({ type: 'error', message: 'Las seleccionadas no tienen contenido para generar (o son videos)' });
-                  } else {
-                    addToast?.({ type: 'success', message: `${qty} creativos en cola. Mirá el ActivityBell.` });
-                    setSelected(new Set());
+                  if (valid.length === 0) {
+                    addToast?.({ type: 'error', message: 'Las seleccionadas no tienen contenido para generar (o son videos).' });
+                    return;
+                  }
+                  // Necesitamos el producto activo + su foto. Buscamos en el array
+                  // de productos cargado por loadProductos.
+                  const producto = productos.find(p => String(p.id) === String(activeProductoId));
+                  if (!producto) {
+                    addToast?.({ type: 'error', message: 'Seleccioná un producto activo antes de generar.' });
+                    return;
+                  }
+                  setBulkRunning(true);
+                  try {
+                    const result = await bulkGenerateFromIdeas({
+                      ideas: valid,
+                      producto,
+                      n: bulkN,
+                      quality: bulkQuality,
+                      addToast,
+                    });
+                    if (result.ok > 0) setSelected(new Set());
+                  } finally {
+                    setBulkRunning(false);
                   }
                 }}
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg hover:from-purple-600 hover:to-pink-600 shadow-sm transition"
-                title="Encola las seleccionadas — la generación corre en background, podés seguir navegando"
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg hover:from-purple-600 hover:to-pink-600 shadow-sm transition disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Genera N variantes de cada idea seleccionada. Se guardan automáticamente en Galería."
               >
-                <Sparkles size={12} /> Generar {selected.size} creativos
+                <Sparkles size={12} />
+                {bulkRunning
+                  ? 'Generando…'
+                  : `Generar ${selected.size * bulkN} ${selected.size * bulkN === 1 ? 'imagen' : 'imágenes'}`
+                }
               </button>
               <button onClick={() => exportSelected('docx')}
                 className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-brand-600 rounded-lg hover:from-brand-600 hover:to-brand-700 shadow-sm transition">

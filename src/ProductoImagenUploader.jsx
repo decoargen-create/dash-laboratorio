@@ -3,23 +3,31 @@
 // referenciales desde Inspiración (mantiene tu envase real).
 
 import React, { useState, useRef, useEffect } from 'react';
-import { ImagePlus, Loader2, Trash2, Check, AlertCircle } from 'lucide-react';
+import { ImagePlus, Loader2, Trash2, Check, AlertCircle, Wand2 } from 'lucide-react';
 import {
   getProductoImagen, setProductoImagen, removeProductoImagen, comprimirImagen,
   getAccentColor, setAccentColor,
 } from './productoImagen.js';
+import { extractPalette } from './extractPalette.js';
 
 export default function ProductoImagenUploader({ productoId, addToast }) {
   const [imagen, setImagen] = useState(null);
   const [accent, setAccent] = useState('');
   const [procesando, setProcesando] = useState(false);
   const [error, setError] = useState('');
+  // Paleta auto-extraída de la foto cargada — se muestra como swatches
+  // sugeridos sobre el color picker manual.
+  const [palette, setPalette] = useState([]);
   const inputRef = useRef(null);
 
   useEffect(() => {
-    setImagen(getProductoImagen(productoId));
+    const img = getProductoImagen(productoId);
+    setImagen(img);
     setAccent(getAccentColor(productoId) || '');
     setError('');
+    setPalette([]);
+    // Auto-extraer paleta al montar si ya hay imagen guardada.
+    if (img) extractPalette(img, 5).then(setPalette).catch(() => {});
   }, [productoId]);
 
   const onArchivo = async (e) => {
@@ -33,6 +41,16 @@ export default function ProductoImagenUploader({ productoId, addToast }) {
       setProductoImagen(productoId, dataUrl);
       setImagen(dataUrl);
       addToast?.({ type: 'success', message: 'Foto del producto cargada' });
+      // Extraer paleta en background — si tarda no bloquea la UI.
+      extractPalette(dataUrl, 5).then(p => {
+        setPalette(p);
+        // Si el user todavía no eligió accent, sugerimos el primer color
+        // dominante. No pisamos si ya hay uno seteado (respeta su decisión).
+        if (p.length > 0 && !getAccentColor(productoId)) {
+          setAccent(p[0]);
+          setAccentColor(productoId, p[0]);
+        }
+      }).catch(() => {});
     } catch (err) {
       setError(err.message || 'No se pudo cargar la imagen');
     } finally {
@@ -44,6 +62,20 @@ export default function ProductoImagenUploader({ productoId, addToast }) {
     removeProductoImagen(productoId);
     setImagen(null);
     setError('');
+    setPalette([]);
+  };
+
+  const reExtraerPaleta = async () => {
+    if (!imagen) return;
+    try {
+      const p = await extractPalette(imagen, 5);
+      setPalette(p);
+      if (p.length === 0) {
+        addToast?.({ type: 'info', message: 'No detecté colores claros en la foto (¿es muy gris/blanca?).' });
+      }
+    } catch {
+      addToast?.({ type: 'error', message: 'No pude extraer la paleta.' });
+    }
   };
 
   const cambiarAccent = (color) => {
@@ -101,11 +133,48 @@ export default function ProductoImagenUploader({ productoId, addToast }) {
 
       {/* Color de acento — opcional, se inyecta en el prompt */}
       <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
-        <p className="text-[10px] font-bold text-gray-700 dark:text-gray-300 mb-1.5">🎨 Color de acento <span className="font-normal text-gray-400">(opcional)</span></p>
+        <div className="flex items-center justify-between mb-1.5">
+          <p className="text-[10px] font-bold text-gray-700 dark:text-gray-300">🎨 Color de acento <span className="font-normal text-gray-400">(opcional)</span></p>
+          {imagen && (
+            <button onClick={reExtraerPaleta}
+              className="inline-flex items-center gap-1 text-[10px] text-brand-600 dark:text-brand-400 hover:underline">
+              <Wand2 size={10} /> Re-extraer
+            </button>
+          )}
+        </div>
         <p className="text-[10px] text-gray-500 dark:text-gray-400 mb-2">
           Color para flechas/highlights/CTA en los creativos. Si no lo definís, gpt-image usa los tonos del producto.
         </p>
+
+        {/* Swatches sugeridos por la IA — extraídos client-side de la foto */}
+        {palette.length > 0 && (
+          <div className="mb-2">
+            <p className="text-[9px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
+              <Wand2 size={9} className="inline mr-0.5" /> Sugeridos desde tu producto
+            </p>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {palette.map((color, i) => {
+                const isActive = accent?.toLowerCase() === color.toLowerCase();
+                return (
+                  <button
+                    key={color}
+                    onClick={() => cambiarAccent(color)}
+                    title={`${color}${i === 0 ? ' · más dominante' : ''}`}
+                    className={`w-7 h-7 rounded-md border-2 transition hover:scale-110 ${
+                      isActive
+                        ? 'border-brand-500 ring-2 ring-brand-200 dark:ring-brand-900'
+                        : 'border-gray-300 dark:border-gray-600'
+                    }`}
+                    style={{ backgroundColor: color }}
+                  />
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         <div className="flex items-center gap-2">
+          <p className="text-[9px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">o elegí a mano:</p>
           <input
             type="color"
             value={/^#[0-9a-fA-F]{6}$/.test(accent) ? accent : '#dc2626'}
@@ -113,10 +182,13 @@ export default function ProductoImagenUploader({ productoId, addToast }) {
             className="w-10 h-10 rounded-md border border-gray-300 dark:border-gray-600 cursor-pointer bg-transparent p-0"
           />
           {accent && (
-            <button onClick={() => cambiarAccent('')}
-              className="text-[10px] text-gray-500 hover:text-red-500 transition">
-              quitar
-            </button>
+            <>
+              <span className="text-[10px] font-mono text-gray-600 dark:text-gray-400">{accent}</span>
+              <button onClick={() => cambiarAccent('')}
+                className="text-[10px] text-gray-500 hover:text-red-500 transition">
+                quitar
+              </button>
+            </>
           )}
         </div>
       </div>

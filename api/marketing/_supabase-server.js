@@ -69,6 +69,27 @@ export async function insertCreativoRow(row) {
   return data;
 }
 
+// Lee los docs ya completados de un producto — útil para que el pipeline
+// pueda reanudar si Vercel mató una invocación previa. Devuelve un objeto
+// {research, avatar, offerBrief, beliefs, resumenEjecutivo} con lo que ya
+// está guardado (puede tener undefined para los que faltan).
+export async function readProductoDocs(userId, productoId) {
+  const supabase = getClient();
+  if (!supabase || !userId || !productoId) return {};
+  try {
+    const { data: row } = await supabase
+      .from('marketing_productos')
+      .select('data')
+      .eq('user_id', userId)
+      .eq('id', String(productoId))
+      .maybeSingle();
+    return row?.data?.docs || {};
+  } catch (err) {
+    console.warn(`[readProductoDocs] error: ${err.message}`);
+    return {};
+  }
+}
+
 // Hace patch a producto.data.docs[key] = content. Lee el row, mergea, escribe.
 // Útil para que el pipeline server-side persista cada paso a medida que
 // los termina — así si el usuario cierra la pestaña, los docs no se pierden

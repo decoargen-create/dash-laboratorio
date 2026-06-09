@@ -22,7 +22,15 @@ import {
   BELIEFS_SYSTEM, PIPELINE_STEPS,
 } from './_lib.js';
 import { anthropicCost } from './_costs.js';
-import { getUserIdFromAuth, patchProductoDocs } from './_supabase-server.js';
+import { getUserIdFromAuth, patchProductoDocs, readProductoDocs } from './_supabase-server.js';
+
+// Mínimo de longitud para considerar un doc como "completado". Sin esto un
+// step a medio generar (claude devolvió 50 chars antes de truncar) se
+// trataría como done y nunca se regenera.
+const MIN_DOC_LENGTH = 200;
+function isDocComplete(content) {
+  return typeof content === 'string' && content.trim().length >= MIN_DOC_LENGTH;
+}
 
 // Alineado con el resto del codebase (deep-analyze, generate-ideas,
 // post-research, copilot, etc. usan todos 4-6). Tener 4-5 acá hacía que el
@@ -138,9 +146,23 @@ export default async function handler(req, res) {
   // cierra la pestaña a mitad del pipeline, los docs ya completados queden
   // guardados — en el próximo pull los recupera.
   let userId = null;
+  // existingDocs: docs ya guardados de una corrida previa (caso reanudación).
+  // Si Vercel mató una invocación pasada, los docs completos hasta ese punto
+  // están en Supabase. Acá los leemos y los pasos que ya tienen contenido
+  // válido NO se vuelven a generar — ahorra costo + tiempo + dura ≤5min.
+  let existingDocs = {};
   if (productoId) {
     try { userId = await getUserIdFromAuth(req); } catch {}
     if (!userId) console.info('[generate] sin auth válido — no se persiste server-side');
+    else {
+      try { existingDocs = await readProductoDocs(userId, String(productoId)); } catch {}
+      const completed = Object.entries(existingDocs)
+        .filter(([_, v]) => isDocComplete(v))
+        .map(([k]) => k);
+      if (completed.length > 0) {
+        console.info(`[generate] reanudación: ya están ${completed.join(', ')} — skip esos steps`);
+      }
+    }
   }
   const persistStep = async (key, content) => {
     if (!userId || !productoId || !content) return;
@@ -230,88 +252,115 @@ ${landingText ? `\n---LANDING PAGE (texto extraído)---\n${landingText}\n---FIN 
 `.trim();
 
     // ------ Paso 1: Research ------
-    sseWrite(res, { type: 'step-start', key: 'research', label: 'Research Doc' });
-    const researchResp = await client.messages.create({
-      model: MODEL_SONNET,
-      max_tokens: 8192,
-      system: [{ type: 'text', text: RESEARCH_SYSTEM, cache_control: { type: 'ephemeral' } }],
-      messages: [{
-        role: 'user',
-        content: `Producto a investigar:\n\n${productContext}\n\nGenerá el DOCUMENTO DE RESEARCH siguiendo la estructura de 12 secciones. Mínimo 2500 palabras. En castellano rioplatense.`,
-      }],
-    });
-    outputs.research = researchResp.content?.[0]?.type === 'text' ? researchResp.content[0].text : '';
-    trackStepCost(researchResp.usage, MODEL_SONNET, 'research', 'Research Doc');
-    sseWrite(res, { type: 'step-done', key: 'research', label: 'Research Doc', content: outputs.research });
-    await persistStep('research', outputs.research);
+    if (isDocComplete(existingDocs.research)) {
+      // Reanudación — reusamos el research previo y emitimos done para que
+      // el frontend muestre el contenido. No re-cobramos el costo.
+      outputs.research = existingDocs.research;
+      sseWrite(res, { type: 'step-done', key: 'research', label: 'Research Doc', content: outputs.research, cached: true });
+    } else {
+      sseWrite(res, { type: 'step-start', key: 'research', label: 'Research Doc' });
+      const researchResp = await client.messages.create({
+        model: MODEL_SONNET,
+        max_tokens: 8192,
+        system: [{ type: 'text', text: RESEARCH_SYSTEM, cache_control: { type: 'ephemeral' } }],
+        messages: [{
+          role: 'user',
+          content: `Producto a investigar:\n\n${productContext}\n\nGenerá el DOCUMENTO DE RESEARCH siguiendo la estructura de 12 secciones. Mínimo 2500 palabras. En castellano rioplatense.`,
+        }],
+      });
+      outputs.research = researchResp.content?.[0]?.type === 'text' ? researchResp.content[0].text : '';
+      trackStepCost(researchResp.usage, MODEL_SONNET, 'research', 'Research Doc');
+      sseWrite(res, { type: 'step-done', key: 'research', label: 'Research Doc', content: outputs.research });
+      await persistStep('research', outputs.research);
+    }
 
     // ------ Paso 2: Avatar ------
-    sseWrite(res, { type: 'step-start', key: 'avatar', label: 'Avatar Sheet' });
-    const avatarResp = await client.messages.create({
-      model: MODEL_HAIKU,
-      max_tokens: 4096,
-      system: [{ type: 'text', text: AVATAR_SYSTEM, cache_control: { type: 'ephemeral' } }],
-      messages: [{
-        role: 'user',
-        content: `Research doc del producto:\n\n${outputs.research}\n\n---TEMPLATE DE AVATAR SHEET A COMPLETAR---\n\n${AVATAR_TEMPLATE}\n\nCompletá cada sección del template con información específica basada en el research. Devolvé el markdown completo.`,
-      }],
-    });
-    outputs.avatar = avatarResp.content?.[0]?.type === 'text' ? avatarResp.content[0].text : '';
-    trackStepCost(avatarResp.usage, MODEL_HAIKU, 'avatar', 'Avatar Sheet');
-    sseWrite(res, { type: 'step-done', key: 'avatar', label: 'Avatar Sheet', content: outputs.avatar });
-    await persistStep('avatar', outputs.avatar);
+    if (isDocComplete(existingDocs.avatar)) {
+      outputs.avatar = existingDocs.avatar;
+      sseWrite(res, { type: 'step-done', key: 'avatar', label: 'Avatar Sheet', content: outputs.avatar, cached: true });
+    } else {
+      sseWrite(res, { type: 'step-start', key: 'avatar', label: 'Avatar Sheet' });
+      const avatarResp = await client.messages.create({
+        model: MODEL_HAIKU,
+        max_tokens: 4096,
+        system: [{ type: 'text', text: AVATAR_SYSTEM, cache_control: { type: 'ephemeral' } }],
+        messages: [{
+          role: 'user',
+          content: `Research doc del producto:\n\n${outputs.research}\n\n---TEMPLATE DE AVATAR SHEET A COMPLETAR---\n\n${AVATAR_TEMPLATE}\n\nCompletá cada sección del template con información específica basada en el research. Devolvé el markdown completo.`,
+        }],
+      });
+      outputs.avatar = avatarResp.content?.[0]?.type === 'text' ? avatarResp.content[0].text : '';
+      trackStepCost(avatarResp.usage, MODEL_HAIKU, 'avatar', 'Avatar Sheet');
+      sseWrite(res, { type: 'step-done', key: 'avatar', label: 'Avatar Sheet', content: outputs.avatar });
+      await persistStep('avatar', outputs.avatar);
+    }
 
     // ------ Paso 3: Offer Brief ------
-    sseWrite(res, { type: 'step-start', key: 'offerBrief', label: 'Offer Brief' });
-    const offerResp = await client.messages.create({
-      model: MODEL_HAIKU,
-      max_tokens: 4096,
-      system: [{ type: 'text', text: OFFER_BRIEF_SYSTEM, cache_control: { type: 'ephemeral' } }],
-      messages: [{
-        role: 'user',
-        content: `Research doc:\n\n${outputs.research}\n\n---AVATAR SHEET---\n\n${outputs.avatar}\n\n---TEMPLATE DE OFFER BRIEF---\n\n${OFFER_BRIEF_TEMPLATE}\n\nCompletá cada sección del offer brief. Dedicale pensamiento a Big Idea, UMP/UMS, Headlines y Belief Chains.`,
-      }],
-    });
-    outputs.offerBrief = offerResp.content?.[0]?.type === 'text' ? offerResp.content[0].text : '';
-    trackStepCost(offerResp.usage, MODEL_HAIKU, 'offerBrief', 'Offer Brief');
-    sseWrite(res, { type: 'step-done', key: 'offerBrief', label: 'Offer Brief', content: outputs.offerBrief });
-    await persistStep('offerBrief', outputs.offerBrief);
+    if (isDocComplete(existingDocs.offerBrief)) {
+      outputs.offerBrief = existingDocs.offerBrief;
+      sseWrite(res, { type: 'step-done', key: 'offerBrief', label: 'Offer Brief', content: outputs.offerBrief, cached: true });
+    } else {
+      sseWrite(res, { type: 'step-start', key: 'offerBrief', label: 'Offer Brief' });
+      const offerResp = await client.messages.create({
+        model: MODEL_HAIKU,
+        max_tokens: 4096,
+        system: [{ type: 'text', text: OFFER_BRIEF_SYSTEM, cache_control: { type: 'ephemeral' } }],
+        messages: [{
+          role: 'user',
+          content: `Research doc:\n\n${outputs.research}\n\n---AVATAR SHEET---\n\n${outputs.avatar}\n\n---TEMPLATE DE OFFER BRIEF---\n\n${OFFER_BRIEF_TEMPLATE}\n\nCompletá cada sección del offer brief. Dedicale pensamiento a Big Idea, UMP/UMS, Headlines y Belief Chains.`,
+        }],
+      });
+      outputs.offerBrief = offerResp.content?.[0]?.type === 'text' ? offerResp.content[0].text : '';
+      trackStepCost(offerResp.usage, MODEL_HAIKU, 'offerBrief', 'Offer Brief');
+      sseWrite(res, { type: 'step-done', key: 'offerBrief', label: 'Offer Brief', content: outputs.offerBrief });
+      await persistStep('offerBrief', outputs.offerBrief);
+    }
 
     // ------ Paso 4: Beliefs ------
-    sseWrite(res, { type: 'step-start', key: 'beliefs', label: 'Creencias necesarias' });
-    const beliefsResp = await client.messages.create({
-      model: MODEL_HAIKU,
-      max_tokens: 2048,
-      system: [{ type: 'text', text: BELIEFS_SYSTEM, cache_control: { type: 'ephemeral' } }],
-      messages: [{
-        role: 'user',
-        content: `Research doc:\n\n${outputs.research}\n\n---AVATAR---\n\n${outputs.avatar}\n\n---OFFER BRIEF---\n\n${outputs.offerBrief}\n\nGenerá las 6 creencias necesarias.`,
-      }],
-    });
-    outputs.beliefs = beliefsResp.content?.[0]?.type === 'text' ? beliefsResp.content[0].text : '';
-    trackStepCost(beliefsResp.usage, MODEL_HAIKU, 'beliefs', 'Creencias necesarias');
-    sseWrite(res, { type: 'step-done', key: 'beliefs', label: 'Creencias necesarias', content: outputs.beliefs });
-    await persistStep('beliefs', outputs.beliefs);
+    if (isDocComplete(existingDocs.beliefs)) {
+      outputs.beliefs = existingDocs.beliefs;
+      sseWrite(res, { type: 'step-done', key: 'beliefs', label: 'Creencias necesarias', content: outputs.beliefs, cached: true });
+    } else {
+      sseWrite(res, { type: 'step-start', key: 'beliefs', label: 'Creencias necesarias' });
+      const beliefsResp = await client.messages.create({
+        model: MODEL_HAIKU,
+        max_tokens: 2048,
+        system: [{ type: 'text', text: BELIEFS_SYSTEM, cache_control: { type: 'ephemeral' } }],
+        messages: [{
+          role: 'user',
+          content: `Research doc:\n\n${outputs.research}\n\n---AVATAR---\n\n${outputs.avatar}\n\n---OFFER BRIEF---\n\n${outputs.offerBrief}\n\nGenerá las 6 creencias necesarias.`,
+        }],
+      });
+      outputs.beliefs = beliefsResp.content?.[0]?.type === 'text' ? beliefsResp.content[0].text : '';
+      trackStepCost(beliefsResp.usage, MODEL_HAIKU, 'beliefs', 'Creencias necesarias');
+      sseWrite(res, { type: 'step-done', key: 'beliefs', label: 'Creencias necesarias', content: outputs.beliefs });
+      await persistStep('beliefs', outputs.beliefs);
+    }
 
     // ------ Paso 5 (bonus): Resumen ejecutivo ------
-    // Síntesis 2-3 líneas de TODO lo generado, para mostrar en la cabecera
-    // del expediente del producto. Útil para contextos futuros (ej: al
-    // regenerar con memoria, este resumen es el "ancla" rápida).
-    sseWrite(res, { type: 'step-start', key: 'resumenEjecutivo', label: 'Resumen ejecutivo' });
-    try {
-      const resumenResp = await client.messages.create({
-        model: MODEL_HAIKU,
-        max_tokens: 512,
-        system: [{ type: 'text', text: 'Sos un estratega de marketing. Recibís 4 documentos de un producto (research, avatar, offer brief, creencias). Devolvés un RESUMEN EJECUTIVO de 2-3 oraciones (máx 500 chars) que capture: qué vende el producto, a quién va dirigido, y el ángulo estratégico central (Big Idea). Castellano rioplatense. Sin preámbulo, sin markdown.' }],
-        messages: [{ role: 'user', content: `RESEARCH:\n${outputs.research.slice(0, 3000)}\n\nAVATAR:\n${outputs.avatar.slice(0, 1500)}\n\nOFFER BRIEF:\n${outputs.offerBrief.slice(0, 1500)}\n\nCREENCIAS:\n${outputs.beliefs.slice(0, 800)}` }],
-      });
-      outputs.resumenEjecutivo = resumenResp.content?.[0]?.type === 'text' ? resumenResp.content[0].text.trim() : '';
-      trackStepCost(resumenResp.usage, MODEL_HAIKU, 'resumenEjecutivo', 'Resumen ejecutivo');
-    } catch (err) {
-      console.error('resumen-ejecutivo error:', err?.message);
+    if (isDocComplete(existingDocs.resumenEjecutivo)) {
+      outputs.resumenEjecutivo = existingDocs.resumenEjecutivo;
+      sseWrite(res, { type: 'step-done', key: 'resumenEjecutivo', label: 'Resumen ejecutivo', content: outputs.resumenEjecutivo, cached: true });
+    } else {
+      // Síntesis 2-3 líneas de TODO lo generado, para mostrar en la cabecera
+      // del expediente del producto. Útil para contextos futuros (ej: al
+      // regenerar con memoria, este resumen es el "ancla" rápida).
+      sseWrite(res, { type: 'step-start', key: 'resumenEjecutivo', label: 'Resumen ejecutivo' });
+      try {
+        const resumenResp = await client.messages.create({
+          model: MODEL_HAIKU,
+          max_tokens: 512,
+          system: [{ type: 'text', text: 'Sos un estratega de marketing. Recibís 4 documentos de un producto (research, avatar, offer brief, creencias). Devolvés un RESUMEN EJECUTIVO de 2-3 oraciones (máx 500 chars) que capture: qué vende el producto, a quién va dirigido, y el ángulo estratégico central (Big Idea). Castellano rioplatense. Sin preámbulo, sin markdown.' }],
+          messages: [{ role: 'user', content: `RESEARCH:\n${outputs.research.slice(0, 3000)}\n\nAVATAR:\n${outputs.avatar.slice(0, 1500)}\n\nOFFER BRIEF:\n${outputs.offerBrief.slice(0, 1500)}\n\nCREENCIAS:\n${outputs.beliefs.slice(0, 800)}` }],
+        });
+        outputs.resumenEjecutivo = resumenResp.content?.[0]?.type === 'text' ? resumenResp.content[0].text.trim() : '';
+        trackStepCost(resumenResp.usage, MODEL_HAIKU, 'resumenEjecutivo', 'Resumen ejecutivo');
+      } catch (err) {
+        console.error('resumen-ejecutivo error:', err?.message);
+      }
+      sseWrite(res, { type: 'step-done', key: 'resumenEjecutivo', label: 'Resumen ejecutivo', content: outputs.resumenEjecutivo });
+      await persistStep('resumenEjecutivo', outputs.resumenEjecutivo);
     }
-    sseWrite(res, { type: 'step-done', key: 'resumenEjecutivo', label: 'Resumen ejecutivo', content: outputs.resumenEjecutivo });
-    await persistStep('resumenEjecutivo', outputs.resumenEjecutivo);
 
     // ------ Fin ------
     sseWrite(res, {

@@ -152,12 +152,14 @@ export async function importProductoFromJson(jsonText) {
   // Re-mapear ids de competidores también — si no, importar el mismo JSON
   // dos veces hace que competidores de ambos productos compartan id,
   // y borrar una brand en uno borra el competidor del otro (cross-product
-  // collision).
-  const remappedComps = (parsed.producto.competidores || []).map((c, i) => ({
-    ...c,
-    id: `comp-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`,
-    importedFromId: c.id,
-  }));
+  // collision). Mantenemos un map oldId → newId para remapear las
+  // referencias en brands (fromCompetidorId) y en ideas (origen.competidorId).
+  const compIdMap = new Map();
+  const remappedComps = (parsed.producto.competidores || []).map((c, i) => {
+    const newCompId = `comp-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`;
+    if (c.id != null) compIdMap.set(String(c.id), newCompId);
+    return { ...c, id: newCompId, importedFromId: c.id };
+  });
 
   const importedProducto = {
     ...parsed.producto,
@@ -175,14 +177,24 @@ export async function importProductoFromJson(jsonText) {
 
   // 2) Brands → re-mapear productoId en la key del localStorage.
   // También re-mapeamos los ids de brands para evitar colisiones con
-  // brands existentes en otros productos.
+  // brands existentes en otros productos. Y re-mapeamos fromCompetidorId
+  // al nuevo comp id (sino el cascade-delete se rompía silenciosamente
+  // — finding del audit final).
   if (Array.isArray(parsed.brands) && parsed.brands.length > 0) {
     try {
-      const remappedBrands = parsed.brands.map((b, i) => ({
-        ...b,
-        id: `brand-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`,
-        importedFromId: b.id,
-      }));
+      const remappedBrands = parsed.brands.map((b, i) => {
+        const remapped = {
+          ...b,
+          id: `brand-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`,
+          importedFromId: b.id,
+        };
+        if (b.fromCompetidorId != null) {
+          const mapped = compIdMap.get(String(b.fromCompetidorId));
+          if (mapped) remapped.fromCompetidorId = mapped;
+          else delete remapped.fromCompetidorId; // referencia rota → wipe
+        }
+        return remapped;
+      });
       localStorage.setItem(brandsKey(newId), JSON.stringify(remappedBrands));
       notifyMarketingChange(brandsKey(newId));
     } catch (err) {
@@ -194,15 +206,32 @@ export async function importProductoFromJson(jsonText) {
   //    colisionar con ideas existentes. Incluye índice i en el id para
   //    evitar colisión cuando Date.now() es el mismo entre iteraciones
   //    (todas las iteraciones sync corren en el mismo ms).
+  //    También re-mapeamos idea.origen.competidorId — referencia rota
+  //    sino al competidor que ya no existe (otra finding del audit final).
   if (Array.isArray(parsed.ideas) && parsed.ideas.length > 0) {
     const existing = loadIdeas();
     const ts = Date.now();
-    const remappedIdeas = parsed.ideas.map((i, idx) => ({
-      ...i,
-      id: `idea-${ts}-${idx}-${Math.random().toString(36).slice(2, 8)}`,
-      productoId: newId,
-      importedFromIdeaId: i.id,
-    }));
+    const remappedIdeas = parsed.ideas.map((i, idx) => {
+      const remapped = {
+        ...i,
+        id: `idea-${ts}-${idx}-${Math.random().toString(36).slice(2, 8)}`,
+        productoId: newId,
+        importedFromIdeaId: i.id,
+      };
+      // origen.competidorId apuntaba al competidor del export original.
+      // Tras re-mapear comps, esa referencia queda rota. Aplicamos el
+      // mismo map o wipeamos si no hay match.
+      if (i.origen?.competidorId != null) {
+        const mapped = compIdMap.get(String(i.origen.competidorId));
+        if (mapped) {
+          remapped.origen = { ...i.origen, competidorId: mapped };
+        } else {
+          const { competidorId, ...origenSinComp } = i.origen;
+          remapped.origen = origenSinComp;
+        }
+      }
+      return remapped;
+    });
     saveIdeas([...remappedIdeas, ...existing]);
   }
 

@@ -25,7 +25,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Sparkles, Package, ChevronRight, ChevronDown, Plus, Trash2, Link2, X,
   Loader2, Download, Image as ImageIcon, ExternalLink, Wand2, Search,
-  Check, AlertCircle, LayoutGrid, Rows3, Table2, Settings2,
+  Check, AlertCircle, LayoutGrid, Rows3, Table2, Settings2, RefreshCw,
 } from 'lucide-react';
 import { logCostsFromResponse } from './costsStore.js';
 import { addGeneratedIdeas } from './bandejaStore.js';
@@ -291,6 +291,24 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
                 comp
               </span>
             )}
+            {(() => {
+              // Badge "estable" — marcas que el smart scrape va a saltear porque
+              // devolvieron 0 ads nuevos 3 veces seguidas. El user puede forzar
+              // si quiere. Lo mostramos para que el user entienda por qué a
+              // veces el smart scrape salta marcas.
+              const z = isCompetidor
+                ? (brand.__sourceComp?.consecutiveZeroAds || 0)
+                : (brand.consecutiveZeroAds || 0);
+              if (z < 3) return null;
+              return (
+                <span
+                  className="px-1 py-px text-[8px] font-bold bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded uppercase tracking-wider shrink-0"
+                  title={`Estable: ${z} scrapes sin ads nuevos. Smart scrape la saltea, usá "Forzar" para igual scrapearla.`}
+                >
+                  estable
+                </span>
+              );
+            })()}
           </div>
           <div className="flex items-center gap-1.5 text-[10px] text-gray-500 dark:text-gray-400 truncate">
             {brand.landingUrl && (
@@ -1786,13 +1804,15 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       const cappedSeenIds = newSeenIds.slice(-1000);
 
       setAdsByBrand(prev => ({ ...prev, [brand.id]: enriched }));
+      const freshCount = enriched.filter(a => a.isFresh).length;
       setBrands(prev => prev.map(x => x.id === brand.id ? {
         ...x,
         lastScraped: new Date().toISOString(),
         seenAdIds: cappedSeenIds,
+        // Mismo tracking que para competidores — si 3 scrapes seguidos
+        // devuelven 0 nuevos, el "Scrape todas" smart la saltea.
+        consecutiveZeroAds: freshCount > 0 ? 0 : (x.consecutiveZeroAds || 0) + 1,
       } : x));
-
-      const freshCount = enriched.filter(a => a.isFresh).length;
       const repeatedCount = enriched.length - freshCount;
       const msg = freshCount > 0
         ? `${freshCount} estáticos NUEVOS de ${brand.nombre}${repeatedCount > 0 ? ` (+${repeatedCount} repetidos)` : ''}`
@@ -1867,15 +1887,20 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       const newAds = ads.filter(a => !prevIds.has(a.id));
 
       // Actualizamos el producto en localStorage (donde viven los competidores).
+      // consecutiveZeroAds: marcas que devuelven 0 nuevos N veces seguidas
+      // se consideran "estables" y se saltan del "Scrape todas" smart.
+      // Reset a 0 cuando aparecen nuevos.
       const fresh = loadProductos();
       const updated = fresh.map(p => {
         if (String(p.id) !== String(producto.id)) return p;
         const comps = (p.competidores || []).map(c => {
           if (c.id !== comp.id) return c;
+          const prevZeroes = c.consecutiveZeroAds || 0;
           return {
             ...c, ads,
             adsTotal: data.total || 0, winnersCount: data.winners || 0,
             lastAdsCheck: new Date().toISOString(),
+            consecutiveZeroAds: newAds.length > 0 ? 0 : prevZeroes + 1,
           };
         });
         return { ...p, competidores: comps, updated_at: new Date().toISOString() };
@@ -2377,38 +2402,87 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                   </div>
                 )}
               </div>
-              {/* Scrape todas — dispara handleScrapeCompetidor o handleScrapeBrand
-                  en paralelo para cada marca del listado filtrado. El UI
-                  loading state está soportado (Set<id>) y el server-side de
-                  Apify maneja rate-limit con backoff. Útil para refresh
-                  rápido de todo el feed cuando hay novedad. */}
-              <button
-                disabled={scrapingBrandIds.size > 0 || unif.length === 0}
-                onClick={() => {
-                  // Disparo en paralelo (no await) — cada uno se setea
-                  // como scrapeando individualmente y termina cuando
-                  // termina. Si Apify rate-limita, los retries internos
-                  // de cada llamada lo manejan.
-                  let count = 0;
-                  for (const b of unif) {
-                    if (!b.fbPageUrl && !b.landingUrl && !isKeywordUsable(b.nombre)) continue;
-                    if (b.isCompetidor) handleScrapeCompetidor(b);
-                    else handleScrapeBrand(b);
-                    count++;
+              {/* Scrape todas (smart) — saltea marcas scrapeadas hace <24h y
+                  las que devolvieron 0 nuevos 3 veces seguidas (estables).
+                  Ahorra cuota de Apify. Para forzar todo igual, ver botón
+                  "Forzar" al lado. */}
+              {(() => {
+                const STALE_HOURS = 24;
+                const STABLE_THRESHOLD = 3;
+                const isStaleEnough = (b) => {
+                  if (!b.lastScraped) return true;
+                  const t = new Date(b.lastScraped).getTime();
+                  // Date inválido → tratar como stale para no quedar "cacheado para siempre"
+                  if (!Number.isFinite(t)) return true;
+                  return Date.now() - t > STALE_HOURS * 3600 * 1000;
+                };
+                const isStable = (b) => {
+                  const z = b.isCompetidor
+                    ? (b.__sourceComp?.consecutiveZeroAds || 0)
+                    : (b.consecutiveZeroAds || 0);
+                  return z >= STABLE_THRESHOLD;
+                };
+                const isScrapeable = (b) => b.fbPageUrl || b.landingUrl || isKeywordUsable(b.nombre);
+
+                const eligibles = unif.filter(isScrapeable);
+                const smartEligibles = eligibles.filter(b => isStaleEnough(b) && !isStable(b));
+                const skippedByCache = eligibles.length - smartEligibles.length;
+
+                const fireScrape = (b) => {
+                  if (b.isCompetidor) handleScrapeCompetidor(b);
+                  else handleScrapeBrand(b);
+                };
+
+                const onSmart = () => {
+                  for (const b of smartEligibles) fireScrape(b);
+                  if (smartEligibles.length === 0) {
+                    addToast?.({
+                      type: 'info',
+                      message: skippedByCache > 0
+                        ? `${skippedByCache} marcas ya frescas (<${STALE_HOURS}h) o estables. Usá "Forzar" para re-scrapearlas.`
+                        : 'Ninguna marca tiene fbPage/landing/keyword utilizable.',
+                    });
+                  } else {
+                    addToast?.({
+                      type: 'info',
+                      message: `Scrape de ${smartEligibles.length} marcas${skippedByCache > 0 ? ` (${skippedByCache} salteadas por cache)` : ''}.`,
+                    });
                   }
-                  if (count === 0) {
+                };
+                const onForce = () => {
+                  for (const b of eligibles) fireScrape(b);
+                  if (eligibles.length === 0) {
                     addToast?.({ type: 'error', message: 'Ninguna marca del listado tiene fbPage/landing/keyword utilizable.' });
                   } else {
-                    addToast?.({ type: 'info', message: `Scrape de ${count} marcas en paralelo. Apify reintenta si hay rate limit.` });
+                    addToast?.({ type: 'info', message: `Forzando scrape de ${eligibles.length} marcas (ignorando cache).` });
                   }
-                }}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-purple-500 to-pink-500 rounded hover:from-purple-600 hover:to-pink-600 shadow-sm transition disabled:opacity-50 disabled:cursor-not-allowed"
-                title="Re-scrapea todas las marcas del listado en paralelo. Útil para ver si hay ads nuevos hoy."
-              >
-                {scrapingBrandIds.size > 0
-                  ? <><Loader2 size={11} className="animate-spin" /> Scrapeando {scrapingBrandIds.size}…</>
-                  : <><Download size={11} /> Scrape todas ({unif.length})</>}
-              </button>
+                };
+
+                return (
+                  <>
+                    <button
+                      disabled={scrapingBrandIds.size > 0 || smartEligibles.length === 0}
+                      onClick={onSmart}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-purple-500 to-pink-500 rounded hover:from-purple-600 hover:to-pink-600 shadow-sm transition disabled:opacity-50 disabled:cursor-not-allowed"
+                      title={`Scrapea solo marcas no scrapeadas en las últimas ${STALE_HOURS}h y que no son estables (${STABLE_THRESHOLD}+ scrapes sin novedad).${skippedByCache > 0 ? ` ${skippedByCache} saltadas por cache.` : ''}`}
+                    >
+                      {scrapingBrandIds.size > 0
+                        ? <><Loader2 size={11} className="animate-spin" /> Scrapeando {scrapingBrandIds.size}…</>
+                        : <><Download size={11} /> Scrape nuevas ({smartEligibles.length})</>}
+                    </button>
+                    <button
+                      disabled={scrapingBrandIds.size > 0 || eligibles.length === 0}
+                      onClick={onForce}
+                      className="inline-flex items-center gap-1.5 px-2 py-1.5 text-xs font-semibold text-purple-700 dark:text-purple-300 bg-white dark:bg-gray-800 border border-purple-300 dark:border-purple-700 rounded hover:bg-purple-50 dark:hover:bg-purple-900/20 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Re-scrapea TODAS las marcas ignorando cache de 24h y estables. Gasta más cuota de Apify."
+                    >
+                      {scrapingBrandIds.size > 0
+                        ? <><Loader2 size={11} className="animate-spin" /> En curso…</>
+                        : <><RefreshCw size={11} /> Forzar todas</>}
+                    </button>
+                  </>
+                );
+              })()}
               {/* Para agregar una marca nueva el flujo va por Competencia
                   (single source of truth). Las marcas que aparecen acá son
                   derivadas de producto.competidores via el useEffect de sync. */}

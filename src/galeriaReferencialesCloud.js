@@ -16,10 +16,25 @@ import { supabase, getCurrentUser } from './supabase.js';
 const BUCKET = 'creativos';
 
 // ¿Está habilitado el modo cloud? (supabase configurado + user logueado)
+// Cacheamos el resultado para no hacer un round-trip a auth.getUser() en
+// cada save/read/count. Cada cambio de auth invalida el cache via
+// onAuthStateChange. Antes, en bulk de N variantes IDB-fallback se llamaba
+// N veces y cada llamada era ~50-200ms de latencia.
+let _cloudReadyCache = null;
+if (typeof window !== 'undefined' && supabase) {
+  // Si la sesión cambia (login, logout, refresh), reseteamos el cache.
+  try {
+    supabase.auth.onAuthStateChange((event, session) => {
+      _cloudReadyCache = !!session?.user;
+    });
+  } catch {}
+}
 export async function isCloudReady() {
   if (!supabase) return false;
+  if (_cloudReadyCache !== null) return _cloudReadyCache;
   const user = await getCurrentUser();
-  return !!user;
+  _cloudReadyCache = !!user;
+  return _cloudReadyCache;
 }
 
 // Convierte base64 puro a Blob para subir al Storage.

@@ -71,7 +71,8 @@ async function processResponse(data, idea, producto, quality) {
 
 // Lanza UNA idea — devuelve la promesa del fetch + processResponse.
 // La promesa SE EJECUTA al llamar (no se espera) — eso es lo que permite
-// disparar N en paralelo.
+// disparar N en paralelo. authToken se obtiene una vez al inicio del bulk
+// (los tokens Supabase duran ~1h, suficiente para bulks típicos).
 function fireIdea({ idea, producto, prodImg, accentColor, n, quality, size, authToken }) {
   return fetch('/api/marketing/crear-imagen-desde-idea', {
     method: 'POST',

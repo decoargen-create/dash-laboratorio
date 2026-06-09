@@ -28,6 +28,7 @@ import { getProductoImagen, getAccentColor } from './productoImagen.js';
 import { saveReferencial } from './galeriaReferenciales.js';
 import { supabase } from './supabase.js';
 import { bulkGenerateFromIdeas } from './bandejaBulkGenerate.js';
+import { deleteCreativo } from './creativosStorage.js';
 import { enqueueGenerate as enqueueGenerarCreativo } from './creativoGeneratorStore.js';
 import { startExecution, updateExecution, finishExecution } from './executionsStore.js';
 
@@ -1646,12 +1647,12 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
     }
   };
 
-  const handleRemove = (id) => {
+  const handleRemove = async (id) => {
     if (!window.confirm('¿Borrar esta idea? No se puede deshacer.')) return;
     setIdeas(removeIdea(id));
     // Borramos también el creativo de IndexedDB — sino quedaba huérfano
     // ocupando espacio para siempre (cada imagen pesa ~1-2 MB).
-    deleteCreativo(id);
+    try { await deleteCreativo(id); } catch (err) { console.warn('[Bandeja] deleteCreativo falló:', err.message); }
     setSelected(prev => {
       const next = new Set(prev); next.delete(id); return next;
     });
@@ -1826,7 +1827,10 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
     a.href = url;
     a.download = `brief-creativos-${stamp}.md`;
     a.click();
-    URL.revokeObjectURL(url);
+    // Revoke con delay — en Safari el click defers el download a un
+    // microtask, revocar sync abortaba la descarga. Mismo patrón que
+    // GaleriaReferencialesModal.jsx.
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   const guardarNotas = (id) => {

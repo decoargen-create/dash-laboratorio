@@ -1358,7 +1358,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   //   • Mismo costo de Sonnet ($0.04 una vez) gracias al cache.
   const crearReferencialDeAd = async (brandNombre, ad) => {
     if (!producto) return false;
-    const prodImg = getProductoImagen(producto.id);
+    const prodImg = await getProductoImagen(producto.id);
     if (!prodImg) {
       addToast?.({ type: 'error', message: 'Cargá la foto del producto en Setup primero.' });
       return false;
@@ -1613,7 +1613,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     }
     if (seleccionados.size === 0) return;
     if (!producto) return;
-    const prodImg = getProductoImagen(producto.id);
+    const prodImg = await getProductoImagen(producto.id);
     if (!prodImg) {
       addToast?.({ type: 'error', message: 'Cargá la foto del producto en Setup primero.' });
       return;

@@ -26,6 +26,7 @@ import { logCostsFromResponse } from './costsStore.js';
 import CreativoPanel from './CreativoPanel.jsx';
 import { getProductoImagen, getAccentColor } from './productoImagen.js';
 import { saveReferencial } from './galeriaReferenciales.js';
+import { supabase } from './supabase.js';
 import { enqueueGenerate as enqueueGenerarCreativo } from './creativoGeneratorStore.js';
 import { startExecution, updateExecution, finishExecution } from './executionsStore.js';
 
@@ -168,7 +169,7 @@ function IdeaCard({
   idea, expanded, onToggle, onEstado, onRemove,
   editandoNotas, onEditNotas, notasDraft, setNotasDraft, onSaveNotas, onCancelNotas,
   editandoGuion, onEditGuion, guionDraft, setGuionDraft, onSaveGuion, onCancelGuion,
-  isSelected, onToggleSelect, onFetchPerformance,
+  isSelected, onToggleSelect, onFetchPerformance, addToast,
 }) {
   const tipo = TIPO_META[idea.tipo] || TIPO_META.desde_cero;
   const estado = ESTADO_META[idea.estado] || ESTADO_META.pendiente;
@@ -329,7 +330,7 @@ function IdeaCard({
                   o carrusel. El prompt está en castellano argentino y combina
                   los campos relevantes de la idea en un solo bloque copiable. */}
               {idea.formato !== 'video' && (idea.hook || idea.descripcionImagen) && (
-                <IdeaImageGenerator idea={idea} />
+                <IdeaImageGenerator idea={idea} addToast={addToast} />
               )}
 
               {/* Para video → brief con guion para mandar a producción
@@ -1101,7 +1102,7 @@ function IdeaDetailModal({ idea, onClose, ...cardProps }) {
 // El user puede elegir N variantes — la primera es interpretación literal del
 // brief, las siguientes van divergiendo (medium → loose).
 
-function IdeaImageGenerator({ idea }) {
+function IdeaImageGenerator({ idea, addToast }) {
   const promptEs = buildPromptGptImage2Es(idea);
   const [n, setN] = useState(2);
   const [size, setSize] = useState('2048x2048');
@@ -1136,8 +1137,19 @@ function IdeaImageGenerator({ idea }) {
     const t0 = Date.now();
     try {
       updateExecution(execId, { stage: `Generando ${n} variante${n !== 1 ? 's' : ''}…` });
+      // Auth token para background save server-side. Sin esto el endpoint
+      // skipea el cloud save y si el user cierra la pestaña pierde el creativo.
+      let authToken = '';
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        authToken = session?.access_token || '';
+      } catch {}
       const resp = await fetch('/api/marketing/crear-imagen-desde-idea', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
+        },
         body: JSON.stringify({
           idea: {
             id: idea.id,
@@ -1154,9 +1166,11 @@ function IdeaImageGenerator({ idea }) {
             formato: idea.formato,
           },
           producto: {
+            id: producto.id,  // CRÍTICO — sin esto el cloud save skipea
             nombre: producto.nombre,
             descripcion: producto.descripcion,
             research: producto.docs?.research,
+            ofertasReales: producto.ofertasReales || '',
             offerBrief: producto.ofertasReales || producto.docs?.offerBrief || '',
           },
           productoImagen: prodImg,
@@ -1168,37 +1182,52 @@ function IdeaImageGenerator({ idea }) {
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
       const costo = logCostsFromResponse(data, `crear-imagen-desde-idea · ${idea.hook?.slice(0, 40) || 'idea'}`);
 
-      // Guardar en la galería con sourceType: 'bandeja-idea'.
+      // Si el backend ya guardó al cloud (cloudCreativos), solo refrescamos
+      // la galería. Si no, fallback IDB local + toast warning.
       const ahora = Date.now();
       const imagenes = data.imagenes || [];
       const variantStyles = data.variantStyles || [];
       const prompts = data.prompts || [];
-      for (let i = 0; i < imagenes.length; i++) {
-        const promptUsed = prompts[i]?.prompt || data.prompts?.[i]?.prompt || '';
-        await saveReferencial({
-          id: `idea_${ahora}_${idea.id}_${i}`,
-          productoId: String(producto.id),
-          sourceType: 'bandeja-idea',
-          sourceIdeaId: idea.id,
-          sourceBrand: 'Idea propia',
-          sourceHeadline: idea.hook || idea.titulo || '',
-          variantIndex: i,
-          variantStyle: variantStyles[i] || 'tight',
-          imageBase64: imagenes[i],
-          mimeType: data.mimeType || 'image/png',
-          prompt: promptUsed,
-          model: data.model,
-          size: data.size,
-          sizeFallback: !!data.sizeFallback,
-          quality: data.quality || quality,
-          createdAt: new Date(ahora + i).toISOString(),
-        });
+      const cloudOk = Array.isArray(data.cloudCreativos) && data.cloudCreativos.length > 0;
+
+      if (cloudOk) {
+        try { window.dispatchEvent(new CustomEvent('viora:referencial-saved', { detail: { productoId: String(producto.id), cloud: true } })); } catch {}
+      } else {
+        if (data.cloudSaveError) {
+          console.warn('[crear-imagen-desde-idea] cloudSaveError:', data.cloudSaveError);
+          addToast?.({
+            type: 'warning',
+            message: `Cloud save no funcionó (${data.cloudSaveError}). Guardando local — NO cierres la pestaña.`,
+          });
+        }
+        for (let i = 0; i < imagenes.length; i++) {
+          const promptUsed = prompts[i]?.prompt || data.prompts?.[i]?.prompt || '';
+          await saveReferencial({
+            id: `idea_${ahora}_${idea.id}_${i}`,
+            productoId: String(producto.id),
+            sourceType: 'bandeja-idea',
+            sourceIdeaId: idea.id,
+            sourceBrand: 'Idea propia',
+            sourceHeadline: idea.hook || idea.titulo || '',
+            variantIndex: i,
+            variantStyle: variantStyles[i] || 'tight',
+            imageBase64: imagenes[i],
+            mimeType: data.mimeType || 'image/png',
+            prompt: promptUsed,
+            model: data.model,
+            size: data.size,
+            sizeFallback: !!data.sizeFallback,
+            quality: data.quality || quality,
+            createdAt: new Date(ahora + i).toISOString(),
+          });
+        }
       }
+      const imageCount = cloudOk ? data.cloudCreativos.length : imagenes.length;
       const durMs = Date.now() - t0;
-      setLastBatch({ count: imagenes.length, t: ahora, durMs });
+      setLastBatch({ count: imageCount, t: ahora, durMs });
       finishExecution(execId, {
         ok: true,
-        message: `${imagenes.length} imagen${imagenes.length !== 1 ? 'es' : ''} en galería`,
+        message: `${imageCount} imagen${imageCount !== 1 ? 'es' : ''} en galería`,
         cost: costo?.total,
       });
     } catch (err) {
@@ -2126,6 +2155,7 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
           isSelected={selected.has(ideaDetalle.id)}
           onToggleSelect={() => toggleSelect(ideaDetalle.id)}
           onFetchPerformance={() => fetchPerformance(ideaDetalle)}
+          addToast={addToast}
         />
       )}
     </div>

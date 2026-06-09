@@ -22,6 +22,28 @@ const KEYS = {
 // ============================================================
 // PULL — al login, traemos todo del backend
 // ============================================================
+// Helper: wrappea cada query con retry + backoff exponencial para que un
+// error de red transitorio al inicio no deje la app vacía hasta el próximo
+// reload. Hace 3 reintentos máx con delays 1s/2s/4s.
+async function queryWithRetry(label, queryFn, retries = 3) {
+  let lastErr = null;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const result = await queryFn();
+      if (result.error) throw new Error(result.error.message);
+      return result;
+    } catch (err) {
+      lastErr = err;
+      if (attempt < retries) {
+        const delay = Math.min(8000, 1000 * Math.pow(2, attempt));
+        console.warn(`[sync] ${label} falló (intento ${attempt + 1}/${retries + 1}): ${err.message}. Retry en ${delay}ms.`);
+        await new Promise(r => setTimeout(r, delay));
+      }
+    }
+  }
+  throw lastErr;
+}
+
 export async function pullMarketingFromCloud() {
   if (!supabase) throw new Error('Supabase no configurado');
   const user = await getCurrentUser();
@@ -29,14 +51,12 @@ export async function pullMarketingFromCloud() {
   console.info(`[sync] pull arrancando para user ${user.id}`);
 
   // 1) productos del user
-  const { data: productos, error: errProd } = await supabase
-    .from('marketing_productos')
-    .select('id, data, updated_at')
-    .order('updated_at', { ascending: false });
-  if (errProd) {
-    console.warn('[sync] pull productos error:', errProd.message);
-    throw new Error(`Pull productos: ${errProd.message}`);
-  }
+  const { data: productos } = await queryWithRetry('pull productos', () =>
+    supabase
+      .from('marketing_productos')
+      .select('id, data, updated_at')
+      .order('updated_at', { ascending: false })
+  );
   console.info(`[sync] pull recibió ${productos?.length || 0} productos del cloud`);
 
   // Stripear campos pesados legacy antes de guardar a localStorage:
@@ -81,10 +101,12 @@ export async function pullMarketingFromCloud() {
   }
 
   // 2) prefs (active_producto_id + gen_opts)
-  const { data: prefs } = await supabase
-    .from('marketing_prefs')
-    .select('active_producto_id, gen_opts')
-    .maybeSingle();
+  const { data: prefs } = await queryWithRetry('pull prefs', () =>
+    supabase
+      .from('marketing_prefs')
+      .select('active_producto_id, gen_opts')
+      .maybeSingle()
+  );
   if (prefs?.active_producto_id) {
     try { localStorage.setItem(KEYS.active, prefs.active_producto_id); } catch {}
   }
@@ -93,10 +115,11 @@ export async function pullMarketingFromCloud() {
   }
 
   // 3) brands per producto
-  const { data: brands, error: errBrands } = await supabase
-    .from('marketing_brands')
-    .select('producto_id, brand_id, data');
-  if (errBrands) throw new Error(`Pull brands: ${errBrands.message}`);
+  const { data: brands } = await queryWithRetry('pull brands', () =>
+    supabase
+      .from('marketing_brands')
+      .select('producto_id, brand_id, data')
+  );
 
   // Agrupar brands por producto y escribir al localStorage con la key específica.
   const byProducto = new Map();

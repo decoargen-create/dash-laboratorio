@@ -124,6 +124,28 @@ export function useMarketingSync({ addToast } = {}) {
       debounceTimers.current.set(key, id);
     };
 
+    // Wrapper que reintenta el push hasta 3 veces (1s/2s/4s). Antes un push
+    // que fallaba (red, token expirado momentáneamente) era game over y solo
+    // dejaba un toast. Ahora el wrapper retry rescata la mayoría de los
+    // errores transitorios.
+    const pushWithRetry = async (label, fn, retries = 3) => {
+      let lastErr = null;
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+          await fn();
+          return;
+        } catch (err) {
+          lastErr = err;
+          if (attempt < retries) {
+            const delay = Math.min(8000, 1000 * Math.pow(2, attempt));
+            console.warn(`[sync] push ${label} falló (intento ${attempt + 1}/${retries + 1}): ${err.message}. Retry en ${delay}ms.`);
+            await new Promise(r => setTimeout(r, delay));
+          }
+        }
+      }
+      throw lastErr;
+    };
+
     const doPush = async (key) => {
       // Guard: si el primer pull aún no terminó, el localStorage puede no
       // reflejar lo que hay en el cloud. Pushear ahora puede borrar datos
@@ -136,21 +158,21 @@ export function useMarketingSync({ addToast } = {}) {
         setStatus('pushing');
         if (key === KEYS.productos) {
           const arr = safeParse(localStorage.getItem(KEYS.productos)) || [];
-          await pushAllProductos(arr);
+          await pushWithRetry('productos', () => pushAllProductos(arr));
         } else if (key === KEYS.active || key === KEYS.genOpts) {
           const active = localStorage.getItem(KEYS.active);
           const genOpts = safeParse(localStorage.getItem(KEYS.genOpts));
-          await pushPrefs({ activeProductoId: active, genOpts });
+          await pushWithRetry('prefs', () => pushPrefs({ activeProductoId: active, genOpts }));
         } else if (key.startsWith(KEYS.brandsPrefix)) {
           const productoId = key.slice(KEYS.brandsPrefix.length);
           const arr = safeParse(localStorage.getItem(key)) || [];
-          await pushBrandsForProducto(productoId, arr);
+          await pushWithRetry(`brands/${productoId}`, () => pushBrandsForProducto(productoId, arr));
         }
         setStatus('ok');
       } catch (err) {
-        console.warn('[sync] push error:', err.message);
+        console.warn('[sync] push error (tras retries):', err.message);
         setStatus('error'); setLastError(err.message);
-        addToast?.({ type: 'error', message: `No pude guardar en el cloud: ${err.message}` });
+        addToast?.({ type: 'error', message: `No pude guardar en el cloud (3 intentos): ${err.message}. Tus cambios quedan en local — recargá para reintentar.` });
       }
     };
 

@@ -852,7 +852,18 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // variable local no se actualiza. Usando un ref síncronizado con un effect
   // sí leemos el valor actual en cada chequeo.
   const cancelledRef = useRef(false);
-  useEffect(() => { cancelledRef.current = pipelineRun.cancelRequested; }, [pipelineRun.cancelRequested]);
+  // AbortController para cancelar fetches in-flight. Antes el cancel solo
+  // se checkeaba ENTRE awaits, así un deep-analyze de 60s que ya estaba
+  // disparado se completaba y cobraba aunque el user clickara Cancelar.
+  // Ahora cancelar dispara abort() y todas las fetches que pasaron
+  // signal se cortan.
+  const pipelineAbortRef = useRef(null);
+  useEffect(() => {
+    cancelledRef.current = pipelineRun.cancelRequested;
+    if (pipelineRun.cancelRequested && pipelineAbortRef.current) {
+      try { pipelineAbortRef.current.abort(); } catch {}
+    }
+  }, [pipelineRun.cancelRequested]);
   // Ref al <input type=file> oculto para que el botón "Importar" pueda
   // triggerar el file picker via click().
   const importFileInputRef = useRef(null);
@@ -1261,6 +1272,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       addToast?.({ type: 'error', message: 'Primero cargá el producto (nombre + landing)' });
       return;
     }
+    // AbortController nuevo por cada run. Lo pasamos a todas las fetches
+    // del pipeline para que un cancel mid-run pare deep-analyze, generate-
+    // ideas, etc. y deje de cobrar al instante.
+    pipelineAbortRef.current = new AbortController();
+    const pipelineSignal = pipelineAbortRef.current.signal;
     // Guard contra double-run. Aunque el botón se oculta cuando running=true,
     // hay paths concurrentes (auto-run pill, Enter rápido, otra pestaña) que
     // pueden disparar dos invocaciones en paralelo y pisarse setProductos /
@@ -1693,6 +1709,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         try {
           const resp = await fetch('/api/marketing/deep-analyze', {
             method: 'POST',
+            signal: pipelineSignal,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               ad: {
@@ -1731,6 +1748,10 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           liveStats.winnersAnalyzed++;
           updateStep(stepId, { detail: `${analyzed}/${nuevosParaAnalizar.length} analizados${yaAnalizados > 0 ? ` · ${yaAnalizados} salteados (ya había análisis)` : ''}` });
         } catch (err) {
+          if (err.name === 'AbortError') {
+            console.info(`deep-analyze abortado por cancel (ad ${ad.id})`);
+            break;
+          }
           // Un análisis fallido no rompe el resto — seguimos.
           console.error(`deep-analyze falló para ad ${ad.id}:`, err);
         }
@@ -1858,6 +1879,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             .map(i => ({ titulo: i.titulo, angulo: i.angulo, tipo: i.tipo, hook: i.hook || '', estado: i.estado || 'pendiente' }));
           const resp = await fetch('/api/marketing/generate-ideas', {
             method: 'POST',
+            signal: pipelineSignal,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               producto: productoActualizado || producto || { nombre: 'Producto sin definir' },
@@ -1944,6 +1966,10 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             restante -= chunkTarget;
           } catch (err) {
             tandasFallidasSeguidas++;
+            if (err.name === 'AbortError') {
+              console.info(`generate-ideas abortado por cancel (tanda ${tandaNum})`);
+              break;
+            }
             console.error(`generate tanda ${tandaNum} falló:`, err);
             // 2 tandas seguidas fallidas → cortamos, pero conservamos lo
             // que ya se insertó en las tandas anteriores.

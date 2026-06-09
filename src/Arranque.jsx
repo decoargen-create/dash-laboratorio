@@ -2358,6 +2358,38 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                   <button
                     onClick={async (e) => {
                       e.stopPropagation();
+                      // Forzar push de TODO el state local actual al cloud.
+                      // Útil cuando cambiás de PC y querés asegurarte que la
+                      // PC vieja pushea todo antes de migrar.
+                      try {
+                        const arr = JSON.parse(localStorage.getItem('adslab-marketing-productos-v1') || '[]');
+                        // Disparamos el evento que hace el push debounced.
+                        window.dispatchEvent(new CustomEvent('viora:marketing-storage-changed', {
+                          detail: { key: 'adslab-marketing-productos-v1' },
+                        }));
+                        // Y para brands del producto también.
+                        const brandsKey = `adslab-marketing-inspiracion-brands-${p.id}`;
+                        if (localStorage.getItem(brandsKey)) {
+                          window.dispatchEvent(new CustomEvent('viora:marketing-storage-changed', {
+                            detail: { key: brandsKey },
+                          }));
+                        }
+                        addToast?.({
+                          type: 'info',
+                          message: `Sync forzado al cloud (${arr.length} productos). Esperá 2-3 segundos antes de cambiar de PC.`,
+                        });
+                      } catch (err) {
+                        addToast?.({ type: 'error', message: `Sync falló: ${err.message}` });
+                      }
+                    }}
+                    className="p-2.5 rounded-lg text-gray-300 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition shrink-0"
+                    title="Forzar sync al cloud (útil al cambiar de PC)"
+                  >
+                    <Upload size={16} />
+                  </button>
+                  <button
+                    onClick={async (e) => {
+                      e.stopPropagation();
                       try {
                         await downloadProductoExport(p.id);
                         addToast?.({ type: 'success', message: `Producto "${p.nombre}" exportado.` });

@@ -2666,12 +2666,12 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             <details className="mt-3 group">
               <summary className="cursor-pointer inline-flex items-center gap-1 text-[10px] font-semibold text-gray-600 dark:text-gray-300 hover:text-brand-600 dark:hover:text-brand-400">
                 <ChevronDown size={10} className="group-open:rotate-180 transition-transform" />
-                💰 Ofertas y claims reales (opcional)
+                💰 Tus ofertas reales — precio, promos, claims (recomendado)
                 {producto.ofertasReales?.trim() && <span className="text-emerald-600 dark:text-emerald-400">✓ cargado</span>}
               </summary>
               <div className="mt-2 space-y-2 pl-4">
                 <p className="text-[10px] text-gray-500 dark:text-gray-400">
-                  Promos, descuentos y claims regulatorios que SÍ podés usar en tus ads. Sin esto, el generador de creativos referenciales remueve cualquier "25% off", "FDA Approved", etc. del ad ref — para no inventar. Cuando cargás esto, Vision puede mantenerlos en el texto adaptado.
+                  Precio actual, promos vigentes y claims regulatorios de TU tienda. Cuando lo cargás, el generador REEMPLAZA las ofertas del ad de la competencia ("$29", "lleva 2 + 1 gratis", "FDA Approved") por las tuyas. Sin esto, las quita por defecto (no inventa). Ejemplo: si el ad ref dice "$29 USD" y vos ponés "USD 49 + envío gratis", el creativo va a decir "USD 49 + envío gratis".
                 </p>
                 <textarea
                   value={producto.ofertasReales || ''}
@@ -2681,7 +2681,8 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                       : p
                   ))}
                   placeholder={`Ejemplos:
-• Comprá 3 frascos y ahorrás 20%
+• Precio: USD 49 (o ARS 49.900)
+• 3x2 — Comprá 3 frascos y pagás 2
 • Envío gratis a todo el país
 • 30 días para devolverlo si no te gusta
 • ANMAT registrado

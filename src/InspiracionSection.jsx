@@ -1361,9 +1361,14 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
 
     const baseBody = {
       producto: {
+        id: producto.id,
         nombre: producto.nombre,
         descripcion: producto.descripcion,
         research: producto.docs?.research,
+        // Ofertas: pasamos ambos campos para que el server pueda preferir
+        // ofertasReales (focalizado, llenado en Setup) y caer a offerBrief
+        // (doc generado por la pipeline) como fallback.
+        ofertasReales: producto.ofertasReales || '',
         offerBrief: producto.ofertasReales || producto.docs?.offerBrief || '',
       },
       inspiracion: {

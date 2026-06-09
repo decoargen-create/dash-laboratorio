@@ -69,6 +69,14 @@ export async function pullMarketingFromCloud() {
     const p = row.data || {};
     // Clonamos shallow y removemos campos legacy pesados.
     const { creativos, ...slim } = p;
+    // Normalización resumenEjecutivo: el server (patchProductoDocs) lo
+    // guarda en docs.resumenEjecutivo. El cliente lo lee en p.resumenEjecutivo
+    // (ver Marketing.jsx:274, 381, etc.). Si el cloud tiene solo docs.X y
+    // no root.X (caso típico tras pipeline server-persisted), promovemos a
+    // root para que la UI lo vea. Sin esto: "Sin resumen ejecutivo generado".
+    if (!slim.resumenEjecutivo && slim.docs?.resumenEjecutivo) {
+      slim.resumenEjecutivo = slim.docs.resumenEjecutivo;
+    }
     return slim;
   });
 
@@ -182,19 +190,17 @@ export async function pushAllProductos(productos) {
     .from('marketing_productos')
     .upsert(rows, { onConflict: 'user_id,id' });
   if (error) throw new Error(`Push productos bulk: ${error.message}`);
-  // Borrar los que ya no existen (solo aplica cuando productos.length > 0).
-  const idsActuales = productos.map(p => String(p.id));
-  const { data: enServer } = await supabase
-    .from('marketing_productos')
-    .select('id');
-  const aBorrar = (enServer || [])
-    .map(r => r.id)
-    .filter(id => !idsActuales.includes(id));
-  if (aBorrar.length > 0) {
-    await supabase.from('marketing_productos').delete().in('id', aBorrar);
-  }
+  // NOTA: no hacemos diff-delete acá (eliminado tras auditoría).
+  // El problema: si el user tenía 5 productos en el cloud (ej. desde otro
+  // device) y el local tiene 1 (porque acaba de pullear o quota
+  // localStorage truncó), un push bulk borraba los otros 4. El borrado
+  // explícito de productos se hace solo via deleteProducto() llamado desde
+  // los handlers de UI — esa es la fuente de verdad para "el user quiso
+  // borrar esto".
 }
 
+// Defense-in-depth: filtramos por user_id además de RLS para que un id
+// incorrecto/colisionado de otro user no se borre por error.
 export async function deleteProducto(productoId) {
   if (!supabase) throw new Error('Supabase no configurado');
   const user = await getCurrentUser();
@@ -202,7 +208,8 @@ export async function deleteProducto(productoId) {
   await supabase
     .from('marketing_productos')
     .delete()
-    .eq('id', String(productoId));
+    .eq('id', String(productoId))
+    .eq('user_id', user.id);
 }
 
 // ============================================================

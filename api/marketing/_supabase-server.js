@@ -83,7 +83,13 @@ export async function readProductoDocs(userId, productoId) {
       .eq('user_id', userId)
       .eq('id', String(productoId))
       .maybeSingle();
-    return row?.data?.docs || {};
+    const docs = { ...(row?.data?.docs || {}) };
+    // Fallback: el cliente legacy puede haber guardado resumenEjecutivo en
+    // root en vez de docs.* — para que la reanudación lo detecte, mergeamos.
+    if (!docs.resumenEjecutivo && row?.data?.resumenEjecutivo) {
+      docs.resumenEjecutivo = row.data.resumenEjecutivo;
+    }
+    return docs;
   } catch (err) {
     console.warn(`[readProductoDocs] error: ${err.message}`);
     return {};

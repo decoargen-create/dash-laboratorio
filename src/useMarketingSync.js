@@ -42,68 +42,73 @@ export function useMarketingSync({ addToast } = {}) {
   // Sin esto, el render inicial dispara saveJSON([]) → push de localStorage
   // vacío → pushAllProductos([]) → ANTES borraba todo el cloud.
   const pullCompletedRef = useRef(false);
+  // Mutex: en StrictMode dev (o si un onAuthChange dispara mientras la IIFE
+  // de mount aún está corriendo) podríamos lanzar 2 pulls concurrentes que
+  // pisan localStorage entre sí. Este ref bloquea pulls superpuestos.
+  const pullingRef = useRef(false);
+
+  // Helper: corre migrate + pull con mutex. Si ya hay otro pull en
+  // progreso, no-op (evita dual-pull racing por StrictMode dev o
+  // onAuthChange disparando mientras la IIFE mount está corriendo).
+  const runPull = async (mountedRef) => {
+    if (pullingRef.current) {
+      console.info('[sync] pull ya en curso — skip duplicado');
+      return;
+    }
+    pullingRef.current = true;
+    try {
+      setStatus('pulling');
+      const mig = await migrateLocalToCloud();
+      if (mig?.migrated) addToast?.({ type: 'success', message: `Migrados ${mig.productos} productos al cloud` });
+      await pullMarketingFromCloud();
+      pullCompletedRef.current = true;
+      if (mountedRef?.current !== false) setStatus('ok');
+
+      // Migración soft de creativos IDB → cloud, en background (no
+      // bloquea el resto del sync). Solo corre la primera vez por user.
+      (async () => {
+        try {
+          const count = await countIDBCreativos();
+          if (count > 0) {
+            addToast?.({ type: 'info', message: `Subiendo ${count} creativos locales al cloud — esto puede tardar un poco.` });
+          }
+          const migCreativos = await migrateIDBCreativosToCloud();
+          if (migCreativos?.migrated > 0) {
+            addToast?.({
+              type: 'success',
+              message: `${migCreativos.migrated} creativos subidos al cloud${migCreativos.failed ? ` (${migCreativos.failed} fallaron)` : ''}`,
+            });
+          }
+        } catch (err) {
+          console.warn('[migración creativos] error:', err.message);
+        }
+      })();
+    } catch (err) {
+      console.warn('[sync] pull error:', err.message);
+      if (mountedRef?.current !== false) { setStatus('error'); setLastError(err.message); }
+      addToast?.({ type: 'error', message: `Sync error: ${err.message}` });
+    } finally {
+      pullingRef.current = false;
+    }
+  };
 
   // 1. Detect login → pull + soft migration.
   useEffect(() => {
-    let mounted = true;
+    const mountedRef = { current: true };
     (async () => {
       const u = await getCurrentUser();
-      if (mounted) setUser(u);
-      if (u) {
-        try {
-          setStatus('pulling');
-          const mig = await migrateLocalToCloud();
-          if (mig?.migrated) addToast?.({ type: 'success', message: `Migrados ${mig.productos} productos al cloud` });
-          await pullMarketingFromCloud();
-          pullCompletedRef.current = true; // habilita pushes
-          if (mounted) setStatus('ok');
-
-          // Migración soft de creativos IDB → cloud, en background (no
-          // bloquea el resto del sync). Solo corre la primera vez por user.
-          (async () => {
-            try {
-              const count = await countIDBCreativos();
-              if (count > 0) {
-                addToast?.({ type: 'info', message: `Subiendo ${count} creativos locales al cloud — esto puede tardar un poco.` });
-              }
-              const migCreativos = await migrateIDBCreativosToCloud();
-              if (migCreativos?.migrated > 0) {
-                addToast?.({
-                  type: 'success',
-                  message: `${migCreativos.migrated} creativos subidos al cloud${migCreativos.failed ? ` (${migCreativos.failed} fallaron)` : ''}`,
-                });
-              }
-            } catch (err) {
-              console.warn('[migración creativos] error:', err.message);
-            }
-          })();
-        } catch (err) {
-          console.warn('[sync] pull error:', err.message);
-          if (mounted) { setStatus('error'); setLastError(err.message); }
-          addToast?.({ type: 'error', message: `Sync error: ${err.message}` });
-        }
-      }
+      if (mountedRef.current) setUser(u);
+      if (u) await runPull(mountedRef);
     })();
-    return onAuthChange(async ({ user: newUser }) => {
+    const unsubscribe = onAuthChange(async ({ user: newUser }) => {
       setUser(newUser);
-      if (newUser) {
-        try {
-          setStatus('pulling');
-          await migrateLocalToCloud();
-          await pullMarketingFromCloud();
-          pullCompletedRef.current = true;
-          setStatus('ok');
-          // Migración de creativos también acá (caso re-login en misma sesión).
-          (async () => {
-            try { await migrateIDBCreativosToCloud(); } catch {}
-          })();
-        } catch (err) {
-          setStatus('error'); setLastError(err.message);
-        }
-      } else {
-        setStatus('idle');
-      }
+      if (newUser) await runPull(mountedRef);
+      else setStatus('idle');
     });
+    return () => {
+      mountedRef.current = false;
+      unsubscribe();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

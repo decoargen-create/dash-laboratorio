@@ -233,6 +233,11 @@ function aspectRatioFromSize(size) {
   return 'landscape (3:2)';
 }
 
+// Mismos timeouts que crear-creativo-referencial.js: si OpenAI se cuelga a
+// los ~275s, cancelamos el fetch y dejamos margen para handler cleanup
+// antes del kill de Vercel a 300s.
+const PER_CALL_TIMEOUT_MS = 275000;
+
 async function callGptImage2Edit({ apiKey, prompt, prodImgBuf, prodMime, size, quality, n }) {
   const RETRY_DELAYS = [15000, 30000];
   let lastErr = null;
@@ -245,11 +250,27 @@ async function callGptImage2Edit({ apiKey, prompt, prodImgBuf, prodMime, size, q
     form.append('n', String(Math.min(10, Math.max(1, n || 1))));
     form.append('moderation', 'low');
     form.append('image[]', new Blob([prodImgBuf], { type: prodMime }), 'producto.' + extForMime(prodMime));
-    const resp = await fetch('https://api.openai.com/v1/images/edits', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${apiKey}` },
-      body: form,
-    });
+    // AbortController por call individual — si OpenAI se cuelga > 275s
+    // matamos esa request. Sin esto, Promise.all en bulk se traba en la
+    // variante más lenta y todo el response timeout-ea.
+    const controller = new AbortController();
+    const callTimeout = setTimeout(() => controller.abort(), PER_CALL_TIMEOUT_MS);
+    let resp;
+    try {
+      resp = await fetch('https://api.openai.com/v1/images/edits', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${apiKey}` },
+        body: form,
+        signal: controller.signal,
+      });
+    } catch (err) {
+      clearTimeout(callTimeout);
+      if (err.name === 'AbortError') {
+        throw new Error(`OpenAI tardó más de ${PER_CALL_TIMEOUT_MS / 1000}s en responder. Cancelado.`);
+      }
+      throw err;
+    }
+    clearTimeout(callTimeout);
     const raw = await resp.text();
     let data;
     try { data = JSON.parse(raw); } catch {

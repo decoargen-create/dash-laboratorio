@@ -1103,7 +1103,8 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     const landingUrl = prodDraft.landingUrl.trim();
     if (!nombre) { addToast?.({ type: 'error', message: 'Ponele nombre al producto' }); return; }
 
-    const nuevoId = Date.now();
+    // Suffix random — antes era solo Date.now() que colisiona en double-click.
+    const nuevoId = `prod-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const nuevo = {
       id: nuevoId,
       nombre,
@@ -1142,7 +1143,8 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         return;
       }
     }
-    const nuevoId = Date.now();
+    // Suffix random — mismo motivo que arriba para competidores.
+    const nuevoId = `comp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const nuevo = {
       id: nuevoId,
       nombre,

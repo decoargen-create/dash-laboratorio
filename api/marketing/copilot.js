@@ -112,7 +112,10 @@ export default async function handler(req, res) {
   try {
     const resp = await client.messages.create({
       model: MODEL,
-      max_tokens: 2048,
+      // Antes 2048 truncaba respuestas como "dame 20 hooks" — Claude
+      // cortaba a mitad de lista. 4096 alcanza para chats normales sin
+      // gastar mucho más (solo se cobra lo que efectivamente sale).
+      max_tokens: 4096,
       // El contexto estable del producto es pesado y no cambia entre turnos
       // → cache_control lo abarata a partir del 2do turno.
       system: [{ type: 'text', text: systemText, cache_control: { type: 'ephemeral' } }],

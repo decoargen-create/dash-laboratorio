@@ -50,11 +50,27 @@ export async function runActorSync(actorId, input, token, opts = {}) {
     maxCharged: maxItems,
   };
 
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(finalInput),
-  });
+  // Timeout absoluto. Apify normalmente responde en 30-180s; si se cuelga
+  // queremos error claro antes del kill de Vercel (300s). El +30s da margen
+  // para que Apify pueda devolver su propio timeout error.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), (timeout * 1000) + 30000);
+  let resp;
+  try {
+    resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(finalInput),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    clearTimeout(timer);
+    if (err.name === 'AbortError') {
+      throw new Error(`[v4-apify-defensive=${maxItems}] Apify hung > ${timeout + 30}s — abortado para no quemar el budget de Vercel.`);
+    }
+    throw err;
+  }
+  clearTimeout(timer);
 
   if (!resp.ok) {
     const text = await resp.text();

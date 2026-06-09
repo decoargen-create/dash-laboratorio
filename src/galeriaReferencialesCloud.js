@@ -20,12 +20,21 @@ const BUCKET = 'creativos';
 // cada save/read/count. Cada cambio de auth invalida el cache via
 // onAuthStateChange. Antes, en bulk de N variantes IDB-fallback se llamaba
 // N veces y cada llamada era ~50-200ms de latencia.
+//
+// EDGE CASE: en SIGNED_OUT explícito reseteamos a null (no false) para que
+// el próximo isCloudReady() vuelva a leer la sesión real. Antes, después
+// de un sign-out el cache quedaba true para todas las in-flight saves
+// hasta que onAuthStateChange disparara — y por timing eso podía hacer
+// que un write intentara cloud cuando ya no había auth.
 let _cloudReadyCache = null;
 if (typeof window !== 'undefined' && supabase) {
-  // Si la sesión cambia (login, logout, refresh), reseteamos el cache.
   try {
     supabase.auth.onAuthStateChange((event, session) => {
-      _cloudReadyCache = !!session?.user;
+      if (event === 'SIGNED_OUT') {
+        _cloudReadyCache = false;
+      } else {
+        _cloudReadyCache = !!session?.user;
+      }
     });
   } catch {}
 }
@@ -171,11 +180,13 @@ export async function countReferencialesByProductoCloud(productoId) {
   const user = await getCurrentUser();
   if (!user) return { total: 0, active: 0, archived: 0, downloaded: 0 };
 
-  // 4 queries paralelas para los conteos. Simple y rápido.
+  // 3 queries paralelas para los conteos. Filtramos por user_id además
+  // de RLS — defense-in-depth contra una eventual misconfig de policy.
+  const pid = String(productoId);
   const [total, archived, downloaded] = await Promise.all([
-    supabase.from('marketing_creativos').select('id', { count: 'exact', head: true }).eq('producto_id', String(productoId)),
-    supabase.from('marketing_creativos').select('id', { count: 'exact', head: true }).eq('producto_id', String(productoId)).eq('archivado', true),
-    supabase.from('marketing_creativos').select('id', { count: 'exact', head: true }).eq('producto_id', String(productoId)).eq('descargada', true),
+    supabase.from('marketing_creativos').select('id', { count: 'exact', head: true }).eq('producto_id', pid).eq('user_id', user.id),
+    supabase.from('marketing_creativos').select('id', { count: 'exact', head: true }).eq('producto_id', pid).eq('user_id', user.id).eq('archivado', true),
+    supabase.from('marketing_creativos').select('id', { count: 'exact', head: true }).eq('producto_id', pid).eq('user_id', user.id).eq('descargada', true),
   ]);
   const t = total.count || 0;
   const a = archived.count || 0;

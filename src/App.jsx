@@ -1458,11 +1458,16 @@ function AppShell({ onExit }) {
   const [cmdOpen, setCmdOpen] = useState(false);
   const [toasts, setToasts] = useState([]);
 
-  const addToast = (toast) => {
+  // useCallback con [] para que sea estable a lo largo de la sesión.
+  // Antes se recreaba en cada render de AppShell — algunos consumers
+  // (CreativeRefreshPanel, Arranque) lo usan en deps de useEffect y eso
+  // causaba add/remove de listeners en cada render, con riesgo de
+  // missed events durante el gap.
+  const addToast = useCallback((toast) => {
     const id = Date.now() + Math.random();
     setToasts(prev => [...prev, { id, ...toast }]);
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), toast.duration || 3500);
-  };
+  }, []);
 
   // Activá el sync de Marketing con Supabase. Pull on mount/login, push
   // debounced en cambios. Si el user NO está logueado, el hook noopea hasta
@@ -1972,7 +1977,14 @@ function AppShell({ onExit }) {
     }
   }, [supabaseUser, currentUser]);
 
-  if (!currentUser) {
+  // Si el user clickeó el link de "Olvidaste tu contraseña" desde el email
+  // mientras YA estaba logueado, el URL hash tiene type=recovery. Sin esto,
+  // como currentUser está seteado, App va directo al workspace y nunca se
+  // muestra el form de reset.
+  const isRecoveryLink = typeof window !== 'undefined' &&
+    (window.location.hash?.includes('type=recovery') || window.location.search?.includes('type=recovery'));
+
+  if (!currentUser || isRecoveryLink) {
     // Sin sesión de Supabase → pantalla de auth Supabase (la única ahora).
     // Renderizamos toasts en paralelo por avisos del bootstrap.
     return (

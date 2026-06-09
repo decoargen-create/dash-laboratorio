@@ -45,26 +45,59 @@ export default async function handler(req, res) {
     return res.end('Host not allowed');
   }
 
+  // Timeout para no quedarnos colgados en el upstream — Vercel mata a 30s
+  // pero queremos error claro antes.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
   try {
     const upstream = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0' },
+      signal: controller.signal,
     });
     if (!upstream.ok) {
       res.statusCode = upstream.status;
       return res.end(`Upstream ${upstream.status}`);
     }
+
+    // Validamos content-type — antes el proxy aceptaba HTML/JS si el upstream
+    // lo servía. Ahora rechazamos cualquier cosa que no sea imagen.
+    const mime = upstream.headers.get('content-type') || '';
+    if (mime && !/^image\//i.test(mime)) {
+      res.statusCode = 415;
+      return res.end(`Upstream content-type not allowed: ${mime}`);
+    }
+
+    // Hard cap de tamaño — sin esto un upstream malicioso podía hacer OOM
+    // de la function. 10MB es generoso para creativos típicos.
+    const MAX_BYTES = 10 * 1024 * 1024;
+    const declaredLen = parseInt(upstream.headers.get('content-length') || '0', 10);
+    if (declaredLen > MAX_BYTES) {
+      res.statusCode = 413;
+      return res.end(`Upstream too large: ${declaredLen} bytes`);
+    }
+
     const ab = await upstream.arrayBuffer();
     const buf = Buffer.from(ab);
+    if (buf.length > MAX_BYTES) {
+      res.statusCode = 413;
+      return res.end(`Upstream too large: ${buf.length} bytes`);
+    }
 
-    const mime = upstream.headers.get('content-type') || 'image/jpeg';
-    res.setHeader('Content-Type', mime);
+    res.setHeader('Content-Type', mime || 'image/jpeg');
     res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.statusCode = 200;
     res.end(buf);
   } catch (err) {
+    if (err.name === 'AbortError') {
+      console.warn('proxy-image timeout:', url);
+      res.statusCode = 504;
+      return res.end('Upstream timeout');
+    }
     console.error('proxy-image error:', err);
     res.statusCode = 502;
     res.end('Upstream error');
+  } finally {
+    clearTimeout(timer);
   }
 }

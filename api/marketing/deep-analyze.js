@@ -69,10 +69,17 @@ function respondJSON(res, status, payload) {
 // Transcribe un video de Meta CDN con Whisper. Los URLs de Meta CDN expiran
 // ~24h después del scrape, así que esto conviene hacerlo ASAP.
 async function transcribeVideo(videoUrl, openaiKey) {
+  // Timeouts para que un video lento o Whisper que se cuelga no devore el
+  // budget de 240s de Vercel — antes podía hacer hang.
+  const VIDEO_TIMEOUT_MS = 60000;
+  const WHISPER_TIMEOUT_MS = 120000;
   // HEAD check — evitamos bajar el video si es > límite de Whisper (25MB).
   let size = 0;
   try {
-    const head = await fetch(videoUrl, { method: 'HEAD' });
+    const headCtl = new AbortController();
+    const headTimer = setTimeout(() => headCtl.abort(), 10000);
+    const head = await fetch(videoUrl, { method: 'HEAD', signal: headCtl.signal });
+    clearTimeout(headTimer);
     size = Number(head.headers.get('content-length') || 0);
   } catch {
     // Si HEAD falla seguimos con GET pero chequeamos en el fetch.
@@ -81,7 +88,19 @@ async function transcribeVideo(videoUrl, openaiKey) {
     return { skipped: true, reason: `Video ${(size / 1024 / 1024).toFixed(1)}MB > ${WHISPER_MAX_MB}MB (límite Whisper)` };
   }
 
-  const videoRes = await fetch(videoUrl);
+  const videoCtl = new AbortController();
+  const videoTimer = setTimeout(() => videoCtl.abort(), VIDEO_TIMEOUT_MS);
+  let videoRes;
+  try {
+    videoRes = await fetch(videoUrl, { signal: videoCtl.signal });
+  } catch (err) {
+    clearTimeout(videoTimer);
+    if (err.name === 'AbortError') {
+      return { skipped: true, reason: `Video timeout (${VIDEO_TIMEOUT_MS / 1000}s)` };
+    }
+    throw err;
+  }
+  clearTimeout(videoTimer);
   if (!videoRes.ok) {
     return { skipped: true, reason: `HTTP ${videoRes.status} bajando video (¿URL expirado?)` };
   }
@@ -97,11 +116,24 @@ async function transcribeVideo(videoUrl, openaiKey) {
   form.append('language', 'es');
   form.append('response_format', 'json');
 
-  const whisperRes = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${openaiKey}` },
-    body: form,
-  });
+  const whisperCtl = new AbortController();
+  const whisperTimer = setTimeout(() => whisperCtl.abort(), WHISPER_TIMEOUT_MS);
+  let whisperRes;
+  try {
+    whisperRes = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${openaiKey}` },
+      body: form,
+      signal: whisperCtl.signal,
+    });
+  } catch (err) {
+    clearTimeout(whisperTimer);
+    if (err.name === 'AbortError') {
+      return { skipped: true, reason: `Whisper timeout (${WHISPER_TIMEOUT_MS / 1000}s)` };
+    }
+    throw err;
+  }
+  clearTimeout(whisperTimer);
 
   if (!whisperRes.ok) {
     const text = await whisperRes.text();

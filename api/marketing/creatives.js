@@ -10,6 +10,7 @@
 //   - 'brief': brief completo en markdown para pasar al diseñador.
 
 import Anthropic from '@anthropic-ai/sdk';
+import { anthropicCost } from './_costs.js';
 
 const MODEL_SONNET = 'claude-sonnet-4-6';
 const MODEL_HAIKU = 'claude-haiku-4-5-20251001';
@@ -170,17 +171,16 @@ Generá el JSON de diagnóstico + ángulos + hooks + observaciones.`;
           rawPreview: text.slice(0, 800),
         });
       }
-      const usage = message.usage || {};
-      const anthropicCostUsd = (
-        (usage.input_tokens || 0) * 0.003 +
-        (usage.cache_read_input_tokens || 0) * 0.0003 +
-        (usage.output_tokens || 0) * 0.015
-      ) / 1000;
+      // Antes: cálculo inline con divisor 1000 (en vez de 1_000_000) y
+      // precios viejos de Sonnet 3.5 → reportaba 1000x el costo real.
+      // Resultado: una call de $0.05 figuraba como $50 en Gastos/History.
+      // Reemplazado por anthropicCost() (helper compartido, único source).
+      const anthropicCostUsd = anthropicCost(message.usage, MODEL_SONNET);
       return respondJSON(res, 200, {
         action,
         generatedAt: new Date().toISOString(),
         ...parsed,
-        cost: { anthropic: Math.round(anthropicCostUsd * 10000) / 10000 },
+        cost: { anthropic: anthropicCostUsd },
       });
     } catch (err) {
       console.error('creatives hooks error:', err);

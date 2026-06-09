@@ -150,15 +150,15 @@ export async function countReferencialesByProducto(productoId) {
   const cloud = await isCloudReady();
   if (cloud) {
     try {
-      const cloudCounts = await countReferencialesByProductoCloud(productoId);
-      // Si cloud tiene items, lo usamos. Si está vacío, intentamos IDB
-      // (puede ser que aún no migramos, o el cloud save falló y vivimos local).
-      if (cloudCounts.total > 0) return cloudCounts;
+      // Cloud es source of truth — si cloud devuelve 0 es 0. Antes el
+      // fallback a IDB hacía que items legacy locales aparezcan después
+      // de un bulk-delete cloud → user pensaba que el delete no funcionó.
+      return await countReferencialesByProductoCloud(productoId);
     } catch (err) {
-      console.warn('[galería] cloud count falló:', err.message);
+      console.warn('[galería] cloud count falló, cae a IDB:', err.message);
     }
   }
-  // Path IDB
+  // Path IDB — solo si cloud no está disponible o falló.
   try {
     const db = await openDB();
     return await new Promise((resolve, reject) => {

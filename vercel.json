@@ -35,7 +35,13 @@
   ],
   "headers": [
     {
-      "source": "/api/(.*)",
+      "source": "/api/marketing/proxy-image",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=86400, immutable" }
+      ]
+    },
+    {
+      "source": "/api/((?!marketing/proxy-image).*)",
       "headers": [
         { "key": "Cache-Control", "value": "no-store, no-cache, must-revalidate" }
       ]

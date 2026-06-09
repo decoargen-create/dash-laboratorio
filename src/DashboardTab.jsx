@@ -93,14 +93,19 @@ export default function DashboardTab({ producto, competidores = [], runHistory =
   const [ideas, setIdeas] = useState(() => loadIdeas());
 
   // Refrescamos la data cada 4s — así el dashboard se actualiza mientras
-  // corre el pipeline sin tener que recargar.
+  // corre el pipeline sin tener que recargar. Antes era polling cada 4s
+  // (re-renders + localStorage reads para siempre). Ahora event-based:
+  // suscribimos a los eventos del sync y reloadeamos solo cuando hay
+  // cambio real.
   useEffect(() => {
-    const tick = () => {
-      setIdeas(loadIdeas());
+    const reload = () => setIdeas(loadIdeas());
+    reload();
+    window.addEventListener('viora:marketing-pulled', reload);
+    window.addEventListener('viora:marketing-storage-changed', reload);
+    return () => {
+      window.removeEventListener('viora:marketing-pulled', reload);
+      window.removeEventListener('viora:marketing-storage-changed', reload);
     };
-    tick();
-    const iv = setInterval(tick, 4000);
-    return () => clearInterval(iv);
   }, []);
 
   const prodId = String(producto?.id || '');
@@ -173,7 +178,7 @@ export default function DashboardTab({ producto, competidores = [], runHistory =
   return (
     <div className="space-y-4">
       {/* KPIs */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
         <KpiCard label="Ideas en Bandeja" value={stats.total} icon={<Inbox size={16} />} accent
           sublabel={`${stats.porEstado.pendiente} sin revisar`} />
         <KpiCard label="Hooks fuertes" value={stats.fuertes} icon={<TrendingUp size={16} />}

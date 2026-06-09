@@ -62,6 +62,20 @@ export default async function handler(req, res) {
     startUrl = fbPageUrl.startsWith('http')
       ? fbPageUrl
       : `https://www.facebook.com/${fbPageUrl.replace(/^\/+/, '')}`;
+    // Validar que sea realmente facebook.com — sin esto, un atacante podría
+    // pasar javascript: o https://evil.com y gastar el actor run de Apify.
+    try {
+      const parsed = new URL(startUrl);
+      if (!['http:', 'https:'].includes(parsed.protocol)) {
+        return respondJSON(res, 400, { error: 'fbPageUrl debe ser http(s)' });
+      }
+      const host = parsed.hostname.toLowerCase();
+      if (!(host === 'facebook.com' || host.endsWith('.facebook.com'))) {
+        return respondJSON(res, 400, { error: `fbPageUrl debe ser facebook.com, no ${host}` });
+      }
+    } catch {
+      return respondJSON(res, 400, { error: 'fbPageUrl no es URL válida' });
+    }
   } else {
     startUrl = buildAdLibraryUrl({ keyword: searchKeyword, country });
   }

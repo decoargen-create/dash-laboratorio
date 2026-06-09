@@ -133,7 +133,10 @@ export default async function handler(req, res) {
       source: 'html',
     });
   } catch (err) {
-    return respondJSON(res, 200, {
+    // Antes devolvíamos 200 con error en body — frontend no podía
+    // distinguir "ok pero sin handle" de "fetch error". Ahora 502 cuando
+    // el fetch upstream falló para que el caller pueda decidir mejor.
+    return respondJSON(res, 502, {
       pageUrl: null,
       handle: null,
       source: null,

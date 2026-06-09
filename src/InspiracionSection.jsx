@@ -1765,6 +1765,15 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
             setBrands(prev => prev.map(x => x.id === brand.id ? { ...x, fbPageUrl: d.pageUrl } : x));
           } else {
             payload.searchKeyword = landingToKeyword(brand.landingUrl);
+            // Avisamos al user que cayó a keyword — es común que el FB page
+            // tenga un nombre distinto al dominio (ej. shopify storefronts).
+            // Sin esto, el scrape puede devolver 0 y el user no entiende.
+            if (d.error) {
+              addToast?.({
+                type: 'info',
+                message: `No pude detectar la FB page de ${brand.nombre}. Buscando por keyword "${payload.searchKeyword}". Si scrape devuelve 0, cargá el FB page URL a mano en Setup.`,
+              });
+            }
           }
         } catch {
           payload.searchKeyword = landingToKeyword(brand.landingUrl);
@@ -1859,8 +1868,17 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
             body: JSON.stringify({ landingUrl: comp.landingUrl }),
           });
           const d = await r.json();
-          if (d.pageUrl) payload.fbPageUrl = d.pageUrl;
-          else payload.searchKeyword = landingToKeyword(comp.landingUrl);
+          if (d.pageUrl) {
+            payload.fbPageUrl = d.pageUrl;
+          } else {
+            payload.searchKeyword = landingToKeyword(comp.landingUrl);
+            if (d.error) {
+              addToast?.({
+                type: 'info',
+                message: `No pude detectar la FB page de ${comp.nombre}. Buscando por keyword "${payload.searchKeyword}". Si devuelve 0, cargá el FB page URL en Setup.`,
+              });
+            }
+          }
         } catch {
           payload.searchKeyword = landingToKeyword(comp.landingUrl);
         }

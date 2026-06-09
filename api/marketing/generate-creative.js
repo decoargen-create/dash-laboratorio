@@ -171,14 +171,29 @@ export default async function handler(req, res) {
 
     // Background save al cloud (Storage + DB) si el user mandó auth válido
     // y el body trae productoId. Eso permite cerrar la pestaña sin perder.
+    // Logging defensivo (igual que crear-creativo-referencial.js) para que
+    // se sepa por qué se skippea cuando no aplica.
     let cloudCreativo = null;
     let cloudSaveError = null;
     const productoId = body?.productoId || body?.producto?.id || null;
     try {
       const userId = await getUserIdFromAuth(req);
+      const hasAuthHeader = !!(req.headers?.authorization || req.headers?.Authorization);
+      const hasSupabaseEnv = !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY);
+      console.info('[cloud save bandeja] pre-check', {
+        hasAuthHeader, hasSupabaseEnv,
+        userId: userId ? `${String(userId).slice(0, 8)}...` : null,
+        productoId,
+      });
+      if (!hasSupabaseEnv) cloudSaveError = 'SUPABASE_URL/SUPABASE_SERVICE_KEY no seteadas en el server';
+      else if (!hasAuthHeader) cloudSaveError = 'Sin Authorization header — frontend no mandó JWT';
+      else if (!userId) cloudSaveError = 'JWT inválido o expirado';
+      else if (!productoId) cloudSaveError = 'producto.id ausente en el body';
       if (userId && productoId) {
         const ts = Date.now();
-        const refId = `from-bandeja-${idea.id || ts}-${ts}`;
+        // Suffix random para evitar colisión (mismo patrón que sus
+        // sibling endpoints crear-imagen-desde-idea + crear-creativo-referencial).
+        const refId = `from-bandeja-${idea.id || ts}-${ts}-${Math.random().toString(36).slice(2, 8)}`;
         const { storagePath, imageUrl } = await uploadCreativoToBucket(userId, refId, result.imageBase64);
         const row = await insertCreativoRow({
           id: refId,

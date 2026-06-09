@@ -775,7 +775,19 @@ export default function MarketingSection({ addToast, bgAnalysis, onStart, onCanc
 
   const readerRef = useRef(null);
 
-  useEffect(() => { saveProductos(productos); }, [productos]);
+  // Skip primer render — al montar, `productos` se inicializa desde
+  // localStorage. Disparar saveProductos en ese momento escribe lo mismo
+  // que ya estaba, pero genera un dispatch innecesario que activa el
+  // listener de Arranque/InspiracionSection. Antes pisaba productos de
+  // otras pantallas con la versión que Marketing acababa de cargar al montar.
+  const marketingMountedRef = useRef(false);
+  useEffect(() => {
+    if (!marketingMountedRef.current) {
+      marketingMountedRef.current = true;
+      return;
+    }
+    saveProductos(productos);
+  }, [productos]);
 
   // Re-sync productos cuando otra parte del código modifica localStorage
   // (Arranque, InspiracionSection, useMarketingSync pull, otra tab).

@@ -20,11 +20,12 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Package, Target, Play, Check, Loader2, AlertTriangle, ChevronRight, ChevronDown,
-  Plus, X, Sparkles, Link2, Search, Clock, Inbox, Trash2,
+  Plus, X, Sparkles, Link2, Search, Clock, Inbox, Trash2, Upload, Download,
 } from 'lucide-react';
 import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGeneradorHoy, updateIdea, formatoDeAd } from './bandejaStore.js';
 import { deleteProducto as deleteProductoFromCloud } from './marketingSync.js';
 import { supabase } from './supabase.js';
+import { downloadProductoExport, importProductoFromFile } from './productoExport.js';
 import { logCostsFromResponse } from './costsStore.js';
 import BandejaSection from './Bandeja.jsx';
 import InspiracionSection from './InspiracionSection.jsx';
@@ -842,6 +843,9 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // sí leemos el valor actual en cada chequeo.
   const cancelledRef = useRef(false);
   useEffect(() => { cancelledRef.current = pipelineRun.cancelRequested; }, [pipelineRun.cancelRequested]);
+  // Ref al <input type=file> oculto para que el botón "Importar" pueda
+  // triggerar el file picker via click().
+  const importFileInputRef = useRef(null);
   const setCancelled = (v) => { if (v) pipelineRun.requestCancel(); };
   // Historial de corridas — persistido. Al completar un run, pusheamos un
   // resumen (productoId, timestamps, steps, stats, costo). Luego se muestra
@@ -2154,10 +2158,42 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               <p className="text-xs text-gray-500 dark:text-gray-400">Cada producto tiene su propia competencia, research y bandeja de ideas.</p>
             </div>
           </div>
-          <button onClick={() => setShowProdForm(true)}
-            className="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-bold text-white bg-gradient-to-br from-brand-500 to-brand-700 rounded-lg hover:from-brand-600 hover:to-brand-800 shadow-sm transition">
-            <Plus size={16} /> Nuevo producto
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Import file input — hidden, triggered by button */}
+            <input
+              type="file"
+              ref={importFileInputRef}
+              accept="application/json,.json"
+              className="hidden"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                e.target.value = ''; // reset para permitir re-importar el mismo archivo
+                if (!file) return;
+                try {
+                  const result = await importProductoFromFile(file);
+                  setProductos(loadJSON(PRODUCTOS_KEY, []));
+                  addToast?.({
+                    type: 'success',
+                    message: `Importado "${result.producto.nombre}" — ${result.stats.brandsCount} brands · ${result.stats.ideasCount} ideas`,
+                  });
+                  if (result.warning) {
+                    addToast?.({ type: 'info', message: result.warning });
+                  }
+                } catch (err) {
+                  addToast?.({ type: 'error', message: `Import falló: ${err.message}` });
+                }
+              }}
+            />
+            <button onClick={() => importFileInputRef.current?.click()}
+              className="inline-flex items-center gap-1.5 px-3 py-2.5 text-sm font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-gray-800 border border-brand-300 dark:border-brand-700 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/20 transition"
+              title="Importar producto desde JSON exportado">
+              <Upload size={16} /> Importar
+            </button>
+            <button onClick={() => setShowProdForm(true)}
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-bold text-white bg-gradient-to-br from-brand-500 to-brand-700 rounded-lg hover:from-brand-600 hover:to-brand-800 shadow-sm transition">
+              <Plus size={16} /> Nuevo producto
+            </button>
+          </div>
         </div>
 
         {/* Form de nuevo producto */}
@@ -2272,6 +2308,21 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                         <span className="text-brand-600 dark:text-brand-400 font-mono">· 💰 ${costoTotal.toFixed(4)} acumulado</span>
                       )}
                     </div>
+                  </button>
+                  <button
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      try {
+                        await downloadProductoExport(p.id);
+                        addToast?.({ type: 'success', message: `Producto "${p.nombre}" exportado.` });
+                      } catch (err) {
+                        addToast?.({ type: 'error', message: `No pude exportar: ${err.message}` });
+                      }
+                    }}
+                    className="p-2.5 rounded-lg text-gray-300 hover:text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition shrink-0"
+                    title="Exportar producto (JSON backup)"
+                  >
+                    <Download size={16} />
                   </button>
                   <button
                     onClick={async (e) => {

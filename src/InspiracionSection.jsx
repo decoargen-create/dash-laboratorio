@@ -1011,7 +1011,13 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   const [brands, setBrands] = useState(() => loadBrands(activeProductoId));
   const [showAddForm, setShowAddForm] = useState(false);
   const [draft, setDraft] = useState({ nombre: '', landingUrl: '', fbPageUrl: '', notas: '' });
-  const [scrapingBrandId, setScrapingBrandId] = useState(null);
+  // Set de IDs scrapeando en paralelo. Antes era un único string — al
+  // arrancar un 2do scrape se pisaba el 1ro y la card #1 perdía su
+  // "Scrapeando..." aunque seguía corriendo. Bug visible cuando el user
+  // disparaba varios scrapes seguidos.
+  const [scrapingBrandIds, setScrapingBrandIds] = useState(() => new Set());
+  const addScraping = (id) => setScrapingBrandIds(prev => { const n = new Set(prev); n.add(id); return n; });
+  const removeScraping = (id) => setScrapingBrandIds(prev => { const n = new Set(prev); n.delete(id); return n; });
   // brand.id → array de ads scrapeados de la última corrida (mostrados inline).
   const [adsByBrand, setAdsByBrand] = useState({});
   // ad.id → bool, true mientras se adapta al producto (loading).
@@ -1717,7 +1723,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   // Scrapea ads activos de una marca via Apify. Si tiene fbPageUrl, prefiere
   // eso (más estable). Sino, deriva keyword del landingUrl.
   const handleScrapeBrand = async (brand) => {
-    setScrapingBrandId(brand.id);
+    addScraping(brand.id);
     const execId = startExecution({
       label: `Scrapeando ads de ${brand.nombre}`,
       sublabel: 'Meta Ads Library vía Apify',
@@ -1801,7 +1807,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       addToast?.({ type: 'error', message: `No pude scrapear ${brand.nombre}: ${err.message}` });
       finishExecution(execId, { ok: false, message: err.message || 'Error' });
     } finally {
-      setScrapingBrandId(null);
+      removeScraping(brand.id);
     }
   };
 
@@ -1809,10 +1815,10 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   // Reusa apify-ingest pero el resultado lo escribimos en el producto, no en
   // `brands`. Después triggereamos refresh de productos.
   const handleScrapeCompetidor = async (brand) => {
-    setScrapingBrandId(brand.id);
+    addScraping(brand.id);
     const comp = brand.__sourceComp;
     if (!comp || !producto) {
-      setScrapingBrandId(null);
+      removeScraping(brand.id);
       return;
     }
     const execId = startExecution({
@@ -1897,7 +1903,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       addToast?.({ type: 'error', message: `No pude scrapear ${brand.nombre}: ${err.message}` });
       finishExecution(execId, { ok: false, message: err.message || 'Error' });
     } finally {
-      setScrapingBrandId(null);
+      removeScraping(brand.id);
     }
   };
 
@@ -2371,6 +2377,38 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                   </div>
                 )}
               </div>
+              {/* Scrape todas — dispara handleScrapeCompetidor o handleScrapeBrand
+                  en paralelo para cada marca del listado filtrado. El UI
+                  loading state está soportado (Set<id>) y el server-side de
+                  Apify maneja rate-limit con backoff. Útil para refresh
+                  rápido de todo el feed cuando hay novedad. */}
+              <button
+                disabled={scrapingBrandIds.size > 0 || unif.length === 0}
+                onClick={() => {
+                  // Disparo en paralelo (no await) — cada uno se setea
+                  // como scrapeando individualmente y termina cuando
+                  // termina. Si Apify rate-limita, los retries internos
+                  // de cada llamada lo manejan.
+                  let count = 0;
+                  for (const b of unif) {
+                    if (!b.fbPageUrl && !b.landingUrl && !isKeywordUsable(b.nombre)) continue;
+                    if (b.isCompetidor) handleScrapeCompetidor(b);
+                    else handleScrapeBrand(b);
+                    count++;
+                  }
+                  if (count === 0) {
+                    addToast?.({ type: 'error', message: 'Ninguna marca del listado tiene fbPage/landing/keyword utilizable.' });
+                  } else {
+                    addToast?.({ type: 'info', message: `Scrape de ${count} marcas en paralelo. Apify reintenta si hay rate limit.` });
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-purple-500 to-pink-500 rounded hover:from-purple-600 hover:to-pink-600 shadow-sm transition disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Re-scrapea todas las marcas del listado en paralelo. Útil para ver si hay ads nuevos hoy."
+              >
+                {scrapingBrandIds.size > 0
+                  ? <><Loader2 size={11} className="animate-spin" /> Scrapeando {scrapingBrandIds.size}…</>
+                  : <><Download size={11} /> Scrape todas ({unif.length})</>}
+              </button>
               {/* Para agregar una marca nueva el flujo va por Competencia
                   (single source of truth). Las marcas que aparecen acá son
                   derivadas de producto.competidores via el useEffect de sync. */}
@@ -2408,7 +2446,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                     key={b.id}
                     brand={b}
                     ads={b.__ads}
-                    isScraping={scrapingBrandId === b.id}
+                    isScraping={scrapingBrandIds.has(b.id)}
                     adaptingAdIds={adaptingAdIds}
                     creandoAdIds={creandoAdIds}
                     seleccionados={seleccionados}

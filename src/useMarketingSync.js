@@ -46,13 +46,32 @@ export function useMarketingSync({ addToast } = {}) {
   // de mount aún está corriendo) podríamos lanzar 2 pulls concurrentes que
   // pisan localStorage entre sí. Este ref bloquea pulls superpuestos.
   const pullingRef = useRef(false);
+  // Set de keys con push pendiente (debounced o en curso). El runPull
+  // verifica esto: si hay pushes en flight, defer el pull hasta que
+  // terminen. Sin esto, race scenario:
+  //   1) user scrapea → localStorage actualizado, push queued 2s
+  //   2) token refresh dispara onAuthChange → runPull arranca antes del push
+  //   3) runPull lee cloud (datos viejos) y pisa localStorage → scrape perdido
+  const pendingPushKeysRef = useRef(new Set());
+  // Cuando un pull se difiere por pushes pendientes, lo marcamos para
+  // ejecutar después del último push.
+  const deferredPullRef = useRef(false);
+  const mountedRefShared = useRef({ current: true });
 
-  // Helper: corre migrate + pull con mutex. Si ya hay otro pull en
-  // progreso, no-op (evita dual-pull racing por StrictMode dev o
-  // onAuthChange disparando mientras la IIFE mount está corriendo).
+  // Helper: corre migrate + pull con mutex + deferral si hay pushes pendientes.
   const runPull = async (mountedRef) => {
     if (pullingRef.current) {
       console.info('[sync] pull ya en curso — skip duplicado');
+      return;
+    }
+    if (pendingPushKeysRef.current.size > 0) {
+      // Hay scrape/edit pendiente de pushear → si pulleamos ahora pisamos
+      // el state local con la versión cloud (que aún no tiene los cambios
+      // locales). Diferimos: cuando el último push termine, dispara este
+      // pull. Garantiza orden: push primero, después pull.
+      console.info(`[sync] pull deferred — pushes pendientes: ${[...pendingPushKeysRef.current].join(', ')}`);
+      deferredPullRef.current = true;
+      mountedRefShared.current = mountedRef || mountedRefShared.current;
       return;
     }
     pullingRef.current = true;
@@ -94,7 +113,11 @@ export function useMarketingSync({ addToast } = {}) {
 
   // 1. Detect login → pull + soft migration.
   useEffect(() => {
+    // Compartimos este mountedRef con el otro useEffect via mountedRefShared
+    // para que un push completado pueda disparar el pull diferido con
+    // el estado de mount correcto.
     const mountedRef = { current: true };
+    mountedRefShared.current = mountedRef;
     (async () => {
       const u = await getCurrentUser();
       if (mountedRef.current) setUser(u);
@@ -120,6 +143,10 @@ export function useMarketingSync({ addToast } = {}) {
     if (!user) return;
 
     const queuePush = (key) => {
+      // Marcar push pendiente — bloquea pulls hasta que termine. Sin esto,
+      // un pull lanzado por token-refresh entre scrape y push pisaba el
+      // localStorage local con la versión cloud vieja.
+      pendingPushKeysRef.current.add(key);
       const existing = debounceTimers.current.get(key);
       if (existing) clearTimeout(existing);
       const id = setTimeout(async () => {
@@ -178,6 +205,17 @@ export function useMarketingSync({ addToast } = {}) {
         console.warn('[sync] push error (tras retries):', err.message);
         setStatus('error'); setLastError(err.message);
         addToast?.({ type: 'error', message: `No pude guardar en el cloud (3 intentos): ${err.message}. Tus cambios quedan en local — recargá para reintentar.` });
+      } finally {
+        // Liberamos el lock del pull deferido sin importar éxito/error.
+        // Si error, los datos quedan en local de todos modos; un pull
+        // posterior los pisaría con cloud-viejo igual, así que mejor dejar
+        // que el pull diferido corra y sincronice cloud → local.
+        pendingPushKeysRef.current.delete(key);
+        if (pendingPushKeysRef.current.size === 0 && deferredPullRef.current) {
+          deferredPullRef.current = false;
+          console.info('[sync] disparando pull diferido — pushes completados');
+          runPull(mountedRefShared.current);
+        }
       }
     };
 

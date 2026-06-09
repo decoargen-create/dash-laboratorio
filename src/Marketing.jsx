@@ -10,6 +10,7 @@
 // Próxima iteración: generador de Meta Ads Creatives (hooks + prompts IA + brief .docx).
 
 import React, { useEffect, useState, useRef } from 'react';
+import { deleteProducto as deleteProductoFromCloud } from './marketingSync.js';
 import {
   FileText, Sparkles, Download, Loader2, Check, AlertTriangle, X,
   RefreshCw, Trash2, ChevronRight, Copy, Package, Plus, MessageSquare,
@@ -968,8 +969,14 @@ export default function MarketingSection({ addToast, bgAnalysis, onStart, onCanc
     }
   };
 
-  const handleDeleteProducto = (id) => {
+  const handleDeleteProducto = async (id) => {
     if (!window.confirm('¿Borrar esta documentación? No se puede deshacer.')) return;
+    try {
+      await deleteProductoFromCloud(id);
+    } catch (err) {
+      addToast?.({ type: 'error', message: `No pude borrar del cloud: ${err.message}` });
+      return;
+    }
     setProductos(prev => prev.filter(p => p.id !== id));
     if (activeProductId === id) setActiveProductId(null);
   };

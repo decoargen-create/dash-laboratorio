@@ -23,6 +23,7 @@ import {
   Plus, X, Sparkles, Link2, Search, Clock, Inbox, Trash2,
 } from 'lucide-react';
 import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGeneradorHoy, updateIdea, formatoDeAd } from './bandejaStore.js';
+import { deleteProducto as deleteProductoFromCloud } from './marketingSync.js';
 import { logCostsFromResponse } from './costsStore.js';
 import BandejaSection from './Bandeja.jsx';
 import InspiracionSection from './InspiracionSection.jsx';
@@ -668,6 +669,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     try {
       if (activeProductoId) localStorage.setItem('adslab-marketing-active-product', activeProductoId);
       else localStorage.removeItem('adslab-marketing-active-product');
+      // Notificar al hook de sync — sin esto el cambio queda solo local
+      // (el evento 'storage' nativo no se dispara en la misma tab que escribe).
+      window.dispatchEvent(new CustomEvent('viora:marketing-storage-changed', {
+        detail: { key: 'adslab-marketing-active-product' },
+      }));
     } catch {}
   }, [activeProductoId]);
 
@@ -2271,12 +2277,20 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                     </div>
                   </button>
                   <button
-                    onClick={(e) => {
+                    onClick={async (e) => {
                       e.stopPropagation();
-                      if (window.confirm(`¿Eliminar "${p.nombre}"? Se borran sus competidores, cuenta Meta y research. No se pueden recuperar.`)) {
-                        setProductos(prev => prev.filter(x => String(x.id) !== String(p.id)));
-                        if (String(p.id) === String(activeProductoId)) setActiveProductoId(null);
+                      if (!window.confirm(`¿Eliminar "${p.nombre}"? Se borran sus competidores, cuenta Meta y research. No se pueden recuperar.`)) return;
+                      // BORRAR DEL CLOUD PRIMERO — si falla, abortar el delete
+                      // local. Sin esto, el producto quedaba huérfano en
+                      // Supabase y aparecía "fantasma" en otra PC.
+                      try {
+                        await deleteProductoFromCloud(p.id);
+                      } catch (err) {
+                        addToast?.({ type: 'error', message: `No pude borrar del cloud: ${err.message}. Intentá de nuevo.` });
+                        return;
                       }
+                      setProductos(prev => prev.filter(x => String(x.id) !== String(p.id)));
+                      if (String(p.id) === String(activeProductoId)) setActiveProductoId(null);
                     }}
                     className="p-2.5 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition shrink-0"
                     title="Eliminar producto"

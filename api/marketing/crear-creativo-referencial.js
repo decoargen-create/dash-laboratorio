@@ -1138,6 +1138,31 @@ export default async function handler(req, res) {
     try {
       const userId = await getUserIdFromAuth(req);
       const productoId = producto?.id != null ? String(producto.id) : null;
+      // Logging defensivo — si el background save no anda, los logs de Vercel
+      // tienen que decir por qué. Antes esto era un silent skip y no
+      // sabíamos si era auth, productoId, o env vars faltando.
+      const hasAuthHeader = !!(req.headers?.authorization || req.headers?.Authorization);
+      const hasSupabaseEnv = !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY);
+      console.info('[cloud save] pre-check', {
+        hasAuthHeader,
+        hasSupabaseEnv,
+        userId: userId ? `${String(userId).slice(0, 8)}...` : null,
+        productoId,
+        imagenesCount: imagenes.length,
+      });
+      if (!hasSupabaseEnv) {
+        cloudSaveError = 'SUPABASE_URL o SUPABASE_SERVICE_KEY no están seteadas en Vercel — el background save no puede correr.';
+        console.warn('[cloud save]', cloudSaveError);
+      } else if (!hasAuthHeader) {
+        cloudSaveError = 'Sin Authorization header — el frontend no mandó el JWT del user. Background save skipped.';
+        console.warn('[cloud save]', cloudSaveError);
+      } else if (!userId) {
+        cloudSaveError = 'Authorization header presente pero el JWT no validó — token expirado o inválido.';
+        console.warn('[cloud save]', cloudSaveError);
+      } else if (!productoId) {
+        cloudSaveError = 'producto.id ausente — no podemos asociar el creativo a un producto.';
+        console.warn('[cloud save]', cloudSaveError);
+      }
       if (userId && productoId) {
         const ts = Date.now();
         const sourceAdId = inspiracion?.adId || inspiracion?.id || `unknown-${ts}`;
@@ -1153,6 +1178,7 @@ export default async function handler(req, res) {
             || (typeof __legacyPromptRef !== 'undefined' ? __legacyPromptRef : null);
           try {
             const { storagePath, imageUrl } = await uploadCreativoToBucket(userId, refId, b64);
+            console.info(`[cloud save] imagen ${i + 1}/${imagenes.length} subida → ${storagePath}`);
             const row = await insertCreativoRow({
               id: refId,
               user_id: userId,
@@ -1181,8 +1207,15 @@ export default async function handler(req, res) {
             return null;
           }
         }));
+        const totalRequested = imagenes.length;
         cloudCreativos = cloudCreativos.filter(Boolean);
-        if (cloudCreativos.length === 0) cloudCreativos = null;
+        console.info(`[cloud save] resultado: ${cloudCreativos.length}/${totalRequested} subidas al cloud`);
+        if (cloudCreativos.length === 0) {
+          cloudCreativos = null;
+          cloudSaveError = cloudSaveError || `Todas las ${totalRequested} subidas al cloud fallaron (ver logs anteriores)`;
+        } else if (cloudCreativos.length < totalRequested) {
+          cloudSaveError = `Solo ${cloudCreativos.length}/${totalRequested} subidas al cloud OK — el resto fallaron`;
+        }
       }
     } catch (err) {
       console.warn('[cloud save] error general:', err.message);

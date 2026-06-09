@@ -42,7 +42,11 @@ async function uploadImageToBucket(userId, refId, imageBase64, mimeType) {
       upsert: true, // si re-subimos con el mismo id, sobreescribir
     });
   if (error) throw new Error(`Upload a Storage falló: ${error.message}`);
-  const { data: { publicUrl } } = supabase.storage.from(BUCKET).getPublicUrl(path);
+  const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(path);
+  const publicUrl = pub?.publicUrl;
+  if (!publicUrl) {
+    throw new Error(`getPublicUrl devolvió vacío para ${path} — bucket no está marcado público?`);
+  }
   return { storagePath: path, imageUrl: publicUrl };
 }
 
@@ -216,19 +220,29 @@ export async function archiveReferencialCloud(id, archived = true) {
 }
 
 // Borrar: limpia tanto el row de la tabla como el archivo del Storage.
+// Defensive: filtramos por user_id en cada query además de RLS, para que un
+// id de otro usuario nunca pueda borrar nada accidentalmente.
 export async function deleteReferencialCloud(id) {
   if (!supabase || !id) return false;
   const user = await getCurrentUser();
   if (!user) return false;
 
-  // Primero buscar el storage_path antes de borrar el row.
+  // Primero buscar el storage_path antes de borrar el row. Filtramos por
+  // user_id explícitamente — sin esto un .eq('id', X) podría matchear un row
+  // de otro user si RLS estuviera mal configurada (defense-in-depth).
   const { data: row } = await supabase
     .from('marketing_creativos')
-    .select('storage_path')
+    .select('storage_path, user_id')
     .eq('id', String(id))
+    .eq('user_id', user.id)
     .maybeSingle();
 
-  if (row?.storage_path) {
+  if (!row) {
+    // No existe o no es del user actual — no borrar nada.
+    return false;
+  }
+
+  if (row.storage_path) {
     try {
       await supabase.storage.from(BUCKET).remove([row.storage_path]);
     } catch (err) {
@@ -239,6 +253,7 @@ export async function deleteReferencialCloud(id) {
   const { error } = await supabase
     .from('marketing_creativos')
     .delete()
-    .eq('id', String(id));
+    .eq('id', String(id))
+    .eq('user_id', user.id);
   return !error;
 }

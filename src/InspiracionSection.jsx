@@ -1421,6 +1421,16 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         try { window.dispatchEvent(new CustomEvent('viora:referencial-saved', { detail: { productoId: String(producto.id), cloud: true } })); } catch {}
         return;
       }
+      // El backend nos dice por qué no pudo guardar al cloud — mostrar al
+      // user para que sepa que si cierra la pestaña, pierde el creativo.
+      // (cloudSaveError viene del endpoint con detalle: auth, env, productoId).
+      if (data.cloudSaveError) {
+        console.warn('[crear-creativo-referencial] cloudSaveError:', data.cloudSaveError);
+        addToast?.({
+          type: 'warning',
+          message: `Cloud save no funcionó (${data.cloudSaveError}). Guardando local — NO cierres la pestaña.`,
+        });
+      }
       // Fallback: backend NO guardó al cloud (sin auth o sin Storage). Save
       // local como antes.
       const variantStyle = data.variantStyles?.[0] || 'strategist';

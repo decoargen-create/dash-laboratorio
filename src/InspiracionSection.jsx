@@ -2377,6 +2377,38 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                   </div>
                 )}
               </div>
+              {/* Scrape todas — dispara handleScrapeCompetidor o handleScrapeBrand
+                  en paralelo para cada marca del listado filtrado. El UI
+                  loading state está soportado (Set<id>) y el server-side de
+                  Apify maneja rate-limit con backoff. Útil para refresh
+                  rápido de todo el feed cuando hay novedad. */}
+              <button
+                disabled={scrapingBrandIds.size > 0 || unif.length === 0}
+                onClick={() => {
+                  // Disparo en paralelo (no await) — cada uno se setea
+                  // como scrapeando individualmente y termina cuando
+                  // termina. Si Apify rate-limita, los retries internos
+                  // de cada llamada lo manejan.
+                  let count = 0;
+                  for (const b of unif) {
+                    if (!b.fbPageUrl && !b.landingUrl && !isKeywordUsable(b.nombre)) continue;
+                    if (b.isCompetidor) handleScrapeCompetidor(b);
+                    else handleScrapeBrand(b);
+                    count++;
+                  }
+                  if (count === 0) {
+                    addToast?.({ type: 'error', message: 'Ninguna marca del listado tiene fbPage/landing/keyword utilizable.' });
+                  } else {
+                    addToast?.({ type: 'info', message: `Scrape de ${count} marcas en paralelo. Apify reintenta si hay rate limit.` });
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-purple-500 to-pink-500 rounded hover:from-purple-600 hover:to-pink-600 shadow-sm transition disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Re-scrapea todas las marcas del listado en paralelo. Útil para ver si hay ads nuevos hoy."
+              >
+                {scrapingBrandIds.size > 0
+                  ? <><Loader2 size={11} className="animate-spin" /> Scrapeando {scrapingBrandIds.size}…</>
+                  : <><Download size={11} /> Scrape todas ({unif.length})</>}
+              </button>
               {/* Para agregar una marca nueva el flujo va por Competencia
                   (single source of truth). Las marcas que aparecen acá son
                   derivadas de producto.competidores via el useEffect de sync. */}

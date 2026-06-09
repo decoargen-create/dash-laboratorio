@@ -624,7 +624,10 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     return prods;
   });
 
-  // Re-leer productos del localStorage cuando termina el pull del cloud.
+  // Re-leer productos del localStorage cuando termina el pull del cloud,
+  // cuando otra parte del código actualiza localStorage (eventos
+  // viora:marketing-storage-changed dispatcheados por InspiracionSection
+  // tras scrapear, etc), o ante storage events de otras tabs.
   // Sin esto, si el user entra con localStorage vacío en la URL nueva,
   // el pull baja los productos a localStorage pero Arranque queda con
   // su state inicial = [] → user ve "Sin productos" hasta que refresca.
@@ -633,23 +636,29 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       try {
         const fresh = loadJSON(PRODUCTOS_KEY, []);
         if (Array.isArray(fresh)) {
-          // Solo cambiamos si la lista del localStorage difiere del state.
-          // Comparamos por largo + ids para evitar re-renders innecesarios.
+          // Comparación PROFUNDA por JSON.stringify. Antes comparábamos solo
+          // length + ids — eso preservaba el `prev` stale cuando otro
+          // componente (InspiracionSection.handleScrapeCompetidor) actualizaba
+          // lastAdsCheck DENTRO de p.competidores: misma cantidad, mismos
+          // ids, pero datos profundos cambiados. Resultado: scrape "perdido"
+          // al re-pisar localStorage con el state stale al próximo render.
           setProductos(prev => {
-            if (prev.length !== fresh.length) return fresh;
-            const prevIds = prev.map(p => String(p.id)).sort().join(',');
-            const freshIds = fresh.map(p => String(p.id)).sort().join(',');
-            return prevIds === freshIds ? prev : fresh;
+            const prevStr = JSON.stringify(prev);
+            const freshStr = JSON.stringify(fresh);
+            return prevStr === freshStr ? prev : fresh;
           });
         }
       } catch {}
     };
-    // Triple cobertura para no perder el pull:
-    // 1. Evento explícito de marketingSync cuando termina pullMarketingFromCloud
-    // 2. Storage event nativo (cuando otra tab cambia localStorage)
-    // 3. Polling cada 3s durante los primeros 15s tras mount (defensivo si
-    //    el evento se pierde por race de mount/unmount)
+    // Cobertura:
+    // 1. viora:marketing-pulled — pullMarketingFromCloud terminó
+    // 2. viora:marketing-storage-changed — otro componente escribió
+    //    localStorage en la misma tab (no dispara 'storage' nativo)
+    // 3. storage — otra tab modificó localStorage
+    // 4. Polling cada 3s durante los primeros 15s (defensivo, antes de
+    //    los eventos custom existiera; queda como red de seguridad)
     window.addEventListener('viora:marketing-pulled', reload);
+    window.addEventListener('viora:marketing-storage-changed', reload);
     const onStorage = (e) => {
       if (!e.key || e.key === PRODUCTOS_KEY) reload();
     };
@@ -662,6 +671,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     }, 3000);
     return () => {
       window.removeEventListener('viora:marketing-pulled', reload);
+      window.removeEventListener('viora:marketing-storage-changed', reload);
       window.removeEventListener('storage', onStorage);
       clearInterval(pollId);
     };

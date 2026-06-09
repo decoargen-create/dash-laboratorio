@@ -23,14 +23,12 @@ import {
 } from './bandejaStore.js';
 import { exportBriefDocx } from './exportDocx.js';
 import { logCostsFromResponse } from './costsStore.js';
-import CreativoPanel from './CreativoPanel.jsx';
 import { getProductoImagen, getAccentColor } from './productoImagen.js';
 import { saveReferencial } from './galeriaReferenciales.js';
 import { supabase } from './supabase.js';
 import { bulkGenerateFromIdeas } from './bandejaBulkGenerate.js';
 import { parseJsonOrThrow } from './apiHelpers.js';
 import { deleteCreativo } from './creativosStorage.js';
-import { enqueueGenerate as enqueueGenerarCreativo } from './creativoGeneratorStore.js';
 import { startExecution, updateExecution, finishExecution } from './executionsStore.js';
 
 const PRODUCTOS_KEY = 'adslab-marketing-productos-v1';

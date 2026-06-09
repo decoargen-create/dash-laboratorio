@@ -38,6 +38,9 @@ export function useMarketingSync({ addToast } = {}) {
   const [status, setStatus] = useState('idle'); // 'idle' | 'pulling' | 'pushing' | 'error' | 'ok'
   const [lastError, setLastError] = useState(null);
   const debounceTimers = useRef(new Map());
+  // Counter de retries por key para deferred pushes (cuando pull aún no
+  // completó). Sin esto, una pull que nunca termina causa loop infinito.
+  const deferRetryRef = useRef(new Map());
   // Guard: solo permitimos PUSH después de que termine el primer pull.
   // Sin esto, el render inicial dispara saveJSON([]) → push de localStorage
   // vacío → pushAllProductos([]) → ANTES borraba todo el cloud.
@@ -183,15 +186,25 @@ export function useMarketingSync({ addToast } = {}) {
       // reflejar lo que hay en el cloud. Pushear ahora puede borrar datos
       // (race condition que afectó al user el 2026-06-08).
       // Antes: skipeábamos silenciosamente → edits hechos durante el pull
-      // se perdían. Ahora: re-encolamos el push para después del pull.
+      // se perdían. Ahora: re-encolamos el push para después del pull, con
+      // máx 30 intentos (~15s de espera) por si el pull nunca termina —
+      // evita loop infinito.
       if (!pullCompletedRef.current) {
-        console.warn(`[sync] push de ${key} diferido — pull aún no completó`);
-        // Re-queue con un timeout corto. Si el pull aún no terminó al
-        // dispararse, vuelve a re-encolar. Cuando pull termine, queuePush
-        // del próximo tick va a poder ejecutarse.
+        const retryAttempts = (deferRetryRef.current.get(key) || 0) + 1;
+        if (retryAttempts > 30) {
+          console.warn(`[sync] push de ${key} dropeado — pull no terminó tras 30 reintentos`);
+          deferRetryRef.current.delete(key);
+          return;
+        }
+        deferRetryRef.current.set(key, retryAttempts);
+        console.warn(`[sync] push de ${key} diferido (${retryAttempts}/30) — pull aún no completó`);
         setTimeout(() => queuePush(key), 500);
         return;
       }
+      // Push se va a ejecutar — reseteamos el counter de deferred retries
+      // para esta key. Si más tarde otro pull se está corriendo y push
+      // necesita diferirse de nuevo, vuelve a empezar de 0.
+      deferRetryRef.current.delete(key);
       try {
         setStatus('pushing');
         if (key === KEYS.productos) {

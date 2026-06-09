@@ -1513,7 +1513,10 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       const stepId = `scrape-${c.id}`;
       updateStep(stepId, { status: 'running', startedAt: Date.now() });
       try {
-        const payload = { country: 'ALL', limit: 200 };
+        // Setup inicial scrape — limit alto para barrer todo lo que tiene
+        // el competidor en la biblioteca por primera vez. Refreshes
+        // posteriores usan 100 (en InspiracionSection).
+        const payload = { country: 'ALL', limit: 500 };
         // Fallback auto-resolver: si no tenemos fbPageUrl pero sí landing,
         // intentamos detectar la FB page antes de caer a keyword. Scrapear
         // por Page es mucho más estable que por keyword (keyword a veces

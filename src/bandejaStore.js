@@ -17,17 +17,124 @@
 //       'diferenciacion' (azul, nadie lo hace) | 'desde_cero' (generado)
 // estado: 'pendiente' | 'en_uso' | 'usada' | 'archivada'
 
-const STORAGE_KEY = 'adslab-marketing-bandeja-v1';
+// Store de la Bandeja de ideas.
+//
+// CLOUD SYNC: Las ideas viven dentro de cada producto en
+// `producto.data.bandejaIdeas[]`. Esto las hace sincronizables gratis vía
+// el push de productos existente (no requiere tabla nueva ni migración).
+//
+// loadIdeas() lee de todos los productos y concatena.
+// saveIdeas([all_ideas]) re-particiona por productoId y escribe en cada
+// producto su subset. Las ideas SIN productoId (raras, casos legacy) se
+// guardan en una key global de fallback.
+//
+// COMPAT: si encuentra una array legacy en la key vieja, la migra a
+// productos al primer load.
 
-export function loadIdeas() {
+const STORAGE_KEY = 'adslab-marketing-bandeja-v1';
+const PRODUCTOS_KEY = 'adslab-marketing-productos-v1';
+const ORPHAN_KEY = 'adslab-marketing-bandeja-orphan-v1'; // ideas sin productoId
+
+function readProductos() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(PRODUCTOS_KEY);
     return raw ? JSON.parse(raw) : [];
   } catch { return []; }
 }
 
+function writeProductos(arr) {
+  try {
+    localStorage.setItem(PRODUCTOS_KEY, JSON.stringify(arr));
+    // Notificar al sync para que pushee al cloud.
+    window.dispatchEvent(new CustomEvent('viora:marketing-storage-changed', {
+      detail: { key: PRODUCTOS_KEY },
+    }));
+  } catch {}
+}
+
+let _legacyMigrated = false;
+function migrateLegacy() {
+  if (_legacyMigrated) return;
+  _legacyMigrated = true;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const legacy = JSON.parse(raw);
+    if (!Array.isArray(legacy) || legacy.length === 0) return;
+    // Distribuir las legacy ideas a sus productos.
+    const productos = readProductos();
+    const byProducto = new Map();
+    const orphans = [];
+    for (const idea of legacy) {
+      if (idea.productoId) {
+        const list = byProducto.get(String(idea.productoId)) || [];
+        list.push(idea);
+        byProducto.set(String(idea.productoId), list);
+      } else {
+        orphans.push(idea);
+      }
+    }
+    const updated = productos.map(p => {
+      const list = byProducto.get(String(p.id));
+      if (!list) return p;
+      const existing = Array.isArray(p.bandejaIdeas) ? p.bandejaIdeas : [];
+      // Dedup por id al mergear
+      const ids = new Set(existing.map(i => i.id));
+      const merged = [...existing, ...list.filter(i => !ids.has(i.id))];
+      return { ...p, bandejaIdeas: merged };
+    });
+    writeProductos(updated);
+    if (orphans.length > 0) {
+      try { localStorage.setItem(ORPHAN_KEY, JSON.stringify(orphans)); } catch {}
+    }
+    // Borrar la key legacy — ya migramos.
+    try { localStorage.removeItem(STORAGE_KEY); } catch {}
+    console.info(`[bandeja] migrate legacy: ${legacy.length} ideas → ${byProducto.size} productos${orphans.length ? ` (+${orphans.length} orphans)` : ''}`);
+  } catch (err) {
+    console.warn('[bandeja] migrate legacy falló:', err.message);
+  }
+}
+
+export function loadIdeas() {
+  migrateLegacy();
+  const productos = readProductos();
+  const all = [];
+  for (const p of productos) {
+    if (Array.isArray(p.bandejaIdeas)) all.push(...p.bandejaIdeas);
+  }
+  // Sumar orphans (ideas sin productoId)
+  try {
+    const raw = localStorage.getItem(ORPHAN_KEY);
+    if (raw) {
+      const orphans = JSON.parse(raw);
+      if (Array.isArray(orphans)) all.push(...orphans);
+    }
+  } catch {}
+  // Ordenar por createdAt desc para mantener el orden que usaba el array global.
+  all.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  return all;
+}
+
 export function saveIdeas(ideas) {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(ideas)); } catch {}
+  // Re-particionar por productoId y escribir cada subset en su producto.
+  const byProducto = new Map();
+  const orphans = [];
+  for (const idea of ideas) {
+    if (idea.productoId) {
+      const list = byProducto.get(String(idea.productoId)) || [];
+      list.push(idea);
+      byProducto.set(String(idea.productoId), list);
+    } else {
+      orphans.push(idea);
+    }
+  }
+  const productos = readProductos();
+  const updated = productos.map(p => {
+    const list = byProducto.get(String(p.id)) || [];
+    return { ...p, bandejaIdeas: list };
+  });
+  writeProductos(updated);
+  try { localStorage.setItem(ORPHAN_KEY, JSON.stringify(orphans)); } catch {}
 }
 
 function genId() {

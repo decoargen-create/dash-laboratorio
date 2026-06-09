@@ -55,14 +55,28 @@ function writeProductos(arr) {
 let _legacyMigrated = false;
 function migrateLegacy() {
   if (_legacyMigrated) return;
-  _legacyMigrated = true;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return;
+    if (!raw) {
+      _legacyMigrated = true; // nada que migrar, no volver a intentar
+      return;
+    }
     const legacy = JSON.parse(raw);
-    if (!Array.isArray(legacy) || legacy.length === 0) return;
+    if (!Array.isArray(legacy) || legacy.length === 0) {
+      _legacyMigrated = true;
+      try { localStorage.removeItem(STORAGE_KEY); } catch {}
+      return;
+    }
     // Distribuir las legacy ideas a sus productos.
     const productos = readProductos();
+    if (productos.length === 0) {
+      // No hay productos cargados todavía — el pull aún no completó. No
+      // migrar ahora, sino la migración escribiría productos:[] y se borraría
+      // la legacy. Reintentamos en el próximo loadIdeas (no marcamos como
+      // migrado).
+      console.warn(`[bandeja] migrate legacy: ${legacy.length} ideas pero NO HAY productos en localStorage — esperando pull`);
+      return;
+    }
     const byProducto = new Map();
     const orphans = [];
     for (const idea of legacy) {
@@ -78,7 +92,6 @@ function migrateLegacy() {
       const list = byProducto.get(String(p.id));
       if (!list) return p;
       const existing = Array.isArray(p.bandejaIdeas) ? p.bandejaIdeas : [];
-      // Dedup por id al mergear
       const ids = new Set(existing.map(i => i.id));
       const merged = [...existing, ...list.filter(i => !ids.has(i.id))];
       return { ...p, bandejaIdeas: merged };
@@ -87,9 +100,9 @@ function migrateLegacy() {
     if (orphans.length > 0) {
       try { localStorage.setItem(ORPHAN_KEY, JSON.stringify(orphans)); } catch {}
     }
-    // Borrar la key legacy — ya migramos.
     try { localStorage.removeItem(STORAGE_KEY); } catch {}
-    console.info(`[bandeja] migrate legacy: ${legacy.length} ideas → ${byProducto.size} productos${orphans.length ? ` (+${orphans.length} orphans)` : ''}`);
+    _legacyMigrated = true;
+    console.info(`[bandeja] ✅ migrate legacy: ${legacy.length} ideas → ${byProducto.size} productos${orphans.length ? ` (+${orphans.length} orphans)` : ''}. Push al cloud en 2s.`);
   } catch (err) {
     console.warn('[bandeja] migrate legacy falló:', err.message);
   }

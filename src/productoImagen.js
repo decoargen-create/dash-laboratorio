@@ -61,14 +61,23 @@ function readProducto(id) {
 function patchProducto(id, patch) {
   try {
     const arr = JSON.parse(localStorage.getItem(PRODUCTOS_KEY) || '[]');
+    const target = arr.find(p => String(p.id) === String(id));
+    if (!target) {
+      // Sin producto destino el patch sería no-op — no escribimos para
+      // evitar tocar localStorage innecesariamente y disparar push vacío.
+      console.warn(`[productoImagen] patchProducto: producto ${id} no encontrado en localStorage`);
+      return false;
+    }
     const updated = arr.map(p => String(p.id) === String(id) ? { ...p, ...patch, updated_at: new Date().toISOString() } : p);
     localStorage.setItem(PRODUCTOS_KEY, JSON.stringify(updated));
     // Notificar al sync para que pushee al cloud.
     window.dispatchEvent(new CustomEvent('viora:marketing-storage-changed', {
       detail: { key: PRODUCTOS_KEY },
     }));
+    return true;
   } catch (err) {
     console.warn('[productoImagen] patchProducto falló:', err.message);
+    return false;
   }
 }
 
@@ -263,9 +272,16 @@ export function getAccentColor(id) {
   try {
     const legacy = localStorage.getItem(ACCENT_KEY(id));
     if (legacy) {
-      // Migrar lazy
-      patchProducto(id, { accentColor: legacy });
-      try { localStorage.removeItem(ACCENT_KEY(id)); } catch {}
+      // CRITICAL: solo migrar+borrar legacy si el producto existe en la lista
+      // (es decir, el pull completó). Si readProducto devuelve null por
+      // pull-aún-pendiente, NO borramos el legacy — lo dejamos para el
+      // próximo read.
+      if (producto) {
+        patchProducto(id, { accentColor: legacy });
+        try { localStorage.removeItem(ACCENT_KEY(id)); } catch {}
+      } else {
+        console.warn(`[productoImagen] accentColor legacy presente pero producto ${id} no está en localStorage aún — esperando pull`);
+      }
       return legacy;
     }
   } catch {}
@@ -276,7 +292,7 @@ export function setAccentColor(id, color) {
   if (!id) return;
   // Escribir en producto.data → sync gratis vía push.
   patchProducto(id, { accentColor: color || null });
-  // Limpiar legacy localStorage si quedó.
+  // Limpiar legacy localStorage si quedó. Solo después de patch exitoso.
   try { localStorage.removeItem(ACCENT_KEY(id)); } catch {}
 }
 

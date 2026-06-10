@@ -19,21 +19,41 @@
 
 // Store de la Bandeja de ideas.
 //
-// CLOUD SYNC: Las ideas viven dentro de cada producto en
-// `producto.data.bandejaIdeas[]`. Esto las hace sincronizables gratis vía
-// el push de productos existente (no requiere tabla nueva ni migración).
+// CLOUD SYNC (post fase 4):
+//   1. Source of truth: tabla marketing_ideas (una fila por idea).
+//   2. localStorage: cache para boot rápido + compat con el código viejo
+//      que lee producto.bandejaIdeas[] inline.
+//   3. Cada mutación dispara dual-write: localStorage (compat) + cloud
+//      (fire-and-forget, no bloquea el UI).
 //
-// loadIdeas() lee de todos los productos y concatena.
-// saveIdeas([all_ideas]) re-particiona por productoId y escribe en cada
-// producto su subset. Las ideas SIN productoId (raras, casos legacy) se
-// guardan en una key global de fallback.
+// El read sigue siendo sync (lee localStorage / producto.bandejaIdeas) por
+// compat con todos los callers actuales. Realtime via useCloudIdeas
+// mantiene cache actualizado.
 //
 // COMPAT: si encuentra una array legacy en la key vieja, la migra a
 // productos al primer load.
 
+import { saveIdea as cloudSaveIdea, deleteIdeaCloud } from './cloudData.js';
+
 const STORAGE_KEY = 'adslab-marketing-bandeja-v1';
 const PRODUCTOS_KEY = 'adslab-marketing-productos-v1';
 const ORPHAN_KEY = 'adslab-marketing-bandeja-orphan-v1'; // ideas sin productoId
+
+// Fire-and-forget para no bloquear los callers sync. Si falla, queda
+// solo en localStorage — el sync layer eventualmente lo levanta.
+function cloudSaveBestEffort(idea) {
+  if (!idea?.id) return;
+  cloudSaveIdea(idea).catch(err => {
+    console.warn(`[bandejaStore] cloud save idea ${idea.id} falló: ${err.message}`);
+  });
+}
+
+function cloudDeleteBestEffort(id) {
+  if (!id) return;
+  deleteIdeaCloud(id).catch(err => {
+    console.warn(`[bandejaStore] cloud delete idea ${id} falló: ${err.message}`);
+  });
+}
 
 function readProductos() {
   try {
@@ -188,6 +208,7 @@ export function addIdea(idea) {
     ...idea,
   };
   saveIdeas([nueva, ...list]);
+  cloudSaveBestEffort(nueva);
   return nueva;
 }
 
@@ -293,12 +314,16 @@ export function updateIdea(id, patch) {
   const list = loadIdeas();
   const updated = list.map(i => i.id === id ? { ...i, ...patch } : i);
   saveIdeas(updated);
+  // Dual-write al cloud: solo la idea modificada (no el set entero).
+  const modified = updated.find(i => i.id === id);
+  if (modified) cloudSaveBestEffort(modified);
   return updated;
 }
 
 export function removeIdea(id) {
   const list = loadIdeas().filter(i => i.id !== id);
   saveIdeas(list);
+  cloudDeleteBestEffort(id);
   return list;
 }
 

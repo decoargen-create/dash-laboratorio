@@ -23,6 +23,7 @@ import ArranqueSection from './Arranque.jsx';
 import BandejaSection from './Bandeja.jsx';
 import AutoIGSection from './AutoIG.jsx';
 import InspiracionSection from './InspiracionSection.jsx';
+import InspiracionGlobalSection from './InspiracionGlobalSection.jsx';
 import ConsultoriaSection from './Consultoria.jsx';
 import { PipelineRunProvider } from './PipelineRunContext.jsx';
 import PipelineRunOverlay from './PipelineRunOverlay.jsx';
@@ -2118,6 +2119,7 @@ function AppShell({ onExit }) {
                   producto en Arranque. */}
               <NavSection title="Operación" sectionKey="mk-op" sidebarOpen={sidebarOpen}>
                 <NavItem icon={Play} label="Marketing" section="mk-arranque" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                <NavItem icon={Sparkles} label="Inspiración" section="mk-inspiracion-global" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               </NavSection>
               <NavSection title="Automatización" sectionKey="mk-auto" sidebarOpen={sidebarOpen} defaultOpen={false}>
                 <NavItem icon={Instagram} label="Automatización IG" section="mk-auto-ig" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
@@ -2214,6 +2216,7 @@ function AppShell({ onExit }) {
               de arriba a mk-arranque — no necesita su propio render. */}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-auto-ig' && <AutoIGSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-inspiracion' && <InspiracionSection addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-inspiracion-global' && <InspiracionGlobalSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-gastos' && <GastosStackSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-docs' && (
             <MarketingSection

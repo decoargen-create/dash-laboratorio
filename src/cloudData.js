@@ -213,6 +213,60 @@ export async function migrateBandejaIdeasFromProductos() {
 }
 
 // ============================================================
+// INSPIRACIÓN GLOBAL (cross-producto)
+// ============================================================
+// Brands referente que el user usa para aprender ángulos/formato/hooks
+// independientemente del producto. Visible y usable desde todos los
+// productos a la vez.
+
+export async function fetchInspiracionGlobal() {
+  if (!supabase) return [];
+  const user = await getCurrentUser();
+  if (!user) return [];
+  const { data, error } = await supabase
+    .from('marketing_inspiracion_global')
+    .select('id, data, updated_at')
+    .order('updated_at', { ascending: false });
+  if (error) {
+    console.warn('[cloudData] fetchInspiracionGlobal error:', error.message);
+    return [];
+  }
+  return (data || []).map(row => ({
+    ...(row.data || {}),
+    id: row.id,
+    updated_at: row.updated_at,
+  }));
+}
+
+export async function saveInspiracionGlobal(brand) {
+  if (!supabase) throw new Error('Supabase no configurado');
+  const user = await getCurrentUser();
+  if (!user) throw new Error('No hay user logueado');
+  if (!brand?.id) throw new Error('brand.id requerido');
+  const { error } = await supabase
+    .from('marketing_inspiracion_global')
+    .upsert({
+      id: String(brand.id),
+      user_id: user.id,
+      data: { ...brand, updated_at: new Date().toISOString() },
+    }, { onConflict: 'user_id,id' });
+  if (error) throw new Error(`saveInspiracionGlobal: ${error.message}`);
+  return brand;
+}
+
+export async function deleteInspiracionGlobal(brandId) {
+  if (!supabase) throw new Error('Supabase no configurado');
+  const user = await getCurrentUser();
+  if (!user) return;
+  const { error } = await supabase
+    .from('marketing_inspiracion_global')
+    .delete()
+    .eq('user_id', user.id)
+    .eq('id', String(brandId));
+  if (error) throw new Error(`deleteInspiracionGlobal: ${error.message}`);
+}
+
+// ============================================================
 // SUBSCRIPCIONES REALTIME — genérico
 // ============================================================
 

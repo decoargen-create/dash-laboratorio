@@ -38,6 +38,35 @@ import GeneradorRapido from './GeneradorRapido.jsx';
 import ProductoImagenUploader from './ProductoImagenUploader.jsx';
 import GaleriaReferencialesModal from './GaleriaReferencialesModal.jsx';
 import { usePipelineRun } from './PipelineRunContext.jsx';
+import { getProductoImagen } from './productoImagen.js';
+
+// Avatar del producto: muestra el pote (foto cargada en Setup) y cae al
+// gradiente con la inicial si todavía no hay foto. getProductoImagen resuelve
+// desde IDB/cloud y está memoizado, así que es barato re-montarlo por card.
+function ProductAvatar({ id, nombre, sizeClass = 'w-12 h-12', radiusClass = 'rounded-lg', extra = '' }) {
+  const [src, setSrc] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    getProductoImagen(id)
+      .then(img => { if (alive) setSrc(img || null); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [id]);
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt={nombre || 'Producto'}
+        className={`${sizeClass} ${radiusClass} object-cover shrink-0 border border-black/5 dark:border-white/10 ${extra}`}
+      />
+    );
+  }
+  return (
+    <div className={`${sizeClass} ${radiusClass} bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white font-bold shrink-0 ${extra}`}>
+      {nombre?.charAt(0)?.toUpperCase() || 'P'}
+    </div>
+  );
+}
 
 // Etiquetas cortas de la etapa de awareness del prospecto — para el chip
 // del header del workspace.
@@ -2351,9 +2380,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                   >
                     {/* Header */}
                     <div className="flex items-center gap-3 mb-3">
-                      <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white font-bold text-lg shrink-0 group-hover:scale-105 transition">
-                        {p.nombre?.charAt(0)?.toUpperCase() || 'P'}
-                      </div>
+                      <ProductAvatar
+                        id={p.id}
+                        nombre={p.nombre}
+                        extra="text-lg group-hover:scale-105 transition"
+                      />
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{p.nombre}</p>
                         <div className="flex items-center gap-2 text-[10px] text-gray-500 dark:text-gray-400 mt-0.5 flex-wrap">
@@ -2490,9 +2521,12 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           title="Volver a la lista de productos">
           <ChevronRight size={18} className="rotate-180" />
         </button>
-        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white shadow-sm shrink-0">
-          <Play size={22} />
-        </div>
+        <ProductAvatar
+          id={producto.id}
+          nombre={producto.nombre}
+          radiusClass="rounded-xl"
+          extra="shadow-sm text-xl"
+        />
         <div className="flex-1 min-w-0">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
             <button onClick={() => setActiveProductoId(null)} className="hover:text-brand-500 transition">Productos</button>

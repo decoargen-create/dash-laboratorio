@@ -9,7 +9,7 @@
 //
 // Próxima iteración: generador de Meta Ads Creatives (hooks + prompts IA + brief .docx).
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, Fragment } from 'react';
 import { deleteProducto as deleteProductoFromCloud } from './marketingSync.js';
 import {
   FileText, Sparkles, Download, Loader2, Check, AlertTriangle, X,
@@ -300,7 +300,7 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
             const isPast = s.done;
             const isFuture = !s.done && !isCurrent;
             return (
-              <React.Fragment key={s.n}>
+              <Fragment key={s.n}>
                 <button
                   onClick={() => !s.disabled && setActiveTab(s.tab)}
                   disabled={s.disabled}
@@ -338,7 +338,7 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
                 {idx < wizardSteps.length - 1 && (
                   <div className={`hidden sm:block w-4 h-px ${isPast ? 'bg-emerald-400' : 'bg-gray-300 dark:bg-gray-600'}`} />
                 )}
-              </React.Fragment>
+              </Fragment>
             );
           })}
         </div>

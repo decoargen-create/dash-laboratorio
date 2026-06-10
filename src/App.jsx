@@ -1,4 +1,4 @@
-import React, { useState, useReducer, useEffect, useMemo, useRef, useCallback, lazy, Suspense } from 'react';
+import React, { useState, useReducer, useEffect, useMemo, useRef, useCallback, lazy, Suspense, Fragment } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   LineChart, Line, PieChart, Pie, Cell
@@ -3326,7 +3326,7 @@ function OrdersList({ state, dispatch, orders, onEditOrder }) {
               // Resumen siempre para mostrar la celda compacta de Cobro
               const cobrosQuick = getOrderCobrosSummary(order);
               return (
-                <React.Fragment key={order.id}>
+                <Fragment key={order.id}>
                 <tr className={`transition ${order.tieneIncidencia ? 'bg-red-50/40 dark:bg-red-900/10' : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}>
                   <td className="px-2 py-3 text-center">
                     <div className="flex items-center gap-0.5">
@@ -3495,7 +3495,7 @@ function OrdersList({ state, dispatch, orders, onEditOrder }) {
                     </td>
                   </tr>
                 )}
-                </React.Fragment>
+                </Fragment>
               );
             })}
           </tbody>
@@ -5229,7 +5229,7 @@ function ClientesSection({ state, onAddClient, onUpdateClient, showModal, setSho
                 const isOpen = expanded.has(client.id);
                 const stats = isOpen ? getClientStats(client.id) : null;
                 return (
-                  <React.Fragment key={client.id}>
+                  <Fragment key={client.id}>
                     <tr className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition">
                       <td className="px-2 py-3 text-center">
                         <button
@@ -5265,7 +5265,7 @@ function ClientesSection({ state, onAddClient, onUpdateClient, showModal, setSho
                         </td>
                       </tr>
                     )}
-                  </React.Fragment>
+                  </Fragment>
                 );
               })}
             </tbody>

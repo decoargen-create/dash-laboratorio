@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { Component, StrictMode } from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
 import './index.css'
@@ -69,7 +69,7 @@ if (typeof window !== 'undefined' && new URL(window.location.href).searchParams.
 // (visible sin expandir) y un botón para copiarlo al portapapeles para
 // debug rápido. También ofrece "Limpiar localStorage" — Viora vive en
 // IndexedDB así que ese reset no afecta los datos productivos.
-class ErrorBoundary extends React.Component {
+class ErrorBoundary extends Component {
   constructor(props) {
     super(props);
     this.state = { err: null, info: null, copied: false };
@@ -166,9 +166,9 @@ class ErrorBoundary extends React.Component {
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(
-  <React.StrictMode>
+  <StrictMode>
     <ErrorBoundary>
       <App />
     </ErrorBoundary>
-  </React.StrictMode>,
+  </StrictMode>,
 )

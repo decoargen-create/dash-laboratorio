@@ -60,9 +60,18 @@ function estimateImageCost(quality, size) {
 // para que gpt-image-2 NO dibuje un formato equivocado (ej. cápsulas en un
 // ad de gomitas) y para que Vision REESCRIBA cualquier mención al formato
 // equivocado en los textos adaptados.
-// Heurística: regex sobre nombre + descripción + research. Devuelve string
-// canónico ("gomitas", "cápsulas", "crema", etc.) o null si no detecta.
+//
+// PRIORIDAD:
+//   1. producto.formato — explícito, el user lo eligió en Setup (ground truth)
+//   2. Heurística regex sobre nombre + descripción + research (fallback)
+//
+// Devuelve string canónico ("gomitas", "cápsulas", "crema", etc.) o null.
 function inferProductForm(producto) {
+  // Si el user declaró el formato explícito en Setup, lo respetamos sin más.
+  const explicit = (producto?.formato || '').toString().trim().toLowerCase();
+  if (explicit && explicit !== 'otros' && explicit !== 'other') {
+    return explicit;
+  }
   const haystack = [
     producto?.nombre || '',
     producto?.descripcion || '',
@@ -88,6 +97,46 @@ function inferProductForm(producto) {
     if (p.re.test(haystack)) return p.canon;
   }
   return null;
+}
+
+// Equivalente singular/contable del formato — para overlays tipo
+// "1 cápsula antes de dormir" → "1 gomita antes de dormir".
+function singularFormato(formato) {
+  if (!formato) return null;
+  const map = {
+    'gomitas': 'gomita',
+    'cápsulas': 'cápsula',
+    'capsulas': 'cápsula',
+    'gotas': 'gota',
+    'comprimidos': 'comprimido',
+    'tabletas': 'tableta',
+    'sachets': 'sachet',
+    'shots': 'shot',
+    'parches': 'parche',
+    'sticks': 'stick',
+  };
+  return map[formato.toLowerCase()] || formato;
+}
+
+// Dedup de líneas de ofertas: si la misma frase (case-insensitive) aparece
+// múltiple veces, mantenemos solo la primera. También dedup de tokens
+// repetidos en la misma línea (ej: "ENVÍO GRATIS · ENVÍO GRATIS" → "ENVÍO GRATIS").
+// Sin esto, gpt-image-2 puede stack 2+ ribbons con el mismo mensaje.
+function dedupOfertas(rawOfertas) {
+  if (!rawOfertas) return '';
+  const lines = String(rawOfertas)
+    .split(/\n+/)
+    .map(l => l.trim())
+    .filter(Boolean);
+  const seen = new Set();
+  const out = [];
+  for (const line of lines) {
+    const key = line.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(line);
+  }
+  return out.join('\n');
 }
 
 async function readBody(req) {
@@ -171,7 +220,7 @@ async function planStrategyAndVariations({ apiKey, refImgBuf, refMime, producto,
   // Cuando está cargado, el plan REEMPLAZA las promos del ad ref con éstas
   // (en vez de removerlas como cuando está vacío). Esto evita que el creativo
   // diga "$29" del competidor cuando nuestro precio es otro.
-  const ofertasReales = (producto?.ofertasReales || producto?.offerBrief || producto?.docs?.offerBrief || '').toString().trim();
+  const ofertasReales = dedupOfertas((producto?.ofertasReales || producto?.offerBrief || producto?.docs?.offerBrief || '').toString().trim());
   const productCtx = [
     `Producto: ${producto?.nombre || 'N/A'}`,
     producto?.descripcion ? `Descripción: ${producto.descripcion.slice(0, 400)}` : '',
@@ -349,7 +398,7 @@ async function extractSkeletonHaiku({ apiKey, refImgBuf, refMime, producto }) {
   // adaptados (no solo traducción cosmética). ofertasReales tiene prioridad
   // sobre offerBrief — es el campo focalizado que el user llena en Setup
   // con su precio/promo real (ej: "USD 49 + envío gratis").
-  const ofertasReales = (producto?.ofertasReales || producto?.offerBrief || producto?.docs?.offerBrief || '').toString().trim();
+  const ofertasReales = dedupOfertas((producto?.ofertasReales || producto?.offerBrief || producto?.docs?.offerBrief || '').toString().trim());
   const productoCtx = [
     `Nombre: ${producto?.nombre || 'N/A'}`,
     productoForm ? `**FORMATO FÍSICO: ${productoForm.toUpperCase()}** (este producto viene en ${productoForm} — NO es otro formato).` : '',
@@ -471,7 +520,7 @@ function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentCol
   const nombre = (producto?.nombre || '').trim();
   const descripcion = (producto?.descripcion || '').trim();
   const research = (producto?.research || producto?.docs?.research || '').trim();
-  const ofertasReales = (producto?.ofertasReales || producto?.offerBrief || producto?.docs?.offerBrief || '').toString().trim();
+  const ofertasReales = dedupOfertas((producto?.ofertasReales || producto?.offerBrief || producto?.docs?.offerBrief || '').toString().trim());
   const productoForm = inferProductForm(producto);
   const v = plan?.visual || {};
   const s = plan?.strategy || {};
@@ -618,7 +667,7 @@ function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio
   const nombre = (producto?.nombre || '').trim();
   const descripcion = (producto?.descripcion || '').trim();
   const research = (producto?.research || producto?.docs?.research || '').trim();
-  const ofertasReales = (producto?.ofertasReales || producto?.offerBrief || producto?.docs?.offerBrief || '').toString().trim();
+  const ofertasReales = dedupOfertas((producto?.ofertasReales || producto?.offerBrief || producto?.docs?.offerBrief || '').toString().trim());
   const productoForm = inferProductForm(producto);
 
   const parts = [];
@@ -644,10 +693,22 @@ function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio
     if (Array.isArray(skeleton.badges) && skeleton.badges.length) parts.push(`  - Graphic badges/seals to replicate AS SHAPES (no specific claim text unless the user provided one in their offer brief): ${skeleton.badges.join('; ')}`);
     if (Array.isArray(skeleton.ctaElements) && skeleton.ctaElements.length) parts.push(`  - CTA-like graphic elements (pills, buttons) in their original positions — but with NEUTRAL CTA text ("Probalo ya" / "Conocé más") unless the user has explicit offer info: ${skeleton.ctaElements.join('; ')}`);
     if (Array.isArray(skeleton.textBlocks) && skeleton.textBlocks.length) {
-      parts.push('  - TEXT OVERLAYS to render IN THE IMAGE (Spanish, exact wording — do NOT paraphrase, do NOT translate to English):');
-      skeleton.textBlocks.forEach((b, i) => {
+      // Dedup de textBlocks: si Vision devolvió 2 con el mismo content_adapted
+      // (a veces lo hace cuando el ad ref tiene ribbons repetidos), keep one.
+      // El renderer ya tendía a duplicar overlays → con esto evitamos doble eco.
+      const seenTexts = new Set();
+      const dedupBlocks = [];
+      for (const b of skeleton.textBlocks) {
         const txt = b.content_adapted || b.content_literal || '';
-        if (!txt) return;
+        if (!txt) continue;
+        const key = txt.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+        if (seenTexts.has(key)) continue;
+        seenTexts.add(key);
+        dedupBlocks.push(b);
+      }
+      parts.push('  - TEXT OVERLAYS to render IN THE IMAGE (Spanish, exact wording — do NOT paraphrase, do NOT translate to English). RENDER EACH ONLY ONCE:');
+      dedupBlocks.forEach((b, i) => {
+        const txt = b.content_adapted || b.content_literal || '';
         const pos = b.position || 'top';
         const size = b.size || 'M';
         const style = b.style || '';
@@ -670,7 +731,9 @@ function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio
   if (productoForm) {
     // CRÍTICO: si el ad ref muestra cápsulas y nuestro producto son gomitas,
     // el modelo replica cápsulas. Hay que decírselo EXPLÍCITO.
+    const singular = singularFormato(productoForm);
     parts.push(`  - **PHYSICAL FORM**: ${productoForm} (NOT capsules, NOT pills, NOT another format). If the reference ad shows the product contents (a single capsule on a hand, powder in a glass, etc.), YOU MUST show ${productoForm} instead. Any spilled/displayed product detail must visually be ${productoForm}.`);
+    parts.push(`  - **TEXT OVERLAY WORDING**: If any overlay says "1 cápsula", "1 pastilla", "una pill", etc., REPLACE it with "1 ${singular}" (the correct singular form for ${productoForm}). Same rule for plural: "60 cápsulas" → "60 ${productoForm}". NEVER let a text on the canvas contradict the physical form of the product.`);
   }
   if (descripcion) parts.push(`  - Description: ${descripcion.slice(0, 400)}`);
   if (research) parts.push(`  - Audience and pain points (use to choose props/scene): ${research.slice(0, 1500)}`);
@@ -682,6 +745,11 @@ function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio
     parts.push(`**USER'S REAL OFFERS / PRICES (use ONLY these in text overlays — NEVER copy a price or promo from IMAGE 1)**:`);
     parts.push(ofertasReales.slice(0, 800).split('\n').map(line => `  • ${line}`).join('\n'));
     parts.push(`  - If IMAGE 1 shows a price/promo NOT in this list, do NOT render it. Use the closest offer from the list above or omit the overlay.`);
+    // Anti-duplicación: explícito al renderer que NO repita el mismo mensaje
+    // en 2+ ribbons. El bug típico es "ENVÍO GRATIS" aparecer en un ribbon
+    // arriba y otro abajo. Una sola pieza por mensaje, combinarlas en UN ribbon
+    // si hay varios mensajes.
+    parts.push(`  - **NO DUPLICATE RIBBONS**: render each offer/badge ONLY ONCE in the canvas. If you have multiple offers, combine them in a SINGLE bottom ribbon separated by " · " or " + " — do NOT stack 2+ ribbons with the same or overlapping messages.`);
   }
 
   if (accentColor) {

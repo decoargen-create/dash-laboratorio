@@ -1462,6 +1462,9 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         nombre: producto.nombre,
         descripcion: producto.descripcion,
         research: producto.docs?.research,
+        // Formato físico — si el user lo declaró explícito, lo pasamos para
+        // que el server NO infiera y NO copie el formato del ad ref.
+        formato: producto.formato || '',
         // Ofertas: pasamos ambos campos para que el server pueda preferir
         // ofertasReales (focalizado, llenado en Setup) y caer a offerBrief
         // (doc generado por la pipeline) como fallback.

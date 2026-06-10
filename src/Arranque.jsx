@@ -2771,6 +2771,51 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               </div>
             </details>
 
+            {/* Formato físico del producto — gomitas / cápsulas / etc.
+                CRÍTICO porque el generador de imágenes copia el formato del ad
+                de referencia si no le decimos explícito. Si tenés gomitas y
+                la inspiración es cápsulas → el creativo va a salir con cápsulas
+                a menos que cargues ESTO. */}
+            <details className="mt-3 group">
+              <summary className="cursor-pointer inline-flex items-center gap-1 text-[10px] font-semibold text-gray-600 dark:text-gray-300 hover:text-brand-600 dark:hover:text-brand-400">
+                <ChevronDown size={10} className="group-open:rotate-180 transition-transform" />
+                🧪 Formato del producto (CRÍTICO para generar bien)
+                {producto.formato?.trim() && <span className="text-emerald-600 dark:text-emerald-400">✓ {producto.formato}</span>}
+              </summary>
+              <div className="mt-2 space-y-2 pl-4">
+                <p className="text-[10px] text-gray-500 dark:text-gray-400">
+                  Forma física en la que viene tu producto. Sin esto, el generador puede dibujarte cápsulas cuando vendés gomitas (porque copia del ad de inspiración). Con esto, la palabra y el visual coinciden con tu formato real.
+                </p>
+                <select
+                  value={producto.formato || ''}
+                  onChange={e => setProductos(prev => prev.map(p =>
+                    String(p.id) === String(activeProductoId)
+                      ? { ...p, formato: e.target.value, updated_at: new Date().toISOString() }
+                      : p
+                  ))}
+                  className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500"
+                >
+                  <option value="">— No seleccionado (heurística) —</option>
+                  <option value="gomitas">🟢 Gomitas / gummies</option>
+                  <option value="cápsulas">💊 Cápsulas / softgels / pastillas</option>
+                  <option value="comprimidos">⚪ Comprimidos / tabletas</option>
+                  <option value="polvo">🥄 Polvo (mix)</option>
+                  <option value="gotas">💧 Gotas / liquid drops</option>
+                  <option value="shot">🥤 Shot líquido</option>
+                  <option value="sachet">📦 Sachet / stick individual</option>
+                  <option value="sérum">🧴 Sérum</option>
+                  <option value="crema">🪞 Crema / loción / emulsión</option>
+                  <option value="aceite">🛢️ Aceite</option>
+                  <option value="bálsamo">💄 Bálsamo</option>
+                  <option value="spray">🌬️ Spray</option>
+                  <option value="stick">📍 Stick / barra</option>
+                  <option value="mascarilla">🎭 Mascarilla / máscara</option>
+                  <option value="parches">🩹 Parches</option>
+                  <option value="otros">❓ Otros (deja heurística)</option>
+                </select>
+              </div>
+            </details>
+
             {/* Ofertas y claims reales — opcional. Si no se carga, los creativos
                 referenciales generados van a SACAR cualquier promo/claim del ad
                 de referencia (mejor decir menos que inventar una oferta falsa).

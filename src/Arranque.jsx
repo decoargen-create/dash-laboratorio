@@ -21,6 +21,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Package, Target, Play, Check, Loader2, AlertTriangle, ChevronRight, ChevronDown,
   Plus, X, Sparkles, Link2, Search, Clock, Inbox, Trash2, Upload, Download, Activity,
+  LayoutGrid, List as ListIcon, BarChart3,
 } from 'lucide-react';
 import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGeneradorHoy, updateIdea, formatoDeAd } from './bandejaStore.js';
 import { deleteProducto as deleteProductoFromCloud } from './marketingSync.js';
@@ -33,7 +34,7 @@ import InspiracionSection from './InspiracionSection.jsx';
 import CreativosTab from './CreativosTab.jsx';
 import DocumentacionTab from './DocumentacionTab.jsx';
 import CopilotoTab from './CopilotoTab.jsx';
-import DashboardTab from './DashboardTab.jsx';
+import CampanasTracker from './CampanasTracker.jsx';
 import GeneradorRapido from './GeneradorRapido.jsx';
 import ProductoImagenUploader from './ProductoImagenUploader.jsx';
 import GaleriaReferencialesModal from './GaleriaReferencialesModal.jsx';
@@ -47,10 +48,26 @@ function ProductAvatar({ id, nombre, sizeClass = 'w-12 h-12', radiusClass = 'rou
   const [src, setSrc] = useState(null);
   useEffect(() => {
     let alive = true;
-    getProductoImagen(id)
-      .then(img => { if (alive) setSrc(img || null); })
-      .catch(() => {});
-    return () => { alive = false; };
+    // Limpiamos la imagen previa al cambiar de id: si esta misma instancia se
+    // reusa para otro producto, no mostramos la foto vieja mientras carga.
+    setSrc(null);
+    const load = () => {
+      getProductoImagen(id)
+        .then(img => { if (alive) setSrc(img || null); })
+        .catch(() => {});
+    };
+    load();
+    // Re-cargar cuando se sube/cambia/borra la foto (setProductoImagen patchea
+    // el producto → dispara este evento). Sin esto el avatar mostraba la foto
+    // vieja hasta recargar la página.
+    const onChange = (e) => {
+      if (!e?.detail?.key || e.detail.key.startsWith('adslab-marketing-productos')) load();
+    };
+    window.addEventListener('viora:marketing-storage-changed', onChange);
+    return () => {
+      alive = false;
+      window.removeEventListener('viora:marketing-storage-changed', onChange);
+    };
   }, [id]);
   if (src) {
     return (
@@ -497,10 +514,9 @@ function ProductTabs({ activeTab, onChange }) {
       id: 'datos',
       label: 'Datos',
       tabs: [
-        { id: 'dashboard', label: 'Dashboard', emoji: '📊' },
         { id: 'setup', label: 'Setup', emoji: '⚙️' },
         { id: 'documentos', label: 'Documentos', emoji: '📄' },
-        { id: 'competencia', label: 'Competencia', emoji: '🎯' },
+        { id: 'campanas', label: 'Campañas', emoji: '📈' },
       ],
     },
     {
@@ -546,34 +562,21 @@ function ProductTabs({ activeTab, onChange }) {
   );
 }
 
-// Mini-stat para los contadores de Bandeja en la card del producto.
-
-function ProdMiniStat({ label, value, color = 'gray', accent = false }) {
-  const colors = {
-    gray: 'bg-gray-50 dark:bg-gray-900/40 text-gray-900 dark:text-gray-100 border-gray-200 dark:border-gray-700',
-    amber: 'bg-amber-50 dark:bg-amber-900/30 text-amber-900 dark:text-amber-200 border-amber-200 dark:border-amber-800',
-    emerald: 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-900 dark:text-emerald-200 border-emerald-200 dark:border-emerald-800',
-    slate: 'bg-slate-50 dark:bg-slate-900/40 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800',
+// Métrica limpia (número grande + label chico, sin caja) para las cards de
+// producto. Estilo dashboard pro (Linear/Vercel): jerarquía por tipografía,
+// no por bordes.
+function ProductMetric({ label, value, tone = 'default' }) {
+  const tones = {
+    default: 'text-gray-900 dark:text-gray-100',
+    brand: 'text-brand-600 dark:text-brand-400',
+    amber: 'text-amber-600 dark:text-amber-400',
+    emerald: 'text-emerald-600 dark:text-emerald-400',
+    muted: 'text-gray-300 dark:text-gray-600',
   };
   return (
-    <div className={`px-2 py-1.5 rounded-md border ${colors[color]} ${accent ? 'ring-1 ring-brand-300 dark:ring-brand-700' : ''}`}>
-      <p className="text-[8px] font-bold uppercase tracking-wider opacity-60 leading-none">{label}</p>
-      <p className="text-base font-bold tabular-nums leading-tight mt-0.5">{value}</p>
-    </div>
-  );
-}
-
-// Stat plano de reporte para la sección de stats del producto.
-
-function ProdReportStat({ label, value, highlight = false }) {
-  return (
-    <div className={`px-2 py-1.5 rounded border ${
-      highlight
-        ? 'bg-brand-50 dark:bg-brand-900/20 border-brand-200 dark:border-brand-800 text-brand-900 dark:text-brand-200'
-        : 'bg-gray-50 dark:bg-gray-900/30 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300'
-    }`}>
-      <p className="text-[8px] font-bold uppercase tracking-wider opacity-60 leading-none">{label}</p>
-      <p className="text-[11px] font-semibold leading-tight mt-0.5">{value}</p>
+    <div className="min-w-0">
+      <p className={`text-lg font-bold tabular-nums leading-none ${tones[tone] || tones.default}`}>{value}</p>
+      <p className="text-[9px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 mt-1 truncate">{label}</p>
     </div>
   );
 }
@@ -785,7 +788,13 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // de pestaña dentro del workspace.
   useEffect(() => {
     if (!productoTabKey) { setProductoTab('setup'); return; }
-    try { setProductoTab(localStorage.getItem(productoTabKey) || 'setup'); } catch { setProductoTab('setup'); }
+    // Tabs retiradas (dashboard, competencia) caen a 'setup' — competencia
+    // ahora vive como sección dentro de Setup.
+    const REMOVED = ['dashboard', 'competencia'];
+    try {
+      const saved = localStorage.getItem(productoTabKey) || 'setup';
+      setProductoTab(REMOVED.includes(saved) ? 'setup' : saved);
+    } catch { setProductoTab('setup'); }
   }, [productoTabKey]);
   useEffect(() => {
     if (productoTabKey) try { localStorage.setItem(productoTabKey, productoTab); } catch {}
@@ -819,7 +828,8 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     };
     const onTab = (e) => {
       const tab = e?.detail?.tab;
-      if (tab) setProductoTab(tab);
+      // Tabs retiradas caen a 'setup' (competencia ahora vive ahí).
+      if (tab) setProductoTab(['dashboard', 'competencia'].includes(tab) ? 'setup' : tab);
     };
     window.addEventListener('viora:product-select', onSelect);
     window.addEventListener('viora:product-tab', onTab);
@@ -865,6 +875,13 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // Wizard product form
   const [showProdForm, setShowProdForm] = useState(false);
   const [showDiagnostico, setShowDiagnostico] = useState(false);
+  // Vista de la lista de productos: 'grid' (tarjetas) | 'list' (filas compactas).
+  const [vista, setVista] = useState(() => {
+    try { return localStorage.getItem('adslab-productos-vista') || 'grid'; } catch { return 'grid'; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('adslab-productos-vista', vista); } catch {}
+  }, [vista]);
   const [prodDraft, setProdDraft] = useState({ nombre: '', landingUrl: '', descripcion: '' });
 
   // Wizard competitors
@@ -2297,6 +2314,21 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 }
               }}
             />
+            {/* Toggle de vista grilla / lista */}
+            {productos.length > 0 && (
+              <div className="inline-flex items-center bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-0.5">
+                <button onClick={() => setVista('grid')}
+                  className={`p-1.5 rounded-md transition ${vista === 'grid' ? 'bg-white dark:bg-gray-700 text-brand-600 dark:text-brand-300 shadow-sm' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-200'}`}
+                  title="Vista de grilla">
+                  <LayoutGrid size={16} />
+                </button>
+                <button onClick={() => setVista('list')}
+                  className={`p-1.5 rounded-md transition ${vista === 'list' ? 'bg-white dark:bg-gray-700 text-brand-600 dark:text-brand-300 shadow-sm' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-200'}`}
+                  title="Vista de lista">
+                  <ListIcon size={16} />
+                </button>
+              </div>
+            )}
             <button onClick={() => setShowDiagnostico(true)}
               className="inline-flex items-center gap-1.5 px-3 py-2.5 text-sm font-semibold text-amber-700 dark:text-amber-300 bg-white dark:bg-gray-800 border border-amber-300 dark:border-amber-700 rounded-lg hover:bg-amber-50 dark:hover:bg-amber-900/20 transition"
               title="Ver qué hay realmente en el cloud para tu cuenta">
@@ -2351,7 +2383,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Creá tu primer producto para empezar a analizar la competencia y generar ideas.</p>
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className={vista === 'grid' ? 'grid grid-cols-1 lg:grid-cols-2 gap-3' : 'space-y-2'}>
             {productos.map(p => {
               const comps = p.competidores || [];
               const hasResearch = !!(p.docs?.research);
@@ -2362,104 +2394,57 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 return acc;
               }, {});
               const adsScrapeados = comps.reduce((sum, c) => sum + (c.ads?.length || 0), 0);
-              const competidoresConAds = comps.filter(c => (c.ads?.length || 0) > 0).length;
-              // El runner persiste los deep-analyses en `c.adsAnalysis` (no
-              // `c.deepAnalyses`). Antes esta lectura usaba el nombre viejo
-              // y el stat siempre mostraba 0 sin importar cuántos análisis
-              // se corrieran.
               const deepAnalyses = comps.reduce((sum, c) => sum + Object.keys(c.adsAnalysis || {}).length, 0);
-              const adsMatched = (p.metaAccount?.ads || []).filter(a => a.productMatch).length;
               const runsDelProducto = runHistory.filter(r => String(r.productoId || '') === String(p.id));
               const ultimoRun = runsDelProducto[0];
               const costoTotal = runsDelProducto.reduce((sum, r) => sum + (r.cost?.total || 0), 0);
-              return (
-                <div key={p.id} className="flex items-stretch gap-2">
+
+              const open = () => setActiveProductoId(String(p.id));
+
+              // Pills compartidas entre grilla y lista.
+              const researchPill = (
+                <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-semibold rounded ${
+                  hasResearch
+                    ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300'
+                    : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500'
+                }`}>
+                  {hasResearch ? '✓ Documentado' : '○ Sin research'}
+                </span>
+              );
+              const stagePill = p.stage ? (
+                <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-semibold rounded bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300">
+                  {(STAGE_LABEL[p.stage] || p.stage).replace('_', '-')}
+                </span>
+              ) : null;
+              const metaPill = (
+                <span className={`inline-flex items-center gap-1 ${p.metaAccount ? 'text-gray-600 dark:text-gray-300' : 'text-gray-400 dark:text-gray-500 italic'}`}>
+                  <BarChart3 size={11} />
+                  {p.metaAccount ? `${p.metaAccount.name} · ${p.metaAccount.ads?.length || 0} ads` : 'Sin cuenta Meta'}
+                </span>
+              );
+
+              // Botones de acción (sync / export / borrar) — aparecen en hover.
+              const actions = (
+                <>
                   <button
-                    onClick={() => setActiveProductoId(String(p.id))}
-                    className="flex-1 text-left p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm hover:border-brand-300 dark:hover:border-brand-700 hover:shadow-md transition group"
-                  >
-                    {/* Header */}
-                    <div className="flex items-center gap-3 mb-3">
-                      <ProductAvatar
-                        id={p.id}
-                        nombre={p.nombre}
-                        extra="text-lg group-hover:scale-105 transition"
-                      />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{p.nombre}</p>
-                        <div className="flex items-center gap-2 text-[10px] text-gray-500 dark:text-gray-400 mt-0.5 flex-wrap">
-                          {p.landingUrl && <span className="truncate max-w-[200px]">{p.landingUrl}</span>}
-                          <span className={`font-semibold ${hasResearch ? 'text-emerald-600' : 'text-gray-400'}`}>
-                            {hasResearch ? '✓ documentado' : '○ sin research'}
-                          </span>
-                          {p.stage && <span className="text-brand-600 dark:text-brand-400">· {p.stage.replace('_', '-')}</span>}
-                        </div>
-                      </div>
-                      <ChevronRight size={16} className="text-gray-400 group-hover:text-brand-500 transition shrink-0" />
-                    </div>
-
-                    {/* Bandeja: contadores por estado (igual que Bandeja) */}
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 mb-2">
-                      <ProdMiniStat label="Pendientes" value={ideasByEstado.pendiente || 0} accent />
-                      <ProdMiniStat label="En uso" value={ideasByEstado.en_uso || 0} color="amber" />
-                      <ProdMiniStat label="Usadas" value={ideasByEstado.usada || 0} color="emerald" />
-                      <ProdMiniStat label="Archivadas" value={ideasByEstado.archivada || 0} color="slate" />
-                    </div>
-
-                    {/* Reporting: stats del producto */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5 text-[9px]">
-                      <ProdReportStat label="Competidores" value={`${comps.length}${competidoresConAds > 0 ? ` · ${competidoresConAds} con ads` : ''}`} />
-                      <ProdReportStat label="Ads scrapeados" value={adsScrapeados.toLocaleString('es-AR')} />
-                      <ProdReportStat label="Análisis IA" value={deepAnalyses} />
-                      <ProdReportStat label="Ideas totales" value={ideasCount} highlight={ideasCount > 0} />
-                    </div>
-
-                    {/* Footer: cuenta Meta + último run + costo */}
-                    <div className="flex items-center gap-3 text-[9px] text-gray-500 dark:text-gray-400 flex-wrap mt-2 pt-2 border-t border-gray-100 dark:border-gray-700">
-                      {p.metaAccount ? (
-                        <span>📊 Meta: <strong className="text-gray-700 dark:text-gray-300">{p.metaAccount.name}</strong> · {p.metaAccount.ads?.length || 0} ads{adsMatched > 0 ? ` · ${adsMatched} matched` : ''}</span>
-                      ) : (
-                        <span className="italic text-gray-400">Sin cuenta Meta conectada</span>
-                      )}
-                      {ultimoRun && (
-                        <span>· ⏱ Último run: <strong className="text-gray-700 dark:text-gray-300">{new Date(ultimoRun.startedAt).toLocaleDateString('es-AR')}</strong></span>
-                      )}
-                      {costoTotal > 0 && (
-                        <span className="text-brand-600 dark:text-brand-400 font-mono">· 💰 ${costoTotal.toFixed(4)} acumulado</span>
-                      )}
-                    </div>
-                  </button>
-                  <button
-                    onClick={async (e) => {
+                    onClick={(e) => {
                       e.stopPropagation();
-                      // Forzar push de TODO el state local actual al cloud.
-                      // Útil cuando cambiás de PC y querés asegurarte que la
-                      // PC vieja pushea todo antes de migrar.
                       try {
                         const arr = JSON.parse(localStorage.getItem('adslab-marketing-productos-v1') || '[]');
-                        // Disparamos el evento que hace el push debounced.
-                        window.dispatchEvent(new CustomEvent('viora:marketing-storage-changed', {
-                          detail: { key: 'adslab-marketing-productos-v1' },
-                        }));
-                        // Y para brands del producto también.
+                        window.dispatchEvent(new CustomEvent('viora:marketing-storage-changed', { detail: { key: 'adslab-marketing-productos-v1' } }));
                         const brandsKey = `adslab-marketing-inspiracion-brands-${p.id}`;
                         if (localStorage.getItem(brandsKey)) {
-                          window.dispatchEvent(new CustomEvent('viora:marketing-storage-changed', {
-                            detail: { key: brandsKey },
-                          }));
+                          window.dispatchEvent(new CustomEvent('viora:marketing-storage-changed', { detail: { key: brandsKey } }));
                         }
-                        addToast?.({
-                          type: 'info',
-                          message: `Sync forzado al cloud (${arr.length} productos). Esperá 2-3 segundos antes de cambiar de PC.`,
-                        });
+                        addToast?.({ type: 'info', message: `Sync forzado al cloud (${arr.length} productos). Esperá 2-3 segundos antes de cambiar de PC.` });
                       } catch (err) {
                         addToast?.({ type: 'error', message: `Sync falló: ${err.message}` });
                       }
                     }}
-                    className="p-2.5 rounded-lg text-gray-300 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition shrink-0"
+                    className="p-1.5 rounded-md text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition"
                     title="Forzar sync al cloud (útil al cambiar de PC)"
                   >
-                    <Upload size={16} />
+                    <Upload size={15} />
                   </button>
                   <button
                     onClick={async (e) => {
@@ -2471,18 +2456,15 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                         addToast?.({ type: 'error', message: `No pude exportar: ${err.message}` });
                       }
                     }}
-                    className="p-2.5 rounded-lg text-gray-300 hover:text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition shrink-0"
+                    className="p-1.5 rounded-md text-gray-400 hover:text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition"
                     title="Exportar producto (JSON backup)"
                   >
-                    <Download size={16} />
+                    <Download size={15} />
                   </button>
                   <button
                     onClick={async (e) => {
                       e.stopPropagation();
                       if (!window.confirm(`¿Eliminar "${p.nombre}"? Se borran sus competidores, cuenta Meta y research. No se pueden recuperar.`)) return;
-                      // BORRAR DEL CLOUD PRIMERO — si falla, abortar el delete
-                      // local. Sin esto, el producto quedaba huérfano en
-                      // Supabase y aparecía "fantasma" en otra PC.
                       try {
                         await deleteProductoFromCloud(p.id);
                       } catch (err) {
@@ -2492,11 +2474,70 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                       setProductos(prev => prev.filter(x => String(x.id) !== String(p.id)));
                       if (String(p.id) === String(activeProductoId)) setActiveProductoId(null);
                     }}
-                    className="p-2.5 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition shrink-0"
+                    className="p-1.5 rounded-md text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition"
                     title="Eliminar producto"
                   >
-                    <Trash2 size={16} />
+                    <Trash2 size={15} />
                   </button>
+                </>
+              );
+
+              // -------- VISTA LISTA (fila compacta) --------
+              if (vista === 'list') {
+                return (
+                  <div key={p.id} onClick={open}
+                    className="group flex items-center gap-3 bg-white dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/80 rounded-xl px-3 py-2.5 cursor-pointer hover:border-brand-300 dark:hover:border-brand-700 hover:shadow-md transition">
+                    <ProductAvatar id={p.id} nombre={p.nombre} sizeClass="w-10 h-10" extra="text-base shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{p.nombre}</p>
+                      <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">{researchPill}{stagePill}</div>
+                    </div>
+                    <div className="hidden md:flex items-center gap-6 shrink-0 px-2">
+                      <ProductMetric label="Ideas" value={ideasCount} tone={ideasCount > 0 ? 'brand' : 'muted'} />
+                      <ProductMetric label="Pend." value={ideasByEstado.pendiente || 0} tone={(ideasByEstado.pendiente || 0) > 0 ? 'amber' : 'muted'} />
+                      <ProductMetric label="Comp." value={comps.length} tone={comps.length > 0 ? 'default' : 'muted'} />
+                      <ProductMetric label="Ads" value={adsScrapeados.toLocaleString('es-AR')} tone={adsScrapeados > 0 ? 'default' : 'muted'} />
+                      <ProductMetric label="IA" value={deepAnalyses} tone={deepAnalyses > 0 ? 'default' : 'muted'} />
+                    </div>
+                    <div className="hidden xl:block text-[10px] shrink-0 w-40 truncate">{metaPill}</div>
+                    <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition" onClick={e => e.stopPropagation()}>
+                      {actions}
+                    </div>
+                    <ChevronRight size={16} className="text-gray-300 group-hover:text-brand-500 transition shrink-0" />
+                  </div>
+                );
+              }
+
+              // -------- VISTA GRILLA (tarjeta) --------
+              return (
+                <div key={p.id} onClick={open}
+                  className="group relative bg-white dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/80 rounded-2xl p-4 cursor-pointer hover:border-brand-300 dark:hover:border-brand-700 hover:shadow-lg hover:shadow-brand-500/[0.04] transition-all">
+                  {/* Acciones (hover) */}
+                  <div className="absolute top-3 right-3 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition" onClick={e => e.stopPropagation()}>
+                    {actions}
+                  </div>
+                  {/* Header */}
+                  <div className="flex items-center gap-3 mb-4 pr-20">
+                    <ProductAvatar id={p.id} nombre={p.nombre} extra="text-lg group-hover:scale-105 transition" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{p.nombre}</p>
+                      <div className="flex items-center gap-1.5 mt-1 flex-wrap">{researchPill}{stagePill}</div>
+                    </div>
+                  </div>
+                  {/* Métricas */}
+                  <div className="grid grid-cols-4 gap-2 py-3 border-y border-gray-100 dark:border-gray-700/60">
+                    <ProductMetric label="Ideas" value={ideasCount} tone={ideasCount > 0 ? 'brand' : 'muted'} />
+                    <ProductMetric label="Pendientes" value={ideasByEstado.pendiente || 0} tone={(ideasByEstado.pendiente || 0) > 0 ? 'amber' : 'muted'} />
+                    <ProductMetric label="Competidores" value={comps.length} tone={comps.length > 0 ? 'default' : 'muted'} />
+                    <ProductMetric label="Ads" value={adsScrapeados.toLocaleString('es-AR')} tone={adsScrapeados > 0 ? 'default' : 'muted'} />
+                  </div>
+                  {/* Footer */}
+                  <div className="flex items-center gap-2 mt-3 text-[10px] text-gray-500 dark:text-gray-400 flex-wrap">
+                    {metaPill}
+                    {deepAnalyses > 0 && <span>· 🤖 {deepAnalyses} análisis</span>}
+                    {ultimoRun && <span>· {new Date(ultimoRun.startedAt).toLocaleDateString('es-AR')}</span>}
+                    {costoTotal > 0 && <span className="font-mono text-brand-600 dark:text-brand-400">· ${costoTotal.toFixed(2)}</span>}
+                  </div>
                 </div>
               );
             })}
@@ -2549,10 +2590,6 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           sidebar abierto y no aparecían en ningún lado. */}
       <ProductTabs activeTab={productoTab} onChange={setProductoTab} />
 
-      {productoTab === 'dashboard' && (
-        <DashboardTab producto={producto} competidores={competidores} runHistory={runHistory} />
-      )}
-
       {productoTab === 'bandeja' && (
         <div className="space-y-4">
           <GeneradorRapido
@@ -2578,136 +2615,9 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         />
       )}
 
-      {productoTab === 'competencia' && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between gap-3 flex-wrap bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-3">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-brand-500 to-brand-600 flex items-center justify-center text-white shrink-0">
-                <Target size={16} />
-              </div>
-              <div className="min-w-0">
-                <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Competencia del producto</h3>
-                <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                  Marcas que monitoreás y de las que extraemos ganadores. Cada corrida scrapea sus ads.
-                </p>
-              </div>
-            </div>
-            {!showCompForm && (
-              <button onClick={() => setShowCompForm(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-brand-600 rounded-lg hover:from-brand-600 hover:to-brand-700 shadow-sm transition shrink-0">
-                <Plus size={12} /> Agregar competidor
-              </button>
-            )}
-          </div>
-
-          {/* Form de agregar */}
-          {showCompForm && (
-            <div className="bg-white dark:bg-gray-800 border border-brand-300 dark:border-brand-700 rounded-xl p-3 flex flex-col sm:flex-row gap-2 items-stretch">
-              <input type="text" value={compDraft.nombre} onChange={e => setCompDraft({ ...compDraft, nombre: e.target.value })}
-                placeholder="Nombre de la marca (opcional — se autocompleta de la URL)"
-                className="flex-1 px-2.5 py-1.5 text-sm bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
-              <input type="url" value={compDraft.landingUrl} onChange={e => setCompDraft({ ...compDraft, landingUrl: e.target.value })}
-                placeholder="https://landing-del-competidor.com (recomendado — autodetecta marca + FB page)"
-                className="flex-1 px-2.5 py-1.5 text-sm bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
-              <div className="flex gap-1">
-                <button onClick={() => { setShowCompForm(false); setCompDraft({ nombre: '', landingUrl: '' }); }}
-                  className="px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 transition">
-                  Cancelar
-                </button>
-                <button onClick={handleAddCompetidor}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-red-500 rounded-md hover:from-brand-600 hover:to-red-600 transition">
-                  <Check size={12} /> Agregar
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Lista de competidores */}
-          {competidores.length === 0 ? (
-            <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-12 text-center">
-              <Target size={32} className="mx-auto text-gray-300 dark:text-gray-600 mb-2" />
-              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Sin competidores todavía</p>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                Agregá al menos 1 marca con la URL de su landing — el pipeline va a scrapear sus ads activos y extraer ganadores para inspirar las ideas.
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {competidores.map(c => {
-                const total = c.adsTotal || c.ads?.length || 0;
-                const winners = c.winnersCount || 0;
-                const history = Array.isArray(c.adsHistory) ? c.adsHistory : [];
-                const prev = history.length >= 2 ? history[history.length - 2] : null;
-                const delta = prev ? total - prev.total : null;
-                const analizado = !!c.lastAdsCheck;
-                const favHost = hostnameOf(c.landingUrl);
-                return (
-                  <div key={c.id} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-3 flex items-start gap-3">
-                    {/* Avatar: favicon del sitio, con fallback a la inicial
-                        de la marca si el favicon no carga. */}
-                    <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-brand-400 to-red-400 flex items-center justify-center text-white font-bold text-sm shrink-0 relative overflow-hidden">
-                      {c.nombre?.charAt(0)?.toUpperCase() || '?'}
-                      {favHost && (
-                        <img
-                          src={`https://www.google.com/s2/favicons?domain=${favHost}&sz=64`}
-                          alt=""
-                          className="absolute inset-0 w-full h-full object-contain bg-white p-1.5"
-                          onError={e => { e.currentTarget.style.display = 'none'; }}
-                        />
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{c.nombre}</p>
-                      <div className="flex items-center gap-2 text-[10px] text-gray-500 dark:text-gray-400 flex-wrap mt-0.5">
-                        {c.landingUrl && (
-                          <a href={c.landingUrl} target="_blank" rel="noreferrer" className="text-brand-600 hover:underline truncate max-w-[280px]">
-                            {c.landingUrl.replace(/^https?:\/\//, '').replace(/^www\./, '')}
-                          </a>
-                        )}
-                        {c.fbPageUrl && <span>· FB: <span className="text-gray-700 dark:text-gray-300">@{c.fbPageUrl.replace(/^.*facebook\.com\//, '').replace(/\/$/, '')}</span></span>}
-                        {c.lastAdsCheck && <span>· Última corrida: {new Date(c.lastAdsCheck).toLocaleDateString('es-AR')}</span>}
-                      </div>
-                      {/* Estado del scrapeo — sin esto la card no decía si el
-                          competidor ya había sido analizado o no. */}
-                      <div className="mt-1.5">
-                        {!analizado ? (
-                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-semibold bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded">
-                            ○ Sin analizar — la próxima corrida del pipeline scrapea sus ads
-                          </span>
-                        ) : total === 0 ? (
-                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-semibold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 rounded">
-                            ⚠ Analizado pero sin ads activos encontrados
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-semibold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded">
-                            ✓ Analizado
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    {total > 0 && (
-                      <div className="shrink-0 flex items-center gap-2 text-xs tabular-nums">
-                        <div className="text-right">
-                          <p className="font-bold text-gray-900 dark:text-gray-100">{total} ads</p>
-                          {winners > 0 && <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">{winners} ganadores 🏆</p>}
-                          {delta != null && delta !== 0 && (
-                            <p className={`text-[10px] font-semibold ${delta > 0 ? 'text-brand-600 dark:text-brand-400' : 'text-red-500'}`}>
-                              {delta > 0 ? `↑${delta}` : `↓${Math.abs(delta)}`} vs corrida anterior
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                    <button onClick={() => handleRemoveCompetidor(c.id)}
-                      className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition shrink-0"
-                      title="Quitar competidor">
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+      {productoTab === 'campanas' && (
+        <div className="-mx-4">
+          <CampanasTracker addToast={addToast} />
         </div>
       )}
 
@@ -3126,34 +3036,107 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       {/* Paso 3 — Competidores (summary). Gestión completa vive en tab Competencia. */}
       <WizardCard
         num="3"
-        title="Competidores a analizar"
+        title="Competencia"
         done={compsReady}
         badge={compsReady ? `${competidores.length} cargado${competidores.length > 1 ? 's' : ''}` : null}
       >
-        {competidores.length === 0 ? (
-          <p className="text-xs text-gray-500 dark:text-gray-400 italic mb-2">
-            Sin competidores cargados todavía. Andá al tab <strong>Competencia</strong> para agregar.
-          </p>
-        ) : (
-          <div className="text-xs text-gray-600 dark:text-gray-300 mb-2">
-            <p>{competidores.length} competidor{competidores.length !== 1 ? 'es' : ''}: <span className="text-gray-900 dark:text-gray-100 font-semibold">{competidores.slice(0, 3).map(c => c.nombre).join(', ')}{competidores.length > 3 ? `… +${competidores.length - 3}` : ''}</span></p>
-            {compsReady && (() => {
-              const totalAds = competidores.reduce((sum, c) => sum + (c.adsTotal || c.ads?.length || 0), 0);
-              const totalWinners = competidores.reduce((sum, c) => sum + (c.winnersCount || 0), 0);
-              return totalAds > 0 ? (
-                <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-1">
-                  {totalAds.toLocaleString('es-AR')} ads scrapeados · {totalWinners} ganadores 🏆
-                </p>
-              ) : null;
-            })()}
+        <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-3">
+          Marcas que monitoreás. Cada corrida del pipeline scrapea sus ads y extrae los ganadores para inspirar ideas.
+        </p>
+
+        {!showCompForm && (
+          <button onClick={() => setShowCompForm(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 mb-3 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-brand-600 rounded-md hover:from-brand-600 hover:to-brand-700 shadow-sm transition">
+            <Plus size={12} /> Agregar competidor
+          </button>
+        )}
+
+        {/* Form de agregar */}
+        {showCompForm && (
+          <div className="bg-gray-50 dark:bg-gray-900/40 border border-brand-300 dark:border-brand-700 rounded-xl p-3 mb-3 flex flex-col sm:flex-row gap-2 items-stretch">
+            <input type="text" value={compDraft.nombre} onChange={e => setCompDraft({ ...compDraft, nombre: e.target.value })}
+              placeholder="Nombre de la marca (opcional)"
+              className="flex-1 px-2.5 py-1.5 text-sm bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
+            <input type="url" value={compDraft.landingUrl} onChange={e => setCompDraft({ ...compDraft, landingUrl: e.target.value })}
+              placeholder="https://landing-del-competidor.com (recomendado)"
+              className="flex-1 px-2.5 py-1.5 text-sm bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
+            <div className="flex gap-1">
+              <button onClick={() => { setShowCompForm(false); setCompDraft({ nombre: '', landingUrl: '' }); }}
+                className="px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 transition">
+                Cancelar
+              </button>
+              <button onClick={handleAddCompetidor}
+                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-red-500 rounded-md hover:from-brand-600 hover:to-red-600 transition">
+                <Check size={12} /> Agregar
+              </button>
+            </div>
           </div>
         )}
-        <button
-          onClick={() => setProductoTab('competencia')}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-red-500 rounded-md hover:from-brand-600 hover:to-red-600 shadow-sm transition"
-        >
-          <Target size={12} /> Gestionar competencia →
-        </button>
+
+        {/* Lista de competidores */}
+        {competidores.length === 0 ? (
+          <p className="text-xs text-gray-500 dark:text-gray-400 italic">
+            Sin competidores todavía. Agregá al menos 1 con la URL de su landing.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {competidores.map(c => {
+              const total = c.adsTotal || c.ads?.length || 0;
+              const winners = c.winnersCount || 0;
+              const analizado = !!c.lastAdsCheck;
+              const favHost = hostnameOf(c.landingUrl);
+              return (
+                <div key={c.id} className="bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-gray-700 rounded-xl p-3 flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-brand-400 to-red-400 flex items-center justify-center text-white font-bold text-sm shrink-0 relative overflow-hidden">
+                    {c.nombre?.charAt(0)?.toUpperCase() || '?'}
+                    {favHost && (
+                      <img src={`https://www.google.com/s2/favicons?domain=${favHost}&sz=64`} alt=""
+                        className="absolute inset-0 w-full h-full object-contain bg-white p-1.5"
+                        onError={e => { e.currentTarget.style.display = 'none'; }} />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{c.nombre}</p>
+                    <div className="flex items-center gap-2 text-[10px] text-gray-500 dark:text-gray-400 flex-wrap mt-0.5">
+                      {c.landingUrl && (
+                        <a href={c.landingUrl} target="_blank" rel="noreferrer" className="text-brand-600 hover:underline truncate max-w-[280px]">
+                          {c.landingUrl.replace(/^https?:\/\//, '').replace(/^www\./, '')}
+                        </a>
+                      )}
+                      {c.lastAdsCheck && <span>· {new Date(c.lastAdsCheck).toLocaleDateString('es-AR')}</span>}
+                    </div>
+                    <div className="mt-1.5">
+                      {!analizado ? (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-semibold bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded">
+                          ○ Sin analizar — la próxima corrida scrapea sus ads
+                        </span>
+                      ) : total === 0 ? (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-semibold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 rounded">
+                          ⚠ Analizado pero sin ads activos
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-semibold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded">
+                          ✓ Analizado
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  {total > 0 && (
+                    <div className="shrink-0 text-right text-xs tabular-nums">
+                      <p className="font-bold text-gray-900 dark:text-gray-100">{total} ads</p>
+                      {winners > 0 && <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">{winners} ganadores 🏆</p>}
+                    </div>
+                  )}
+                  <button onClick={() => handleRemoveCompetidor(c.id)}
+                    className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition shrink-0"
+                    title="Quitar competidor">
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </WizardCard>
 
       {/* Paso 4 — Correr pipeline */}
@@ -3268,7 +3251,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                     className="inline-flex items-center gap-1 px-3 py-2 text-xs font-bold text-brand-700 dark:text-brand-300 hover:bg-brand-50 dark:hover:bg-brand-900/20 rounded transition">
                       Ver Bandeja de ideas <ChevronRight size={12} />
                   </button>
-                  <button onClick={() => setProductoTab('competencia')}
+                  <button onClick={() => setProductoTab('setup')}
                     className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold text-brand-700 dark:text-brand-300 hover:bg-brand-50 dark:hover:bg-brand-900/20 rounded transition">
                       Ver Competencia <ChevronRight size={12} />
                   </button>
@@ -3314,7 +3297,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                   <Inbox size={14} /> Ver ideas en la Bandeja <ChevronRight size={14} />
                 </button>
                 <button
-                  onClick={() => setProductoTab('competencia')}
+                  onClick={() => setProductoTab('setup')}
                   className="shrink-0 inline-flex items-center gap-1 px-3 py-2.5 text-xs font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-gray-800 border border-brand-200 dark:border-brand-800 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/20 transition"
                 >
                   Ver Competencia <ChevronRight size={12} />

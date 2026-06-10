@@ -81,6 +81,21 @@ async function runScrapePool(items, limit, worker) {
   await Promise.all(runners);
 }
 
+// Mutex para serializar el read-modify-write de PRODUCTOS_KEY en localStorage.
+// Sin esto, varios scrapes de competidores corriendo en paralelo (runScrapePool,
+// SCRAPE_CONCURRENCY=3) hacen loadProductos() → setItem() sobre snapshots stale
+// y el último writer pisa los resultados de los otros → se pierden ads de los
+// scrapes concurrentes. El lock garantiza que cada writer lea DESPUÉS de que el
+// anterior terminó de escribir, así los cambios se acumulan en vez de pisarse.
+let productosWriteChain = Promise.resolve();
+function withProductosLock(fn) {
+  const next = productosWriteChain.then(() => fn());
+  // No propagamos el rechazo a la cadena para que un fallo no rompa los locks
+  // siguientes; el caller recibe el error real vía el `next` que retornamos.
+  productosWriteChain = next.then(() => {}, () => {});
+  return next;
+}
+
 // Extrae una keyword sensata desde una landing URL — preferimos el hostname
 // COMPLETO con www. si está, porque eso es lo que pegarías a mano en la
 // Ads Library de Meta. La búsqueda con dominio devuelve los ads reales del
@@ -1942,29 +1957,35 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       // consecutiveZeroAds: marcas que devuelven 0 nuevos N veces seguidas
       // se consideran "estables" y se saltan del "Scrape todas" smart.
       // Reset a 0 cuando aparecen nuevos.
-      const fresh = loadProductos();
-      const updated = fresh.map(p => {
-        if (String(p.id) !== String(producto.id)) return p;
-        const comps = (p.competidores || []).map(c => {
-          if (c.id !== comp.id) return c;
-          const prevZeroes = c.consecutiveZeroAds || 0;
-          return {
-            ...c, ads,
-            adsTotal: data.total || 0, winnersCount: data.winners || 0,
-            lastAdsCheck: new Date().toISOString(),
-            consecutiveZeroAds: newAds.length > 0 ? 0 : prevZeroes + 1,
-          };
+      // Serializado vía mutex: el loadProductos() corre DESPUÉS de que el
+      // scrape anterior (de la misma tanda paralela) terminó de escribir, así
+      // los resultados de los 3 competidores concurrentes se acumulan en vez
+      // de pisarse entre sí.
+      await withProductosLock(() => {
+        const fresh = loadProductos();
+        const updated = fresh.map(p => {
+          if (String(p.id) !== String(producto.id)) return p;
+          const comps = (p.competidores || []).map(c => {
+            if (c.id !== comp.id) return c;
+            const prevZeroes = c.consecutiveZeroAds || 0;
+            return {
+              ...c, ads,
+              adsTotal: data.total || 0, winnersCount: data.winners || 0,
+              lastAdsCheck: new Date().toISOString(),
+              consecutiveZeroAds: newAds.length > 0 ? 0 : prevZeroes + 1,
+            };
+          });
+          return { ...p, competidores: comps, updated_at: new Date().toISOString() };
         });
-        return { ...p, competidores: comps, updated_at: new Date().toISOString() };
+        try {
+          localStorage.setItem(PRODUCTOS_KEY, JSON.stringify(updated));
+          // Sin esto, el scrape del competidor NO se pushea al cloud y al
+          // recargar la página el pull pisa lastAdsCheck con null. Resultado:
+          // "ya scrapie varias veces y queda igual" (PR fix de Aurivita).
+          notifyMarketingChange(PRODUCTOS_KEY);
+        } catch {}
+        setProductos(updated);
       });
-      try {
-        localStorage.setItem(PRODUCTOS_KEY, JSON.stringify(updated));
-        // Sin esto, el scrape del competidor NO se pushea al cloud y al
-        // recargar la página el pull pisa lastAdsCheck con null. Resultado:
-        // "ya scrapie varias veces y queda igual" (PR fix de Aurivita).
-        notifyMarketingChange(PRODUCTOS_KEY);
-      } catch {}
-      setProductos(updated);
 
       const msg = newAds.length > 0
         ? `${newAds.length} estáticos NUEVOS de ${comp.nombre} (${ads.length} total)`
@@ -2537,7 +2558,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                   derivadas de producto.competidores via el useEffect de sync. */}
               <button
                 onClick={() => {
-                  try { window.dispatchEvent(new CustomEvent('viora:product-tab', { detail: { tab: 'competencia' } })); } catch {}
+                  try { window.dispatchEvent(new CustomEvent('viora:product-tab', { detail: { tab: 'setup' } })); } catch {}
                   addToast?.({ type: 'info', message: 'Cargá la marca como competidor — va a aparecer acá automático.' });
                 }}
                 className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-amber-500 to-brand-500 rounded hover:from-amber-600 hover:to-brand-600 shadow-sm transition"
@@ -2557,7 +2578,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                   label: 'Agregar competidor',
                   icon: Plus,
                   onClick: () => {
-                    try { window.dispatchEvent(new CustomEvent('viora:product-tab', { detail: { tab: 'competencia' } })); } catch {}
+                    try { window.dispatchEvent(new CustomEvent('viora:product-tab', { detail: { tab: 'setup' } })); } catch {}
                     addToast?.({ type: 'info', message: 'Cargalo como competidor — va a aparecer acá automático.' });
                   },
                 }}

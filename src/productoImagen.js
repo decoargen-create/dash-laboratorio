@@ -3,7 +3,8 @@
 // FLUJO:
 // - setProductoImagen(id, dataUrl):
 //     1) Guarda en IndexedDB local (cache rápido).
-//     2) Sube los bytes al bucket "creativos" path "producto-fotos/<uid>/<id>.jpg".
+//     2) Sube los bytes al bucket "creativos" path "<uid>/producto-fotos/<id>.jpg".
+//        (el uid va PRIMERO: la policy RLS exige foldername[1] = auth.uid()).
 //     3) Guarda la URL pública en producto.data.fotoUrl (sync via producto sync).
 // - getProductoImagen(id):
 //     1) Cache en memoria (mem map).
@@ -98,7 +99,11 @@ async function uploadFotoToCloud(productoId, dataUrl) {
   if (!user) return null;
   try {
     const blob = dataUrlToBlob(dataUrl);
-    const path = `producto-fotos/${user.id}/${String(productoId)}.jpg`;
+    // El uid VA PRIMERO en el path: la policy RLS del bucket exige
+    // foldername(name)[1] = auth.uid(). Si anteponemos 'producto-fotos/'
+    // el primer segmento pasa a ser 'producto-fotos' y RLS rechaza el upload
+    // (fallaba en silencio → la foto nunca llegaba al cloud).
+    const path = `${user.id}/producto-fotos/${String(productoId)}.jpg`;
     const { error } = await supabase.storage
       .from(BUCKET)
       .upload(path, blob, { contentType: blob.type || 'image/jpeg', upsert: true });
@@ -260,7 +265,7 @@ export async function removeProductoImagen(id) {
     try {
       const user = await getCurrentUser();
       if (user) {
-        await supabase.storage.from(BUCKET).remove([`producto-fotos/${user.id}/${String(id)}.jpg`]);
+        await supabase.storage.from(BUCKET).remove([`${user.id}/producto-fotos/${String(id)}.jpg`]);
       }
     } catch {}
   }

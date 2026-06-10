@@ -319,7 +319,6 @@ export async function pushAllProductos(productos) {
     console.warn('[sync] push de productos vacíos — skipping para no borrar cloud (race protection)');
     return;
   }
-
   // ⚠️ GUARD ANTI-WIPE: para cada producto, traemos el tamaño actual del
   // cloud. Si lo que estamos por pushear es <50% del cloud Y el cloud tiene
   // data significativa (>500 bytes), es señal de que localStorage perdió

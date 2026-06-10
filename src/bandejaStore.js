@@ -162,6 +162,18 @@ export function saveIdeas(ideas) {
     }
   }
   const productos = readProductos();
+  const knownIds = new Set(productos.map(p => String(p.id)));
+  // Ideas cuyo producto NO está en localStorage todavía (pull aún no trajo ese
+  // producto, o la lista quedó truncada por quota). Sin esto, esas ideas se
+  // perdían: no se asignaban a ningún producto del map y, como tienen
+  // productoId, tampoco caían al branch de orphans. Las preservamos como
+  // orphans — cuando el producto cargue, el próximo save las re-asigna solo.
+  for (const [pid, list] of byProducto) {
+    if (!knownIds.has(pid)) {
+      orphans.push(...list);
+      byProducto.delete(pid);
+    }
+  }
   const updated = productos.map(p => {
     const list = byProducto.get(String(p.id)) || [];
     return { ...p, bandejaIdeas: list };

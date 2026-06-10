@@ -19,10 +19,8 @@ import MarketingSection from './Marketing.jsx';
 // tras la migración. La sección quedó huérfana; cualquier deep-link a
 // `mk-competencia` ahora redirige a `mk-arranque` (workspace del producto).
 import GastosStackSection from './GastosStack.jsx';
-import MetaConnectBanner from './MetaConnectBanner.jsx';
 import ArranqueSection from './Arranque.jsx';
 import BandejaSection from './Bandeja.jsx';
-import CampanasTracker from './CampanasTracker.jsx';
 import AutoIGSection from './AutoIG.jsx';
 import InspiracionSection from './InspiracionSection.jsx';
 import ConsultoriaSection from './Consultoria.jsx';
@@ -1415,7 +1413,7 @@ function AppShell({ onExit }) {
       const saved = localStorage.getItem('adslab-last-section');
       // Si tenía una sección de Viora/Senydrop/MetaAds, defaulteamos a la
       // de Marketing. Lista de secciones válidas en las plataformas activas:
-      const validSections = ['mk-arranque', 'mk-bandeja', 'mk-campanas', 'mk-auto-ig',
+      const validSections = ['mk-arranque', 'mk-bandeja', 'mk-auto-ig',
         'mk-inspiracion', 'mk-gastos', 'mk-docs', 'con-acta'];
       return validSections.includes(saved) ? saved : 'mk-arranque';
     } catch { return 'mk-arranque'; }
@@ -2119,7 +2117,6 @@ function AppShell({ onExit }) {
                   producto en Arranque. */}
               <NavSection title="Operación" sectionKey="mk-op" sidebarOpen={sidebarOpen}>
                 <NavItem icon={Play} label="Marketing" section="mk-arranque" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                <NavItem icon={TrendingUp} label="Campañas" section="mk-campanas" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               </NavSection>
               <NavSection title="Automatización" sectionKey="mk-auto" sidebarOpen={sidebarOpen} defaultOpen={false}>
                 <NavItem icon={Instagram} label="Automatización IG" section="mk-auto-ig" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
@@ -2210,14 +2207,10 @@ function AppShell({ onExit }) {
           {/* Gate doble de Supabase removido — ahora la auth Supabase es la
               ÚNICA puerta global (ver checkpoint arriba). Si llegamos acá,
               ya hay supabaseUser. */}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && (
-            <MetaConnectBanner returnTo={`/acceso?section=${currentSection}`} />
-          )}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-arranque' && <ArranqueSection addToast={addToast} onGoToSection={setCurrentSection} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-bandeja' && <BandejaSection addToast={addToast} />}
           {/* mk-competencia (sidebar legacy) está redirigido por el effect
               de arriba a mk-arranque — no necesita su propio render. */}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-campanas' && <CampanasTracker addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-auto-ig' && <AutoIGSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-inspiracion' && <InspiracionSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-gastos' && <GastosStackSection addToast={addToast} />}
@@ -2248,7 +2241,12 @@ function AppShell({ onExit }) {
           state={state}
           currentUser={currentUser}
           onClose={() => setCmdOpen(false)}
-          onNavigate={(section) => { setCurrentSection(section); setCmdOpen(false); }}
+          onNavigate={(section) => {
+            if (section.startsWith('mk-')) setCurrentPlatform('marketing');
+            else if (section.startsWith('con-')) setCurrentPlatform('consultoria');
+            setCurrentSection(section);
+            setCmdOpen(false);
+          }}
           onNewSale={() => { setCurrentSection('ventas'); setShowNewSaleModal(true); setCmdOpen(false); }}
           onNewClient={() => { setCurrentSection('clientes'); setShowNewClientModal(true); setCmdOpen(false); }}
           onNewProduct={() => { setCurrentSection('productos'); setShowNewProductModal(true); setCmdOpen(false); }}
@@ -2275,10 +2273,9 @@ function AppShell({ onExit }) {
 //   dispatch 'viora:product-tab' → switch de tab dentro del activo
 const PRODUCT_TABS = {
   datos: [
-    { id: 'dashboard',   label: 'Dashboard',   emoji: '📊' },
     { id: 'setup',       label: 'Setup',       emoji: '⚙️' },
     { id: 'documentos',  label: 'Documentos',  emoji: '📄' },
-    { id: 'competencia', label: 'Competencia', emoji: '🎯' },
+    { id: 'campanas',    label: 'Campañas',    emoji: '📈' },
   ],
   creacion: [
     { id: 'bandeja',     label: 'Bandeja',     emoji: '📥' },
@@ -8084,7 +8081,6 @@ function getSectionTitle(user, section) {
     'mk-arranque': 'Marketing · Arranque',
     'mk-bandeja': 'Marketing · Bandeja de ideas',
     'mk-docs': 'Marketing · Documentación de producto',
-    'mk-campanas': 'Marketing · Campañas',
     'mk-auto-ig': 'Marketing · Automatización IG',
     'mk-inspiracion': 'Marketing · Inspiración',
     'mk-gastos': 'Marketing · Gastos del stack',
@@ -8578,23 +8574,16 @@ function CommandPalette({ state, currentUser, onClose, onNavigate, onNewSale, on
     inputRef.current?.focus();
   }, []);
 
-  // Armamos la lista de comandos disponibles según el rol
+  // Comandos disponibles. Solo navegación de AdsLab (Marketing + Consultoría)
+  // + preferencias/sesión. Las acciones viejas de Viora (ventas, clientes,
+  // productos) se sacaron porque esa plataforma no está activa.
   const baseCmds = [];
   if (currentUser?.role === 'admin') {
     baseCmds.push(
-      { id: 'go-inicio', group: 'Ir a', label: 'Dashboard / Inicio', icon: Home, shortcut: 'G I', run: () => onNavigate('inicio') },
-      { id: 'go-productos', group: 'Ir a', label: 'Productos', icon: Package, shortcut: 'G P', run: () => onNavigate('productos') },
-      { id: 'go-clientes', group: 'Ir a', label: 'Clientes', icon: Users, shortcut: 'G C', run: () => onNavigate('clientes') },
-      { id: 'go-comisiones', group: 'Ir a', label: 'Comisiones y Partners', icon: CreditCard, shortcut: 'G $', run: () => onNavigate('comisiones') },
-      { id: 'new-sale', group: 'Acciones', label: 'Nueva venta', icon: Plus, shortcut: 'N V', run: onNewSale },
-      { id: 'new-client', group: 'Acciones', label: 'Nuevo cliente', icon: Plus, shortcut: 'N C', run: onNewClient },
-      { id: 'new-product', group: 'Acciones', label: 'Nuevo producto', icon: Plus, shortcut: 'N P', run: onNewProduct },
-    );
-  } else {
-    baseCmds.push(
-      { id: 'go-resumen', group: 'Ir a', label: 'Mi Resumen', icon: Home, run: () => onNavigate('resumen') },
-      { id: 'go-mis-comisiones', group: 'Ir a', label: 'Mis Comisiones', icon: CreditCard, run: () => onNavigate('mis-comisiones') },
-      { id: 'go-mis-clientes', group: 'Ir a', label: 'Mis Clientes', icon: Users, run: () => onNavigate('mis-clientes') },
+      { id: 'go-marketing', group: 'Ir a', label: 'Marketing', icon: Play, shortcut: 'G M', run: () => onNavigate('mk-arranque') },
+      { id: 'go-autoig', group: 'Ir a', label: 'Automatización IG', icon: Instagram, run: () => onNavigate('mk-auto-ig') },
+      { id: 'go-gastos', group: 'Ir a', label: 'Gastos del stack', icon: DollarSign, run: () => onNavigate('mk-gastos') },
+      { id: 'go-consultoria', group: 'Ir a', label: 'Consultoría · Acta', icon: FileText, run: () => onNavigate('con-acta') },
     );
   }
   baseCmds.push(
@@ -8602,34 +8591,8 @@ function CommandPalette({ state, currentUser, onClose, onNavigate, onNewSale, on
     { id: 'logout', group: 'Sesión', label: 'Cerrar sesión', icon: LogOut, run: onLogout },
   );
 
-  // Resultados dinámicos por texto: además de los comandos base, matcheamos
-  // clientes y productos por nombre y al seleccionar navegamos a la sección.
-  const dynamicCmds = [];
   const q = query.trim().toLowerCase();
-  if (q && currentUser?.role === 'admin') {
-    state.clients.slice(0, 6).filter(c => c.nombre?.toLowerCase().includes(q)).forEach(c => {
-      dynamicCmds.push({
-        id: `client-${c.id}`,
-        group: 'Clientes',
-        label: c.nombre,
-        meta: c.telefono || '',
-        icon: Users,
-        run: () => onNavigate('clientes'),
-      });
-    });
-    state.products.slice(0, 6).filter(p => p.nombre?.toLowerCase().includes(q)).forEach(p => {
-      dynamicCmds.push({
-        id: `product-${p.id}`,
-        group: 'Productos',
-        label: p.nombre,
-        meta: `$${(p.precioVenta || 0).toLocaleString()}`,
-        icon: Package,
-        run: () => onNavigate('productos'),
-      });
-    });
-  }
-
-  const allCmds = [...baseCmds, ...dynamicCmds];
+  const allCmds = baseCmds;
   const filtered = q
     ? allCmds.filter(c => c.label.toLowerCase().includes(q) || c.group.toLowerCase().includes(q))
     : allCmds;

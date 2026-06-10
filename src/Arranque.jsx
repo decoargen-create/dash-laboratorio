@@ -306,11 +306,25 @@ async function parseJsonResponse(resp, contextLabel) {
   try {
     return JSON.parse(raw);
   } catch {
-    const isTimeout = /timeout|FUNCTION_INVOCATION|gateway/i.test(raw)
-      || resp.status === 504 || resp.status === 502;
-    const detalle = isTimeout
-      ? 'el servidor tardó demasiado y cortó la conexión (timeout) — reintentá en la próxima corrida'
-      : `el servidor devolvió un error inesperado (HTTP ${resp.status})`;
+    // Vercel mata la función serverless al pasar maxDuration y devuelve
+    // su página HTML genérica "Internal Server Error" / "An error occurred
+    // with your deployment". Detectamos esos patrones para dar un mensaje
+    // accionable en lugar del críptico "Unexpected token '<' is not JSON".
+    const isVercelTimeout = /FUNCTION_INVOCATION_TIMEOUT|TIMEOUT|gateway timeout/i.test(raw);
+    const isVercelGenericError = /Internal Server Error|An error occurred with your deployment|FUNCTION_INVOCATION_FAILED/i.test(raw);
+    const isHTML = /^\s*<(!doctype|html)/i.test(raw);
+    const status5xx = resp.status === 504 || resp.status === 502 || resp.status === 500;
+
+    let detalle;
+    if (isVercelTimeout || resp.status === 504) {
+      detalle = 'el servidor tardó demasiado y cortó la conexión (timeout > 300s) — reintentá en la próxima corrida';
+    } else if (isVercelGenericError || (isHTML && status5xx)) {
+      detalle = 'la función serverless crasheó o agotó memoria — Vercel devolvió error genérico. Reintentá; si persiste, revisá los logs en Vercel';
+    } else if (status5xx) {
+      detalle = `el servidor devolvió un error inesperado (HTTP ${resp.status})`;
+    } else {
+      detalle = `respuesta no-JSON inesperada (HTTP ${resp.status})`;
+    }
     throw new Error(`${contextLabel}: ${detalle}`);
   }
 }

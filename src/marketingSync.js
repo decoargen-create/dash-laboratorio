@@ -170,6 +170,26 @@ export async function pullMarketingFromCloud() {
           productosArr[idx] = { ...p, bandejaIdeas: fromTable };
         }
       });
+      // Sweep de orphans: cualquier idea que ya esté en marketing_ideas se
+      // remueve del ORPHAN_KEY (sino loadIdeas la mostraría duplicada y el
+      // orphan key crecería indefinidamente).
+      try {
+        const ORPHAN_KEY = 'adslab-marketing-bandeja-orphan-v1';
+        const raw = localStorage.getItem(ORPHAN_KEY);
+        if (raw) {
+          const orphans = JSON.parse(raw);
+          if (Array.isArray(orphans) && orphans.length > 0) {
+            const idsInTable = new Set(ideasRows.map(r => String(r.id)));
+            const remaining = orphans.filter(o => !idsInTable.has(String(o?.id)));
+            if (remaining.length < orphans.length) {
+              localStorage.setItem(ORPHAN_KEY, JSON.stringify(remaining));
+              console.info(`[sync] sweep orphans: ${orphans.length - remaining.length} reconciliados a marketing_ideas`);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[sync] sweep orphans falló:', err.message);
+      }
       console.info(`[sync] re-attached ${ideasRows.length} ideas de marketing_ideas a productos`);
     }
   } catch (err) {

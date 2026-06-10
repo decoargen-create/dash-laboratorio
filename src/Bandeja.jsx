@@ -30,6 +30,7 @@ import { bulkGenerateFromIdeas } from './bandejaBulkGenerate.js';
 import { parseJsonOrThrow } from './apiHelpers.js';
 import { startExecution, updateExecution, finishExecution } from './executionsStore.js';
 import { useCloudProductos } from './useCloudProductos.js';
+import { fetchProductos } from './cloudData.js';
 
 const PRODUCTOS_KEY = 'adslab-marketing-productos-v1';
 const ACTIVE_PRODUCT_KEY = 'adslab-marketing-bandeja-active-product';
@@ -1118,7 +1119,6 @@ function IdeaImageGenerator({ idea, addToast }) {
     let producto = loadProductos().find(p => String(p.id) === String(idea.productoId));
     if (!producto) {
       try {
-        const { fetchProductos } = await import('./cloudData.js');
         const cloud = await fetchProductos();
         producto = cloud.find(p => String(p.id) === String(idea.productoId));
       } catch {}
@@ -1364,7 +1364,6 @@ function VideoBriefPanel({ idea }) {
     if (!prod) {
       // Fallback cross-device: si localStorage no sincronizó, pedir cloud.
       try {
-        const { fetchProductos } = await import('./cloudData.js');
         const cloud = await fetchProductos();
         prod = cloud.find(p => String(p.id) === String(idea.productoId));
       } catch {}

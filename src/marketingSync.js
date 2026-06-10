@@ -95,20 +95,24 @@ export async function pullMarketingFromCloud() {
     // Cuando algun campo aparece en local pero NO en cloud, lo
     // promocionamos. El próximo push lo sube y queda sincronizado para
     // todas las devices del user.
+    //
+    // GENERIC PRESERVE: en lugar de listar campo por campo (frágil, se
+    // olvidan descripcion / landingUrl / metaAccount), preservamos cualquier
+    // key que esté en local con valor no-null y no esté en cloud (== null).
+    // Excepciones: campos legacy o que viven en tablas separadas.
+    const EXCLUDED_FROM_PRESERVE = new Set([
+      'creativos',     // legacy embebido, removido de cloud
+      'bandejaIdeas',  // ahora vive en tabla marketing_ideas
+    ]);
     const merged = { ...slim };
-    const preserveIfMissing = (key) => {
-      if (merged[key] == null && localP[key] != null) merged[key] = localP[key];
-    };
-    preserveIfMissing('docs');
-    preserveIfMissing('resumenEjecutivo');
-    preserveIfMissing('accentColor');
-    preserveIfMissing('fotoUrl');
-    preserveIfMissing('fotoUpdatedAt');
-    preserveIfMissing('ofertasReales');
-    preserveIfMissing('activoVisual');
-    preserveIfMissing('stage');
-    preserveIfMissing('docsGeneratedAt');
+    for (const k of Object.keys(localP)) {
+      if (EXCLUDED_FROM_PRESERVE.has(k)) continue;
+      if (merged[k] == null && localP[k] != null) {
+        merged[k] = localP[k];
+      }
+    }
     // Arrays: si cloud está vacío/null pero local tiene cosas, preservar.
+    // (cubre el caso donde cloud tiene competidores: [] vs local con datos)
     if ((!merged.competidores || merged.competidores.length === 0) && localP.competidores?.length) {
       merged.competidores = localP.competidores;
     }
@@ -172,37 +176,46 @@ export async function pullMarketingFromCloud() {
     console.warn('[sync] pull ideas falló (continuo igual):', err.message);
   }
 
+  // ⚠️ SAFETY CRÍTICO: NUNCA degradar localStorage a una versión sparse.
+  // El bug original guardaba {id, nombre, ...subset} cuando quota fallaba —
+  // después, cualquier mutación (setAccentColor, addCompetidor) leía sparse
+  // + modificaba + dispatchaba push → push subía sparse al cloud → CLOUD
+  // WIPED. Ese fue el data-loss event histórico de este account.
+  //
+  // Nueva estrategia ante quota:
+  //   1. Liberar caches no-críticos (skeleton-cache, creative-refresh-cache, etc.)
+  //   2. Retry con la data FULL
+  //   3. Si AÚN no entra, NO escribir nada — dejamos localStorage como
+  //      estaba (puede estar stale pero NO sparse). Loggeamos error crítico.
+  //      NO disparamos push.
   try {
     localStorage.setItem(KEYS.productos, JSON.stringify(productosArr));
     if (mergeOccurred) {
-      // Dispara el push del merge → cloud se actualiza con lo preservado.
       window.dispatchEvent(new CustomEvent('viora:marketing-storage-changed', {
         detail: { key: KEYS.productos },
       }));
     }
     console.info(`[sync] localStorage productos actualizado: ${productosArr.length} productos, ${JSON.stringify(productosArr).length} bytes`);
   } catch (e) {
-    console.warn('[sync] no pude escribir localStorage (quota?):', e.message);
-    // Fallback: intentar con solo la metadata mínima — sin docs/research grandes
+    console.warn('[sync] localStorage write falló (quota?):', e.message, '— liberando cache y retry');
+    // 1) Liberar caches.
+    try { localStorage.removeItem('adslab-marketing-skeleton-cache'); } catch {}
+    try { localStorage.removeItem('adslab-marketing-creative-refresh-cache'); } catch {}
+    try { localStorage.removeItem('adslab-marketing-execution-log'); } catch {}
+    try { localStorage.removeItem('adslab-marketing-cost-log'); } catch {}
+    // 2) Retry full data.
     try {
-      const tinyArr = productosArr.map(p => ({
-        id: p.id,
-        nombre: p.nombre,
-        descripcion: (p.descripcion || '').slice(0, 500),
-        landingUrl: p.landingUrl,
-        stage: p.stage,
-        competidores: p.competidores,
-        metaAccount: p.metaAccount,
-      }));
-      localStorage.setItem(KEYS.productos, JSON.stringify(tinyArr));
-      console.warn(`[sync] guardé versión liviana: ${tinyArr.length} productos`);
+      localStorage.setItem(KEYS.productos, JSON.stringify(productosArr));
+      console.info(`[sync] localStorage escrito tras liberar caches: ${productosArr.length} productos`);
+      if (mergeOccurred) {
+        window.dispatchEvent(new CustomEvent('viora:marketing-storage-changed', {
+          detail: { key: KEYS.productos },
+        }));
+      }
     } catch (e2) {
-      console.warn('[sync] ni siquiera la versión mínima entra. Limpiando otras keys.', e2.message);
-      // Liberamos espacio borrando caches que no son críticos.
-      try { localStorage.removeItem('adslab-marketing-skeleton-cache'); } catch {}
-      try { localStorage.removeItem('adslab-marketing-creative-refresh-cache'); } catch {}
-      // Retry
-      try { localStorage.setItem(KEYS.productos, JSON.stringify(productosArr.map(p => ({ id: p.id, nombre: p.nombre })))); } catch {}
+      // 3) NO degradar. Dejar localStorage intacto (versión previa) → push
+      //    no se gatilla → cloud queda con la versión actual (segura).
+      console.error('[sync] 🔴 CRÍTICO: localStorage lleno tras liberar caches. NO degradando a sparse para no wipear cloud. Dejando versión anterior:', e2.message);
     }
   }
 
@@ -260,12 +273,30 @@ export async function pushProducto(producto) {
   if (!supabase) throw new Error('Supabase no configurado');
   const user = await getCurrentUser();
   if (!user) throw new Error('No hay user logueado');
+  // ANTI-WIPE: chequear regresión de tamaño contra cloud actual.
+  const stripped = stripIdeas(producto);
+  const localSize = JSON.stringify(stripped).length;
+  try {
+    const { data: cloudCurrent } = await supabase
+      .from('marketing_productos')
+      .select('data')
+      .eq('user_id', user.id)
+      .eq('id', String(producto.id))
+      .maybeSingle();
+    const cloudSize = cloudCurrent?.data ? JSON.stringify(cloudCurrent.data).length : 0;
+    if (cloudSize > 500 && localSize < cloudSize * 0.5) {
+      console.error(`[sync] 🔴 ANTI-WIPE: skip push de producto ${producto.id} (${producto.nombre}) por regresión: local ${localSize}B vs cloud ${cloudSize}B`);
+      return;
+    }
+  } catch (err) {
+    console.warn('[sync] pushProducto pre-check falló — pusheando sin guard:', err.message);
+  }
   const { error } = await supabase
     .from('marketing_productos')
     .upsert({
       id: String(producto.id),
       user_id: user.id,
-      data: stripIdeas(producto),
+      data: stripped,
     }, { onConflict: 'user_id,id' });
   if (error) throw new Error(`Push producto: ${error.message}`);
 }
@@ -288,12 +319,61 @@ export async function pushAllProductos(productos) {
     console.warn('[sync] push de productos vacíos — skipping para no borrar cloud (race protection)');
     return;
   }
-  // Upsert masivo. stripIdeas() saca bandejaIdeas — la tabla marketing_ideas
-  // es la source of truth desde fase 5.
-  const rows = productos.map(p => ({
+  // ⚠️ GUARD ANTI-WIPE: para cada producto, traemos el tamaño actual del
+  // cloud. Si lo que estamos por pushear es <50% del cloud Y el cloud tiene
+  // data significativa (>500 bytes), es señal de que localStorage perdió
+  // data (quota fallback histórico, race condition) y este push wipearía
+  // el cloud. En ese caso lo SKIPEAMOS por producto.
+  //
+  // El usuario verá un warning en consola y sabrá que su localStorage está
+  // sparse. La data del cloud queda intacta hasta que el smart-merge en el
+  // próximo pull la traiga de vuelta a local.
+  let cloudSizes = new Map();
+  try {
+    const { data: cloudCurrent } = await supabase
+      .from('marketing_productos')
+      .select('id, data')
+      .eq('user_id', user.id)
+      .in('id', productos.map(p => String(p.id)));
+    for (const row of cloudCurrent || []) {
+      const size = JSON.stringify(row.data || {}).length;
+      cloudSizes.set(String(row.id), size);
+    }
+  } catch (err) {
+    console.warn('[sync] pre-push cloud check falló — pusheo sin guard de regresión:', err.message);
+  }
+
+  const safe = [];
+  const skipped = [];
+  for (const p of productos) {
+    const stripped = stripIdeas(p);
+    const localSize = JSON.stringify(stripped).length;
+    const cloudSize = cloudSizes.get(String(p.id)) || 0;
+    // Heurística: cloud tiene data sustancial (>500B) Y local es menos de
+    // la mitad → regresión sospechosa, skipear.
+    if (cloudSize > 500 && localSize < cloudSize * 0.5) {
+      skipped.push({ id: p.id, nombre: p.nombre, localSize, cloudSize });
+    } else {
+      safe.push(stripped);
+    }
+  }
+
+  if (skipped.length > 0) {
+    console.error(
+      `[sync] 🔴 ANTI-WIPE: skipeando push de ${skipped.length} productos por regresión de tamaño (local << cloud). Probablemente localStorage está sparse y este push wipearía cloud:`,
+      skipped
+    );
+  }
+
+  if (safe.length === 0) {
+    console.warn('[sync] push: todos los productos fueron skipeados por anti-wipe, no se pushea nada');
+    return;
+  }
+
+  const rows = safe.map(p => ({
     id: String(p.id),
     user_id: user.id,
-    data: stripIdeas(p),
+    data: p,
   }));
   const { error } = await supabase
     .from('marketing_productos')

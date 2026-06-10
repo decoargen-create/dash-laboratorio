@@ -230,9 +230,11 @@ function formatMs(ms) {
   return `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
-// Barra flotante de progreso del bulk. Muestra ad current, % total, ETA
-// y un pill por cada ad para ver qué está done/doing/pending/error.
-export function BulkProgressBar({ state, onClose }) {
+// Barra flotante de progreso del bulk. Movida a su propio archivo
+// (BulkProgressBar.jsx) para code-splitting. La definición quedó acá
+// para no romper si algún código viejo importa el named export.
+// TODO: remover en próximo PR cuando confirmemos que no hay más callers.
+function BulkProgressBar({ state, onClose }) {
   // Guard: si no hay bulk corriendo (state=null), no renderizamos nada.
   // El caller siempre debería check pero por defensiva acá lo doblamos —
   // Arranque renderiza esto en el shell del producto sin condicional.
@@ -1029,6 +1031,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   // si el user navega fuera durante async ops (40-90s típico).
   const mountedRef = useRef(true);
   const bulkRunningRef = useRef(false);
+  const bulkAdaptingRef = useRef(false);
   const timeoutsRef = useRef(new Set());
   useEffect(() => {
     mountedRef.current = true;
@@ -1384,58 +1387,64 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   // Adapta un ad de inspiración al producto activo: llama al endpoint
   // adapt-inspiracion (Claude Vision con la imagen + contexto del producto)
   // y mete las ideas generadas directamente en la Bandeja del producto.
+  // adaptAdToIdeas: core sin UI side-effects. Llama el endpoint, mete
+  // las ideas a la bandeja, devuelve { ideasCount, cost }. Throw on error.
+  // Usado por handleAdapt (single, con UI) y handleBulkAdapt (bulk silencioso).
+  const adaptAdToIdeas = async (brandNombre, ad) => {
+    if (!producto) throw new Error('Sin producto activo');
+    const resp = await fetch('/api/marketing/adapt-inspiracion', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        producto: {
+          nombre: producto.nombre,
+          descripcion: producto.descripcion,
+          landingUrl: producto.landingUrl,
+          research: producto.docs?.research,
+          avatar: producto.docs?.avatar,
+          activoVisual: producto.activoVisual,
+        },
+        inspiracion: { brandNombre, ad },
+      }),
+    });
+    const data = await parseJsonOrThrow(resp, 'adapt-inspiracion');
+    if (!resp.ok) throw new Error(stringifyApiError(data.error) || `HTTP ${resp.status}`);
+    const adaptCost = logCostsFromResponse(data, `adapt-inspiracion · ${brandNombre}`);
+    const ideas = (data.ideas || []).map(i => ({
+      ...i,
+      tipo: 'replica',
+      productoId: String(producto.id),
+      productoNombre: producto.nombre,
+      origen: {
+        competidorNombre: `Inspiración: ${brandNombre}`,
+        adId: ad.id,
+        adSnapshotUrl: ad.snapshotUrl,
+        imageUrl: ad.imageUrls?.[0],
+        razonamiento: i.razonamiento,
+      },
+    }));
+    addGeneratedIdeas(ideas);
+    return { ideas: ideas.length, cost: adaptCost?.total || 0 };
+  };
+
   const handleAdapt = async (brandNombre, ad) => {
     if (!producto) return;
     setAdaptingAdIds(prev => new Set(prev).add(ad.id));
     const execId = startExecution({
       label: `Adaptando ideas desde ${brandNombre}`,
-      // Sanitizamos templates Meta del estilo {{product.name}} que algunos
-      // competidores dejan en el headline — Apify scrapea el raw template
-      // sin que Meta lo interpole para nosotros.
       sublabel: (ad.headline || ad.body || '').replace(/\{\{[^}]+\}\}/g, '').trim().slice(0, 60),
       kind: 'adapt',
       estimatedMs: 40000,
     });
     try {
-      const resp = await fetch('/api/marketing/adapt-inspiracion', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          producto: {
-            nombre: producto.nombre,
-            descripcion: producto.descripcion,
-            landingUrl: producto.landingUrl,
-            research: producto.docs?.research,
-            avatar: producto.docs?.avatar,
-            activoVisual: producto.activoVisual,
-          },
-          inspiracion: { brandNombre, ad },
-        }),
-      });
-      const data = await parseJsonOrThrow(resp, 'adapt-inspiracion');
-      if (!resp.ok) throw new Error(stringifyApiError(data.error) || `HTTP ${resp.status}`);
-      const adaptCost = logCostsFromResponse(data, `adapt-inspiracion · ${brandNombre}`);
-
-      const ideas = (data.ideas || []).map(i => ({
-        ...i,
-        tipo: 'replica',
-        productoId: String(producto.id),
-        productoNombre: producto.nombre,
-        origen: {
-          competidorNombre: `Inspiración: ${brandNombre}`,
-          adId: ad.id,
-          adSnapshotUrl: ad.snapshotUrl,
-          imageUrl: ad.imageUrls?.[0],
-          razonamiento: i.razonamiento,
-        },
-      }));
-      addGeneratedIdeas(ideas);
-
-      const msg = `${ideas.length} ideas adaptadas en la Bandeja de ${producto.nombre}`;
+      const { ideas, cost } = await adaptAdToIdeas(brandNombre, ad);
+      const msg = `${ideas} ideas adaptadas en la Bandeja de ${producto.nombre}`;
       addToast?.({ type: 'success', message: msg });
-      finishExecution(execId, { ok: true, message: msg, cost: adaptCost?.total });
+      finishExecution(execId, { ok: true, message: msg, cost });
+      return { ideas, cost };
     } catch (err) {
       addToast?.({ type: 'error', message: `No pude adaptar: ${err.message}` });
       finishExecution(execId, { ok: false, message: err.message || 'Error' });
+      throw err;
     } finally {
       if (mountedRef.current) {
         setAdaptingAdIds(prev => {
@@ -1745,6 +1754,80 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   // Bulk: itera los seleccionados en SECUENCIAL (gpt-image-2 toma 30-60s
   // por llamada y queremos evitar rate limits). Mantiene bulkProgress
   // actualizado para que la barra flotante muestre ETA real.
+  // Bulk adapt: convierte TODOS los ads seleccionados en ideas de Bandeja
+  // mediante adapt-inspiracion. Cada ad → ~3-5 ideas vía Claude Haiku
+  // (~$0.005/ad). Mucho más barato que generar imágenes — útil para
+  // poblar la Bandeja con ideas inspiradas en los winners de la
+  // competencia antes de decidir cuáles vale la pena generar.
+  const handleBulkAdapt = async () => {
+    if (bulkAdaptingRef.current) {
+      addToast?.({ type: 'info', message: 'Ya hay un bulk adapt corriendo. Esperá a que termine.' });
+      return;
+    }
+    if (seleccionados.size === 0) return;
+    if (!producto) return;
+    // Reusamos el mismo lookup que handleBulkCrear.
+    const adsAGenerar = [];
+    const adsCompetidores = (producto.competidores || []).flatMap(c =>
+      (c.ads || [])
+        .filter(a => seleccionados.has(a.id))
+        .map(a => ({ brandNombre: c.nombre, ad: a }))
+    );
+    const adsCustom = Object.entries(adsByBrand).flatMap(([brandId, lista]) => {
+      const b = brands.find(x => x.id === brandId);
+      const brandNombre = b?.nombre || 'Inspiración';
+      return (lista || [])
+        .filter(a => seleccionados.has(a.id))
+        .map(a => ({ brandNombre, ad: a }));
+    });
+    adsAGenerar.push(...adsCompetidores, ...adsCustom);
+    if (adsAGenerar.length === 0) return;
+    const costoAprox = (adsAGenerar.length * 0.005).toFixed(3);
+    if (!window.confirm(`Convertir ${adsAGenerar.length} ads en ideas para la Bandeja de ${producto.nombre}. Cada ad genera ~3-5 ideas. Costo: ~$${costoAprox} (Claude Haiku). ¿Seguir?`)) return;
+    bulkAdaptingRef.current = true;
+    const startedAt = Date.now();
+    const execId = startExecution({
+      label: `Adaptando ${adsAGenerar.length} ads a ideas`,
+      sublabel: `→ Bandeja de ${producto.nombre}`,
+      kind: 'adapt',
+      estimatedMs: 25000 * Math.ceil(adsAGenerar.length / 3),
+      estimatedCost: Number(costoAprox),
+    });
+    addToast?.({
+      type: 'info',
+      message: `${adsAGenerar.length} ads disparados en paralelo. ETA ~${Math.ceil(adsAGenerar.length / 3) * 25}s — podés cerrar la pestaña.`,
+    });
+    let ok = 0;
+    let failed = 0;
+    let totalIdeas = 0;
+    let totalCost = 0;
+    // adaptAdToIdeas es silencioso — sin toasts ni executions individuales.
+    // Solo el bulk muestra UN execution + UN toast final agregado.
+    const promises = adsAGenerar.map(({ brandNombre, ad }) =>
+      adaptAdToIdeas(brandNombre, ad)
+        .then(result => {
+          ok++;
+          if (result?.ideas) totalIdeas += result.ideas;
+          if (result?.cost) totalCost += result.cost;
+          updateExecution(execId, { stage: `${ok}/${adsAGenerar.length} adaptados${failed ? ` (${failed} ✗)` : ''}` });
+        })
+        .catch(err => {
+          failed++;
+          console.warn(`bulk adapt ad ${ad.id} falló:`, err.message);
+          updateExecution(execId, { stage: `${ok}/${adsAGenerar.length} adaptados${failed ? ` (${failed} ✗)` : ''}` });
+        })
+    );
+    await Promise.all(promises);
+    bulkAdaptingRef.current = false;
+    const msg = failed === 0
+      ? `${ok} ads → ${totalIdeas || 'N'} ideas en Bandeja`
+      : `${ok}/${adsAGenerar.length} OK (${failed} fallaron) — ${totalIdeas} ideas`;
+    finishExecution(execId, { ok: failed === 0, message: msg, cost: totalCost });
+    addToast?.({ type: failed === 0 ? 'success' : 'warning', message: msg });
+    if (ok > 0) playDoneChime();
+    limpiarSeleccion();
+  };
+
   const handleBulkCrear = async () => {
     // Guard contra doble-click. Sin esto, dos workers procesaban el mismo
     // index del queue por race en nextIndex → ads generados 2x o skipped.
@@ -2202,6 +2285,12 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           <button onClick={limpiarSeleccion}
             className="text-[11px] text-gray-500 hover:text-red-500 transition">
             Limpiar
+          </button>
+          <button onClick={handleBulkAdapt}
+            disabled={bulkAdaptingRef.current}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-700 rounded-lg hover:bg-amber-100 dark:hover:bg-amber-900/50 transition disabled:opacity-60"
+            title="Adaptar TODOS los ads seleccionados como ideas en la Bandeja. ~$0.005 por ad (Claude Haiku) — barato. Ideal para crear un dump masivo de ideas inspiradas en los ganadores de la competencia.">
+            <Inbox size={13} /> Bandeja ×{seleccionados.size}
           </button>
           <button onClick={handleBulkCrear}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-brand-600 rounded-lg hover:from-brand-700 hover:to-brand-600 transition">

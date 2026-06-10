@@ -13,13 +13,16 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   X, Download, Trash2, Images, ChevronDown, ChevronUp, ExternalLink,
   LayoutGrid, Rows3, Table2, Plus, Check, FileArchive, EyeOff, Eye,
-  Archive, ArchiveRestore,
+  Archive, ArchiveRestore, Trophy, Sparkles,
 } from 'lucide-react';
 import JSZip from 'jszip';
 import {
   getReferencialesByProducto, deleteReferencial, patchReferenciales,
   archiveReferencial, countReferencialesByProducto,
+  markAsWinner, unmarkWinner,
 } from './galeriaReferenciales.js';
+import WinnerForm from './WinnerForm.jsx';
+import { iterateFromWinner } from './winnerIterate.js';
 import { SkeletonGrid } from './Skeleton.jsx';
 import EmptyState from './EmptyState.jsx';
 
@@ -418,7 +421,8 @@ function GalleryTableView({ items, blobUrls, seleccionados, selectedOrder, onTog
 
 // Lightbox separado para mantener este archivo manejable.
 
-function Lightbox({ item, imgSrc, onClose, showDebug, setShowDebug, onDownload, onDelete, onToggleDescargada, onArchive }) {
+function Lightbox({ item, imgSrc, onClose, showDebug, setShowDebug, onDownload, onDelete, onToggleDescargada, onArchive, onToggleWinner, onIterateWinner }) {
+  const metrics = item.winnerMetrics || {};
   return (
     <div
       className="fixed inset-0 z-[60] bg-black/90 flex items-start justify-center p-6 overflow-y-auto"
@@ -446,10 +450,15 @@ function Lightbox({ item, imgSrc, onClose, showDebug, setShowDebug, onDownload, 
             )}
           </div>
           <div className="bg-white dark:bg-gray-900 p-3 flex flex-col">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-brand-600 dark:text-brand-400 mb-2 flex items-center gap-2">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-brand-600 dark:text-brand-400 mb-2 flex items-center gap-2 flex-wrap">
               Variación generada {item.variantIndex != null ? `#${item.variantIndex + 1}` : ''}
               {item.variantStyle === 'rebrand' && (
                 <span className="px-1.5 py-0.5 text-[9px] bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 rounded">REBRAND</span>
+              )}
+              {item.winner && (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 rounded" title={`Winner marcado ${fmtDate(item.winnerAt)}`}>
+                  <Trophy size={9} /> WINNER
+                </span>
               )}
               {item.descargada && (
                 <span className="ml-auto inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded" title={fmtDate(item.descargadaAt)}>
@@ -466,6 +475,38 @@ function Lightbox({ item, imgSrc, onClose, showDebug, setShowDebug, onDownload, 
             </div>
           </div>
         </div>
+
+        {/* Métricas del winner — solo si está marcado */}
+        {item.winner && (
+          <div className="border-t border-amber-200 dark:border-amber-800 bg-amber-50/60 dark:bg-amber-900/15 px-4 py-3">
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-amber-800 dark:text-amber-200 flex items-center gap-1.5">
+                <Trophy size={12} /> Por qué este es un winner
+              </p>
+              {metrics.ad_id && (
+                <span className="text-[10px] text-amber-700 dark:text-amber-300 font-mono">
+                  Ad: {metrics.ad_id}
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-3 md:grid-cols-6 gap-2 mb-2">
+              {metrics.ctr != null && <MetricBox label="CTR" value={`${metrics.ctr}%`} />}
+              {metrics.roas != null && <MetricBox label="ROAS" value={metrics.roas} />}
+              {metrics.cpa != null && <MetricBox label="CPA" value={`$${metrics.cpa}`} />}
+              {metrics.thumb_stop != null && <MetricBox label="Thumb-stop" value={`${metrics.thumb_stop}%`} />}
+              {metrics.impressions != null && <MetricBox label="Impres." value={Number(metrics.impressions).toLocaleString('es-AR')} />}
+              {metrics.purchases != null && <MetricBox label="Compras" value={metrics.purchases} />}
+            </div>
+            {Array.isArray(metrics.que_funciono) && metrics.que_funciono.length > 0 && (
+              <p className="text-[10px] text-amber-800 dark:text-amber-200 mb-1">
+                <span className="font-bold">Funcionó:</span> {metrics.que_funciono.join(' · ')}
+              </p>
+            )}
+            {metrics.notas && (
+              <p className="text-[11px] text-amber-900 dark:text-amber-100 italic">"{metrics.notas}"</p>
+            )}
+          </div>
+        )}
 
         {(item.skeleton || item.prompt) && (
           <div className="border-t border-gray-200 dark:border-gray-700">
@@ -497,18 +538,32 @@ function Lightbox({ item, imgSrc, onClose, showDebug, setShowDebug, onDownload, 
           <div className="text-[10px] text-gray-500 dark:text-gray-400">
             {item.createdAt && <span>{fmtDate(item.createdAt)}</span>}
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap justify-end">
             <button onClick={onDownload}
               className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition">
               <Download size={13} /> Descargar
             </button>
+            <button onClick={onToggleWinner}
+              className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg transition ${
+                item.winner
+                  ? 'text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/40 hover:bg-amber-200'
+                  : 'text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 hover:bg-amber-100 border border-amber-300 dark:border-amber-800'
+              }`}>
+              <Trophy size={13} /> {item.winner ? 'Quitar winner' : 'Marcar winner'}
+            </button>
+            {item.winner && onIterateWinner && (
+              <button onClick={onIterateWinner}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 rounded-lg transition">
+                <Sparkles size={13} /> Iterar desde winner
+              </button>
+            )}
             <button onClick={onToggleDescargada}
               className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg transition ${
                 item.descargada
                   ? 'text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100'
                   : 'text-gray-700 dark:text-gray-200 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300'
               }`}>
-              <Check size={13} /> {item.descargada ? 'Marcar pendiente' : 'Marcar descargado'}
+              <Check size={13} /> {item.descargada ? 'Pendiente' : 'Descargado'}
             </button>
             <button onClick={onArchive}
               className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg transition ${
@@ -535,10 +590,14 @@ function Lightbox({ item, imgSrc, onClose, showDebug, setShowDebug, onDownload, 
 }
 
 
-export default function GaleriaReferencialesModal({ productoId, productoNombre, onClose, embedded = false }) {
+export default function GaleriaReferencialesModal({ productoId, productoNombre, producto, onClose, embedded = false }) {
   const [items, setItems] = useState([]);
-  const [counts, setCounts] = useState({ total: 0, active: 0, archived: 0, downloaded: 0 });
+  const [counts, setCounts] = useState({ total: 0, active: 0, archived: 0, downloaded: 0, winners: 0 });
   const [verArchivados, setVerArchivados] = useState(false);
+  // Panel principal: 'todos' | 'winners' | 'archivados'. Es el filtro top-level.
+  const [panel, setPanel] = useState('todos');
+  // Form de marcar como winner — guardamos el creativo a marcar.
+  const [winnerFormItem, setWinnerFormItem] = useState(null);
   const [selected, setSelected] = useState(null);
   const [cargando, setCargando] = useState(true);
   const [showDebug, setShowDebug] = useState(false);
@@ -570,8 +629,11 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
 
   const refresh = () => {
     setCargando(true);
+    // Cuando el panel es "archivados", incluimos archivados en la query
+    // — sino los filtraríamos del array y no aparecerían en el panel.
+    const includeArchived = panel === 'archivados' || verArchivados;
     Promise.all([
-      getReferencialesByProducto(productoId, { includeArchived: verArchivados }),
+      getReferencialesByProducto(productoId, { includeArchived }),
       countReferencialesByProducto(productoId),
     ])
       .then(([its, cs]) => { setItems(its); setCounts(cs); })
@@ -588,7 +650,7 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
     window.addEventListener('viora:referencial-saved', onSaved);
     return () => window.removeEventListener('viora:referencial-saved', onSaved);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [productoId, verArchivados]);
+  }, [productoId, verArchivados, panel]);
 
   // Blob URLs por item — se revoca el set anterior al regenerar.
   // SIN esto, cada <img src="data:..."> hacía Chrome decodificar PNG 2K en
@@ -764,6 +826,41 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
     refresh();
   };
 
+  // Winner — abrir form si va a marcar, des-marcar directo si quitar.
+  const handleToggleWinner = (item) => {
+    if (item.winner) {
+      // Des-marcar directo (sin form). Si querían editar las métricas, hay
+      // un botón aparte "Editar métricas" en el lightbox.
+      if (!window.confirm('¿Sacar el flag de winner de este creativo? Las métricas guardadas se pierden.')) return;
+      unmarkWinner(item.id).then(() => refresh());
+      return;
+    }
+    setWinnerFormItem(item);
+  };
+
+  const handleConfirmWinner = async (metrics) => {
+    if (!winnerFormItem) return;
+    await markAsWinner(winnerFormItem.id, metrics);
+    setWinnerFormItem(null);
+    refresh();
+  };
+
+  // Iterar desde un winner — crea idea en Bandeja y cierra galería.
+  const handleIterateWinner = async (item) => {
+    if (!producto) {
+      alert('Falta el contexto del producto para iterar.');
+      return;
+    }
+    try {
+      await iterateFromWinner(item, producto);
+      // Notificar que se creó idea — Bandeja la va a levantar.
+      try { window.dispatchEvent(new Event('viora:marketing-storage-changed')); } catch {}
+      alert('✓ Idea de iteración creada en la Bandeja del producto. Andá ahí para editarla y generar variantes.');
+    } catch (err) {
+      alert(`Error iterando: ${err.message}`);
+    }
+  };
+
   // Bulk archive: archiva todos los seleccionados a la vez. Útil cuando
   // armaste una grilla de 4 variaciones y solo querés guardar las 2 que
   // sirven para usar en Meta.
@@ -780,6 +877,10 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
   };
 
   const visibleItems = items.filter(it => {
+    // Panel principal: winners-only / archivados-only / todos.
+    if (panel === 'winners' && !it.winner) return false;
+    if (panel === 'archivados' && !it.archivado) return false;
+    if (panel === 'todos' && it.archivado) return false;
     if (filtroEstado === 'pending' && it.descargada) return false;
     if (filtroEstado === 'downloaded' && !it.descargada) return false;
     if (filtroVariante !== 'all' && it.variantStyle !== filtroVariante) return false;
@@ -802,20 +903,6 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
               <p className="text-[10px] text-gray-500 dark:text-gray-400 truncate">
                 {productoNombre} · {counts.active} activo{counts.active !== 1 ? 's' : ''}
                 {counts.downloaded > 0 && ` · ${counts.downloaded} descargado${counts.downloaded !== 1 ? 's' : ''}`}
-                {counts.archived > 0 && (
-                  <button
-                    onClick={() => setVerArchivados(v => !v)}
-                    className={`ml-1 px-1.5 py-0.5 rounded text-[9px] font-bold transition ${
-                      verArchivados
-                        ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300'
-                        : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-amber-50 dark:hover:bg-amber-900/30'
-                    }`}
-                    title={verArchivados ? 'Ocultar archivados' : 'Mostrar archivados'}
-                  >
-                    {verArchivados ? <ArchiveRestore size={9} className="inline -mt-0.5 mr-0.5" /> : <Archive size={9} className="inline -mt-0.5 mr-0.5" />}
-                    {counts.archived} archivado{counts.archived !== 1 ? 's' : ''}
-                  </button>
-                )}
               </p>
             </div>
           </div>
@@ -877,6 +964,33 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
               <X size={16} />
             </button>
           </div>
+        </div>
+
+        {/* Tabs panel: Todos / Winners / Archivados */}
+        <div className="px-5 pt-3 pb-0 border-b border-gray-200 dark:border-gray-700 flex items-center gap-1">
+          <TabButton
+            active={panel === 'todos'}
+            onClick={() => setPanel('todos')}
+            icon={<Images size={12} />}
+            label="Todos"
+            count={counts.active}
+          />
+          <TabButton
+            active={panel === 'winners'}
+            onClick={() => setPanel('winners')}
+            icon={<Trophy size={12} />}
+            label="Winners"
+            count={counts.winners}
+            highlight={counts.winners > 0}
+            accent="amber"
+          />
+          <TabButton
+            active={panel === 'archivados'}
+            onClick={() => setPanel('archivados')}
+            icon={<Archive size={12} />}
+            label="Archivados"
+            count={counts.archived}
+          />
         </div>
 
         {/* Body */}
@@ -960,6 +1074,17 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
           onDelete={() => handleDelete(selected.id)}
           onToggleDescargada={() => toggleDescargadaFlag(selected.id, !!selected.descargada)}
           onArchive={() => handleArchive(selected.id, !!selected.archivado)}
+          onToggleWinner={() => handleToggleWinner(selected)}
+          onIterateWinner={() => handleIterateWinner(selected)}
+        />
+      )}
+
+      {/* Winner form */}
+      {winnerFormItem && (
+        <WinnerForm
+          creativo={winnerFormItem}
+          onConfirm={handleConfirmWinner}
+          onCancel={() => setWinnerFormItem(null)}
         />
       )}
     </>
@@ -984,6 +1109,44 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
         {innerContent}
       </div>
     </div>
+  );
+}
+
+// Box compacto de métrica usado en la vista expandida del winner.
+function MetricBox({ label, value }) {
+  return (
+    <div className="bg-white/70 dark:bg-black/30 border border-amber-200 dark:border-amber-800 rounded px-2 py-1">
+      <p className="text-[9px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-300">{label}</p>
+      <p className="text-xs font-bold tabular-nums text-amber-900 dark:text-amber-100">{value}</p>
+    </div>
+  );
+}
+
+// Tab button para el panel principal (Todos / Winners / Archivados).
+function TabButton({ active, onClick, icon, label, count, highlight = false, accent }) {
+  const accentClass = accent === 'amber'
+    ? (active
+        ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 border-amber-300 dark:border-amber-700'
+        : highlight
+          ? 'text-amber-700 dark:text-amber-300 border-transparent hover:bg-amber-50 dark:hover:bg-amber-900/20'
+          : 'text-gray-600 dark:text-gray-300 border-transparent hover:bg-gray-50 dark:hover:bg-gray-800')
+    : (active
+        ? 'bg-brand-100 dark:bg-brand-900/40 text-brand-800 dark:text-brand-200 border-brand-300 dark:border-brand-700'
+        : 'text-gray-600 dark:text-gray-300 border-transparent hover:bg-gray-50 dark:hover:bg-gray-800');
+  return (
+    <button
+      onClick={onClick}
+      className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold rounded-t-md border-b-2 transition ${accentClass}`}>
+      {icon}
+      {label}
+      {count > 0 && (
+        <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+          active
+            ? 'bg-white/60 dark:bg-black/30'
+            : 'bg-gray-100 dark:bg-gray-700'
+        }`}>{count}</span>
+      )}
+    </button>
   );
 }
 

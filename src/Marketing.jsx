@@ -130,6 +130,16 @@ function downloadText(content, filename) {
 }
 
 // ---- inner components moved before export (TDZ fix Vite/Rollup) ----
+// CRÍTICO: DASH_TABS const TIENE que estar acá arriba (antes de
+// ProductDashboard que lo usa) sino TDZ en prod minificado.
+const DASH_TABS = [
+  { key: 'resumen',      label: 'Resumen',      icon: BookOpen },
+  { key: 'docs',         label: 'Documentos',   icon: FileText },
+  { key: 'competencia',  label: 'Competencia',  icon: Target },
+  { key: 'creativos',    label: 'Creativos',    icon: Sparkles },
+  { key: 'memoria',      label: 'Memoria',      icon: MessageSquare },
+  { key: 'historial',    label: 'Historial',    icon: Clock },
+];
 
 function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownloadSingle, onDownloadPack, onDelete, onUpdateProduct, addToast }) {
   const [noteText, setNoteText] = useState('');
@@ -1329,14 +1339,6 @@ export default function MarketingSection({ addToast, bgAnalysis, onStart, onCanc
 }
 
 // ============================================================
-// Dashboard expandido de un producto
+// Dashboard expandido de un producto — DASH_TABS movido arriba (TDZ fix)
 // ============================================================
-const DASH_TABS = [
-  { key: 'resumen',      label: 'Resumen',      icon: BookOpen },
-  { key: 'docs',         label: 'Documentos',   icon: FileText },
-  { key: 'competencia',  label: 'Competencia',  icon: Target },
-  { key: 'creativos',    label: 'Creativos',    icon: Sparkles },
-  { key: 'memoria',      label: 'Memoria',      icon: MessageSquare },
-  { key: 'historial',    label: 'Historial',    icon: Clock },
-];
 

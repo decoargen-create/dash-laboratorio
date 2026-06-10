@@ -17,7 +17,7 @@
 // para continuidad entre Arranque, Documentación (viewer), Competencia,
 // Bandeja y Gastos.
 
-import React, { useState, useEffect, useRef, useMemo, lazy, Suspense, Fragment } from 'react';
+import React, { useState, useEffect, useRef, useMemo, Fragment } from 'react';
 import {
   Package, Target, Play, Check, Loader2, AlertTriangle, ChevronRight, ChevronDown,
   Plus, X, Sparkles, Link2, Search, Clock, Inbox, Trash2, Upload, Download, Activity,
@@ -29,11 +29,9 @@ import { supabase } from './supabase.js';
 import { downloadProductoExport, importProductoFromFile } from './productoExport.js';
 import DiagnosticoSyncModal from './DiagnosticoSyncModal.jsx';
 import { logCostsFromResponse } from './costsStore.js';
-// Lazy-loaded para no inflar el main chunk. Estos tabs (Bandeja/Inspiración)
-// solo renderean cuando el user activa el tab dentro del workspace del
-// producto. Suspense las wrapea abajo.
-const BandejaSection = lazy(() => import('./Bandeja.jsx'));
-const InspiracionSection = lazy(() => import('./InspiracionSection.jsx'));
+// Static imports — lazy() causaba TDZ en prod por chunking inconsistente.
+import BandejaSection from './Bandeja.jsx';
+import InspiracionSection from './InspiracionSection.jsx';
 import CreativosTab from './CreativosTab.jsx';
 import DocumentacionTab from './DocumentacionTab.jsx';
 import CopilotoTab from './CopilotoTab.jsx';
@@ -2635,9 +2633,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             onDone={() => setBandejaRefreshKey(k => k + 1)}
           />
           <div className="-mx-4">
-            <Suspense fallback={<div className="p-6 text-xs text-gray-400 italic">Cargando Bandeja…</div>}>
-              <BandejaSection key={bandejaRefreshKey} addToast={addToast} forcedProductoId={String(producto.id)} embedded />
-            </Suspense>
+            <BandejaSection key={bandejaRefreshKey} addToast={addToast} forcedProductoId={String(producto.id)} embedded />
           </div>
         </div>
       )}
@@ -2662,9 +2658,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
       {productoTab === 'inspiracion' && (
         <div className="-mx-4">
-          <Suspense fallback={<div className="p-6 text-xs text-gray-400 italic">Cargando Inspiración…</div>}>
-            <InspiracionSection addToast={addToast} forcedProductoId={String(producto.id)} embedded />
-          </Suspense>
+          <InspiracionSection addToast={addToast} forcedProductoId={String(producto.id)} embedded />
         </div>
       )}
 

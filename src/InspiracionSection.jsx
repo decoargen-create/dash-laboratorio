@@ -1595,31 +1595,45 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         [ad.id]: { ...prev[ad.id], stage: `generando ${completed}/${nVar}` },
       }));
 
-      // CALLS #2..N — SECUENCIAL (concurrency=1) para no acumular base64s
-      // en memoria. Con concurrency=2 dos imágenes de 5-15MB conviven en
-      // heap → renderer OOM. Secuencial es 70s más lento por variación pero
-      // estable.
+      // CALLS #2..N — PARALELO (fire-all-at-once) para que sobrevivan al
+      // cierre de pestaña. Cada call genera 1 imagen y el servidor la guarda
+      // en cloud automáticamente (con auth token). Si el user cierra,
+      // Vercel no mata las serverless functions in-flight → las imágenes
+      // terminan en Galería igual.
+      //
+      // Nota memoria: con cloud-save funcionando (auth presente), las
+      // imágenes NO se acumulan en heap del browser — server las guarda y
+      // devuelve solo metadata. Si fallback IDB local (sin auth), el peor
+      // caso es N base64s simultáneos en heap (~15MB × N).
       if (nVar > 1) {
-        for (let idx = 1; idx < nVar; idx++) {
-          try {
-            const data = await doCall(idx, cachedPlan);
-            await saveOne(data, idx, cachedPlan);
-            const c = logCostsFromResponse(data, `crear-creativo-referencial · ${brandNombre} · ${idx + 1}/${nVar}`);
-            totalCostAccum.openai += c?.openai || 0;
-            totalCostAccum.anthropic += c?.anthropic || 0;
-            // Liberar la referencia al base64 ANTES del próximo call.
-            if (data.imagenes) data.imagenes.length = 0;
-            completed++;
-          } catch (err) {
-            console.warn(`Variación ${idx + 1}/${nVar} de ${brandNombre} falló:`, err.message);
-            failed++;
+        const restPromises = Array.from({ length: nVar - 1 }, (_, i) => {
+          const idx = i + 1;
+          return doCall(idx, cachedPlan)
+            .then(async data => {
+              await saveOne(data, idx, cachedPlan);
+              const c = logCostsFromResponse(data, `crear-creativo-referencial · ${brandNombre} · ${idx + 1}/${nVar}`);
+              totalCostAccum.openai += c?.openai || 0;
+              totalCostAccum.anthropic += c?.anthropic || 0;
+              if (data.imagenes) data.imagenes.length = 0;
+              return { ok: true, idx };
+            })
+            .catch(err => {
+              console.warn(`Variación ${idx + 1}/${nVar} de ${brandNombre} falló:`, err.message);
+              return { ok: false, idx, error: err.message };
+            });
+        });
+        // Reporter de progreso a medida que terminan (sin bloquear el flow).
+        restPromises.forEach(p => p.then(res => {
+          if (res.ok) completed++; else failed++;
+          if (mountedRef.current) {
+            setProgressById(prev => ({
+              ...prev,
+              [ad.id]: { ...(prev[ad.id] || {}), stage: `generando ${completed}/${nVar}${failed ? ` (${failed} ✗)` : ''}` },
+            }));
+            updateExecution(execId, { stage: `Generando ${completed}/${nVar}…` });
           }
-          setProgressById(prev => ({
-            ...prev,
-            [ad.id]: { ...prev[ad.id], stage: `generando ${completed}/${nVar}${failed ? ` (${failed} ✗)` : ''}` },
-          }));
-          updateExecution(execId, { stage: `Generando ${completed}/${nVar}…` });
-        }
+        }));
+        await Promise.all(restPromises);
       }
 
       setProgressById(prev => ({
@@ -1695,7 +1709,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     const total = seleccionados.size * nVarBulk;
     const sizeLabel = genOpts.size === '1024x1536' ? '1024×1536 portrait' : genOpts.size === '1024x1024' ? '1024×1024 1:1' : '2048×2048 1:1';
     const cacheNote = visionAds < seleccionados.size ? ` (${seleccionados.size - visionAds} con skeleton cacheado)` : '';
-    if (!window.confirm(`Generar ${nVarBulk} variante${nVarBulk !== 1 ? 's' : ''} ${sizeLabel} por cada uno de los ${seleccionados.size} ads${cacheNote} → ${total} imágenes total, ~$${costoEstimado.toFixed(2)}. Corriendo en paralelo, debería tardar ~${Math.ceil(seleccionados.size / BULK_CONCURRENCY) * 90}s. ¿Seguir?`)) return;
+    if (!window.confirm(`Generar ${nVarBulk} variante${nVarBulk !== 1 ? 's' : ''} ${sizeLabel} por cada uno de los ${seleccionados.size} ads${cacheNote} → ${total} imágenes total, ~$${costoEstimado.toFixed(2)}. Las requests se disparan TODAS en paralelo y el cloud-save funciona aunque cierres la pestaña. ETA: ~${Math.max(120, 75 * 2)}s. ¿Seguir?`)) return;
 
     // Buscar los ad objects desde adsByBrand + de los competidores (que viven
     // en producto.competidores, no en brands custom).
@@ -1730,43 +1744,51 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       errors: [],
     });
 
-    // Ejecución en PARALELO con concurrencia BULK_CONCURRENCY.
-    // Cada worker toma del queue y procesa hasta vaciarlo. Mucho más rápido
-    // que el for-await secuencial anterior.
-    let nextIndex = 0;
-    const indexOf = new Map(adsAGenerar.map((x, i) => [x.ad.id, i]));
-    const worker = async () => {
-      while (true) {
-        const i = nextIndex++;
-        if (i >= adsAGenerar.length) return;
-        const { brandNombre, ad } = adsAGenerar[i];
-        setBulkProgress(prev => prev ? ({
-          ...prev,
-          adsList: prev.adsList.map((x, idx) =>
-            idx === i ? { ...x, status: 'doing' } : x
-          ),
-        }) : prev);
-        const adStartedAt = Date.now();
-        const ok = await crearReferencialDeAd(brandNombre, ad);
-        const adDuration = Date.now() - adStartedAt;
+    // FIRE-ALL-AT-ONCE — disparamos crearReferencialDeAd para TODOS los ads
+    // al toque. Cada uno internamente dispara CALL #1 (vision + plan) y
+    // después de su CALL #1, dispara CALLS #2..N en paralelo. Net effect:
+    // en ~75s todas las requests de variations 2..N están en flight server-side.
+    //
+    // Si el user cierra la pestaña después de eso (~80s), Vercel sigue
+    // procesándolas y el cloud-save automático server-side las guarda en
+    // marketing_creativos. Aparecen en Galería al volver.
+    //
+    // Antes era sequential workers (concurrency=1) que tardaba 40+ min para
+    // 8 ads × 4 vars. Ahora es ~5 min para lo mismo, y resiliente al cierre.
+    adsAGenerar.forEach((_, i) => {
+      setBulkProgress(prev => prev ? ({
+        ...prev,
+        adsList: prev.adsList.map((x, idx) =>
+          idx === i ? { ...x, status: 'doing' } : x
+        ),
+      }) : prev);
+    });
+
+    // Toast de aviso — el user puede cerrar la pestaña tranquilo después.
+    addToast?.({
+      type: 'info',
+      message: `${adsAGenerar.length} ads disparados en paralelo. En ~80s todas las variantes estarán generándose server-side — podés cerrar la pestaña y volver: el cloud save sigue.`,
+    });
+
+    const adStart = Date.now();
+    const promises = adsAGenerar.map(({ brandNombre, ad }, i) =>
+      crearReferencialDeAd(brandNombre, ad).then(ok => {
         setBulkProgress(prev => prev ? ({
           ...prev,
           completed: prev.completed + 1,
           currentIdx: Math.min(prev.currentIdx + 1, prev.total - 1),
-          adDurations: [...prev.adDurations, adDuration],
+          adDurations: [...prev.adDurations, Date.now() - adStart],
           adsList: prev.adsList.map((x, idx) =>
             idx === i ? { ...x, status: ok ? 'done' : 'error' } : x
           ),
           errors: ok ? prev.errors : [...prev.errors, brandNombre],
         }) : prev);
-      }
-    };
-    const workers = Array.from(
-      { length: Math.min(BULK_CONCURRENCY, adsAGenerar.length) },
-      () => worker()
+        return ok;
+      })
     );
+
     try {
-      await Promise.all(workers);
+      await Promise.all(promises);
     } finally {
       bulkRunningRef.current = false;
     }

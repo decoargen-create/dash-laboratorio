@@ -159,6 +159,42 @@ export function useMarketingSync({ addToast } = {}) {
         runPull(mountedRefShared.current);
       }, 1500);
     };
+    // Refresh de ideas: lee marketing_ideas, las redistribuye en
+    // producto.bandejaIdeas (localStorage), y dispatcha viora:marketing-pulled
+    // para que los componentes que lean del legacy storage se actualicen.
+    let ideasTimer = null;
+    const scheduleIdeasRefresh = () => {
+      if (ideasTimer) clearTimeout(ideasTimer);
+      ideasTimer = setTimeout(async () => {
+        try {
+          const { fetchIdeas } = await import('./cloudData.js');
+          const ideas = await fetchIdeas();
+          // Re-particionar por productoId.
+          const byProducto = new Map();
+          for (const i of ideas) {
+            const pid = i.productoId ? String(i.productoId) : null;
+            if (!pid) continue;
+            const list = byProducto.get(pid) || [];
+            list.push(i);
+            byProducto.set(pid, list);
+          }
+          // Mergear en localStorage producto.bandejaIdeas.
+          const raw = localStorage.getItem(KEYS.productos);
+          if (raw) {
+            const productos = safeParse(raw) || [];
+            const updated = productos.map(p => ({
+              ...p,
+              bandejaIdeas: byProducto.get(String(p.id)) || [],
+            }));
+            localStorage.setItem(KEYS.productos, JSON.stringify(updated));
+            window.dispatchEvent(new Event('viora:marketing-pulled'));
+            console.info(`[realtime] ideas refrescadas: ${ideas.length} ideas en ${byProducto.size} productos`);
+          }
+        } catch (err) {
+          console.warn('[realtime] refresh ideas falló:', err.message);
+        }
+      }, 800);
+    };
     const channel = supabase
       .channel(`marketing-realtime-${uid}`)
       .on('postgres_changes',
@@ -177,10 +213,21 @@ export function useMarketingSync({ addToast } = {}) {
           try { window.dispatchEvent(new CustomEvent('viora:referencial-saved', { detail: { cloud: true } })); } catch {}
         }
       )
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'marketing_ideas', filter: `user_id=eq.${uid}` },
+        () => {
+          // Cuando una idea cambia en otra PC, refetcheamos todas las ideas
+          // del cloud y las redistribuimos en producto.bandejaIdeas para que
+          // los componentes que aún leen de localStorage (Bandeja, Arranque)
+          // las vean. Debounced 800ms para batch updates.
+          scheduleIdeasRefresh();
+        }
+      )
       .subscribe();
     console.info('[realtime] suscripto a cambios de marketing_* para user', uid.slice(0, 8));
     return () => {
       if (pullTimer) clearTimeout(pullTimer);
+      if (ideasTimer) clearTimeout(ideasTimer);
       try { supabase.removeChannel(channel); } catch {}
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

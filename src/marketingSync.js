@@ -50,6 +50,15 @@ export async function pullMarketingFromCloud() {
   if (!user) throw new Error('No hay user logueado');
   console.info(`[sync] pull arrancando para user ${user.id}`);
 
+  // 0) Migración lazy: bandejaIdeas inline en producto → tabla marketing_ideas.
+  // Idempotente — solo hace algo la primera vez tras el rollout.
+  try {
+    const { migrateBandejaIdeasFromProductos } = await import('./cloudData.js');
+    await migrateBandejaIdeasFromProductos();
+  } catch (err) {
+    console.warn('[sync] migración bandeja ideas falló (continuo igual):', err.message);
+  }
+
   // 1) productos del user
   const { data: productos } = await queryWithRetry('pull productos', () =>
     supabase
@@ -128,6 +137,41 @@ export async function pullMarketingFromCloud() {
     console.info('[sync] smart-merge: campos local-only preservados, disparando push automático');
   }
 
+  // Pulleamos las ideas de la tabla marketing_ideas (post fase 5) y las
+  // re-attacheamos a cada producto.bandejaIdeas. Esto mantiene compatibilidad
+  // con el código viejo (Bandeja.jsx lee producto.bandejaIdeas) mientras la
+  // source of truth pasa a ser una tabla per-row sin race conditions.
+  try {
+    const { data: ideasRows } = await supabase
+      .from('marketing_ideas')
+      .select('id, producto_id, data, updated_at')
+      .order('updated_at', { ascending: false });
+    if (Array.isArray(ideasRows) && ideasRows.length > 0) {
+      const byProducto = new Map();
+      for (const row of ideasRows) {
+        const pid = row.producto_id ? String(row.producto_id) : null;
+        if (!pid) continue;
+        const idea = { ...(row.data || {}), id: row.id, productoId: pid };
+        const list = byProducto.get(pid) || [];
+        list.push(idea);
+        byProducto.set(pid, list);
+      }
+      // Pisamos producto.bandejaIdeas con la versión de la tabla. Si la
+      // tabla no tiene ideas para un producto y el producto SÍ tenía
+      // bandejaIdeas legacy (caso pre-migración), las preservamos —
+      // serán migradas por migrateBandejaIdeasFromProductos.
+      productosArr.forEach((p, idx) => {
+        const fromTable = byProducto.get(String(p.id));
+        if (fromTable) {
+          productosArr[idx] = { ...p, bandejaIdeas: fromTable };
+        }
+      });
+      console.info(`[sync] re-attached ${ideasRows.length} ideas de marketing_ideas a productos`);
+    }
+  } catch (err) {
+    console.warn('[sync] pull ideas falló (continuo igual):', err.message);
+  }
+
   try {
     localStorage.setItem(KEYS.productos, JSON.stringify(productosArr));
     if (mergeOccurred) {
@@ -202,6 +246,16 @@ export async function pullMarketingFromCloud() {
 // ============================================================
 // PUSH — upsert de un producto al backend
 // ============================================================
+// Strip bandejaIdeas del producto antes de pushear — desde fase 5 la source
+// of truth es la tabla marketing_ideas. Si dejamos el inline array, el push
+// constante de producto pisa el cloud con la versión local (race) y la tabla
+// y el array divergen.
+function stripIdeas(producto) {
+  if (!producto || typeof producto !== 'object') return producto;
+  const { bandejaIdeas, ...rest } = producto;
+  return rest;
+}
+
 export async function pushProducto(producto) {
   if (!supabase) throw new Error('Supabase no configurado');
   const user = await getCurrentUser();
@@ -211,7 +265,7 @@ export async function pushProducto(producto) {
     .upsert({
       id: String(producto.id),
       user_id: user.id,
-      data: producto,
+      data: stripIdeas(producto),
     }, { onConflict: 'user_id,id' });
   if (error) throw new Error(`Push producto: ${error.message}`);
 }
@@ -234,11 +288,12 @@ export async function pushAllProductos(productos) {
     console.warn('[sync] push de productos vacíos — skipping para no borrar cloud (race protection)');
     return;
   }
-  // Upsert masivo.
+  // Upsert masivo. stripIdeas() saca bandejaIdeas — la tabla marketing_ideas
+  // es la source of truth desde fase 5.
   const rows = productos.map(p => ({
     id: String(p.id),
     user_id: user.id,
-    data: p,
+    data: stripIdeas(p),
   }));
   const { error } = await supabase
     .from('marketing_productos')

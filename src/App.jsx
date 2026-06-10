@@ -1,4 +1,4 @@
-import React, { useState, useReducer, useEffect, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useReducer, useEffect, useMemo, useRef, useCallback, lazy, Suspense } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   LineChart, Line, PieChart, Pie, Cell
@@ -22,11 +22,11 @@ import GastosStackSection from './GastosStack.jsx';
 import ArranqueSection from './Arranque.jsx';
 // Lazy-loadeamos las secciones que no se renderizan en el render inicial.
 // Reduce el main chunk de ~1.5MB → ~1.2MB y baja TTI en mobile.
-const BandejaSection = React.lazy(() => import('./Bandeja.jsx'));
-const AutoIGSection = React.lazy(() => import('./AutoIG.jsx'));
-const InspiracionSection = React.lazy(() => import('./InspiracionSection.jsx'));
-const InspiracionGlobalSection = React.lazy(() => import('./InspiracionGlobalSection.jsx'));
-const ConsultoriaSection = React.lazy(() => import('./Consultoria.jsx'));
+const BandejaSection = lazy(() => import('./Bandeja.jsx'));
+const AutoIGSection = lazy(() => import('./AutoIG.jsx'));
+const InspiracionSection = lazy(() => import('./InspiracionSection.jsx'));
+const InspiracionGlobalSection = lazy(() => import('./InspiracionGlobalSection.jsx'));
+const ConsultoriaSection = lazy(() => import('./Consultoria.jsx'));
 import { PipelineRunProvider } from './PipelineRunContext.jsx';
 import PipelineRunOverlay from './PipelineRunOverlay.jsx';
 import ExecutionsTray from './ExecutionsTray.jsx';
@@ -2214,26 +2214,26 @@ function AppShell({ onExit }) {
               ya hay supabaseUser. */}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-arranque' && <ArranqueSection addToast={addToast} onGoToSection={setCurrentSection} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-bandeja' && (
-            <React.Suspense fallback={<div className="p-6 text-xs text-gray-400 italic">Cargando Bandeja…</div>}>
+            <Suspense fallback={<div className="p-6 text-xs text-gray-400 italic">Cargando Bandeja…</div>}>
               <BandejaSection addToast={addToast} />
-            </React.Suspense>
+            </Suspense>
           )}
           {/* mk-competencia (sidebar legacy) está redirigido por el effect
               de arriba a mk-arranque — no necesita su propio render. */}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-auto-ig' && (
-            <React.Suspense fallback={<div className="p-6 text-xs text-gray-400 italic">Cargando…</div>}>
+            <Suspense fallback={<div className="p-6 text-xs text-gray-400 italic">Cargando…</div>}>
               <AutoIGSection addToast={addToast} />
-            </React.Suspense>
+            </Suspense>
           )}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-inspiracion' && (
-            <React.Suspense fallback={<div className="p-6 text-xs text-gray-400 italic">Cargando Inspiración…</div>}>
+            <Suspense fallback={<div className="p-6 text-xs text-gray-400 italic">Cargando Inspiración…</div>}>
               <InspiracionSection addToast={addToast} />
-            </React.Suspense>
+            </Suspense>
           )}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-inspiracion-global' && (
-            <React.Suspense fallback={<div className="p-6 text-xs text-gray-400 italic">Cargando Inspiración global…</div>}>
+            <Suspense fallback={<div className="p-6 text-xs text-gray-400 italic">Cargando Inspiración global…</div>}>
               <InspiracionGlobalSection addToast={addToast} />
-            </React.Suspense>
+            </Suspense>
           )}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-gastos' && <GastosStackSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-docs' && (
@@ -2248,9 +2248,9 @@ function AppShell({ onExit }) {
 
           {/* Consultoría */}
           {currentUser.role === 'admin' && currentPlatform === 'consultoria' && currentSection === 'con-acta' && (
-            <React.Suspense fallback={<div className="p-6 text-xs text-gray-400 italic">Cargando…</div>}>
+            <Suspense fallback={<div className="p-6 text-xs text-gray-400 italic">Cargando…</div>}>
               <ConsultoriaSection addToast={addToast} />
-            </React.Suspense>
+            </Suspense>
           )}
 
           {/* Mentor Views */}

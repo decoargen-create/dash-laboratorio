@@ -17,7 +17,7 @@
 // para continuidad entre Arranque, Documentación (viewer), Competencia,
 // Bandeja y Gastos.
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, lazy, Suspense, Fragment } from 'react';
 import {
   Package, Target, Play, Check, Loader2, AlertTriangle, ChevronRight, ChevronDown,
   Plus, X, Sparkles, Link2, Search, Clock, Inbox, Trash2, Upload, Download, Activity,
@@ -31,9 +31,9 @@ import DiagnosticoSyncModal from './DiagnosticoSyncModal.jsx';
 import { logCostsFromResponse } from './costsStore.js';
 // Lazy-loaded para no inflar el main chunk. Estos tabs (Bandeja/Inspiración)
 // solo renderean cuando el user activa el tab dentro del workspace del
-// producto. React.Suspense las wrapea abajo.
-const BandejaSection = React.lazy(() => import('./Bandeja.jsx'));
-const InspiracionSection = React.lazy(() => import('./InspiracionSection.jsx'));
+// producto. Suspense las wrapea abajo.
+const BandejaSection = lazy(() => import('./Bandeja.jsx'));
+const InspiracionSection = lazy(() => import('./InspiracionSection.jsx'));
 import CreativosTab from './CreativosTab.jsx';
 import DocumentacionTab from './DocumentacionTab.jsx';
 import CopilotoTab from './CopilotoTab.jsx';
@@ -538,7 +538,7 @@ function ProductTabs({ activeTab, onChange }) {
   return (
     <div className="flex items-stretch gap-2 overflow-x-auto p-1 bg-gray-100 dark:bg-gray-800/70 rounded-xl border border-gray-200 dark:border-gray-700">
       {groups.map((g, idx) => (
-        <React.Fragment key={g.id}>
+        <Fragment key={g.id}>
           {idx > 0 && (
             <div className="w-px bg-gray-300 dark:bg-gray-600 my-1.5 shrink-0" aria-hidden />
           )}
@@ -560,7 +560,7 @@ function ProductTabs({ activeTab, onChange }) {
               </button>
             ))}
           </div>
-        </React.Fragment>
+        </Fragment>
       ))}
     </div>
   );
@@ -2635,9 +2635,9 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             onDone={() => setBandejaRefreshKey(k => k + 1)}
           />
           <div className="-mx-4">
-            <React.Suspense fallback={<div className="p-6 text-xs text-gray-400 italic">Cargando Bandeja…</div>}>
+            <Suspense fallback={<div className="p-6 text-xs text-gray-400 italic">Cargando Bandeja…</div>}>
               <BandejaSection key={bandejaRefreshKey} addToast={addToast} forcedProductoId={String(producto.id)} embedded />
-            </React.Suspense>
+            </Suspense>
           </div>
         </div>
       )}
@@ -2662,9 +2662,9 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
       {productoTab === 'inspiracion' && (
         <div className="-mx-4">
-          <React.Suspense fallback={<div className="p-6 text-xs text-gray-400 italic">Cargando Inspiración…</div>}>
+          <Suspense fallback={<div className="p-6 text-xs text-gray-400 italic">Cargando Inspiración…</div>}>
             <InspiracionSection addToast={addToast} forcedProductoId={String(producto.id)} embedded />
-          </React.Suspense>
+          </Suspense>
         </div>
       )}
 

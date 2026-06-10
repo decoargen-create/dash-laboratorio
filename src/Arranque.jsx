@@ -40,6 +40,7 @@ import ProductoImagenUploader from './ProductoImagenUploader.jsx';
 import GaleriaReferencialesModal from './GaleriaReferencialesModal.jsx';
 import { usePipelineRun } from './PipelineRunContext.jsx';
 import { getProductoImagen } from './productoImagen.js';
+import { stringifyApiError } from './apiHelpers.js';
 
 // Avatar del producto: muestra el pote (foto cargada en Setup) y cae al
 // gradiente con la inicial si todavía no hay foto. getProductoImagen resuelve
@@ -1656,9 +1657,10 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         if (!resp.ok) {
           // Si el endpoint sugiere algo (ej: cargar fbPageUrl manual), lo
           // mostramos al user — más útil que el error crudo de Apify.
-          const errMsg = data.sugerencia
-            ? `${data.error || `HTTP ${resp.status}`} — ${data.sugerencia}`
-            : (data.error || `HTTP ${resp.status}`);
+          // stringifyApiError: sin esto, si data.error venía como objeto el
+          // mensaje quedaba en "[object Object]" en el step del pipeline.
+          const errBase = stringifyApiError(data.error) || `HTTP ${resp.status}`;
+          const errMsg = data.sugerencia ? `${errBase} — ${data.sugerencia}` : errBase;
           throw new Error(errMsg);
         }
         trackCost(data, `apify-ingest · ${c.nombre}`);

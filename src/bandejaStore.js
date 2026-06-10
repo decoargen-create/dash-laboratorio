@@ -135,7 +135,10 @@ export function loadIdeas() {
   for (const p of productos) {
     if (Array.isArray(p.bandejaIdeas)) all.push(...p.bandejaIdeas);
   }
-  // Sumar orphans (ideas sin productoId)
+  // Sumar orphans (ideas sin productoId asignado o cuyo producto no estaba
+  // cargado al momento del save). Si ya están en producto.bandejaIdeas
+  // (porque pull las re-attacheó desde marketing_ideas), las skipeamos para
+  // evitar duplicados.
   try {
     const raw = localStorage.getItem(ORPHAN_KEY);
     if (raw) {
@@ -143,9 +146,19 @@ export function loadIdeas() {
       if (Array.isArray(orphans)) all.push(...orphans);
     }
   } catch {}
+  // Dedupe por id — el orphan + el re-attached pueden coexistir tras un
+  // pull si la migración o la reconciliación no limpió bien el ORPHAN_KEY.
+  // Antes esto causaba ideas duplicadas en la UI.
+  const seen = new Set();
+  const dedup = all.filter(i => {
+    if (!i?.id) return true;
+    if (seen.has(i.id)) return false;
+    seen.add(i.id);
+    return true;
+  });
   // Ordenar por createdAt desc para mantener el orden que usaba el array global.
-  all.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
-  return all;
+  dedup.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  return dedup;
 }
 
 export function saveIdeas(ideas) {

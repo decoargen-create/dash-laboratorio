@@ -64,9 +64,15 @@ function patchProducto(id, patch) {
     const arr = JSON.parse(localStorage.getItem(PRODUCTOS_KEY) || '[]');
     const target = arr.find(p => String(p.id) === String(id));
     if (!target) {
-      // Sin producto destino el patch sería no-op — no escribimos para
-      // evitar tocar localStorage innecesariamente y disparar push vacío.
-      console.warn(`[productoImagen] patchProducto: producto ${id} no encontrado en localStorage`);
+      // Producto NO está en localStorage — caso típico: PC nueva donde el
+      // pull aún no completó, o IDB tiene foto de producto borrado en cloud.
+      // Antes esto silenciosamente perdía el patch (no se persistía fotoUrl).
+      // Ahora fallback async: fetch del cloud, patch, upsert. Sin bloquear
+      // el caller sync.
+      console.warn(`[productoImagen] patchProducto: producto ${id} no está en localStorage — fallback async a cloud`);
+      patchProductoCloudFallback(id, patch).catch(err => {
+        console.warn(`[productoImagen] patchProductoCloud fallback falló para ${id}:`, err.message);
+      });
       return false;
     }
     const updated = arr.map(p => String(p.id) === String(id) ? { ...p, ...patch, updated_at: new Date().toISOString() } : p);
@@ -80,6 +86,30 @@ function patchProducto(id, patch) {
     console.warn('[productoImagen] patchProducto falló:', err.message);
     return false;
   }
+}
+
+// Fallback: producto no está en localStorage pero sí en cloud (cross-device
+// race). Patcheamos directo via upsert. Próximo pull trae la versión patcheada.
+async function patchProductoCloudFallback(id, patch) {
+  if (!supabase) return;
+  const user = await getCurrentUser();
+  if (!user) return;
+  const { data: row, error: fetchErr } = await supabase
+    .from('marketing_productos')
+    .select('data')
+    .eq('user_id', user.id)
+    .eq('id', String(id))
+    .maybeSingle();
+  if (fetchErr || !row?.data) {
+    console.warn(`[productoImagen] cloud fallback: producto ${id} tampoco está en cloud`);
+    return;
+  }
+  const merged = { ...row.data, ...patch, updated_at: new Date().toISOString() };
+  const { error: upErr } = await supabase
+    .from('marketing_productos')
+    .upsert({ id: String(id), user_id: user.id, data: merged }, { onConflict: 'user_id,id' });
+  if (upErr) throw new Error(upErr.message);
+  console.info(`[productoImagen] patcheado directo en cloud (sin localStorage): producto ${id}`);
 }
 
 function dataUrlToBlob(dataUrl) {

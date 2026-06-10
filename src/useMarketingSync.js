@@ -21,6 +21,7 @@ import {
 } from './marketingSync.js';
 import { supabase, onAuthChange, getCurrentUser } from './supabase.js';
 import { migrateIDBCreativosToCloud, countIDBCreativos } from './galeriaMigration.js';
+import { fetchIdeas } from './cloudData.js';
 
 const KEYS = {
   productos: 'adslab-marketing-productos-v1',
@@ -167,7 +168,6 @@ export function useMarketingSync({ addToast } = {}) {
       if (ideasTimer) clearTimeout(ideasTimer);
       ideasTimer = setTimeout(async () => {
         try {
-          const { fetchIdeas } = await import('./cloudData.js');
           const ideas = await fetchIdeas();
           // Re-particionar por productoId.
           const byProducto = new Map();

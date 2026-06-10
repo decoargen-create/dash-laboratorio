@@ -16,6 +16,8 @@
 // real (porque la mayoría de los endpoints no streamean). Curva: 92% asintota
 // a τ=estimatedMs/2.
 
+import { logActivity } from './activityLogStore.js';
+
 const executions = new Map();
 const listeners = new Set();
 let seq = 0;
@@ -65,23 +67,21 @@ export function finishExecution(id, { ok = true, message = '', cost = 0 } = {}) 
   emit();
 
   // Persiste en activityLog para que el user lo pueda revisar después.
-  // Import dinámico para evitar dependencia circular si algún día activityLog
-  // necesita algo del executionsStore.
-  import('./activityLogStore.js').then(mod => {
-    try {
-      mod.logActivity({
-        id: exec.id,
-        label: exec.label,
-        sublabel: exec.sublabel,
-        kind: exec.kind,
-        status: exec.status,
-        message: exec.message,
-        cost: exec.cost,
-        durationMs: (exec.finishedAt || Date.now()) - exec.startedAt,
-        finishedAt: new Date(exec.finishedAt).toISOString(),
-      });
-    } catch {}
-  }).catch(() => {});
+  // Antes era dynamic import pero activityLogStore no importa de vuelta —
+  // el dynamic creaba doble-bundling y warnings de Vite. Static import OK.
+  try {
+    logActivity({
+      id: exec.id,
+      label: exec.label,
+      sublabel: exec.sublabel,
+      kind: exec.kind,
+      status: exec.status,
+      message: exec.message,
+      cost: exec.cost,
+      durationMs: (exec.finishedAt || Date.now()) - exec.startedAt,
+      finishedAt: new Date(exec.finishedAt).toISOString(),
+    });
+  } catch {}
 
   // Auto-dismiss después de 3s si OK, 12s si error (le da tiempo al user
   // a leer el mensaje). El user igual puede cerrarlo manual desde el tray.

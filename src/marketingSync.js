@@ -11,6 +11,7 @@
 // siguen 100% en localStorage.
 
 import { supabase, getCurrentUser } from './supabase.js';
+import { migrateBandejaIdeasFromProductos } from './cloudData.js';
 
 const KEYS = {
   productos: 'adslab-marketing-productos-v1',
@@ -53,7 +54,6 @@ export async function pullMarketingFromCloud() {
   // 0) Migración lazy: bandejaIdeas inline en producto → tabla marketing_ideas.
   // Idempotente — solo hace algo la primera vez tras el rollout.
   try {
-    const { migrateBandejaIdeasFromProductos } = await import('./cloudData.js');
     await migrateBandejaIdeasFromProductos();
   } catch (err) {
     console.warn('[sync] migración bandeja ideas falló (continuo igual):', err.message);

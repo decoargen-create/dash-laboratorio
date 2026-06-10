@@ -23,11 +23,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Zap, Check, Loader2, Trash2, AlertCircle, RefreshCw, ExternalLink,
-  TrendingUp, KeyRound, ChevronDown, Search, Plus, X,
+  TrendingUp, KeyRound, ChevronDown, Search, Plus, X, HelpCircle, Clock, ShieldCheck,
 } from 'lucide-react';
 import { supabase } from './supabase.js';
 
 const TOKEN_HELP_URL = 'https://developers.facebook.com/tools/explorer/';
+const SYS_USERS_URL = 'https://business.facebook.com/settings/system-users';
 const LS_PRESET = 'adslab-campanas-date-preset';
 const LS_ACCT_PREFIX = 'adslab-campanas-acct-';
 
@@ -101,6 +102,7 @@ function ConnectTokenForm({ onConnect, onCancel, canCancel }) {
   const [label, setLabel] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [guide, setGuide] = useState('quick'); // 'quick' | 'permanent'
 
   const submit = async (e) => {
     e?.preventDefault();
@@ -174,27 +176,90 @@ function ConnectTokenForm({ onConnect, onCancel, canCancel }) {
         </button>
       </form>
 
-      <div className="mt-4 p-3 bg-white/70 dark:bg-gray-900/40 border border-dashed border-gray-300 dark:border-gray-700 rounded-lg">
-        <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">¿De dónde saco el token?</p>
-        <ul className="text-[11px] text-gray-600 dark:text-gray-400 space-y-1 list-disc pl-4">
-          <li>
-            <strong>Cuenta de otra persona:</strong> que te comparta su cuenta publicitaria con tu Business Manager
-            (Configuración del negocio → Cuentas publicitarias → Agregar socio) y usá un token de <em>System User</em> de tu BM:
-            ese token ve todas las cuentas compartidas.
-          </li>
-          <li>
-            <strong>Rápido / prueba:</strong> generá uno en el{' '}
-            <a href={TOKEN_HELP_URL} target="_blank" rel="noreferrer" className="text-brand-600 dark:text-brand-400 font-semibold inline-flex items-center gap-0.5">
-              Graph API Explorer <ExternalLink size={10} />
-            </a>{' '}
-            con permisos <code className="font-mono">ads_read</code> y <code className="font-mono">ads_management</code>.
-          </li>
-        </ul>
-        <p className="text-[11px] text-gray-500 dark:text-gray-500 mt-2">
-          El token se guarda {DB_MODE ? 'cifrado en el servidor (tabla protegida)' : 'en una cookie HttpOnly del servidor'} — nunca queda accesible desde el navegador.
+      {/* Guía paso a paso para conseguir el token */}
+      <div className="mt-5 bg-white/80 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2">
+          <HelpCircle size={16} className="text-brand-600 dark:text-brand-400 shrink-0" />
+          <p className="text-sm font-bold text-gray-900 dark:text-gray-100">¿Cómo consigo el token? Te guío</p>
+        </div>
+
+        {/* Tabs de método */}
+        <div className="flex gap-1 px-4 pt-3">
+          <button
+            type="button" onClick={() => setGuide('quick')}
+            className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-t-lg border-b-2 transition ${
+              guide === 'quick'
+                ? 'text-brand-600 dark:text-brand-400 border-brand-500'
+                : 'text-gray-500 dark:text-gray-400 border-transparent hover:text-gray-700 dark:hover:text-gray-200'
+            }`}
+          >
+            <Clock size={13} /> Rápido (para probar)
+          </button>
+          <button
+            type="button" onClick={() => setGuide('permanent')}
+            className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-t-lg border-b-2 transition ${
+              guide === 'permanent'
+                ? 'text-brand-600 dark:text-brand-400 border-brand-500'
+                : 'text-gray-500 dark:text-gray-400 border-transparent hover:text-gray-700 dark:hover:text-gray-200'
+            }`}
+          >
+            <ShieldCheck size={13} /> Permanente (recomendado)
+          </button>
+        </div>
+
+        <div className="p-4 pt-3">
+          {guide === 'quick' ? (
+            <>
+              <a
+                href={TOKEN_HELP_URL} target="_blank" rel="noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-2 mb-3 text-xs font-bold text-white bg-gradient-to-br from-[#0668E1] to-[#1877F2] rounded-lg hover:from-[#0556BE] hover:to-[#1668D8] transition shadow-sm"
+              >
+                Abrir Graph API Explorer <ExternalLink size={12} />
+              </a>
+              <ol className="space-y-2.5">
+                <GuideStep n={1}>En la ventana que se abre, a la derecha buscá <strong>“Permissions”</strong> (Permisos) y agregá <code className="font-mono bg-gray-100 dark:bg-gray-800 px-1 rounded">ads_read</code> y <code className="font-mono bg-gray-100 dark:bg-gray-800 px-1 rounded">ads_management</code>.</GuideStep>
+                <GuideStep n={2}>Click en el botón azul <strong>“Generate Access Token”</strong>. Te va a pedir iniciar sesión en Facebook y aprobar.</GuideStep>
+                <GuideStep n={3}>Se genera un texto largo que arranca con <code className="font-mono bg-gray-100 dark:bg-gray-800 px-1 rounded">EAAB…</code>. Copialo entero.</GuideStep>
+                <GuideStep n={4}>Volvé acá, pegalo en <strong>“Access Token”</strong> y tocá <strong>Conectar</strong>. ✅</GuideStep>
+              </ol>
+              <div className="mt-3 flex items-start gap-2 text-[11px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-2.5">
+                <Clock size={13} className="shrink-0 mt-0.5" />
+                <span>Este token dura ~1 a 2 horas — perfecto para probar ya. Cuando se venza, generás otro igual, o pasás al método <strong>Permanente</strong>.</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <a
+                href={SYS_USERS_URL} target="_blank" rel="noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-2 mb-3 text-xs font-bold text-white bg-gradient-to-br from-[#0668E1] to-[#1877F2] rounded-lg hover:from-[#0556BE] hover:to-[#1668D8] transition shadow-sm"
+              >
+                Abrir Configuración del negocio <ExternalLink size={12} />
+              </a>
+              <ol className="space-y-2.5">
+                <GuideStep n={1}>En <strong>Usuarios → Usuarios del sistema</strong>, creá uno (botón <strong>“Agregar”</strong>) o usá uno existente.</GuideStep>
+                <GuideStep n={2}>Asignale la <strong>cuenta publicitaria</strong> a trackear (en “Agregar activos” → Cuentas publicitarias → acceso total). Para la cuenta de otra persona, primero pedile que te la comparta con tu Business Manager.</GuideStep>
+                <GuideStep n={3}>Click en <strong>“Generar nuevo token”</strong>, elegí tu app, y marcá los permisos <code className="font-mono bg-gray-100 dark:bg-gray-800 px-1 rounded">ads_read</code> y <code className="font-mono bg-gray-100 dark:bg-gray-800 px-1 rounded">ads_management</code>.</GuideStep>
+                <GuideStep n={4}>Copiá el token y pegalo acá. <strong>Este no expira</strong> y ve todas las cuentas compartidas. ✅</GuideStep>
+              </ol>
+            </>
+          )}
+        </div>
+
+        <p className="px-4 pb-3 text-[11px] text-gray-500 dark:text-gray-500">
+          🔒 El token se guarda {DB_MODE ? 'cifrado en el servidor (tabla protegida)' : 'en una cookie HttpOnly del servidor'} — nunca queda accesible desde el navegador.
         </p>
       </div>
     </div>
+  );
+}
+
+// Paso numerado de la guía.
+function GuideStep({ n, children }) {
+  return (
+    <li className="flex items-start gap-2.5">
+      <span className="shrink-0 w-5 h-5 rounded-full bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 text-[11px] font-bold flex items-center justify-center mt-0.5">{n}</span>
+      <span className="text-xs text-gray-700 dark:text-gray-300 leading-relaxed">{children}</span>
+    </li>
   );
 }
 

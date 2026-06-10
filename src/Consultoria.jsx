@@ -330,7 +330,11 @@ export default function ConsultoriaSection({ addToast }) {
     async function sync() {
       let session = '';
       try { session = localStorage.getItem('adslab-session') || ''; } catch {}
-      if (!session) return;
+      if (!session) {
+        setSyncState('error');
+        setSyncMsg('No encontré tu sesión para sincronizar con Drive (volvé a iniciar sesión).');
+        return;
+      }
       setSyncState('syncing');
       setSyncMsg('Sincronizando con Drive…');
       try {

@@ -577,6 +577,20 @@ function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = f
         >
           <ExternalLink size={10} /> Ver en FB
         </a>
+        {/* Toggle manual de "usado" — persiste por ad.id (Ad Archive ID),
+            sobrevive al re-scrapeo. Gris = ya lo usé. */}
+        <button
+          onClick={(e) => {
+            e.preventDefault(); e.stopPropagation();
+            window.dispatchEvent(new CustomEvent('viora:toggle-used-ad', { detail: { adId: ad.id } }));
+          }}
+          className={`opacity-0 group-hover/thumb:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white rounded ${
+            used ? 'bg-gray-600 hover:bg-gray-700' : 'bg-emerald-600/90 hover:bg-emerald-700'
+          }`}
+          title={used ? 'Quitar marca de usado' : 'Marcar como usado (queda en gris)'}
+        >
+          <Check size={10} /> {used ? 'Marcado usado' : 'Marcar usado'}
+        </button>
       </div>
       {ad.daysRunning > 0 && (
         <div className="absolute top-1 left-1 px-1.5 py-0.5 text-[9px] font-bold rounded bg-black/60 text-white pointer-events-none">
@@ -1264,6 +1278,34 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     return () => { active = false; window.removeEventListener('viora:referencial-saved', onSaved); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [producto?.id]);
+
+  // Toggle manual de "usado" por ad. Se guarda en producto.usedAdIds, keyed
+  // por Ad Archive ID (ad.id) — estable entre re-scrapes y se sincroniza al
+  // cloud junto con el producto, así no se pierde el rastro al re-scrapear.
+  useEffect(() => {
+    const onToggle = (e) => {
+      const adId = e?.detail?.adId;
+      if (!adId || !activeProductoId) return;
+      const updated = loadProductos().map(p => {
+        if (String(p.id) !== String(activeProductoId)) return p;
+        const cur = new Set((p.usedAdIds || []).map(String));
+        if (cur.has(String(adId))) cur.delete(String(adId)); else cur.add(String(adId));
+        return { ...p, usedAdIds: [...cur] };
+      });
+      try { localStorage.setItem(PRODUCTOS_KEY, JSON.stringify(updated)); notifyMarketingChange(PRODUCTOS_KEY); } catch {}
+      setProductos(updated);
+    };
+    window.addEventListener('viora:toggle-used-ad', onToggle);
+    return () => window.removeEventListener('viora:toggle-used-ad', onToggle);
+  }, [activeProductoId]);
+
+  // Set combinado de "usados": automáticos (ads con un referencial ya guardado)
+  // + marcados manualmente en producto.usedAdIds. Es lo que tiñe de gris.
+  const mergedUsedAdIds = useMemo(() => {
+    const s = new Set(usedAdIds);
+    for (const id of (producto?.usedAdIds || [])) s.add(String(id));
+    return s;
+  }, [usedAdIds, producto?.usedAdIds]);
 
   const handleAddBrand = () => {
     const nombre = draft.nombre.trim();
@@ -2331,7 +2373,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                 creandoAdIds={creandoAdIds}
                 seleccionados={seleccionados}
                 selectedOrder={selectedOrder}
-                usedAdIds={usedAdIds}
+                usedAdIds={mergedUsedAdIds}
                 progressById={progressById}
                 onAdapt={(brandNombre, ad) => handleAdapt(brandNombre, ad)}
                 onCrearReferencial={(brandNombre, ad) => crearReferencialDeAd(brandNombre, ad)}
@@ -2595,7 +2637,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                     creandoAdIds={creandoAdIds}
                     seleccionados={seleccionados}
                     selectedOrder={selectedOrder}
-                    usedAdIds={usedAdIds}
+                    usedAdIds={mergedUsedAdIds}
                     progressById={progressById}
                     onScrape={() => b.isCompetidor ? handleScrapeCompetidor(b) : handleScrapeBrand(b)}
                     onAdapt={(ad) => handleAdapt(b.nombre, ad)}

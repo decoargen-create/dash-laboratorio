@@ -65,23 +65,77 @@ export async function pullMarketingFromCloud() {
   // Sin esto: producto "Probiotico" con creativos legacy pesa 1.46 MB y
   // hace exceeder la quota de localStorage (5-10MB) cuando hay 2+ productos
   // pesados. Resultado: el setItem falla y el user ve "Sin productos".
+  // SMART MERGE: el pull NO sobreescribe ciegamente local con cloud.
+  // Si local tiene un campo que cloud no tiene (caso "subí foto/corrí
+  // pipeline antes de que existiera el sync server-side"), preservamos
+  // el local. Esto fuerza una sincronización automática hacia el cloud
+  // en el próximo push (sin necesidad de botón "Forzar sync" manual).
+  let localArr = [];
+  try { localArr = JSON.parse(localStorage.getItem(KEYS.productos) || '[]'); } catch {}
+  const localById = new Map(localArr.map(p => [String(p.id), p]));
+
   const productosArr = (productos || []).map(row => {
-    const p = row.data || {};
-    // Clonamos shallow y removemos campos legacy pesados.
-    const { creativos, ...slim } = p;
-    // Normalización resumenEjecutivo: el server (patchProductoDocs) lo
-    // guarda en docs.resumenEjecutivo. El cliente lo lee en p.resumenEjecutivo
-    // (ver Marketing.jsx:274, 381, etc.). Si el cloud tiene solo docs.X y
-    // no root.X (caso típico tras pipeline server-persisted), promovemos a
-    // root para que la UI lo vea. Sin esto: "Sin resumen ejecutivo generado".
+    const cloudP = row.data || {};
+    const { creativos, ...slim } = cloudP;
     if (!slim.resumenEjecutivo && slim.docs?.resumenEjecutivo) {
       slim.resumenEjecutivo = slim.docs.resumenEjecutivo;
     }
-    return slim;
+    const localP = localById.get(String(slim.id));
+    if (!localP) return slim;
+    // Merge: cloud es base, pero cualquier campo SOLO-LOCAL se preserva.
+    // Cuando algun campo aparece en local pero NO en cloud, lo
+    // promocionamos. El próximo push lo sube y queda sincronizado para
+    // todas las devices del user.
+    const merged = { ...slim };
+    const preserveIfMissing = (key) => {
+      if (merged[key] == null && localP[key] != null) merged[key] = localP[key];
+    };
+    preserveIfMissing('docs');
+    preserveIfMissing('resumenEjecutivo');
+    preserveIfMissing('accentColor');
+    preserveIfMissing('fotoUrl');
+    preserveIfMissing('fotoUpdatedAt');
+    preserveIfMissing('ofertasReales');
+    preserveIfMissing('activoVisual');
+    preserveIfMissing('stage');
+    preserveIfMissing('docsGeneratedAt');
+    // Arrays: si cloud está vacío/null pero local tiene cosas, preservar.
+    if ((!merged.competidores || merged.competidores.length === 0) && localP.competidores?.length) {
+      merged.competidores = localP.competidores;
+    }
+    if ((!merged.bandejaIdeas || merged.bandejaIdeas.length === 0) && localP.bandejaIdeas?.length) {
+      merged.bandejaIdeas = localP.bandejaIdeas;
+    }
+    // Para docs: merge field-by-field (cloud puede tener research, local
+    // puede tener avatar nuevo, etc).
+    if (localP.docs && typeof localP.docs === 'object') {
+      merged.docs = { ...localP.docs, ...(merged.docs || {}) };
+      // Excepción: si local tiene un doc no-vacío y cloud tiene vacío/null,
+      // preservar el local.
+      for (const k of Object.keys(localP.docs)) {
+        if (!merged.docs[k] && localP.docs[k]) merged.docs[k] = localP.docs[k];
+      }
+    }
+    return merged;
   });
+
+  // Detectar si hicimos merge — disparar push automático para subir lo
+  // preservado al cloud sin que el user tenga que hacer nada.
+  const cloudStr = JSON.stringify((productos || []).map(r => r.data));
+  const mergedStr = JSON.stringify(productosArr);
+  const mergeOccurred = cloudStr !== mergedStr;
+  if (mergeOccurred) {
+    console.info('[sync] smart-merge: campos local-only preservados, disparando push automático');
+  }
 
   try {
     localStorage.setItem(KEYS.productos, JSON.stringify(productosArr));
+    if (mergeOccurred) {
+      // Dispara el push del merge → cloud se actualiza con lo preservado.
+      window.dispatchEvent(new CustomEvent('viora:marketing-storage-changed', {
+        detail: { key: KEYS.productos },
+      }));
+    }
     console.info(`[sync] localStorage productos actualizado: ${productosArr.length} productos, ${JSON.stringify(productosArr).length} bytes`);
   } catch (e) {
     console.warn('[sync] no pude escribir localStorage (quota?):', e.message);

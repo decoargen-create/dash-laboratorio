@@ -20,12 +20,13 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Package, Target, Play, Check, Loader2, AlertTriangle, ChevronRight, ChevronDown,
-  Plus, X, Sparkles, Link2, Search, Clock, Inbox, Trash2, Upload, Download,
+  Plus, X, Sparkles, Link2, Search, Clock, Inbox, Trash2, Upload, Download, Activity,
 } from 'lucide-react';
 import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGeneradorHoy, updateIdea, formatoDeAd } from './bandejaStore.js';
 import { deleteProducto as deleteProductoFromCloud } from './marketingSync.js';
 import { supabase } from './supabase.js';
 import { downloadProductoExport, importProductoFromFile } from './productoExport.js';
+import DiagnosticoSyncModal from './DiagnosticoSyncModal.jsx';
 import { logCostsFromResponse } from './costsStore.js';
 import BandejaSection from './Bandeja.jsx';
 import InspiracionSection from './InspiracionSection.jsx';
@@ -800,6 +801,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
   // Wizard product form
   const [showProdForm, setShowProdForm] = useState(false);
+  const [showDiagnostico, setShowDiagnostico] = useState(false);
   const [prodDraft, setProdDraft] = useState({ nombre: '', landingUrl: '', descripcion: '' });
 
   // Wizard competitors
@@ -2230,6 +2232,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 }
               }}
             />
+            <button onClick={() => setShowDiagnostico(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2.5 text-sm font-semibold text-amber-700 dark:text-amber-300 bg-white dark:bg-gray-800 border border-amber-300 dark:border-amber-700 rounded-lg hover:bg-amber-50 dark:hover:bg-amber-900/20 transition"
+              title="Ver qué hay realmente en el cloud para tu cuenta">
+              <Activity size={16} /> Diagnóstico
+            </button>
             <button onClick={() => importFileInputRef.current?.click()}
               className="inline-flex items-center gap-1.5 px-3 py-2.5 text-sm font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-gray-800 border border-brand-300 dark:border-brand-700 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/20 transition"
               title="Importar producto desde JSON exportado">
@@ -2428,6 +2435,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             })}
           </div>
         )}
+        {showDiagnostico && <DiagnosticoSyncModal onClose={() => setShowDiagnostico(false)} />}
       </div>
     );
   }

@@ -58,7 +58,7 @@ export default async function handler(req, res) {
       const auth = req.headers.authorization || '';
       if (auth !== `Bearer ${cronSecret}`) return respondJSON(res, 401, { error: 'No autorizado' });
     }
-    maxGenerate = 8;
+    maxGenerate = 4;
   } else if (req.method === 'POST') {
     // Camino del panel: exige sesión admin.
     const body = await readBody(req);

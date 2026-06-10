@@ -334,7 +334,7 @@ export default function ConsultoriaSection({ addToast }) {
       setSyncState('syncing');
       setSyncMsg('Sincronizando con Drive…');
       try {
-        for (let i = 0; i < 6; i++) {
+        for (let i = 0; i < 8; i++) {
           const res = await fetch('/api/actas/sync', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -354,7 +354,15 @@ export default function ConsultoriaSection({ addToast }) {
           }
           if (!data.pending || data.pending <= 0) {
             setSyncState('done');
-            setSyncMsg(`${data.actas?.length || 0} actas sincronizadas desde Drive.`);
+            setSyncMsg(`${data.actas?.length || 0} actas listas desde Drive.`);
+            return;
+          }
+          // Hay pendientes pero esta tanda no generó ninguna → algo falla en la
+          // generación. Surfaceamos el motivo en vez de loopear al pedo.
+          if (!data.generated) {
+            const reason = data.errors?.[0] ? ` Motivo: ${data.errors[0]}` : '';
+            setSyncState('error');
+            setSyncMsg(`Quedaron ${data.pending} actas sin generar.${reason}`);
             return;
           }
           setSyncMsg(`Generando actas nuevas… (${data.pending} pendiente${data.pending === 1 ? '' : 's'})`);

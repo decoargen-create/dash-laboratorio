@@ -115,7 +115,9 @@ export function parseTranscriptName(name) {
 
 // Vigila la carpeta, genera las actas faltantes y devuelve todas las actas.
 // maxGenerate acota cuántas genera por corrida (para no exceder el timeout).
-export async function runSync({ maxGenerate = 5 } = {}) {
+// model: por defecto Haiku (rápido) para que cada generación entre cómoda en
+// el límite de tiempo de la función; las actas manuales usan Sonnet.
+export async function runSync({ maxGenerate = 5, model = 'claude-haiku-4-5-20251001' } = {}) {
   if (!driveConfigured()) {
     return { configured: false, error: 'Drive no está configurado (falta GOOGLE_SERVICE_ACCOUNT_JSON o DRIVE_TRANSCRIPTS_FOLDER_ID).' };
   }
@@ -148,11 +150,12 @@ export async function runSync({ maxGenerate = 5 } = {}) {
 
   const pending = candidates.filter(f => !fileById.has(f.id));
   let generated = 0;
+  const errors = [];
   for (const f of pending) {
     if (generated >= maxGenerate) break;
     try {
       const text = await driveExportDoc(token, f.id);
-      const result = await generarActa({ transcript: text, client: f.meta.client, date: f.meta.date });
+      const result = await generarActa({ transcript: text, client: f.meta.client, date: f.meta.date, model });
       const record = {
         transcriptId: f.id,
         transcriptName: f.name,
@@ -166,6 +169,7 @@ export async function runSync({ maxGenerate = 5 } = {}) {
       generated++;
     } catch (e) {
       console.error('[actas] no pude generar para', f.name, '-', e?.message);
+      if (errors.length < 3) errors.push(`${f.meta.client}: ${e?.message || e}`);
     }
   }
 
@@ -184,5 +188,6 @@ export async function runSync({ maxGenerate = 5 } = {}) {
     totalClientes: candidates.length,
     pending: Math.max(0, pending.length - generated),
     actas,
+    errors,
   };
 }

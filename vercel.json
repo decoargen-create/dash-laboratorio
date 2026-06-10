@@ -23,12 +23,12 @@
     "api/marketing/resolve-fb-page.js": { "maxDuration": 30 },
     "api/marketing/proxy-image.js": { "maxDuration": 30 },
     "api/meta/[action].js": { "maxDuration": 60 },
-    "api/acta.js": { "maxDuration": 120 },
-    "api/actas/sync.js": { "maxDuration": 300 }
+    "api/acta.js": { "maxDuration": 60 },
+    "api/actas/sync.js": { "maxDuration": 60 }
   },
   "crons": [
     { "path": "/api/meta/cron-creative-refresh", "schedule": "0 12 * * *" },
-    { "path": "/api/actas/sync", "schedule": "0 * * * *" }
+    { "path": "/api/actas/sync", "schedule": "0 9 * * *" }
   ],
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/index.html" }

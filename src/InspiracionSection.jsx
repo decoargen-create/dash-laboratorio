@@ -26,6 +26,7 @@ import {
   Sparkles, Package, ChevronRight, ChevronDown, Plus, Trash2, Link2, X,
   Loader2, Download, Image as ImageIcon, ExternalLink, Wand2, Search,
   Check, AlertCircle, LayoutGrid, Rows3, Table2, Settings2, RefreshCw,
+  Inbox,
 } from 'lucide-react';
 import { logCostsFromResponse } from './costsStore.js';
 import { addGeneratedIdeas } from './bandejaStore.js';

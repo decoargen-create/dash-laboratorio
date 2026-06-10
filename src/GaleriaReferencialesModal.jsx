@@ -592,6 +592,44 @@ function Lightbox({ item, imgSrc, onClose, showDebug, setShowDebug, onDownload, 
 }
 
 
+// Box compacto de métrica usado en la vista expandida del winner.
+function MetricBox({ label, value }) {
+  return (
+    <div className="bg-white/70 dark:bg-black/30 border border-amber-200 dark:border-amber-800 rounded px-2 py-1">
+      <p className="text-[9px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-300">{label}</p>
+      <p className="text-xs font-bold tabular-nums text-amber-900 dark:text-amber-100">{value}</p>
+    </div>
+  );
+}
+
+// Tab button para el panel principal (Todos / Winners / Archivados).
+function TabButton({ active, onClick, icon, label, count, highlight = false, accent }) {
+  const accentClass = accent === 'amber'
+    ? (active
+        ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 border-amber-300 dark:border-amber-700'
+        : highlight
+          ? 'text-amber-700 dark:text-amber-300 border-transparent hover:bg-amber-50 dark:hover:bg-amber-900/20'
+          : 'text-gray-600 dark:text-gray-300 border-transparent hover:bg-gray-50 dark:hover:bg-gray-800')
+    : (active
+        ? 'bg-brand-100 dark:bg-brand-900/40 text-brand-800 dark:text-brand-200 border-brand-300 dark:border-brand-700'
+        : 'text-gray-600 dark:text-gray-300 border-transparent hover:bg-gray-50 dark:hover:bg-gray-800');
+  return (
+    <button
+      onClick={onClick}
+      className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold rounded-t-md border-b-2 transition ${accentClass}`}>
+      {icon}
+      {label}
+      {count > 0 && (
+        <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+          active
+            ? 'bg-white/60 dark:bg-black/30'
+            : 'bg-gray-100 dark:bg-gray-700'
+        }`}>{count}</span>
+      )}
+    </button>
+  );
+}
+
 export default function GaleriaReferencialesModal({ productoId, productoNombre, producto, onClose, embedded = false }) {
   const [items, setItems] = useState([]);
   const [counts, setCounts] = useState({ total: 0, active: 0, archived: 0, downloaded: 0, winners: 0 });
@@ -1137,44 +1175,6 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
         {innerContent}
       </div>
     </div>
-  );
-}
-
-// Box compacto de métrica usado en la vista expandida del winner.
-function MetricBox({ label, value }) {
-  return (
-    <div className="bg-white/70 dark:bg-black/30 border border-amber-200 dark:border-amber-800 rounded px-2 py-1">
-      <p className="text-[9px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-300">{label}</p>
-      <p className="text-xs font-bold tabular-nums text-amber-900 dark:text-amber-100">{value}</p>
-    </div>
-  );
-}
-
-// Tab button para el panel principal (Todos / Winners / Archivados).
-function TabButton({ active, onClick, icon, label, count, highlight = false, accent }) {
-  const accentClass = accent === 'amber'
-    ? (active
-        ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 border-amber-300 dark:border-amber-700'
-        : highlight
-          ? 'text-amber-700 dark:text-amber-300 border-transparent hover:bg-amber-50 dark:hover:bg-amber-900/20'
-          : 'text-gray-600 dark:text-gray-300 border-transparent hover:bg-gray-50 dark:hover:bg-gray-800')
-    : (active
-        ? 'bg-brand-100 dark:bg-brand-900/40 text-brand-800 dark:text-brand-200 border-brand-300 dark:border-brand-700'
-        : 'text-gray-600 dark:text-gray-300 border-transparent hover:bg-gray-50 dark:hover:bg-gray-800');
-  return (
-    <button
-      onClick={onClick}
-      className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold rounded-t-md border-b-2 transition ${accentClass}`}>
-      {icon}
-      {label}
-      {count > 0 && (
-        <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
-          active
-            ? 'bg-white/60 dark:bg-black/30'
-            : 'bg-gray-100 dark:bg-gray-700'
-        }`}>{count}</span>
-      )}
-    </button>
   );
 }
 

@@ -47,10 +47,26 @@ function ProductAvatar({ id, nombre, sizeClass = 'w-12 h-12', radiusClass = 'rou
   const [src, setSrc] = useState(null);
   useEffect(() => {
     let alive = true;
-    getProductoImagen(id)
-      .then(img => { if (alive) setSrc(img || null); })
-      .catch(() => {});
-    return () => { alive = false; };
+    // Limpiamos la imagen previa al cambiar de id: si esta misma instancia se
+    // reusa para otro producto, no mostramos la foto vieja mientras carga.
+    setSrc(null);
+    const load = () => {
+      getProductoImagen(id)
+        .then(img => { if (alive) setSrc(img || null); })
+        .catch(() => {});
+    };
+    load();
+    // Re-cargar cuando se sube/cambia/borra la foto (setProductoImagen patchea
+    // el producto → dispara este evento). Sin esto el avatar mostraba la foto
+    // vieja hasta recargar la página.
+    const onChange = (e) => {
+      if (!e?.detail?.key || e.detail.key.startsWith('adslab-marketing-productos')) load();
+    };
+    window.addEventListener('viora:marketing-storage-changed', onChange);
+    return () => {
+      alive = false;
+      window.removeEventListener('viora:marketing-storage-changed', onChange);
+    };
   }, [id]);
   if (src) {
     return (

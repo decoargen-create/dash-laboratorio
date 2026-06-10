@@ -260,6 +260,28 @@ export async function archiveReferencial(id, archived = true) {
   ).then(n => n > 0);
 }
 
+// Marca/desmarca un creativo como winner — el user lo publicó en Meta, corrió,
+// y concluyó que rinde lo suficiente para escalar / iterar. metrics es un
+// objeto libre con CTR, ROAS, CPA, ad_id, qué funcionó, notas, etc. (ver
+// migración 0007 para shape sugerido).
+export async function markAsWinner(id, metrics = {}) {
+  if (!id) return false;
+  return patchReferenciales([id], {
+    winner: true,
+    winnerAt: new Date().toISOString(),
+    winnerMetrics: metrics,
+  }).then(n => n > 0);
+}
+
+export async function unmarkWinner(id) {
+  if (!id) return false;
+  return patchReferenciales([id], {
+    winner: false,
+    winnerAt: null,
+    winnerMetrics: null,
+  }).then(n => n > 0);
+}
+
 // ============================================================
 // DELETE
 // ============================================================

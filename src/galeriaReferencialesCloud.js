@@ -149,14 +149,17 @@ function rowToRef(row) {
     descargadaAt: row.descargada_at,
     archivado: row.archivado,
     archivadoAt: row.archivado_at,
+    winner: !!row.winner,
+    winnerAt: row.winner_at,
+    winnerMetrics: row.winner_metrics || null,
     createdAt: row.created_at,
   };
 }
 
-// Lista creativos del producto. Soporta `includeArchived`.
+// Lista creativos del producto. Soporta `includeArchived`, `onlyWinners`.
 export async function getReferencialesByProductoCloud(productoId, opts = {}) {
   if (!supabase) return [];
-  const { includeArchived = false } = opts;
+  const { includeArchived = false, onlyWinners = false } = opts;
   const user = await getCurrentUser();
   if (!user) return [];
 
@@ -166,6 +169,7 @@ export async function getReferencialesByProductoCloud(productoId, opts = {}) {
     .eq('producto_id', String(productoId))
     .order('created_at', { ascending: false });
   if (!includeArchived) query = query.eq('archivado', false);
+  if (onlyWinners) query = query.eq('winner', true);
 
   const { data, error } = await query;
   if (error) {
@@ -176,21 +180,22 @@ export async function getReferencialesByProductoCloud(productoId, opts = {}) {
 }
 
 export async function countReferencialesByProductoCloud(productoId) {
-  if (!supabase) return { total: 0, active: 0, archived: 0, downloaded: 0 };
+  if (!supabase) return { total: 0, active: 0, archived: 0, downloaded: 0, winners: 0 };
   const user = await getCurrentUser();
-  if (!user) return { total: 0, active: 0, archived: 0, downloaded: 0 };
+  if (!user) return { total: 0, active: 0, archived: 0, downloaded: 0, winners: 0 };
 
-  // 3 queries paralelas para los conteos. Filtramos por user_id además
+  // 4 queries paralelas para los conteos. Filtramos por user_id además
   // de RLS — defense-in-depth contra una eventual misconfig de policy.
   const pid = String(productoId);
-  const [total, archived, downloaded] = await Promise.all([
+  const [total, archived, downloaded, winners] = await Promise.all([
     supabase.from('marketing_creativos').select('id', { count: 'exact', head: true }).eq('producto_id', pid).eq('user_id', user.id),
     supabase.from('marketing_creativos').select('id', { count: 'exact', head: true }).eq('producto_id', pid).eq('user_id', user.id).eq('archivado', true),
     supabase.from('marketing_creativos').select('id', { count: 'exact', head: true }).eq('producto_id', pid).eq('user_id', user.id).eq('descargada', true),
+    supabase.from('marketing_creativos').select('id', { count: 'exact', head: true }).eq('producto_id', pid).eq('user_id', user.id).eq('winner', true),
   ]);
   const t = total.count || 0;
   const a = archived.count || 0;
-  return { total: t, active: t - a, archived: a, downloaded: downloaded.count || 0 };
+  return { total: t, active: t - a, archived: a, downloaded: downloaded.count || 0, winners: winners.count || 0 };
 }
 
 // Set de sourceAdId que ya fueron usados para generar (para marcar en Inspiración).
@@ -223,6 +228,9 @@ export async function patchReferencialesCloud(ids, patch) {
   if ('descargadaAt' in patch) dbPatch.descargada_at = patch.descargadaAt;
   if ('archivado' in patch) dbPatch.archivado = patch.archivado;
   if ('archivadoAt' in patch) dbPatch.archivado_at = patch.archivadoAt;
+  if ('winner' in patch) dbPatch.winner = patch.winner;
+  if ('winnerAt' in patch) dbPatch.winner_at = patch.winnerAt;
+  if ('winnerMetrics' in patch) dbPatch.winner_metrics = patch.winnerMetrics;
 
   if (Object.keys(dbPatch).length === 0) return 0;
 

@@ -1113,13 +1113,23 @@ function IdeaImageGenerator({ idea, addToast }) {
 
   const handleGenerar = async () => {
     setError('');
-    const productos = loadProductos();
-    const producto = productos.find(p => String(p.id) === String(idea.productoId));
+    // Primero localStorage, después cloud — fallback cross-device cuando
+    // localStorage todavía no terminó de sincronizar pero el cloud sí.
+    let producto = loadProductos().find(p => String(p.id) === String(idea.productoId));
+    if (!producto) {
+      try {
+        const { fetchProductos } = await import('./cloudData.js');
+        const cloud = await fetchProductos();
+        producto = cloud.find(p => String(p.id) === String(idea.productoId));
+      } catch {}
+    }
     if (!producto) {
       setError('No encontré el producto de esta idea — recargá la página.');
       return;
     }
-    const prodImg = await getProductoImagen(producto.id);
+    // Pasamos producto como fallback para que getProductoImagen no dependa
+    // de readProducto (lee localStorage, puede estar vacío cross-device).
+    const prodImg = await getProductoImagen(producto.id, producto);
     if (!prodImg) {
       setError('Cargá la foto del producto en Setup (Arranque) antes de generar.');
       return;
@@ -1174,7 +1184,7 @@ function IdeaImageGenerator({ idea, addToast }) {
             offerBrief: producto.ofertasReales || producto.docs?.offerBrief || '',
           },
           productoImagen: prodImg,
-          accentColor: getAccentColor(producto.id) || '',
+          accentColor: getAccentColor(producto.id, producto) || '',
           n, size, quality,
         }),
       });
@@ -1349,7 +1359,15 @@ function VideoBriefPanel({ idea }) {
   const autoGenRef = useRef(false);
 
   const generar = async () => {
-    const prod = loadProductos().find(p => String(p.id) === String(idea.productoId));
+    let prod = loadProductos().find(p => String(p.id) === String(idea.productoId));
+    if (!prod) {
+      // Fallback cross-device: si localStorage no sincronizó, pedir cloud.
+      try {
+        const { fetchProductos } = await import('./cloudData.js');
+        const cloud = await fetchProductos();
+        prod = cloud.find(p => String(p.id) === String(idea.productoId));
+      } catch {}
+    }
     if (!prod) {
       setError('No encontré el producto de esta idea — recargá la página.');
       return;

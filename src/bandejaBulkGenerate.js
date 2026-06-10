@@ -132,7 +132,9 @@ export async function bulkGenerateFromIdeas({
     addToast?.({ type: 'error', message: 'Falta producto (cargá uno en Setup).' });
     return { ok: 0, failed: ideas.length, totalImages: 0, costoUSD: 0 };
   }
-  const prodImg = await getProductoImagen(producto.id);
+  // Pasamos el producto como fallback — cross-device, localStorage puede
+  // no haber sincronizado todavía pero el cloud sí tiene producto.fotoUrl.
+  const prodImg = await getProductoImagen(producto.id, producto);
   if (!prodImg) {
     addToast?.({ type: 'error', message: 'Falta la foto del producto en Setup (Arranque).' });
     return { ok: 0, failed: ideas.length, totalImages: 0, costoUSD: 0 };
@@ -151,7 +153,7 @@ export async function bulkGenerateFromIdeas({
     const { data: { session } } = await supabase.auth.getSession();
     authToken = session?.access_token || '';
   } catch {}
-  const accentColor = getAccentColor(producto.id) || '';
+  const accentColor = getAccentColor(producto.id, producto) || '';
 
   // Disparar TODAS las requests sincrónicamente al inicio. Esto asegura
   // que estén en flight (browser network stack) antes de que el user pueda

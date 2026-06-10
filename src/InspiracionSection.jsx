@@ -1382,7 +1382,9 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   //   • Mismo costo de Sonnet ($0.04 una vez) gracias al cache.
   const crearReferencialDeAd = async (brandNombre, ad) => {
     if (!producto) return false;
-    const prodImg = await getProductoImagen(producto.id);
+    // Pasamos producto como fallback — cross-device, localStorage puede no
+    // tener producto.fotoUrl todavía pero el cloud sí.
+    const prodImg = await getProductoImagen(producto.id, producto);
     if (!prodImg) {
       addToast?.({ type: 'error', message: 'Cargá la foto del producto en Setup primero.' });
       return false;
@@ -1436,7 +1438,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       },
       inspiracionImageUrl: refImageUrl,
       productoImagen: prodImg,
-      accentColor: getAccentColor(producto.id) || '',
+      accentColor: getAccentColor(producto.id, producto) || '',
       quality: genOpts.quality,
       size: genOpts.size,
     };
@@ -1637,7 +1639,9 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     }
     if (seleccionados.size === 0) return;
     if (!producto) return;
-    const prodImg = await getProductoImagen(producto.id);
+    // Pasamos producto como fallback para que getProductoImagen pueda fallback
+    // a producto.fotoUrl del cloud si localStorage aún no sincronizó.
+    const prodImg = await getProductoImagen(producto.id, producto);
     if (!prodImg) {
       addToast?.({ type: 'error', message: 'Cargá la foto del producto en Setup primero.' });
       return;

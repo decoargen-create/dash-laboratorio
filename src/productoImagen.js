@@ -150,7 +150,11 @@ async function migrateLocalPhotoToCloud(id, dataUrl) {
   }
 }
 
-export async function getProductoImagen(id) {
+// fallbackProducto: cuando el caller ya tiene el producto (ej: de
+// useCloudProductos), puede pasarlo acá para evitar leer localStorage.
+// Crítico para flujos cross-device donde localStorage aún no terminó
+// de sincronizar pero el cloud ya devolvió producto.fotoUrl.
+export async function getProductoImagen(id, fallbackProducto = null) {
   if (!id) return null;
   const key = String(id);
   if (memCache.has(key)) return memCache.get(key);
@@ -185,9 +189,10 @@ export async function getProductoImagen(id) {
     }
   } catch {}
   // 3) Cloud — bajar producto.data.fotoUrl si está y cachear en IDB.
-  //    Este es el path típico "entré desde otra PC": el cloud tiene la foto
-  //    pero el IDB local está vacío.
-  const producto = readProducto(id);
+  //    Path típico "entré desde otra PC": el cloud tiene la foto pero el
+  //    IDB local está vacío. Prioridad: fallbackProducto (cloud-first) >
+  //    readProducto (localStorage, puede estar vacío en cross-device).
+  const producto = fallbackProducto || readProducto(id);
   if (producto?.fotoUrl) {
     const dataUrl = await dataUrlFromUrl(producto.fotoUrl);
     if (dataUrl) {
@@ -264,9 +269,13 @@ export async function removeProductoImagen(id) {
 // Accent color ahora vive en producto.data.accentColor para sync cross-device.
 // localStorage queda como migración: si encontramos un accent viejo lo
 // promocionamos a producto.data al primer read.
-export function getAccentColor(id) {
+//
+// fallbackProducto: cuando el caller tiene el producto (ej: de
+// useCloudProductos), lo pasa acá para evitar leer localStorage —
+// crítico para flujos cross-device donde localStorage aún no sincronizó.
+export function getAccentColor(id, fallbackProducto = null) {
   if (!id) return '';
-  const producto = readProducto(id);
+  const producto = fallbackProducto || readProducto(id);
   if (producto?.accentColor) return producto.accentColor;
   // Fallback legacy localStorage
   try {

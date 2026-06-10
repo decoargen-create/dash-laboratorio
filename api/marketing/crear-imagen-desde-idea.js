@@ -22,24 +22,10 @@ import {
 } from './_supabase-server.js';
 
 const MODEL = 'gpt-image-2';
-// Default 1024x1024 (antes 2048): los estáticos se ven en feed mobile, donde
-// 1024 alcanza de sobra. A 2048/high el costo es ~3.7x ($0.68 vs $0.18) por
-// 4x los píxeles, sin diferencia perceptible en el feed.
-const DEFAULT_SIZE = '1024x1024';
+const DEFAULT_SIZE = '2048x2048';
 const FALLBACK_SIZE = '1024x1024';
 const DEFAULT_QUALITY = 'high';
-// Costo real de gpt-image-2 según size + quality (misma tabla que
-// generate-creative.js). Antes era plana (high=0.18 fijo) e ignoraba el size,
-// subreportando ~3.7x cuando se generaba a 2048. Ahora el tracker de gastos
-// refleja el costo verdadero.
-const COST_ESTIMATE_BY_SIZE = {
-  low:    { '1024x1024': 0.013, '1024x1536': 0.020, '1536x1024': 0.020, '2048x2048': 0.050 },
-  medium: { '1024x1024': 0.046, '1024x1536': 0.068, '1536x1024': 0.068, '2048x2048': 0.175 },
-  high:   { '1024x1024': 0.180, '1024x1536': 0.262, '1536x1024': 0.262, '2048x2048': 0.680 },
-};
-function estimateImageCost(quality, size) {
-  return COST_ESTIMATE_BY_SIZE[quality]?.[size] ?? COST_ESTIMATE_BY_SIZE.medium['1024x1024'];
-}
+const COST_ESTIMATE = { low: 0.03, medium: 0.07, high: 0.18 };
 
 async function readBody(req) {
   if (req.body && typeof req.body === 'object') return req.body;
@@ -101,7 +87,23 @@ function inferProductForm(producto) {
 
 // Singular del formato — para overlays "1 cápsula" → "1 gomita".
 function singularFormato(formato) {
-  const map = { 'gomitas': 'gomita', 'cápsulas': 'cápsula', 'gotas': 'gota', 'comprimidos': 'comprimido', 'tabletas': 'tableta', 'sachets': 'sachet', 'shots': 'shot', 'parches': 'parche', 'sticks': 'stick' };
+  const map = {
+    'gomitas': 'gomita', 'gummies': 'gummy',
+    'cápsulas': 'cápsula', 'capsulas': 'cápsula', 'capsules': 'capsule', 'softgels': 'softgel', 'pastillas': 'pastilla',
+    'gotas': 'gota', 'drops': 'drop',
+    'comprimidos': 'comprimido', 'tabletas': 'tableta', 'tablets': 'tablet',
+    'sachets': 'sachet', 'sachet': 'sachet',
+    'shots': 'shot', 'shot': 'shot',
+    'parches': 'parche', 'patches': 'patch',
+    'sticks': 'stick', 'stick': 'stick', 'sticks individuales': 'stick',
+    'polvo': 'porción', 'powder': 'scoop',
+    'sérum': 'gota', 'serum': 'gota',
+    'crema': 'aplicación', 'cream': 'application',
+    'aceite': 'gota', 'oil': 'drop',
+    'bálsamo': 'aplicación', 'balm': 'application',
+    'spray': 'puff',
+    'mascarilla': 'mascarilla', 'mask': 'mask',
+  };
   return map[(formato || '').toLowerCase()] || formato;
 }
 
@@ -488,7 +490,7 @@ export default async function handler(req, res) {
       sourceIdeaId: idea.id,
       prompts: prompts.map(p => ({ variantStyle: p.variation.divergence_level, variation: p.variation, prompt: p.prompt })),
       generatedAt: new Date().toISOString(),
-      cost: { openai: estimateImageCost(quality, sizeUsed) * imagenes.length },
+      cost: { openai: (COST_ESTIMATE[quality] ?? 0.18) * imagenes.length },
     });
   } catch (err) {
     console.error('crear-imagen-desde-idea error:', err);

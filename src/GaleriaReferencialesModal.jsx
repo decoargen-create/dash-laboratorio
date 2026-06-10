@@ -667,14 +667,28 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
   useEffect(() => {
     // Esc: si hay lightbox abierto cierra eso, si no cierra el modal.
     // En modo embedded NO hay modal a cerrar (onClose no se pasa) → ignorar.
+    // ← / → / j / k: navegar prev/next entre los visibleItems con el
+    //                lightbox abierto. Replica el patrón de Lightroom/Photos.
     const onKey = (e) => {
-      if (e.key !== 'Escape') return;
-      if (selected) setSelected(null);
-      else onClose?.();
+      if (e.key === 'Escape') {
+        if (selected) setSelected(null);
+        else onClose?.();
+        return;
+      }
+      if (!selected) return;
+      const isArrowOrJK = e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'j' || e.key === 'k';
+      if (!isArrowOrJK) return;
+      const idx = visibleItems.findIndex(it => it.id === selected.id);
+      if (idx === -1) return;
+      const dir = (e.key === 'ArrowRight' || e.key === 'j') ? 1 : -1;
+      const nextIdx = (idx + dir + visibleItems.length) % visibleItems.length;
+      setSelected(visibleItems[nextIdx]);
+      e.preventDefault();
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [selected, onClose]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, onClose, visibleItems]);
 
   const toggleSeleccion = (id, e) => {
     // Shift+click: rango desde el último clickeado hasta este id (inclusive).

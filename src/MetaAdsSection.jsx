@@ -17,6 +17,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import CreativeRefreshPanel from './CreativeRefreshPanel.jsx';
+import { useCloudProductos } from './useCloudProductos.js';
 
 const PRODUCTOS_KEY = 'adslab-marketing-productos-v1';
 const ACTIVE_KEY = 'adslab-marketing-meta-ads-active-product';
@@ -306,36 +307,27 @@ function AdCard({ ad }) {
 
 
 export default function MetaAdsSection({ addToast }) {
-  const [productos, setProductos] = useState(() => loadProductos());
+  // CLOUD-FIRST (Fase 4): leemos productos directo del cloud via hook
+  // useCloudProductos. La sincronización en vivo se hace automática via
+  // Realtime — cuando otra tab/PC modifica un producto este componente
+  // se entera sin pasar por localStorage.
+  // Fallback: si el cloud aún no cargó, mostramos lo que esté en
+  // localStorage como cache rápido para no ver UI vacía.
+  const { productos: cloudProductos, loading: cloudLoading } = useCloudProductos();
+  const [localCache] = useState(() => loadProductos());
+  const productos = cloudLoading && cloudProductos.length === 0 ? localCache : cloudProductos;
+  // El setProductos local ya no es necesario — los cambios vienen del cloud
+  // via Realtime. Mantenemos noopSetProductos solo por compat con el resto
+  // del componente que pudiera tener llamadas (en este componente no hay).
+  const setProductos = () => {};
   const [activeProductoId, setActiveProductoId] = useState(() => {
     try { return localStorage.getItem(ACTIVE_KEY) || null; } catch { return null; }
   });
   const [activeTab, setActiveTab] = useState('ads'); // 'ads' | 'refresh'
 
-  // Re-sync cuando otra parte del código modifica productos (Arranque
-  // edita, pipeline termina, pull del cloud). Comparación deep por JSON
-  // — antes era shallow length-compare que se perdía edits in-place.
-  useEffect(() => {
-    const reload = () => {
-      try {
-        const fresh = loadProductos();
-        setProductos(prev => {
-          return JSON.stringify(prev) === JSON.stringify(fresh) ? prev : fresh;
-        });
-      } catch {}
-    };
-    window.addEventListener('viora:marketing-pulled', reload);
-    window.addEventListener('viora:marketing-storage-changed', reload);
-    const onStorage = (e) => {
-      if (!e.key || e.key === PRODUCTOS_KEY) reload();
-    };
-    window.addEventListener('storage', onStorage);
-    return () => {
-      window.removeEventListener('viora:marketing-pulled', reload);
-      window.removeEventListener('viora:marketing-storage-changed', reload);
-      window.removeEventListener('storage', onStorage);
-    };
-  }, []);
+  // (Fase 4 cloud-first: el useCloudProductos hook maneja Realtime updates
+  // automático — ya no necesitamos listeners de localStorage events ni
+  // polling. Si Arranque modifica productos, el cloud Realtime nos avisa.)
 
   useEffect(() => {
     try {

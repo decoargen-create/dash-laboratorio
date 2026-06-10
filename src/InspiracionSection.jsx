@@ -2537,7 +2537,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                   derivadas de producto.competidores via el useEffect de sync. */}
               <button
                 onClick={() => {
-                  try { window.dispatchEvent(new CustomEvent('viora:product-tab', { detail: { tab: 'competencia' } })); } catch {}
+                  try { window.dispatchEvent(new CustomEvent('viora:product-tab', { detail: { tab: 'setup' } })); } catch {}
                   addToast?.({ type: 'info', message: 'Cargá la marca como competidor — va a aparecer acá automático.' });
                 }}
                 className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-amber-500 to-brand-500 rounded hover:from-amber-600 hover:to-brand-600 shadow-sm transition"
@@ -2557,7 +2557,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                   label: 'Agregar competidor',
                   icon: Plus,
                   onClick: () => {
-                    try { window.dispatchEvent(new CustomEvent('viora:product-tab', { detail: { tab: 'competencia' } })); } catch {}
+                    try { window.dispatchEvent(new CustomEvent('viora:product-tab', { detail: { tab: 'setup' } })); } catch {}
                     addToast?.({ type: 'info', message: 'Cargalo como competidor — va a aparecer acá automático.' });
                   },
                 }}

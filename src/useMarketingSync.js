@@ -19,7 +19,7 @@ import {
   pushPrefs,
   migrateLocalToCloud,
 } from './marketingSync.js';
-import { onAuthChange, getCurrentUser } from './supabase.js';
+import { supabase, onAuthChange, getCurrentUser } from './supabase.js';
 import { migrateIDBCreativosToCloud, countIDBCreativos } from './galeriaMigration.js';
 
 const KEYS = {
@@ -137,6 +137,54 @@ export function useMarketingSync({ addToast } = {}) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 1b. REALTIME — suscribimos a cambios en las tablas del cloud para que
+  // otra PC del mismo user vea las modificaciones en vivo (sin F5).
+  // Cuando llega un cambio remoto, hacemos pull para que el smart-merge
+  // aplique los datos al localStorage local. Los componentes ya tienen
+  // listeners de viora:marketing-pulled y se re-renderean solos.
+  //
+  // Filtramos por user_id en cada channel para no recibir cambios de
+  // otros users (RLS también protege, esto es para minimizar ancho de banda).
+  useEffect(() => {
+    if (!supabase || !user) return;
+    const uid = user.id;
+    // Debounce de los pulls — múltiples cambios seguidos (típico de un
+    // batch de scrapes) deberían disparar UN pull, no N.
+    let pullTimer = null;
+    const schedulePull = () => {
+      if (pullTimer) clearTimeout(pullTimer);
+      pullTimer = setTimeout(() => {
+        console.info('[realtime] cambio remoto detectado — re-pulling cloud');
+        runPull(mountedRefShared.current);
+      }, 1500);
+    };
+    const channel = supabase
+      .channel(`marketing-realtime-${uid}`)
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'marketing_productos', filter: `user_id=eq.${uid}` },
+        () => schedulePull()
+      )
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'marketing_brands', filter: `user_id=eq.${uid}` },
+        () => schedulePull()
+      )
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'marketing_creativos', filter: `user_id=eq.${uid}` },
+        () => {
+          // Para creativos no hace falta full pull (no van a localStorage).
+          // Dispatchamos para que la galería refresque desde el cloud.
+          try { window.dispatchEvent(new CustomEvent('viora:referencial-saved', { detail: { cloud: true } })); } catch {}
+        }
+      )
+      .subscribe();
+    console.info('[realtime] suscripto a cambios de marketing_* para user', uid.slice(0, 8));
+    return () => {
+      if (pullTimer) clearTimeout(pullTimer);
+      try { supabase.removeChannel(channel); } catch {}
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
 
   // 2. Listen a cambios de localStorage (mismo tab) — usamos un MutationObserver
   // alternativo via `viora:storage-changed` event que disparamos manualmente

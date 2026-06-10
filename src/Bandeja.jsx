@@ -28,7 +28,6 @@ import { saveReferencial } from './galeriaReferenciales.js';
 import { supabase } from './supabase.js';
 import { bulkGenerateFromIdeas } from './bandejaBulkGenerate.js';
 import { parseJsonOrThrow } from './apiHelpers.js';
-import { deleteCreativo } from './creativosStorage.js';
 import { startExecution, updateExecution, finishExecution } from './executionsStore.js';
 
 const PRODUCTOS_KEY = 'adslab-marketing-productos-v1';
@@ -1670,9 +1669,9 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
   const handleRemove = async (id) => {
     if (!window.confirm('¿Borrar esta idea? No se puede deshacer.')) return;
     setIdeas(removeIdea(id));
-    // Borramos también el creativo de IndexedDB — sino quedaba huérfano
-    // ocupando espacio para siempre (cada imagen pesa ~1-2 MB).
-    try { await deleteCreativo(id); } catch (err) { console.warn('[Bandeja] deleteCreativo falló:', err.message); }
+    // (Fase 2 cloud-first: ya no borramos legacy IDB — los creativos
+    // ahora viven en Supabase Storage + marketing_creativos. La galería
+    // sigue su propio ciclo de vida.)
     setSelected(prev => {
       const next = new Set(prev); next.delete(id); return next;
     });

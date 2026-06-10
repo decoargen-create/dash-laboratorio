@@ -105,15 +105,39 @@ function singularFormato(formato) {
   if (!formato) return null;
   const map = {
     'gomitas': 'gomita',
+    'gummies': 'gummy',
     'cápsulas': 'cápsula',
     'capsulas': 'cápsula',
+    'capsules': 'capsule',
+    'softgels': 'softgel',
+    'pastillas': 'pastilla',
     'gotas': 'gota',
+    'drops': 'drop',
     'comprimidos': 'comprimido',
     'tabletas': 'tableta',
+    'tablets': 'tablet',
     'sachets': 'sachet',
+    'sachet': 'sachet',
     'shots': 'shot',
+    'shot': 'shot',
     'parches': 'parche',
+    'patches': 'patch',
     'sticks': 'stick',
+    'stick': 'stick',
+    'sticks individuales': 'stick',
+    'polvo': 'porción',         // "polvo" no es contable, usamos "porción"
+    'powder': 'scoop',
+    'sérum': 'gota',             // "1 gota de sérum"
+    'serum': 'gota',
+    'crema': 'aplicación',
+    'cream': 'application',
+    'aceite': 'gota',
+    'oil': 'drop',
+    'bálsamo': 'aplicación',
+    'balm': 'application',
+    'spray': 'puff',
+    'mascarilla': 'mascarilla',  // singular igual
+    'mask': 'mask',
   };
   return map[formato.toLowerCase()] || formato;
 }

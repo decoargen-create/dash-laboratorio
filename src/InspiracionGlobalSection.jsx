@@ -102,10 +102,22 @@ export default function InspiracionGlobalSection({ addToast }) {
         payload.searchKeyword = brand.nombre;
       }
       updateExecution(execId, { stage: 'Scrapeando…' });
-      const resp = await fetch('/api/marketing/apify-ingest', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      // Timeout de 90s para que el user no quede colgado si Apify se cuelga.
+      const ctrl = new AbortController();
+      const timeoutId = setTimeout(() => ctrl.abort(), 90000);
+      let resp;
+      try {
+        resp = await fetch('/api/marketing/apify-ingest', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal: ctrl.signal,
+        });
+      } catch (err) {
+        if (err.name === 'AbortError') throw new Error('Timeout (90s) — Apify no respondió a tiempo. Probá de nuevo.');
+        throw err;
+      } finally {
+        clearTimeout(timeoutId);
+      }
       const data = await parseJsonOrThrow(resp, 'apify-ingest');
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
       const ads = data.ads || [];

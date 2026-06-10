@@ -87,7 +87,23 @@ function inferProductForm(producto) {
 
 // Singular del formato — para overlays "1 cápsula" → "1 gomita".
 function singularFormato(formato) {
-  const map = { 'gomitas': 'gomita', 'cápsulas': 'cápsula', 'gotas': 'gota', 'comprimidos': 'comprimido', 'tabletas': 'tableta', 'sachets': 'sachet', 'shots': 'shot', 'parches': 'parche', 'sticks': 'stick' };
+  const map = {
+    'gomitas': 'gomita', 'gummies': 'gummy',
+    'cápsulas': 'cápsula', 'capsulas': 'cápsula', 'capsules': 'capsule', 'softgels': 'softgel', 'pastillas': 'pastilla',
+    'gotas': 'gota', 'drops': 'drop',
+    'comprimidos': 'comprimido', 'tabletas': 'tableta', 'tablets': 'tablet',
+    'sachets': 'sachet', 'sachet': 'sachet',
+    'shots': 'shot', 'shot': 'shot',
+    'parches': 'parche', 'patches': 'patch',
+    'sticks': 'stick', 'stick': 'stick', 'sticks individuales': 'stick',
+    'polvo': 'porción', 'powder': 'scoop',
+    'sérum': 'gota', 'serum': 'gota',
+    'crema': 'aplicación', 'cream': 'application',
+    'aceite': 'gota', 'oil': 'drop',
+    'bálsamo': 'aplicación', 'balm': 'application',
+    'spray': 'puff',
+    'mascarilla': 'mascarilla', 'mask': 'mask',
+  };
   return map[(formato || '').toLowerCase()] || formato;
 }
 

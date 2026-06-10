@@ -426,7 +426,7 @@ function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = f
   // que solo corra cuando el thumb está cerca del viewport. Con 400+ thumbs
   // en pantalla, mount-time lookups eran el principal bottleneck.
   const [cachedUrl, setCachedUrl] = useState(null);
-  const containerRef = React.useRef(null);
+  const containerRef = useRef(null);
   useEffect(() => {
     let active = true;
     if (!ad?.id || !containerRef.current) return;

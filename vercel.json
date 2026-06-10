@@ -28,7 +28,7 @@
   },
   "crons": [
     { "path": "/api/meta/cron-creative-refresh", "schedule": "0 12 * * *" },
-    { "path": "/api/actas/sync", "schedule": "0 9 * * *" }
+    { "path": "/api/actas/sync", "schedule": "0 * * * *" }
   ],
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/index.html" }

@@ -22,7 +22,9 @@ import {
   markAsWinner, unmarkWinner,
 } from './galeriaReferenciales.js';
 import WinnerForm from './WinnerForm.jsx';
+import WinnersReport from './WinnersReport.jsx';
 import { iterateFromWinner } from './winnerIterate.js';
+import { BarChart3 } from 'lucide-react';
 import { SkeletonGrid } from './Skeleton.jsx';
 import EmptyState from './EmptyState.jsx';
 
@@ -631,7 +633,9 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
     setCargando(true);
     // Cuando el panel es "archivados", incluimos archivados en la query
     // — sino los filtraríamos del array y no aparecerían en el panel.
-    const includeArchived = panel === 'archivados' || verArchivados;
+    // 'reportes' incluye archivados también porque los winners pueden estar
+    // archivados (winner + archivado = "ganador histórico ya no en uso").
+    const includeArchived = panel === 'archivados' || panel === 'reportes' || verArchivados;
     Promise.all([
       getReferencialesByProducto(productoId, { includeArchived }),
       countReferencialesByProducto(productoId),
@@ -1005,11 +1009,21 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
             label="Archivados"
             count={counts.archived}
           />
+          <TabButton
+            active={panel === 'reportes'}
+            onClick={() => setPanel('reportes')}
+            icon={<BarChart3 size={12} />}
+            label="Reportes"
+            count={counts.winners}
+            accent="amber"
+          />
         </div>
 
         {/* Body */}
         <div className="p-5 max-h-[75vh] overflow-y-auto">
-          {cargando ? (
+          {panel === 'reportes' ? (
+            <WinnersReport winners={items.filter(it => it.winner)} />
+          ) : cargando ? (
             <SkeletonGrid count={8} />
           ) : items.length === 0 ? (
             <EmptyState

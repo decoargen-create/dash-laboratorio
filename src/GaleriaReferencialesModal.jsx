@@ -667,6 +667,21 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
   const [filtroOrigen, setFiltroOrigen] = useState('all');     // 'all' | 'inspiracion' | 'bandeja-idea'
   const [zipping, setZipping] = useState(false);
 
+  // ⚠️ visibleItems TIENE que estar acá arriba (antes del useEffect de
+  // keyboard nav que lo usa en su dep array). Estaba abajo en línea 935
+  // y producía TDZ "Cannot access 'N' before initialization" en prod.
+  const visibleItems = items.filter(it => {
+    if (panel === 'winners' && !it.winner) return false;
+    if (panel === 'archivados' && !it.archivado) return false;
+    if (panel === 'todos' && it.archivado) return false;
+    if (filtroEstado === 'pending' && it.descargada) return false;
+    if (filtroEstado === 'downloaded' && !it.descargada) return false;
+    if (filtroVariante !== 'all' && it.variantStyle !== filtroVariante) return false;
+    if (filtroOrigen === 'inspiracion' && it.sourceType === 'bandeja-idea') return false;
+    if (filtroOrigen === 'bandeja-idea' && it.sourceType !== 'bandeja-idea') return false;
+    return true;
+  });
+
   const refresh = () => {
     setCargando(true);
     // Cuando el panel es "archivados", incluimos archivados en la query
@@ -931,19 +946,8 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
     limpiarSeleccion();
     refresh();
   };
-
-  const visibleItems = items.filter(it => {
-    // Panel principal: winners-only / archivados-only / todos.
-    if (panel === 'winners' && !it.winner) return false;
-    if (panel === 'archivados' && !it.archivado) return false;
-    if (panel === 'todos' && it.archivado) return false;
-    if (filtroEstado === 'pending' && it.descargada) return false;
-    if (filtroEstado === 'downloaded' && !it.descargada) return false;
-    if (filtroVariante !== 'all' && it.variantStyle !== filtroVariante) return false;
-    if (filtroOrigen === 'inspiracion' && it.sourceType === 'bandeja-idea') return false;
-    if (filtroOrigen === 'bandeja-idea' && it.sourceType !== 'bandeja-idea') return false;
-    return true;
-  });
+  // visibleItems se declara arriba (línea 673) — TDZ fix para el useEffect
+  // de keyboard nav del lightbox.
   const anyFilterActive = filtroEstado !== 'all' || filtroVariante !== 'all' || filtroOrigen !== 'all';
   const yaDescargadosCount = items.filter(it => it.descargada).length;
 

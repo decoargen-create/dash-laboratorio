@@ -29,8 +29,11 @@ import { supabase } from './supabase.js';
 import { downloadProductoExport, importProductoFromFile } from './productoExport.js';
 import DiagnosticoSyncModal from './DiagnosticoSyncModal.jsx';
 import { logCostsFromResponse } from './costsStore.js';
-import BandejaSection from './Bandeja.jsx';
-import InspiracionSection from './InspiracionSection.jsx';
+// Lazy-loaded para no inflar el main chunk. Estos tabs (Bandeja/Inspiración)
+// solo renderean cuando el user activa el tab dentro del workspace del
+// producto. React.Suspense las wrapea abajo.
+const BandejaSection = React.lazy(() => import('./Bandeja.jsx'));
+const InspiracionSection = React.lazy(() => import('./InspiracionSection.jsx'));
 import CreativosTab from './CreativosTab.jsx';
 import DocumentacionTab from './DocumentacionTab.jsx';
 import CopilotoTab from './CopilotoTab.jsx';
@@ -2632,7 +2635,9 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             onDone={() => setBandejaRefreshKey(k => k + 1)}
           />
           <div className="-mx-4">
-            <BandejaSection key={bandejaRefreshKey} addToast={addToast} forcedProductoId={String(producto.id)} embedded />
+            <React.Suspense fallback={<div className="p-6 text-xs text-gray-400 italic">Cargando Bandeja…</div>}>
+              <BandejaSection key={bandejaRefreshKey} addToast={addToast} forcedProductoId={String(producto.id)} embedded />
+            </React.Suspense>
           </div>
         </div>
       )}
@@ -2657,7 +2662,9 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
       {productoTab === 'inspiracion' && (
         <div className="-mx-4">
-          <InspiracionSection addToast={addToast} forcedProductoId={String(producto.id)} embedded />
+          <React.Suspense fallback={<div className="p-6 text-xs text-gray-400 italic">Cargando Inspiración…</div>}>
+            <InspiracionSection addToast={addToast} forcedProductoId={String(producto.id)} embedded />
+          </React.Suspense>
         </div>
       )}
 

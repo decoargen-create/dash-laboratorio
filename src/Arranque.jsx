@@ -21,7 +21,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Package, Target, Play, Check, Loader2, AlertTriangle, ChevronRight, ChevronDown,
   Plus, X, Sparkles, Link2, Search, Clock, Inbox, Trash2, Upload, Download, Activity,
-  LayoutGrid, List as ListIcon, BarChart3,
+  LayoutGrid, List as ListIcon, BarChart3, Copy,
 } from 'lucide-react';
 import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGeneradorHoy, updateIdea, formatoDeAd } from './bandejaStore.js';
 import { deleteProducto as deleteProductoFromCloud } from './marketingSync.js';
@@ -2460,6 +2460,38 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                     title="Exportar producto (JSON backup)"
                   >
                     <Download size={15} />
+                  </button>
+                  <button
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      // Duplicar — útil cuando launching variantes del mismo concept
+                      // (mismo research/competencia, ofertas distintas, etc).
+                      // Se duplica TODO el producto salvo: id nuevo + sufijo " (copia)"
+                      // en el nombre + bandejaIdeas vacía (las ideas son específicas
+                      // del original).
+                      const newName = window.prompt(`Nombre del producto duplicado:`, `${p.nombre} (copia)`);
+                      if (!newName?.trim()) return;
+                      const newId = `prod-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+                      const dup = {
+                        ...p,
+                        id: newId,
+                        nombre: newName.trim(),
+                        createdAt: new Date().toISOString(),
+                        updated_at: new Date().toISOString(),
+                        bandejaIdeas: [],          // las ideas son del original
+                        competidores: (p.competidores || []).map(c => ({ ...c, id: `${c.id}-dup-${Math.random().toString(36).slice(2, 4)}`, ads: [] })),  // mismas brands, sin ads scrapeados (re-scrape para fresh data)
+                        // Reseteamos lo que el user probablemente quiere refresh por variante:
+                        fotoUrl: null,
+                        fotoUpdatedAt: null,
+                      };
+                      setProductos(prev => [dup, ...prev]);
+                      setActiveProductoId(String(newId));
+                      addToast?.({ type: 'success', message: `"${newName}" duplicado. Re-scrapeá competidores y subí foto si cambia.` });
+                    }}
+                    className="p-1.5 rounded-md text-gray-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition"
+                    title="Duplicar producto (mismo research/competencia, nuevo nombre)"
+                  >
+                    <Copy size={15} />
                   </button>
                   <button
                     onClick={async (e) => {

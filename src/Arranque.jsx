@@ -177,6 +177,10 @@ async function streamGenerateDocs({ productoNombre, productoUrl, descripcion, pr
   let buffer = '';
   const outputs = {};
   let resumenEjecutivo = '';
+  // Tracking para mejor diagnóstico cuando docs incompletos.
+  let stepStartsSeen = 0;
+  let lastStepStarted = null;
+  let streamCompleted = false;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -191,7 +195,11 @@ async function streamGenerateDocs({ productoNombre, productoUrl, descripcion, pr
       try {
         const ev = JSON.parse(payload);
         if (ev.type === 'info' && ev.message) onProgress?.(ev.message);
-        else if (ev.type === 'step-start') onProgress?.(`Generando ${ev.label}…`);
+        else if (ev.type === 'step-start') {
+          stepStartsSeen++;
+          lastStepStarted = ev.label || ev.key;
+          onProgress?.(`Generando ${ev.label}…`);
+        }
         else if (ev.type === 'step-done') {
           outputs[ev.key] = ev.content;
           if (ev.key === 'resumenEjecutivo') resumenEjecutivo = ev.content || '';
@@ -203,6 +211,7 @@ async function streamGenerateDocs({ productoNombre, productoUrl, descripcion, pr
         } else if (ev.type === 'error') {
           throw new Error(ev.error || 'Error en el stream de docs');
         } else if (ev.type === 'complete') {
+          streamCompleted = true;
           // El cliente ya recibió los step-cost incrementales — el cost
           // total del `complete` es solo para validación del lado del
           // server, NO lo volvemos a sumar (sería doble contabilización).
@@ -223,7 +232,21 @@ async function streamGenerateDocs({ productoNombre, productoUrl, descripcion, pr
   const REQUIRED_DOCS = ['research', 'avatar', 'offerBrief', 'beliefs'];
   const incomplete = REQUIRED_DOCS.filter(k => !outputs[k] || String(outputs[k]).trim().length < 200);
   if (incomplete.length > 0) {
-    throw new Error(`Documentación incompleta: faltan ${incomplete.join(', ')}. El stream se cortó a mitad — reintentá el pipeline.`);
+    // Diagnóstico accionable según en qué estado quedó el stream:
+    //   - 0 step-start: server murió antes de arrancar (scrape landing, init).
+    //   - N start, no complete: timeout de Vercel (300s) o red caída
+    //     durante "<lastStepStarted>".
+    //   - complete + outputs vacíos: Anthropic devolvió content vacío
+    //     (safety filter / edge case con el nombre).
+    let diag;
+    if (stepStartsSeen === 0) {
+      diag = 'El server no arrancó ningún paso — probablemente falló al scrapear la landing (15s timeout) o se cayó antes de empezar.';
+    } else if (!streamCompleted) {
+      diag = `Se cortó durante "${lastStepStarted || 'desconocido'}". Probable: timeout de Vercel (300s), red del cliente caída, o Anthropic colgado. Reintentá — los docs ya completos se persistieron server-side.`;
+    } else {
+      diag = `Stream completo pero faltan: ${incomplete.join(', ')}. Anthropic devolvió contenido vacío (safety filter o prompt edge case). Reintentá; si vuelve a fallar, simplificá el nombre del producto.`;
+    }
+    throw new Error(`Documentación incompleta. ${diag}`);
   }
 
   return { docs: outputs, resumenEjecutivo };

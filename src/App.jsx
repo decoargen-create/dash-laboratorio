@@ -27,6 +27,7 @@ import ConsultoriaSection from './Consultoria.jsx';
 import { PipelineRunProvider } from './PipelineRunContext.jsx';
 import PipelineRunOverlay from './PipelineRunOverlay.jsx';
 import ExecutionsTray from './ExecutionsTray.jsx';
+import BulkProgressBarGlobal from './BulkProgressBarGlobal.jsx';
 import BalanceBar from './BalanceBar.jsx';
 import ActivityBell from './ActivityBell.jsx';
 import { getRemaining, subscribeBalance } from './balanceStore.js';
@@ -8747,6 +8748,9 @@ export default function App() {
         <AppShell onExit={() => navigate('/')} />
         <PipelineRunOverlay />
         <ExecutionsTray />
+        {/* Barra de progreso del bulk-gen — global, sobrevive cambios de
+            sección y refresh (re-hidrata de localStorage). */}
+        <BulkProgressBarGlobal />
       </PipelineRunProvider>
     );
   }

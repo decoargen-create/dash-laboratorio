@@ -31,6 +31,7 @@ import { logCostsFromResponse } from './costsStore.js';
 import { addGeneratedIdeas } from './bandejaStore.js';
 import { getProductoImagen, getAccentColor } from './productoImagen.js';
 import { saveReferencial, getUsedAdIdsForProducto } from './galeriaReferenciales.js';
+import { startBulk, patchBulk, reportAdFinished, finishBulk, clearBulk, subscribeBulk } from './bulkProgressStore.js';
 import { cacheAdImagesBatch, getCachedAdImageUrl } from './adImagesStore.js';
 import { startExecution, updateExecution, finishExecution } from './executionsStore.js';
 import { playDoneChime, playBulkDoneChime, playErrorTone } from './sounds.js';
@@ -1169,7 +1170,23 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   // Progreso del bulk: null cuando no hay bulk en curso.
   // { total, completed, currentIdx, current: {adId, brandNombre, adHeadline}, startedAt,
   //   adsList: [{adId, brandNombre, status: 'pending'|'doing'|'done'|'error'}], errors: [] }
-  const [bulkProgress, setBulkProgress] = useState(null);
+  // bulkProgress vive ahora en bulkProgressStore (global + localStorage).
+  // Acá lo sub-scribimos para re-render y mostrar el botón "cancelar" si
+  // hay uno en curso. La BARRA en sí la renderiza App.jsx para que sea
+  // persistente a cambios de sección.
+  const [bulkProgress, _setBulkProgressLocal] = useState(null);
+  useEffect(() => subscribeBulk(_setBulkProgressLocal), []);
+  // Helper: las callbacks viejas del código usaban setBulkProgress(prev => ...)
+  // Lo mantenemos compatible delegando al store.
+  const setBulkProgress = (val) => {
+    if (typeof val === 'function') {
+      patchBulk(val);
+    } else if (val == null) {
+      clearBulk();
+    } else {
+      patchBulk(val);
+    }
+  };
   // Tick para re-renderizar progress bars (elapsed/ETA).
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -1731,20 +1748,17 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     });
     adsAGenerar.push(...adsCompetidores, ...adsCustom);
 
-    // Inicializar barra de progreso del bulk.
-    setBulkProgress({
+    // Inicializar barra de progreso del bulk (en el store global). La barra
+    // visualmente vive en App.jsx via BulkProgressBar — sobrevive cambios de
+    // sección y refresh.
+    startBulk({
+      origin: 'inspiracion-bulk',
       total: adsAGenerar.length,
-      completed: 0,
-      currentIdx: 0,
-      startedAt: Date.now(),
-      adDurations: [],
-      current: { adId: adsAGenerar[0].ad.id, brandNombre: adsAGenerar[0].brandNombre, adHeadline: adsAGenerar[0].ad.headline || adsAGenerar[0].ad.body?.slice(0, 60) || '' },
-      adsList: adsAGenerar.map((x, i) => ({
-        adId: x.ad.id,
+      ads: adsAGenerar.map(x => ({
+        id: x.ad.id,
         brandNombre: x.brandNombre,
-        status: 'pending',
+        headline: x.ad.headline || x.ad.body?.slice(0, 60) || '',
       })),
-      errors: [],
     });
 
     // FIRE-ALL-AT-ONCE — disparamos crearReferencialDeAd para TODOS los ads
@@ -1758,14 +1772,12 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     //
     // Antes era sequential workers (concurrency=1) que tardaba 40+ min para
     // 8 ads × 4 vars. Ahora es ~5 min para lo mismo, y resiliente al cierre.
-    adsAGenerar.forEach((_, i) => {
-      setBulkProgress(prev => prev ? ({
-        ...prev,
-        adsList: prev.adsList.map((x, idx) =>
-          idx === i ? { ...x, status: 'doing' } : x
-        ),
-      }) : prev);
-    });
+    // Marcamos todos como 'doing' en el store (las requests están disparándose
+    // de a una pero en background — UX-wise el user ve que ya arrancó todo).
+    patchBulk(prev => prev ? ({
+      ...prev,
+      adsList: prev.adsList.map(x => ({ ...x, status: 'doing' })),
+    }) : prev);
 
     // Toast de aviso — el user puede cerrar la pestaña tranquilo después.
     addToast?.({
@@ -1773,19 +1785,9 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       message: `${adsAGenerar.length} ads disparados en paralelo. En ~80s todas las variantes estarán generándose server-side — podés cerrar la pestaña y volver: el cloud save sigue.`,
     });
 
-    const adStart = Date.now();
     const promises = adsAGenerar.map(({ brandNombre, ad }, i) =>
       crearReferencialDeAd(brandNombre, ad).then(ok => {
-        setBulkProgress(prev => prev ? ({
-          ...prev,
-          completed: prev.completed + 1,
-          currentIdx: Math.min(prev.currentIdx + 1, prev.total - 1),
-          adDurations: [...prev.adDurations, Date.now() - adStart],
-          adsList: prev.adsList.map((x, idx) =>
-            idx === i ? { ...x, status: ok ? 'done' : 'error' } : x
-          ),
-          errors: ok ? prev.errors : [...prev.errors, brandNombre],
-        }) : prev);
+        reportAdFinished(i, { ok, errorBrand: ok ? null : brandNombre });
         return ok;
       })
     );
@@ -1796,9 +1798,9 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       bulkRunningRef.current = false;
     }
 
+    finishBulk();
     if (!mountedRef.current) return; // user navegó fuera durante el bulk
     limpiarSeleccion();
-    trackedTimeout(() => setBulkProgress(null), 4000);
     addToast?.({ type: 'success', message: 'Generación bulk completa — revisá la galería' });
     playBulkDoneChime();
   };
@@ -2166,15 +2168,9 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         </div>
       )}
 
-      {/* Barra de progreso del bulk — reemplaza a la barra de seleccionados
-          mientras está corriendo. Muestra current ad, % total, ETA y pills
-          por cada ad para ver qué está pendiente/listo/fallado. */}
-      {bulkProgress && (
-        <BulkProgressBar
-          state={bulkProgress}
-          onClose={cerrarBulkProgress}
-        />
-      )}
+      {/* Barra de progreso del bulk — ahora la renderiza App.jsx desde el
+          bulkProgressStore para que sobreviva cambios de sección y refresh.
+          Acá no renderizamos nada (sino habría 2 barras visibles). */}
 
       {/* Galería pasó a ser su propio tab en el workspace — sin modal acá. */}
 

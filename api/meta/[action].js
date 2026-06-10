@@ -19,6 +19,30 @@ import {
   verifyState, signState, setMetaCookie, clearMetaCookie,
   readMetaCookie, getOrigin, respondJSON, graphGet, graphPost,
 } from './_lib.js';
+import {
+  isSupabaseConfigured, getUserIdFromAuth,
+  listMetaConnections, insertMetaConnection,
+  getMetaConnectionToken, deleteMetaConnection,
+} from '../marketing/_supabase-server.js';
+
+// Resuelve el access token a usar para un request. Dos fuentes:
+//   - connection_id (query/body) → conexión guardada en Supabase (multi-cuenta).
+//     Requiere JWT de Supabase en Authorization para identificar al dueño.
+//   - cookie viora-meta-session → modo legacy single-token (sin Supabase).
+// Devuelve { token } o { error, status }.
+async function resolveAccessToken(req, url) {
+  const connId = url?.searchParams?.get('connection_id');
+  if (connId) {
+    const userId = await getUserIdFromAuth(req);
+    if (!userId) return { error: 'No autenticado — falta sesión de Supabase', status: 401 };
+    const token = await getMetaConnectionToken(userId, connId);
+    if (!token) return { error: 'Conexión no encontrada o sin acceso', status: 404 };
+    return { token };
+  }
+  const session = readMetaCookie(req);
+  if (session?.accessToken) return { token: session.accessToken };
+  return { error: 'Meta no conectado', status: 401 };
+}
 
 // --- helpers locales ---
 
@@ -191,11 +215,12 @@ async function handleMe(req, res) {
 // elija en un dropdown de "¿cuál usamos?".
 async function handleAdAccounts(req, res) {
   if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
-  const session = readMetaCookie(req);
-  if (!session?.accessToken) return respondJSON(res, 401, { error: 'Meta no conectado' });
+  const url = new URL(req.url, getOrigin(req));
+  const { token, error, status } = await resolveAccessToken(req, url);
+  if (!token) return respondJSON(res, status || 401, { error: error || 'Meta no conectado' });
 
   try {
-    const data = await graphGet('me/adaccounts', session.accessToken, {
+    const data = await graphGet('me/adaccounts', token, {
       fields: 'id,account_id,name,account_status,currency,timezone_name,business_name',
       limit: 100,
     });
@@ -1226,14 +1251,235 @@ async function handleResolveIgUrl(req, res) {
   }
 }
 
+// ========================================================================
+// CONEXIÓN POR ACCESS TOKEN (sin OAuth)
+// ========================================================================
+// Alternativa simple al flujo OAuth: el user pega un access token de larga
+// duración (System User token del Business Manager, o uno generado en el
+// Graph API Explorer) y lo guardamos en la MISMA cookie firmada que usa
+// todo el resto de /api/meta/*. Así reutilizamos ad-accounts, campaigns,
+// insights, etc. sin tocar nada más.
+//
+// Por qué existe: crear una app de Meta Developer + pasar App Review para
+// ads_read/ads_management es lento (y a veces inviable si la cuenta de
+// developer está bloqueada). Un token pegado funciona al instante para uso
+// propio sobre tu propia cuenta publicitaria.
+//
+// Body JSON: { accessToken: "EAAB..." }
+async function handleConnectToken(req, res) {
+  if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
+
+  const authSecret = process.env.AUTH_SECRET;
+  if (!authSecret) return respondJSON(res, 500, { error: 'AUTH_SECRET no configurada en el servidor' });
+
+  // Parsear body (Vercel no auto-parsea siempre en POST).
+  let body;
+  try {
+    if (req.body && typeof req.body === 'object') body = req.body;
+    else {
+      const chunks = [];
+      for await (const c of req) chunks.push(c);
+      body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+    }
+  } catch {
+    return respondJSON(res, 400, { error: 'Body JSON inválido' });
+  }
+
+  const accessToken = String(body?.accessToken || '').trim();
+  if (!accessToken) return respondJSON(res, 400, { error: 'Falta accessToken' });
+
+  // Validamos el token llamando a /me. Si Meta devuelve error, el token es
+  // inválido, expiró, o no tiene permisos básicos.
+  let me;
+  try {
+    me = await fetchMe(accessToken);
+  } catch (err) {
+    return respondJSON(res, 502, { error: `No pude validar el token contra Meta: ${err.message}` });
+  }
+  if (me?.error || !me?.id) {
+    const msg = me?.error?.message || 'Meta no devolvió un user id — el token es inválido o expiró.';
+    return respondJSON(res, 401, { error: `Token inválido: ${msg}` });
+  }
+
+  // Si hay Supabase + JWT del user, guardamos la conexión en DB (multi-cuenta):
+  // así se pueden tener varias cuentas/clientes conectados a la vez.
+  const userId = isSupabaseConfigured() ? await getUserIdFromAuth(req) : null;
+  if (userId) {
+    try {
+      const connection = await insertMetaConnection(userId, {
+        label: body?.label,
+        metaUserId: me.id,
+        metaUserName: me.name || null,
+        accessToken,
+      });
+      return respondJSON(res, 200, {
+        stored: 'db',
+        connection,
+        user: { id: me.id, name: me.name || null },
+      });
+    } catch (err) {
+      return respondJSON(res, 502, { error: `No pude guardar la conexión: ${err.message}` });
+    }
+  }
+
+  // Fallback legacy: sin Supabase guardamos en cookie (una sola conexión).
+  const cookiePayload = {
+    accessToken,
+    metaUserId: me.id,
+    metaUserName: me.name || null,
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + META_COOKIE_MAX_AGE,
+  };
+  setMetaCookie(res, signState(cookiePayload, authSecret));
+
+  return respondJSON(res, 200, {
+    stored: 'cookie',
+    connected: true,
+    user: { id: me.id, name: me.name || null },
+  });
+}
+
+// Lista (GET) y borra (DELETE) las conexiones guardadas del user. Requiere
+// JWT de Supabase. La lista NUNCA incluye el access_token.
+async function handleConnections(req, res) {
+  if (req.method === 'GET') {
+    if (!isSupabaseConfigured()) {
+      // Sin Supabase no hay multi-conexión: el front cae a modo cookie.
+      return respondJSON(res, 200, { supabase: false, authenticated: false, connections: [] });
+    }
+    const userId = await getUserIdFromAuth(req);
+    if (!userId) return respondJSON(res, 200, { supabase: true, authenticated: false, connections: [] });
+    try {
+      const connections = await listMetaConnections(userId);
+      return respondJSON(res, 200, { supabase: true, authenticated: true, connections });
+    } catch (err) {
+      return respondJSON(res, 502, { error: err.message });
+    }
+  }
+  if (req.method === 'DELETE') {
+    const userId = await getUserIdFromAuth(req);
+    if (!userId) return respondJSON(res, 401, { error: 'No autenticado' });
+    const url = new URL(req.url, getOrigin(req));
+    const connId = url.searchParams.get('connection_id');
+    if (!connId) return respondJSON(res, 400, { error: 'Falta connection_id' });
+    try {
+      await deleteMetaConnection(userId, connId);
+      return respondJSON(res, 200, { ok: true });
+    } catch (err) {
+      return respondJSON(res, 502, { error: err.message });
+    }
+  }
+  return respondJSON(res, 405, { error: 'Method not allowed' });
+}
+
+// ========================================================================
+// CAMPAÑAS CON INSIGHTS — la tabla de tracking
+// ========================================================================
+// Lista las campañas de una ad account con sus métricas agregadas para un
+// período (date_preset). Es el endpoint que alimenta la tabla de "Campañas".
+// Reusa parseInsights() para derivar ROAS/CPA/compras del bloque actions.
+//
+// Query params:
+//   account_id   (obligatorio, con prefijo act_)
+//   date_preset  (opcional, default last_7d)
+async function handleCampaignsInsights(req, res) {
+  if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
+
+  const origin = getOrigin(req);
+  const url = new URL(req.url, origin);
+  const { token, error, status } = await resolveAccessToken(req, url);
+  if (!token) return respondJSON(res, status || 401, { error: error || 'Meta no conectado' });
+
+  const accountId = url.searchParams.get('account_id');
+  if (!accountId) return respondJSON(res, 400, { error: 'Falta account_id (con prefijo act_)' });
+
+  // Período. Sólo aceptamos presets que Meta soporta — cualquier otro cae a
+  // last_7d para no romper el call.
+  const allowedPresets = [
+    'today', 'yesterday', 'last_7d', 'last_14d', 'last_30d',
+    'last_90d', 'this_month', 'last_month', 'maximum',
+  ];
+  let datePreset = url.searchParams.get('date_preset') || 'last_7d';
+  if (!allowedPresets.includes(datePreset)) datePreset = 'last_7d';
+
+  const effectiveStatus = JSON.stringify([
+    'ACTIVE', 'PAUSED', 'IN_PROCESS', 'WITH_ISSUES',
+    'PENDING_REVIEW', 'DISAPPROVED', 'PREAPPROVED',
+  ]);
+
+  try {
+    const all = [];
+    let next = null;
+    let guard = 0;
+    do {
+      const params = {
+        fields: [
+          'id,name,objective,status,effective_status,daily_budget,lifetime_budget,created_time',
+          `insights.date_preset(${datePreset}){impressions,clicks,ctr,cpc,cpm,spend,actions,action_values,reach,frequency}`,
+        ].join(','),
+        limit: 100,
+        effective_status: effectiveStatus,
+      };
+      if (next) params.after = next;
+      const data = await graphGet(`${accountId}/campaigns`, token, params);
+      for (const c of data.data || []) all.push(c);
+      next = data.paging?.cursors?.after && data.paging?.next ? data.paging.cursors.after : null;
+      guard++;
+    } while (next && guard < 5); // máx ~500 campañas
+
+    const campaigns = all.map(c => ({
+      id: c.id,
+      name: c.name,
+      objective: c.objective,
+      status: c.status,
+      effectiveStatus: c.effective_status,
+      // Meta devuelve budgets en centavos de la moneda de la cuenta.
+      dailyBudget: c.daily_budget != null ? Number(c.daily_budget) / 100 : null,
+      lifetimeBudget: c.lifetime_budget != null ? Number(c.lifetime_budget) / 100 : null,
+      createdTime: c.created_time,
+      insights: parseInsights(c.insights?.data?.[0]),
+    }));
+    // Orden: mayor gasto primero (lo que más importa trackear arriba).
+    campaigns.sort((a, b) => (b.insights?.spend || 0) - (a.insights?.spend || 0));
+
+    // Totales agregados para la fila de resumen de la tabla.
+    const totals = campaigns.reduce((t, c) => {
+      const i = c.insights;
+      if (!i) return t;
+      t.spend += i.spend || 0;
+      t.impressions += i.impressions || 0;
+      t.clicks += i.clicks || 0;
+      t.purchases += i.purchases || 0;
+      t.revenue += i.revenue || 0;
+      return t;
+    }, { spend: 0, impressions: 0, clicks: 0, purchases: 0, revenue: 0 });
+    totals.ctr = totals.impressions > 0 ? (totals.clicks / totals.impressions) * 100 : 0;
+    totals.roas = totals.spend > 0 ? totals.revenue / totals.spend : 0;
+    totals.cpa = totals.purchases > 0 ? totals.spend / totals.purchases : 0;
+
+    return respondJSON(res, 200, {
+      accountId,
+      datePreset,
+      total: campaigns.length,
+      totals,
+      campaigns,
+    });
+  } catch (err) {
+    return respondJSON(res, err.status || 502, { error: err.message });
+  }
+}
+
 // --- dispatcher ---
 
 const actions = {
   connect: handleConnect,
   callback: handleCallback,
+  'connect-token': handleConnectToken,
+  connections: handleConnections,
   disconnect: handleDisconnect,
   me: handleMe,
   'ad-accounts': handleAdAccounts,
+  'campaigns-insights': handleCampaignsInsights,
   'ads-with-insights': handleAdsWithInsights,
   'ad-performance': handleAdPerformance,
   'ig-accounts': handleIgAccounts,

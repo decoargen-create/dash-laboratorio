@@ -38,6 +38,35 @@ import GeneradorRapido from './GeneradorRapido.jsx';
 import ProductoImagenUploader from './ProductoImagenUploader.jsx';
 import GaleriaReferencialesModal from './GaleriaReferencialesModal.jsx';
 import { usePipelineRun } from './PipelineRunContext.jsx';
+import { getProductoImagen } from './productoImagen.js';
+
+// Avatar del producto: muestra el pote (foto cargada en Setup) y cae al
+// gradiente con la inicial si todavía no hay foto. getProductoImagen resuelve
+// desde IDB/cloud y está memoizado, así que es barato re-montarlo por card.
+function ProductAvatar({ id, nombre, sizeClass = 'w-12 h-12', radiusClass = 'rounded-lg', extra = '' }) {
+  const [src, setSrc] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    getProductoImagen(id)
+      .then(img => { if (alive) setSrc(img || null); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [id]);
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt={nombre || 'Producto'}
+        className={`${sizeClass} ${radiusClass} object-cover shrink-0 border border-black/5 dark:border-white/10 ${extra}`}
+      />
+    );
+  }
+  return (
+    <div className={`${sizeClass} ${radiusClass} bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white font-bold shrink-0 ${extra}`}>
+      {nombre?.charAt(0)?.toUpperCase() || 'P'}
+    </div>
+  );
+}
 
 // Etiquetas cortas de la etapa de awareness del prospecto — para el chip
 // del header del workspace.
@@ -385,27 +414,74 @@ function RunHistoryCard({ history, onClear }) {
   );
 }
 
-// Guía corta del flujo del módulo — se muestra debajo de los tabs para
-// que el user nuevo sepa el orden. Dismissable y persistido.
+// Guía del flujo del módulo. Vive arriba de todo (lista de productos y
+// workspace) para que sea la MISMA referencia desde cualquier tab, incluida
+// Bandeja. Colapsada por defecto como un pill chico para no sumar ruido
+// ("demasiada info"): el user la abre solo si la necesita. El estado
+// abierto/cerrado se persiste.
+const FLOW_STEPS = [
+  { emoji: '⚙️', tab: 'setup', titulo: 'Setup', desc: 'Cargá el producto (foto, oferta) y sus competidores.' },
+  { emoji: '▶️', tab: null, titulo: 'Correr pipeline', desc: 'Leemos los ads ganadores de la competencia y armamos ideas.' },
+  { emoji: '📥', tab: 'bandeja', titulo: 'Bandeja', desc: 'Revisás cada idea y generás el creativo ahí mismo.' },
+  { emoji: '🎨', tab: 'creativos', titulo: 'Creativos', desc: 'Ves los estáticos generados, listos para descargar.' },
+  { emoji: '🤖', tab: 'copiloto', titulo: 'Copiloto', desc: 'Pedís más variantes o ajustes en lenguaje natural.' },
+];
 
-function TabsGuide() {
-  const [hidden, setHidden] = useState(() => {
-    try { return localStorage.getItem('adslab-tabs-guide-hidden') === '1'; } catch { return false; }
+function FlowGuide() {
+  const [open, setOpen] = useState(() => {
+    try { return localStorage.getItem('adslab-flow-guide-open') === '1'; } catch { return false; }
   });
-  if (hidden) return null;
+  const toggle = () => {
+    setOpen(prev => {
+      const next = !prev;
+      try { localStorage.setItem('adslab-flow-guide-open', next ? '1' : '0'); } catch {}
+      return next;
+    });
+  };
+  const goTab = (tab) => {
+    if (!tab) return;
+    try { window.dispatchEvent(new CustomEvent('viora:product-tab', { detail: { tab } })); } catch {}
+  };
   return (
-    <div className="flex items-center gap-2 px-3 py-2 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-lg text-[11px] text-brand-800 dark:text-brand-300">
-      <span className="shrink-0">🗺️</span>
-      <span className="flex-1 min-w-0">
-        <strong>Cómo va el flujo:</strong> ⚙️ Setup (cargá producto + competidores) → ▶️ Correr pipeline → 📥 Bandeja (revisá las ideas y generá el creativo en cada una) → 🤖 Copiloto para pedir más.
-      </span>
+    <div className="bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-lg overflow-hidden">
       <button
-        onClick={() => { try { localStorage.setItem('adslab-tabs-guide-hidden', '1'); } catch {} setHidden(true); }}
-        className="shrink-0 text-brand-400 hover:text-brand-700 dark:hover:text-brand-200 transition"
-        title="Ocultar guía"
+        onClick={toggle}
+        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-brand-100/60 dark:hover:bg-brand-900/30 transition"
+        title={open ? 'Ocultar guía' : 'Ver cómo funciona el módulo'}
       >
-        <X size={13} />
+        <span className="shrink-0">🗺️</span>
+        <span className="flex-1 min-w-0 text-[12px] font-bold text-brand-800 dark:text-brand-200">
+          ¿Cómo funciona? <span className="font-normal text-brand-600/80 dark:text-brand-400/80">— guía rápida del flujo en 5 pasos</span>
+        </span>
+        <ChevronDown size={14} className={`shrink-0 text-brand-500 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
+      {open && (
+        <div className="px-3 pb-3 pt-1">
+          <div className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-5">
+            {FLOW_STEPS.map((s, i) => (
+              <button
+                key={s.titulo}
+                onClick={() => goTab(s.tab)}
+                disabled={!s.tab}
+                className={`flex flex-col gap-0.5 p-2 rounded-md border text-left transition ${
+                  s.tab
+                    ? 'bg-white/70 dark:bg-gray-800/50 border-brand-200 dark:border-brand-800 hover:border-brand-400 dark:hover:border-brand-600 hover:shadow-sm cursor-pointer'
+                    : 'bg-white/40 dark:bg-gray-800/30 border-brand-200/60 dark:border-brand-800/60 cursor-default'
+                }`}
+              >
+                <span className="flex items-center gap-1.5 text-[11px] font-bold text-brand-800 dark:text-brand-200">
+                  <span className="text-gray-400 dark:text-gray-500 tabular-nums">{i + 1}.</span>
+                  <span>{s.emoji}</span>{s.titulo}
+                </span>
+                <span className="text-[10px] leading-snug text-gray-600 dark:text-gray-400">{s.desc}</span>
+              </button>
+            ))}
+          </div>
+          <p className="mt-2 text-[10px] text-brand-600/70 dark:text-brand-400/70">
+            Tip: tocá un paso para saltar a esa tab. Setup → pipeline es lo primero; el resto se va llenando solo.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -714,19 +790,6 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   useEffect(() => {
     if (productoTabKey) try { localStorage.setItem(productoTabKey, productoTab); } catch {}
   }, [productoTab, productoTabKey]);
-
-  // Estado del sidebar global (open/closed) — escuchamos el evento que
-  // dispatchea App.jsx para ocultar la barra horizontal de tabs cuando el
-  // sidebar las muestra en vertical (evita duplicación). En mobile o con
-  // sidebar colapsado, las tabs horizontales siguen visibles como fallback.
-  const [sidebarOpenInApp, setSidebarOpenInApp] = useState(true);
-  useEffect(() => {
-    const onSidebar = (e) => {
-      if (e?.detail?.open != null) setSidebarOpenInApp(!!e.detail.open);
-    };
-    window.addEventListener('viora:sidebar-state', onSidebar);
-    return () => window.removeEventListener('viora:sidebar-state', onSidebar);
-  }, []);
 
   // Sync del contexto del producto activo + lista para que el sidebar de
   // App.jsx pueda renderizar el nav vertical estilo Apify (lista de productos
@@ -2191,6 +2254,8 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   if (!producto) {
     return (
       <div className="max-w-6xl mx-auto space-y-6">
+        {/* Guía del flujo — arriba de todo el módulo, también en la lista. */}
+        <FlowGuide />
         {/* Antes había acá <BulkProgressBar state={bulkCreativos} .../> pero
             bulkCreativos / bulkAbortRef nunca se declararon — era código
             muerto que crasheaba al primer render. La barra real de bulk
@@ -2315,9 +2380,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                   >
                     {/* Header */}
                     <div className="flex items-center gap-3 mb-3">
-                      <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white font-bold text-lg shrink-0 group-hover:scale-105 transition">
-                        {p.nombre?.charAt(0)?.toUpperCase() || 'P'}
-                      </div>
+                      <ProductAvatar
+                        id={p.id}
+                        nombre={p.nombre}
+                        extra="text-lg group-hover:scale-105 transition"
+                      />
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{p.nombre}</p>
                         <div className="flex items-center gap-2 text-[10px] text-gray-500 dark:text-gray-400 mt-0.5 flex-wrap">
@@ -2445,6 +2512,8 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // ====================================================================
   return (
     <div className="max-w-[1500px] mx-auto space-y-6">
+      {/* Guía del flujo — arriba de todo, misma referencia en cualquier tab. */}
+      <FlowGuide />
       {/* Header del producto */}
       <div className="flex items-center gap-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-3 shadow-sm">
         <button onClick={() => setActiveProductoId(null)}
@@ -2452,9 +2521,12 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           title="Volver a la lista de productos">
           <ChevronRight size={18} className="rotate-180" />
         </button>
-        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white shadow-sm shrink-0">
-          <Play size={22} />
-        </div>
+        <ProductAvatar
+          id={producto.id}
+          nombre={producto.nombre}
+          radiusClass="rounded-xl"
+          extra="shadow-sm text-xl"
+        />
         <div className="flex-1 min-w-0">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
             <button onClick={() => setActiveProductoId(null)} className="hover:text-brand-500 transition">Productos</button>
@@ -2471,15 +2543,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       </div>
 
       {/* Tabs del workspace — Dashboard, Setup, Bandeja, Inspiración, Creativos.
-          Ocultas cuando el sidebar está abierto (las muestra ahí en vertical
-          y se ven duplicadas). Visibles cuando el sidebar está colapsado
-          (icon-only) o en mobile. */}
-      {!sidebarOpenInApp && (
-        <>
-          <ProductTabs activeTab={productoTab} onChange={setProductoTab} />
-          <TabsGuide />
-        </>
-      )}
+          Se muestran siempre en el panel principal: el nav vertical del sidebar
+          (ProductNavInSidebar) fue removido por pedido del user, así que estas
+          son la única forma de cambiar de tab — antes quedaban ocultas con el
+          sidebar abierto y no aparecían en ningún lado. */}
+      <ProductTabs activeTab={productoTab} onChange={setProductoTab} />
 
       {productoTab === 'dashboard' && (
         <DashboardTab producto={producto} competidores={competidores} runHistory={runHistory} />

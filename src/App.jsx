@@ -22,7 +22,7 @@ import GastosStackSection from './GastosStack.jsx';
 import MetaConnectBanner from './MetaConnectBanner.jsx';
 import ArranqueSection from './Arranque.jsx';
 import BandejaSection from './Bandeja.jsx';
-import MetaAdsSection from './MetaAdsSection.jsx';
+import CampanasTracker from './CampanasTracker.jsx';
 import AutoIGSection from './AutoIG.jsx';
 import InspiracionSection from './InspiracionSection.jsx';
 import ConsultoriaSection from './Consultoria.jsx';
@@ -1415,7 +1415,7 @@ function AppShell({ onExit }) {
       const saved = localStorage.getItem('adslab-last-section');
       // Si tenía una sección de Viora/Senydrop/MetaAds, defaulteamos a la
       // de Marketing. Lista de secciones válidas en las plataformas activas:
-      const validSections = ['mk-arranque', 'mk-bandeja', 'mk-meta-ads', 'mk-auto-ig',
+      const validSections = ['mk-arranque', 'mk-bandeja', 'mk-campanas', 'mk-auto-ig',
         'mk-inspiracion', 'mk-gastos', 'mk-docs', 'con-acta'];
       return validSections.includes(saved) ? saved : 'mk-arranque';
     } catch { return 'mk-arranque'; }
@@ -2119,7 +2119,7 @@ function AppShell({ onExit }) {
                   producto en Arranque. */}
               <NavSection title="Operación" sectionKey="mk-op" sidebarOpen={sidebarOpen}>
                 <NavItem icon={Play} label="Marketing" section="mk-arranque" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                <NavItem icon={BarChart3} label="Meta Ads" section="mk-meta-ads" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                <NavItem icon={TrendingUp} label="Campañas" section="mk-campanas" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               </NavSection>
               <NavSection title="Automatización" sectionKey="mk-auto" sidebarOpen={sidebarOpen} defaultOpen={false}>
                 <NavItem icon={Instagram} label="Automatización IG" section="mk-auto-ig" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
@@ -2217,7 +2217,7 @@ function AppShell({ onExit }) {
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-bandeja' && <BandejaSection addToast={addToast} />}
           {/* mk-competencia (sidebar legacy) está redirigido por el effect
               de arriba a mk-arranque — no necesita su propio render. */}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-meta-ads' && <MetaAdsSection addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-campanas' && <CampanasTracker addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-auto-ig' && <AutoIGSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-inspiracion' && <InspiracionSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-gastos' && <GastosStackSection addToast={addToast} />}
@@ -8084,7 +8084,7 @@ function getSectionTitle(user, section) {
     'mk-arranque': 'Marketing · Arranque',
     'mk-bandeja': 'Marketing · Bandeja de ideas',
     'mk-docs': 'Marketing · Documentación de producto',
-    'mk-meta-ads': 'Marketing · Meta Ads',
+    'mk-campanas': 'Marketing · Campañas',
     'mk-auto-ig': 'Marketing · Automatización IG',
     'mk-inspiracion': 'Marketing · Inspiración',
     'mk-gastos': 'Marketing · Gastos del stack',

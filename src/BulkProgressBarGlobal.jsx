@@ -9,7 +9,7 @@
 // donde se diseñó originalmente. Acá solo es plumbing.
 
 import React, { useEffect, useState } from 'react';
-import { BulkProgressBar } from './InspiracionSection.jsx';
+import BulkProgressBar from './BulkProgressBar.jsx';
 import { subscribeBulk, clearBulk } from './bulkProgressStore.js';
 
 export default function BulkProgressBarGlobal() {

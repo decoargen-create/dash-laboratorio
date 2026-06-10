@@ -230,9 +230,11 @@ function formatMs(ms) {
   return `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
-// Barra flotante de progreso del bulk. Muestra ad current, % total, ETA
-// y un pill por cada ad para ver qué está done/doing/pending/error.
-export function BulkProgressBar({ state, onClose }) {
+// Barra flotante de progreso del bulk. Movida a su propio archivo
+// (BulkProgressBar.jsx) para code-splitting. La definición quedó acá
+// para no romper si algún código viejo importa el named export.
+// TODO: remover en próximo PR cuando confirmemos que no hay más callers.
+function BulkProgressBar({ state, onClose }) {
   // Guard: si no hay bulk corriendo (state=null), no renderizamos nada.
   // El caller siempre debería check pero por defensiva acá lo doblamos —
   // Arranque renderiza esto en el shell del producto sin condicional.

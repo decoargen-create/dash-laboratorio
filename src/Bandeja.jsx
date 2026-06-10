@@ -29,6 +29,7 @@ import { supabase } from './supabase.js';
 import { bulkGenerateFromIdeas } from './bandejaBulkGenerate.js';
 import { parseJsonOrThrow } from './apiHelpers.js';
 import { startExecution, updateExecution, finishExecution } from './executionsStore.js';
+import { useCloudProductos } from './useCloudProductos.js';
 
 const PRODUCTOS_KEY = 'adslab-marketing-productos-v1';
 const ACTIVE_PRODUCT_KEY = 'adslab-marketing-bandeja-active-product';
@@ -1481,7 +1482,15 @@ function VideoBriefPanel({ idea }) {
 
 export default function BandejaSection({ addToast, forcedProductoId, embedded = false }) {
   const [ideas, setIdeas] = useState(() => loadIdeas());
-  const [productos, setProductos] = useState(() => loadProductos());
+  // Cloud-first (fase 4): productos viene del hook con Realtime. Mientras
+  // carga inicial usamos cache de localStorage para evitar flicker — pero
+  // ni bien Realtime emite, queda el cloud como fuente de verdad.
+  const { productos: cloudProductos, loading: cloudLoading } = useCloudProductos();
+  const [localCacheProductos] = useState(() => loadProductos());
+  const productos = (cloudLoading && cloudProductos.length === 0) ? localCacheProductos : cloudProductos;
+  // setProductos era usado por el effect de polling — ya no se usa, el hook
+  // mantiene productos sincronizado vía Realtime.
+  const setProductos = () => {};
   const [activeProductoIdRaw, setActiveProductoIdRaw] = useState(() => {
     try { return localStorage.getItem(ACTIVE_PRODUCT_KEY) || null; } catch { return null; }
   });
@@ -1599,20 +1608,13 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
   const [bulkRunning, setBulkRunning] = useState(false);
 
   // Re-sincronizar cuando otras secciones agregan o MODIFICAN ideas.
-  // Antes era polling cada 3s — interrumpía drag-and-drop del kanban
-  // (cada array reset cancelaba el drag in-flight). Ahora event-based
-  // (viora:marketing-storage-changed dispara cuando otro componente
-  // escribe localStorage). Si no hay evento → no re-cargamos.
-  // Polling defensivo a 10s como red de seguridad (era 3s).
+  // Productos ya viene del hook useCloudProductos (Realtime). Acá solo
+  // re-cargamos `ideas` (sigue en localStorage por ahora).
   useEffect(() => {
     const sig = (list) => list.map(i => `${i.id}:${i.estado || ''}:${i.lowScore ? 1 : 0}:${i.scoreValue || ''}:${i.customColumnId || ''}`).join('|');
     const reload = () => {
       const fresh = loadIdeas();
       setIdeas(prev => (sig(prev) !== sig(fresh) ? fresh : prev));
-      const freshProds = loadProductos();
-      setProductos(prev => {
-        return JSON.stringify(prev) === JSON.stringify(freshProds) ? prev : freshProds;
-      });
     };
     window.addEventListener('viora:marketing-pulled', reload);
     window.addEventListener('viora:marketing-storage-changed', reload);

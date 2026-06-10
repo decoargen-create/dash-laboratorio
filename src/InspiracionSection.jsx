@@ -57,6 +57,30 @@ const MAX_SELECCIONADOS = 10;
 // sin cola = ~75s en vez de ~150s. Galería se llena en orden predecible.
 const BULK_CONCURRENCY = 1;
 
+// Máximo de marcas scrapeándose en paralelo cuando se usa "Scrape nuevas" /
+// "Forzar todas". Antes se disparaban TODAS de una (for sin await), lo que
+// saturaba la cuenta de Apify: cada run reserva ~1GB y, pasado el límite de
+// memoria/concurrencia del plan, Apify encola (o aborta) las extra en silencio
+// y algunas marcas quedaban vacías. Con un pool de 3 mantenemos paralelismo
+// real pero acotado: cuando una termina, arranca la siguiente.
+const SCRAPE_CONCURRENCY = 3;
+
+// Corre `worker(item)` sobre `items` con un límite de concurrencia: arranca
+// hasta `limit` workers y, a medida que cada uno termina, toma el próximo de
+// la cola. Devuelve cuando se procesaron todos. Los errores de un item no
+// frenan al resto (cada worker async ya maneja su try/catch internamente).
+async function runScrapePool(items, limit, worker) {
+  const queue = [...items];
+  const runNext = async () => {
+    while (queue.length) {
+      const item = queue.shift();
+      await worker(item);
+    }
+  };
+  const runners = Array.from({ length: Math.min(limit, items.length) }, runNext);
+  await Promise.all(runners);
+}
+
 // Extrae una keyword sensata desde una landing URL — preferimos el hostname
 // COMPLETO con www. si está, porque eso es lo que pegarías a mano en la
 // Ads Library de Meta. La búsqueda con dominio devuelve los ads reales del
@@ -2446,13 +2470,9 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                 const smartEligibles = eligibles.filter(b => isStaleEnough(b) && !isStable(b));
                 const skippedByCache = eligibles.length - smartEligibles.length;
 
-                const fireScrape = (b) => {
-                  if (b.isCompetidor) handleScrapeCompetidor(b);
-                  else handleScrapeBrand(b);
-                };
+                const fireScrape = (b) => b.isCompetidor ? handleScrapeCompetidor(b) : handleScrapeBrand(b);
 
                 const onSmart = () => {
-                  for (const b of smartEligibles) fireScrape(b);
                   if (smartEligibles.length === 0) {
                     addToast?.({
                       type: 'info',
@@ -2460,20 +2480,21 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                         ? `${skippedByCache} marcas ya frescas (<${STALE_HOURS}h) o estables. Usá "Forzar" para re-scrapearlas.`
                         : 'Ninguna marca tiene fbPage/landing/keyword utilizable.',
                     });
-                  } else {
-                    addToast?.({
-                      type: 'info',
-                      message: `Scrape de ${smartEligibles.length} marcas${skippedByCache > 0 ? ` (${skippedByCache} salteadas por cache)` : ''}.`,
-                    });
+                    return;
                   }
+                  addToast?.({
+                    type: 'info',
+                    message: `Scrape de ${smartEligibles.length} marcas (de a ${SCRAPE_CONCURRENCY})${skippedByCache > 0 ? ` · ${skippedByCache} salteadas por cache` : ''}.`,
+                  });
+                  runScrapePool(smartEligibles, SCRAPE_CONCURRENCY, fireScrape);
                 };
                 const onForce = () => {
-                  for (const b of eligibles) fireScrape(b);
                   if (eligibles.length === 0) {
                     addToast?.({ type: 'error', message: 'Ninguna marca del listado tiene fbPage/landing/keyword utilizable.' });
-                  } else {
-                    addToast?.({ type: 'info', message: `Forzando scrape de ${eligibles.length} marcas (ignorando cache).` });
+                    return;
                   }
+                  addToast?.({ type: 'info', message: `Forzando scrape de ${eligibles.length} marcas (de a ${SCRAPE_CONCURRENCY}, ignorando cache).` });
+                  runScrapePool(eligibles, SCRAPE_CONCURRENCY, fireScrape);
                 };
 
                 return (

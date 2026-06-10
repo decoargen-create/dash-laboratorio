@@ -100,6 +100,7 @@ function fireIdea({ idea, producto, prodImg, accentColor, n, quality, size, auth
         nombre: producto.nombre,
         descripcion: producto.descripcion,
         research: producto.docs?.research,
+        formato: producto.formato || '',
         ofertasReales: producto.ofertasReales || '',
         offerBrief: producto.ofertasReales || producto.docs?.offerBrief || '',
       },

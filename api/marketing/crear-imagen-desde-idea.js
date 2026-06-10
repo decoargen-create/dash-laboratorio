@@ -77,6 +77,10 @@ function extForMime(mime) {
 }
 
 function inferProductForm(producto) {
+  // 1. Prioridad: producto.formato explícito del Setup
+  const explicit = (producto?.formato || '').toString().trim().toLowerCase();
+  if (explicit && explicit !== 'otros' && explicit !== 'other') return explicit;
+  // 2. Fallback: heurística regex
   const hay = [producto?.nombre, producto?.descripcion, String(producto?.research || '')].join(' ').toLowerCase();
   const patterns = [
     { canon: 'gomitas',   re: /\b(gomitas?|gummies)\b/ },
@@ -93,6 +97,27 @@ function inferProductForm(producto) {
   ];
   for (const p of patterns) if (p.re.test(hay)) return p.canon;
   return null;
+}
+
+// Singular del formato — para overlays "1 cápsula" → "1 gomita".
+function singularFormato(formato) {
+  const map = { 'gomitas': 'gomita', 'cápsulas': 'cápsula', 'gotas': 'gota', 'comprimidos': 'comprimido', 'tabletas': 'tableta', 'sachets': 'sachet', 'shots': 'shot', 'parches': 'parche', 'sticks': 'stick' };
+  return map[(formato || '').toLowerCase()] || formato;
+}
+
+// Dedup de líneas duplicadas en ofertasReales (case-insensitive).
+function dedupOfertas(raw) {
+  if (!raw) return '';
+  const lines = String(raw).split(/\n+/).map(l => l.trim()).filter(Boolean);
+  const seen = new Set();
+  const out = [];
+  for (const l of lines) {
+    const k = l.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(l);
+  }
+  return out.join('\n');
 }
 
 // Sanitiza palabras clínicas trigger del safety filter (igual que el otro endpoint).
@@ -151,7 +176,9 @@ function buildPromptForIdeaVariation({ idea, producto, accentColor, aspectRatio,
   parts.push('PRODUCT:');
   if (producto?.nombre) parts.push(`  • Name: ${producto.nombre}`);
   if (productoForm) {
+    const sing = singularFormato(productoForm);
     parts.push(`  • **PHYSICAL FORM**: ${productoForm} (NOT capsules/pills/another format). If you show product contents, show ${productoForm}.`);
+    parts.push(`  • **TEXT WORDING**: any overlay must use "${sing}" instead of "cápsula"/"pill"/"pastilla" — e.g. "1 ${sing} antes de dormir". Same plural: use "${productoForm}" instead of "cápsulas"/"pills". NEVER let canvas text contradict the physical form.`);
   }
   if (producto?.descripcion) parts.push(`  • Description: ${producto.descripcion.slice(0, 400)}`);
   if (producto?.research) parts.push(`  • Audience and pain: ${String(producto.research).slice(0, 1500)}`);
@@ -166,12 +193,13 @@ function buildPromptForIdeaVariation({ idea, producto, accentColor, aspectRatio,
   // Ofertas reales — ofertasReales tiene prioridad (campo focalizado del user
   // en Setup). offerBrief es fallback. Si hay overlays con precios/promos en
   // textoEnImagen que no coinciden, hay que reemplazarlos por estos.
-  const offer = (producto?.ofertasReales || producto?.offerBrief || '').toString().trim();
+  const offer = dedupOfertas((producto?.ofertasReales || producto?.offerBrief || '').toString().trim());
   if (offer) {
     parts.push('');
     parts.push(`**REAL OFFERS / PRICES / CLAIMS (only these are valid — REPLACE any other price/promo in text overlays with these)**:`);
     parts.push(offer.slice(0, 800).split('\n').map(line => `  • ${line}`).join('\n'));
     parts.push(`  • If a text overlay mentions a price or promo NOT in this list, use the closest matching one from above instead.`);
+    parts.push(`  • **NO DUPLICATE RIBBONS**: each offer/badge appears ONLY ONCE in the canvas. If you have multiple offers, combine them in a SINGLE ribbon separated by " · " or " + ". NEVER stack 2+ ribbons with overlapping messages (e.g. "ENVÍO GRATIS" repeated).`);
   } else {
     parts.push('');
     parts.push('NO OFFERS DECLARED — do NOT invent prices, % off, FDA, ANMAT, claims. Keep text neutral (CTA like "Probalo ya", "Conocé más").');

@@ -21,7 +21,7 @@
 //   4. (Parte 7.2): grilla de ads del scrape, con dedup día a día
 //   5. (Parte 7.4): botón "Adaptar a {producto}" en cada ad
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Sparkles, Package, ChevronRight, ChevronDown, Plus, Trash2, Link2, X,
   Loader2, Download, Image as ImageIcon, ExternalLink, Wand2, Search,
@@ -1084,7 +1084,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   const [seleccionados, setSeleccionados] = useState(new Set());
   // Map { adId → 1-based selection index } recomputado cada vez que cambia
   // la selección. Lo pasamos a cada AdThumb para que muestre el número.
-  const selectedOrder = React.useMemo(() => {
+  const selectedOrder = useMemo(() => {
     const m = new Map();
     let i = 0;
     for (const adId of seleccionados) m.set(adId, ++i);

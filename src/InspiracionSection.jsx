@@ -150,8 +150,19 @@ async function parseJsonOrThrow(resp, contexto = 'API') {
     data = JSON.parse(raw);
   } catch {
     // No es JSON — heurísticas para errores conocidos del servidor.
-    if (resp.status === 504 || /timeout/i.test(raw) || /An error occurred with your deployment/i.test(raw)) {
+    // Vercel mata la función al pasar maxDuration y devuelve HTML/texto
+    // genérico. Cubrimos las variantes: "Internal Server Error" (texto
+    // plano), "An error occurred with your deployment" (HTML), 504 timeout,
+    // FUNCTION_INVOCATION_FAILED, etc.
+    const isTimeout = resp.status === 504 || /timeout|FUNCTION_INVOCATION_TIMEOUT|gateway timeout/i.test(raw);
+    const isVercelKill = /An error occurred with your deployment|FUNCTION_INVOCATION_FAILED/i.test(raw)
+                        || /^Internal Server Error\s*$/i.test(raw.trim())
+                        || /^\s*<(!doctype|html)/i.test(raw);
+    if (isTimeout) {
       throw new Error(`${contexto} timeout — la operación tardó más que el límite del servidor. Reintentá con menos ads seleccionados o quality medium.`);
+    }
+    if (isVercelKill) {
+      throw new Error(`${contexto} crasheó en el servidor (Vercel devolvió "Internal Server Error"). Suele ser timeout o memoria. Reintentá con menos ads en paralelo o quality medium; si persiste, revisá los logs en Vercel.`);
     }
     if (resp.status >= 500) {
       throw new Error(`${contexto} error ${resp.status} — el servidor devolvió HTML/texto en vez de JSON. Probá de nuevo en unos segundos.`);

@@ -2194,10 +2194,41 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
           </p>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
             {ideasDelProducto.length === 0
-              ? 'Corré el pipeline desde "Arranque" — las ideas aparecen acá en "Pendientes".'
+              ? 'Andá a "Inspiración" del producto, scrapeá competidores y dale "Bandeja × N" para poblarla con ideas inspiradas en los winners.'
               : 'Ajustá el buscador o el filtro de tipo.'
             }
           </p>
+          {ideasDelProducto.length === 0 && (
+            <div className="mt-4 flex items-center justify-center gap-2 flex-wrap">
+              <button
+                onClick={() => {
+                  // Reset filtros para evitar que el user crea que están vacíos cuando vienen ideas.
+                  setFiltroTipo('all');
+                  setFiltroEstado('active');
+                  setFiltroFormato('all');
+                  setQuery('');
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 transition"
+              >
+                Resetear filtros
+              </button>
+            </div>
+          )}
+          {ideasDelProducto.length > 0 && (
+            <div className="mt-4">
+              <button
+                onClick={() => {
+                  setFiltroTipo('all');
+                  setFiltroEstado('all');
+                  setFiltroFormato('all');
+                  setQuery('');
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-brand-600 rounded-md hover:from-brand-600 hover:to-brand-700 transition"
+              >
+                Limpiar filtros
+              </button>
+            </div>
+          )}
         </div>
       ) : (
         <div className="flex gap-3 overflow-x-auto pb-2" style={{ minHeight: '200px' }}>

@@ -2145,7 +2145,11 @@ function AppShell({ onExit }) {
           {/* Nav de productos — visible solo cuando Arranque envió contexto.
               Reemplaza la necesidad de bajar a Probiotico → ProductTabs
               horizontal para cambiar de tab o producto. */}
-          <ProductNavInSidebar sidebarOpen={sidebarOpen} />
+          {/* ProductNavInSidebar removido por pedido del user — los
+              productos + sus tabs se ven mejor en el panel principal
+              (Arranque.jsx workspace). El sidebar queda solo con las
+              plataformas y secciones globales (Marketing, Meta Ads,
+              Gastos del stack). */}
         </nav>
 
         {/* Footer: stats de saldo + pill de usuario con menú personalizado */}

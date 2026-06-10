@@ -1,6 +1,10 @@
 // Form modal para marcar un creativo como winner — captura las métricas
 // + ad ID + qué funcionó. Todo opcional excepto: el user tiene que pinchar
 // "Confirmar". El shape coincide con winner_metrics (jsonb) en marketing_creativos.
+//
+// ⚠️ TDZ FIX: Field component definido ANTES del export default para que el
+// minifier de Vite/Rollup no produzca "Cannot access 'Field' before
+// initialization" en producción (function declarations → const expressions).
 
 import React, { useState } from 'react';
 import { X, Trophy } from 'lucide-react';
@@ -14,6 +18,18 @@ const QUE_FUNCIONO_OPTS = [
   { v: 'oferta', label: 'Oferta', emoji: '💰' },
   { v: 'audience', label: 'Audiencia', emoji: '👥' },
 ];
+
+function Field({ label, value, onChange, type = 'text', step }) {
+  return (
+    <div>
+      <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1">
+        {label}
+      </label>
+      <input type={type} step={step} value={value} onChange={e => onChange(e.target.value)}
+        className="w-full px-2.5 py-1.5 text-xs bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md focus:outline-none focus:ring-2 focus:ring-amber-500" />
+    </div>
+  );
+}
 
 export default function WinnerForm({ creativo, onConfirm, onCancel }) {
   const existing = creativo?.winnerMetrics || {};
@@ -162,18 +178,6 @@ export default function WinnerForm({ creativo, onConfirm, onCancel }) {
           </button>
         </div>
       </div>
-    </div>
-  );
-}
-
-function Field({ label, value, onChange, type = 'text', step }) {
-  return (
-    <div>
-      <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-1">
-        {label}
-      </label>
-      <input type={type} step={step} value={value} onChange={e => onChange(e.target.value)}
-        className="w-full px-2.5 py-1.5 text-xs bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md focus:outline-none focus:ring-2 focus:ring-amber-500" />
     </div>
   );
 }

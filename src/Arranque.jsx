@@ -385,27 +385,74 @@ function RunHistoryCard({ history, onClear }) {
   );
 }
 
-// Guía corta del flujo del módulo — se muestra debajo de los tabs para
-// que el user nuevo sepa el orden. Dismissable y persistido.
+// Guía del flujo del módulo. Vive arriba de todo (lista de productos y
+// workspace) para que sea la MISMA referencia desde cualquier tab, incluida
+// Bandeja. Colapsada por defecto como un pill chico para no sumar ruido
+// ("demasiada info"): el user la abre solo si la necesita. El estado
+// abierto/cerrado se persiste.
+const FLOW_STEPS = [
+  { emoji: '⚙️', tab: 'setup', titulo: 'Setup', desc: 'Cargá el producto (foto, oferta) y sus competidores.' },
+  { emoji: '▶️', tab: null, titulo: 'Correr pipeline', desc: 'Leemos los ads ganadores de la competencia y armamos ideas.' },
+  { emoji: '📥', tab: 'bandeja', titulo: 'Bandeja', desc: 'Revisás cada idea y generás el creativo ahí mismo.' },
+  { emoji: '🎨', tab: 'creativos', titulo: 'Creativos', desc: 'Ves los estáticos generados, listos para descargar.' },
+  { emoji: '🤖', tab: 'copiloto', titulo: 'Copiloto', desc: 'Pedís más variantes o ajustes en lenguaje natural.' },
+];
 
-function TabsGuide() {
-  const [hidden, setHidden] = useState(() => {
-    try { return localStorage.getItem('adslab-tabs-guide-hidden') === '1'; } catch { return false; }
+function FlowGuide() {
+  const [open, setOpen] = useState(() => {
+    try { return localStorage.getItem('adslab-flow-guide-open') === '1'; } catch { return false; }
   });
-  if (hidden) return null;
+  const toggle = () => {
+    setOpen(prev => {
+      const next = !prev;
+      try { localStorage.setItem('adslab-flow-guide-open', next ? '1' : '0'); } catch {}
+      return next;
+    });
+  };
+  const goTab = (tab) => {
+    if (!tab) return;
+    try { window.dispatchEvent(new CustomEvent('viora:product-tab', { detail: { tab } })); } catch {}
+  };
   return (
-    <div className="flex items-center gap-2 px-3 py-2 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-lg text-[11px] text-brand-800 dark:text-brand-300">
-      <span className="shrink-0">🗺️</span>
-      <span className="flex-1 min-w-0">
-        <strong>Cómo va el flujo:</strong> ⚙️ Setup (cargá producto + competidores) → ▶️ Correr pipeline → 📥 Bandeja (revisá las ideas y generá el creativo en cada una) → 🤖 Copiloto para pedir más.
-      </span>
+    <div className="bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-lg overflow-hidden">
       <button
-        onClick={() => { try { localStorage.setItem('adslab-tabs-guide-hidden', '1'); } catch {} setHidden(true); }}
-        className="shrink-0 text-brand-400 hover:text-brand-700 dark:hover:text-brand-200 transition"
-        title="Ocultar guía"
+        onClick={toggle}
+        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-brand-100/60 dark:hover:bg-brand-900/30 transition"
+        title={open ? 'Ocultar guía' : 'Ver cómo funciona el módulo'}
       >
-        <X size={13} />
+        <span className="shrink-0">🗺️</span>
+        <span className="flex-1 min-w-0 text-[12px] font-bold text-brand-800 dark:text-brand-200">
+          ¿Cómo funciona? <span className="font-normal text-brand-600/80 dark:text-brand-400/80">— guía rápida del flujo en 5 pasos</span>
+        </span>
+        <ChevronDown size={14} className={`shrink-0 text-brand-500 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
+      {open && (
+        <div className="px-3 pb-3 pt-1">
+          <div className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-5">
+            {FLOW_STEPS.map((s, i) => (
+              <button
+                key={s.titulo}
+                onClick={() => goTab(s.tab)}
+                disabled={!s.tab}
+                className={`flex flex-col gap-0.5 p-2 rounded-md border text-left transition ${
+                  s.tab
+                    ? 'bg-white/70 dark:bg-gray-800/50 border-brand-200 dark:border-brand-800 hover:border-brand-400 dark:hover:border-brand-600 hover:shadow-sm cursor-pointer'
+                    : 'bg-white/40 dark:bg-gray-800/30 border-brand-200/60 dark:border-brand-800/60 cursor-default'
+                }`}
+              >
+                <span className="flex items-center gap-1.5 text-[11px] font-bold text-brand-800 dark:text-brand-200">
+                  <span className="text-gray-400 dark:text-gray-500 tabular-nums">{i + 1}.</span>
+                  <span>{s.emoji}</span>{s.titulo}
+                </span>
+                <span className="text-[10px] leading-snug text-gray-600 dark:text-gray-400">{s.desc}</span>
+              </button>
+            ))}
+          </div>
+          <p className="mt-2 text-[10px] text-brand-600/70 dark:text-brand-400/70">
+            Tip: tocá un paso para saltar a esa tab. Setup → pipeline es lo primero; el resto se va llenando solo.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -2178,6 +2225,8 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   if (!producto) {
     return (
       <div className="max-w-6xl mx-auto space-y-6">
+        {/* Guía del flujo — arriba de todo el módulo, también en la lista. */}
+        <FlowGuide />
         {/* Antes había acá <BulkProgressBar state={bulkCreativos} .../> pero
             bulkCreativos / bulkAbortRef nunca se declararon — era código
             muerto que crasheaba al primer render. La barra real de bulk
@@ -2432,6 +2481,8 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // ====================================================================
   return (
     <div className="max-w-[1500px] mx-auto space-y-6">
+      {/* Guía del flujo — arriba de todo, misma referencia en cualquier tab. */}
+      <FlowGuide />
       {/* Header del producto */}
       <div className="flex items-center gap-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-3 shadow-sm">
         <button onClick={() => setActiveProductoId(null)}
@@ -2463,7 +2514,6 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           son la única forma de cambiar de tab — antes quedaban ocultas con el
           sidebar abierto y no aparecían en ningún lado. */}
       <ProductTabs activeTab={productoTab} onChange={setProductoTab} />
-      <TabsGuide />
 
       {productoTab === 'dashboard' && (
         <DashboardTab producto={producto} competidores={competidores} runHistory={runHistory} />

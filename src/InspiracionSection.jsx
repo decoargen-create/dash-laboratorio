@@ -1852,6 +1852,12 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     const comp = brand.__sourceComp;
     if (!comp || !producto) {
       removeScraping(brand.id);
+      if (!producto) {
+        addToast?.({
+          type: 'warning',
+          message: 'Cargando tus productos del cloud — probá de nuevo en un segundo.',
+        });
+      }
       return;
     }
     const execId = startExecution({

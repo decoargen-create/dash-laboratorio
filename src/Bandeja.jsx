@@ -1601,14 +1601,32 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
     addToast?.({ type: 'success', message: `Idea → ${ESTADO_META[estado]?.label || estado}` });
   };
   const [expandedId, setExpandedId] = useState(null);
-  const [filtroTipo, setFiltroTipo] = useState('all');
-  const [filtroEstado, setFiltroEstado] = useState('active'); // 'all' | 'active' (pendiente + en_uso) | 'pendiente' | 'en_uso' | 'usada' | 'archivada'
+  // Persisto los filtros a localStorage para que sobrevivan refresh/navegación.
+  // Antes se reseteaban cada vez que el user abría la Bandeja → pain point.
+  const FILTROS_KEY = 'adslab-bandeja-filtros-v1';
+  const _loadFiltros = () => {
+    try { return JSON.parse(localStorage.getItem(FILTROS_KEY) || '{}') || {}; }
+    catch { return {}; }
+  };
+  const _savedFiltros = _loadFiltros();
+  const _persistFiltro = (key, value) => {
+    try {
+      const cur = _loadFiltros();
+      localStorage.setItem(FILTROS_KEY, JSON.stringify({ ...cur, [key]: value }));
+    } catch {}
+  };
+  const [filtroTipo, _setFiltroTipoRaw] = useState(_savedFiltros.tipo || 'all');
+  const setFiltroTipo = (v) => { _setFiltroTipoRaw(v); _persistFiltro('tipo', v); };
+  const [filtroEstado, _setFiltroEstadoRaw] = useState(_savedFiltros.estado || 'active'); // 'all' | 'active' (pendiente + en_uso) | 'pendiente' | 'en_uso' | 'usada' | 'archivada'
+  const setFiltroEstado = (v) => { _setFiltroEstadoRaw(v); _persistFiltro('estado', v); };
   // Filtro por formato: 'all' | 'imagen' (static+carrusel) | 'video'.
   // Sirve para separar lo que producís vos (imagen) de lo que mandás a
   // producción de video.
-  const [filtroFormato, setFiltroFormato] = useState('all');
+  const [filtroFormato, _setFiltroFormatoRaw] = useState(_savedFiltros.formato || 'all');
+  const setFiltroFormato = (v) => { _setFiltroFormatoRaw(v); _persistFiltro('formato', v); };
   // Orden de las cards dentro de cada columna del kanban.
-  const [orden, setOrden] = useState('recientes'); // recientes | antiguas | score | angulo
+  const [orden, _setOrdenRaw] = useState(_savedFiltros.orden || 'recientes'); // recientes | antiguas | score | angulo
+  const setOrden = (v) => { _setOrdenRaw(v); _persistFiltro('orden', v); };
   const [query, setQuery] = useState('');
   // Set de ids de ideas que ya tienen un creativo producido (IndexedDB).
   const [editandoNotasId, setEditandoNotasId] = useState(null);

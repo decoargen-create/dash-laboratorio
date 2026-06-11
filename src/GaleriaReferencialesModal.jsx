@@ -13,7 +13,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   X, Download, Trash2, Images, ChevronDown, ChevronUp, ExternalLink,
   LayoutGrid, Rows3, Table2, Plus, Check, FileArchive, EyeOff, Eye,
-  Archive, ArchiveRestore, Trophy, Sparkles,
+  Archive, ArchiveRestore, Trophy, Sparkles, Search,
 } from 'lucide-react';
 import JSZip from 'jszip';
 import {
@@ -151,7 +151,7 @@ function HoverPreview({ item, imgSrc, children, className = '' }) {
 
 // VISTA 1 — Grid: thumbs cuadrados con número de selección + badge si ya descargado.
 
-function GalleryGridView({ items, blobUrls, seleccionados, selectedOrder, onToggleSelect, onOpen, onArchive }) {
+function GalleryGridView({ items, blobUrls, seleccionados, selectedOrder, onToggleSelect, onOpen, onArchive, onToggleWinner }) {
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
       {items.map(it => {
@@ -192,13 +192,28 @@ function GalleryGridView({ items, blobUrls, seleccionados, selectedOrder, onTogg
             >
               {isSel ? selIdx : <Plus size={14} />}
             </button>
-            {/* Badge "descargada" — esquina superior derecha, debajo del archive */}
+            {/* Badge "descargada" — esquina superior derecha, debajo de winner+archive */}
             {it.descargada && (
-              <div className={`absolute ${onArchive ? 'top-10' : 'top-2'} right-2 z-10 inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold text-white bg-emerald-500 rounded-md shadow-md`}
+              <div className={`absolute ${onToggleWinner && onArchive ? 'top-[4.5rem]' : onArchive || onToggleWinner ? 'top-10' : 'top-2'} right-2 z-10 inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold text-white bg-emerald-500 rounded-md shadow-md`}
                 title={`Descargado ${fmtDate(it.descargadaAt)}`}
               >
                 <Check size={10} /> ✓
               </div>
+            )}
+            {/* Trofeo: si ya es winner, siempre visible (amber sólido). Si no lo es,
+                aparece en hover para marcarlo desde la card sin entrar al lightbox. */}
+            {onToggleWinner && (
+              <button
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggleWinner(it); }}
+                className={`absolute top-2 right-2 z-10 w-7 h-7 rounded-full flex items-center justify-center shadow-md transition-all ${
+                  it.winner
+                    ? 'bg-amber-500 text-white opacity-100'
+                    : 'bg-white/90 dark:bg-gray-900/90 text-gray-500 hover:text-amber-600 hover:bg-amber-50 opacity-0 group-hover:opacity-100 hover:scale-110'
+                }`}
+                title={it.winner ? 'Es winner — click para quitar' : 'Marcar como winner (publicado y rinde)'}
+              >
+                <Trophy size={12} />
+              </button>
             )}
             {/* Botón archivar / restaurar — solo visible al hover, top-right.
                 Click rápido para sacar de la vista sin tener que entrar al
@@ -206,7 +221,7 @@ function GalleryGridView({ items, blobUrls, seleccionados, selectedOrder, onTogg
             {onArchive && (
               <button
                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); onArchive(it.id, !!it.archivado); }}
-                className={`absolute top-2 right-2 z-10 w-7 h-7 rounded-full flex items-center justify-center shadow-md transition-all ${
+                className={`absolute ${onToggleWinner ? 'top-10' : 'top-2'} right-2 z-10 w-7 h-7 rounded-full flex items-center justify-center shadow-md transition-all ${
                   it.archivado
                     ? 'bg-amber-500 text-white opacity-100'
                     : 'bg-white/90 dark:bg-gray-900/90 text-gray-500 hover:text-amber-600 hover:bg-amber-50 opacity-0 group-hover:opacity-100 hover:scale-110'
@@ -232,7 +247,7 @@ function GalleryGridView({ items, blobUrls, seleccionados, selectedOrder, onTogg
 
 // VISTA 2 — Lista: rows con thumb + info + acciones inline.
 
-function GalleryListView({ items, blobUrls, seleccionados, selectedOrder, onToggleSelect, onOpen, onDownload, onToggleDescargada, onArchive, onDelete }) {
+function GalleryListView({ items, blobUrls, seleccionados, selectedOrder, onToggleSelect, onOpen, onDownload, onToggleDescargada, onArchive, onDelete, onToggleWinner }) {
   return (
     <div className="space-y-1.5">
       {items.map(it => {
@@ -275,6 +290,13 @@ function GalleryListView({ items, blobUrls, seleccionados, selectedOrder, onTogg
                     REBRAND
                   </span>
                 )}
+                {it.winner && (
+                  <span className="inline-flex items-center gap-0.5 px-1 py-0.5 text-[9px] font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 rounded"
+                    title={`Winner ${fmtDate(it.winnerAt)}`}
+                  >
+                    <Trophy size={9} /> WINNER
+                  </span>
+                )}
                 {it.descargada && (
                   <span className="inline-flex items-center gap-0.5 px-1 py-0.5 text-[9px] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded"
                     title={`Descargado ${fmtDate(it.descargadaAt)}`}
@@ -307,6 +329,17 @@ function GalleryListView({ items, blobUrls, seleccionados, selectedOrder, onTogg
                 title={it.descargada ? 'Marcar como NO descargado' : 'Marcar como descargado'}>
                 <Check size={12} />
               </button>
+              {onToggleWinner && (
+                <button onClick={() => onToggleWinner(it)}
+                  className={`p-1.5 rounded transition ${
+                    it.winner
+                      ? 'text-amber-700 dark:text-amber-200 bg-amber-100 dark:bg-amber-900/40 hover:bg-amber-200'
+                      : 'text-gray-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20'
+                  }`}
+                  title={it.winner ? 'Es winner — click para quitar' : 'Marcar como winner'}>
+                  <Trophy size={12} />
+                </button>
+              )}
               <button onClick={() => onArchive(it.id, !!it.archivado)}
                 className={`p-1.5 rounded transition ${
                   it.archivado
@@ -331,7 +364,7 @@ function GalleryListView({ items, blobUrls, seleccionados, selectedOrder, onTogg
 
 // VISTA 3 — Tabla.
 
-function GalleryTableView({ items, blobUrls, seleccionados, selectedOrder, onToggleSelect, onOpen, onDownload, onToggleDescargada, onArchive, onDelete }) {
+function GalleryTableView({ items, blobUrls, seleccionados, selectedOrder, onToggleSelect, onOpen, onDownload, onToggleDescargada, onArchive, onDelete, onToggleWinner }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-xs">
@@ -401,6 +434,13 @@ function GalleryTableView({ items, blobUrls, seleccionados, selectedOrder, onTog
                       title={it.descargada ? 'Marcar pendiente' : 'Marcar descargado'}>
                       <Check size={11} />
                     </button>
+                    {onToggleWinner && (
+                      <button onClick={() => onToggleWinner(it)}
+                        className={`p-1 rounded ${it.winner ? 'text-amber-700 bg-amber-100 dark:bg-amber-900/40' : 'text-gray-400 hover:text-amber-600'} hover:bg-amber-50 dark:hover:bg-amber-900/30`}
+                        title={it.winner ? 'Es winner — click para quitar' : 'Marcar como winner'}>
+                        <Trophy size={11} />
+                      </button>
+                    )}
                     <button onClick={() => onArchive(it.id, !!it.archivado)}
                       className={`p-1 rounded ${it.archivado ? 'text-amber-600' : 'text-gray-400'} hover:bg-gray-100 dark:hover:bg-gray-700`}
                       title={it.archivado ? 'Restaurar' : 'Archivar'}>
@@ -665,6 +705,8 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
   const [filtroEstado, setFiltroEstado] = useState('all');     // 'all' | 'pending' | 'downloaded'
   const [filtroVariante, setFiltroVariante] = useState('all'); // 'all' | 'reference' | 'rebrand' | 'tight' | 'medium' | 'loose'
   const [filtroOrigen, setFiltroOrigen] = useState('all');     // 'all' | 'inspiracion' | 'bandeja-idea'
+  // Búsqueda libre por texto — matchea sourceBrand, sourceHeadline, variantStyle.
+  const [searchQuery, setSearchQuery] = useState('');
   const [zipping, setZipping] = useState(false);
 
   // ⚠️ visibleItems TIENE que estar acá arriba (antes del useEffect de
@@ -679,6 +721,12 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
     if (filtroVariante !== 'all' && it.variantStyle !== filtroVariante) return false;
     if (filtroOrigen === 'inspiracion' && it.sourceType === 'bandeja-idea') return false;
     if (filtroOrigen === 'bandeja-idea' && it.sourceType !== 'bandeja-idea') return false;
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      const haystack = [it.sourceBrand, it.sourceHeadline, it.variantStyle, it.prompt]
+        .filter(Boolean).join(' ').toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
     return true;
   });
 
@@ -967,6 +1015,18 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0 flex-wrap">
+            {/* Búsqueda libre — matchea brand, headline, variante, prompt. */}
+            <div className="relative">
+              <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Buscar por marca, headline…"
+                className="pl-6 pr-2 py-1.5 text-[10px] font-medium bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded focus:outline-none focus:ring-1 focus:ring-brand-500 w-40"
+                title="Búsqueda libre"
+              />
+            </div>
             {/* Filtros estilo dropdown (linear-style). Compactos. */}
             <select
               value={filtroEstado}
@@ -1082,15 +1142,15 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
             />
           ) : viewMode === 'grid' ? (
             <GalleryGridView items={visibleItems} blobUrls={blobUrls} seleccionados={seleccionados} selectedOrder={selectedOrder}
-              onToggleSelect={toggleSeleccion} onOpen={setSelected} onArchive={handleArchive} />
+              onToggleSelect={toggleSeleccion} onOpen={setSelected} onArchive={handleArchive} onToggleWinner={handleToggleWinner} />
           ) : viewMode === 'list' ? (
             <GalleryListView items={visibleItems} blobUrls={blobUrls} seleccionados={seleccionados} selectedOrder={selectedOrder}
               onToggleSelect={toggleSeleccion} onOpen={setSelected}
-              onDownload={handleSingleDownload} onToggleDescargada={toggleDescargadaFlag} onArchive={handleArchive} onDelete={handleDelete} />
+              onDownload={handleSingleDownload} onToggleDescargada={toggleDescargadaFlag} onArchive={handleArchive} onDelete={handleDelete} onToggleWinner={handleToggleWinner} />
           ) : (
             <GalleryTableView items={visibleItems} blobUrls={blobUrls} seleccionados={seleccionados} selectedOrder={selectedOrder}
               onToggleSelect={toggleSeleccion} onOpen={setSelected}
-              onDownload={handleSingleDownload} onToggleDescargada={toggleDescargadaFlag} onArchive={handleArchive} onDelete={handleDelete} />
+              onDownload={handleSingleDownload} onToggleDescargada={toggleDescargadaFlag} onArchive={handleArchive} onDelete={handleDelete} onToggleWinner={handleToggleWinner} />
           )}
         </div>
 

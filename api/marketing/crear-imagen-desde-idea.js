@@ -281,8 +281,12 @@ function aspectRatioFromSize(size) {
 // los ~275s, cancelamos el fetch y dejamos margen para handler cleanup
 // antes del kill de Vercel a 300s.
 const PER_CALL_TIMEOUT_MS = 275000;
+// Budget del handler — Vercel mata la function a los 300s. Si abortamos los
+// fetches y cortamos retries antes de este techo, siempre alcanzamos a devolver
+// un error limpio en vez de morir mid-fetch (lo que deja al cliente colgado).
+const HANDLER_TIMEOUT_MS = 290000;
 
-async function callGptImage2Edit({ apiKey, prompt, prodImgBuf, prodMime, size, quality, n }) {
+async function callGptImage2Edit({ apiKey, prompt, prodImgBuf, prodMime, size, quality, n, budgetStartedAt = Date.now() }) {
   const RETRY_DELAYS = [15000, 30000];
   let lastErr = null;
   for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
@@ -294,11 +298,15 @@ async function callGptImage2Edit({ apiKey, prompt, prodImgBuf, prodMime, size, q
     form.append('n', String(Math.min(10, Math.max(1, n || 1))));
     form.append('moderation', 'low');
     form.append('image[]', new Blob([prodImgBuf], { type: prodMime }), 'producto.' + extForMime(prodMime));
-    // AbortController por call individual — si OpenAI se cuelga > 275s
-    // matamos esa request. Sin esto, Promise.all en bulk se traba en la
-    // variante más lenta y todo el response timeout-ea.
+    // AbortController por call individual, BUDGET-AWARE: abortamos al mínimo
+    // entre el techo (275s) y el budget restante del handler. Sin esto, un
+    // retry o un preámbulo lento puede empujar el fetch más allá de los 300s
+    // → Vercel mata la function mid-fetch sin responder → el cliente queda
+    // colgado para siempre (barra de progreso en 0%).
+    const remainingBudget = HANDLER_TIMEOUT_MS - (Date.now() - budgetStartedAt);
+    const callTimeoutMs = Math.max(10000, Math.min(PER_CALL_TIMEOUT_MS, remainingBudget - 8000));
     const controller = new AbortController();
-    const callTimeout = setTimeout(() => controller.abort(), PER_CALL_TIMEOUT_MS);
+    const callTimeout = setTimeout(() => controller.abort(), callTimeoutMs);
     let resp;
     try {
       resp = await fetch('https://api.openai.com/v1/images/edits', {
@@ -310,7 +318,7 @@ async function callGptImage2Edit({ apiKey, prompt, prodImgBuf, prodMime, size, q
     } catch (err) {
       clearTimeout(callTimeout);
       if (err.name === 'AbortError') {
-        throw new Error(`OpenAI tardó más de ${PER_CALL_TIMEOUT_MS / 1000}s en responder. Cancelado.`);
+        throw new Error(`OpenAI tardó más de ${Math.round(callTimeoutMs / 1000)}s en responder. Cancelado para no agotar el budget del handler.`);
       }
       throw err;
     }
@@ -329,7 +337,17 @@ async function callGptImage2Edit({ apiKey, prompt, prodImgBuf, prodMime, size, q
     const code = data?.error?.code || data?.error?.type || '';
     const isRateLimit = resp.status === 429 || /rate limit/i.test(msg) || /too many requests/i.test(msg);
     if (isRateLimit && attempt < RETRY_DELAYS.length) {
-      await new Promise(r => setTimeout(r, RETRY_DELAYS[attempt]));
+      // Solo reintentamos si queda budget para el backoff + el próximo call
+      // (~130s típico). Sin esto, esperar 30s y arrancar un call de 200s+ nos
+      // pasa de los 300s → hard kill sin respuesta.
+      const delay = RETRY_DELAYS[attempt];
+      const elapsedNow = Date.now() - budgetStartedAt;
+      if (elapsedNow + delay + 130000 > HANDLER_TIMEOUT_MS) {
+        lastErr = new Error('OpenAI rate limit y sin budget para reintentar. Reintentá en 30s con menos imágenes a la vez.');
+        lastErr.status = 429;
+        throw lastErr;
+      }
+      await new Promise(r => setTimeout(r, delay));
       continue;
     }
     lastErr = new Error(`OpenAI rechazó: ${msg}`);
@@ -342,6 +360,7 @@ async function callGptImage2Edit({ apiKey, prompt, prodImgBuf, prodMime, size, q
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
+  const budgetStartedAt = Date.now(); // budget del handler para los aborts
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return respondJSON(res, 500, { error: 'OPENAI_API_KEY no configurada' });
@@ -383,6 +402,7 @@ export default async function handler(req, res) {
           apiKey, prompt: p.prompt,
           prodImgBuf: prodBuf, prodMime,
           size: useSize, quality, n: 1,
+          budgetStartedAt,
         })
       ));
       return results.flat();

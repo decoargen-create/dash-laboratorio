@@ -21,7 +21,7 @@ import React, { useState, useEffect, useRef, useMemo, Fragment } from 'react';
 import {
   Package, Target, Play, Check, Loader2, AlertTriangle, ChevronRight, ChevronDown,
   Plus, X, Sparkles, Link2, Search, Clock, Inbox, Trash2, Upload, Download, Activity,
-  LayoutGrid, List as ListIcon, BarChart3, Copy,
+  LayoutGrid, List as ListIcon, BarChart3, Copy, Pencil,
 } from 'lucide-react';
 import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGeneradorHoy, updateIdea, formatoDeAd } from './bandejaStore.js';
 import { deleteProducto as deleteProductoFromCloud } from './marketingSync.js';
@@ -606,6 +606,57 @@ function ProductMetric({ label, value, tone = 'default' }) {
   );
 }
 
+
+// Nombre del producto editable inline. Por defecto muestra el nombre como
+// texto; al tocar el lápiz se vuelve input. Guarda en setProductos (mismo
+// patrón que el resto del wizard) actualizando updated_at para que sincronice.
+function ProductoNombreEditable({ producto, setProductos }) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(producto.nombre || '');
+
+  const guardar = () => {
+    const nombre = val.trim();
+    if (!nombre || nombre === producto.nombre) { setEditing(false); setVal(producto.nombre || ''); return; }
+    setProductos(prev => prev.map(p =>
+      String(p.id) === String(producto.id)
+        ? { ...p, nombre, updated_at: new Date().toISOString() }
+        : p
+    ));
+    setEditing(false);
+  };
+
+  if (!editing) {
+    return (
+      <p className="flex items-center gap-1.5 group/nombre">
+        <strong>{producto.nombre}</strong>
+        <button
+          onClick={() => { setVal(producto.nombre || ''); setEditing(true); }}
+          title="Cambiar nombre"
+          className="opacity-0 group-hover/nombre:opacity-100 transition text-gray-400 hover:text-brand-600 dark:hover:text-brand-400"
+        >
+          <Pencil size={11} />
+        </button>
+      </p>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <input
+        autoFocus
+        value={val}
+        onChange={e => setVal(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter') guardar(); if (e.key === 'Escape') { setEditing(false); setVal(producto.nombre || ''); } }}
+        onBlur={guardar}
+        className="px-2 py-0.5 text-xs font-bold bg-white dark:bg-gray-700 border border-brand-400 dark:border-brand-600 rounded focus:outline-none focus:ring-2 focus:ring-brand-500 min-w-0 flex-1 max-w-[260px]"
+      />
+      <button onMouseDown={e => e.preventDefault()} onClick={guardar}
+        title="Guardar" className="text-emerald-600 dark:text-emerald-400 hover:text-emerald-700">
+        <Check size={13} />
+      </button>
+    </div>
+  );
+}
 
 function WizardCard({ num, title, done, disabled = false, badge, children }) {
   return (
@@ -2743,7 +2794,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       >
         {prodReady ? (
           <div className="text-xs text-gray-700 dark:text-gray-300 space-y-1">
-            <p><strong>{producto.nombre}</strong></p>
+            <ProductoNombreEditable producto={producto} setProductos={setProductos} />
             {producto.landingUrl && (
               <a href={producto.landingUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-brand-600 hover:underline">
                 <Link2 size={11} /> {producto.landingUrl}

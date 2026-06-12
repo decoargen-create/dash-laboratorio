@@ -5,10 +5,10 @@
 // generador. No scrapea ni hace deep-analyze: por eso termina en minutos
 // en vez de la media hora del pipeline completo.
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Sparkles, Image as ImageIcon, Video, Layers, Check, X, AlertCircle } from 'lucide-react';
-import { addGeneratedIdeas, loadIdeas, formatoDeAd, TIPO_META } from './bandejaStore.js';
-import { logCostsFromResponse } from './costsStore.js';
+import { TIPO_META } from './bandejaStore.js';
+import { runGeneradorRapido, cancelGenerador, subscribeGenerador } from './generadorRapidoStore.js';
 
 // Traduce errores técnicos a algo accionable para el user.
 function errorAmigable(msg) {
@@ -38,7 +38,6 @@ const FORMATO_OPCIONES = [
   { id: 'video',  label: 'Video',     icon: Video,     mix: { static: 0, video: 1 } },
 ];
 const CANTIDADES = [8, 16, 24];
-const CHUNK = 8;
 
 const FORMATO_EMOJI = { static: '🖼️', video: '🎬', carrusel: '🎠' };
 
@@ -49,160 +48,48 @@ function fmtTiempo(s) {
 export default function GeneradorRapido({ producto, addToast, onDone }) {
   const [formato, setFormato] = useState('static');
   const [cantidad, setCantidad] = useState(16);
-  const [running, setRunning] = useState(false);
-  const [insertadas, setInsertadas] = useState(0);
-  const [liveIdeas, setLiveIdeas] = useState([]);
-  const [tanda, setTanda] = useState({ actual: 0, total: 0 });
+  // Estado de la corrida — vive en el store global (sobrevive cambios de
+  // sección). Acá solo nos suscribimos y reflejamos lo que sea de ESTE producto.
+  const [job, setJob] = useState(null);
   const [elapsed, setElapsed] = useState(0);
-  const [error, setError] = useState(null);
-  const abortRef = useRef(null);
+
+  // Nos suscribimos al store global. Solo nos importa la corrida si es de
+  // este producto — si corre otra cosa, mostramos los controles idle igual.
+  useEffect(() => subscribeGenerador(s => {
+    setJob(s && String(s.productoId) === String(producto?.id) ? s : null);
+  }), [producto?.id]);
+
+  const running = job?.status === 'running';
+  const liveIdeas = job?.liveIdeas || [];
+  const insertadas = job?.insertadas || 0;
+  const tanda = job?.tanda || { actual: 0, total: 0 };
+  const error = job?.status === 'error' ? job.error : null;
 
   const competidores = producto?.competidores || [];
   const tieneResearch = !!(producto?.docs?.research || producto?.research);
   const numAnalisis = competidores.reduce((s, c) => s + Object.keys(c.adsAnalysis || {}).length, 0);
   const numAds = competidores.reduce((s, c) => s + (c.ads?.length || 0), 0);
 
-  // Cronómetro mientras corre.
+  // Cronómetro derivado del startedAt del store (no de un mount local), así
+  // muestra el tiempo real aunque hayas navegado y vuelto.
   useEffect(() => {
-    if (!running) return;
-    const start = Date.now();
-    setElapsed(0);
-    const iv = setInterval(() => setElapsed(Math.floor((Date.now() - start) / 1000)), 1000);
+    if (!running || !job?.startedAt) return;
+    setElapsed(Math.floor((Date.now() - job.startedAt) / 1000));
+    const iv = setInterval(() => setElapsed(Math.floor((Date.now() - job.startedAt) / 1000)), 1000);
     return () => clearInterval(iv);
-  }, [running]);
+  }, [running, job?.startedAt]);
 
-  const cancelar = () => {
-    abortRef.current?.abort();
+  const cancelar = () => cancelGenerador();
+
+  const generar = () => {
+    const formatoMix = FORMATO_OPCIONES.find(f => f.id === formato)?.mix || { static: 1, video: 0 };
+    runGeneradorRapido({ producto, formato, cantidad, formatoMix, addToast, onDone });
   };
 
-  const generar = async () => {
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
-    setError(null);
-    setRunning(true);
-    setInsertadas(0);
-    setLiveIdeas([]);
-    setTanda({ actual: 0, total: Math.ceil(cantidad / CHUNK) });
-    let totalInsertadas = 0;
-    let totalGeneradas = 0;
-    try {
-      // Contexto desde lo ya guardado — sin scrape ni deep-analyze.
-      const compAnalisis = [];
-      const allCompAds = [];
-      for (const c of competidores) {
-        const analyses = c.adsAnalysis || {};
-        for (const adId of Object.keys(analyses)) {
-          const ad = (c.ads || []).find(x => x.id === adId);
-          compAnalisis.push({
-            competidorNombre: c.nombre, adId,
-            adHeadline: ad?.headline || '', adBody: ad?.body || '',
-            analysis: analyses[adId].analysis,
-          });
-        }
-        for (const ad of (c.ads || [])) {
-          allCompAds.push({
-            competidor: c.nombre,
-            body: (ad.body || '').slice(0, 300),
-            headline: ad.headline || '',
-            formato: formatoDeAd(ad),
-            daysRunning: ad.daysRunning || 0,
-            score: ad.score || 0,
-            isWinner: !!ad.isWinner,
-            winnerTier: ad.winnerTier || null,
-            variantes: ad.variantes || 0,
-          });
-        }
-      }
-      const formatoMix = FORMATO_OPCIONES.find(f => f.id === formato)?.mix || { static: 1, video: 0 };
-      const totalTandas = Math.ceil(cantidad / CHUNK);
-
-      for (let t = 0; t < totalTandas; t++) {
-        const chunkTarget = Math.min(CHUNK, cantidad - t * CHUNK);
-        setTanda({ actual: t + 1, total: totalTandas });
-        const ideasExist = loadIdeas()
-          .filter(i => String(i.productoId || '') === String(producto.id))
-          .map(i => ({ titulo: i.titulo, angulo: i.angulo, tipo: i.tipo, hook: i.hook || '', estado: i.estado || 'pendiente' }));
-
-        const resp = await fetch('/api/marketing/generate-ideas', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: ctrl.signal,
-          body: JSON.stringify({
-            producto,
-            competidoresAnalisis: compAnalisis,
-            allCompAds,
-            ideasExistentes: ideasExist,
-            propiosAds: [],
-            targetCount: chunkTarget,
-            formatoMix,
-          }),
-        });
-        if (!resp.ok || !resp.body) {
-          const txt = await resp.text().catch(() => '');
-          throw new Error(`HTTP ${resp.status}${txt ? ': ' + txt.slice(0, 120) : ''}`);
-        }
-
-        const reader = resp.body.getReader();
-        const decoder = new TextDecoder();
-        let buf = '';
-        let streamErr = null;
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buf += decoder.decode(value, { stream: true });
-          const lines = buf.split('\n');
-          buf = lines.pop() || '';
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            const payload = line.slice(6).trim();
-            if (!payload) continue;
-            try {
-              const ev = JSON.parse(payload);
-              if (ev.type === 'idea' && ev.idea) {
-                totalGeneradas++;
-                setLiveIdeas(prev => [
-                  { titulo: ev.idea.titulo, tipo: ev.idea.tipo, formato: ev.idea.formato },
-                  ...prev,
-                ]);
-                const nuevas = addGeneratedIdeas([ev.idea], { producto });
-                if (nuevas.length > 0) {
-                  totalInsertadas++;
-                  setInsertadas(totalInsertadas);
-                }
-              } else if (ev.type === 'complete') {
-                logCostsFromResponse(ev, `generador rápido · ${producto?.nombre || ''}`);
-              } else if (ev.type === 'error') {
-                streamErr = new Error(ev.error || 'Error del generador');
-              }
-            } catch { /* línea SSE parcial — se completa en el próximo chunk */ }
-          }
-        }
-        if (streamErr) throw streamErr;
-      }
-
-      if (totalInsertadas > 0) {
-        addToast?.({ type: 'success', message: `${totalInsertadas} ideas nuevas en la Bandeja` });
-      } else {
-        addToast?.({ type: 'info', message: 'El generador no encontró ideas nuevas — probá con otro formato o más cantidad.' });
-      }
-    } catch (err) {
-      if (err.name === 'AbortError') {
-        addToast?.({ type: 'info', message: `Generación cancelada${totalInsertadas > 0 ? ` — ${totalInsertadas} ideas quedaron en la Bandeja` : ''}` });
-      } else {
-        setError(err.message || 'Error desconocido');
-        addToast?.({ type: 'error', message: `Generador rápido: ${err.message}` });
-      }
-    } finally {
-      abortRef.current = null;
-      setRunning(false);
-      setTanda({ actual: 0, total: 0 });
-      // Refrescamos la Bandeja si se insertó algo — incluso si una tanda
-      // falló o se canceló, las ideas ya generadas quedaron guardadas.
-      if (totalInsertadas > 0) onDone?.();
-    }
-  };
-
-  const pct = cantidad > 0 ? Math.min(100, Math.round((liveIdeas.length / cantidad) * 100)) : 0;
+  // Mientras corre, la cantidad de referencia es la del job (el selector local
+  // puede haber cambiado). Idle: la del selector.
+  const cantidadActiva = running ? (job?.cantidad || cantidad) : cantidad;
+  const pct = cantidadActiva > 0 ? Math.min(100, Math.round((liveIdeas.length / cantidadActiva) * 100)) : 0;
 
   return (
     <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
@@ -287,7 +174,7 @@ export default function GeneradorRapido({ producto, addToast, onDone }) {
             <div className="flex items-center justify-between mb-1.5 text-xs">
               <span className="font-bold text-gray-900 dark:text-gray-100">
                 {liveIdeas.length > 0
-                  ? `${liveIdeas.length} de ${cantidad} ideas`
+                  ? `${liveIdeas.length} de ${cantidadActiva} ideas`
                   : 'Armando los briefs…'}
                 {tanda.total > 1 && <span className="text-gray-400 font-normal"> · tanda {tanda.actual}/{tanda.total}</span>}
               </span>
@@ -333,10 +220,15 @@ export default function GeneradorRapido({ producto, addToast, onDone }) {
             </div>
           )}
 
-          <button onClick={cancelar}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition">
-            <X size={12} /> Cancelar
-          </button>
+          <div className="flex items-center gap-2.5">
+            <button onClick={cancelar}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition">
+              <X size={12} /> Cancelar
+            </button>
+            <span className="text-[10px] text-gray-400 dark:text-gray-500">
+              Podés cambiar de sección — sigue corriendo en segundo plano.
+            </span>
+          </div>
         </div>
       )}
     </div>

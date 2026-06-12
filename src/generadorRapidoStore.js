@@ -67,7 +67,7 @@ export function cancelGenerador() {
 // Dispara la generación. Devuelve inmediatamente si ya hay una corriendo.
 // La corrida sobrevive a desmontajes del componente: el fetch SSE y el
 // reporte de progreso viven acá, no en React.
-export async function runGeneradorRapido({ producto, formato, cantidad, formatoMix, addToast, onDone }) {
+export async function runGeneradorRapido({ producto, formato, cantidad, formatoMix, contextoTematico = '', addToast, onDone }) {
   if (_state?.status === 'running') {
     addToast?.({ type: 'info', message: 'Ya hay una generación de ideas en curso.' });
     return;
@@ -80,12 +80,14 @@ export async function runGeneradorRapido({ producto, formato, cantidad, formatoM
   const ctrl = new AbortController();
   _ctrl = ctrl;
   const totalTandas = Math.ceil(cantidad / CHUNK);
+  const tema = String(contextoTematico || '').trim();
 
   _state = {
     productoId: producto.id,
     productoNombre: producto.nombre || '',
     formato,
     cantidad,
+    contextoTematico: tema,
     startedAt: Date.now(),
     tanda: { actual: 0, total: totalTandas },
     liveIdeas: [],
@@ -96,7 +98,9 @@ export async function runGeneradorRapido({ producto, formato, cantidad, formatoM
   emit();
 
   const execId = startExecution({
-    label: `Generador rápido · ${cantidad} ideas`,
+    label: tema
+      ? `Ideas temáticas · ${cantidad} · "${tema.slice(0, 40)}"`
+      : `Generador rápido · ${cantidad} ideas`,
     sublabel: `${producto.nombre || 'producto'} · podés cambiar de sección`,
     kind: 'generador-rapido',
     estimatedMs: cantidad * 25000,
@@ -157,6 +161,7 @@ export async function runGeneradorRapido({ producto, formato, cantidad, formatoM
           propiosAds: [],
           targetCount: chunkTarget,
           formatoMix: mix,
+          contextoTematico: tema,
         }),
       });
       if (!resp.ok || !resp.body) {

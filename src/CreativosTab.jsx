@@ -10,12 +10,171 @@
 //   onUpdateProducto: callback para guardar resultados en el producto
 //   addToast: para feedback al user
 
-import React, { useState } from 'react';
-import { Sparkles, Loader2, AlertTriangle, Copy, Check } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Sparkles, Loader2, AlertTriangle, Copy, Check, Image as ImageIcon, X, Inbox } from 'lucide-react';
 import { logCostsFromResponse } from './costsStore.js';
 import { startExecution, updateExecution, finishExecution } from './executionsStore.js';
+import { runGeneradorRapido, cancelGenerador, subscribeGenerador } from './generadorRapidoStore.js';
+import { TIPO_META } from './bandejaStore.js';
 
 // ---- inner components moved before export (TDZ fix Vite/Rollup) ----
+
+const TEMATICO_CANTIDADES = [8, 16, 24];
+const TEMATICO_EJEMPLOS = ['adaptado al Mundial', 'edición navideña', 'Día de la Madre', 'Hot Sale', 'vuelta al cole'];
+const FORMATO_EMOJI = { static: '🖼️', video: '🎬', carrusel: '🎠' };
+
+// Generador de ideas TEMÁTICAS para estáticos — el user da un contexto libre
+// (ej. "adaptado al Mundial") y Claude genera ideas ambientadas en esa
+// temática. Corren en segundo plano (mismo store que el Generador rápido:
+// el progreso completo se ve en el ExecutionsTray global). Las ideas caen en
+// la Bandeja; desde ahí se convierten en estáticos con el flujo existente.
+function GeneradorTematico({ producto, addToast }) {
+  const [contexto, setContexto] = useState('');
+  const [cantidad, setCantidad] = useState(8);
+  const [job, setJob] = useState(null);
+
+  // Solo reflejamos la corrida si es de ESTE producto Y es temática (tiene
+  // contextoTematico) — para no pisarnos con el Generador rápido de la Bandeja.
+  useEffect(() => subscribeGenerador(s => {
+    const mine = s && String(s.productoId) === String(producto?.id) && !!s.contextoTematico;
+    setJob(mine ? s : null);
+  }), [producto?.id]);
+
+  const running = job?.status === 'running';
+  const liveIdeas = job?.liveIdeas || [];
+  const insertadas = job?.insertadas || 0;
+  const cantidadActiva = running ? (job?.cantidad || cantidad) : cantidad;
+  const pct = cantidadActiva > 0 ? Math.min(100, Math.round((liveIdeas.length / cantidadActiva) * 100)) : 0;
+
+  const generar = () => {
+    const tema = contexto.trim();
+    if (!tema) {
+      addToast?.({ type: 'info', message: 'Escribí un contexto temático (ej: "adaptado al Mundial").' });
+      return;
+    }
+    if (!producto?.nombre) {
+      addToast?.({ type: 'error', message: 'No hay producto activo.' });
+      return;
+    }
+    runGeneradorRapido({
+      producto,
+      formato: 'static',
+      cantidad,
+      formatoMix: { static: 1, video: 0 },
+      contextoTematico: tema,
+      addToast,
+    });
+  };
+
+  return (
+    <div className="bg-gradient-to-br from-brand-50 to-amber-50 dark:from-brand-950/30 dark:to-amber-950/20 border border-brand-200 dark:border-brand-800 rounded-xl p-4">
+      <div className="flex items-center gap-2.5 mb-3">
+        <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-brand-500 to-amber-500 flex items-center justify-center text-white shrink-0">
+          <ImageIcon size={16} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Estáticos temáticos por contexto</h3>
+          <p className="text-[11px] text-gray-500 dark:text-gray-400">
+            Dale un contexto libre y genera ideas de estáticos ambientadas en esa temática — caen en la Bandeja, listas para convertir en imágenes.
+          </p>
+        </div>
+      </div>
+
+      {!running && (
+        <>
+          <div className="mb-2">
+            <input
+              type="text"
+              value={contexto}
+              onChange={e => setContexto(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') generar(); }}
+              placeholder='Contexto temático — ej: "adaptado al Mundial"'
+              className="w-full px-3 py-2 text-sm bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+            />
+            <div className="flex flex-wrap gap-1 mt-1.5">
+              {TEMATICO_EJEMPLOS.map(ej => (
+                <button key={ej} onClick={() => setContexto(ej)}
+                  className="px-2 py-0.5 text-[10px] font-medium text-brand-700 dark:text-brand-300 bg-brand-100/60 dark:bg-brand-900/40 rounded-full hover:bg-brand-200 dark:hover:bg-brand-900/70 transition">
+                  {ej}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-end gap-3">
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-1">Cantidad</p>
+              <div className="flex gap-1">
+                {TEMATICO_CANTIDADES.map(n => (
+                  <button key={n} onClick={() => setCantidad(n)}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-lg border transition ${
+                      cantidad === n
+                        ? 'bg-brand-500 border-brand-500 text-white shadow-sm'
+                        : 'bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:border-brand-300 dark:hover:border-brand-700'
+                    }`}>
+                    {n}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <button onClick={generar}
+              className="inline-flex items-center gap-2 px-5 py-2 text-sm font-bold text-white bg-gradient-to-br from-brand-500 to-amber-500 rounded-lg hover:from-brand-600 hover:to-amber-600 shadow-sm transition">
+              <Sparkles size={14} /> Generar ideas temáticas
+            </button>
+          </div>
+        </>
+      )}
+
+      {running && (
+        <div className="space-y-3">
+          <div>
+            <div className="flex items-center justify-between mb-1.5 text-xs">
+              <span className="font-bold text-gray-900 dark:text-gray-100">
+                {liveIdeas.length > 0 ? `${liveIdeas.length} de ${cantidadActiva} ideas` : 'Armando los briefs…'}
+                {job?.contextoTematico && <span className="text-gray-400 font-normal"> · "{job.contextoTematico.slice(0, 30)}"</span>}
+              </span>
+              {insertadas > 0 && (
+                <span className="inline-flex items-center gap-0.5 text-emerald-600 dark:text-emerald-400 font-bold tabular-nums">
+                  <Check size={11} /> {insertadas} en Bandeja
+                </span>
+              )}
+            </div>
+            <div className="h-2.5 bg-white/70 dark:bg-gray-900 rounded-full overflow-hidden">
+              <div
+                className={`h-full bg-gradient-to-r from-brand-500 to-amber-500 rounded-full transition-all duration-500 ${liveIdeas.length === 0 ? 'animate-pulse' : ''}`}
+                style={{ width: `${liveIdeas.length === 0 ? 8 : pct}%` }}
+              />
+            </div>
+          </div>
+
+          {liveIdeas.length > 0 && (
+            <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
+              {liveIdeas.slice(0, 8).map((idea, i) => (
+                <div key={liveIdeas.length - i} className="flex items-center gap-2 text-[11px] py-1 px-2 bg-white/70 dark:bg-gray-900/60 rounded-md">
+                  <span className="shrink-0">{FORMATO_EMOJI[idea.formato] || '🖼️'}</span>
+                  <span className="flex-1 min-w-0 truncate text-gray-700 dark:text-gray-200 font-medium">{idea.titulo || 'Idea sin título'}</span>
+                  <span className="shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400">
+                    {TIPO_META[idea.tipo]?.label || idea.tipo}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="flex items-center gap-2.5">
+            <button onClick={() => cancelGenerador()}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-600 transition">
+              <X size={12} /> Cancelar
+            </button>
+            <span className="text-[10px] text-gray-400 dark:text-gray-500 inline-flex items-center gap-1">
+              <Inbox size={11} /> Las ideas van a la Bandeja — podés cambiar de sección, sigue en segundo plano.
+            </span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function HooksDisplay({ fase1, addToast }) {
   const { diagnostico, angulosElegidos = [], hooks = [], observaciones = [] } = fase1;
@@ -213,6 +372,10 @@ export default function CreativosTab({ producto, onUpdateProducto, addToast }) {
 
   return (
     <div className="space-y-4">
+      {/* Generador de estáticos temáticos por contexto libre (ej. "adaptado al
+          Mundial"). Genera ideas en la Bandeja, en segundo plano. */}
+      <GeneradorTematico producto={producto} addToast={addToast} />
+
       {/* Header thin Linear-style — una sola fila con título + última corrida + botón primario */}
       <div className="flex items-center gap-3 flex-wrap">
         <div className="flex items-center gap-2 min-w-0 flex-1">

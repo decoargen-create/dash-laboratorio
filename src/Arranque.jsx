@@ -608,20 +608,16 @@ function ProductMetric({ label, value, tone = 'default' }) {
 
 
 // Nombre del producto editable inline. Por defecto muestra el nombre como
-// texto; al tocar el lápiz se vuelve input. Guarda en setProductos (mismo
-// patrón que el resto del wizard) actualizando updated_at para que sincronice.
-function ProductoNombreEditable({ producto, setProductos }) {
+// texto; al tocar el lápiz se vuelve input. Delega el guardado a onRename
+// (el padre persiste y, si hay research viejo, ofrece regenerarlo).
+function ProductoNombreEditable({ producto, onRename }) {
   const [editing, setEditing] = useState(false);
   const [val, setVal] = useState(producto.nombre || '');
 
   const guardar = () => {
     const nombre = val.trim();
     if (!nombre || nombre === producto.nombre) { setEditing(false); setVal(producto.nombre || ''); return; }
-    setProductos(prev => prev.map(p =>
-      String(p.id) === String(producto.id)
-        ? { ...p, nombre, updated_at: new Date().toISOString() }
-        : p
-    ));
+    onRename(nombre);
     setEditing(false);
   };
 
@@ -1425,7 +1421,53 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     setSteps(prev => prev.map(s => s.id === id ? { ...s, ...patch } : s));
   };
 
-  const runPipeline = async () => {
+  // Regeneración de research pendiente tras un rename. Guardamos el id del
+  // producto; un effect dispara runPipeline({docsOnly}) cuando el state ya se
+  // asentó (docs limpios + nombre nuevo), evitando leer un closure stale.
+  const [pendingRegen, setPendingRegen] = useState(null);
+
+  // Rename del producto. Persiste el nombre nuevo y, si ya había research
+  // generado con el nombre viejo, ofrece regenerarlo (solo research + stage).
+  const handleRenameProducto = (nombre) => {
+    const tieneResearch = !!(producto?.docs?.research);
+    let regen = false;
+    if (tieneResearch) {
+      regen = window.confirm(
+        `Ya hay un research doc generado con el nombre anterior.\n\n¿Regenerarlo con "${nombre}"?\n\nBorra research + avatar + offer brief + creencias + stage y los vuelve a generar (~3-4 min). Las ideas que ya están en la Bandeja no se tocan; las nuevas saldrán con el nombre correcto.`
+      );
+    }
+    setProductos(prev => prev.map(p =>
+      String(p.id) === String(producto.id)
+        ? {
+            ...p,
+            nombre,
+            updated_at: new Date().toISOString(),
+            ...(regen ? {
+              docs: {}, resumenEjecutivo: '', docsGeneratedAt: null,
+              stage: null, stageReason: '', searchKeywords: [],
+            } : {}),
+          }
+        : p
+    ));
+    if (regen) setPendingRegen(String(producto.id));
+  };
+
+  // Dispara la regeneración una vez que el producto activo quedó con docs
+  // limpios (necesitaDocs=true) y no hay otro pipeline corriendo.
+  useEffect(() => {
+    if (!pendingRegen || running) return;
+    if (String(producto?.id) !== String(pendingRegen)) return;
+    const limpio = ['research', 'avatar', 'offerBrief', 'beliefs'].some(k => !producto?.docs?.[k]);
+    if (!limpio) return;
+    setPendingRegen(null);
+    runPipeline({ docsOnly: true });
+  }, [pendingRegen, producto, running]);
+
+  const runPipeline = async (opts) => {
+    // docsOnly: regenerar SOLO research + stage (post-rename), sin re-scrapear
+    // competidores ni generar ideas. opts puede venir como evento de onClick
+    // (que no tiene docsOnly) → queda false.
+    const docsOnly = opts?.docsOnly === true;
     if (!producto?.nombre) {
       addToast?.({ type: 'error', message: 'Primero cargá el producto (nombre + landing)' });
       return;
@@ -1497,7 +1539,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     // Chequeamos los 4 docs, no solo `research`. Si una corrida quedó con
     // docs PARCIALES (research sí, avatar no), mirar solo research activaba
     // el skip y el avatar faltante nunca se regeneraba.
-    const necesitaDocs = ['research', 'avatar', 'offerBrief', 'beliefs']
+    const necesitaDocs = docsOnly || ['research', 'avatar', 'offerBrief', 'beliefs']
       .some(k => !producto?.docs?.[k]);
 
     const pasosIniciales = [
@@ -1586,7 +1628,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     // skip se activaba y nunca regenerábamos — quedabas atascado con keywords
     // pobres salvo que borraras el producto. 3 es el mínimo que da una mezcla
     // viable de problema + categoría + ángulo.
-    const yaTienePostResearch = !!productoActualizado?.stage && searchKeywords.length >= 3;
+    const yaTienePostResearch = !docsOnly && !!productoActualizado?.stage && searchKeywords.length >= 3;
     if (!cancelledRef.current && productoActualizado?.docs?.research && !yaTienePostResearch) {
       updateStep('post-research', { status: 'running', startedAt: Date.now() });
       try {
@@ -1632,6 +1674,20 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         endedAt: Date.now(),
         detail: `↻ Reusado · Stage: ${productoActualizado.stage.replace('_', '-')} · ${searchKeywords.length} keywords (sin re-llamar a Claude)`,
       });
+    }
+
+    // Modo docsOnly (regeneración post-rename): cortamos acá. Solo queríamos
+    // research + stage frescos con el nombre nuevo — no re-scrapear competencia
+    // ni generar ideas (eso lo dispara el user con el pipeline completo).
+    if (docsOnly) {
+      updateStep('done', {
+        status: 'done',
+        endedAt: Date.now(),
+        detail: `Research regenerado con "${productoActualizado.nombre}"`,
+      });
+      setRunning(false);
+      addToast?.({ type: 'success', message: 'Research regenerado con el nombre nuevo. Las próximas ideas y estáticos ya lo usan.' });
+      return;
     }
 
     // La competencia la carga el user a mano — sin auto-sugerencia
@@ -2794,7 +2850,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       >
         {prodReady ? (
           <div className="text-xs text-gray-700 dark:text-gray-300 space-y-1">
-            <ProductoNombreEditable producto={producto} setProductos={setProductos} />
+            <ProductoNombreEditable producto={producto} onRename={handleRenameProducto} />
             {producto.landingUrl && (
               <a href={producto.landingUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-brand-600 hover:underline">
                 <Link2 size={11} /> {producto.landingUrl}

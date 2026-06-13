@@ -2034,9 +2034,9 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {selected.size > 0 && (
-            <>
-              <span className="text-xs text-gray-600 dark:text-gray-300">
-                {selected.size} seleccionada{selected.size > 1 ? 's' : ''}
+            <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-white dark:bg-gray-800 border-2 border-purple-300 dark:border-purple-700 rounded-xl shadow-2xl px-4 py-3 flex items-center gap-2 flex-wrap max-w-[calc(100vw-3rem)]">
+              <span className="text-xs font-bold text-gray-900 dark:text-gray-100">
+                {selected.size} seleccionada{selected.size > 1 ? 's' : ''} <span className="font-normal text-gray-500 dark:text-gray-400">(todas las columnas)</span>
               </span>
               <button onClick={() => setSelected(new Set())}
                 className="px-2.5 py-1.5 text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition">
@@ -2127,7 +2127,7 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
                 className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-gray-800 border border-brand-300 dark:border-brand-700 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/20 transition">
                 .md
               </button>
-            </>
+            </div>
           )}
           {selected.size === 0 && filtered.length > 0 && (
             <>

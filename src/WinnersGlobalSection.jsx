@@ -11,7 +11,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Trophy, Sparkles, Loader2, Check, ImageOff, Package, ArrowRight } from 'lucide-react';
-import { listAllWinnersCloud } from './galeriaReferencialesCloud.js';
+import { listAllWinners } from './galeriaReferenciales.js';
 import { getProductoImagen, getAccentColor } from './productoImagen.js';
 import { startExecution, updateExecution, finishExecution } from './executionsStore.js';
 import { logCostsFromResponse } from './costsStore.js';
@@ -56,7 +56,7 @@ export default function WinnersGlobalSection({ addToast, onGoToSection }) {
     (async () => {
       setLoading(true);
       try {
-        const w = await listAllWinnersCloud();
+        const w = await listAllWinners();
         if (active) setWinners(w);
       } catch { if (active) setWinners([]); }
       finally { if (active) setLoading(false); }

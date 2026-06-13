@@ -23,7 +23,7 @@ import {
 } from './galeriaReferenciales.js';
 import WinnerForm from './WinnerForm.jsx';
 import WinnersReport from './WinnersReport.jsx';
-import { iterateFromWinner } from './winnerIterate.js';
+import { iterateFromWinner, generateFromWinner } from './winnerIterate.js';
 import { BarChart3 } from 'lucide-react';
 import { SkeletonGrid } from './Skeleton.jsx';
 import EmptyState from './EmptyState.jsx';
@@ -463,7 +463,7 @@ function GalleryTableView({ items, blobUrls, seleccionados, selectedOrder, onTog
 
 // Lightbox separado para mantener este archivo manejable.
 
-function Lightbox({ item, imgSrc, onClose, showDebug, setShowDebug, onDownload, onDelete, onToggleDescargada, onArchive, onToggleWinner, onIterateWinner }) {
+function Lightbox({ item, imgSrc, onClose, showDebug, setShowDebug, onDownload, onDelete, onToggleDescargada, onArchive, onToggleWinner, onIterateWinner, iterating = false }) {
   const metrics = item.winnerMetrics || {};
   return (
     <div
@@ -595,8 +595,11 @@ function Lightbox({ item, imgSrc, onClose, showDebug, setShowDebug, onDownload, 
             </button>
             {item.winner && onIterateWinner && (
               <button onClick={onIterateWinner}
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 rounded-lg transition">
-                <Sparkles size={13} /> Iterar desde winner
+                disabled={iterating}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">
+                {iterating
+                  ? <><span className="animate-spin">⏳</span> Generando…</>
+                  : <><Sparkles size={13} /> Generar variación desde winner</>}
               </button>
             )}
             <button onClick={onToggleDescargada}
@@ -708,6 +711,9 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
   // Búsqueda libre por texto — matchea sourceBrand, sourceHeadline, variantStyle.
   const [searchQuery, setSearchQuery] = useState('');
   const [zipping, setZipping] = useState(false);
+  // Iteración de winner en curso — bloquea el botón y muestra progreso.
+  const [iteratingId, setIteratingId] = useState(null);
+  const [iterateProgress, setIterateProgress] = useState(null);
 
   // ⚠️ visibleItems TIENE que estar acá arriba (antes del useEffect de
   // keyboard nav que lo usa en su dep array). Estaba abajo en línea 935
@@ -964,19 +970,34 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
     refresh();
   };
 
-  // Iterar desde un winner — crea idea en Bandeja y cierra galería.
+  // Iterar desde un winner — genera DIRECTO una variación nueva usando el
+  // winner como referencia visual (mismo pipeline que Inspiración, no
+  // pasa por Bandeja). La idea es que el ganador es el insumo, no la
+  // hipótesis a editar.
   const handleIterateWinner = async (item) => {
     if (!producto) {
       alert('Falta el contexto del producto para iterar.');
       return;
     }
+    if (iteratingId) return; // ya hay una iteración corriendo
+    setIteratingId(item.id);
+    setIterateProgress({ current: 0, total: 1, brand: item.sourceBrand });
     try {
-      await iterateFromWinner(item, producto);
-      // Notificar que se creó idea — Bandeja la va a levantar.
-      try { window.dispatchEvent(new Event('viora:marketing-storage-changed')); } catch {}
-      alert('✓ Idea de iteración creada en la Bandeja del producto. Andá ahí para editarla y generar variantes.');
+      const { count } = await generateFromWinner(item, producto, {
+        n: 1,
+        quality: 'high',
+        size: item.size || '1024x1024',
+        onProgress: (p) => setIterateProgress({ ...p, brand: item.sourceBrand }),
+      });
+      // El backend ya disparó viora:referencial-saved en cada save al cloud;
+      // por las dudas refresh local también.
+      refresh();
+      alert(`✓ ${count} variación nueva del winner generada y guardada al repositorio.`);
     } catch (err) {
       alert(`Error iterando: ${err.message}`);
+    } finally {
+      setIteratingId(null);
+      setIterateProgress(null);
     }
   };
 
@@ -1192,6 +1213,17 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
         </div>
       )}
 
+      {/* Toast de progreso del iterate — visible aun si cerrás el lightbox */}
+      {iteratingId && iterateProgress && (
+        <div className="fixed top-4 right-4 z-[80] bg-gradient-to-br from-purple-600 to-pink-600 text-white rounded-lg shadow-2xl px-4 py-3 flex items-center gap-3 max-w-sm">
+          <Sparkles size={16} className="animate-pulse" />
+          <div className="text-xs">
+            <p className="font-bold">Generando desde winner{iterateProgress.brand ? ` · ${iterateProgress.brand}` : ''}</p>
+            <p className="text-white/80 text-[10px]">{iterateProgress.current}/{iterateProgress.total} · suele tardar 60-90s</p>
+          </div>
+        </div>
+      )}
+
       {/* Lightbox */}
       {selected && (
         <Lightbox
@@ -1206,6 +1238,7 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
           onArchive={() => handleArchive(selected.id, !!selected.archivado)}
           onToggleWinner={() => handleToggleWinner(selected)}
           onIterateWinner={() => handleIterateWinner(selected)}
+          iterating={iteratingId === selected.id}
         />
       )}
 

@@ -2189,6 +2189,21 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         setProductos(updated);
       });
 
+      // El BUG previo: handleScrapeBrand actualiza brand.lastScraped en
+      // setBrands, pero handleScrapeCompetidor (que es lo que dispara COMP
+      // de Setup) NO lo hacía — solo tocaba competidor.lastAdsCheck en
+      // localStorage. La UI lee brand.lastScraped para mostrar "sin
+      // scrapear" / "Re-scrape", así que después de un scrape exitoso de
+      // un COMP la card seguía diciendo "sin scrapear". Fix: replicar el
+      // setBrands acá también.
+      setBrands(prev => prev.map(x => x.id === brand.id ? {
+        ...x,
+        lastScraped: new Date().toISOString(),
+        // Mismo tracking de "estable" que handleScrapeBrand.
+        consecutiveZeroAds: newAds.length > 0 ? 0 : (x.consecutiveZeroAds || 0) + 1,
+      } : x));
+      setAdsByBrand(prev => ({ ...prev, [brand.id]: ads }));
+
       const msg = newAds.length > 0
         ? `${newAds.length} estáticos NUEVOS de ${comp.nombre} (${ads.length} total)`
         : `${ads.length} estáticos de ${comp.nombre} (sin nuevos)`;

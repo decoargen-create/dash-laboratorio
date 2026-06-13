@@ -10,6 +10,7 @@ import {
   AlignJustify, LayoutGrid, Columns3, Sparkles, Bot, Zap, Activity, FileText, Settings, Loader2, Calculator, Copy, Save, RotateCcw, Target, Play, Inbox, BarChart3, Instagram, SlidersHorizontal, ClipboardList, AlertTriangle, Trophy
 } from 'lucide-react';
 import { VioraLogo, VioraMark, AdsLabLogo, AdsLabMark } from './logo.jsx';
+import { installDebugLog, exportDebugLog } from './debugLog.js';
 import LandingPage from './LandingPage.jsx';
 import BocetosSection from './Bocetos.jsx';
 import MarketingSection from './Marketing.jsx';
@@ -8753,6 +8754,11 @@ export default function App() {
       console.info(`%c[AdsLab build] ${tag}`, 'color: #c026d3; font-weight: bold');
       window.__VIORA_BUILD__ = tag;
     } catch {}
+    // Instalar el debug log global — captura fetch, errores, rejections y
+    // console.error en un buffer exportable. Ctrl+Shift+L descarga el JSON.
+    // Sin esto, cuando algo falla y el toast efímero desaparece, no hay
+    // forma de reproducir qué pasó sin reproducir el flow desde cero.
+    try { installDebugLog(); window.__exportDebugLog = exportDebugLog; } catch {}
     return () => window.removeEventListener('popstate', onPop);
   }, []);
 

@@ -17,6 +17,7 @@
 // cross-device. localStorage se mantiene como fallback de migración.
 
 import { supabase, getCurrentUser } from './supabase.js';
+import { logEvent } from './debugLog.js';
 
 const DB_NAME = 'adslab-producto-imagenes';
 const DB_VERSION = 1;
@@ -124,9 +125,15 @@ function dataUrlToBlob(dataUrl) {
 
 // Sube la foto al bucket Supabase. Devuelve la URL pública o null si falla.
 async function uploadFotoToCloud(productoId, dataUrl) {
-  if (!supabase) return null;
+  if (!supabase) {
+    logEvent({ kind: 'fetch-error', label: `[producto-imagen] sin supabase configurado`, meta: { productoId } });
+    return null;
+  }
   const user = await getCurrentUser();
-  if (!user) return null;
+  if (!user) {
+    logEvent({ kind: 'fetch-error', label: `[producto-imagen] sin sesión auth — no se sube foto`, meta: { productoId } });
+    return null;
+  }
   try {
     const blob = dataUrlToBlob(dataUrl);
     // El uid VA PRIMERO en el path: la policy RLS del bucket exige
@@ -139,12 +146,27 @@ async function uploadFotoToCloud(productoId, dataUrl) {
       .upload(path, blob, { contentType: blob.type || 'image/jpeg', upsert: true });
     if (error) {
       console.warn('[productoImagen] cloud upload falló:', error.message);
+      logEvent({
+        kind: 'fetch-error',
+        label: `[producto-imagen] upload falló: ${error.message}`,
+        meta: { productoId, path, errorMsg: error.message, sizeBytes: blob.size },
+      });
       return null;
     }
     const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(path);
+    logEvent({
+      kind: 'fetch',
+      label: `[producto-imagen] subido OK ${productoId}`,
+      meta: { productoId, path, publicUrl: pub?.publicUrl?.slice(0, 200) },
+    });
     return pub?.publicUrl || null;
   } catch (err) {
     console.warn('[productoImagen] cloud upload error:', err.message);
+    logEvent({
+      kind: 'fetch-error',
+      label: `[producto-imagen] upload exception: ${err.message}`,
+      meta: { productoId, error: err.message, stack: err.stack },
+    });
     return null;
   }
 }

@@ -24,9 +24,59 @@
 // SHAPE persistido:
 //   { ads: [...], total: N, winners: M, lastAdsCheck: ISO, ts: epoch }
 
+import { supabase, getCurrentUser } from './supabase.js';
+
 const DB_NAME = 'adslab-competidor-ads-v1';
 const DB_VERSION = 1;
 const STORE = 'ads';
+const BUCKET = 'creativos';
+
+// Path en Supabase Storage para los ads de un (producto, competidor).
+// El uid VA PRIMERO — la policy RLS exige foldername[1] = auth.uid().
+function cloudPath(uid, productoId, competidorId) {
+  return `${uid}/competitor-ads/${String(productoId)}-${String(competidorId)}.json`;
+}
+
+// Sube el payload de ads al bucket — best effort. Sin esto los ads viven solo
+// en IDB local y la otra PC no los ve hasta re-scrapear.
+async function uploadAdsToCloud(productoId, competidorId, payload) {
+  if (!supabase) return null;
+  try {
+    const user = await getCurrentUser();
+    if (!user) return null;
+    const path = cloudPath(user.id, productoId, competidorId);
+    const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+    const { error } = await supabase.storage
+      .from(BUCKET)
+      .upload(path, blob, { contentType: 'application/json', upsert: true });
+    if (error) {
+      console.warn('[competidorAdsIDB] cloud upload falló:', error.message);
+      return null;
+    }
+    return path;
+  } catch (err) {
+    console.warn('[competidorAdsIDB] cloud upload error:', err.message);
+    return null;
+  }
+}
+
+// Baja el payload del cloud — usado cuando IDB no tiene nada pero la
+// metadata del producto dice que hubo un scrape (cross-PC).
+async function downloadAdsFromCloud(productoId, competidorId) {
+  if (!supabase) return null;
+  try {
+    const user = await getCurrentUser();
+    if (!user) return null;
+    const path = cloudPath(user.id, productoId, competidorId);
+    const { data, error } = await supabase.storage.from(BUCKET).download(path);
+    if (error || !data) return null;
+    const text = await data.text();
+    return JSON.parse(text);
+  } catch (err) {
+    console.warn('[competidorAdsIDB] cloud download falló:', err.message);
+    return null;
+  }
+}
 
 let dbPromise = null;
 
@@ -84,6 +134,10 @@ export async function setCompAds(productoId, competidorId, payload) {
         detail: { productoId: String(productoId), competidorId: String(competidorId), total: record.total },
       }));
     } catch {}
+    // Sync al cloud en background (best effort). Sin esto, los ads viven solo
+    // local y la otra PC tiene que re-scrapear para verlos. Con el upload,
+    // PC2 los baja on-demand cuando getCompAds() no encuentra en IDB.
+    uploadAdsToCloud(productoId, competidorId, record).catch(() => {});
     return true;
   } catch (err) {
     console.warn('[competidorAdsIDB] set falló:', err.message);
@@ -95,6 +149,7 @@ export async function getCompAds(productoId, competidorId) {
   if (!productoId || !competidorId) return null;
   const key = makeKey(productoId, competidorId);
   if (memCache.has(key)) return memCache.get(key);
+  // 1) Intentar IDB
   try {
     const db = await openDB();
     const record = await new Promise((resolve, reject) => {
@@ -103,12 +158,27 @@ export async function getCompAds(productoId, competidorId) {
       req.onsuccess = () => resolve(req.result || null);
       req.onerror = () => reject(req.error);
     });
-    if (record) memCache.set(key, record);
-    return record;
+    if (record) { memCache.set(key, record); return record; }
   } catch (err) {
-    console.warn('[competidorAdsIDB] get falló:', err.message);
-    return null;
+    console.warn('[competidorAdsIDB] get IDB falló:', err.message);
   }
+  // 2) Fallback al cloud — caso "entré desde otra PC". Bajamos del bucket
+  // y cacheamos local para próximas lecturas.
+  const cloudRec = await downloadAdsFromCloud(productoId, competidorId);
+  if (cloudRec && Array.isArray(cloudRec.ads)) {
+    try {
+      const db = await openDB();
+      await new Promise((resolve) => {
+        const tx = db.transaction(STORE, 'readwrite');
+        tx.objectStore(STORE).put({ ...cloudRec, key, productoId: String(productoId), competidorId: String(competidorId) });
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => resolve();
+      });
+    } catch {}
+    memCache.set(key, cloudRec);
+    return cloudRec;
+  }
+  return null;
 }
 
 export async function getCompAdsCount(productoId, competidorId) {
@@ -128,8 +198,19 @@ export async function removeCompAds(productoId, competidorId) {
       tx.oncomplete = () => resolve();
       tx.onerror = () => resolve();
     });
-    return true;
-  } catch { return false; }
+  } catch {}
+  // Borrar también del cloud para no dejar archivos huérfanos consumiendo
+  // bucket. Best effort — si falla no es crítico.
+  if (supabase) {
+    try {
+      const user = await getCurrentUser();
+      if (user) {
+        const path = cloudPath(user.id, productoId, competidorId);
+        await supabase.storage.from(BUCKET).remove([path]);
+      }
+    } catch {}
+  }
+  return true;
 }
 
 export async function removeAllForProducto(productoId) {

@@ -645,12 +645,16 @@ function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = f
 
 function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect, onClearProgress }) {
   const [showRepeated, setShowRepeated] = useState(false);
-  const [showAllFresh, setShowAllFresh] = useState(false);
-  const [showAllRepeated, setShowAllRepeated] = useState(false);
+  // Paginación: arranca con 30, "ver más" suma de a 60 hasta cap razonable.
+  // ANTES: showAllFresh = true mostraba TODOS los ads (3000+) en DOM →
+  // Chrome se colgaba renderizando esa cantidad de thumbnails.
+  const [freshLimit, setFreshLimit] = useState(30);
+  const [repeatedLimit, setRepeatedLimit] = useState(30);
   const fresh = ads.filter(a => a.isFresh !== false);
   const repeated = ads.filter(a => a.isFresh === false);
-  const FRESH_LIMIT = showAllFresh ? fresh.length : 30;
-  const REPEATED_LIMIT = showAllRepeated ? repeated.length : 30;
+  const FRESH_LIMIT = Math.min(freshLimit, fresh.length);
+  const REPEATED_LIMIT = Math.min(repeatedLimit, repeated.length);
+  const PAGE_STEP = 60;
 
   return (
     <div className="mt-3 space-y-3">
@@ -679,13 +683,23 @@ function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccion
                 onClearProgress={onClearProgress}
               />
             ))}
-            {fresh.length > 30 && (
+            {fresh.length > FRESH_LIMIT && (
               <button
-                onClick={() => setShowAllFresh(s => !s)}
+                onClick={() => setFreshLimit(l => l + PAGE_STEP)}
                 className="aspect-square rounded-md flex items-center justify-center bg-gray-50 dark:bg-gray-900 border-2 border-dashed border-gray-200 dark:border-gray-700 text-[10px] text-gray-500 dark:text-gray-400 italic hover:bg-gray-100 dark:hover:bg-gray-800 hover:border-brand-400 dark:hover:border-brand-600 hover:text-brand-600 dark:hover:text-brand-300 transition cursor-pointer"
-                title={showAllFresh ? 'Ver solo los 30 primeros' : `Ver los ${fresh.length - 30} restantes`}
+                title={`Cargar otros ${Math.min(PAGE_STEP, fresh.length - FRESH_LIMIT)} de ${fresh.length - FRESH_LIMIT} restantes`}
               >
-                {showAllFresh ? 'Mostrar menos' : `+${fresh.length - 30} más`}
+                +{Math.min(PAGE_STEP, fresh.length - FRESH_LIMIT)} más
+                <span className="block text-[8px] mt-0.5">({FRESH_LIMIT}/{fresh.length})</span>
+              </button>
+            )}
+            {FRESH_LIMIT > 30 && (
+              <button
+                onClick={() => setFreshLimit(30)}
+                className="aspect-square rounded-md flex items-center justify-center bg-gray-50 dark:bg-gray-900 border-2 border-dashed border-gray-200 dark:border-gray-700 text-[10px] text-gray-500 dark:text-gray-400 italic hover:bg-gray-100 dark:hover:bg-gray-800 hover:border-amber-400 hover:text-amber-600 transition cursor-pointer"
+                title="Volver a mostrar los primeros 30"
+              >
+                ↑ Menos
               </button>
             )}
           </div>
@@ -722,13 +736,14 @@ function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccion
                   onToggleSelect={onToggleSelect ? () => onToggleSelect(ad.id) : null}
                 />
               ))}
-              {repeated.length > 30 && (
+              {repeated.length > REPEATED_LIMIT && (
                 <button
-                  onClick={() => setShowAllRepeated(s => !s)}
+                  onClick={() => setRepeatedLimit(l => l + PAGE_STEP)}
                   className="aspect-square rounded-md flex items-center justify-center bg-gray-50 dark:bg-gray-900 border-2 border-dashed border-gray-200 dark:border-gray-700 text-[10px] text-gray-400 italic hover:bg-gray-100 dark:hover:bg-gray-800 hover:border-brand-400 hover:text-brand-600 transition cursor-pointer"
-                  title={showAllRepeated ? 'Ver solo los 30 primeros' : `Ver los ${repeated.length - 30} restantes`}
+                  title={`Cargar ${Math.min(PAGE_STEP, repeated.length - REPEATED_LIMIT)} más`}
                 >
-                  {showAllRepeated ? 'Menos' : `+${repeated.length - 30} más`}
+                  +{Math.min(PAGE_STEP, repeated.length - REPEATED_LIMIT)} más
+                  <span className="block text-[8px] mt-0.5">({REPEATED_LIMIT}/{repeated.length})</span>
                 </button>
               )}
             </div>

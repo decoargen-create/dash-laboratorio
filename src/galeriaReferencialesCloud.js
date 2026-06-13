@@ -190,10 +190,12 @@ export async function listAllWinnersCloud() {
   // NO filtramos por archivado: un winner archivado sigue siendo winner que
   // el user quiere ver/replicar (de hecho suele marcarse winner DESDE la
   // pestaña Archivados — "ganador histórico"). Mostramos todos.
+  // Sin .eq('user_id') explícito: RLS ya restringe a auth.uid()=user_id, y así
+  // matchea exactamente el patrón de la query del producto (que SÍ trae los
+  // winners). Filtrar de más por user_id era un sospechoso de excluir filas.
   const { data, error } = await supabase
     .from('marketing_creativos')
     .select('*')
-    .eq('user_id', user.id)
     .eq('winner', true)
     .order('winner_at', { ascending: false, nullsFirst: false })
     .order('created_at', { ascending: false });

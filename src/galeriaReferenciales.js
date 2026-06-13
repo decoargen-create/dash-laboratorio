@@ -19,6 +19,7 @@ import {
   patchReferencialesCloud,
   archiveReferencialCloud,
   deleteReferencialCloud,
+  listAllWinnersCloud,
 } from './galeriaReferencialesCloud.js';
 
 const DB_NAME = 'lab-viora-referenciales';
@@ -280,6 +281,46 @@ export async function unmarkWinner(id) {
     winnerAt: null,
     winnerMetrics: null,
   }).then(n => n > 0);
+}
+
+// Lista TODOS los winners del usuario (cross-producto) para la galería global.
+// UNE cloud + IDB local: un winner puede estar solo en IDB si su creativo se
+// generó sin cloud-save (imageBase64 local) o si el patch al cloud no matcheó
+// la fila. Sin esto, la galería global quedaba vacía aunque la pestaña Winners
+// del producto (que cae a IDB) sí lo mostrara. Merge por id, cloud preferido.
+export async function listAllWinners() {
+  let cloud = [];
+  try { cloud = await listAllWinnersCloud(); } catch { /* sigo con IDB */ }
+  const byId = new Map(cloud.map(w => [String(w.id), w]));
+
+  try {
+    const db = await openDB();
+    const idbWinners = await new Promise((resolve) => {
+      const tx = db.transaction(STORE, 'readonly');
+      const req = tx.objectStore(STORE).getAll();
+      req.onsuccess = () => resolve((req.result || []).filter(it => it && it.winner));
+      req.onerror = () => resolve([]);
+    });
+    for (const it of idbWinners) {
+      const id = String(it.id);
+      if (byId.has(id)) continue; // el cloud ya lo tiene (preferido)
+      const imageUrl = it.imageUrl
+        || (it.imageBase64 ? `data:${it.mimeType || 'image/png'};base64,${it.imageBase64}` : null);
+      byId.set(id, {
+        id: it.id,
+        productoId: it.productoId,
+        imageUrl,
+        skeleton: it.skeleton || null,
+        sourceBrand: it.sourceBrand || null,
+        winner: true,
+        winnerAt: it.winnerAt || null,
+        createdAt: it.createdAt || null,
+        _local: true,
+      });
+    }
+  } catch { /* sin IDB, devolvemos solo cloud */ }
+
+  return Array.from(byId.values());
 }
 
 // ============================================================

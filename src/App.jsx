@@ -2179,8 +2179,15 @@ function AppShell({ onExit }) {
         </div>
       </aside>
 
-      {/* Main Content */}
-      <main className="flex-1 overflow-auto relative">
+      {/* Main Content
+          - pb-32 deja espacio abajo para que las barras flotantes fixed (bulk
+            actions de Bandeja/Galería/Inspiración, ExecutionsTray bottom-right,
+            BulkProgressBar bottom-center) NO tapen los últimos 100-120px del
+            contenido scrollable. Sin esto el user no podía llegar al final.
+          - scroll-pt-20 compensa los ~80px del StickyHeader sticky en
+            smooth-scroll y anchor-jumps para que el anchor no quede tapado.
+          - scroll-pb-32 simétrico para anchors al pie. */}
+      <main className="flex-1 overflow-auto relative pb-32 scroll-pt-20 scroll-pb-32">
         {/* Pill flotante del análisis en bg: visible desde cualquier sección
             cuando hay un análisis en curso. Click "Ver" → te lleva a Marketing. */}
         {bgAnalysis && (

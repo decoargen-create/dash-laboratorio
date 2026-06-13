@@ -27,6 +27,10 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { anthropicCost } from './_costs.js';
 
+// Vercel: darle el máximo de tiempo (300s en Pro). Aun así el cap de ads de
+// arriba es lo que evita el timeout — esto es defensivo.
+export const maxDuration = 300;
+
 const MODEL = 'claude-sonnet-4-6';
 
 const SYSTEM_PROMPT_BASE = `Sos un estratega de direct-response + copywriter + director de arte especializado en Meta Ads para e-commerce ARGENTINO. Tu estilo combina:
@@ -367,8 +371,26 @@ function respondJSON(res, status, payload) {
 }
 
 // Serializamos el contexto en un string estructurado y legible para Claude.
-function buildContext({ producto, competidoresAnalisis, allCompAds, ideasExistentes, propiosAds, targetCount }) {
+function buildContext({ producto, competidoresAnalisis, allCompAds, ideasExistentes, propiosAds, targetCount, contextoTematico }) {
   const parts = [];
+
+  // Contexto temático libre que pidió el user (ej: "adaptado al Mundial",
+  // "edición navideña", "Día de la Madre"). Va PRIMERO y bien fuerte para que
+  // TODAS las ideas lo respeten — es el pedido explícito del usuario y pesa
+  // más que cualquier default del system prompt.
+  const tema = String(contextoTematico || '').trim();
+  if (tema) {
+    parts.push('## 🎯 CONTEXTO TEMÁTICO — MANDATORIO EN EL 100% DE LAS IDEAS');
+    parts.push(`El usuario pidió que TODAS las ideas giren alrededor de esta temática/idea:\n\n"${tema}"\n`);
+    parts.push([
+      'Reglas innegociables:',
+      '1. CADA idea (sin excepción: réplica, iteración, diferenciación o desde cero) debe estar claramente enmarcada en esta temática. Si una idea no se puede conectar honestamente con el tema, NO la incluyas.',
+      '2. Incluso las RÉPLICAS: tomá el patrón ganador del competidor (estructura, trigger, formato) pero RE-ENMARCALO en la temática. No copies un ad que no tenga nada que ver con el tema.',
+      '3. VARIÁ LOS ÁNGULOS dentro del tema: distintos disparadores emocionales, escenarios, sub-momentos y enfoques — pero todos sobre la MISMA temática. No quiero N versiones del mismo hook, quiero N maneras DISTINTAS de hablar del mismo tema.',
+      '4. La temática es la AMBIENTACIÓN + el gancho; los beneficios reales del producto y el ángulo de direct-response se mantienen. No mientas (no afirmes que el producto "es para X" si no lo es) — conectalo de forma honesta y vendedora (regalo, ocasión, momento, emoción asociada).',
+      '5. El hook, el copy, el escenario narrativo y SOBRE TODO la descripción visual / prompt de imagen deben reflejar la temática de forma reconocible.',
+    ].join('\n') + '\n');
+  }
 
   parts.push('## PRODUCTO PROPIO');
   parts.push(`Nombre: ${producto?.nombre || '(sin nombre)'}`);
@@ -429,17 +451,28 @@ function buildContext({ producto, competidoresAnalisis, allCompAds, ideasExisten
   // El generador recibe CADA ad que scrapeamos — no filtramos nada.
   // Esto le da la visión completa del mercado para detectar patrones.
   if (allCompAds?.length) {
+    // CAP anti-timeout: con productos de muchos ads (ej. 200), mandar TODOS
+    // hacía el prompt gigante y el endpoint timeouteaba en Vercel
+    // (FUNCTION_INVOCATION_TIMEOUT / HTTP 504 a los ~5min). Tomamos los top N
+    // por (ganador, score) — más que suficiente para pattern mining.
+    const MAX_ADS = 60;
+    const allSorted = [...allCompAds].sort((a, b) =>
+      ((b.isWinner ? 1 : 0) - (a.isWinner ? 1 : 0)) || ((b.score || 0) - (a.score || 0))
+    );
+    const cappedAds = allSorted.slice(0, MAX_ADS);
+    const omitidos = allCompAds.length - cappedAds.length;
+
     // Agrupar por competidor para que el contexto sea legible.
     const byComp = {};
-    for (const ad of allCompAds) {
+    for (const ad of cappedAds) {
       const key = ad.competidor || 'Desconocido';
       if (!byComp[key]) byComp[key] = [];
       byComp[key].push(ad);
     }
 
-    parts.push('\n## TODOS LOS ADS DE LA COMPETENCIA (copy crudo para pattern mining)');
-    parts.push(`Total: ${allCompAds.length} ads de ${Object.keys(byComp).length} competidores.`);
-    parts.push(`**Tu trabajo**: leer TODOS estos ads, identificar los PATRONES que se repiten entre los ganadores (hooks, ángulos, estructura, formatos), y usarlos para generar ideas. No te limites a los 10 primeros — mirá toda la lista.`);
+    parts.push('\n## ADS DE LA COMPETENCIA (copy crudo para pattern mining)');
+    parts.push(`Mostrando ${cappedAds.length} de ${allCompAds.length} ads (los de mayor score / ganadores) de ${Object.keys(byComp).length} competidores.${omitidos > 0 ? ` ${omitidos} ads de menor score se omitieron para no exceder el límite de tiempo.` : ''}`);
+    parts.push(`**Tu trabajo**: leer estos ads, identificar los PATRONES que se repiten entre los ganadores (hooks, ángulos, estructura, formatos), y usarlos para generar ideas.`);
     parts.push('');
 
     for (const [compName, ads] of Object.entries(byComp)) {
@@ -576,7 +609,7 @@ function buildContext({ producto, competidoresAnalisis, allCompAds, ideasExisten
   }
 
   parts.push('\n## INSTRUCCIÓN');
-  parts.push(`Generá ${targetCount || 12} ideas nuevas y enviá el array completo con la tool submit_ideas. Respetá el mix de tipos y de formato del system prompt.`);
+  parts.push(`Generá ${targetCount || 12} ideas nuevas y enviá el array completo con la tool submit_ideas. Respetá el mix de tipos y de formato del system prompt.${tema ? ` RECORDÁ: las ${targetCount || 12} ideas deben estar ambientadas en la temática "${tema}" — sin excepción.` : ''}`);
 
   return parts.join('\n');
 }
@@ -704,6 +737,7 @@ export default async function handler(req, res) {
     propiosAds = [],
     targetCount = 50,
     formatoMix = { static: 0.6, video: 0.4 },
+    contextoTematico = '',
   } = body || {};
 
   if (!producto || !producto.nombre) {
@@ -723,7 +757,7 @@ export default async function handler(req, res) {
 
   const client = new Anthropic({ apiKey: anthropicKey });
   const hasPropios = Array.isArray(propiosAds) && propiosAds.length > 0;
-  const userContent = buildContext({ producto, competidoresAnalisis, allCompAds, ideasExistentes, propiosAds, targetCount: clampedTarget });
+  const userContent = buildContext({ producto, competidoresAnalisis, allCompAds, ideasExistentes, propiosAds, targetCount: clampedTarget, contextoTematico: String(contextoTematico || '').slice(0, 600) });
   const systemPrompt = buildSystemPrompt({
     hasPropios,
     targetCount: clampedTarget,

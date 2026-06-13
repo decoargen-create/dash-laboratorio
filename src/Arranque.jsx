@@ -21,7 +21,7 @@ import React, { useState, useEffect, useRef, useMemo, Fragment } from 'react';
 import {
   Package, Target, Play, Check, Loader2, AlertTriangle, ChevronRight, ChevronDown,
   Plus, X, Sparkles, Link2, Search, Clock, Inbox, Trash2, Upload, Download, Activity,
-  LayoutGrid, List as ListIcon, BarChart3, Copy,
+  LayoutGrid, List as ListIcon, BarChart3, Copy, Pencil,
 } from 'lucide-react';
 import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGeneradorHoy, updateIdea, formatoDeAd } from './bandejaStore.js';
 import { deleteProducto as deleteProductoFromCloud } from './marketingSync.js';
@@ -620,6 +620,53 @@ function ProductMetric({ label, value, tone = 'default' }) {
   );
 }
 
+
+// Nombre del producto editable inline. Por defecto muestra el nombre como
+// texto; al tocar el lápiz se vuelve input. Delega el guardado a onRename
+// (el padre persiste y, si hay research viejo, ofrece regenerarlo).
+function ProductoNombreEditable({ producto, onRename }) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(producto.nombre || '');
+
+  const guardar = () => {
+    const nombre = val.trim();
+    if (!nombre || nombre === producto.nombre) { setEditing(false); setVal(producto.nombre || ''); return; }
+    onRename(nombre);
+    setEditing(false);
+  };
+
+  if (!editing) {
+    return (
+      <p className="flex items-center gap-1.5 group/nombre">
+        <strong>{producto.nombre}</strong>
+        <button
+          onClick={() => { setVal(producto.nombre || ''); setEditing(true); }}
+          title="Cambiar nombre"
+          className="opacity-0 group-hover/nombre:opacity-100 transition text-gray-400 hover:text-brand-600 dark:hover:text-brand-400"
+        >
+          <Pencil size={11} />
+        </button>
+      </p>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <input
+        autoFocus
+        value={val}
+        onChange={e => setVal(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter') guardar(); if (e.key === 'Escape') { setEditing(false); setVal(producto.nombre || ''); } }}
+        onBlur={guardar}
+        className="px-2 py-0.5 text-xs font-bold bg-white dark:bg-gray-700 border border-brand-400 dark:border-brand-600 rounded focus:outline-none focus:ring-2 focus:ring-brand-500 min-w-0 flex-1 max-w-[260px]"
+      />
+      <button onMouseDown={e => e.preventDefault()} onClick={guardar}
+        title="Guardar" className="text-emerald-600 dark:text-emerald-400 hover:text-emerald-700">
+        <Check size={13} />
+      </button>
+    </div>
+  );
+}
 
 function WizardCard({ num, title, done, disabled = false, badge, children }) {
   return (
@@ -1388,7 +1435,53 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     setSteps(prev => prev.map(s => s.id === id ? { ...s, ...patch } : s));
   };
 
-  const runPipeline = async () => {
+  // Regeneración de research pendiente tras un rename. Guardamos el id del
+  // producto; un effect dispara runPipeline({docsOnly}) cuando el state ya se
+  // asentó (docs limpios + nombre nuevo), evitando leer un closure stale.
+  const [pendingRegen, setPendingRegen] = useState(null);
+
+  // Rename del producto. Persiste el nombre nuevo y, si ya había research
+  // generado con el nombre viejo, ofrece regenerarlo (solo research + stage).
+  const handleRenameProducto = (nombre) => {
+    const tieneResearch = !!(producto?.docs?.research);
+    let regen = false;
+    if (tieneResearch) {
+      regen = window.confirm(
+        `Ya hay un research doc generado con el nombre anterior.\n\n¿Regenerarlo con "${nombre}"?\n\nBorra research + avatar + offer brief + creencias + stage y los vuelve a generar (~3-4 min). Las ideas que ya están en la Bandeja no se tocan; las nuevas saldrán con el nombre correcto.`
+      );
+    }
+    setProductos(prev => prev.map(p =>
+      String(p.id) === String(producto.id)
+        ? {
+            ...p,
+            nombre,
+            updated_at: new Date().toISOString(),
+            ...(regen ? {
+              docs: {}, resumenEjecutivo: '', docsGeneratedAt: null,
+              stage: null, stageReason: '', searchKeywords: [],
+            } : {}),
+          }
+        : p
+    ));
+    if (regen) setPendingRegen(String(producto.id));
+  };
+
+  // Dispara la regeneración una vez que el producto activo quedó con docs
+  // limpios (necesitaDocs=true) y no hay otro pipeline corriendo.
+  useEffect(() => {
+    if (!pendingRegen || running) return;
+    if (String(producto?.id) !== String(pendingRegen)) return;
+    const limpio = ['research', 'avatar', 'offerBrief', 'beliefs'].some(k => !producto?.docs?.[k]);
+    if (!limpio) return;
+    setPendingRegen(null);
+    runPipeline({ docsOnly: true });
+  }, [pendingRegen, producto, running]);
+
+  const runPipeline = async (opts) => {
+    // docsOnly: regenerar SOLO research + stage (post-rename), sin re-scrapear
+    // competidores ni generar ideas. opts puede venir como evento de onClick
+    // (que no tiene docsOnly) → queda false.
+    const docsOnly = opts?.docsOnly === true;
     if (!producto?.nombre) {
       addToast?.({ type: 'error', message: 'Primero cargá el producto (nombre + landing)' });
       return;
@@ -1460,7 +1553,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     // Chequeamos los 4 docs, no solo `research`. Si una corrida quedó con
     // docs PARCIALES (research sí, avatar no), mirar solo research activaba
     // el skip y el avatar faltante nunca se regeneraba.
-    const necesitaDocs = ['research', 'avatar', 'offerBrief', 'beliefs']
+    const necesitaDocs = docsOnly || ['research', 'avatar', 'offerBrief', 'beliefs']
       .some(k => !producto?.docs?.[k]);
 
     const pasosIniciales = [
@@ -1549,7 +1642,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     // skip se activaba y nunca regenerábamos — quedabas atascado con keywords
     // pobres salvo que borraras el producto. 3 es el mínimo que da una mezcla
     // viable de problema + categoría + ángulo.
-    const yaTienePostResearch = !!productoActualizado?.stage && searchKeywords.length >= 3;
+    const yaTienePostResearch = !docsOnly && !!productoActualizado?.stage && searchKeywords.length >= 3;
     if (!cancelledRef.current && productoActualizado?.docs?.research && !yaTienePostResearch) {
       updateStep('post-research', { status: 'running', startedAt: Date.now() });
       try {
@@ -1595,6 +1688,20 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         endedAt: Date.now(),
         detail: `↻ Reusado · Stage: ${productoActualizado.stage.replace('_', '-')} · ${searchKeywords.length} keywords (sin re-llamar a Claude)`,
       });
+    }
+
+    // Modo docsOnly (regeneración post-rename): cortamos acá. Solo queríamos
+    // research + stage frescos con el nombre nuevo — no re-scrapear competencia
+    // ni generar ideas (eso lo dispara el user con el pipeline completo).
+    if (docsOnly) {
+      updateStep('done', {
+        status: 'done',
+        endedAt: Date.now(),
+        detail: `Research regenerado con "${productoActualizado.nombre}"`,
+      });
+      setRunning(false);
+      addToast?.({ type: 'success', message: 'Research regenerado con el nombre nuevo. Las próximas ideas y estáticos ya lo usan.' });
+      return;
     }
 
     // La competencia la carga el user a mano — sin auto-sugerencia
@@ -2417,10 +2524,48 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
         {/* Lista de productos existentes */}
         {productos.length === 0 ? (
-          <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-12 text-center">
-            <Package size={36} className="mx-auto text-gray-300 dark:text-gray-600 mb-3" />
-            <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Sin productos</p>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Creá tu primer producto para empezar a analizar la competencia y generar ideas.</p>
+          /* ONBOARDING DE PRIMER USO — un usuario nuevo cae acá sin productos.
+             En vez de un empty-state seco, lo recibimos, le mostramos el flujo
+             en 3 pasos y le damos un CTA claro para arrancar. */
+          <div className="relative overflow-hidden border border-brand-200 dark:border-brand-800 rounded-2xl p-8 md:p-10 bg-gradient-to-br from-brand-50 via-white to-amber-50 dark:from-brand-950/40 dark:via-gray-900 dark:to-amber-950/20">
+            <div className="max-w-2xl mx-auto text-center">
+              <div className="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-brand-500 to-amber-500 flex items-center justify-center text-white shadow-lg mb-4">
+                <Sparkles size={26} />
+              </div>
+              <h3 className="text-xl md:text-2xl font-extrabold text-gray-900 dark:text-gray-100">¡Bienvenido a AdsLab!</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-2 max-w-md mx-auto">
+                Acá cargás un producto, analizamos los ads ganadores de tu competencia y te generamos ideas y creativos listos para publicar. Empecemos por tu primer producto.
+              </p>
+
+              {/* Flujo en 3 pasos */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-7 mb-7 text-left">
+                {[
+                  { n: 1, ic: <Package size={16} />, t: 'Cargá tu producto', d: 'Nombre, landing y una foto. En segundos.' },
+                  { n: 2, ic: <Search size={16} />, t: 'Sumá competencia', d: 'Scrapeamos sus ads ganadores de Meta.' },
+                  { n: 3, ic: <Sparkles size={16} />, t: 'Generá ideas y creativos', d: 'Hooks, estáticos y briefs con IA.' },
+                ].map(s => (
+                  <div key={s.n} className="bg-white/70 dark:bg-gray-800/60 border border-gray-200/70 dark:border-gray-700/60 rounded-xl p-3.5">
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className="w-6 h-6 rounded-lg bg-brand-100 dark:bg-brand-900/50 text-brand-700 dark:text-brand-300 flex items-center justify-center text-xs font-bold shrink-0">{s.n}</span>
+                      <span className="text-brand-600 dark:text-brand-400">{s.ic}</span>
+                    </div>
+                    <p className="text-xs font-bold text-gray-900 dark:text-gray-100">{s.t}</p>
+                    <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">{s.d}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-2.5">
+                <button onClick={() => setShowProdForm(true)}
+                  className="inline-flex items-center gap-2 px-6 py-3 text-sm font-bold text-white bg-gradient-to-br from-brand-500 to-brand-700 rounded-xl hover:from-brand-600 hover:to-brand-800 shadow-md transition">
+                  <Plus size={16} /> Crear mi primer producto
+                </button>
+                <button onClick={() => importFileInputRef.current?.click()}
+                  className="inline-flex items-center gap-2 px-4 py-3 text-sm font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-gray-800 border border-brand-300 dark:border-brand-700 rounded-xl hover:bg-brand-50 dark:hover:bg-brand-900/20 transition">
+                  <Upload size={15} /> Importar uno existente
+                </button>
+              </div>
+            </div>
           </div>
         ) : (
           <div className={vista === 'grid' ? 'grid grid-cols-1 lg:grid-cols-2 gap-3' : 'space-y-2'}>
@@ -2562,14 +2707,29 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                     <ProductAvatar id={p.id} nombre={p.nombre} sizeClass="w-10 h-10" extra="text-base shrink-0" />
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{p.nombre}</p>
-                      <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">{researchPill}{stagePill}</div>
+                      {/* Un solo chip de estado (research) + stage en texto sutil. */}
+                      <div className="flex items-center gap-2 mt-0.5">
+                        {researchPill}
+                        {stagePill && (
+                          <span className="text-[10px] text-gray-400 dark:text-gray-500 truncate">
+                            {(STAGE_LABEL[p.stage] || p.stage).replace('_', '-')}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <div className="hidden md:flex items-center gap-6 shrink-0 px-2">
-                      <ProductMetric label="Ideas" value={ideasCount} tone={ideasCount > 0 ? 'brand' : 'muted'} />
-                      <ProductMetric label="Pend." value={ideasByEstado.pendiente || 0} tone={(ideasByEstado.pendiente || 0) > 0 ? 'amber' : 'muted'} />
-                      <ProductMetric label="Comp." value={comps.length} tone={comps.length > 0 ? 'default' : 'muted'} />
-                      <ProductMetric label="Ads" value={adsScrapeados.toLocaleString('es-AR')} tone={adsScrapeados > 0 ? 'default' : 'muted'} />
-                      <ProductMetric label="IA" value={deepAnalyses} tone={deepAnalyses > 0 ? 'default' : 'muted'} />
+                    {/* 2 números fuertes (ideas, ads) + detalle secundario sutil. */}
+                    <div className="hidden md:flex items-center gap-5 shrink-0 px-2 text-xs">
+                      <div className="text-right leading-none">
+                        <div className={`text-base font-bold ${ideasCount > 0 ? 'text-brand-600 dark:text-brand-400' : 'text-gray-300 dark:text-gray-600'}`}>{ideasCount}</div>
+                        <div className="text-[9px] text-gray-400 mt-0.5">ideas</div>
+                      </div>
+                      <div className="text-right leading-none">
+                        <div className={`text-base font-bold ${adsScrapeados > 0 ? 'text-gray-900 dark:text-gray-100' : 'text-gray-300 dark:text-gray-600'}`}>{adsScrapeados.toLocaleString('es-AR')}</div>
+                        <div className="text-[9px] text-gray-400 mt-0.5">ads</div>
+                      </div>
+                      <div className="hidden lg:block w-28 text-[10px] text-gray-400 dark:text-gray-500 leading-tight">
+                        {(ideasByEstado.pendiente || 0)} pend{comps.length > 0 ? ` · ${comps.length} comp` : ''}{deepAnalyses > 0 ? ` · ${deepAnalyses} IA` : ''}
+                      </div>
                     </div>
                     <div className="hidden xl:block text-[10px] shrink-0 w-40 truncate">{metaPill}</div>
                     <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition" onClick={e => e.stopPropagation()}>
@@ -2593,7 +2753,14 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                     <ProductAvatar id={p.id} nombre={p.nombre} extra="text-lg group-hover:scale-105 transition" />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{p.nombre}</p>
-                      <div className="flex items-center gap-1.5 mt-1 flex-wrap">{researchPill}{stagePill}</div>
+                      <div className="flex items-center gap-2 mt-1">
+                        {researchPill}
+                        {stagePill && (
+                          <span className="text-[10px] text-gray-400 dark:text-gray-500 truncate">
+                            {(STAGE_LABEL[p.stage] || p.stage).replace('_', '-')}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
                   {/* Métricas */}
@@ -2757,7 +2924,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       >
         {prodReady ? (
           <div className="text-xs text-gray-700 dark:text-gray-300 space-y-1">
-            <p><strong>{producto.nombre}</strong></p>
+            <ProductoNombreEditable producto={producto} onRename={handleRenameProducto} />
             {producto.landingUrl && (
               <a href={producto.landingUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-brand-600 hover:underline">
                 <Link2 size={11} /> {producto.landingUrl}

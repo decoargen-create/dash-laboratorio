@@ -1553,6 +1553,10 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       },
       inspiracion: {
         brandNombre,
+        // Sin esto el backend guardaba source_ad_id='unknown-...' → el ad
+        // nunca quedaba marcado como "usado" (no matcheaba ad.id). Era el bug
+        // de "los ads usados no se ponen en gris".
+        adId: ad.id,
         body: ad.body, headline: ad.headline,
         formato: ad.formato,
         analysis: ad.analysis || null,
@@ -1575,23 +1579,40 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         const { data: { session } } = await supabase.auth.getSession();
         authToken = session?.access_token || '';
       } catch {}
-      const resp = await fetch('/api/marketing/crear-creativo-referencial', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
-        },
-        body: JSON.stringify({
-          ...baseBody,
-          n: 1,
-          nPlan: nVar,
-          variationStartIndex,
-          skeletonCached: planCached || null,
-        }),
-      });
-      const data = await parseJsonOrThrow(resp, 'crear-creativo-referencial');
-      if (!resp.ok) throw new Error(stringifyApiError(data.error) || `HTTP ${resp.status}`);
-      return data;
+      // Timeout de cliente. El endpoint tiene maxDuration 300s server-side; si
+      // la function muere o el proxy retiene la conexión, el fetch puede colgar
+      // para SIEMPRE y la barra de progreso queda en 0% sin error ni estado
+      // terminal. Abortamos a los 330s (300 + margen) para que la promesa
+      // RECHACE y el ad se marque como fallido en vez de quedar zombie.
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), 330000);
+      try {
+        const resp = await fetch('/api/marketing/crear-creativo-referencial', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
+          },
+          body: JSON.stringify({
+            ...baseBody,
+            n: 1,
+            nPlan: nVar,
+            variationStartIndex,
+            skeletonCached: planCached || null,
+          }),
+          signal: ac.signal,
+        });
+        const data = await parseJsonOrThrow(resp, 'crear-creativo-referencial');
+        if (!resp.ok) throw new Error(stringifyApiError(data.error) || `HTTP ${resp.status}`);
+        return data;
+      } catch (err) {
+        if (err?.name === 'AbortError') {
+          throw new Error('La generación tardó más de 5 min y se canceló (timeout). Reintentá ese ad.');
+        }
+        throw err;
+      } finally {
+        clearTimeout(timer);
+      }
     };
 
     // Helper: persiste UNA imagen del response a galería.
@@ -2154,7 +2175,19 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       const msg = newAds.length > 0
         ? `${newAds.length} estáticos NUEVOS de ${comp.nombre} (${ads.length} total)`
         : `${ads.length} estáticos de ${comp.nombre} (sin nuevos)`;
-      addToast?.({ type: 'success', message: msg });
+      // 0 resultados: aviso ACCIONABLE en vez de un "éxito" engañoso. Casi
+      // siempre es que no detectamos la FB page (caímos a keyword) o que la
+      // marca no tiene ads activos en Meta Ad Library.
+      if (ads.length === 0) {
+        addToast?.({
+          type: 'warning',
+          message: payload.fbPageUrl
+            ? `0 ads para ${comp.nombre}: esa página de Facebook no tiene anuncios activos en Meta Ad Library (o no aplica al país).`
+            : `0 ads para ${comp.nombre}: no detecté su página de Facebook (busqué por "${payload.searchKeyword}"). Cargá el FB page URL del competidor en Setup para scrapear directo.`,
+        });
+      } else {
+        addToast?.({ type: 'success', message: msg });
+      }
 
       // Cache en background. Para Inspiración solo nos interesan los estáticos.
       const staticAds = ads.filter(a => (a.imageUrls?.length || 0) > 0 && (a.videoUrls?.length || 0) === 0);

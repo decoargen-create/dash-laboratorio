@@ -6,7 +6,7 @@
 // refleja lo que te queda.
 
 import React, { useEffect, useState, useRef } from 'react';
-import { Wallet, Check, X } from 'lucide-react';
+import { Wallet, Check, X, ChevronDown } from 'lucide-react';
 import { getBalance, setBalance, getRemaining, subscribeBalance } from './balanceStore.js';
 
 const PROVIDERS = [
@@ -24,21 +24,33 @@ export default function BalanceBar() {
   const [tick, setTick] = useState(0);
   const [editing, setEditing] = useState(null); // provider key
   const [draft, setDraft] = useState('');
+  // Colapsado por defecto: una sola pill "Costos $X" para descargar el header.
+  // Click → expande las 3 pills individuales (cada una editable como antes).
+  const [showAll, setShowAll] = useState(false);
   const popoverRef = useRef(null);
 
   useEffect(() => subscribeBalance(() => setTick(x => x + 1)), []);
 
-  // Cierra el popover cuando el user clickea afuera.
+  // Cierra popover de edición + colapsa cuando el user clickea afuera.
   useEffect(() => {
-    if (!editing) return;
+    if (!editing && !showAll) return;
     const onDown = (e) => {
       if (popoverRef.current && !popoverRef.current.contains(e.target)) {
         setEditing(null);
+        setShowAll(false);
       }
     };
     document.addEventListener('mousedown', onDown);
     return () => document.removeEventListener('mousedown', onDown);
-  }, [editing]);
+  }, [editing, showAll]);
+
+  // Total restante (suma de los providers con saldo cargado).
+  const total = PROVIDERS.reduce((s, p) => {
+    const r = getRemaining(p.key);
+    return s + (r != null ? r : 0);
+  }, 0);
+  const anyConfigured = PROVIDERS.some(p => getBalance(p.key));
+  const anyLow = PROVIDERS.some(p => { const r = getRemaining(p.key); return r != null && r < 1; });
 
   const handleEdit = (key) => {
     const current = getBalance(key);
@@ -56,8 +68,26 @@ export default function BalanceBar() {
   };
 
   return (
-    <div className="hidden md:flex items-center gap-1.5 relative">
-      {PROVIDERS.map(p => {
+    <div ref={popoverRef} className="hidden md:flex items-center gap-1.5 relative">
+      {!showAll ? (
+        <button
+          onClick={() => setShowAll(true)}
+          title="Costos del stack — click para ver/editar el saldo de cada proveedor"
+          className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-bold rounded-lg border transition ${
+            anyLow
+              ? 'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800 hover:bg-red-100 dark:hover:bg-red-900/50'
+              : anyConfigured
+                ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/50'
+                : 'bg-gray-100 dark:bg-gray-800 text-gray-500 border-gray-200 dark:border-gray-700 hover:bg-gray-200 dark:hover:bg-gray-700'
+          }`}
+        >
+          <Wallet size={11} />
+          <span className="opacity-70">Costos</span>
+          <span className="tabular-nums">{anyConfigured ? fmtUsd(total) : 'set'}</span>
+          <ChevronDown size={10} className="opacity-60" />
+        </button>
+      ) : (
+        PROVIDERS.map(p => {
         const balance = getBalance(p.key);
         const remaining = getRemaining(p.key);
         const lowSaldo = remaining != null && remaining < 1;
@@ -81,12 +111,11 @@ export default function BalanceBar() {
             <span className="tabular-nums">{balance ? fmtUsd(remaining) : 'set'}</span>
           </button>
         );
-      })}
+      }))}
 
       {/* Popover de edición */}
       {editing && (
         <div
-          ref={popoverRef}
           className="absolute top-full right-0 mt-2 z-50 w-72 bg-white dark:bg-gray-900 border-2 border-brand-300 dark:border-brand-700 rounded-xl shadow-2xl p-3"
         >
           {(() => {

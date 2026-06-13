@@ -722,8 +722,13 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
     if (panel === 'winners' && !it.winner) return false;
     if (panel === 'archivados' && !it.archivado) return false;
     if (panel === 'todos' && it.archivado) return false;
-    if (filtroEstado === 'pending' && it.descargada) return false;
-    if (filtroEstado === 'downloaded' && !it.descargada) return false;
+    // En Winners NO aplicamos el filtro de descargados: un winner casi siempre
+    // ya está descargado/publicado, y esconderlos vaciaba la pestaña ("Todo
+    // descargado" pese a tener winners marcados).
+    if (panel !== 'winners') {
+      if (filtroEstado === 'pending' && it.descargada) return false;
+      if (filtroEstado === 'downloaded' && !it.descargada) return false;
+    }
     if (filtroVariante !== 'all' && it.variantStyle !== filtroVariante) return false;
     if (filtroOrigen === 'inspiracion' && it.sourceType === 'bandeja-idea') return false;
     if (filtroOrigen === 'bandeja-idea' && it.sourceType !== 'bandeja-idea') return false;
@@ -742,7 +747,7 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
     // — sino los filtraríamos del array y no aparecerían en el panel.
     // 'reportes' incluye archivados también porque los winners pueden estar
     // archivados (winner + archivado = "ganador histórico ya no en uso").
-    const includeArchived = panel === 'archivados' || panel === 'reportes' || verArchivados;
+    const includeArchived = panel === 'archivados' || panel === 'reportes' || panel === 'winners' || verArchivados;
     Promise.all([
       getReferencialesByProducto(productoId, { includeArchived }),
       countReferencialesByProducto(productoId),
@@ -1015,6 +1020,19 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
     limpiarSeleccion();
     refresh();
   };
+  // Bulk: marcar los seleccionados como winner (sin form de métricas — quick
+  // mark). Aparecen en la pestaña Winners y en la galería global de winners.
+  const handleBulkWinner = async () => {
+    if (seleccionados.size === 0) return;
+    const cant = seleccionados.size;
+    if (!window.confirm(`¿Marcar ${cant} creativo${cant !== 1 ? 's' : ''} como winner? Aparecen en la pestaña Winners y en la galería global.`)) return;
+    await patchReferenciales(
+      Array.from(seleccionados),
+      { winner: true, winnerAt: new Date().toISOString() }
+    );
+    limpiarSeleccion();
+    refresh();
+  };
   // visibleItems se declara arriba (línea 673) — TDZ fix para el useEffect
   // de keyboard nav del lightbox.
   const anyFilterActive = filtroEstado !== 'all' || filtroVariante !== 'all' || filtroOrigen !== 'all';
@@ -1194,6 +1212,14 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
           <span className="text-[9px] text-gray-400 dark:text-gray-500 italic hidden md:inline">
             tip: shift+click selecciona un rango
           </span>
+          <button
+            onClick={handleBulkWinner}
+            disabled={zipping}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-amber-500 to-yellow-500 rounded-lg hover:from-amber-600 hover:to-yellow-600 transition disabled:opacity-60"
+            title="Marcar los seleccionados como winner (aparecen en la pestaña Winners y en la galería global)"
+          >
+            <Trophy size={12} /> Marcar winner ({seleccionados.size})
+          </button>
           <button
             onClick={handleBulkArchive}
             disabled={zipping}

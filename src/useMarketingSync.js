@@ -20,8 +20,9 @@ import {
   migrateLocalToCloud,
 } from './marketingSync.js';
 import { supabase, onAuthChange, getCurrentUser } from './supabase.js';
-import { migrateIDBCreativosToCloud, countIDBCreativos } from './galeriaMigration.js';
+import { migrateIDBCreativosToCloud } from './galeriaMigration.js';
 import { fetchIdeas } from './cloudData.js';
+import { setSyncStatus } from './syncStatusStore.js';
 
 const KEYS = {
   productos: 'adslab-marketing-productos-v1',
@@ -38,6 +39,12 @@ export function useMarketingSync({ addToast } = {}) {
   const [user, setUser] = useState(null);
   const [status, setStatus] = useState('idle'); // 'idle' | 'pulling' | 'pushing' | 'error' | 'ok'
   const [lastError, setLastError] = useState(null);
+
+  // Espejamos status/lastError al store global para que el SyncStatusBadge
+  // del header (y cualquier otro consumidor) lo muestre sin prop-drilling.
+  useEffect(() => {
+    setSyncStatus({ status, lastError });
+  }, [status, lastError]);
   const debounceTimers = useRef(new Map());
   // Counter de retries por key para deferred pushes (cuando pull aún no
   // completó). Sin esto, una pull que nunca termina causa loop infinito.
@@ -91,11 +98,12 @@ export function useMarketingSync({ addToast } = {}) {
       // bloquea el resto del sync). Solo corre la primera vez por user.
       (async () => {
         try {
-          const count = await countIDBCreativos();
-          if (count > 0) {
-            addToast?.({ type: 'info', message: `Subiendo ${count} creativos locales al cloud — esto puede tardar un poco.` });
-          }
-          const migCreativos = await migrateIDBCreativosToCloud();
+          // El toast lo dispara onStart, que migrateIDBCreativosToCloud solo
+          // llama si REALMENTE va a subir (no si ya migró). Antes el aviso
+          // salía en cada pull aunque no subiera nada.
+          const migCreativos = await migrateIDBCreativosToCloud({
+            onStart: (count) => addToast?.({ type: 'info', message: `Subiendo ${count} creativos locales al cloud — esto puede tardar un poco.` }),
+          });
           if (migCreativos?.migrated > 0) {
             addToast?.({
               type: 'success',
@@ -136,6 +144,16 @@ export function useMarketingSync({ addToast } = {}) {
       mountedRef.current = false;
       unsubscribe();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 1c. SYNC MANUAL — el user puede forzar un pull desde el badge del header
+  // (caso típico: "entré desde otra PC y no veo los cambios todavía"). Reusa
+  // runPull, que ya tiene mutex + deferral si hay pushes pendientes.
+  useEffect(() => {
+    const onForce = () => runPull(mountedRefShared.current);
+    window.addEventListener('viora:force-sync', onForce);
+    return () => window.removeEventListener('viora:force-sync', onForce);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

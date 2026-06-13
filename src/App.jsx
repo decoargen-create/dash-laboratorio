@@ -7,7 +7,7 @@ import {
   Menu, LogOut, Home, ShoppingCart, Package, Users, AlertCircle, CreditCard,
   UserCheck, TrendingUp, Plus, Filter, Eye, Edit2, Trash2, Calendar, DollarSign,
   Moon, Sun, ChevronDown, ChevronRight, Search, X, Command, Check, Bell,
-  AlignJustify, LayoutGrid, Columns3, Sparkles, Bot, Zap, Activity, FileText, Settings, Loader2, Calculator, Copy, Save, RotateCcw, Target, Play, Inbox, BarChart3, Instagram, SlidersHorizontal, ClipboardList, AlertTriangle
+  AlignJustify, LayoutGrid, Columns3, Sparkles, Bot, Zap, Activity, FileText, Settings, Loader2, Calculator, Copy, Save, RotateCcw, Target, Play, Inbox, BarChart3, Instagram, SlidersHorizontal, ClipboardList, AlertTriangle, Trophy
 } from 'lucide-react';
 import { VioraLogo, VioraMark, AdsLabLogo, AdsLabMark } from './logo.jsx';
 import LandingPage from './LandingPage.jsx';
@@ -27,6 +27,7 @@ import ArranqueSection from './Arranque.jsx';
 import BandejaSection from './Bandeja.jsx';
 import AutoIGSection from './AutoIG.jsx';
 import InspiracionSection from './InspiracionSection.jsx';
+import WinnersGlobalSection from './WinnersGlobalSection.jsx';
 import InspiracionGlobalSection from './InspiracionGlobalSection.jsx';
 import ConsultoriaSection from './Consultoria.jsx';
 import { PipelineRunProvider } from './PipelineRunContext.jsx';
@@ -35,9 +36,11 @@ import ExecutionsTray from './ExecutionsTray.jsx';
 import BulkProgressBarGlobal from './BulkProgressBarGlobal.jsx';
 import BalanceBar from './BalanceBar.jsx';
 import ActivityBell from './ActivityBell.jsx';
+import SyncStatusBadge from './SyncStatusBadge.jsx';
 import { getRemaining, subscribeBalance } from './balanceStore.js';
 import SupabaseAuthScreen from './SupabaseAuth.jsx';
 import { useMarketingSync } from './useMarketingSync.js';
+import { useUserPrefs } from './useUserPrefs.js';
 import { supabase, onAuthChange } from './supabase.js';
 import { generateCSV, downloadCSV, parseCSV, toNumber, toBool } from './csv.js';
 import { loadVioraState, saveVioraState, clearVioraState, createBackup } from './vioraStorage.js';
@@ -1420,7 +1423,7 @@ function AppShell({ onExit }) {
       // Si tenía una sección de Viora/Senydrop/MetaAds, defaulteamos a la
       // de Marketing. Lista de secciones válidas en las plataformas activas:
       const validSections = ['mk-arranque', 'mk-bandeja', 'mk-auto-ig',
-        'mk-inspiracion', 'mk-gastos', 'mk-docs', 'con-acta'];
+        'mk-inspiracion', 'mk-inspiracion-global', 'mk-winners', 'mk-gastos', 'mk-docs', 'con-acta'];
       return validSections.includes(saved) ? saved : 'mk-arranque';
     } catch { return 'mk-arranque'; }
   });
@@ -1642,6 +1645,9 @@ function AppShell({ onExit }) {
     if (typeof window === 'undefined') return 'dorado';
     return localStorage.getItem('dash-accent-color') || 'dorado';
   });
+  // Apariencia sincronizada con la nube (user_prefs). Pullea al login y
+  // pushea con debounce — así el color/fuente/tamaño te sigue entre PCs.
+  useUserPrefs({ accentColor, setAccentColor, textSize, setTextSize, uiFont, setUiFont });
   // Tamaño: zoom al <html> → escala TODO de forma uniforme (texto + UI).
   // Se aplica al documentElement (no a #root) para ser consistente con el
   // script inline de index.html que lo setea antes del render (sin flash).
@@ -2124,6 +2130,7 @@ function AppShell({ onExit }) {
               <NavSection title="Operación" sectionKey="mk-op" sidebarOpen={sidebarOpen}>
                 <NavItem icon={Play} label="Marketing" section="mk-arranque" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                 <NavItem icon={Sparkles} label="Inspiración" section="mk-inspiracion-global" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                <NavItem icon={Trophy} label="Winners" section="mk-winners" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               </NavSection>
               <NavSection title="Automatización" sectionKey="mk-auto" sidebarOpen={sidebarOpen} defaultOpen={false}>
                 <NavItem icon={Instagram} label="Automatización IG" section="mk-auto-ig" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
@@ -2221,6 +2228,7 @@ function AppShell({ onExit }) {
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-auto-ig' && <AutoIGSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-inspiracion' && <InspiracionSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-inspiracion-global' && <InspiracionGlobalSection addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-winners' && <WinnersGlobalSection addToast={addToast} onGoToSection={setCurrentSection} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-gastos' && <GastosStackSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-docs' && (
             <MarketingSection
@@ -8091,6 +8099,7 @@ function getSectionTitle(user, section) {
     'mk-docs': 'Marketing · Documentación de producto',
     'mk-auto-ig': 'Marketing · Automatización IG',
     'mk-inspiracion': 'Marketing · Inspiración',
+    'mk-winners': 'Marketing · Winners',
     'mk-gastos': 'Marketing · Gastos del stack',
     'con-acta': 'Consultoría · Acta de reunión',
   };
@@ -8491,6 +8500,7 @@ function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, textSize, set
         </div>
       </div>
       <div className="flex items-center gap-2 shrink-0">
+        <SyncStatusBadge />
         <ActivityBell />
         <BalanceBar />
         <button

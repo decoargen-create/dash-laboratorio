@@ -3,15 +3,39 @@
 // El copiloto conoce el research, avatar, competencia e ideas del producto
 // (se los manda al endpoint /api/marketing/copilot). Sirve para pensar
 // hooks, ángulos, estrategia de funnel y pedir feedback sin navegar entre
-// pantallas. El historial se persiste por producto en localStorage.
+// pantallas.
+//
+// El historial es CLOUD-FIRST: la fuente de verdad es la tabla
+// marketing_copilot_chats (por usuario y producto), y localStorage se usa
+// como cache para pintar al instante. Así la conversación se respalda y se ve
+// desde cualquier PC, sin los líos de merge del sync híbrido de productos
+// (acá guardamos directo al cloud en cada turno del chat).
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Loader2, Send, Sparkles, Trash2 } from 'lucide-react';
 import { loadIdeas } from './bandejaStore.js';
 import { logCostsFromResponse } from './costsStore.js';
+import { supabase, getCurrentUser } from './supabase.js';
 
 const CHAT_KEY_PREFIX = 'adslab-marketing-copilot-';
 const CHAT_CAP = 40; // mensajes guardados por producto
+
+// Guarda el historial en la nube (upsert por user_id + producto_id). Best
+// effort: si falla (offline / sin sesión) queda el cache local y se reintenta
+// en el próximo turno. No await en los call sites — no bloquea la UI.
+async function saveCopilotChatToCloud(productoId, messages) {
+  try {
+    if (!supabase || !productoId) return;
+    const user = await getCurrentUser();
+    if (!user) return;
+    await supabase.from('marketing_copilot_chats').upsert({
+      user_id: user.id,
+      producto_id: String(productoId),
+      messages: messages.slice(-CHAT_CAP),
+      updated_at: new Date().toISOString(),
+    });
+  } catch { /* queda el cache local */ }
+}
 
 // Preguntas sugeridas para arrancar la conversación.
 const SUGERENCIAS = [
@@ -35,14 +59,35 @@ export default function CopilotoTab({ producto, addToast }) {
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef(null);
 
-  // Recargar el historial al cambiar de producto.
+  // Cargar el historial al cambiar de producto: CLOUD-FIRST.
+  // 1) Pintamos el cache local al instante (UX sin parpadeo).
+  // 2) Traemos del cloud y, si hay fila, esa manda (y refresca el cache).
   useEffect(() => {
     if (!chatKey) { setMessages([]); return; }
+    let active = true;
     try {
       const raw = localStorage.getItem(chatKey);
       setMessages(raw ? JSON.parse(raw) : []);
     } catch { setMessages([]); }
-  }, [chatKey]);
+    (async () => {
+      try {
+        if (!supabase || !producto?.id) return;
+        const user = await getCurrentUser();
+        if (!user || !active) return;
+        const { data, error } = await supabase
+          .from('marketing_copilot_chats')
+          .select('messages')
+          .eq('user_id', user.id)
+          .eq('producto_id', String(producto.id))
+          .maybeSingle();
+        if (!active || error || !data) return;
+        const cloudMsgs = Array.isArray(data.messages) ? data.messages : [];
+        setMessages(cloudMsgs);
+        try { localStorage.setItem(chatKey, JSON.stringify(cloudMsgs.slice(-CHAT_CAP))); } catch {}
+      } catch { /* nos quedamos con el cache local */ }
+    })();
+    return () => { active = false; };
+  }, [chatKey, producto?.id]);
 
   // Persistir el historial (cap a los últimos CHAT_CAP mensajes).
   useEffect(() => {
@@ -116,7 +161,9 @@ export default function CopilotoTab({ producto, addToast }) {
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
       logCostsFromResponse(data, `copilot · ${producto?.nombre || ''}`);
-      setMessages([...conMensaje, { role: 'assistant', content: data.reply }]);
+      const finalMsgs = [...conMensaje, { role: 'assistant', content: data.reply }];
+      setMessages(finalMsgs);
+      saveCopilotChatToCloud(producto?.id, finalMsgs);
     } catch (err) {
       addToast?.({ type: 'error', message: `Copiloto: ${err.message}` });
       // Dejamos el mensaje del user en pantalla para que pueda reintentar.
@@ -129,6 +176,7 @@ export default function CopilotoTab({ producto, addToast }) {
   const limpiar = () => {
     if (!window.confirm('¿Borrar toda la conversación del copiloto para este producto?')) return;
     setMessages([]);
+    saveCopilotChatToCloud(producto?.id, []);
   };
 
   const tieneResearch = !!(producto?.docs?.research || producto?.research);

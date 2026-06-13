@@ -18,6 +18,7 @@ import { supabase } from './supabase.js';
 
 const COUNT_OPTIONS = [1, 2, 4, 6];
 const POOL = 2; // ideas en paralelo (cada una genera `count` imágenes server-side)
+const FORMATO_EMOJI = { static: '🖼️', video: '🎬', carrusel: '🎠' };
 
 export default function CreativosBulkGenerator({ producto, addToast }) {
   const [ideas, setIdeas] = useState([]);
@@ -67,6 +68,12 @@ export default function CreativosBulkGenerator({ producto, addToast }) {
     for (const id of selected) m.set(id, ++i);
     return m;
   }, [selected]);
+
+  // Más reciente → más viejo (como la Bandeja).
+  const ordered = useMemo(
+    () => [...ideas].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')),
+    [ideas]
+  );
 
   const toggle = (id) => setSelected(prev => {
     const n = new Set(prev);
@@ -245,36 +252,48 @@ export default function CreativosBulkGenerator({ producto, addToast }) {
           )}
 
           {/* Grilla de ideas seleccionables */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-80 overflow-y-auto pr-1">
-            {ideas.map(idea => {
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5 max-h-[30rem] overflow-y-auto pr-1">
+            {ordered.map(idea => {
               const isSel = selected.has(idea.id);
               const order = selectedOrder.get(idea.id);
               const isUsed = usedIds.has(String(idea.id));
+              const meta = TIPO_META[idea.tipo];
+              const angulo = idea.anguloCategoria || idea.angulo;
               return (
                 <button key={idea.id} onClick={() => toggle(idea.id)}
-                  className={`text-left p-2.5 rounded-lg border-2 transition ${isSel ? 'border-emerald-500 bg-emerald-50/60 dark:bg-emerald-900/20' : 'border-gray-200 dark:border-gray-700 hover:border-emerald-300'} ${isUsed && !isSel ? 'opacity-50 grayscale-[40%] hover:opacity-100 hover:grayscale-0' : ''}`}>
-                  <div className="flex items-start gap-2">
-                    <div className={`mt-0.5 w-4 h-4 rounded shrink-0 flex items-center justify-center text-[9px] font-bold ${isSel ? 'bg-emerald-500 text-white' : 'border border-gray-300 dark:border-gray-600'}`}>
-                      {isSel ? (order || <Check size={10} />) : ''}
+                  className={`text-left p-3 rounded-xl border-2 transition flex gap-3 ${isSel ? 'border-emerald-500 bg-emerald-50/60 dark:bg-emerald-900/20' : 'border-gray-200 dark:border-gray-700 hover:border-emerald-300'} ${isUsed && !isSel ? 'opacity-50 grayscale-[40%] hover:opacity-100 hover:grayscale-0' : ''}`}>
+                  {/* Check de selección */}
+                  <div className={`mt-0.5 w-5 h-5 rounded-md shrink-0 flex items-center justify-center text-[10px] font-bold ${isSel ? 'bg-emerald-500 text-white' : 'border-2 border-gray-300 dark:border-gray-600'}`}>
+                    {isSel ? (order || <Check size={11} />) : ''}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    {/* Fila de etiquetas: tipo (color) + formato + usado + fecha */}
+                    <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
+                      {meta && (
+                        <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold rounded border ${meta.color}`}>
+                          {meta.emoji} {meta.label}
+                        </span>
+                      )}
+                      <span className="text-[11px]" title={idea.formato}>{FORMATO_EMOJI[idea.formato] || '🖼️'}</span>
+                      {isUsed && (
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-gray-300 dark:bg-gray-600 text-gray-600 dark:text-gray-300" title="Ya generaste creativos de esta idea">
+                          usado
+                        </span>
+                      )}
+                      {idea.createdAt && (
+                        <span className="ml-auto shrink-0 text-[9px] text-gray-400 dark:text-gray-500">
+                          {new Date(idea.createdAt).toLocaleDateString('es-AR', { day: '2-digit', month: 'short' })}
+                        </span>
+                      )}
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-xs font-semibold text-gray-800 dark:text-gray-200 line-clamp-2 leading-snug">
-                        {idea.hook || idea.titulo || 'Idea sin título'}
-                      </p>
-                      <div className="flex items-center gap-1.5 mt-1">
-                        {idea.tipo && (
-                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400">
-                            {TIPO_META[idea.tipo]?.label || idea.tipo}
-                          </span>
-                        )}
-                        {idea.angulo && <span className="text-[9px] text-gray-400 truncate">{idea.angulo}</span>}
-                        {isUsed && (
-                          <span className="ml-auto shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded bg-gray-300 dark:bg-gray-600 text-gray-600 dark:text-gray-300" title="Ya generaste creativos de esta idea">
-                            usado
-                          </span>
-                        )}
-                      </div>
-                    </div>
+                    {/* Hook */}
+                    <p className="text-xs font-semibold text-gray-800 dark:text-gray-200 leading-snug line-clamp-2">
+                      {idea.hook || idea.titulo || 'Idea sin título'}
+                    </p>
+                    {/* Ángulo */}
+                    {angulo && (
+                      <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1 truncate">{angulo}</p>
+                    )}
                   </div>
                 </button>
               );

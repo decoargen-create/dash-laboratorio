@@ -46,7 +46,7 @@ import { stringifyApiError } from './apiHelpers.js';
 // Avatar del producto: muestra el pote (foto cargada en Setup) y cae al
 // gradiente con la inicial si todavía no hay foto. getProductoImagen resuelve
 // desde IDB/cloud y está memoizado, así que es barato re-montarlo por card.
-function ProductAvatar({ id, nombre, sizeClass = 'w-12 h-12', radiusClass = 'rounded-lg', extra = '' }) {
+function ProductAvatar({ id, nombre, producto = null, sizeClass = 'w-12 h-12', radiusClass = 'rounded-lg', extra = '' }) {
   const [src, setSrc] = useState(null);
   useEffect(() => {
     let alive = true;
@@ -54,7 +54,12 @@ function ProductAvatar({ id, nombre, sizeClass = 'w-12 h-12', radiusClass = 'rou
     // reusa para otro producto, no mostramos la foto vieja mientras carga.
     setSrc(null);
     const load = () => {
-      getProductoImagen(id)
+      // ⚠️ CROSS-PC FIX: pasamos producto como fallback. Sin esto,
+      // getProductoImagen leía readProducto(id) de localStorage; en PC2
+      // el localStorage puede estar stale → fotoUrl ausente → null →
+      // caía al avatar de letra ("C", "B", "P"). Con el producto en mano
+      // (que el caller ya tiene del cloud-pull), accede a fotoUrl directo.
+      getProductoImagen(id, producto)
         .then(img => { if (alive) setSrc(img || null); })
         .catch(() => {});
     };
@@ -2734,7 +2739,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 return (
                   <div key={p.id} onClick={open}
                     className="group flex items-center gap-3 bg-white dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/80 rounded-xl px-3 py-2.5 cursor-pointer hover:border-brand-300 dark:hover:border-brand-700 hover:shadow-md transition">
-                    <ProductAvatar id={p.id} nombre={p.nombre} sizeClass="w-10 h-10" extra="text-base shrink-0" />
+                    <ProductAvatar id={p.id} nombre={p.nombre} producto={p} sizeClass="w-10 h-10" extra="text-base shrink-0" />
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{p.nombre}</p>
                       {/* Un solo chip de estado (research) + stage en texto sutil. */}
@@ -2780,7 +2785,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                   </div>
                   {/* Header */}
                   <div className="flex items-center gap-3 mb-4 pr-20">
-                    <ProductAvatar id={p.id} nombre={p.nombre} extra="text-lg group-hover:scale-105 transition" />
+                    <ProductAvatar id={p.id} nombre={p.nombre} producto={p} extra="text-lg group-hover:scale-105 transition" />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{p.nombre}</p>
                       <div className="flex items-center gap-2 mt-1">
@@ -2834,6 +2839,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         <ProductAvatar
           id={producto.id}
           nombre={producto.nombre}
+          producto={producto}
           radiusClass="rounded-xl"
           extra="shadow-sm text-xl"
         />
@@ -3001,7 +3007,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
             {/* Foto del producto para usar como referencia en gpt-image-2
                 cuando se generan creativos referenciales desde Inspiración. */}
-            <ProductoImagenUploader productoId={producto.id} addToast={addToast} />
+            <ProductoImagenUploader productoId={producto.id} producto={producto} addToast={addToast} />
 
             {/* Activo visual de marca — elemento icónico reutilizable que se
                 propaga a todos los prompts de imagen. */}

@@ -171,14 +171,21 @@ export async function pullMarketingFromCloud() {
   //
   // Bug reportado: misma cuenta, dos PCs, listas de productos DISTINTAS.
   //
-  // Fix puramente ADITIVO: agregamos los local-only al final. Como cambia
-  // mergedStr, mergeOccurred pasa a true y se dispara el push automático que
-  // los sube al cloud → aparecen en las demás PCs. No puede causar el
-  // data-loss histórico: solo toca ids que NO están en cloud, así que jamás
-  // pisa/wipea una fila existente del cloud.
+  // Fix ADITIVO con GATE ANTI-RESURRECCIÓN: solo re-agregamos un producto
+  // local-only si es GENUINAMENTE NUEVO en esta PC (creado/editado DESPUÉS del
+  // último pull). Si es viejo y desapareció del cloud, es porque lo BORRARON
+  // en otra PC → NO lo resucitamos. Sin este gate, un delete en otra PC se
+  // deshacía (el producto reaparecía y se re-pusheaba al cloud).
+  // En el PRIMER pull (sin marca previa) preservamos todo: merge inicial a la
+  // unión, sin riesgo de deshacer un delete que todavía no existió.
+  const LAST_PULL_KEY = 'adslab-marketing-last-pull-ts';
+  let lastPullTs = 0;
+  try { lastPullTs = Number(localStorage.getItem(LAST_PULL_KEY)) || 0; } catch {}
   const cloudIds = new Set((productos || []).map(r => String(r.id)));
   for (const lp of localArr) {
-    if (lp && lp.id != null && !cloudIds.has(String(lp.id))) {
+    if (!lp || lp.id == null || cloudIds.has(String(lp.id))) continue;
+    const lpTs = Date.parse(lp.updated_at || lp.updatedAt || lp.createdAt || lp.created_at || 0) || 0;
+    if (lastPullTs === 0 || lpTs > lastPullTs) {
       productosArr.push(lp);
     }
   }
@@ -320,6 +327,11 @@ export async function pullMarketingFromCloud() {
   for (const [productoId, arr] of byProducto) {
     try { localStorage.setItem(`${KEYS.brandsPrefix}${productoId}`, JSON.stringify(arr)); } catch {}
   }
+
+  // Marca de "último pull exitoso" — la usa el gate anti-resurrección de
+  // arriba en el PRÓXIMO pull para distinguir un producto local nuevo (creado
+  // después de esta marca) de uno borrado en otra PC (más viejo que la marca).
+  try { localStorage.setItem('adslab-marketing-last-pull-ts', String(Date.now())); } catch {}
 
   // Aviso a la app para que re-cargue desde localStorage.
   try { window.dispatchEvent(new CustomEvent('viora:marketing-pulled')); } catch {}

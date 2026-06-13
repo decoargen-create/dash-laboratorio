@@ -2693,14 +2693,29 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                     <ProductAvatar id={p.id} nombre={p.nombre} sizeClass="w-10 h-10" extra="text-base shrink-0" />
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{p.nombre}</p>
-                      <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">{researchPill}{stagePill}</div>
+                      {/* Un solo chip de estado (research) + stage en texto sutil. */}
+                      <div className="flex items-center gap-2 mt-0.5">
+                        {researchPill}
+                        {stagePill && (
+                          <span className="text-[10px] text-gray-400 dark:text-gray-500 truncate">
+                            {(STAGE_LABEL[p.stage] || p.stage).replace('_', '-')}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <div className="hidden md:flex items-center gap-6 shrink-0 px-2">
-                      <ProductMetric label="Ideas" value={ideasCount} tone={ideasCount > 0 ? 'brand' : 'muted'} />
-                      <ProductMetric label="Pend." value={ideasByEstado.pendiente || 0} tone={(ideasByEstado.pendiente || 0) > 0 ? 'amber' : 'muted'} />
-                      <ProductMetric label="Comp." value={comps.length} tone={comps.length > 0 ? 'default' : 'muted'} />
-                      <ProductMetric label="Ads" value={adsScrapeados.toLocaleString('es-AR')} tone={adsScrapeados > 0 ? 'default' : 'muted'} />
-                      <ProductMetric label="IA" value={deepAnalyses} tone={deepAnalyses > 0 ? 'default' : 'muted'} />
+                    {/* 2 números fuertes (ideas, ads) + detalle secundario sutil. */}
+                    <div className="hidden md:flex items-center gap-5 shrink-0 px-2 text-xs">
+                      <div className="text-right leading-none">
+                        <div className={`text-base font-bold ${ideasCount > 0 ? 'text-brand-600 dark:text-brand-400' : 'text-gray-300 dark:text-gray-600'}`}>{ideasCount}</div>
+                        <div className="text-[9px] text-gray-400 mt-0.5">ideas</div>
+                      </div>
+                      <div className="text-right leading-none">
+                        <div className={`text-base font-bold ${adsScrapeados > 0 ? 'text-gray-900 dark:text-gray-100' : 'text-gray-300 dark:text-gray-600'}`}>{adsScrapeados.toLocaleString('es-AR')}</div>
+                        <div className="text-[9px] text-gray-400 mt-0.5">ads</div>
+                      </div>
+                      <div className="hidden lg:block w-28 text-[10px] text-gray-400 dark:text-gray-500 leading-tight">
+                        {(ideasByEstado.pendiente || 0)} pend{comps.length > 0 ? ` · ${comps.length} comp` : ''}{deepAnalyses > 0 ? ` · ${deepAnalyses} IA` : ''}
+                      </div>
                     </div>
                     <div className="hidden xl:block text-[10px] shrink-0 w-40 truncate">{metaPill}</div>
                     <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition" onClick={e => e.stopPropagation()}>
@@ -2724,7 +2739,14 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                     <ProductAvatar id={p.id} nombre={p.nombre} extra="text-lg group-hover:scale-105 transition" />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{p.nombre}</p>
-                      <div className="flex items-center gap-1.5 mt-1 flex-wrap">{researchPill}{stagePill}</div>
+                      <div className="flex items-center gap-2 mt-1">
+                        {researchPill}
+                        {stagePill && (
+                          <span className="text-[10px] text-gray-400 dark:text-gray-500 truncate">
+                            {(STAGE_LABEL[p.stage] || p.stage).replace('_', '-')}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
                   {/* Métricas */}

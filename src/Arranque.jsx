@@ -2510,10 +2510,48 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
         {/* Lista de productos existentes */}
         {productos.length === 0 ? (
-          <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-12 text-center">
-            <Package size={36} className="mx-auto text-gray-300 dark:text-gray-600 mb-3" />
-            <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Sin productos</p>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Creá tu primer producto para empezar a analizar la competencia y generar ideas.</p>
+          /* ONBOARDING DE PRIMER USO — un usuario nuevo cae acá sin productos.
+             En vez de un empty-state seco, lo recibimos, le mostramos el flujo
+             en 3 pasos y le damos un CTA claro para arrancar. */
+          <div className="relative overflow-hidden border border-brand-200 dark:border-brand-800 rounded-2xl p-8 md:p-10 bg-gradient-to-br from-brand-50 via-white to-amber-50 dark:from-brand-950/40 dark:via-gray-900 dark:to-amber-950/20">
+            <div className="max-w-2xl mx-auto text-center">
+              <div className="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-brand-500 to-amber-500 flex items-center justify-center text-white shadow-lg mb-4">
+                <Sparkles size={26} />
+              </div>
+              <h3 className="text-xl md:text-2xl font-extrabold text-gray-900 dark:text-gray-100">¡Bienvenido a AdsLab!</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-2 max-w-md mx-auto">
+                Acá cargás un producto, analizamos los ads ganadores de tu competencia y te generamos ideas y creativos listos para publicar. Empecemos por tu primer producto.
+              </p>
+
+              {/* Flujo en 3 pasos */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-7 mb-7 text-left">
+                {[
+                  { n: 1, ic: <Package size={16} />, t: 'Cargá tu producto', d: 'Nombre, landing y una foto. En segundos.' },
+                  { n: 2, ic: <Search size={16} />, t: 'Sumá competencia', d: 'Scrapeamos sus ads ganadores de Meta.' },
+                  { n: 3, ic: <Sparkles size={16} />, t: 'Generá ideas y creativos', d: 'Hooks, estáticos y briefs con IA.' },
+                ].map(s => (
+                  <div key={s.n} className="bg-white/70 dark:bg-gray-800/60 border border-gray-200/70 dark:border-gray-700/60 rounded-xl p-3.5">
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className="w-6 h-6 rounded-lg bg-brand-100 dark:bg-brand-900/50 text-brand-700 dark:text-brand-300 flex items-center justify-center text-xs font-bold shrink-0">{s.n}</span>
+                      <span className="text-brand-600 dark:text-brand-400">{s.ic}</span>
+                    </div>
+                    <p className="text-xs font-bold text-gray-900 dark:text-gray-100">{s.t}</p>
+                    <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">{s.d}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-2.5">
+                <button onClick={() => setShowProdForm(true)}
+                  className="inline-flex items-center gap-2 px-6 py-3 text-sm font-bold text-white bg-gradient-to-br from-brand-500 to-brand-700 rounded-xl hover:from-brand-600 hover:to-brand-800 shadow-md transition">
+                  <Plus size={16} /> Crear mi primer producto
+                </button>
+                <button onClick={() => importFileInputRef.current?.click()}
+                  className="inline-flex items-center gap-2 px-4 py-3 text-sm font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-gray-800 border border-brand-300 dark:border-brand-700 rounded-xl hover:bg-brand-50 dark:hover:bg-brand-900/20 transition">
+                  <Upload size={15} /> Importar uno existente
+                </button>
+              </div>
+            </div>
           </div>
         ) : (
           <div className={vista === 'grid' ? 'grid grid-cols-1 lg:grid-cols-2 gap-3' : 'space-y-2'}>

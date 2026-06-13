@@ -41,6 +41,7 @@ import ProductoImagenUploader from './ProductoImagenUploader.jsx';
 import GaleriaReferencialesModal from './GaleriaReferencialesModal.jsx';
 import { usePipelineRun } from './PipelineRunContext.jsx';
 import { getProductoImagen } from './productoImagen.js';
+import { setCompAds, getCompAds, hydrateCompetidoresAds } from './competidorAdsIDB.js';
 import { stringifyApiError } from './apiHelpers.js';
 
 // Avatar del producto: muestra el pote (foto cargada en Setup) y cae al
@@ -971,7 +972,30 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
   // Producto activo derivado + competidores + cuenta Meta del producto activo.
   const producto = productos.find(p => String(p.id) === String(activeProductoId)) || null;
-  const competidores = producto?.competidores || [];
+  const competidoresBase = producto?.competidores || [];
+  // Ads ahora viven en IDB. compAdsByCompId hidrata por competidor.id.
+  // useMemo de `competidores` mete los ads adentro para que el código
+  // legacy (memos, pipeline) sigan leyendo c.ads como antes.
+  const [compAdsByCompId, setCompAdsByCompId] = useState({});
+  useEffect(() => {
+    let cancelled = false;
+    if (!producto?.id) { setCompAdsByCompId({}); return; }
+    (async () => {
+      const map = {};
+      for (const c of competidoresBase) {
+        if (Array.isArray(c.ads) && c.ads.length > 0) { map[c.id] = c.ads; continue; }
+        const rec = await getCompAds(producto.id, c.id);
+        if (rec?.ads?.length) map[c.id] = rec.ads;
+      }
+      if (!cancelled) setCompAdsByCompId(map);
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [producto?.id, competidoresBase.length, competidoresBase.map(c => c.lastAdsCheck).join('|')]);
+  const competidores = useMemo(
+    () => competidoresBase.map(c => (compAdsByCompId[c.id] ? { ...c, ads: compAdsByCompId[c.id] } : c)),
+    [competidoresBase, compAdsByCompId]
+  );
   const metaAccount = producto?.metaAccount || null;
   // Setter de competidores que los guarda DENTRO del producto activo.
   const setCompetidores = (updater) => {
@@ -1852,12 +1876,24 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         const ads = data.ads || [];
         const allWinners = ads.filter(a => a.isWinner);
 
-        // Calcular cuántos ads son NUEVOS vs ya vistos (para transparencia).
-        const prevAdIds = new Set((c.ads || []).map(a => a.id));
+        // Calcular cuántos ads son NUEVOS vs ya vistos. Para esto necesitamos
+        // los ads previos — antes vivían inline en c.ads, ahora en IDB.
+        const prevRecord = await getCompAds(producto.id, c.id);
+        const prevAds = (Array.isArray(c.ads) && c.ads.length > 0 ? c.ads : prevRecord?.ads) || [];
+        const prevAdIds = new Set(prevAds.map(a => a.id));
         const newAds = ads.filter(a => !prevAdIds.has(a.id));
         const seenAds = ads.filter(a => prevAdIds.has(a.id));
 
-        // Guardar en el competidor (con historial de corridas)
+        // STORAGE SPLIT: ads → IDB (sin cap); metadata → localStorage.
+        await setCompAds(producto.id, c.id, {
+          ads,
+          total: data.total || 0,
+          winners: data.winners || 0,
+          lastAdsCheck: new Date().toISOString(),
+        });
+        setCompAdsByCompId(prev => ({ ...prev, [c.id]: ads }));
+
+        // Guardar SOLO metadata en el competidor (con historial de corridas)
         setCompetidores(prev => prev.map(x => {
           if (x.id !== c.id) return x;
           const prevHistory = Array.isArray(x.adsHistory) ? x.adsHistory : [];
@@ -1867,12 +1903,12 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             winners: data.winners || 0,
             newAds: newAds.length,
           }].slice(-10);
-          // consecutiveZeroAds: tracking para "estable" en el smart scrape.
-          // Se inicializa acá y se incrementa/resetea en InspiracionSection
-          // según haya o no ads nuevos en cada refresh.
+          // Quitamos `ads` inline (vive en IDB). consecutiveZeroAds: tracking
+          // para "estable" en el smart scrape.
           const prevZeroes = x.consecutiveZeroAds || 0;
+          const { ads: _legacy, ...meta } = x;
           return {
-            ...x, ads, adsTotal: data.total || 0, winnersCount: data.winners || 0,
+            ...meta, adsTotal: data.total || 0, winnersCount: data.winners || 0,
             lastAdsCheck: new Date().toISOString(), adsHistory: history,
             consecutiveZeroAds: newAds.length > 0 ? 0 : prevZeroes + 1,
           };

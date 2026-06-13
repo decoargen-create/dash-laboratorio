@@ -84,7 +84,12 @@ export default async function handler(req, res) {
   // El actor de Apify cambió su API: ahora requiere maxItems > 0 además de
   // resultsLimit (que dejó de ser el field principal). Mandamos ambos para
   // compatibilidad con cualquier versión del actor.
-  const cappedLimit = Math.min(Math.max(limit, 5), 200);
+  // Cap subido 200→5000 para soportar competidores grandes (user pidió
+  // poder analizar hasta 3000 ads de un competidor). El cliente almacena
+  // ads en IndexedDB (no localStorage), así que el storage local no es
+  // bottleneck. El cuello de botella ahora es Apify run-sync timeout
+  // (300s) + el cap de top-60 ads que se mandan al prompt de Claude.
+  const cappedLimit = Math.min(Math.max(limit, 5), 5000);
   const input = {
     startUrls: [{ url: startUrl }],
     resultsLimit: cappedLimit,

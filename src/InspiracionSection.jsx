@@ -39,6 +39,7 @@ import { playDoneChime, playBulkDoneChime, playErrorTone } from './sounds.js';
 import EmptyState from './EmptyState.jsx';
 import { supabase } from './supabase.js';
 import { notifyMarketingChange } from './useMarketingSync.js';
+import { setCompAds, getCompAds } from './competidorAdsIDB.js';
 // Galería ahora vive como tab independiente en el workspace (Arranque),
 // no más como modal acá.
 
@@ -1125,6 +1126,33 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   const removeScraping = (id) => setScrapingBrandIds(prev => { const n = new Set(prev); n.delete(id); return n; });
   // brand.id → array de ads scrapeados de la última corrida (mostrados inline).
   const [adsByBrand, setAdsByBrand] = useState({});
+  // competidor.id → array de ads scrapeados. Antes vivían en c.ads inline en
+  // localStorage pero rompía quota con muchos ads. Ahora se hidratan desde
+  // IDB (competidorAdsIDB) cuando el producto se monta o cambia.
+  const [compAdsByCompId, setCompAdsByCompId] = useState({});
+
+  // Hidratar ads de competidores desde IDB. Sin esto, después del refactor
+  // de storage los cards de competidores muestran 0 ads aunque scrapeaste.
+  useEffect(() => {
+    if (!producto?.competidores) return;
+    let cancelled = false;
+    (async () => {
+      const map = {};
+      for (const c of producto.competidores) {
+        // Migración lazy: si todavía hay ads inline en localStorage (legacy),
+        // los usamos. Si no, los pedimos a IDB.
+        if (Array.isArray(c.ads) && c.ads.length > 0) {
+          map[c.id] = c.ads;
+        } else {
+          const rec = await getCompAds(producto.id, c.id);
+          if (rec?.ads?.length) map[c.id] = rec.ads;
+        }
+      }
+      if (!cancelled) setCompAdsByCompId(map);
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [producto?.id, producto?.competidores?.length]);
   // ad.id → bool, true mientras se adapta al producto (loading).
   const [adaptingAdIds, setAdaptingAdIds] = useState(new Set());
   // Multi-select para bulk. Set preserva el orden de inserción → podemos
@@ -2163,6 +2191,18 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       // scrape anterior (de la misma tanda paralela) terminó de escribir, así
       // los resultados de los 3 competidores concurrentes se acumulan en vez
       // de pisarse entre sí.
+      // STORAGE SPLIT: los ads van a IDB (sin cap), la METADATA va a localStorage
+      // (chiquito → no rompe quota). Antes guardábamos el array `ads` inline en
+      // el producto → con 5 competidores × 500 ads = 5MB+ → quota exceeded.
+      await setCompAds(producto.id, comp.id, {
+        ads,
+        total: data.total || 0,
+        winners: data.winners || 0,
+        lastAdsCheck: new Date().toISOString(),
+      });
+      // Reflejar inmediatamente en UI sin esperar al useEffect de hidratación.
+      setCompAdsByCompId(prev => ({ ...prev, [comp.id]: ads }));
+
       await withProductosLock(() => {
         const fresh = loadProductos();
         const updated = fresh.map(p => {
@@ -2170,8 +2210,11 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           const comps = (p.competidores || []).map(c => {
             if (c.id !== comp.id) return c;
             const prevZeroes = c.consecutiveZeroAds || 0;
+            // Solo metadata en localStorage. Los ads viven en IDB (setCompAds
+            // arriba). Si quedaban ads inline de antes (legacy), los borramos.
+            const { ads: _legacy, ...meta } = c;
             return {
-              ...c, ads,
+              ...meta,
               adsTotal: data.total || 0, winnersCount: data.winners || 0,
               lastAdsCheck: new Date().toISOString(),
               consecutiveZeroAds: newAds.length > 0 ? 0 : prevZeroes + 1,
@@ -2465,7 +2508,10 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       {(() => {
         // Construimos array unificado.
         const competidoresUnif = (producto.competidores || []).map(c => {
-          const staticAds = (c.ads || []).filter(a => (a.imageUrls?.length || 0) > 0 && (a.videoUrls?.length || 0) === 0);
+          // Ads ahora viven en IDB; compAdsByCompId los hidrata. Fallback a c.ads
+          // inline para items legacy aún no migrados.
+          const allAds = compAdsByCompId[c.id] || c.ads || [];
+          const staticAds = allAds.filter(a => (a.imageUrls?.length || 0) > 0 && (a.videoUrls?.length || 0) === 0);
           return {
             id: `comp-${c.id}`,
             nombre: c.nombre,

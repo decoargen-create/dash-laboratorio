@@ -142,6 +142,36 @@ function saveJSON(key, value) {
     // (storage disabled en navegadores raros) no son accionables y mantienen
     // el comportamiento previo de fallar silencioso.
     if (err && (err.name === 'QuotaExceededError' || err.code === 22 || err.code === 1014)) {
+      // ANTES: dispatcheábamos el toast en seguida sin intentar liberar
+      // nada. Pero hay caches gordas (skeleton, creative-refresh, debug log
+      // viejo) que ocupan MB y son descartables. Replicamos la estrategia
+      // de marketingSync.js: liberar caches → retry → si AÚN no entra,
+      // recién ahí surface el error al user.
+      const cachesAReleasar = [
+        'adslab-marketing-skeleton-cache',
+        'adslab-marketing-creative-refresh-cache',
+        'adslab-marketing-execution-log',
+        'adslab-marketing-cost-log',
+        'adslab-debug-log-v1',
+      ];
+      let liberadas = 0;
+      for (const k of cachesAReleasar) {
+        try {
+          if (localStorage.getItem(k)) { localStorage.removeItem(k); liberadas++; }
+        } catch {}
+      }
+      if (liberadas > 0) {
+        try {
+          localStorage.setItem(key, JSON.stringify(value));
+          if (key.startsWith('adslab-marketing-')) {
+            try { window.dispatchEvent(new CustomEvent('viora:marketing-storage-changed', { detail: { key } })); } catch {}
+          }
+          console.info(`[saveJSON] quota recuperado liberando ${liberadas} caches`);
+          return true;
+        } catch {
+          // sigue sin entrar — caer al toast
+        }
+      }
       try {
         // Notificamos vía CustomEvent así el componente puede mostrar toast
         // sin tener que pasar `addToast` a esta función pura.

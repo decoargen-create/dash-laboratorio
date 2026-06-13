@@ -160,6 +160,29 @@ export async function pullMarketingFromCloud() {
     return merged;
   });
 
+  // PRODUCTOS SOLO-LOCAL — preservarlos (antes se perdían).
+  //
+  // El map de arriba reconstruye la lista ÚNICAMENTE con las filas del cloud.
+  // Cualquier producto que exista en localStorage pero todavía NO esté en el
+  // cloud (creado/importado en ESTA PC y que aún no se pusheó, o cuyo push
+  // quedó bloqueado por el anti-wipe) quedaba FUERA de productosArr → el
+  // setItem de más abajo lo borraba de local → el producto "desaparecía" en
+  // esta PC y NUNCA se propagaba a las otras.
+  //
+  // Bug reportado: misma cuenta, dos PCs, listas de productos DISTINTAS.
+  //
+  // Fix puramente ADITIVO: agregamos los local-only al final. Como cambia
+  // mergedStr, mergeOccurred pasa a true y se dispara el push automático que
+  // los sube al cloud → aparecen en las demás PCs. No puede causar el
+  // data-loss histórico: solo toca ids que NO están en cloud, así que jamás
+  // pisa/wipea una fila existente del cloud.
+  const cloudIds = new Set((productos || []).map(r => String(r.id)));
+  for (const lp of localArr) {
+    if (lp && lp.id != null && !cloudIds.has(String(lp.id))) {
+      productosArr.push(lp);
+    }
+  }
+
   // Detectar si hicimos merge — disparar push automático para subir lo
   // preservado al cloud sin que el user tenga que hacer nada.
   const cloudStr = JSON.stringify((productos || []).map(r => r.data));

@@ -20,7 +20,7 @@ import {
   migrateLocalToCloud,
 } from './marketingSync.js';
 import { supabase, onAuthChange, getCurrentUser } from './supabase.js';
-import { migrateIDBCreativosToCloud, countIDBCreativos } from './galeriaMigration.js';
+import { migrateIDBCreativosToCloud } from './galeriaMigration.js';
 import { fetchIdeas } from './cloudData.js';
 import { setSyncStatus } from './syncStatusStore.js';
 
@@ -98,11 +98,12 @@ export function useMarketingSync({ addToast } = {}) {
       // bloquea el resto del sync). Solo corre la primera vez por user.
       (async () => {
         try {
-          const count = await countIDBCreativos();
-          if (count > 0) {
-            addToast?.({ type: 'info', message: `Subiendo ${count} creativos locales al cloud — esto puede tardar un poco.` });
-          }
-          const migCreativos = await migrateIDBCreativosToCloud();
+          // El toast lo dispara onStart, que migrateIDBCreativosToCloud solo
+          // llama si REALMENTE va a subir (no si ya migró). Antes el aviso
+          // salía en cada pull aunque no subiera nada.
+          const migCreativos = await migrateIDBCreativosToCloud({
+            onStart: (count) => addToast?.({ type: 'info', message: `Subiendo ${count} creativos locales al cloud — esto puede tardar un poco.` }),
+          });
           if (migCreativos?.migrated > 0) {
             addToast?.({
               type: 'success',

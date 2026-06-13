@@ -65,7 +65,7 @@ function markMigrated() {
 }
 
 // Ejecuta la migración. Devuelve { skipped, migrated, failed } con counts.
-export async function migrateIDBCreativosToCloud({ onProgress } = {}) {
+export async function migrateIDBCreativosToCloud({ onProgress, onStart } = {}) {
   if (!supabase) return { skipped: true, reason: 'no-supabase' };
   const user = await getCurrentUser();
   if (!user) return { skipped: true, reason: 'no-user' };
@@ -82,6 +82,11 @@ export async function migrateIDBCreativosToCloud({ onProgress } = {}) {
     markMigrated();
     return { skipped: true, reason: 'idb-empty' };
   }
+
+  // Recién acá sabemos que VAMOS a subir — avisamos (el toast antes salía en
+  // cada pull aunque ya estuviera todo migrado, porque los items del IDB no se
+  // borran tras migrar y el aviso vivía afuera, antes de este chequeo).
+  if (onStart) { try { onStart(conImagen.length); } catch {} }
 
   let migrated = 0;
   let failed = 0;

@@ -178,6 +178,8 @@ export default function CreativosBulkGenerator({ producto, addToast }) {
       estimatedMs: 90000 * Math.ceil(sel.length / POOL),
     });
 
+    let costoUSD = 0; // costo real acumulado de esta ejecución (se reporta al tray)
+
     // Una llamada por idea con n=count (igual que la Bandeja). Abort a 330s.
     const doOne = async (idea) => {
       const ac = new AbortController();
@@ -208,7 +210,7 @@ export default function CreativosBulkGenerator({ producto, addToast }) {
         });
         const data = await resp.json();
         if (!resp.ok) throw new Error((data && (data.error?.message || data.error)) || `HTTP ${resp.status}`);
-        logCostsFromResponse(data, `creativos bulk · ${idea.hook?.slice(0, 40) || 'idea'}`);
+        costoUSD += logCostsFromResponse(data, `creativos bulk · ${idea.hook?.slice(0, 40) || 'idea'}`)?.total || 0;
         return Array.isArray(data.cloudCreativos) ? data.cloudCreativos.map(c => c?.imageUrl).filter(Boolean) : [];
       } finally { clearTimeout(timer); }
     };
@@ -232,7 +234,7 @@ export default function CreativosBulkGenerator({ producto, addToast }) {
     setGenerating(false);
     setSelected(new Set());
     if (ok > 0) setRecientes({ urls });
-    finishExecution(execId, { ok: ok > 0, message: `${ok} idea(s) generadas${fail ? ` · ${fail} fallaron` : ''} para ${producto.nombre}.` });
+    finishExecution(execId, { ok: ok > 0, message: `${ok} idea(s) generadas${fail ? ` · ${fail} fallaron` : ''} para ${producto.nombre}.`, cost: costoUSD });
     addToast?.({
       type: ok > 0 ? 'success' : 'error',
       message: `${ok * count} estáticos generados${fail ? ` · ${fail} ideas fallaron` : ''}. Están en la Galería.`,

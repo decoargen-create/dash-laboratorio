@@ -116,6 +116,8 @@ export default function WinnersGlobalSection({ addToast, onGoToSection }) {
       estimatedMs: 45000 * sel.length,
     });
 
+    let costoUSD = 0; // costo real acumulado de esta ejecución (se reporta al tray)
+
     // Una imagen por llamada (n:1) — igual que Inspiración, para no exceder el
     // maxDuration del server cuando count es alto. nPlan=count para que el plan
     // tenga las variaciones; skeletonCached salteamos Vision (lo trae el winner).
@@ -148,7 +150,7 @@ export default function WinnersGlobalSection({ addToast, onGoToSection }) {
         });
         const data = await resp.json();
         if (!resp.ok) throw new Error((data && (data.error?.message || data.error)) || `HTTP ${resp.status}`);
-        logCostsFromResponse(data, `winners → ${target.nombre}`);
+        costoUSD += logCostsFromResponse(data, `winners → ${target.nombre}`)?.total || 0;
         // URLs de los creativos recién subidos al cloud (para el preview).
         const urls = Array.isArray(data.cloudCreativos)
           ? data.cloudCreativos.map(c => c?.imageUrl).filter(Boolean)
@@ -171,7 +173,7 @@ export default function WinnersGlobalSection({ addToast, onGoToSection }) {
     setGenerating(false);
     setSelected(new Set());
     if (ok > 0) setRecientes({ productoId: String(target.id), productoNombre: target.nombre, urls: nuevasUrls });
-    finishExecution(execId, { ok: ok > 0, message: `${ok} estáticos creados para ${target.nombre}${fail ? ` · ${fail} fallaron` : ''}.` });
+    finishExecution(execId, { ok: ok > 0, message: `${ok} estáticos creados para ${target.nombre}${fail ? ` · ${fail} fallaron` : ''}.`, cost: costoUSD });
     addToast?.({
       type: ok > 0 ? 'success' : 'error',
       message: `${ok} estáticos adaptados a ${target.nombre}. Están en la Galería de ${target.nombre}.`,

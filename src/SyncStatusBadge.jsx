@@ -2,11 +2,16 @@
 // syncStatusStore (que alimenta useMarketingSync). Da feedback claro de
 // "guardando / guardado / error" — antes el sync era invisible y el user no
 // se enteraba si un cambio no había llegado al cloud (causa de las PCs
-// desincronizadas).
+// desincronizadas). Además es clickeable para forzar un "Sincronizar ahora"
+// (caso típico: entraste desde otra PC y querés traer los últimos cambios).
 
 import React, { useEffect, useState } from 'react';
-import { Loader2, Check, CloudOff } from 'lucide-react';
+import { Loader2, Check, CloudOff, RefreshCw } from 'lucide-react';
 import { subscribeSyncStatus } from './syncStatusStore.js';
+
+function forceSync() {
+  try { window.dispatchEvent(new Event('viora:force-sync')); } catch {}
+}
 
 export default function SyncStatusBadge() {
   const [state, setState] = useState({ status: 'idle', lastError: null });
@@ -35,13 +40,14 @@ export default function SyncStatusBadge() {
 
   if (status === 'error') {
     return (
-      <span
-        className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] rounded-lg bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800/50 text-red-700 dark:text-red-300 cursor-help"
-        title={`No se pudo guardar en la nube: ${lastError || 'error desconocido'}. Tus cambios quedaron en local — recargá para reintentar.`}
+      <button
+        onClick={forceSync}
+        className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] rounded-lg bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800/50 text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/50 transition"
+        title={`No se pudo guardar en la nube: ${lastError || 'error desconocido'}. Click para reintentar.`}
       >
         <CloudOff size={12} />
-        Sin guardar
-      </span>
+        Reintentar
+      </button>
     );
   }
 
@@ -54,6 +60,14 @@ export default function SyncStatusBadge() {
     );
   }
 
-  // idle / ok-ya-desvanecido → no mostramos nada (evita ruido visual).
-  return null;
+  // idle / ok-ya-desvanecido → botón discreto para forzar sync manual.
+  return (
+    <button
+      onClick={forceSync}
+      className="hidden sm:inline-flex items-center justify-center p-1.5 rounded-lg text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+      title="Sincronizar ahora — traer los últimos cambios de la nube"
+    >
+      <RefreshCw size={13} />
+    </button>
+  );
 }

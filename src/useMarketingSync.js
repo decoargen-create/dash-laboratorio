@@ -146,6 +146,16 @@ export function useMarketingSync({ addToast } = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 1c. SYNC MANUAL — el user puede forzar un pull desde el badge del header
+  // (caso típico: "entré desde otra PC y no veo los cambios todavía"). Reusa
+  // runPull, que ya tiene mutex + deferral si hay pushes pendientes.
+  useEffect(() => {
+    const onForce = () => runPull(mountedRefShared.current);
+    window.addEventListener('viora:force-sync', onForce);
+    return () => window.removeEventListener('viora:force-sync', onForce);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // 1b. REALTIME — suscribimos a cambios en las tablas del cloud para que
   // otra PC del mismo user vea las modificaciones en vivo (sin F5).
   // Cuando llega un cambio remoto, hacemos pull para que el smart-merge

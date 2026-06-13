@@ -1542,6 +1542,10 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       },
       inspiracion: {
         brandNombre,
+        // Sin esto el backend guardaba source_ad_id='unknown-...' → el ad
+        // nunca quedaba marcado como "usado" (no matcheaba ad.id). Era el bug
+        // de "los ads usados no se ponen en gris".
+        adId: ad.id,
         body: ad.body, headline: ad.headline,
         formato: ad.formato,
         analysis: ad.analysis || null,

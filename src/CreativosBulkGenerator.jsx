@@ -10,6 +10,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Sparkles, Loader2, Check, ArrowRight, Inbox, ImageOff } from 'lucide-react';
 import { loadIdeas, TIPO_META } from './bandejaStore.js';
+import { getUsedAdIdsForProducto } from './galeriaReferenciales.js';
 import { getProductoImagen, getAccentColor } from './productoImagen.js';
 import { startExecution, updateExecution, finishExecution } from './executionsStore.js';
 import { logCostsFromResponse } from './costsStore.js';
@@ -26,6 +27,8 @@ export default function CreativosBulkGenerator({ producto, addToast }) {
   const [generating, setGenerating] = useState(false);
   const [progreso, setProgreso] = useState({ done: 0, total: 0 });
   const [recientes, setRecientes] = useState(null);
+  // Ideas ya usadas (con creativo generado). source_ad_id del creativo = idea.id.
+  const [usedIds, setUsedIds] = useState(() => new Set());
 
   // Cargar las ideas del producto + refrescar cuando cambian (pull / nuevas
   // ideas temáticas / Bandeja).
@@ -40,6 +43,22 @@ export default function CreativosBulkGenerator({ producto, addToast }) {
     return () => {
       window.removeEventListener('viora:marketing-pulled', reload);
       window.removeEventListener('viora:marketing-storage-changed', reload);
+    };
+  }, [producto?.id]);
+
+  // Cargar qué ideas YA tienen creativo generado → para marcarlas en gris.
+  // Refresca tras generar (viora:referencial-saved) y tras un pull.
+  useEffect(() => {
+    if (!producto?.id) { setUsedIds(new Set()); return; }
+    let active = true;
+    const refresh = () => { getUsedAdIdsForProducto(producto.id).then(s => { if (active) setUsedIds(s); }).catch(() => {}); };
+    refresh();
+    window.addEventListener('viora:referencial-saved', refresh);
+    window.addEventListener('viora:marketing-pulled', refresh);
+    return () => {
+      active = false;
+      window.removeEventListener('viora:referencial-saved', refresh);
+      window.removeEventListener('viora:marketing-pulled', refresh);
     };
   }, [producto?.id]);
 
@@ -230,9 +249,10 @@ export default function CreativosBulkGenerator({ producto, addToast }) {
             {ideas.map(idea => {
               const isSel = selected.has(idea.id);
               const order = selectedOrder.get(idea.id);
+              const isUsed = usedIds.has(String(idea.id));
               return (
                 <button key={idea.id} onClick={() => toggle(idea.id)}
-                  className={`text-left p-2.5 rounded-lg border-2 transition ${isSel ? 'border-emerald-500 bg-emerald-50/60 dark:bg-emerald-900/20' : 'border-gray-200 dark:border-gray-700 hover:border-emerald-300'}`}>
+                  className={`text-left p-2.5 rounded-lg border-2 transition ${isSel ? 'border-emerald-500 bg-emerald-50/60 dark:bg-emerald-900/20' : 'border-gray-200 dark:border-gray-700 hover:border-emerald-300'} ${isUsed && !isSel ? 'opacity-50 grayscale-[40%] hover:opacity-100 hover:grayscale-0' : ''}`}>
                   <div className="flex items-start gap-2">
                     <div className={`mt-0.5 w-4 h-4 rounded shrink-0 flex items-center justify-center text-[9px] font-bold ${isSel ? 'bg-emerald-500 text-white' : 'border border-gray-300 dark:border-gray-600'}`}>
                       {isSel ? (order || <Check size={10} />) : ''}
@@ -248,6 +268,11 @@ export default function CreativosBulkGenerator({ producto, addToast }) {
                           </span>
                         )}
                         {idea.angulo && <span className="text-[9px] text-gray-400 truncate">{idea.angulo}</span>}
+                        {isUsed && (
+                          <span className="ml-auto shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded bg-gray-300 dark:bg-gray-600 text-gray-600 dark:text-gray-300" title="Ya generaste creativos de esta idea">
+                            usado
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>

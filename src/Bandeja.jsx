@@ -2097,6 +2097,17 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
                     ideas: valid, producto, n: bulkN, quality: bulkQuality, size: bulkSize, addToast,
                   });
                   if (result.ok > 0) setSelected(new Set());
+                } catch (err) {
+                  // bulkGenerateFromIdeas puede tirar ANTES de su propio
+                  // finishExecution (ej: getProductoImagen falla, supabase
+                  // auth crashea, fetch sin red). Sin este catch, el error
+                  // queda como unhandled rejection y el user no ve nada
+                  // — solo el botón se reactiva sin explicación.
+                  console.error('[bulk-generate] crash temprano:', err);
+                  addToast?.({
+                    type: 'error',
+                    message: `No pude arrancar el bulk: ${err?.message || err}`,
+                  });
                 } finally {
                   setBulkRunning(false);
                 }

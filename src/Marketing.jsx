@@ -148,6 +148,10 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
   const [compUrl, setCompUrl] = useState('');
   const [compPageId, setCompPageId] = useState('');
   const [hooksRunning, setHooksRunning] = useState(false);
+  // Error latcheado del generador de hooks — sin esto el toast efímero (3.5s)
+  // desaparece antes que el user pueda leer un fallo después de 30-60s.
+  // Mismo patrón que CreativosTab.jsx tras commit 83f5e62.
+  const [hooksError, setHooksError] = useState(null);
   const [hooksTono, setHooksTono] = useState('argentino coloquial, directo');
   const [hooksObjetivo, setHooksObjetivo] = useState('TOFU');
   const [hooksRestricciones, setHooksRestricciones] = useState('');
@@ -179,6 +183,7 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
 
   const generarHooks = async () => {
     setHooksRunning(true);
+    setHooksError(null);
     try {
       const resp = await fetch('/api/marketing/creatives', {
         method: 'POST',
@@ -216,6 +221,7 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
       });
       addToast?.({ type: 'success', message: `${data.hooks?.length || 0} hooks generados` });
     } catch (err) {
+      setHooksError(err.message || 'Error desconocido');
       addToast?.({ type: 'error', message: err.message });
     } finally {
       setHooksRunning(false);
@@ -561,6 +567,28 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
               </button>
               {creativos?.fase1?.generatedAt && (
                 <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-2">Última generación: {new Date(creativos.fase1.generatedAt).toLocaleString('es-AR')}</p>
+              )}
+              {/* Cartel rojo persistente — sin esto un error de 30-60s después
+                  del click se muestra solo como toast efímero (3.5s) y el user
+                  no puede leer el motivo del fallo. Mismo patrón que CreativosTab. */}
+              {hooksError && !hooksRunning && (
+                <div className="mt-3 bg-red-50 dark:bg-red-900/20 border border-red-300 dark:border-red-800 rounded-lg p-3 flex items-start gap-2">
+                  <AlertTriangle size={16} className="text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-bold text-red-800 dark:text-red-200 mb-1">Falló el generador de hooks</p>
+                    <p className="text-xs text-red-700 dark:text-red-300 break-words">{hooksError}</p>
+                    <div className="mt-2 flex items-center gap-2">
+                      <button onClick={generarHooks}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-white bg-red-600 hover:bg-red-700 rounded transition">
+                        <Sparkles size={11} /> Reintentar
+                      </button>
+                      <button onClick={() => setHooksError(null)}
+                        className="text-[11px] text-red-700 dark:text-red-300 hover:underline">
+                        Cerrar
+                      </button>
+                    </div>
+                  </div>
+                </div>
               )}
             </div>
 

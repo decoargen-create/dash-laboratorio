@@ -325,7 +325,9 @@ function BulkProgressBar({ state, onClose }) {
 // para Vite/Rollup en builds minificados.
 // =========================================================
 
-function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onScrape, onAdapt, onCrearReferencial, onToggleSelect, onRemove }) {
+function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onScrape, onAdapt, onCrearReferencial, onToggleSelect, onRemove, onClearProgress }) {
+  // onClearProgress se forwardea a BrandAdsGrid (que lo pasa a AdThumb) para
+  // que el user pueda cerrar el overlay de error que ahora queda persistente.
   const isCompetidor = !!brand.isCompetidor;
   return (
     <div className="group/brand bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 hover:border-amber-300 dark:hover:border-amber-700 transition">
@@ -424,6 +426,7 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
           onAdapt={onAdapt}
           onCrearReferencial={onCrearReferencial}
           onToggleSelect={onToggleSelect}
+          onClearProgress={onClearProgress}
         />
       )}
     </div>
@@ -431,7 +434,7 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
 }
 
 
-function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = false, selected = false, selectionIndex = null, used = false, onAdapt, onCrearReferencial, onToggleSelect, progress = null }) {
+function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = false, selected = false, selectionIndex = null, used = false, onAdapt, onCrearReferencial, onToggleSelect, progress = null, onClearProgress = null }) {
   const cdnThumb = ad.imageUrls?.[0];
   const fbUrl = ad.snapshotUrl;
   // Si tenemos el ad cacheado en IndexedDB (sobreviven el TTL de 24h del CDN),
@@ -554,7 +557,19 @@ function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = f
             </>
           )}
           {progress.stage === 'error' && progress.error && (
-            <p className="text-[9px] text-red-200 text-center line-clamp-2">{progress.error}</p>
+            <>
+              <p className="text-[9px] text-red-200 text-center line-clamp-3 px-1">{progress.error}</p>
+              {/* Sin esto el overlay del error queda para siempre tapando el
+                  thumb. El user lo cierra acá o reintenta clickeando el ad. */}
+              {onClearProgress && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onClearProgress(ad.id); }}
+                  className="mt-1 px-2 py-0.5 text-[9px] font-bold text-white bg-red-600 hover:bg-red-700 rounded transition"
+                >
+                  Cerrar
+                </button>
+              )}
+            </>
           )}
         </div>
       )}
@@ -627,7 +642,7 @@ function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = f
 }
 
 
-function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect }) {
+function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect, onClearProgress }) {
   const [showRepeated, setShowRepeated] = useState(false);
   const [showAllFresh, setShowAllFresh] = useState(false);
   const [showAllRepeated, setShowAllRepeated] = useState(false);
@@ -660,6 +675,7 @@ function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccion
                 onAdapt={onAdapt ? () => onAdapt(ad) : null}
                 onCrearReferencial={onCrearReferencial ? () => onCrearReferencial(ad) : null}
                 onToggleSelect={onToggleSelect ? () => onToggleSelect(ad.id) : null}
+                onClearProgress={onClearProgress}
               />
             ))}
             {fresh.length > 30 && (
@@ -731,7 +747,7 @@ function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccion
 // strip horizontal. Cada item es un AdThumb con sus acciones normales
 // (Crear creativo, + ideas en Bandeja, multi-select).
 
-function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect }) {
+function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect, onClearProgress }) {
   const [expanded, setExpanded] = useState(true);
   // Vista del Top 10 — persistida en localStorage. 3 opciones:
   //   grid: strip horizontal de 10 thumbs (default, denso)
@@ -796,7 +812,8 @@ function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, se
           {viewMode === 'grid' && (
             <TopGridView items={items} adaptingAdIds={adaptingAdIds} creandoAdIds={creandoAdIds}
               seleccionados={seleccionados} selectedOrder={selectedOrder} usedAdIds={usedAdIds} progressById={progressById}
-              onAdapt={onAdapt} onCrearReferencial={onCrearReferencial} onToggleSelect={onToggleSelect} />
+              onAdapt={onAdapt} onCrearReferencial={onCrearReferencial} onToggleSelect={onToggleSelect}
+              onClearProgress={onClearProgress} />
           )}
           {viewMode === 'list' && (
             <TopListView items={items} seleccionados={seleccionados} selectedOrder={selectedOrder}
@@ -816,7 +833,7 @@ function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, se
 
 // VISTA 1 — Grid: el strip horizontal original con 10 thumbs grandes.
 
-function TopGridView({ items, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect }) {
+function TopGridView({ items, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect, onClearProgress }) {
   return (
     <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-10 gap-2">
       {items.map(({ ad, brandNombre, isCompetidor }, idx) => (
@@ -834,6 +851,7 @@ function TopGridView({ items, adaptingAdIds, creandoAdIds, seleccionados, select
             onAdapt={onAdapt ? () => onAdapt(brandNombre, ad) : null}
             onCrearReferencial={onCrearReferencial ? () => onCrearReferencial(brandNombre, ad) : null}
             onToggleSelect={onToggleSelect ? () => onToggleSelect(ad.id) : null}
+            onClearProgress={onClearProgress}
           />
           <div className="mt-1 px-0.5">
             <p className="text-[9px] font-semibold text-gray-700 dark:text-gray-200 truncate">
@@ -1768,12 +1786,11 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       addToast?.({ type: 'error', message: `No pude generar: ${err.message}` });
       finishExecution(execId, { ok: false, message: err.message || 'Error' });
       playErrorTone();
-      // Limpiar el error después de 5s.
-      trackedTimeout(() => {
-        setProgressById(prev => {
-          const next = { ...prev }; delete next[ad.id]; return next;
-        });
-      }, 5000);
+      // ANTES borrábamos el error a los 5s — pero generar tarda 30-60s, el
+      // user típicamente no está mirando cuando explota y perdía el motivo
+      // del fallo de una operación cara ($0.18/imagen). Ahora el error queda
+      // persistente en progressById hasta que el user lo cierre manualmente
+      // (botón X en el badge de progreso) o reintente.
       return false;
     } finally {
       if (mountedRef.current) {
@@ -2533,6 +2550,9 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                 onAdapt={(brandNombre, ad) => handleAdapt(brandNombre, ad)}
                 onCrearReferencial={(brandNombre, ad) => crearReferencialDeAd(brandNombre, ad)}
                 onToggleSelect={(adId) => toggleSeleccion(adId)}
+                onClearProgress={(adId) => setProgressById(prev => {
+                  const next = { ...prev }; delete next[adId]; return next;
+                })}
               />
             )}
 
@@ -2799,6 +2819,9 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                     onCrearReferencial={(ad) => crearReferencialDeAd(b.nombre, ad)}
                     onToggleSelect={(adId) => toggleSeleccion(adId)}
                     onRemove={b.isCompetidor ? null : () => handleRemoveBrand(b.id)}
+                    onClearProgress={(adId) => setProgressById(prev => {
+                      const next = { ...prev }; delete next[adId]; return next;
+                    })}
                   />
                 ))}
               </div>

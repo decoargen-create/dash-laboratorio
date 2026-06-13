@@ -16,7 +16,7 @@
 // imagen directo.
 
 import { supabase } from './supabase.js';
-import { getProductoImagen } from './productoImagen.js';
+import { getProductoImagen, getAccentColor } from './productoImagen.js';
 import { saveReferencial } from './galeriaReferenciales.js';
 
 // Parse defensivo de la response — el endpoint a veces devuelve HTML cuando
@@ -41,8 +41,12 @@ async function parseJsonOrThrow(resp, contexto = 'crear-creativo-referencial') {
 export async function generateFromWinner(creativo, producto, opts = {}) {
   if (!creativo?.id) throw new Error('generateFromWinner: falta creativo');
   if (!producto?.id) throw new Error('generateFromWinner: falta producto');
-  if (!creativo.imageUrl && !creativo.imageBase64) {
-    throw new Error('El winner no tiene imagen para usar como referencia');
+  // El endpoint requiere URL pública (no acepta base64). Si el winner solo
+  // tiene base64 local, no podemos iterar — el user debe re-generarlo al cloud.
+  if (!creativo.imageUrl) {
+    throw new Error(creativo.imageBase64
+      ? 'Este winner solo está en local (sin URL cloud). Re-generalo para que se suba al bucket y poder iterarlo.'
+      : 'El winner no tiene imagen para usar como referencia');
   }
 
   const { quality = 'high', size = '1024x1024', n = 1, onProgress } = opts;
@@ -60,13 +64,7 @@ export async function generateFromWinner(creativo, producto, opts = {}) {
     authToken = session?.access_token || '';
   } catch {}
 
-  // 3. La URL del winner como inspiración. Si solo hay base64 (item legacy
-  //    IDB), tendríamos que subir y obtener URL — por ahora throw clarito.
   const inspiracionImageUrl = creativo.imageUrl;
-  if (!inspiracionImageUrl) {
-    throw new Error('Este winner solo está en local (sin imageUrl). Re-generalo primero para que vaya al cloud.');
-  }
-
   const brandNombre = creativo.sourceBrand || 'winner';
   const winnerHeadline = creativo.sourceHeadline || '';
 
@@ -81,6 +79,9 @@ export async function generateFromWinner(creativo, producto, opts = {}) {
       offerBrief: producto.ofertasReales || producto.docs?.offerBrief || '',
     },
     inspiracion: {
+      // adId: sin esto el cloud-save guarda source_ad_id='unknown-{ts}' y
+      // perdemos el link entre winner padre y variante generada.
+      adId: creativo.id,
       brandNombre,
       // Headline del winner. Lo pasamos sin body porque el winner ya pasó por
       // gpt-image-2 una vez — su "body" no es ad copy, es prompt residual.
@@ -92,6 +93,9 @@ export async function generateFromWinner(creativo, producto, opts = {}) {
     },
     inspiracionImageUrl,
     productoImagen: prodImg,
+    // accentColor: sin esto el Strategist usa colores random. Con esto, el
+    // creativo iterado respeta la paleta de marca del producto.
+    accentColor: getAccentColor(producto.id, producto) || '',
     quality,
     size,
   };

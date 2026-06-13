@@ -81,6 +81,10 @@ export async function runGeneradorRapido({ producto, formato, cantidad, formatoM
   _ctrl = ctrl;
   const totalTandas = Math.ceil(cantidad / CHUNK);
   const tema = String(contextoTematico || '').trim();
+  // Un id de bloque por corrida temática: agrupa todas las ideas de ESTA
+  // generación bajo el mismo tema (ej. "día del padre"), para mostrarlas como
+  // un bloque con su título + contador de usadas en Creativos.
+  const bloqueId = tema ? `bloque_${Date.now()}_${Math.random().toString(36).slice(2, 6)}` : null;
 
   _state = {
     productoId: producto.id,

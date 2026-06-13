@@ -256,7 +256,7 @@ function hookSignature(hook) {
 // insertado. Dedupea por (tipo, titulo) y también detecta hooks casi
 // idénticos (primeras 3 palabras significativas iguales) — si el generator
 // repite un patrón, se loggea warning pero no se bloquea.
-export function addGeneratedIdeas(rawIdeas, { producto } = {}) {
+export function addGeneratedIdeas(rawIdeas, { producto, contextoTematico = '', bloqueId = null } = {}) {
   const prodId = producto?.id ? String(producto.id) : null;
   const prodNombre = producto?.nombre || null;
   if (!Array.isArray(rawIdeas)) return [];
@@ -328,6 +328,11 @@ export function addGeneratedIdeas(rawIdeas, { producto } = {}) {
       // Cuál de las 6 creencias del Offer Brief tumba esta idea — el
       // generador la declara explícitamente. Si no vino, queda undefined.
       creenciaApalancada: r.creenciaApalancada || null,
+      // Bloque temático: agrupa las ideas generadas en una misma corrida con
+      // contexto (ej. "día del padre"). bloqueId = id de la corrida, titulo =
+      // el tema. Permite mostrarlas como un bloque con contador de usadas.
+      contextoTematico: contextoTematico || null,
+      bloqueId: bloqueId || null,
       hookDuplicado,
     });
     if (loadIdeas().length > existingCount + nuevas.length) nuevas.push(idea);

@@ -75,6 +75,76 @@ export default function CreativosBulkGenerator({ producto, addToast }) {
     [ideas]
   );
 
+  // Agrupar por BLOQUE temático: las ideas generadas juntas con un tema (ej.
+  // "día del padre") comparten bloqueId. Cada bloque se muestra con su título
+  // (el tema) y un contador de usadas. Las sueltas (sin bloque) van al final.
+  const grupos = useMemo(() => {
+    const map = new Map();
+    const sueltas = [];
+    for (const idea of ordered) {
+      if (idea.bloqueId) {
+        if (!map.has(idea.bloqueId)) {
+          map.set(idea.bloqueId, { id: idea.bloqueId, titulo: idea.contextoTematico || 'Bloque temático', ideas: [] });
+        }
+        map.get(idea.bloqueId).ideas.push(idea);
+      } else {
+        sueltas.push(idea);
+      }
+    }
+    return { bloques: Array.from(map.values()), sueltas };
+  }, [ordered]);
+
+  const selectBlock = (bloqueIdeas) => setSelected(prev => {
+    const n = new Set(prev);
+    const ids = bloqueIdeas.map(i => i.id);
+    const allSel = ids.every(id => n.has(id));
+    for (const id of ids) { if (allSel) n.delete(id); else n.add(id); }
+    return n;
+  });
+
+  // Card de una idea (reusada en bloques y sueltas).
+  const renderIdeaCard = (idea) => {
+    const isSel = selected.has(idea.id);
+    const order = selectedOrder.get(idea.id);
+    const isUsed = usedIds.has(String(idea.id));
+    const meta = TIPO_META[idea.tipo];
+    const angulo = idea.anguloCategoria || idea.angulo;
+    return (
+      <button key={idea.id} onClick={() => toggle(idea.id)}
+        className={`text-left p-3 rounded-xl border-2 transition flex gap-3 ${isSel ? 'border-emerald-500 bg-emerald-50/60 dark:bg-emerald-900/20' : 'border-gray-200 dark:border-gray-700 hover:border-emerald-300'} ${isUsed && !isSel ? 'opacity-50 grayscale-[40%] hover:opacity-100 hover:grayscale-0' : ''}`}>
+        <div className={`mt-0.5 w-5 h-5 rounded-md shrink-0 flex items-center justify-center text-[10px] font-bold ${isSel ? 'bg-emerald-500 text-white' : 'border-2 border-gray-300 dark:border-gray-600'}`}>
+          {isSel ? (order || <Check size={11} />) : ''}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
+            {meta && (
+              <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold rounded border ${meta.color}`}>
+                {meta.emoji} {meta.label}
+              </span>
+            )}
+            <span className="text-[11px]" title={idea.formato}>{FORMATO_EMOJI[idea.formato] || '🖼️'}</span>
+            {isUsed && (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-gray-300 dark:bg-gray-600 text-gray-600 dark:text-gray-300" title="Ya generaste creativos de esta idea">
+                usado
+              </span>
+            )}
+            {idea.createdAt && (
+              <span className="ml-auto shrink-0 text-[9px] text-gray-400 dark:text-gray-500">
+                {new Date(idea.createdAt).toLocaleDateString('es-AR', { day: '2-digit', month: 'short' })}
+              </span>
+            )}
+          </div>
+          <p className="text-xs font-semibold text-gray-800 dark:text-gray-200 leading-snug line-clamp-2">
+            {idea.hook || idea.titulo || 'Idea sin título'}
+          </p>
+          {angulo && (
+            <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1 truncate">{angulo}</p>
+          )}
+        </div>
+      </button>
+    );
+  };
+
   const toggle = (id) => setSelected(prev => {
     const n = new Set(prev);
     if (n.has(id)) n.delete(id); else n.add(id);
@@ -251,53 +321,44 @@ export default function CreativosBulkGenerator({ producto, addToast }) {
             </div>
           )}
 
-          {/* Grilla de ideas seleccionables */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5 max-h-[30rem] overflow-y-auto pr-1">
-            {ordered.map(idea => {
-              const isSel = selected.has(idea.id);
-              const order = selectedOrder.get(idea.id);
-              const isUsed = usedIds.has(String(idea.id));
-              const meta = TIPO_META[idea.tipo];
-              const angulo = idea.anguloCategoria || idea.angulo;
+          {/* Ideas agrupadas por bloque temático + sueltas */}
+          <div className="space-y-4 max-h-[32rem] overflow-y-auto pr-1">
+            {grupos.bloques.map(b => {
+              const usadas = b.ideas.filter(i => usedIds.has(String(i.id))).length;
+              const allSel = b.ideas.every(i => selected.has(i.id));
               return (
-                <button key={idea.id} onClick={() => toggle(idea.id)}
-                  className={`text-left p-3 rounded-xl border-2 transition flex gap-3 ${isSel ? 'border-emerald-500 bg-emerald-50/60 dark:bg-emerald-900/20' : 'border-gray-200 dark:border-gray-700 hover:border-emerald-300'} ${isUsed && !isSel ? 'opacity-50 grayscale-[40%] hover:opacity-100 hover:grayscale-0' : ''}`}>
-                  {/* Check de selección */}
-                  <div className={`mt-0.5 w-5 h-5 rounded-md shrink-0 flex items-center justify-center text-[10px] font-bold ${isSel ? 'bg-emerald-500 text-white' : 'border-2 border-gray-300 dark:border-gray-600'}`}>
-                    {isSel ? (order || <Check size={11} />) : ''}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    {/* Fila de etiquetas: tipo (color) + formato + usado + fecha */}
-                    <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
-                      {meta && (
-                        <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold rounded border ${meta.color}`}>
-                          {meta.emoji} {meta.label}
-                        </span>
-                      )}
-                      <span className="text-[11px]" title={idea.formato}>{FORMATO_EMOJI[idea.formato] || '🖼️'}</span>
-                      {isUsed && (
-                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-gray-300 dark:bg-gray-600 text-gray-600 dark:text-gray-300" title="Ya generaste creativos de esta idea">
-                          usado
-                        </span>
-                      )}
-                      {idea.createdAt && (
-                        <span className="ml-auto shrink-0 text-[9px] text-gray-400 dark:text-gray-500">
-                          {new Date(idea.createdAt).toLocaleDateString('es-AR', { day: '2-digit', month: 'short' })}
-                        </span>
-                      )}
+                <div key={b.id}>
+                  {/* Header del bloque: tema + contador de usadas */}
+                  <div className="flex items-center justify-between gap-2 mb-2 pb-1.5 border-b border-gray-100 dark:border-gray-700/60">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-xs font-bold text-gray-800 dark:text-gray-100 truncate">🎯 {b.titulo}</span>
+                      <span className={`shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded ${usadas > 0 ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300' : 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400'}`}
+                        title="Cuántas ideas de este bloque ya usaste para generar estáticos">
+                        {usadas}/{b.ideas.length} usadas
+                      </span>
                     </div>
-                    {/* Hook */}
-                    <p className="text-xs font-semibold text-gray-800 dark:text-gray-200 leading-snug line-clamp-2">
-                      {idea.hook || idea.titulo || 'Idea sin título'}
-                    </p>
-                    {/* Ángulo */}
-                    {angulo && (
-                      <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1 truncate">{angulo}</p>
-                    )}
+                    <button onClick={() => selectBlock(b.ideas)}
+                      className="shrink-0 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 hover:underline">
+                      {allSel ? 'Deseleccionar bloque' : 'Seleccionar bloque'}
+                    </button>
                   </div>
-                </button>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
+                    {b.ideas.map(renderIdeaCard)}
+                  </div>
+                </div>
               );
             })}
+
+            {grupos.sueltas.length > 0 && (
+              <div>
+                {grupos.bloques.length > 0 && (
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">Sueltas</div>
+                )}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
+                  {grupos.sueltas.map(renderIdeaCard)}
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}

@@ -16,6 +16,7 @@ import { logCostsFromResponse } from './costsStore.js';
 import { startExecution, updateExecution, finishExecution } from './executionsStore.js';
 import { runGeneradorRapido, cancelGenerador, subscribeGenerador } from './generadorRapidoStore.js';
 import { TIPO_META } from './bandejaStore.js';
+import CreativosBulkGenerator from './CreativosBulkGenerator.jsx';
 
 // ---- inner components moved before export (TDZ fix Vite/Rollup) ----
 
@@ -375,6 +376,10 @@ export default function CreativosTab({ producto, onUpdateProducto, addToast }) {
       {/* Generador de estáticos temáticos por contexto libre (ej. "adaptado al
           Mundial"). Genera ideas en la Bandeja, en segundo plano. */}
       <GeneradorTematico producto={producto} addToast={addToast} />
+
+      {/* Generación masiva de estáticos desde las ideas del producto
+          (multi-select + barra 1/2/4/6, estilo Inspiración). */}
+      <CreativosBulkGenerator producto={producto} addToast={addToast} />
 
       {/* Header thin Linear-style — una sola fila con título + última corrida + botón primario */}
       <div className="flex items-center gap-3 flex-wrap">

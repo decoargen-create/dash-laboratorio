@@ -943,14 +943,24 @@ function KanbanCard({ idea, isSelected = false, onToggleSelect, onClick }) {
       } ${isDragging ? 'opacity-40' : ''}`}
     >
       {onToggleSelect && (
-        <button
-          onClick={handleCheckboxClick}
-          className="absolute top-1.5 right-1.5 w-5 h-5 flex items-center justify-center rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:border-brand-500 transition opacity-0 group-hover:opacity-100 data-[checked=true]:opacity-100 z-10"
-          data-checked={isSelected}
-          title={isSelected ? 'Deseleccionar' : 'Seleccionar para exportar'}
-        >
-          {isSelected ? <CheckSquare size={12} className="text-brand-600" /> : <Square size={12} className="text-gray-400" />}
-        </button>
+        esVideo ? (
+          // Video: no se puede generar como estático → checkbox deshabilitado.
+          <span
+            className="absolute top-1.5 right-1.5 w-5 h-5 flex items-center justify-center rounded border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 opacity-0 group-hover:opacity-100 z-10 cursor-not-allowed"
+            title="Las ideas de video no se pueden generar como estático"
+          >
+            <Square size={12} className="text-gray-300 dark:text-gray-600" />
+          </span>
+        ) : (
+          <button
+            onClick={handleCheckboxClick}
+            className="absolute top-1.5 right-1.5 w-5 h-5 flex items-center justify-center rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:border-brand-500 transition opacity-0 group-hover:opacity-100 data-[checked=true]:opacity-100 z-10"
+            data-checked={isSelected}
+            title={isSelected ? 'Deseleccionar' : 'Seleccionar para generar / exportar'}
+          >
+            {isSelected ? <CheckSquare size={12} className="text-brand-600" /> : <Square size={12} className="text-gray-400" />}
+          </button>
+        )
       )}
 
       {/* Fila 1: badges de clasificación (tipo · formato · score) */}
@@ -2009,6 +2019,111 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
 
   return (
     <div className="max-w-[1500px] mx-auto space-y-5">
+      {/* Barra de selección/generación — SIEMPRE renderizada (también cuando la
+          Bandeja va embebida en el workspace del producto). Antes vivía dentro
+          del header {!embedded && ...}, así que embebida NO aparecía y no se
+          podían generar estáticos en masa. Es un portal a document.body, así
+          que su posición en el árbol no importa. Solo cuenta ideas de IMAGEN
+          (las de video no se pueden generar). */}
+      {(() => {
+        const seleccionablesImg = [...selected].filter(id => {
+          const i = ideas.find(x => x.id === id);
+          return i && i.formato !== 'video';
+        });
+        const nImg = seleccionablesImg.length;
+        if (selected.size === 0) return null;
+        return createPortal(
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[60] bg-white dark:bg-gray-800 border-2 border-purple-300 dark:border-purple-700 rounded-xl shadow-2xl px-4 py-3 flex items-center gap-2 flex-wrap max-w-[calc(100vw-3rem)]">
+            <span className="text-xs font-bold text-gray-900 dark:text-gray-100">
+              {selected.size} seleccionada{selected.size > 1 ? 's' : ''} <span className="font-normal text-gray-500 dark:text-gray-400">(todas las columnas{nImg !== selected.size ? ` · ${nImg} de imagen` : ''})</span>
+            </span>
+            <button onClick={() => setSelected(new Set())}
+              className="px-2.5 py-1.5 text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition">
+              Limpiar
+            </button>
+            {/* Selector de N variantes por idea de imagen. Total = N × imagen. */}
+            <div className="inline-flex items-center gap-0.5 px-1 py-0.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded">
+              <span className="text-[10px] text-gray-500 dark:text-gray-400 px-1">var:</span>
+              {[1, 2, 4].map(opt => (
+                <button key={opt}
+                  onClick={() => setBulkN(opt)}
+                  disabled={bulkRunning}
+                  className={`px-1.5 py-0.5 text-[10px] font-bold rounded transition ${
+                    bulkN === opt
+                      ? 'bg-purple-600 text-white'
+                      : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                  }`}
+                >{opt}</button>
+              ))}
+            </div>
+            <div className="inline-flex items-center gap-0.5 px-1 py-0.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded">
+              {['medium', 'high'].map(opt => (
+                <button key={opt}
+                  onClick={() => setBulkQuality(opt)}
+                  disabled={bulkRunning}
+                  className={`px-1.5 py-0.5 text-[10px] font-bold rounded transition ${
+                    bulkQuality === opt
+                      ? 'bg-purple-600 text-white'
+                      : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                  }`}
+                >{opt}</button>
+              ))}
+            </div>
+            <button
+              disabled={bulkRunning || nImg === 0}
+              onClick={async () => {
+                // Solo ideas de IMAGEN con contenido. Las de video se ignoran
+                // (no se pueden generar como estático).
+                const valid = [];
+                for (const id of selected) {
+                  const idea = ideas.find(i => i.id === id);
+                  if (!idea) continue;
+                  if (idea.formato === 'video') continue;
+                  if (!(idea.hook || idea.titulo || idea.descripcionImagen)) continue;
+                  valid.push(idea);
+                }
+                if (valid.length === 0) {
+                  addToast?.({ type: 'error', message: 'Las seleccionadas no tienen ideas de imagen para generar (las de video no aplican).' });
+                  return;
+                }
+                const producto = productos.find(p => String(p.id) === String(activeProductoId));
+                if (!producto) {
+                  addToast?.({ type: 'error', message: 'Seleccioná un producto activo antes de generar.' });
+                  return;
+                }
+                setBulkRunning(true);
+                try {
+                  const result = await bulkGenerateFromIdeas({
+                    ideas: valid, producto, n: bulkN, quality: bulkQuality, size: bulkSize, addToast,
+                  });
+                  if (result.ok > 0) setSelected(new Set());
+                } finally {
+                  setBulkRunning(false);
+                }
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg hover:from-purple-600 hover:to-pink-600 shadow-sm transition disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Genera N variantes de cada idea de imagen seleccionada. Las de video se ignoran. Se guardan en Galería."
+            >
+              <Sparkles size={12} />
+              {bulkRunning
+                ? 'Generando…'
+                : nImg === 0
+                  ? 'Sin ideas de imagen'
+                  : `Generar ${nImg * bulkN} ${nImg * bulkN === 1 ? 'imagen' : 'imágenes'}`
+              }
+            </button>
+            <button onClick={() => exportSelected('docx')}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-brand-600 rounded-lg hover:from-brand-600 hover:to-brand-700 shadow-sm transition">
+              <Download size={12} /> Exportar {selected.size} .docx
+            </button>
+            <button onClick={() => exportSelected('md')}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-gray-800 border border-brand-300 dark:border-brand-700 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/20 transition">
+              .md
+            </button>
+          </div>,
+          document.body
+        );
+      })()}
       {/* Header con breadcrumb de producto — se oculta cuando estamos
           embebidos en otro padre que ya tiene su propio header. */}
       {!embedded && (
@@ -2034,103 +2149,9 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          {selected.size > 0 && createPortal(
-            <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[60] bg-white dark:bg-gray-800 border-2 border-purple-300 dark:border-purple-700 rounded-xl shadow-2xl px-4 py-3 flex items-center gap-2 flex-wrap max-w-[calc(100vw-3rem)]">
-              <span className="text-xs font-bold text-gray-900 dark:text-gray-100">
-                {selected.size} seleccionada{selected.size > 1 ? 's' : ''} <span className="font-normal text-gray-500 dark:text-gray-400">(todas las columnas)</span>
-              </span>
-              <button onClick={() => setSelected(new Set())}
-                className="px-2.5 py-1.5 text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition">
-                Limpiar
-              </button>
-              {/* Selector de N variantes por idea — el user setea cuántas
-                  imágenes quiere por cada idea seleccionada. Total = N × selected. */}
-              <div className="inline-flex items-center gap-0.5 px-1 py-0.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded">
-                <span className="text-[10px] text-gray-500 dark:text-gray-400 px-1">var:</span>
-                {[1, 2, 4].map(opt => (
-                  <button key={opt}
-                    onClick={() => setBulkN(opt)}
-                    disabled={bulkRunning}
-                    className={`px-1.5 py-0.5 text-[10px] font-bold rounded transition ${
-                      bulkN === opt
-                        ? 'bg-purple-600 text-white'
-                        : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-                    }`}
-                  >{opt}</button>
-                ))}
-              </div>
-              {/* Quality: medium ahorra 4x respecto de high con calidad razonable */}
-              <div className="inline-flex items-center gap-0.5 px-1 py-0.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded">
-                {['medium', 'high'].map(opt => (
-                  <button key={opt}
-                    onClick={() => setBulkQuality(opt)}
-                    disabled={bulkRunning}
-                    className={`px-1.5 py-0.5 text-[10px] font-bold rounded transition ${
-                      bulkQuality === opt
-                        ? 'bg-purple-600 text-white'
-                        : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-                    }`}
-                  >{opt}</button>
-                ))}
-              </div>
-              <button
-                disabled={bulkRunning}
-                onClick={async () => {
-                  // Filtrar las ideas válidas (con contenido + no video).
-                  const valid = [];
-                  for (const id of selected) {
-                    const idea = ideas.find(i => i.id === id);
-                    if (!idea) continue;
-                    if (!(idea.hook || idea.titulo || idea.descripcionImagen)) continue;
-                    if (idea.formato === 'video') continue;
-                    valid.push(idea);
-                  }
-                  if (valid.length === 0) {
-                    addToast?.({ type: 'error', message: 'Las seleccionadas no tienen contenido para generar (o son videos).' });
-                    return;
-                  }
-                  // Necesitamos el producto activo + su foto. Buscamos en el array
-                  // de productos cargado por loadProductos.
-                  const producto = productos.find(p => String(p.id) === String(activeProductoId));
-                  if (!producto) {
-                    addToast?.({ type: 'error', message: 'Seleccioná un producto activo antes de generar.' });
-                    return;
-                  }
-                  setBulkRunning(true);
-                  try {
-                    const result = await bulkGenerateFromIdeas({
-                      ideas: valid,
-                      producto,
-                      n: bulkN,
-                      quality: bulkQuality,
-                      size: bulkSize,
-                      addToast,
-                    });
-                    if (result.ok > 0) setSelected(new Set());
-                  } finally {
-                    setBulkRunning(false);
-                  }
-                }}
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg hover:from-purple-600 hover:to-pink-600 shadow-sm transition disabled:opacity-50 disabled:cursor-not-allowed"
-                title="Genera N variantes de cada idea seleccionada. Se guardan automáticamente en Galería."
-              >
-                <Sparkles size={12} />
-                {bulkRunning
-                  ? 'Generando…'
-                  : `Generar ${selected.size * bulkN} ${selected.size * bulkN === 1 ? 'imagen' : 'imágenes'}`
-                }
-              </button>
-              <button onClick={() => exportSelected('docx')}
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-brand-600 rounded-lg hover:from-brand-600 hover:to-brand-700 shadow-sm transition">
-                <Download size={12} /> Exportar {selected.size} .docx
-              </button>
-              <button onClick={() => exportSelected('md')}
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-gray-800 border border-brand-300 dark:border-brand-700 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/20 transition">
-                .md
-              </button>
-            </div>,
-            document.body
-          )}
+          {/* La barra de selección/generación se movió FUERA del header
+              {!embedded} (ver más arriba en el return) para que aparezca
+              también en la Bandeja embebida dentro del workspace del producto. */}
           {selected.size === 0 && filtered.length > 0 && (
             <>
               <button

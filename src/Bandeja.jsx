@@ -13,6 +13,7 @@
 //   - Checkbox rápido para marcar "en uso" o "usada"
 
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Inbox, Search, Filter, ExternalLink, Trash2, Download, Package,
   ChevronDown, Check, Circle, CircleDot, Archive, Edit3, CheckSquare, Square, ChevronRight,
@@ -2033,8 +2034,8 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          {selected.size > 0 && (
-            <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-white dark:bg-gray-800 border-2 border-purple-300 dark:border-purple-700 rounded-xl shadow-2xl px-4 py-3 flex items-center gap-2 flex-wrap max-w-[calc(100vw-3rem)]">
+          {selected.size > 0 && createPortal(
+            <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[60] bg-white dark:bg-gray-800 border-2 border-purple-300 dark:border-purple-700 rounded-xl shadow-2xl px-4 py-3 flex items-center gap-2 flex-wrap max-w-[calc(100vw-3rem)]">
               <span className="text-xs font-bold text-gray-900 dark:text-gray-100">
                 {selected.size} seleccionada{selected.size > 1 ? 's' : ''} <span className="font-normal text-gray-500 dark:text-gray-400">(todas las columnas)</span>
               </span>
@@ -2127,7 +2128,8 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
                 className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-gray-800 border border-brand-300 dark:border-brand-700 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/20 transition">
                 .md
               </button>
-            </div>
+            </div>,
+            document.body
           )}
           {selected.size === 0 && filtered.length > 0 && (
             <>

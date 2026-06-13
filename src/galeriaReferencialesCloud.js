@@ -187,12 +187,14 @@ export async function listAllWinnersCloud() {
   const user = await getCurrentUser();
   if (!user) return [];
 
+  // NO filtramos por archivado: un winner archivado sigue siendo winner que
+  // el user quiere ver/replicar (de hecho suele marcarse winner DESDE la
+  // pestaña Archivados — "ganador histórico"). Mostramos todos.
   const { data, error } = await supabase
     .from('marketing_creativos')
     .select('*')
     .eq('user_id', user.id)
     .eq('winner', true)
-    .eq('archivado', false)
     .order('winner_at', { ascending: false, nullsFirst: false })
     .order('created_at', { ascending: false });
   if (error) {

@@ -38,6 +38,7 @@ import ActivityBell from './ActivityBell.jsx';
 import { getRemaining, subscribeBalance } from './balanceStore.js';
 import SupabaseAuthScreen from './SupabaseAuth.jsx';
 import { useMarketingSync } from './useMarketingSync.js';
+import { useUserPrefs } from './useUserPrefs.js';
 import { supabase, onAuthChange } from './supabase.js';
 import { generateCSV, downloadCSV, parseCSV, toNumber, toBool } from './csv.js';
 import { loadVioraState, saveVioraState, clearVioraState, createBackup } from './vioraStorage.js';
@@ -1642,6 +1643,9 @@ function AppShell({ onExit }) {
     if (typeof window === 'undefined') return 'dorado';
     return localStorage.getItem('dash-accent-color') || 'dorado';
   });
+  // Apariencia sincronizada con la nube (user_prefs). Pullea al login y
+  // pushea con debounce — así el color/fuente/tamaño te sigue entre PCs.
+  useUserPrefs({ accentColor, setAccentColor, textSize, setTextSize, uiFont, setUiFont });
   // Tamaño: zoom al <html> → escala TODO de forma uniforme (texto + UI).
   // Se aplica al documentElement (no a #root) para ser consistente con el
   // script inline de index.html que lo setea antes del render (sin flash).

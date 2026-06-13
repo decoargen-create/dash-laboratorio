@@ -190,9 +190,9 @@ export default function ExecutionsTray() {
             <button
               onClick={() => { try { exportDebugLog(); } catch {} }}
               className="w-full inline-flex items-center justify-center gap-1.5 px-2 py-1 text-[10px] font-bold text-gray-600 dark:text-gray-300 hover:text-brand-700 dark:hover:text-brand-300 hover:bg-white dark:hover:bg-gray-700 rounded transition"
-              title="Descarga un JSON con todo lo que se ejecutó (fetches, errores, rejections) — útil para reportar bugs. También: Ctrl+Shift+L"
+              title="Descarga un JSON con todo lo que se ejecutó (fetches, errores, rejections) — útil para reportar bugs. También: Ctrl+Shift+D"
             >
-              <Download size={11} /> Exportar log de debug (Ctrl+Shift+L)
+              <Download size={11} /> Exportar log de debug (Ctrl+Shift+D)
             </button>
           </div>
         </>

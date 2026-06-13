@@ -1428,9 +1428,31 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     }
   };
 
-  const handleRemoveCompetidor = (id) => {
+  const handleRemoveCompetidor = async (id) => {
     if (!window.confirm('¿Sacar a este competidor de la lista?')) return;
     setCompetidores(prev => prev.filter(c => c.id !== id));
+    // Limpiar el brand "auto-sincronizado" en Inspiración (fromCompetidorId)
+    // → sin esto quedaba una marca huérfana en la galería de inspiración
+    // apuntando a un competidor que ya no existe.
+    if (producto?.id) {
+      try {
+        const brandsKey = `adslab-marketing-inspiracion-brands-${producto.id}`;
+        const raw = localStorage.getItem(brandsKey);
+        if (raw) {
+          const arr = JSON.parse(raw);
+          const filtered = arr.filter(b => String(b.fromCompetidorId || '') !== String(id));
+          if (filtered.length !== arr.length) {
+            localStorage.setItem(brandsKey, JSON.stringify(filtered));
+          }
+        }
+      } catch {}
+      // Y borrar los ads del competidor en IDB — no tienen razón de seguir
+      // ocupando MB después de que el comp se va.
+      try {
+        const { removeCompAds } = await import('./competidorAdsIDB.js');
+        await removeCompAds(producto.id, id);
+      } catch {}
+    }
   };
 
   // Sugerencia automática de competidores: buscamos en Ad Library por keyword

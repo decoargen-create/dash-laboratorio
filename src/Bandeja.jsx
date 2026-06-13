@@ -1734,10 +1734,25 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
 
   const handleRemove = async (id) => {
     if (!window.confirm('¿Borrar esta idea? No se puede deshacer.')) return;
+    // Si era réplica de un ad de competencia, sacar el adId de
+    // producto.usedAdIds para que en Inspiración el ad deje de aparecer
+    // gris/"usado". Sin esto quedaba un ref zombi.
+    const idea = ideas.find(i => i.id === id);
+    const sourceAdId = idea?.origen?.adId;
+    if (sourceAdId && activeProductoId) {
+      try {
+        const arr = JSON.parse(localStorage.getItem('adslab-marketing-productos-v1') || '[]');
+        const updated = arr.map(p => {
+          if (String(p.id) !== String(activeProductoId)) return p;
+          const set = new Set(p.usedAdIds || []);
+          set.delete(String(sourceAdId));
+          return { ...p, usedAdIds: Array.from(set), updated_at: new Date().toISOString() };
+        });
+        localStorage.setItem('adslab-marketing-productos-v1', JSON.stringify(updated));
+        try { window.dispatchEvent(new CustomEvent('viora:marketing-storage-changed', { detail: { key: 'adslab-marketing-productos-v1' } })); } catch {}
+      } catch {}
+    }
     setIdeas(removeIdea(id));
-    // (Fase 2 cloud-first: ya no borramos legacy IDB — los creativos
-    // ahora viven en Supabase Storage + marketing_creativos. La galería
-    // sigue su propio ciclo de vida.)
     setSelected(prev => {
       const next = new Set(prev); next.delete(id); return next;
     });

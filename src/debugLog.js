@@ -44,17 +44,26 @@ function isVerbose() {
 }
 
 function persistSnapshot() {
+  // Solo guardamos los últimos 100 con campos chicos (sin stacks largos
+  // ni bodies) para no inflar localStorage.
+  const buildSlim = (count) => buffer.slice(-count).map(e => ({
+    t: e.t,
+    kind: e.kind,
+    label: e.label,
+    meta: e.meta ? slimMeta(e.meta) : null,
+  }));
   try {
-    // Solo guardamos los últimos 100 con campos chicos (sin stacks largos
-    // ni bodies) para no inflar localStorage.
-    const slim = buffer.slice(-MAX_LOCALSTORAGE).map(e => ({
-      t: e.t,
-      kind: e.kind,
-      label: e.label,
-      meta: e.meta ? slimMeta(e.meta) : null,
-    }));
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(slim));
-  } catch {}
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(buildSlim(MAX_LOCALSTORAGE)));
+  } catch (err) {
+    // Quota: si tiramos QuotaExceededError, intentar con N=20 y borrar el
+    // viejo. Sin esto el persist queda ciego para siempre.
+    if (err && (err.name === 'QuotaExceededError' || err.code === 22 || err.code === 1014)) {
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(buildSlim(20)));
+      } catch {}
+    }
+  }
 }
 
 function slimMeta(meta) {
@@ -64,6 +73,10 @@ function slimMeta(meta) {
     if (v == null) continue;
     if (typeof v === 'string') {
       out[k] = v.length > 500 ? v.slice(0, 500) + `… [+${v.length - 500} chars]` : v;
+    } else if (v instanceof Error) {
+      // JSON.stringify(error) devuelve '{}' porque sus props no son
+      // enumerables. Extraemos manualmente para preservar info útil.
+      out[k] = { message: v.message, stack: v.stack, cause: v.cause?.message || null };
     } else if (typeof v === 'object') {
       try {
         const s = JSON.stringify(v);
@@ -253,15 +266,22 @@ export function installDebugLog() {
     };
   }
 
+  // Atajo de teclado para export rápido.
+  installKeyboardShortcut();
+
   // Log inicial — referencia para saber desde cuándo está el buffer.
   logEvent({ kind: 'info', label: 'debug-log instalado' });
 }
 
-// Atajo de teclado: Ctrl+Shift+L exporta el log inmediato (útil cuando algo
-// está roto y querés un snapshot sin tener que buscar el botón).
-if (typeof window !== 'undefined') {
+// Atajo de teclado: Ctrl+Shift+D (Alt opcional) exporta el log. Antes era
+// Ctrl+Shift+L pero Firefox usa eso para abrir su sidebar de bookmarks.
+// Movido a Ctrl+Shift+D (Ctrl+Alt+D en Firefox toggle de devtools, distinto).
+// Registramos el listener DENTRO de installDebugLog para que respete el
+// flag `installed` y no se duplique en HMR / StrictMode double-mount.
+function installKeyboardShortcut() {
+  if (typeof window === 'undefined') return;
   window.addEventListener('keydown', (e) => {
-    if (e.ctrlKey && e.shiftKey && (e.key === 'L' || e.key === 'l')) {
+    if (e.ctrlKey && e.shiftKey && (e.key === 'D' || e.key === 'd')) {
       e.preventDefault();
       try { exportDebugLog(); } catch (err) { console.warn('exportDebugLog falló', err); }
     }

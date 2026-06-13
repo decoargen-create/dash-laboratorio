@@ -2164,7 +2164,19 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       const msg = newAds.length > 0
         ? `${newAds.length} estáticos NUEVOS de ${comp.nombre} (${ads.length} total)`
         : `${ads.length} estáticos de ${comp.nombre} (sin nuevos)`;
-      addToast?.({ type: 'success', message: msg });
+      // 0 resultados: aviso ACCIONABLE en vez de un "éxito" engañoso. Casi
+      // siempre es que no detectamos la FB page (caímos a keyword) o que la
+      // marca no tiene ads activos en Meta Ad Library.
+      if (ads.length === 0) {
+        addToast?.({
+          type: 'warning',
+          message: payload.fbPageUrl
+            ? `0 ads para ${comp.nombre}: esa página de Facebook no tiene anuncios activos en Meta Ad Library (o no aplica al país).`
+            : `0 ads para ${comp.nombre}: no detecté su página de Facebook (busqué por "${payload.searchKeyword}"). Cargá el FB page URL del competidor en Setup para scrapear directo.`,
+        });
+      } else {
+        addToast?.({ type: 'success', message: msg });
+      }
 
       // Cache en background. Para Inspiración solo nos interesan los estáticos.
       const staticAds = ads.filter(a => (a.imageUrls?.length || 0) > 0 && (a.videoUrls?.length || 0) === 0);

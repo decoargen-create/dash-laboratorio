@@ -674,8 +674,13 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
     if (panel === 'winners' && !it.winner) return false;
     if (panel === 'archivados' && !it.archivado) return false;
     if (panel === 'todos' && it.archivado) return false;
-    if (filtroEstado === 'pending' && it.descargada) return false;
-    if (filtroEstado === 'downloaded' && !it.descargada) return false;
+    // En Winners NO aplicamos el filtro de descargados: un winner casi siempre
+    // ya está descargado/publicado, y esconderlos vaciaba la pestaña ("Todo
+    // descargado" pese a tener winners marcados).
+    if (panel !== 'winners') {
+      if (filtroEstado === 'pending' && it.descargada) return false;
+      if (filtroEstado === 'downloaded' && !it.descargada) return false;
+    }
     if (filtroVariante !== 'all' && it.variantStyle !== filtroVariante) return false;
     if (filtroOrigen === 'inspiracion' && it.sourceType === 'bandeja-idea') return false;
     if (filtroOrigen === 'bandeja-idea' && it.sourceType !== 'bandeja-idea') return false;
@@ -688,7 +693,7 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
     // — sino los filtraríamos del array y no aparecerían en el panel.
     // 'reportes' incluye archivados también porque los winners pueden estar
     // archivados (winner + archivado = "ganador histórico ya no en uso").
-    const includeArchived = panel === 'archivados' || panel === 'reportes' || verArchivados;
+    const includeArchived = panel === 'archivados' || panel === 'reportes' || panel === 'winners' || verArchivados;
     Promise.all([
       getReferencialesByProducto(productoId, { includeArchived }),
       countReferencialesByProducto(productoId),

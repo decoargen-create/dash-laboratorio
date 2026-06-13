@@ -10,7 +10,7 @@
 // Galería del producto destino.
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Trophy, Sparkles, Loader2, Check, ImageOff, Package } from 'lucide-react';
+import { Trophy, Sparkles, Loader2, Check, ImageOff, Package, ArrowRight } from 'lucide-react';
 import { listAllWinnersCloud } from './galeriaReferencialesCloud.js';
 import { getProductoImagen, getAccentColor } from './productoImagen.js';
 import { startExecution, updateExecution, finishExecution } from './executionsStore.js';
@@ -24,7 +24,7 @@ function loadProductos() {
   try { return JSON.parse(localStorage.getItem(PRODUCTOS_KEY) || '[]'); } catch { return []; }
 }
 
-export default function WinnersGlobalSection({ addToast }) {
+export default function WinnersGlobalSection({ addToast, onGoToSection }) {
   const [winners, setWinners] = useState([]);
   const [productos, setProductos] = useState(() => loadProductos());
   const [loading, setLoading] = useState(true);
@@ -33,6 +33,22 @@ export default function WinnersGlobalSection({ addToast }) {
   const [count, setCount] = useState(2);
   const [quality, setQuality] = useState('high');
   const [generating, setGenerating] = useState(false);
+  // Recién creados: { productoId, productoNombre, urls: [] } — preview inline
+  // para no tener que entrar al producto a buscarlos.
+  const [recientes, setRecientes] = useState(null);
+
+  // Abre el producto destino en su tab Galería. Seteamos localStorage (por si
+  // Arranque no está montado todavía) + disparamos los eventos que escucha
+  // Arranque (por si ya está montado). Después navegamos a la sección.
+  const irAGaleria = (productoId) => {
+    try { localStorage.setItem('adslab-marketing-active-product', String(productoId)); } catch {}
+    try { localStorage.setItem(`adslab-marketing-prod-tab-${productoId}`, 'galeria'); } catch {}
+    try {
+      window.dispatchEvent(new CustomEvent('viora:product-select', { detail: { productoId: String(productoId) } }));
+      window.dispatchEvent(new CustomEvent('viora:product-tab', { detail: { tab: 'galeria' } }));
+    } catch {}
+    onGoToSection?.('mk-arranque');
+  };
 
   // Cargar winners del cloud + mantener productos sincronizados con localStorage.
   useEffect(() => {
@@ -133,15 +149,20 @@ export default function WinnersGlobalSection({ addToast }) {
         const data = await resp.json();
         if (!resp.ok) throw new Error((data && (data.error?.message || data.error)) || `HTTP ${resp.status}`);
         logCostsFromResponse(data, `winners → ${target.nombre}`);
-        return true;
+        // URLs de los creativos recién subidos al cloud (para el preview).
+        const urls = Array.isArray(data.cloudCreativos)
+          ? data.cloudCreativos.map(c => c?.imageUrl).filter(Boolean)
+          : [];
+        return urls;
       } finally { clearTimeout(timer); }
     };
 
     let ok = 0, fail = 0;
+    const nuevasUrls = [];
     for (const w of sel) {
       updateExecution(execId, { stage: `Adaptando winner de ${productoNombre.get(String(w.productoId)) || 'producto'}…` });
       const calls = Array.from({ length: count }, (_, i) =>
-        doOne(w, i).then(() => { ok++; }).catch(e => { fail++; console.warn('[winners] gen fail:', e?.message); })
+        doOne(w, i).then(urls => { ok++; nuevasUrls.push(...urls); }).catch(e => { fail++; console.warn('[winners] gen fail:', e?.message); })
       );
       await Promise.allSettled(calls);
       try { window.dispatchEvent(new CustomEvent('viora:referencial-saved', { detail: { productoId: String(target.id), cloud: true } })); } catch {}
@@ -149,6 +170,7 @@ export default function WinnersGlobalSection({ addToast }) {
 
     setGenerating(false);
     setSelected(new Set());
+    if (ok > 0) setRecientes({ productoId: String(target.id), productoNombre: target.nombre, urls: nuevasUrls });
     finishExecution(execId, { ok: ok > 0, message: `${ok} estáticos creados para ${target.nombre}${fail ? ` · ${fail} fallaron` : ''}.` });
     addToast?.({
       type: ok > 0 ? 'success' : 'error',
@@ -224,6 +246,37 @@ export default function WinnersGlobalSection({ addToast }) {
             className="text-[11px] text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 disabled:opacity-50">
             Limpiar
           </button>
+        </div>
+      )}
+
+      {/* Recién creados — preview inline + salto a la Galería del producto */}
+      {recientes && (
+        <div className="px-4 py-3 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/50">
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <p className="text-xs font-bold text-emerald-700 dark:text-emerald-300 inline-flex items-center gap-1.5">
+              <Check size={13} /> Recién creados para {recientes.productoNombre}
+            </p>
+            <div className="flex items-center gap-2">
+              <button onClick={() => irAGaleria(recientes.productoId)}
+                className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition">
+                Ver en Galería de {recientes.productoNombre} <ArrowRight size={12} />
+              </button>
+              <button onClick={() => setRecientes(null)}
+                className="text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">Cerrar</button>
+            </div>
+          </div>
+          {recientes.urls.length > 0 ? (
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {recientes.urls.map((u, i) => (
+                <img key={i} src={u} alt="" loading="lazy"
+                  className="w-20 h-20 object-cover rounded-lg border border-emerald-200 dark:border-emerald-800 shrink-0" />
+              ))}
+            </div>
+          ) : (
+            <p className="text-[11px] text-gray-500 dark:text-gray-400">
+              Generados y guardados en la nube. Abrí la Galería del producto para verlos.
+            </p>
+          )}
         </div>
       )}
 

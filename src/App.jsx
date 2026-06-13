@@ -35,6 +35,7 @@ import ExecutionsTray from './ExecutionsTray.jsx';
 import BulkProgressBarGlobal from './BulkProgressBarGlobal.jsx';
 import BalanceBar from './BalanceBar.jsx';
 import ActivityBell from './ActivityBell.jsx';
+import SyncStatusBadge from './SyncStatusBadge.jsx';
 import { getRemaining, subscribeBalance } from './balanceStore.js';
 import SupabaseAuthScreen from './SupabaseAuth.jsx';
 import { useMarketingSync } from './useMarketingSync.js';
@@ -8495,6 +8496,7 @@ function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, textSize, set
         </div>
       </div>
       <div className="flex items-center gap-2 shrink-0">
+        <SyncStatusBadge />
         <ActivityBell />
         <BalanceBar />
         <button

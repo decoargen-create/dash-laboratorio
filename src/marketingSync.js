@@ -293,19 +293,23 @@ export async function pushProducto(producto) {
   if (!supabase) throw new Error('Supabase no configurado');
   const user = await getCurrentUser();
   if (!user) throw new Error('No hay user logueado');
-  // ANTI-WIPE: chequear regresión de tamaño contra cloud actual.
+  // ANTI-WIPE + LWW: chequear regresión contra cloud actual, salvo que lo
+  // local sea más nuevo (en cuyo caso es la verdad y se pushea igual).
   const stripped = stripIdeas(producto);
   const localSize = JSON.stringify(stripped).length;
+  const localTs = Date.parse(stripped.updated_at || stripped.updatedAt || 0) || 0;
   try {
     const { data: cloudCurrent } = await supabase
       .from('marketing_productos')
-      .select('data')
+      .select('data, updated_at')
       .eq('user_id', user.id)
       .eq('id', String(producto.id))
       .maybeSingle();
     const cloudSize = cloudCurrent?.data ? JSON.stringify(cloudCurrent.data).length : 0;
-    if (cloudSize > 500 && localSize < cloudSize * 0.5) {
-      console.error(`[sync] 🔴 ANTI-WIPE: skip push de producto ${producto.id} (${producto.nombre}) por regresión: local ${localSize}B vs cloud ${cloudSize}B`);
+    const cloudTs = Date.parse(cloudCurrent?.data?.updated_at || cloudCurrent?.data?.updatedAt || cloudCurrent?.updated_at || 0) || 0;
+    const localEsMasNuevo = localTs > 0 && localTs > cloudTs;
+    if (!localEsMasNuevo && cloudSize > 500 && localSize < cloudSize * 0.5) {
+      console.error(`[sync] 🔴 ANTI-WIPE: skip push de producto ${producto.id} (${producto.nombre}) por regresión: local ${localSize}B vs cloud ${cloudSize}B (local no es más nuevo)`);
       return;
     }
   } catch (err) {
@@ -317,6 +321,7 @@ export async function pushProducto(producto) {
       id: String(producto.id),
       user_id: user.id,
       data: stripped,
+      updated_at: stripped.updated_at || stripped.updatedAt || new Date().toISOString(),
     }, { onConflict: 'user_id,id' });
   if (error) throw new Error(`Push producto: ${error.message}`);
 }
@@ -349,15 +354,21 @@ export async function pushAllProductos(productos) {
   // sparse. La data del cloud queda intacta hasta que el smart-merge en el
   // próximo pull la traiga de vuelta a local.
   let cloudSizes = new Map();
+  let cloudUpdatedAt = new Map();
   try {
     const { data: cloudCurrent } = await supabase
       .from('marketing_productos')
-      .select('id, data')
+      .select('id, data, updated_at')
       .eq('user_id', user.id)
       .in('id', productos.map(p => String(p.id)));
     for (const row of cloudCurrent || []) {
       const size = JSON.stringify(row.data || {}).length;
       cloudSizes.set(String(row.id), size);
+      // Para LWW comparamos contra el timestamp del propio producto (data),
+      // no el de la columna — así una device que pushea un producto recién
+      // editado siempre gana sobre uno viejo, sin importar el tamaño.
+      const ts = Date.parse(row.data?.updated_at || row.data?.updatedAt || row.updated_at || 0) || 0;
+      cloudUpdatedAt.set(String(row.id), ts);
     }
   } catch (err) {
     console.warn('[sync] pre-push cloud check falló — pusheo sin guard de regresión:', err.message);
@@ -369,10 +380,17 @@ export async function pushAllProductos(productos) {
     const stripped = stripIdeas(p);
     const localSize = JSON.stringify(stripped).length;
     const cloudSize = cloudSizes.get(String(p.id)) || 0;
-    // Heurística: cloud tiene data sustancial (>500B) Y local es menos de
-    // la mitad → regresión sospechosa, skipear.
-    if (cloudSize > 500 && localSize < cloudSize * 0.5) {
-      skipped.push({ id: p.id, nombre: p.nombre, localSize, cloudSize });
+    const localTs = Date.parse(stripped.updated_at || stripped.updatedAt || 0) || 0;
+    const cloudTs = cloudUpdatedAt.get(String(p.id)) || 0;
+    // LAST-WRITE-WINS: si lo local es más nuevo que el cloud, es la verdad —
+    // lo pusheamos aunque haya achicado de tamaño (ej. regen que limpió docs,
+    // un producto al que le borraron competidores). El guard anti-wipe SOLO
+    // bloquea cuando NO podemos afirmar que lo local es más nuevo (timestamps
+    // iguales/ausentes) y además hay una regresión grande de tamaño — el caso
+    // clásico de un localStorage sparse pisando un cloud lleno.
+    const localEsMasNuevo = localTs > 0 && localTs > cloudTs;
+    if (!localEsMasNuevo && cloudSize > 500 && localSize < cloudSize * 0.5) {
+      skipped.push({ id: p.id, nombre: p.nombre, localSize, cloudSize, localTs, cloudTs });
     } else {
       safe.push(stripped);
     }
@@ -394,6 +412,10 @@ export async function pushAllProductos(productos) {
     id: String(p.id),
     user_id: user.id,
     data: p,
+    // Seteamos updated_at explícito: `default now()` solo aplica en INSERT, no
+    // en UPDATE, así que sin esto la columna quedaba vieja en cada edición y
+    // rompía el orden del pull (order by updated_at) y el LWW.
+    updated_at: p.updated_at || p.updatedAt || new Date().toISOString(),
   }));
   const { error } = await supabase
     .from('marketing_productos')

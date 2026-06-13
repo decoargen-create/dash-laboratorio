@@ -22,6 +22,7 @@ import {
 import { supabase, onAuthChange, getCurrentUser } from './supabase.js';
 import { migrateIDBCreativosToCloud, countIDBCreativos } from './galeriaMigration.js';
 import { fetchIdeas } from './cloudData.js';
+import { setSyncStatus } from './syncStatusStore.js';
 
 const KEYS = {
   productos: 'adslab-marketing-productos-v1',
@@ -38,6 +39,12 @@ export function useMarketingSync({ addToast } = {}) {
   const [user, setUser] = useState(null);
   const [status, setStatus] = useState('idle'); // 'idle' | 'pulling' | 'pushing' | 'error' | 'ok'
   const [lastError, setLastError] = useState(null);
+
+  // Espejamos status/lastError al store global para que el SyncStatusBadge
+  // del header (y cualquier otro consumidor) lo muestre sin prop-drilling.
+  useEffect(() => {
+    setSyncStatus({ status, lastError });
+  }, [status, lastError]);
   const debounceTimers = useRef(new Map());
   // Counter de retries por key para deferred pushes (cuando pull aún no
   // completó). Sin esto, una pull que nunca termina causa loop infinito.

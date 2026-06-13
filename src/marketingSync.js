@@ -111,10 +111,38 @@ export async function pullMarketingFromCloud() {
         merged[k] = localP[k];
       }
     }
-    // Arrays: si cloud está vacío/null pero local tiene cosas, preservar.
-    // (cubre el caso donde cloud tiene competidores: [] vs local con datos)
-    if ((!merged.competidores || merged.competidores.length === 0) && localP.competidores?.length) {
-      merged.competidores = localP.competidores;
+    // COMPETIDORES — union por id con LWW a nivel producto.
+    //
+    // Antes "cloud ganaba wholesale": si el pull traía un cloud sin un
+    // competidor que SÍ estaba en local (recién agregado/scrapeado y aún sin
+    // pushear), ese competidor se perdía. Síntoma reportado: "scrapeo un
+    // competidor y se me cae el otro" — el scrape dispara un pull y el cloud
+    // viejo pisa la lista local.
+    //
+    // Regla:
+    //   - localTs >  cloudTs → local es más nuevo: su versión de cada
+    //     competidor manda (ej. ads recién scrapeados), y sumamos los que el
+    //     cloud tenga y local no (agregados desde otra PC).
+    //   - localTs == cloudTs → empate: el cloud manda en los compartidos, pero
+    //     NO perdemos los competidores que existen solo en local.
+    //   - localTs <  cloudTs → el cloud es estrictamente más nuevo (puede
+    //     incluir un borrado hecho en otra PC) → confiamos en el cloud y NO
+    //     resucitamos competidores locales.
+    {
+      const localTs = Date.parse(localP.updated_at || localP.updatedAt || 0) || 0;
+      const cloudTs = Date.parse(slim.updated_at || slim.updatedAt || row.updated_at || 0) || 0;
+      const cloudComps = Array.isArray(merged.competidores) ? merged.competidores : [];
+      const localComps = Array.isArray(localP.competidores) ? localP.competidores : [];
+      if (cloudComps.length === 0 && localComps.length) {
+        merged.competidores = localComps;
+      } else if (localComps.length && localTs > cloudTs) {
+        const localIds = new Set(localComps.map(c => String(c.id)));
+        merged.competidores = [...localComps, ...cloudComps.filter(c => !localIds.has(String(c.id)))];
+      } else if (localComps.length && localTs === cloudTs) {
+        const cloudIds = new Set(cloudComps.map(c => String(c.id)));
+        const soloLocal = localComps.filter(c => !cloudIds.has(String(c.id)));
+        if (soloLocal.length) merged.competidores = [...cloudComps, ...soloLocal];
+      }
     }
     if ((!merged.bandejaIdeas || merged.bandejaIdeas.length === 0) && localP.bandejaIdeas?.length) {
       merged.bandejaIdeas = localP.bandejaIdeas;

@@ -33,12 +33,17 @@ function GeneradorTematico({ producto, addToast }) {
   const [contexto, setContexto] = useState('');
   const [cantidad, setCantidad] = useState(8);
   const [job, setJob] = useState(null);
+  // Latcheamos el último error en estado local: el store limpia su estado a los
+  // 6s, pero el error tiene que quedar VISIBLE hasta que el user reintente o lo
+  // cierre (antes solo salía un toast efímero y "desaparecía rápido").
+  const [lastError, setLastError] = useState(null);
 
   // Solo reflejamos la corrida si es de ESTE producto Y es temática (tiene
   // contextoTematico) — para no pisarnos con el Generador rápido de la Bandeja.
   useEffect(() => subscribeGenerador(s => {
     const mine = s && String(s.productoId) === String(producto?.id) && !!s.contextoTematico;
     setJob(mine ? s : null);
+    if (mine && s.status === 'error' && s.error) setLastError(s.error);
   }), [producto?.id]);
 
   const running = job?.status === 'running';
@@ -48,6 +53,7 @@ function GeneradorTematico({ producto, addToast }) {
   const pct = cantidadActiva > 0 ? Math.min(100, Math.round((liveIdeas.length / cantidadActiva) * 100)) : 0;
 
   const generar = () => {
+    setLastError(null);
     const tema = contexto.trim();
     if (!tema) {
       addToast?.({ type: 'info', message: 'Escribí un contexto temático (ej: "adaptado al Mundial").' });
@@ -171,6 +177,27 @@ function GeneradorTematico({ producto, addToast }) {
               <Inbox size={11} /> Las ideas van a la Bandeja — podés cambiar de sección, sigue en segundo plano.
             </span>
           </div>
+        </div>
+      )}
+
+      {/* Error persistente — NO se va solo (antes era un toast efímero que
+          "desaparecía rápido" y no se podía leer). Queda hasta reintentar. */}
+      {lastError && !running && (
+        <div className="mt-3 px-3 py-2.5 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50">
+          <div className="flex items-start gap-2">
+            <AlertTriangle size={14} className="text-red-500 shrink-0 mt-0.5" />
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-bold text-red-700 dark:text-red-300">No se pudieron generar las ideas</p>
+              <p className="text-[11px] text-red-600 dark:text-red-400 mt-0.5 break-words font-mono">{String(lastError)}</p>
+            </div>
+            <button onClick={() => setLastError(null)} className="text-red-400 hover:text-red-600 shrink-0" title="Cerrar">
+              <X size={13} />
+            </button>
+          </div>
+          <button onClick={generar}
+            className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold text-white bg-red-600 hover:bg-red-700 rounded-md transition">
+            <Sparkles size={11} /> Reintentar
+          </button>
         </div>
       )}
     </div>

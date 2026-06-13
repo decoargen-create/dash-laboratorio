@@ -367,8 +367,19 @@ function respondJSON(res, status, payload) {
 }
 
 // Serializamos el contexto en un string estructurado y legible para Claude.
-function buildContext({ producto, competidoresAnalisis, allCompAds, ideasExistentes, propiosAds, targetCount }) {
+function buildContext({ producto, competidoresAnalisis, allCompAds, ideasExistentes, propiosAds, targetCount, contextoTematico }) {
   const parts = [];
+
+  // Contexto temático libre que pidió el user (ej: "adaptado al Mundial",
+  // "edición navideña", "Día de la Madre"). Va PRIMERO y bien fuerte para que
+  // TODAS las ideas lo respeten — es el pedido explícito del usuario y pesa
+  // más que cualquier default del system prompt.
+  const tema = String(contextoTematico || '').trim();
+  if (tema) {
+    parts.push('## 🎯 CONTEXTO TEMÁTICO — OBLIGATORIO EN TODAS LAS IDEAS');
+    parts.push(`El user pidió explícitamente que TODAS las ideas se enmarquen en este contexto/temática:\n\n"${tema}"\n`);
+    parts.push('Cada idea (hook, copy, escenario narrativo y especialmente la descripción visual / prompt de imagen) debe estar claramente adaptada a esta temática. Si la temática es un evento (ej. el Mundial, Navidad, Día de la Madre), integralo de forma natural y vendedora — no forzado, pero presente y reconocible en TODAS las piezas. Mantené igual el ángulo de direct-response y los beneficios reales del producto; la temática es la AMBIENTACIÓN, no reemplaza la estrategia.\n');
+  }
 
   parts.push('## PRODUCTO PROPIO');
   parts.push(`Nombre: ${producto?.nombre || '(sin nombre)'}`);
@@ -576,7 +587,7 @@ function buildContext({ producto, competidoresAnalisis, allCompAds, ideasExisten
   }
 
   parts.push('\n## INSTRUCCIÓN');
-  parts.push(`Generá ${targetCount || 12} ideas nuevas y enviá el array completo con la tool submit_ideas. Respetá el mix de tipos y de formato del system prompt.`);
+  parts.push(`Generá ${targetCount || 12} ideas nuevas y enviá el array completo con la tool submit_ideas. Respetá el mix de tipos y de formato del system prompt.${tema ? ` RECORDÁ: las ${targetCount || 12} ideas deben estar ambientadas en la temática "${tema}" — sin excepción.` : ''}`);
 
   return parts.join('\n');
 }
@@ -704,6 +715,7 @@ export default async function handler(req, res) {
     propiosAds = [],
     targetCount = 50,
     formatoMix = { static: 0.6, video: 0.4 },
+    contextoTematico = '',
   } = body || {};
 
   if (!producto || !producto.nombre) {
@@ -723,7 +735,7 @@ export default async function handler(req, res) {
 
   const client = new Anthropic({ apiKey: anthropicKey });
   const hasPropios = Array.isArray(propiosAds) && propiosAds.length > 0;
-  const userContent = buildContext({ producto, competidoresAnalisis, allCompAds, ideasExistentes, propiosAds, targetCount: clampedTarget });
+  const userContent = buildContext({ producto, competidoresAnalisis, allCompAds, ideasExistentes, propiosAds, targetCount: clampedTarget, contextoTematico: String(contextoTematico || '').slice(0, 600) });
   const systemPrompt = buildSystemPrompt({
     hasPropios,
     targetCount: clampedTarget,

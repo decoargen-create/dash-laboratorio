@@ -927,10 +927,17 @@ async function callGptImage2Edit(params) {
       throw new Error(`crear-creativo-referencial sin budget de tiempo (${Math.round(elapsed/1000)}s). Probá con menos ads o quality medium.`);
     }
     const form = buildEditForm({ ...params, aggressiveSanitization });
-    // AbortController por call individual — si OpenAI se cuelga > 220s
-    // matamos esa request y dejamos margen para el handler cleanup.
+    // AbortController por call individual. El abort tiene que ser BUDGET-AWARE:
+    // PER_CALL_TIMEOUT_MS es el techo, pero el preámbulo (fetchImage + vision +
+    // plan con Claude) ya comió parte del budget del handler. Si dejáramos el
+    // techo fijo, el fetch podría correr hasta pasarse de los 300s y Vercel
+    // mata la function MID-FETCH sin devolver respuesta → el cliente queda
+    // colgado para siempre (bug de la barra en 0%). Recortamos para abortar
+    // ~8s antes de agotar el budget del handler y poder devolver error limpio.
+    const remainingBudget = HANDLER_TIMEOUT_MS - (Date.now() - budgetStartedAt);
+    const callTimeoutMs = Math.max(10000, Math.min(PER_CALL_TIMEOUT_MS, remainingBudget - 8000));
     const controller = new AbortController();
-    const callTimeout = setTimeout(() => controller.abort(), PER_CALL_TIMEOUT_MS);
+    const callTimeout = setTimeout(() => controller.abort(), callTimeoutMs);
     let resp;
     try {
       resp = await fetch('https://api.openai.com/v1/images/edits', {
@@ -942,7 +949,7 @@ async function callGptImage2Edit(params) {
     } catch (err) {
       clearTimeout(callTimeout);
       if (err.name === 'AbortError') {
-        throw new Error(`OpenAI tardó más de ${PER_CALL_TIMEOUT_MS/1000}s en responder. Cancelado.`);
+        throw new Error(`OpenAI tardó más de ${Math.round(callTimeoutMs/1000)}s en responder. Cancelado para no agotar el budget del handler.`);
       }
       throw err;
     }

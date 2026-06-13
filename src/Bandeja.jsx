@@ -1154,43 +1154,60 @@ function IdeaImageGenerator({ idea, addToast }) {
         const { data: { session } } = await supabase.auth.getSession();
         authToken = session?.access_token || '';
       } catch {}
-      const resp = await fetch('/api/marketing/crear-imagen-desde-idea', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
-        },
-        body: JSON.stringify({
-          idea: {
-            id: idea.id,
-            hook: idea.hook,
-            titulo: idea.titulo,
-            angulo: idea.angulo,
-            painPoint: idea.painPoint,
-            escenarioNarrativo: idea.escenarioNarrativo,
-            descripcionImagen: idea.descripcionImagen,
-            estiloVisual: idea.estiloVisual,
-            publicoSugerido: idea.publicoSugerido,
-            creenciaApalancada: idea.creenciaApalancada,
-            textoEnImagen: idea.textoEnImagen,
-            formato: idea.formato,
+      // Timeout de cliente. El endpoint tiene maxDuration 300s; sin abort, un
+      // fetch que se cuelga (function muerta / proxy reteniendo la conexión)
+      // deja la generación zombie para siempre. Abortamos a los 330s para que
+      // la promesa RECHACE y la idea se marque como fallida en vez de colgar.
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), 330000);
+      let data;
+      try {
+        const resp = await fetch('/api/marketing/crear-imagen-desde-idea', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
           },
-          producto: {
-            id: producto.id,  // CRÍTICO — sin esto el cloud save skipea
-            nombre: producto.nombre,
-            descripcion: producto.descripcion,
-            research: producto.docs?.research,
-            formato: producto.formato || '',
-            ofertasReales: producto.ofertasReales || '',
-            offerBrief: producto.ofertasReales || producto.docs?.offerBrief || '',
-          },
-          productoImagen: prodImg,
-          accentColor: getAccentColor(producto.id, producto) || '',
-          n, size, quality,
-        }),
-      });
-      const data = await parseJsonOrThrow(resp, 'crear-imagen-desde-idea');
-      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+          body: JSON.stringify({
+            idea: {
+              id: idea.id,
+              hook: idea.hook,
+              titulo: idea.titulo,
+              angulo: idea.angulo,
+              painPoint: idea.painPoint,
+              escenarioNarrativo: idea.escenarioNarrativo,
+              descripcionImagen: idea.descripcionImagen,
+              estiloVisual: idea.estiloVisual,
+              publicoSugerido: idea.publicoSugerido,
+              creenciaApalancada: idea.creenciaApalancada,
+              textoEnImagen: idea.textoEnImagen,
+              formato: idea.formato,
+            },
+            producto: {
+              id: producto.id,  // CRÍTICO — sin esto el cloud save skipea
+              nombre: producto.nombre,
+              descripcion: producto.descripcion,
+              research: producto.docs?.research,
+              formato: producto.formato || '',
+              ofertasReales: producto.ofertasReales || '',
+              offerBrief: producto.ofertasReales || producto.docs?.offerBrief || '',
+            },
+            productoImagen: prodImg,
+            accentColor: getAccentColor(producto.id, producto) || '',
+            n, size, quality,
+          }),
+          signal: ac.signal,
+        });
+        data = await parseJsonOrThrow(resp, 'crear-imagen-desde-idea');
+        if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      } catch (err) {
+        if (err?.name === 'AbortError') {
+          throw new Error('La generación tardó más de 5 min y se canceló (timeout). Reintentá.');
+        }
+        throw err;
+      } finally {
+        clearTimeout(timer);
+      }
       const costo = logCostsFromResponse(data, `crear-imagen-desde-idea · ${idea.hook?.slice(0, 40) || 'idea'}`);
 
       // Si el backend ya guardó al cloud (cloudCreativos), solo refrescamos

@@ -22,6 +22,7 @@ import {
 import { supabase, onAuthChange, getCurrentUser } from './supabase.js';
 import { migrateIDBCreativosToCloud, countIDBCreativos } from './galeriaMigration.js';
 import { fetchIdeas } from './cloudData.js';
+import { setSyncStatus } from './syncStatusStore.js';
 
 const KEYS = {
   productos: 'adslab-marketing-productos-v1',
@@ -38,6 +39,12 @@ export function useMarketingSync({ addToast } = {}) {
   const [user, setUser] = useState(null);
   const [status, setStatus] = useState('idle'); // 'idle' | 'pulling' | 'pushing' | 'error' | 'ok'
   const [lastError, setLastError] = useState(null);
+
+  // Espejamos status/lastError al store global para que el SyncStatusBadge
+  // del header (y cualquier otro consumidor) lo muestre sin prop-drilling.
+  useEffect(() => {
+    setSyncStatus({ status, lastError });
+  }, [status, lastError]);
   const debounceTimers = useRef(new Map());
   // Counter de retries por key para deferred pushes (cuando pull aún no
   // completó). Sin esto, una pull que nunca termina causa loop infinito.
@@ -136,6 +143,16 @@ export function useMarketingSync({ addToast } = {}) {
       mountedRef.current = false;
       unsubscribe();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 1c. SYNC MANUAL — el user puede forzar un pull desde el badge del header
+  // (caso típico: "entré desde otra PC y no veo los cambios todavía"). Reusa
+  // runPull, que ya tiene mutex + deferral si hay pushes pendientes.
+  useEffect(() => {
+    const onForce = () => runPull(mountedRefShared.current);
+    window.addEventListener('viora:force-sync', onForce);
+    return () => window.removeEventListener('viora:force-sync', onForce);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

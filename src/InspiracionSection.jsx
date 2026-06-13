@@ -1564,23 +1564,40 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         const { data: { session } } = await supabase.auth.getSession();
         authToken = session?.access_token || '';
       } catch {}
-      const resp = await fetch('/api/marketing/crear-creativo-referencial', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
-        },
-        body: JSON.stringify({
-          ...baseBody,
-          n: 1,
-          nPlan: nVar,
-          variationStartIndex,
-          skeletonCached: planCached || null,
-        }),
-      });
-      const data = await parseJsonOrThrow(resp, 'crear-creativo-referencial');
-      if (!resp.ok) throw new Error(stringifyApiError(data.error) || `HTTP ${resp.status}`);
-      return data;
+      // Timeout de cliente. El endpoint tiene maxDuration 300s server-side; si
+      // la function muere o el proxy retiene la conexión, el fetch puede colgar
+      // para SIEMPRE y la barra de progreso queda en 0% sin error ni estado
+      // terminal. Abortamos a los 330s (300 + margen) para que la promesa
+      // RECHACE y el ad se marque como fallido en vez de quedar zombie.
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), 330000);
+      try {
+        const resp = await fetch('/api/marketing/crear-creativo-referencial', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
+          },
+          body: JSON.stringify({
+            ...baseBody,
+            n: 1,
+            nPlan: nVar,
+            variationStartIndex,
+            skeletonCached: planCached || null,
+          }),
+          signal: ac.signal,
+        });
+        const data = await parseJsonOrThrow(resp, 'crear-creativo-referencial');
+        if (!resp.ok) throw new Error(stringifyApiError(data.error) || `HTTP ${resp.status}`);
+        return data;
+      } catch (err) {
+        if (err?.name === 'AbortError') {
+          throw new Error('La generación tardó más de 5 min y se canceló (timeout). Reintentá ese ad.');
+        }
+        throw err;
+      } finally {
+        clearTimeout(timer);
+      }
     };
 
     // Helper: persiste UNA imagen del response a galería.

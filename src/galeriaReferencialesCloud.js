@@ -179,6 +179,29 @@ export async function getReferencialesByProductoCloud(productoId, opts = {}) {
   return (data || []).map(rowToRef);
 }
 
+// Lista TODOS los winners del usuario, de TODOS sus productos (galería global
+// de winners). Cada winner trae su imageUrl + skeleton + prompt, así se puede
+// replicar para otro producto sin re-extraer el esqueleto con Vision.
+export async function listAllWinnersCloud() {
+  if (!supabase) return [];
+  const user = await getCurrentUser();
+  if (!user) return [];
+
+  const { data, error } = await supabase
+    .from('marketing_creativos')
+    .select('*')
+    .eq('user_id', user.id)
+    .eq('winner', true)
+    .eq('archivado', false)
+    .order('winner_at', { ascending: false, nullsFirst: false })
+    .order('created_at', { ascending: false });
+  if (error) {
+    console.warn('[winners cloud] query error:', error.message);
+    return [];
+  }
+  return (data || []).map(rowToRef);
+}
+
 export async function countReferencialesByProductoCloud(productoId) {
   if (!supabase) return { total: 0, active: 0, archived: 0, downloaded: 0, winners: 0 };
   const user = await getCurrentUser();

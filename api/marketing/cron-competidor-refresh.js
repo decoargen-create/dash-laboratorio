@@ -27,6 +27,7 @@ import { upsertAdsToIndex } from './_ads-index.js';
 
 const DAILY_COST_CAP_USD = 25; // cap de gasto diario hard-coded
 const PER_COMP_LIMIT = 500;     // ads por competidor en cada refresh
+const COMP_CONCURRENCY = 3;     // scrapes simultáneos por producto (Apify token tier limit)
 
 function respondJSON(res, status, payload) {
   res.statusCode = status;
@@ -96,115 +97,136 @@ export default async function handler(req, res) {
     const optedIn = competidores.filter(c => c.autoRefresh === true);
     if (optedIn.length === 0) continue;
 
-    for (const comp of optedIn) {
-      if (estimatedCostUSD >= DAILY_COST_CAP_USD) break;
+    // Scrape de un competidor — extraído a closure para Promise.all.
+    // Devuelve { compId, patch?, costAdded, status }. NO toca la DB del producto:
+    // los patches se mergean al final del producto en un único write,
+    // evitando race condition entre scrapes paralelos del mismo producto.
+    const scrapeOne = async (comp) => {
+      // Skip si último scrape fue < 20h atrás — no quemamos gasto.
+      const lastCheck = comp.lastAdsCheck ? Date.parse(comp.lastAdsCheck) : 0;
+      if (lastCheck && (Date.now() - lastCheck) < 20 * 60 * 60 * 1000) {
+        return { compId: comp.id, status: 'skipped', reason: 'fresh', costAdded: 0 };
+      }
+
+      // Armar el startUrl: priorizar adLibraryUrl > fbPageUrl.
+      const directUrl = comp.adLibraryUrl || comp.fbPageUrl;
+      let startUrl;
+      if (directUrl) {
+        startUrl = directUrl.startsWith('http') ? directUrl : `https://www.facebook.com/${directUrl}`;
+      } else if (comp.landingUrl) {
+        const host = (comp.landingUrl || '').replace(/^https?:\/\//, '').split('/')[0];
+        startUrl = `https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=ALL&is_targeted_country=false&q=${encodeURIComponent(host)}&search_type=keyword_unordered&media_type=all&sort_data[mode]=total_impressions&sort_data[direction]=desc`;
+      } else {
+        return { compId: comp.id, status: 'skipped', reason: 'no-url', costAdded: 0 };
+      }
+
+      const input = {
+        startUrls: [{ url: startUrl }],
+        maxItems: PER_COMP_LIMIT,
+        resultsLimit: PER_COMP_LIMIT,
+        maxResults: PER_COMP_LIMIT,
+        activeStatus: 'active',
+        isDetailsPerAd: true,
+        includeAboutPage: false,
+      };
+
+      const result = await runActorAsync(actorId, input, apifyToken, { maxWaitSec: 240, pollIntervalSec: 8 });
+      const items = result.items || [];
+      if (!Array.isArray(items) || items.length === 0) {
+        return { compId: comp.id, status: 'skipped', reason: 'no-items', costAdded: 0 };
+      }
+      const normalized = items.map(normalizeAd);
+      const byPage = new Map();
+      for (const ad of normalized) {
+        if (!byPage.has(ad.pageId)) byPage.set(ad.pageId, []);
+        byPage.get(ad.pageId).push(ad);
+      }
+      const scored = normalized.map(ad => {
+        const sameGroup = byPage.get(ad.pageId) || [];
+        const { _raw, ...clean } = ad;
+        const scoring = scoreAd(ad, sameGroup);
+        return { ...clean, ...scoring };
+      });
+      const winners = scored.filter(a => a.isWinner).length;
+      const costAdded = items.length * 0.0058;
+
+      // Subir el JSON al bucket.
+      const path = `${row.user_id}/competitor-ads/${String(row.id)}-${String(comp.id)}.json`;
+      const payload = {
+        ads: scored,
+        total: scored.length,
+        winners,
+        lastAdsCheck: new Date().toISOString(),
+        ts: Date.now(),
+        source: 'cron-refresh',
+      };
+      const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+      await supabase.storage.from('creativos').upload(path, blob, {
+        contentType: 'application/json', upsert: true,
+      });
+
+      // Upsert al index server-side (best-effort).
       try {
-        // Skip si último scrape fue < 20h atrás — no quemamos gasto.
-        const lastCheck = comp.lastAdsCheck ? Date.parse(comp.lastAdsCheck) : 0;
-        if (lastCheck && (Date.now() - lastCheck) < 20 * 60 * 60 * 1000) {
-          totalSkipped++;
+        await upsertAdsToIndex({
+          userId: row.user_id, productoId: row.id, competidorId: comp.id, ads: scored,
+        });
+      } catch (idxErr) {
+        console.warn('[cron] upsertAdsToIndex falló:', idxErr.message);
+      }
+
+      return {
+        compId: comp.id,
+        status: 'ok',
+        costAdded,
+        patch: {
+          adsTotal: scored.length,
+          winnersCount: winners,
+          lastAdsCheck: new Date().toISOString(),
+          lastAutoRefreshAt: new Date().toISOString(),
+        },
+      };
+    };
+
+    // Paralelizar con concurrencia. Antes era sequential: 4 comps × 120s = 480s
+    // que superaba maxDuration:300. Con concurrency 3, mismo total ~120-240s.
+    // Si el cap diario se hit en un batch previo, salimos antes del siguiente.
+    const patchesByCompId = new Map();
+    for (let i = 0; i < optedIn.length; i += COMP_CONCURRENCY) {
+      if (estimatedCostUSD >= DAILY_COST_CAP_USD) break;
+      const batch = optedIn.slice(i, i + COMP_CONCURRENCY);
+      const results = await Promise.allSettled(batch.map(scrapeOne));
+      for (let j = 0; j < results.length; j++) {
+        const r = results[j];
+        const comp = batch[j];
+        if (r.status === 'rejected') {
+          totalErrors++;
+          errors.push({ productoId: row.id, competidorId: comp.id, error: r.reason?.message?.slice(0, 200) || 'unknown' });
           continue;
         }
-
-        // Armar el startUrl: priorizar adLibraryUrl > fbPageUrl.
-        const directUrl = comp.adLibraryUrl || comp.fbPageUrl;
-        let startUrl;
-        if (directUrl) {
-          startUrl = directUrl.startsWith('http') ? directUrl : `https://www.facebook.com/${directUrl}`;
-        } else if (comp.landingUrl) {
-          // Para keyword usamos el dominio de la landing.
-          const host = (comp.landingUrl || '').replace(/^https?:\/\//, '').split('/')[0];
-          startUrl = `https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=ALL&is_targeted_country=false&q=${encodeURIComponent(host)}&search_type=keyword_unordered&media_type=all&sort_data[mode]=total_impressions&sort_data[direction]=desc`;
+        const v = r.value;
+        estimatedCostUSD += v.costAdded || 0;
+        if (v.status === 'ok') {
+          totalRefreshed++;
+          if (v.patch) patchesByCompId.set(v.compId, v.patch);
         } else {
           totalSkipped++;
-          continue; // sin url ni keyword no podemos scrapear
         }
-
-        const input = {
-          startUrls: [{ url: startUrl }],
-          maxItems: PER_COMP_LIMIT,
-          resultsLimit: PER_COMP_LIMIT,
-          maxResults: PER_COMP_LIMIT,
-          activeStatus: 'active',
-          isDetailsPerAd: true,
-          includeAboutPage: false,
-        };
-
-        const result = await runActorAsync(actorId, input, apifyToken, { maxWaitSec: 240, pollIntervalSec: 8 });
-        const items = result.items || [];
-        if (!Array.isArray(items) || items.length === 0) {
-          totalSkipped++;
-          continue;
-        }
-        // Normalizar + score.
-        const normalized = items.map(normalizeAd);
-        const byPage = new Map();
-        for (const ad of normalized) {
-          if (!byPage.has(ad.pageId)) byPage.set(ad.pageId, []);
-          byPage.get(ad.pageId).push(ad);
-        }
-        const scored = normalized.map(ad => {
-          const sameGroup = byPage.get(ad.pageId) || [];
-          const { _raw, ...clean } = ad;
-          const scoring = scoreAd(ad, sameGroup);
-          return { ...clean, ...scoring };
-        });
-        const winners = scored.filter(a => a.isWinner).length;
-        estimatedCostUSD += items.length * 0.0058;
-
-        // Subir el JSON al bucket.
-        const path = `${row.user_id}/competitor-ads/${String(row.id)}-${String(comp.id)}.json`;
-        const payload = {
-          ads: scored,
-          total: scored.length,
-          winners,
-          lastAdsCheck: new Date().toISOString(),
-          ts: Date.now(),
-          source: 'cron-refresh',
-        };
-        const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
-        await supabase.storage.from('creativos').upload(path, blob, {
-          contentType: 'application/json', upsert: true,
-        });
-
-        // También upsert al index server-side para search rápido.
-        // Best effort — si falla, los ads siguen en el bucket.
-        try {
-          await upsertAdsToIndex({
-            userId: row.user_id,
-            productoId: row.id,
-            competidorId: comp.id,
-            ads: scored,
-          });
-        } catch (idxErr) {
-          console.warn('[cron] upsertAdsToIndex falló:', idxErr.message);
-        }
-
-        // Actualizar la metadata del competidor en el row del producto.
-        const updatedCompetidores = competidores.map(c => {
-          if (c.id !== comp.id) return c;
-          return {
-            ...c,
-            adsTotal: scored.length,
-            winnersCount: winners,
-            lastAdsCheck: new Date().toISOString(),
-            lastAutoRefreshAt: new Date().toISOString(),
-          };
-        });
-        await supabase
-          .from('marketing_productos')
-          .update({
-            data: { ...data, competidores: updatedCompetidores },
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', row.id)
-          .eq('user_id', row.user_id);
-
-        totalRefreshed++;
-      } catch (err) {
-        totalErrors++;
-        errors.push({ productoId: row.id, competidorId: comp.id, error: err.message?.slice(0, 200) });
       }
+    }
+
+    // Único write por producto: aplicar todos los patches a la vez.
+    if (patchesByCompId.size > 0) {
+      const updatedCompetidores = competidores.map(c =>
+        patchesByCompId.has(c.id) ? { ...c, ...patchesByCompId.get(c.id) } : c
+      );
+      await supabase
+        .from('marketing_productos')
+        .update({
+          data: { ...data, competidores: updatedCompetidores },
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', row.id)
+        .eq('user_id', row.user_id);
     }
   }
 

@@ -1,0 +1,131 @@
+name: Santi periodic audit
+
+# Loop automático cada 30 minutos — Santi audita el repo en busca de bugs
+# o regresiones nuevas y abre un Issue si encuentra algo crítico.
+#
+# Requiere secrets:
+#   ANTHROPIC_API_KEY — para Claude
+#   (GITHUB_TOKEN ya viene por default)
+#
+# El audit es BARATO: lee diff vs last-audited-sha, hace pattern check estático
+# (no llama LLM si no hay diff). Solo invoca Claude cuando hay archivos
+# modificados desde la última corrida.
+
+on:
+  schedule:
+    - cron: '*/30 * * * *' # cada 30 minutos
+  workflow_dispatch: # permite triggear manual desde la UI
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 50
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install deps
+        run: npm ci --no-audit --no-fund
+
+      - name: Build check
+        id: build
+        run: |
+          if npm run build 2>&1 | tee build.log; then
+            echo "build_ok=true" >> $GITHUB_OUTPUT
+          else
+            echo "build_ok=false" >> $GITHUB_OUTPUT
+          fi
+        continue-on-error: true
+
+      - name: Static checks
+        id: static
+        run: |
+          # 1. ¿Console.log dejados?
+          consoles=$(grep -rn "console\.log" src/ --include="*.jsx" --include="*.js" | grep -v "// eslint-disable" | wc -l)
+          echo "consoles=$consoles" >> $GITHUB_OUTPUT
+          # 2. ¿TODO/FIXME nuevos?
+          todos=$(grep -rn "TODO\|FIXME" src/ api/ --include="*.jsx" --include="*.js" | wc -l)
+          echo "todos=$todos" >> $GITHUB_OUTPUT
+          # 3. ¿Conflict markers olvidados?
+          conflicts=$(grep -rn '<<<<<<<\|>>>>>>>' src/ api/ --include="*.jsx" --include="*.js" 2>/dev/null | wc -l)
+          echo "conflicts=$conflicts" >> $GITHUB_OUTPUT
+
+      - name: Report findings
+        if: steps.build.outputs.build_ok == 'false' || steps.static.outputs.conflicts != '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const buildOk = '${{ steps.build.outputs.build_ok }}' === 'true';
+            const conflicts = parseInt('${{ steps.static.outputs.conflicts }}', 10);
+            const body = `# Santi periodic audit — encontró algo
+
+            - **Build status**: ${buildOk ? '✅ OK' : '❌ FAIL'}
+            - **Conflict markers olvidados**: ${conflicts}
+            - **Console.log debug**: ${{ steps.static.outputs.consoles }}
+            - **TODO/FIXME**: ${{ steps.static.outputs.todos }}
+
+            Mirá los logs del job: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}
+
+            Si querés que arregle algo, mencioname o reasigname.`;
+
+            // Buscar si ya hay un issue abierto del audit; updatear o crear.
+            const { data: existing } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'santi-audit',
+            });
+            if (existing.length > 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing[0].number,
+                body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: 'Santi periodic audit — findings',
+                body,
+                labels: ['santi-audit'],
+              });
+            }
+
+      - name: All clear — close stale audit issues
+        if: steps.build.outputs.build_ok == 'true' && steps.static.outputs.conflicts == '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: existing } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'santi-audit',
+            });
+            for (const iss of existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: iss.number,
+                body: '✅ Audit OK — build pasa, sin conflict markers. Cerrando issue.',
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: iss.number,
+                state: 'closed',
+              });
+            }

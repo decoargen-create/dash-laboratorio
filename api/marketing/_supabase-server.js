@@ -166,6 +166,37 @@ export async function uploadCreativoToBucket(userId, refId, base64, mimeType = '
   return { storagePath: path, imageUrl: publicUrl };
 }
 
+// Genera signed URLs (1h por default) para una lista de storage paths del
+// bucket `creativos`. El bucket es PRIVADO → la public URL guardada en la fila
+// no funciona como <img src>. El frontend (`galeriaReferencialesCloud`) ya
+// firma cuando lee con `createSignedUrls`, pero las respuestas inmediatas
+// de `crear-creativo-referencial` / `crear-imagen-desde-idea` devuelven la
+// public URL directo en `cloudCreativos[].imageUrl` → el render falla hasta
+// que el user refresca y la query vuelve a pasar por la firma. Acá firmamos
+// en el server para que la URL devuelta sea usable de una.
+//
+// Devuelve un Map<storagePath, signedUrl>. Si Storage falla, devuelve Map
+// vacío y los callers caen al public URL como antes.
+export async function createSignedUrlsForCreativos(storagePaths, expiresInSeconds = 3600) {
+  const supabase = getClient();
+  if (!supabase || !Array.isArray(storagePaths) || storagePaths.length === 0) {
+    return new Map();
+  }
+  try {
+    const { data, error } = await supabase.storage
+      .from('creativos')
+      .createSignedUrls(storagePaths, expiresInSeconds);
+    if (error || !Array.isArray(data)) {
+      console.warn('[createSignedUrlsForCreativos] error:', error?.message || 'no data');
+      return new Map();
+    }
+    return new Map(data.map(s => [s.path, s.signedUrl]).filter(([p, u]) => p && u));
+  } catch (err) {
+    console.warn('[createSignedUrlsForCreativos] exception:', err.message);
+    return new Map();
+  }
+}
+
 // Inserta una fila en marketing_creativos. Devuelve el row insertado.
 export async function insertCreativoRow(row) {
   const supabase = getClient();

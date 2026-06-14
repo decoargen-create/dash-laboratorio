@@ -19,7 +19,13 @@ import {
   getUserIdFromAuth,
   uploadCreativoToBucket,
   insertCreativoRow,
+  createSignedUrlsForCreativos,
 } from './_supabase-server.js';
+import {
+  sanitizePromptForSafety,
+  isHighRiskCategory,
+  isSafetyError,
+} from './_safety.js';
 
 const MODEL = 'gpt-image-2';
 const DEFAULT_SIZE = '2048x2048';
@@ -122,29 +128,12 @@ function dedupOfertas(raw) {
   return out.join('\n');
 }
 
-// Sanitiza palabras clínicas trigger del safety filter (igual que el otro endpoint).
-function sanitizePromptForSafety(text) {
-  if (!text) return text;
-  const swaps = [
-    [/\bvaginales?\b/gi, 'íntimo'],
-    [/\bvagina\b/gi, 'zona íntima'],
-    [/\bvulvas?\b/gi, 'zona íntima'],
-    [/\bgenitales?\b/gi, 'íntimo'],
-    [/\bsexuales?\b/gi, 'íntimo'],
-    [/\bmenstruales?\b/gi, 'mensual'],
-    [/\bmenstruaci[óo]n\b/gi, 'ciclo'],
-    [/\bsangrado\b/gi, 'flujo'],
-    [/\binfeccion(es)?\b/gi, 'molestia$1'],
-    [/\bhongos?\b/gi, 'desequilibrio'],
-    [/\bcandidiasis\b/gi, 'desequilibrio'],
-    [/\bvagina(l)?\b/gi, 'intimate$1'],
-    [/\bnaked\b/gi, ''],
-    [/\bnude\b/gi, ''],
-  ];
-  let out = text;
-  for (const [re, rep] of swaps) out = out.replace(re, rep);
-  return out;
-}
+// sanitizePromptForSafety + isHighRiskCategory ahora vienen de ./_safety.js
+// (compartido con crear-creativo-referencial). Antes este archivo tenía un
+// swap set CHICO sin modo agresivo → cuando OpenAI rechazaba por safety
+// filter, el call no se reintentaba y el user veía error en vez de creativo.
+// Ahora: arrancamos en modo agresivo si el producto es high-risk, y reintentamos
+// con agresividad on tras el primer safety reject.
 
 // Construye prompt para UNA variación de la idea.
 function buildPromptForIdeaVariation({ idea, producto, accentColor, aspectRatio, variation }) {
@@ -286,13 +275,17 @@ const PER_CALL_TIMEOUT_MS = 275000;
 // un error limpio en vez de morir mid-fetch (lo que deja al cliente colgado).
 const HANDLER_TIMEOUT_MS = 290000;
 
-async function callGptImage2Edit({ apiKey, prompt, prodImgBuf, prodMime, size, quality, n, budgetStartedAt = Date.now() }) {
+async function callGptImage2Edit({ apiKey, prompt, prodImgBuf, prodMime, size, quality, n, budgetStartedAt = Date.now(), initialAggressive = false }) {
   const RETRY_DELAYS = [15000, 30000];
   let lastErr = null;
+  // aggressiveSanitization se activa tras un safety reject, O desde el inicio
+  // si el producto es high-risk (wellness íntimo, salud femenina, etc.) —
+  // ahorra el primer call que sabemos que va a rebotar.
+  let aggressiveSanitization = initialAggressive;
   for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
     const form = new FormData();
     form.append('model', MODEL);
-    form.append('prompt', sanitizePromptForSafety(prompt));
+    form.append('prompt', sanitizePromptForSafety(prompt, aggressiveSanitization));
     form.append('size', size);
     form.append('quality', quality);
     form.append('n', String(Math.min(10, Math.max(1, n || 1))));
@@ -336,6 +329,20 @@ async function callGptImage2Edit({ apiKey, prompt, prodImgBuf, prodMime, size, q
     const msg = data?.error?.message || `HTTP ${resp.status}`;
     const code = data?.error?.code || data?.error?.type || '';
     const isRateLimit = resp.status === 429 || /rate limit/i.test(msg) || /too many requests/i.test(msg);
+    const isSafetyReject = isSafetyError(msg, code);
+    // Si el reject fue safety y NO estábamos en modo agresivo → retry inmediato
+    // con sanitización extra. Antes el endpoint NO reintentaba en safety reject
+    // → el user veía error directo aunque la sanitización agresiva hubiera
+    // pasado. Replicamos el patrón de crear-creativo-referencial.
+    if (isSafetyReject && !aggressiveSanitization && attempt < RETRY_DELAYS.length) {
+      const elapsedNow = Date.now() - budgetStartedAt;
+      if (elapsedNow + 130000 > HANDLER_TIMEOUT_MS) {
+        throw new Error('OpenAI rechazó por safety filter. Sin budget para retry sanitizado. Probá con OTRA idea (sin claims clínicos fuertes).');
+      }
+      console.warn('Safety reject. Retry con sanitización agresiva.');
+      aggressiveSanitization = true;
+      continue; // sin backoff — el problema es el prompt, no el rate
+    }
     if (isRateLimit && attempt < RETRY_DELAYS.length) {
       // Solo reintentamos si queda budget para el backoff + el próximo call
       // (~130s típico). Sin esto, esperar 30s y arrancar un call de 200s+ nos
@@ -396,6 +403,7 @@ export default async function handler(req, res) {
     let sizeUsed = size;
     let sizeFallback = false;
 
+    const isHighRisk = isHighRiskCategory(producto);
     const runAll = async (useSize) => {
       const results = await Promise.all(prompts.map(p =>
         callGptImage2Edit({
@@ -403,6 +411,7 @@ export default async function handler(req, res) {
           prodImgBuf: prodBuf, prodMime,
           size: useSize, quality, n: 1,
           budgetStartedAt,
+          initialAggressive: isHighRisk,
         })
       ));
       return results.flat();
@@ -474,7 +483,7 @@ export default async function handler(req, res) {
               image_url: imageUrl,
               created_at: new Date(ts + i).toISOString(),
             });
-            return { id: row.id, imageUrl, variantIndex: i, variantStyle };
+            return { id: row.id, imageUrl, storagePath, variantIndex: i, variantStyle };
           } catch (err) {
             console.warn(`[cloud save bandeja] imagen ${i} falló:`, err.message);
             return null;
@@ -486,6 +495,24 @@ export default async function handler(req, res) {
         if (cloudCreativos.length === 0) {
           cloudCreativos = null;
           cloudSaveError = cloudSaveError || 'Todas las subidas fallaron';
+        } else {
+          // PRIVATE BUCKET FIX: uploadCreativoToBucket usa getPublicUrl pero el
+          // bucket es privado → los <img src> dan 400/403. Firmamos cada path
+          // (1h) ANTES de devolver, así el frontend puede renderear sin
+          // refrescar primero (cuando refresca, la query de galería ya firma
+          // de nuevo). Si firmar falla, dejamos la public URL como fallback.
+          try {
+            const paths = cloudCreativos.map(c => c?.storagePath).filter(Boolean);
+            const signedMap = await createSignedUrlsForCreativos(paths, 3600);
+            if (signedMap.size > 0) {
+              cloudCreativos = cloudCreativos.map(c => {
+                const signed = c?.storagePath ? signedMap.get(c.storagePath) : null;
+                return signed ? { ...c, imageUrl: signed } : c;
+              });
+            }
+          } catch (err) {
+            console.warn('[cloud save bandeja] sign URLs falló:', err.message);
+          }
         }
       }
     } catch (err) {

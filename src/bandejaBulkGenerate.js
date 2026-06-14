@@ -23,6 +23,7 @@ import { startExecution, updateExecution, finishExecution } from './executionsSt
 import { saveReferencial } from './galeriaReferenciales.js';
 import { logCostsFromResponse } from './costsStore.js';
 import { playDoneChime, playBulkDoneChime, playErrorTone } from './sounds.js';
+import { updateIdea } from './bandejaStore.js';
 
 // Procesa la respuesta de una idea — si cloud OK no hace nada (el server
 // ya guardó), si no cae a IDB local.
@@ -165,6 +166,18 @@ export async function bulkGenerateFromIdeas({
       .then(async data => {
         const costo = logCostsFromResponse(data, `bulk-bandeja · ${(idea.hook || idea.titulo || '').slice(0, 40)}`);
         const result = await processResponse(data, idea, producto, quality);
+        // Marcar la idea como "usada" — sin esto se queda en la columna
+        // "Pendientes" del kanban aunque ya generaste imágenes desde ella.
+        // El user tenía que moverlas a mano: con 20 ideas era insostenible.
+        try {
+          await updateIdea(idea.id, {
+            estado: 'usada',
+            usadaAt: new Date().toISOString(),
+            creativosGenerados: (idea.creativosGenerados || 0) + (result.saved || 0),
+          });
+        } catch (err) {
+          console.warn(`[bulk] no pude marcar idea ${idea.id} como usada:`, err.message);
+        }
         return { ok: true, idea, cost: costo?.total || 0, ...result };
       })
       .catch(err => {

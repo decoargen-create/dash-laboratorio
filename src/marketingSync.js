@@ -86,9 +86,19 @@ export async function pullMarketingFromCloud() {
   const productosArr = (productos || []).map(row => {
     const cloudP = row.data || {};
     const { creativos, ...slim } = cloudP;
+    // DEFENSIVE SHAPE VALIDATION: data corrupta en cloud (campo `competidores`
+    // que es string en vez de array, etc.) crasheaba la app al render.
+    // Coerce a defaults seguros antes de pasar a la lógica.
+    if (slim.competidores != null && !Array.isArray(slim.competidores)) slim.competidores = [];
+    if (slim.brands != null && !Array.isArray(slim.brands)) slim.brands = [];
+    if (slim.usedAdIds != null && !Array.isArray(slim.usedAdIds)) slim.usedAdIds = [];
+    if (slim.adsHistory != null && !Array.isArray(slim.adsHistory)) slim.adsHistory = [];
+    if (slim.docs != null && typeof slim.docs !== 'object') slim.docs = {};
     if (!slim.resumenEjecutivo && slim.docs?.resumenEjecutivo) {
       slim.resumenEjecutivo = slim.docs.resumenEjecutivo;
     }
+    // Stamp de schema version para future-proof migrations.
+    if (!slim.schemaVersion) slim.schemaVersion = 1;
     const localP = localById.get(String(slim.id));
     if (!localP) return slim;
     // Merge: cloud es base, pero cualquier campo SOLO-LOCAL se preserva.
@@ -346,9 +356,20 @@ export async function pullMarketingFromCloud() {
 // of truth es la tabla marketing_ideas. Si dejamos el inline array, el push
 // constante de producto pisa el cloud con la versión local (race) y la tabla
 // y el array divergen.
+// ADEMÁS strip de competidores[].ads — desde el refactor IDB los ads viven en
+// IndexedDB local + bucket Supabase. Si dejamos el inline array, el push
+// los re-sube al row del producto (defeats el refactor — el row vuelve a
+// medir MB).
 function stripIdeas(producto) {
   if (!producto || typeof producto !== 'object') return producto;
   const { bandejaIdeas, ...rest } = producto;
+  if (Array.isArray(rest.competidores)) {
+    rest.competidores = rest.competidores.map(c => {
+      if (!c || typeof c !== 'object') return c;
+      const { ads: _legacyAds, ...cMeta } = c;
+      return cMeta;
+    });
+  }
   return rest;
 }
 

@@ -39,6 +39,8 @@ import { playDoneChime, playBulkDoneChime, playErrorTone } from './sounds.js';
 import EmptyState from './EmptyState.jsx';
 import { supabase } from './supabase.js';
 import { notifyMarketingChange } from './useMarketingSync.js';
+import { safeSetItem } from './safeStorage.js';
+import { setCompAds, getCompAds } from './competidorAdsIDB.js';
 // Galería ahora vive como tab independiente en el workspace (Arranque),
 // no más como modal acá.
 
@@ -150,8 +152,19 @@ async function parseJsonOrThrow(resp, contexto = 'API') {
     data = JSON.parse(raw);
   } catch {
     // No es JSON — heurísticas para errores conocidos del servidor.
-    if (resp.status === 504 || /timeout/i.test(raw) || /An error occurred with your deployment/i.test(raw)) {
+    // Vercel mata la función al pasar maxDuration y devuelve HTML/texto
+    // genérico. Cubrimos las variantes: "Internal Server Error" (texto
+    // plano), "An error occurred with your deployment" (HTML), 504 timeout,
+    // FUNCTION_INVOCATION_FAILED, etc.
+    const isTimeout = resp.status === 504 || /timeout|FUNCTION_INVOCATION_TIMEOUT|gateway timeout/i.test(raw);
+    const isVercelKill = /An error occurred with your deployment|FUNCTION_INVOCATION_FAILED/i.test(raw)
+                        || /^Internal Server Error\s*$/i.test(raw.trim())
+                        || /^\s*<(!doctype|html)/i.test(raw);
+    if (isTimeout) {
       throw new Error(`${contexto} timeout — la operación tardó más que el límite del servidor. Reintentá con menos ads seleccionados o quality medium.`);
+    }
+    if (isVercelKill) {
+      throw new Error(`${contexto} crasheó en el servidor (Vercel devolvió "Internal Server Error"). Suele ser timeout o memoria. Reintentá con menos ads en paralelo o quality medium; si persiste, revisá los logs en Vercel.`);
     }
     if (resp.status >= 500) {
       throw new Error(`${contexto} error ${resp.status} — el servidor devolvió HTML/texto en vez de JSON. Probá de nuevo en unos segundos.`);
@@ -191,12 +204,15 @@ function loadBrands(productoId) {
 function saveBrands(productoId, brands) {
   if (!productoId) return;
   const key = brandsKey(productoId);
-  try {
-    localStorage.setItem(key, JSON.stringify(brands));
+  // safeSetItem: en Safari private mode setItem tira QuotaExceededError aunque
+  // los datos quepan. Con el try/catch viejo el write silenciosamente fallaba
+  // y los brands no se persistían — el dispatch tampoco se enviaba. Acá
+  // condicionamos el notify al éxito real del write.
+  if (safeSetItem(key, JSON.stringify(brands))) {
     // Notificar al sync hook — sin esto el push al cloud nunca corre y
     // al recargar el pull pisa los cambios con datos viejos.
     notifyMarketingChange(key);
-  } catch {}
+  }
 }
 
 // Props:
@@ -314,7 +330,9 @@ function BulkProgressBar({ state, onClose }) {
 // para Vite/Rollup en builds minificados.
 // =========================================================
 
-function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onScrape, onAdapt, onCrearReferencial, onToggleSelect, onRemove }) {
+function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onScrape, onAdapt, onCrearReferencial, onToggleSelect, onRemove, onClearProgress }) {
+  // onClearProgress se forwardea a BrandAdsGrid (que lo pasa a AdThumb) para
+  // que el user pueda cerrar el overlay de error que ahora queda persistente.
   const isCompetidor = !!brand.isCompetidor;
   return (
     <div className="group/brand bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 hover:border-amber-300 dark:hover:border-amber-700 transition">
@@ -413,6 +431,7 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
           onAdapt={onAdapt}
           onCrearReferencial={onCrearReferencial}
           onToggleSelect={onToggleSelect}
+          onClearProgress={onClearProgress}
         />
       )}
     </div>
@@ -420,7 +439,7 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
 }
 
 
-function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = false, selected = false, selectionIndex = null, used = false, onAdapt, onCrearReferencial, onToggleSelect, progress = null }) {
+function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = false, selected = false, selectionIndex = null, used = false, onAdapt, onCrearReferencial, onToggleSelect, progress = null, onClearProgress = null }) {
   const cdnThumb = ad.imageUrls?.[0];
   const fbUrl = ad.snapshotUrl;
   // Si tenemos el ad cacheado en IndexedDB (sobreviven el TTL de 24h del CDN),
@@ -543,7 +562,19 @@ function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = f
             </>
           )}
           {progress.stage === 'error' && progress.error && (
-            <p className="text-[9px] text-red-200 text-center line-clamp-2">{progress.error}</p>
+            <>
+              <p className="text-[9px] text-red-200 text-center line-clamp-3 px-1">{progress.error}</p>
+              {/* Sin esto el overlay del error queda para siempre tapando el
+                  thumb. El user lo cierra acá o reintenta clickeando el ad. */}
+              {onClearProgress && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onClearProgress(ad.id); }}
+                  className="mt-1 px-2 py-0.5 text-[9px] font-bold text-white bg-red-600 hover:bg-red-700 rounded transition"
+                >
+                  Cerrar
+                </button>
+              )}
+            </>
           )}
         </div>
       )}
@@ -616,14 +647,18 @@ function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = f
 }
 
 
-function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect }) {
+function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect, onClearProgress }) {
   const [showRepeated, setShowRepeated] = useState(false);
-  const [showAllFresh, setShowAllFresh] = useState(false);
-  const [showAllRepeated, setShowAllRepeated] = useState(false);
+  // Paginación: arranca con 30, "ver más" suma de a 60 hasta cap razonable.
+  // ANTES: showAllFresh = true mostraba TODOS los ads (3000+) en DOM →
+  // Chrome se colgaba renderizando esa cantidad de thumbnails.
+  const [freshLimit, setFreshLimit] = useState(30);
+  const [repeatedLimit, setRepeatedLimit] = useState(30);
   const fresh = ads.filter(a => a.isFresh !== false);
   const repeated = ads.filter(a => a.isFresh === false);
-  const FRESH_LIMIT = showAllFresh ? fresh.length : 30;
-  const REPEATED_LIMIT = showAllRepeated ? repeated.length : 30;
+  const FRESH_LIMIT = Math.min(freshLimit, fresh.length);
+  const REPEATED_LIMIT = Math.min(repeatedLimit, repeated.length);
+  const PAGE_STEP = 60;
 
   return (
     <div className="mt-3 space-y-3">
@@ -649,15 +684,26 @@ function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccion
                 onAdapt={onAdapt ? () => onAdapt(ad) : null}
                 onCrearReferencial={onCrearReferencial ? () => onCrearReferencial(ad) : null}
                 onToggleSelect={onToggleSelect ? () => onToggleSelect(ad.id) : null}
+                onClearProgress={onClearProgress}
               />
             ))}
-            {fresh.length > 30 && (
+            {fresh.length > FRESH_LIMIT && (
               <button
-                onClick={() => setShowAllFresh(s => !s)}
+                onClick={() => setFreshLimit(l => l + PAGE_STEP)}
                 className="aspect-square rounded-md flex items-center justify-center bg-gray-50 dark:bg-gray-900 border-2 border-dashed border-gray-200 dark:border-gray-700 text-[10px] text-gray-500 dark:text-gray-400 italic hover:bg-gray-100 dark:hover:bg-gray-800 hover:border-brand-400 dark:hover:border-brand-600 hover:text-brand-600 dark:hover:text-brand-300 transition cursor-pointer"
-                title={showAllFresh ? 'Ver solo los 30 primeros' : `Ver los ${fresh.length - 30} restantes`}
+                title={`Cargar otros ${Math.min(PAGE_STEP, fresh.length - FRESH_LIMIT)} de ${fresh.length - FRESH_LIMIT} restantes`}
               >
-                {showAllFresh ? 'Mostrar menos' : `+${fresh.length - 30} más`}
+                +{Math.min(PAGE_STEP, fresh.length - FRESH_LIMIT)} más
+                <span className="block text-[8px] mt-0.5">({FRESH_LIMIT}/{fresh.length})</span>
+              </button>
+            )}
+            {FRESH_LIMIT > 30 && (
+              <button
+                onClick={() => setFreshLimit(30)}
+                className="aspect-square rounded-md flex items-center justify-center bg-gray-50 dark:bg-gray-900 border-2 border-dashed border-gray-200 dark:border-gray-700 text-[10px] text-gray-500 dark:text-gray-400 italic hover:bg-gray-100 dark:hover:bg-gray-800 hover:border-amber-400 hover:text-amber-600 transition cursor-pointer"
+                title="Volver a mostrar los primeros 30"
+              >
+                ↑ Menos
               </button>
             )}
           </div>
@@ -694,13 +740,14 @@ function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccion
                   onToggleSelect={onToggleSelect ? () => onToggleSelect(ad.id) : null}
                 />
               ))}
-              {repeated.length > 30 && (
+              {repeated.length > REPEATED_LIMIT && (
                 <button
-                  onClick={() => setShowAllRepeated(s => !s)}
+                  onClick={() => setRepeatedLimit(l => l + PAGE_STEP)}
                   className="aspect-square rounded-md flex items-center justify-center bg-gray-50 dark:bg-gray-900 border-2 border-dashed border-gray-200 dark:border-gray-700 text-[10px] text-gray-400 italic hover:bg-gray-100 dark:hover:bg-gray-800 hover:border-brand-400 hover:text-brand-600 transition cursor-pointer"
-                  title={showAllRepeated ? 'Ver solo los 30 primeros' : `Ver los ${repeated.length - 30} restantes`}
+                  title={`Cargar ${Math.min(PAGE_STEP, repeated.length - REPEATED_LIMIT)} más`}
                 >
-                  {showAllRepeated ? 'Menos' : `+${repeated.length - 30} más`}
+                  +{Math.min(PAGE_STEP, repeated.length - REPEATED_LIMIT)} más
+                  <span className="block text-[8px] mt-0.5">({REPEATED_LIMIT}/{repeated.length})</span>
                 </button>
               )}
             </div>
@@ -720,7 +767,7 @@ function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccion
 // strip horizontal. Cada item es un AdThumb con sus acciones normales
 // (Crear creativo, + ideas en Bandeja, multi-select).
 
-function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect }) {
+function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect, onClearProgress }) {
   const [expanded, setExpanded] = useState(true);
   // Vista del Top 10 — persistida en localStorage. 3 opciones:
   //   grid: strip horizontal de 10 thumbs (default, denso)
@@ -785,7 +832,8 @@ function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, se
           {viewMode === 'grid' && (
             <TopGridView items={items} adaptingAdIds={adaptingAdIds} creandoAdIds={creandoAdIds}
               seleccionados={seleccionados} selectedOrder={selectedOrder} usedAdIds={usedAdIds} progressById={progressById}
-              onAdapt={onAdapt} onCrearReferencial={onCrearReferencial} onToggleSelect={onToggleSelect} />
+              onAdapt={onAdapt} onCrearReferencial={onCrearReferencial} onToggleSelect={onToggleSelect}
+              onClearProgress={onClearProgress} />
           )}
           {viewMode === 'list' && (
             <TopListView items={items} seleccionados={seleccionados} selectedOrder={selectedOrder}
@@ -805,7 +853,7 @@ function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, se
 
 // VISTA 1 — Grid: el strip horizontal original con 10 thumbs grandes.
 
-function TopGridView({ items, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect }) {
+function TopGridView({ items, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect, onClearProgress }) {
   return (
     <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-10 gap-2">
       {items.map(({ ad, brandNombre, isCompetidor }, idx) => (
@@ -823,6 +871,7 @@ function TopGridView({ items, adaptingAdIds, creandoAdIds, seleccionados, select
             onAdapt={onAdapt ? () => onAdapt(brandNombre, ad) : null}
             onCrearReferencial={onCrearReferencial ? () => onCrearReferencial(brandNombre, ad) : null}
             onToggleSelect={onToggleSelect ? () => onToggleSelect(ad.id) : null}
+            onClearProgress={onClearProgress}
           />
           <div className="mt-1 px-0.5">
             <p className="text-[9px] font-semibold text-gray-700 dark:text-gray-200 truncate">
@@ -1096,6 +1145,59 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   const removeScraping = (id) => setScrapingBrandIds(prev => { const n = new Set(prev); n.delete(id); return n; });
   // brand.id → array de ads scrapeados de la última corrida (mostrados inline).
   const [adsByBrand, setAdsByBrand] = useState({});
+  // competidor.id → array de ads scrapeados. Antes vivían en c.ads inline en
+  // localStorage pero rompía quota con muchos ads. Ahora se hidratan desde
+  // IDB (competidorAdsIDB) cuando el producto se monta o cambia.
+  const [compAdsByCompId, setCompAdsByCompId] = useState({});
+
+  // Hidratar ads de competidores desde IDB.
+  // - PRIORITY: IDB primero, inline legacy solo si IDB vacía.
+  // - MERGE por TIMESTAMP (no por length) — re-scrape con menos ads gana si
+  //   es más reciente.
+  // - RESET al cambiar producto — sin esto el state acumulaba entries de
+  //   todos los productos navegados (memory leak).
+  // - DROP ZOMBI: filtrar entries de comps que ya no existen.
+  const prevProductoIdRefInsp = useRef(null);
+  useEffect(() => {
+    if (prevProductoIdRefInsp.current && prevProductoIdRefInsp.current !== producto?.id) {
+      setCompAdsByCompId({});
+    }
+    prevProductoIdRefInsp.current = producto?.id;
+  }, [producto?.id]);
+  useEffect(() => {
+    if (!producto?.competidores) return;
+    let cancelled = false;
+    (async () => {
+      const updates = {};
+      const recordsByCompId = {};
+      for (const c of producto.competidores) {
+        const rec = await getCompAds(producto.id, c.id);
+        if (rec?.ads?.length) { updates[c.id] = rec.ads; recordsByCompId[c.id] = rec; continue; }
+        if (Array.isArray(c.ads) && c.ads.length > 0) { updates[c.id] = c.ads; }
+      }
+      if (!cancelled) {
+        setCompAdsByCompId(prev => {
+          const next = {};
+          const validIds = new Set((producto.competidores || []).map(c => c.id));
+          for (const [k, v] of Object.entries(prev)) {
+            if (validIds.has(k)) next[k] = v;
+          }
+          for (const [cid, ads] of Object.entries(updates)) {
+            const rec = recordsByCompId[cid];
+            const incomingTs = rec?.ts || 0;
+            const currentTs = next[cid]?._ts || 0;
+            if (!next[cid] || incomingTs >= currentTs) {
+              next[cid] = ads;
+              if (incomingTs) ads._ts = incomingTs;
+            }
+          }
+          return next;
+        });
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [producto?.id, producto?.competidores?.length, (producto?.competidores || []).map(c => c.lastAdsCheck).join('|')]);
   // ad.id → bool, true mientras se adapta al producto (loading).
   const [adaptingAdIds, setAdaptingAdIds] = useState(new Set());
   // Multi-select para bulk. Set preserva el orden de inserción → podemos
@@ -1592,7 +1694,16 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           signal: ac.signal,
         });
         const data = await parseJsonOrThrow(resp, 'crear-creativo-referencial');
-        if (!resp.ok) throw new Error(stringifyApiError(data.error) || `HTTP ${resp.status}`);
+        if (!resp.ok) {
+        // Propagar la sugerencia del backend (apify-ingest devuelve sugerencias
+        // accionables como "cargá fbPageUrl en Setup"). Sin esto el user veía
+        // solo el error técnico sin context.
+        const base = stringifyApiError(data.error) || `HTTP ${resp.status}`;
+        // Si sugerencia es objeto (shape futuro), serializamos sin perder info.
+        const sug = typeof data.sugerencia === 'string' ? data.sugerencia
+                  : data.sugerencia ? JSON.stringify(data.sugerencia) : '';
+        throw new Error(sug ? `${base} — ${sug}` : base);
+      }
         return data;
       } catch (err) {
         if (err?.name === 'AbortError') {
@@ -1757,12 +1868,11 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       addToast?.({ type: 'error', message: `No pude generar: ${err.message}` });
       finishExecution(execId, { ok: false, message: err.message || 'Error' });
       playErrorTone();
-      // Limpiar el error después de 5s.
-      trackedTimeout(() => {
-        setProgressById(prev => {
-          const next = { ...prev }; delete next[ad.id]; return next;
-        });
-      }, 5000);
+      // ANTES borrábamos el error a los 5s — pero generar tarda 30-60s, el
+      // user típicamente no está mirando cuando explota y perdía el motivo
+      // del fallo de una operación cara ($0.18/imagen). Ahora el error queda
+      // persistente en progressById hasta que el user lo cierre manualmente
+      // (botón X en el badge de progreso) o reintente.
       return false;
     } finally {
       if (mountedRef.current) {
@@ -1788,10 +1898,11 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     }
     if (seleccionados.size === 0) return;
     if (!producto) return;
-    // Reusamos el mismo lookup que handleBulkCrear.
+    // POST-REFACTOR: c.ads inline está stripped. Usamos compAdsByCompId
+    // (hidratado desde IDB) para encontrar los ads seleccionados.
     const adsAGenerar = [];
     const adsCompetidores = (producto.competidores || []).flatMap(c =>
-      (c.ads || [])
+      (compAdsByCompId[c.id] || c.ads || [])
         .filter(a => seleccionados.has(a.id))
         .map(a => ({ brandNombre: c.nombre, ad: a }))
     );
@@ -1878,11 +1989,13 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     const cacheNote = visionAds < seleccionados.size ? ` (${seleccionados.size - visionAds} con skeleton cacheado)` : '';
     if (!window.confirm(`Generar ${nVarBulk} variante${nVarBulk !== 1 ? 's' : ''} ${sizeLabel} por cada uno de los ${seleccionados.size} ads${cacheNote} → ${total} imágenes total, ~$${costoEstimado.toFixed(2)}. Las requests se disparan TODAS en paralelo y el cloud-save funciona aunque cierres la pestaña. ETA: ~${Math.max(120, 75 * 2)}s. ¿Seguir?`)) return;
 
-    // Buscar los ad objects desde adsByBrand + de los competidores (que viven
-    // en producto.competidores, no en brands custom).
+    // Buscar los ad objects desde adsByBrand + de los competidores.
+    // POST-REFACTOR IDB: c.ads inline está stripped — usar compAdsByCompId
+    // (hidratado desde IDB). Sin esto el bulk-create fallaba silencioso
+    // post-reload: ningún ad de competidor matchaba los seleccionados.
     const adsAGenerar = [];
     const adsCompetidores = (producto.competidores || []).flatMap(c =>
-      (c.ads || [])
+      (compAdsByCompId[c.id] || c.ads || [])
         .filter(a => seleccionados.has(a.id) && (a.imageUrls?.length || 0) > 0)
         .map(a => ({ brandNombre: c.nombre, ad: a }))
     );
@@ -2010,7 +2123,16 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         body: JSON.stringify(payload),
       });
       const data = await parseJsonOrThrow(resp, 'apify-ingest');
-      if (!resp.ok) throw new Error(stringifyApiError(data.error) || `HTTP ${resp.status}`);
+      if (!resp.ok) {
+        // Propagar la sugerencia del backend (apify-ingest devuelve sugerencias
+        // accionables como "cargá fbPageUrl en Setup"). Sin esto el user veía
+        // solo el error técnico sin context.
+        const base = stringifyApiError(data.error) || `HTTP ${resp.status}`;
+        // Si sugerencia es objeto (shape futuro), serializamos sin perder info.
+        const sug = typeof data.sugerencia === 'string' ? data.sugerencia
+                  : data.sugerencia ? JSON.stringify(data.sugerencia) : '';
+        throw new Error(sug ? `${base} — ${sug}` : base);
+      }
       const scrapeCost = logCostsFromResponse(data, `inspiracion · ${brand.nombre}`);
 
       const allAds = data.ads || [];
@@ -2120,7 +2242,16 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         body: JSON.stringify(payload),
       });
       const data = await parseJsonOrThrow(resp, 'apify-ingest');
-      if (!resp.ok) throw new Error(stringifyApiError(data.error) || `HTTP ${resp.status}`);
+      if (!resp.ok) {
+        // Propagar la sugerencia del backend (apify-ingest devuelve sugerencias
+        // accionables como "cargá fbPageUrl en Setup"). Sin esto el user veía
+        // solo el error técnico sin context.
+        const base = stringifyApiError(data.error) || `HTTP ${resp.status}`;
+        // Si sugerencia es objeto (shape futuro), serializamos sin perder info.
+        const sug = typeof data.sugerencia === 'string' ? data.sugerencia
+                  : data.sugerencia ? JSON.stringify(data.sugerencia) : '';
+        throw new Error(sug ? `${base} — ${sug}` : base);
+      }
       const scrapeCost = logCostsFromResponse(data, `inspiracion · ${comp.nombre}`);
 
       const ads = data.ads || [];
@@ -2135,6 +2266,18 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       // scrape anterior (de la misma tanda paralela) terminó de escribir, así
       // los resultados de los 3 competidores concurrentes se acumulan en vez
       // de pisarse entre sí.
+      // STORAGE SPLIT: los ads van a IDB (sin cap), la METADATA va a localStorage
+      // (chiquito → no rompe quota). Antes guardábamos el array `ads` inline en
+      // el producto → con 5 competidores × 500 ads = 5MB+ → quota exceeded.
+      await setCompAds(producto.id, comp.id, {
+        ads,
+        total: data.total || 0,
+        winners: data.winners || 0,
+        lastAdsCheck: new Date().toISOString(),
+      });
+      // Reflejar inmediatamente en UI sin esperar al useEffect de hidratación.
+      setCompAdsByCompId(prev => ({ ...prev, [comp.id]: ads }));
+
       await withProductosLock(() => {
         const fresh = loadProductos();
         const updated = fresh.map(p => {
@@ -2142,8 +2285,11 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           const comps = (p.competidores || []).map(c => {
             if (c.id !== comp.id) return c;
             const prevZeroes = c.consecutiveZeroAds || 0;
+            // Solo metadata en localStorage. Los ads viven en IDB (setCompAds
+            // arriba). Si quedaban ads inline de antes (legacy), los borramos.
+            const { ads: _legacy, ...meta } = c;
             return {
-              ...c, ads,
+              ...meta,
               adsTotal: data.total || 0, winnersCount: data.winners || 0,
               lastAdsCheck: new Date().toISOString(),
               consecutiveZeroAds: newAds.length > 0 ? 0 : prevZeroes + 1,
@@ -2160,6 +2306,21 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         } catch {}
         setProductos(updated);
       });
+
+      // El BUG previo: handleScrapeBrand actualiza brand.lastScraped en
+      // setBrands, pero handleScrapeCompetidor (que es lo que dispara COMP
+      // de Setup) NO lo hacía — solo tocaba competidor.lastAdsCheck en
+      // localStorage. La UI lee brand.lastScraped para mostrar "sin
+      // scrapear" / "Re-scrape", así que después de un scrape exitoso de
+      // un COMP la card seguía diciendo "sin scrapear". Fix: replicar el
+      // setBrands acá también.
+      setBrands(prev => prev.map(x => x.id === brand.id ? {
+        ...x,
+        lastScraped: new Date().toISOString(),
+        // Mismo tracking de "estable" que handleScrapeBrand.
+        consecutiveZeroAds: newAds.length > 0 ? 0 : (x.consecutiveZeroAds || 0) + 1,
+      } : x));
+      setAdsByBrand(prev => ({ ...prev, [brand.id]: ads }));
 
       const msg = newAds.length > 0
         ? `${newAds.length} estáticos NUEVOS de ${comp.nombre} (${ads.length} total)`
@@ -2422,7 +2583,10 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       {(() => {
         // Construimos array unificado.
         const competidoresUnif = (producto.competidores || []).map(c => {
-          const staticAds = (c.ads || []).filter(a => (a.imageUrls?.length || 0) > 0 && (a.videoUrls?.length || 0) === 0);
+          // Ads ahora viven en IDB; compAdsByCompId los hidrata. Fallback a c.ads
+          // inline para items legacy aún no migrados.
+          const allAds = compAdsByCompId[c.id] || c.ads || [];
+          const staticAds = allAds.filter(a => (a.imageUrls?.length || 0) > 0 && (a.videoUrls?.length || 0) === 0);
           return {
             id: `comp-${c.id}`,
             nombre: c.nombre,
@@ -2522,6 +2686,9 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                 onAdapt={(brandNombre, ad) => handleAdapt(brandNombre, ad)}
                 onCrearReferencial={(brandNombre, ad) => crearReferencialDeAd(brandNombre, ad)}
                 onToggleSelect={(adId) => toggleSeleccion(adId)}
+                onClearProgress={(adId) => setProgressById(prev => {
+                  const next = { ...prev }; delete next[adId]; return next;
+                })}
               />
             )}
 
@@ -2788,6 +2955,9 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                     onCrearReferencial={(ad) => crearReferencialDeAd(b.nombre, ad)}
                     onToggleSelect={(adId) => toggleSeleccion(adId)}
                     onRemove={b.isCompetidor ? null : () => handleRemoveBrand(b.id)}
+                    onClearProgress={(adId) => setProgressById(prev => {
+                      const next = { ...prev }; delete next[adId]; return next;
+                    })}
                   />
                 ))}
               </div>

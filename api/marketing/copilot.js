@@ -16,10 +16,11 @@ import { anthropicCost } from './_costs.js';
 
 const MODEL = 'claude-sonnet-4-6';
 
-const SYSTEM_BASE = `Sos el copiloto de marketing de Viora — un estratega de direct-response + copywriter experto en Meta Ads para e-commerce argentino. Asistís al user a pensar campañas, hooks, ángulos y creativos para SU producto.
+const SYSTEM_BASE = `Sos Santi. El cerebro estratégico que vive adentro de la plataforma — todo lo que pasa adentro (scrapes, análisis, generaciones, ideas) sale de tu cabeza. Te presentás como una persona, no como "asistente" ni "AI". Hablás en primera persona ("yo te ayudo a...", "lo que yo veo es...", "yo te scrapearía..."). Especialidad: direct-response + copywriting + Meta Ads para e-commerce argentino.
 
 Cómo respondés:
 - Castellano rioplatense, directo, sin vueltas. Tono de colega experto, no de chatbot corporativo.
+- Primera persona — sos Santi, hablás de vos mismo. Cuando ejecutás algo en la plataforma ("voy a scrapear", "te genero las ideas") decilo en primera persona.
 - Concreto y accionable. Si te piden hooks, devolvés hooks listos para usar, no teoría.
 - Te apoyás en el research, el avatar y el análisis de competencia del producto (te los paso abajo). Si algo no está en ese contexto, decilo en vez de inventar.
 - Honesto: si una idea del user es floja, decíselo y proponé algo mejor.
@@ -41,7 +42,7 @@ function buildEstableBlock(ctx) {
   if (ctx.offerBrief) parts.push(`\n--- OFFER BRIEF ---\n${String(ctx.offerBrief).slice(0, 8000)}`);
   if (ctx.beliefs) parts.push(`\n--- CREENCIAS NECESARIAS ---\n${String(ctx.beliefs).slice(0, 4000)}`);
   if (parts.length === 1) {
-    parts.push('(El producto todavía no tiene research. Corré el pipeline para que el copiloto tenga material — por ahora respondé con criterio general.)');
+    parts.push('(El producto todavía no tiene research. Corré el pipeline para que tengas material — por ahora respondé con criterio general, decí que falta el research.)');
   }
   return parts.join('\n');
 }
@@ -124,7 +125,7 @@ export default async function handler(req, res) {
 
     const textBlock = (resp.content || []).find(c => c.type === 'text');
     const reply = textBlock?.text?.trim() || '';
-    if (!reply) return respondJSON(res, 502, { error: 'El copiloto no devolvió respuesta' });
+    if (!reply) return respondJSON(res, 502, { error: 'Santi no devolvió respuesta' });
 
     return respondJSON(res, 200, {
       reply,
@@ -134,6 +135,6 @@ export default async function handler(req, res) {
     });
   } catch (err) {
     console.error('copilot error:', err);
-    return respondJSON(res, 500, { error: err?.message || 'Error en el copiloto' });
+    return respondJSON(res, 500, { error: err?.message || 'Error interno' });
   }
 }

@@ -1734,10 +1734,25 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
 
   const handleRemove = async (id) => {
     if (!window.confirm('¿Borrar esta idea? No se puede deshacer.')) return;
+    // Si era réplica de un ad de competencia, sacar el adId de
+    // producto.usedAdIds para que en Inspiración el ad deje de aparecer
+    // gris/"usado". Sin esto quedaba un ref zombi.
+    const idea = ideas.find(i => i.id === id);
+    const sourceAdId = idea?.origen?.adId;
+    if (sourceAdId && activeProductoId) {
+      try {
+        const arr = JSON.parse(localStorage.getItem('adslab-marketing-productos-v1') || '[]');
+        const updated = arr.map(p => {
+          if (String(p.id) !== String(activeProductoId)) return p;
+          const set = new Set(p.usedAdIds || []);
+          set.delete(String(sourceAdId));
+          return { ...p, usedAdIds: Array.from(set), updated_at: new Date().toISOString() };
+        });
+        localStorage.setItem('adslab-marketing-productos-v1', JSON.stringify(updated));
+        try { window.dispatchEvent(new CustomEvent('viora:marketing-storage-changed', { detail: { key: 'adslab-marketing-productos-v1' } })); } catch {}
+      } catch {}
+    }
     setIdeas(removeIdea(id));
-    // (Fase 2 cloud-first: ya no borramos legacy IDB — los creativos
-    // ahora viven en Supabase Storage + marketing_creativos. La galería
-    // sigue su propio ciclo de vida.)
     setSelected(prev => {
       const next = new Set(prev); next.delete(id); return next;
     });
@@ -2075,16 +2090,36 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
                 // Solo ideas de IMAGEN con contenido. Las de video se ignoran
                 // (no se pueden generar como estático).
                 const valid = [];
+                let skipUsadas = 0;
                 for (const id of selected) {
                   const idea = ideas.find(i => i.id === id);
                   if (!idea) continue;
                   if (idea.formato === 'video') continue;
                   if (!(idea.hook || idea.titulo || idea.descripcionImagen)) continue;
+                  // Anti-gasto duplicado: si la idea ya fue generada antes
+                  // (estado='usada'), no la re-disparamos al endpoint. Cada
+                  // call cuesta $0.18 en gpt-image-2 quality high. Antes el
+                  // bulk re-procesaba todo lo seleccionado sin filtro.
+                  // en_uso = está siendo generada por OTRA tanda concurrente.
+                  // Re-disparar la mismas idea en paralelo gasta tokens 2x.
+                  if (idea.estado === 'usada' || idea.estado === 'archivada' || idea.estado === 'en_uso') {
+                    skipUsadas++;
+                    continue;
+                  }
                   valid.push(idea);
                 }
                 if (valid.length === 0) {
-                  addToast?.({ type: 'error', message: 'Las seleccionadas no tienen ideas de imagen para generar (las de video no aplican).' });
+                  const msg = skipUsadas > 0
+                    ? `Las ${skipUsadas} seleccionadas ya fueron generadas (estado 'usada'). Para re-generar, archivá y volvé a marcar pendiente.`
+                    : 'Las seleccionadas no tienen ideas de imagen para generar (las de video no aplican).';
+                  addToast?.({ type: 'error', message: msg });
                   return;
+                }
+                if (skipUsadas > 0) {
+                  addToast?.({
+                    type: 'info',
+                    message: `${skipUsadas} ya generada${skipUsadas !== 1 ? 's' : ''} salteada${skipUsadas !== 1 ? 's' : ''} — ${valid.length} a procesar`,
+                  });
                 }
                 const producto = productos.find(p => String(p.id) === String(activeProductoId));
                 if (!producto) {
@@ -2097,6 +2132,17 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
                     ideas: valid, producto, n: bulkN, quality: bulkQuality, size: bulkSize, addToast,
                   });
                   if (result.ok > 0) setSelected(new Set());
+                } catch (err) {
+                  // bulkGenerateFromIdeas puede tirar ANTES de su propio
+                  // finishExecution (ej: getProductoImagen falla, supabase
+                  // auth crashea, fetch sin red). Sin este catch, el error
+                  // queda como unhandled rejection y el user no ve nada
+                  // — solo el botón se reactiva sin explicación.
+                  console.error('[bulk-generate] crash temprano:', err);
+                  addToast?.({
+                    type: 'error',
+                    message: `No pude arrancar el bulk: ${err?.message || err}`,
+                  });
                 } finally {
                   setBulkRunning(false);
                 }

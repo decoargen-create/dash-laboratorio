@@ -8,7 +8,8 @@
 // - Si está vacío, no renderiza nada (no ocupa espacio).
 
 import React, { useEffect, useState } from 'react';
-import { Loader2, Check, AlertCircle, X, ChevronDown, ChevronUp } from 'lucide-react';
+import { Loader2, Check, AlertCircle, X, ChevronDown, ChevronUp, Download } from 'lucide-react';
+import { exportDebugLog } from './debugLog.js';
 import { subscribeExecutions, estimateProgress, dismissExecution } from './executionsStore.js';
 import { fetchDolarCripto, subscribeDolar, usdToArsString, getDolarCriptoCached } from './dolarStore.js';
 
@@ -148,10 +149,10 @@ export default function ExecutionsTray() {
           }
           <p className="text-[11px] font-bold text-gray-900 dark:text-gray-100">
             {running > 0
-              ? `${running} ${running === 1 ? 'tarea en curso' : 'tareas en curso'}`
+              ? `Santi está en ${running} ${running === 1 ? 'tarea' : 'tareas'}`
               : errored > 0
                 ? `${errored} con error`
-                : 'Listo'
+                : 'Santi listo'
             }
           </p>
         </div>
@@ -176,11 +177,25 @@ export default function ExecutionsTray() {
       </button>
 
       {!collapsed && (
-        <div className="max-h-[60vh] overflow-y-auto divide-y divide-gray-100 dark:divide-gray-800">
-          {execs.map(e => (
-            <ExecutionCard key={e.id} exec={e} dolar={dolar} />
-          ))}
-        </div>
+        <>
+          <div className="max-h-[60vh] overflow-y-auto divide-y divide-gray-100 dark:divide-gray-800">
+            {execs.map(e => (
+              <ExecutionCard key={e.id} exec={e} dolar={dolar} />
+            ))}
+          </div>
+          {/* Botón para exportar el log de debug — cuando algo falla, el user
+              lo descarga y me lo manda. Incluye fetches /api/, errores, stacks,
+              console.errors. También dispara con Ctrl+Shift+L. */}
+          <div className="px-2 py-1.5 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+            <button
+              onClick={() => { try { exportDebugLog(); } catch {} }}
+              className="w-full inline-flex items-center justify-center gap-1.5 px-2 py-1 text-[10px] font-bold text-gray-600 dark:text-gray-300 hover:text-brand-700 dark:hover:text-brand-300 hover:bg-white dark:hover:bg-gray-700 rounded transition"
+              title="Descarga un JSON con todo lo que se ejecutó (fetches, errores, rejections) — útil para reportar bugs. También: Ctrl+Shift+D"
+            >
+              <Download size={11} /> Exportar log de debug (Ctrl+Shift+D)
+            </button>
+          </div>
+        </>
       )}
     </div>
   );

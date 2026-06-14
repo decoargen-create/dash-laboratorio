@@ -84,7 +84,17 @@ export default async function handler(req, res) {
   // El actor de Apify cambió su API: ahora requiere maxItems > 0 además de
   // resultsLimit (que dejó de ser el field principal). Mandamos ambos para
   // compatibilidad con cualquier versión del actor.
-  const cappedLimit = Math.min(Math.max(limit, 5), 200);
+  // Cap pragmático en 1500. El user pidió hasta 3000 pero los runs grandes
+  // de Apify no terminan en el budget de 240s + retry (300s total Vercel),
+  // y devolvían 504. 1500 cubre 90% de los casos reales (competidores DTC
+  // grandes raramente pasan 800 ads activos al mismo tiempo) y mantiene el
+  // pipeline confiable. Si pediís más alto, automáticamente capeamos +
+  // logueamos en attemptNote para que sepas qué pasó.
+  const requestedLimit = Math.max(limit, 5);
+  const cappedLimit = Math.min(requestedLimit, 1500);
+  const limitNote = requestedLimit > cappedLimit
+    ? `Pediste ${requestedLimit} pero capeamos a ${cappedLimit} para que Apify termine antes del timeout de Vercel (300s). Para más, hay que migrar a run-async + polling.`
+    : null;
   const input = {
     startUrls: [{ url: startUrl }],
     resultsLimit: cappedLimit,
@@ -99,11 +109,26 @@ export default async function handler(req, res) {
   // Retry helper: si Apify aborta el run (memoria/timeout/keyword genérico),
   // reintentamos automáticamente con limit reducido. Suele resolverse así.
   // Si el segundo intento también falla, devolvemos error con sugerencia.
+  //
+  // BUDGET DE TIEMPO: Vercel mata el endpoint a los 300s (maxDuration en
+  // vercel.json). Si el primer intento se come 240s, el retry NO puede
+  // tener otros 240s — Vercel kills mid-retry y el cliente ve "Internal
+  // Server Error" genérico. Trackeamos el tiempo desde el inicio del
+  // handler y ajustamos el timeout del retry al budget restante (con un
+  // colchón de 20s para que esta función responda JSON antes del kill).
+  const VERCEL_MAX_DURATION = 300;
+  const SAFETY_BUFFER = 20;
+  const handlerStartMs = Date.now();
+  const remainingBudget = () => Math.max(
+    10,
+    VERCEL_MAX_DURATION - Math.floor((Date.now() - handlerStartMs) / 1000) - SAFETY_BUFFER
+  );
+
   let items;
   let usedLimit = input.resultsLimit;
-  let attemptNote = null;
+  let attemptNote = limitNote;
   try {
-    items = await runActorSync(actorId, input, token, { timeout: 240 });
+    items = await runActorSync(actorId, input, token, { timeout: Math.min(240, remainingBudget()) });
   } catch (err) {
     const msg = String(err.message || '');
 
@@ -118,14 +143,18 @@ export default async function handler(req, res) {
       });
     }
 
+    const budget = remainingBudget();
     const shouldRetry = /ABORTED|run-failed|timeout|memory|400|429|503/i.test(msg);
-    if (shouldRetry && usedLimit > 25) {
+    // Solo reintentamos si queda budget razonable (>=60s). Si Vercel está a
+    // punto de matarnos, mejor devolver el error ahora con mensaje claro.
+    if (shouldRetry && usedLimit > 25 && budget >= 60) {
       const reducedLimit = Math.max(25, Math.floor(usedLimit / 4));
-      console.warn(`apify-ingest: primer intento falló (${msg.slice(0, 100)}). Retry con limit ${reducedLimit}.`);
+      console.warn(`apify-ingest: primer intento falló (${msg.slice(0, 100)}). Retry con limit ${reducedLimit}, budget ${budget}s.`);
       try {
-        items = await runActorSync(actorId, { ...input, resultsLimit: reducedLimit, maxItems: reducedLimit, maxResults: reducedLimit }, token, { timeout: 240 });
+        items = await runActorSync(actorId, { ...input, resultsLimit: reducedLimit, maxItems: reducedLimit, maxResults: reducedLimit }, token, { timeout: budget });
         usedLimit = reducedLimit;
-        attemptNote = `Apify abortó con limit ${input.resultsLimit}. Reintentado con limit ${reducedLimit} y funcionó.`;
+        // Append (no overwrite) — sin esto perdíamos el limitNote del cap 1500.
+        attemptNote = (attemptNote ? attemptNote + ' · ' : '') + `Apify abortó con limit ${input.resultsLimit}. Reintentado con limit ${reducedLimit} y funcionó.`;
       } catch (err2) {
         const sugerencia = fbPageUrl
           ? 'Probá si la URL de Facebook page es correcta (debería ser https://www.facebook.com/<handle>).'
@@ -135,6 +164,17 @@ export default async function handler(req, res) {
           sugerencia,
         });
       }
+    } else if (shouldRetry && budget < 60) {
+      // Caso explícito: el primer intento consumió casi todo el budget de
+      // Vercel. No reintentamos — devolvemos error claro para que el user
+      // sepa qué pasó en lugar de comerse un "Internal Server Error" genérico.
+      return respondJSON(res, 504, {
+        error: `Apify tardó demasiado (${VERCEL_MAX_DURATION - budget - SAFETY_BUFFER}s) y no quedó tiempo para reintentar`,
+        sugerencia: fbPageUrl
+          ? 'La página de Facebook puede tener muchos ads o estar lenta. Probá bajar el limit o reintentar.'
+          : 'El keyword puede ser muy amplio. Probá cargar la fbPageUrl del competidor a mano.',
+        rawApify: msg.slice(0, 300),
+      });
     } else {
       const sugerencia = fbPageUrl
         ? 'Verificá la URL de Facebook page (formato: https://www.facebook.com/<handle>).'

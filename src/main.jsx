@@ -165,6 +165,34 @@ class ErrorBoundary extends Component {
   }
 }
 
+// SW UPDATE: detectar bundle nuevo y forzar reload. vite-plugin-pwa con
+// registerType: 'autoUpdate' DESCARGA el nuevo SW pero los tabs abiertos
+// siguen corriendo el bundle viejo hasta navegar. Si el deploy cambia
+// shape de datos (refactor IDB/cloud), el bundle viejo escribe shape vieja
+// → corrompe data. Forzamos reload cuando hay update pendiente.
+if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+  // ANTI-LOOP guard: si el SW se re-instala constantemente (caso raro pero
+  // posible), evitamos reloads infinitos chequeando un flag en sessionStorage.
+  // El flag se borra al cerrar la pestaña — solo previene loop dentro de la
+  // misma session.
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    // ANTI-LOOP con timestamp en vez de flag binario — el flag binario
+    // prevenía reloads legítimos de un SEGUNDO deploy en sesiones largas.
+    // Ahora solo ignoramos si el último reload fue hace < 60s (es indicador
+    // de loop, no de update genuino).
+    try {
+      const lastTs = Number(sessionStorage.getItem('viora-sw-reloaded-at') || 0);
+      if (lastTs && (Date.now() - lastTs) < 60000) {
+        console.warn('[SW] controllerchange < 60s después del último reload — ignorando (probable loop)');
+        return;
+      }
+      sessionStorage.setItem('viora-sw-reloaded-at', String(Date.now()));
+    } catch {}
+    console.info('[SW] nueva versión activa — recargando');
+    window.location.reload();
+  });
+}
+
 ReactDOM.createRoot(document.getElementById('root')).render(
   <StrictMode>
     <ErrorBoundary>

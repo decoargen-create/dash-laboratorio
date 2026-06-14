@@ -41,12 +41,13 @@ import ProductoImagenUploader from './ProductoImagenUploader.jsx';
 import GaleriaReferencialesModal from './GaleriaReferencialesModal.jsx';
 import { usePipelineRun } from './PipelineRunContext.jsx';
 import { getProductoImagen } from './productoImagen.js';
+import { setCompAds, getCompAds, hydrateCompetidoresAds, removeCompAds } from './competidorAdsIDB.js';
 import { stringifyApiError } from './apiHelpers.js';
 
 // Avatar del producto: muestra el pote (foto cargada en Setup) y cae al
 // gradiente con la inicial si todavía no hay foto. getProductoImagen resuelve
 // desde IDB/cloud y está memoizado, así que es barato re-montarlo por card.
-function ProductAvatar({ id, nombre, sizeClass = 'w-12 h-12', radiusClass = 'rounded-lg', extra = '' }) {
+function ProductAvatar({ id, nombre, producto = null, sizeClass = 'w-12 h-12', radiusClass = 'rounded-lg', extra = '' }) {
   const [src, setSrc] = useState(null);
   useEffect(() => {
     let alive = true;
@@ -54,7 +55,12 @@ function ProductAvatar({ id, nombre, sizeClass = 'w-12 h-12', radiusClass = 'rou
     // reusa para otro producto, no mostramos la foto vieja mientras carga.
     setSrc(null);
     const load = () => {
-      getProductoImagen(id)
+      // ⚠️ CROSS-PC FIX: pasamos producto como fallback. Sin esto,
+      // getProductoImagen leía readProducto(id) de localStorage; en PC2
+      // el localStorage puede estar stale → fotoUrl ausente → null →
+      // caía al avatar de letra ("C", "B", "P"). Con el producto en mano
+      // (que el caller ya tiene del cloud-pull), accede a fotoUrl directo.
+      getProductoImagen(id, producto)
         .then(img => { if (alive) setSrc(img || null); })
         .catch(() => {});
     };
@@ -142,6 +148,36 @@ function saveJSON(key, value) {
     // (storage disabled en navegadores raros) no son accionables y mantienen
     // el comportamiento previo de fallar silencioso.
     if (err && (err.name === 'QuotaExceededError' || err.code === 22 || err.code === 1014)) {
+      // ANTES: dispatcheábamos el toast en seguida sin intentar liberar
+      // nada. Pero hay caches gordas (skeleton, creative-refresh, debug log
+      // viejo) que ocupan MB y son descartables. Replicamos la estrategia
+      // de marketingSync.js: liberar caches → retry → si AÚN no entra,
+      // recién ahí surface el error al user.
+      const cachesAReleasar = [
+        'adslab-marketing-skeleton-cache',
+        'adslab-marketing-creative-refresh-cache',
+        'adslab-marketing-execution-log',
+        'adslab-marketing-cost-log',
+        'adslab-debug-log-v1',
+      ];
+      let liberadas = 0;
+      for (const k of cachesAReleasar) {
+        try {
+          if (localStorage.getItem(k)) { localStorage.removeItem(k); liberadas++; }
+        } catch {}
+      }
+      if (liberadas > 0) {
+        try {
+          localStorage.setItem(key, JSON.stringify(value));
+          if (key.startsWith('adslab-marketing-')) {
+            try { window.dispatchEvent(new CustomEvent('viora:marketing-storage-changed', { detail: { key } })); } catch {}
+          }
+          console.info(`[saveJSON] quota recuperado liberando ${liberadas} caches`);
+          return true;
+        } catch {
+          // sigue sin entrar — caer al toast
+        }
+      }
       try {
         // Notificamos vía CustomEvent así el componente puede mostrar toast
         // sin tener que pasar `addToast` a esta función pura.
@@ -306,11 +342,25 @@ async function parseJsonResponse(resp, contextLabel) {
   try {
     return JSON.parse(raw);
   } catch {
-    const isTimeout = /timeout|FUNCTION_INVOCATION|gateway/i.test(raw)
-      || resp.status === 504 || resp.status === 502;
-    const detalle = isTimeout
-      ? 'el servidor tardó demasiado y cortó la conexión (timeout) — reintentá en la próxima corrida'
-      : `el servidor devolvió un error inesperado (HTTP ${resp.status})`;
+    // Vercel mata la función serverless al pasar maxDuration y devuelve
+    // su página HTML genérica "Internal Server Error" / "An error occurred
+    // with your deployment". Detectamos esos patrones para dar un mensaje
+    // accionable en lugar del críptico "Unexpected token '<' is not JSON".
+    const isVercelTimeout = /FUNCTION_INVOCATION_TIMEOUT|TIMEOUT|gateway timeout/i.test(raw);
+    const isVercelGenericError = /Internal Server Error|An error occurred with your deployment|FUNCTION_INVOCATION_FAILED/i.test(raw);
+    const isHTML = /^\s*<(!doctype|html)/i.test(raw);
+    const status5xx = resp.status === 504 || resp.status === 502 || resp.status === 500;
+
+    let detalle;
+    if (isVercelTimeout || resp.status === 504) {
+      detalle = 'el servidor tardó demasiado y cortó la conexión (timeout > 300s) — reintentá en la próxima corrida';
+    } else if (isVercelGenericError || (isHTML && status5xx)) {
+      detalle = 'la función serverless crasheó o agotó memoria — Vercel devolvió error genérico. Reintentá; si persiste, revisá los logs en Vercel';
+    } else if (status5xx) {
+      detalle = `el servidor devolvió un error inesperado (HTTP ${resp.status})`;
+    } else {
+      detalle = `respuesta no-JSON inesperada (HTTP ${resp.status})`;
+    }
     throw new Error(`${contextLabel}: ${detalle}`);
   }
 }
@@ -466,7 +516,7 @@ const FLOW_STEPS = [
   { emoji: '▶️', tab: null, titulo: 'Correr pipeline', desc: 'Leemos los ads ganadores de la competencia y armamos ideas.' },
   { emoji: '📥', tab: 'bandeja', titulo: 'Bandeja', desc: 'Revisás cada idea y generás el creativo ahí mismo.' },
   { emoji: '🎨', tab: 'creativos', titulo: 'Creativos', desc: 'Ves los estáticos generados, listos para descargar.' },
-  { emoji: '🤖', tab: 'copiloto', titulo: 'Copiloto', desc: 'Pedís más variantes o ajustes en lenguaje natural.' },
+  { emoji: '🧠', tab: 'copiloto', titulo: 'Santi', desc: 'Hablale a Santi — el cerebro de la plataforma. Pedíle variantes, ajustes o feedback en lenguaje natural.' },
 ];
 
 function FlowGuide() {
@@ -552,7 +602,7 @@ function ProductTabs({ activeTab, onChange }) {
         { id: 'inspiracion', label: 'Inspiración', emoji: '✨' },
         { id: 'creativos', label: 'Creativos', emoji: '🎨' },
         { id: 'galeria', label: 'Galería', emoji: '🖼️' },
-        { id: 'copiloto', label: 'Copiloto', emoji: '🤖' },
+        { id: 'copiloto', label: 'Santi', emoji: '🧠' },
       ],
     },
   ];
@@ -922,7 +972,70 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
   // Producto activo derivado + competidores + cuenta Meta del producto activo.
   const producto = productos.find(p => String(p.id) === String(activeProductoId)) || null;
-  const competidores = producto?.competidores || [];
+  const competidoresBase = producto?.competidores || [];
+  // Ads ahora viven en IDB. compAdsByCompId hidrata por competidor.id.
+  // useMemo de `competidores` mete los ads adentro para que el código
+  // legacy (memos, pipeline) sigan leyendo c.ads como antes.
+  const [compAdsByCompId, setCompAdsByCompId] = useState({});
+  const [hydratingAds, setHydratingAds] = useState(false);
+  // RESET al cambiar producto — sin esto el state acumula entries de TODOS
+  // los productos navegados → memory leak masivo (50 productos × 5 comps ×
+  // 200 ads × 5KB ≈ 250MB en el state). Hacemos cleanup explícito.
+  const prevProductoIdRef = useRef(null);
+  useEffect(() => {
+    if (prevProductoIdRef.current && prevProductoIdRef.current !== producto?.id) {
+      setCompAdsByCompId({});
+    }
+    prevProductoIdRef.current = producto?.id;
+  }, [producto?.id]);
+  useEffect(() => {
+    let cancelled = false;
+    if (!producto?.id) { setCompAdsByCompId({}); return; }
+    setHydratingAds(true);
+    (async () => {
+      // PRIORITY: IDB > inline legacy. Antes preferíamos inline si existía,
+      // lo que dejaba productos parcialmente migrados leyendo datos stale.
+      const updates = {};
+      const recordsByCompId = {};
+      for (const c of competidoresBase) {
+        const rec = await getCompAds(producto.id, c.id);
+        if (rec?.ads?.length) { updates[c.id] = rec.ads; recordsByCompId[c.id] = rec; continue; }
+        if (Array.isArray(c.ads) && c.ads.length > 0) { updates[c.id] = c.ads; }
+      }
+      if (!cancelled) {
+        // MERGE FIX (round 3): antes comparábamos `ads.length > prev.length`
+        // que perdía datos cuando un re-scrape devolvía MENOS ads (algunos
+        // expiraron en Meta). Ahora comparamos por timestamp (ts del record
+        // IDB). El más fresco gana, sin importar el length.
+        setCompAdsByCompId(prev => {
+          const next = {};
+          const validIds = new Set(competidoresBase.map(c => c.id));
+          // Conservar solo entries de comps que aún existen (drop zombi).
+          for (const [k, v] of Object.entries(prev)) {
+            if (validIds.has(k)) next[k] = v;
+          }
+          // Aplicar updates priorizando frescura por timestamp.
+          for (const [cid, ads] of Object.entries(updates)) {
+            const rec = recordsByCompId[cid];
+            const incomingTs = rec?.ts || 0;
+            const currentTs = next[cid]?._ts || 0;
+            if (!next[cid] || incomingTs >= currentTs) {
+              next[cid] = ads;
+              if (incomingTs) ads._ts = incomingTs;
+            }
+          }
+          return next;
+        });
+        setHydratingAds(false);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [producto?.id, competidoresBase.length, competidoresBase.map(c => c.lastAdsCheck).join('|')]);
+  const competidores = useMemo(
+    () => competidoresBase.map(c => (compAdsByCompId[c.id] ? { ...c, ads: compAdsByCompId[c.id] } : c)),
+    [competidoresBase, compAdsByCompId]
+  );
   const metaAccount = producto?.metaAccount || null;
   // Setter de competidores que los guarda DENTRO del producto activo.
   const setCompetidores = (updater) => {
@@ -1355,9 +1468,28 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     }
   };
 
-  const handleRemoveCompetidor = (id) => {
+  const handleRemoveCompetidor = async (id) => {
     if (!window.confirm('¿Sacar a este competidor de la lista?')) return;
     setCompetidores(prev => prev.filter(c => c.id !== id));
+    // Limpiar el brand "auto-sincronizado" en Inspiración (fromCompetidorId)
+    // → sin esto quedaba una marca huérfana en la galería de inspiración
+    // apuntando a un competidor que ya no existe.
+    if (producto?.id) {
+      try {
+        const brandsKey = `adslab-marketing-inspiracion-brands-${producto.id}`;
+        const raw = localStorage.getItem(brandsKey);
+        if (raw) {
+          const arr = JSON.parse(raw);
+          const filtered = arr.filter(b => String(b.fromCompetidorId || '') !== String(id));
+          if (filtered.length !== arr.length) {
+            localStorage.setItem(brandsKey, JSON.stringify(filtered));
+          }
+        }
+      } catch {}
+      // Y borrar los ads del competidor en IDB — no tienen razón de seguir
+      // ocupando MB después de que el comp se va.
+      try { await removeCompAds(producto.id, id); } catch {}
+    }
   };
 
   // Sugerencia automática de competidores: buscamos en Ad Library por keyword
@@ -1803,12 +1935,26 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         const ads = data.ads || [];
         const allWinners = ads.filter(a => a.isWinner);
 
-        // Calcular cuántos ads son NUEVOS vs ya vistos (para transparencia).
-        const prevAdIds = new Set((c.ads || []).map(a => a.id));
+        // Calcular cuántos ads son NUEVOS vs ya vistos. Para esto necesitamos
+        // los ads previos — antes vivían inline en c.ads, ahora en IDB.
+        // skipCloud: para la diferencia de "nuevos vs vistos" alcanza con
+        // los previos LOCAL. Si bajamos del cloud bloqueamos el pipeline.
+        const prevRecord = await getCompAds(producto.id, c.id, { skipCloud: true });
+        const prevAds = (Array.isArray(c.ads) && c.ads.length > 0 ? c.ads : prevRecord?.ads) || [];
+        const prevAdIds = new Set(prevAds.map(a => a.id));
         const newAds = ads.filter(a => !prevAdIds.has(a.id));
         const seenAds = ads.filter(a => prevAdIds.has(a.id));
 
-        // Guardar en el competidor (con historial de corridas)
+        // STORAGE SPLIT: ads → IDB (sin cap); metadata → localStorage.
+        await setCompAds(producto.id, c.id, {
+          ads,
+          total: data.total || 0,
+          winners: data.winners || 0,
+          lastAdsCheck: new Date().toISOString(),
+        });
+        setCompAdsByCompId(prev => ({ ...prev, [c.id]: ads }));
+
+        // Guardar SOLO metadata en el competidor (con historial de corridas)
         setCompetidores(prev => prev.map(x => {
           if (x.id !== c.id) return x;
           const prevHistory = Array.isArray(x.adsHistory) ? x.adsHistory : [];
@@ -1818,12 +1964,12 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             winners: data.winners || 0,
             newAds: newAds.length,
           }].slice(-10);
-          // consecutiveZeroAds: tracking para "estable" en el smart scrape.
-          // Se inicializa acá y se incrementa/resetea en InspiracionSection
-          // según haya o no ads nuevos en cada refresh.
+          // Quitamos `ads` inline (vive en IDB). consecutiveZeroAds: tracking
+          // para "estable" en el smart scrape.
           const prevZeroes = x.consecutiveZeroAds || 0;
+          const { ads: _legacy, ...meta } = x;
           return {
-            ...x, ads, adsTotal: data.total || 0, winnersCount: data.winners || 0,
+            ...meta, adsTotal: data.total || 0, winnersCount: data.winners || 0,
             lastAdsCheck: new Date().toISOString(), adsHistory: history,
             consecutiveZeroAds: newAds.length > 0 ? 0 : prevZeroes + 1,
           };
@@ -1993,8 +2139,12 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         // los `adsAnalysis` recién guardados por el deep-analyze loop. Antes
         // leíamos `loadJSON(COMPETIDORES_KEY, ...)` que está borrada tras la
         // migración → caía al fallback del closure y perdía análisis frescos.
+        // CRÍTICO POST-REFACTOR: productosRef.current tiene ads STRIPPED (viven
+        // en IDB ahora). Sin hidratar, el pipeline corre ciego — allCompAds
+        // queda vacío y el generador no recibe contexto de competencia.
         const productoFreshGen = productosRef.current.find(p => String(p.id) === String(producto.id));
-        const compsActualizados = productoFreshGen?.competidores || competidores;
+        const compsBase = productoFreshGen?.competidores || competidores;
+        const compsActualizados = await hydrateCompetidoresAds(compsBase, producto.id);
         for (const c of compsActualizados) {
           // Deep-analyzed (con insights completos)
           const analyses = c.adsAnalysis || {};
@@ -2564,7 +2714,10 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 acc[i.estado || 'pendiente'] = (acc[i.estado || 'pendiente'] || 0) + 1;
                 return acc;
               }, {});
-              const adsScrapeados = comps.reduce((sum, c) => sum + (c.ads?.length || 0), 0);
+              // adsTotal vive en localStorage (metadata). c.ads.length solo
+              // existe si los ads aún están hidratados en memory. Fallback a
+              // adsTotal previene el bug "0 ads tras reload" post-refactor IDB.
+              const adsScrapeados = comps.reduce((sum, c) => sum + (c.adsTotal || c.ads?.length || 0), 0);
               const deepAnalyses = comps.reduce((sum, c) => sum + Object.keys(c.adsAnalysis || {}).length, 0);
               const runsDelProducto = runHistory.filter(r => String(r.productoId || '') === String(p.id));
               const ultimoRun = runsDelProducto[0];
@@ -2690,7 +2843,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 return (
                   <div key={p.id} onClick={open}
                     className="group flex items-center gap-3 bg-white dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/80 rounded-xl px-3 py-2.5 cursor-pointer hover:border-brand-300 dark:hover:border-brand-700 hover:shadow-md transition">
-                    <ProductAvatar id={p.id} nombre={p.nombre} sizeClass="w-10 h-10" extra="text-base shrink-0" />
+                    <ProductAvatar id={p.id} nombre={p.nombre} producto={p} sizeClass="w-10 h-10" extra="text-base shrink-0" />
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{p.nombre}</p>
                       {/* Un solo chip de estado (research) + stage en texto sutil. */}
@@ -2736,7 +2889,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                   </div>
                   {/* Header */}
                   <div className="flex items-center gap-3 mb-4 pr-20">
-                    <ProductAvatar id={p.id} nombre={p.nombre} extra="text-lg group-hover:scale-105 transition" />
+                    <ProductAvatar id={p.id} nombre={p.nombre} producto={p} extra="text-lg group-hover:scale-105 transition" />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{p.nombre}</p>
                       <div className="flex items-center gap-2 mt-1">
@@ -2790,6 +2943,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         <ProductAvatar
           id={producto.id}
           nombre={producto.nombre}
+          producto={producto}
           radiusClass="rounded-xl"
           extra="shadow-sm text-xl"
         />
@@ -2957,7 +3111,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
             {/* Foto del producto para usar como referencia en gpt-image-2
                 cuando se generan creativos referenciales desde Inspiración. */}
-            <ProductoImagenUploader productoId={producto.id} addToast={addToast} />
+            <ProductoImagenUploader productoId={producto.id} producto={producto} addToast={addToast} />
 
             {/* Activo visual de marca — elemento icónico reutilizable que se
                 propaga a todos los prompts de imagen. */}

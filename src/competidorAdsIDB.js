@@ -144,6 +144,33 @@ if (typeof window !== 'undefined') {
   });
 }
 
+// CROSS-TAB SYNC: window events solo se entregan dentro de la MISMA tab. Si
+// el user scrapea en tab A, la tab B no ve los nuevos ads hasta que refresca
+// (IDB sí está sincronizado, pero el memCache de tab B sirve el valor viejo).
+// BroadcastChannel propaga el evento entre tabs del mismo origen → tab B
+// limpia su memCache y la próxima getCompAds() lee fresco de IDB.
+let _compAdsChannel = null;
+if (typeof BroadcastChannel !== 'undefined') {
+  try {
+    _compAdsChannel = new BroadcastChannel('viora-comp-ads');
+    _compAdsChannel.onmessage = (e) => {
+      try {
+        const { productoId, competidorId } = e.data || {};
+        if (productoId && competidorId) {
+          memCache.delete(makeKey(productoId, competidorId));
+          // Re-dispatch como CustomEvent local para que los componentes
+          // suscritos al evento window (sin BC) también se enteren.
+          try {
+            window.dispatchEvent(new CustomEvent('adslab:comp-ads-changed', {
+              detail: { productoId, competidorId, total: e.data?.total },
+            }));
+          } catch {}
+        }
+      } catch {}
+    };
+  } catch {}
+}
+
 export async function setCompAds(productoId, competidorId, payload) {
   if (!productoId || !competidorId) return false;
   const key = makeKey(productoId, competidorId);
@@ -171,6 +198,17 @@ export async function setCompAds(productoId, competidorId, payload) {
       window.dispatchEvent(new CustomEvent('adslab:comp-ads-changed', {
         detail: { productoId: String(productoId), competidorId: String(competidorId), total: record.total },
       }));
+    } catch {}
+    // CROSS-TAB SYNC: propagamos a las demás tabs via BroadcastChannel para que
+    // sus memCaches se invaliden — si no, la otra tab sigue sirviendo el valor
+    // viejo hasta un hard refresh.
+    try {
+      _compAdsChannel?.postMessage({
+        type: 'comp-ads-updated',
+        productoId: String(productoId),
+        competidorId: String(competidorId),
+        total: record.total,
+      });
     } catch {}
     // Sync al cloud en background (best effort). Sin esto, los ads viven solo
     // local y la otra PC tiene que re-scrapear para verlos. Con el upload,

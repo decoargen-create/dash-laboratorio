@@ -1216,7 +1216,11 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
         {/* Body */}
         <div className="p-5 max-h-[75vh] overflow-y-auto">
           {panel === 'reportes' ? (
-            <WinnersReport winners={items.filter(it => it.winner)} />
+            <WinnersReport
+              winners={items.filter(it => it.winner)}
+              productoNombre={productoNombre}
+              productoImagen={producto?.imagen || producto?.imagenUrl || null}
+            />
           ) : cargando ? (
             <SkeletonGrid count={8} />
           ) : items.length === 0 ? (

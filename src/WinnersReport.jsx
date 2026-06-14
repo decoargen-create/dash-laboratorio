@@ -17,7 +17,176 @@
 // que los usa, producía "Cannot access 'w' before initialization" en producción.
 
 import React from 'react';
-import { Trophy, TrendingUp, Target, Palette, Tag } from 'lucide-react';
+import { Trophy, TrendingUp, Target, Palette, Tag, Package } from 'lucide-react';
+
+const ANZUELO_META = {
+  hook:     { label: 'Hook',     emoji: '🎣', color: '#f59e0b' },
+  visual:   { label: 'Visual',   emoji: '🎨', color: '#ec4899' },
+  copy:     { label: 'Copy',     emoji: '📝', color: '#8b5cf6' },
+  cta:      { label: 'CTA',      emoji: '🖱️', color: '#3b82f6' },
+  angulo:   { label: 'Ángulo',   emoji: '📐', color: '#10b981' },
+  oferta:   { label: 'Oferta',   emoji: '💰', color: '#eab308' },
+  audience: { label: 'Audiencia', emoji: '👥', color: '#06b6d4' },
+};
+
+function AnzuelosMap({ winners, productoNombre, productoImagen }) {
+  // Buckets por categoría — solo las que tienen winners.
+  const buckets = {};
+  for (const w of winners) {
+    const arr = w.winnerMetrics?.que_funciono;
+    if (!Array.isArray(arr) || arr.length === 0) continue;
+    for (const k of arr) {
+      if (!buckets[k]) buckets[k] = [];
+      buckets[k].push(w);
+    }
+  }
+  const entries = Object.entries(buckets)
+    .filter(([k]) => ANZUELO_META[k])
+    .sort((a, b) => b[1].length - a[1].length);
+
+  if (entries.length === 0) {
+    return (
+      <div className="border border-dashed border-gray-300 dark:border-gray-700 rounded-xl p-6 text-center bg-gray-50/50 dark:bg-gray-800/30">
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          Marcá los winners completando "qué funcionó" (hook, visual, oferta, etc.)
+          para que aparezca el mapa de ánzuelos.
+        </p>
+      </div>
+    );
+  }
+
+  // Layout radial. Container 100% x 360px alto.
+  const N = entries.length;
+  const size = 360;
+  const centerX = size / 2;
+  const centerY = size / 2;
+  const radius = size * 0.36;
+  // Nodos: posición + datos.
+  const nodes = entries.map(([key, ws], i) => {
+    // Empezamos en -90° (arriba) y vamos en sentido horario.
+    const angle = (i / N) * 2 * Math.PI - Math.PI / 2;
+    const x = centerX + radius * Math.cos(angle);
+    const y = centerY + radius * Math.sin(angle);
+    return { key, ws, x, y, meta: ANZUELO_META[key] };
+  });
+
+  // Buscamos thumbnail rep del bucket (winner con ROAS más alto si tiene,
+  // sino el más nuevo). Usado para mostrar visualmente "este ángulo
+  // está representado por estos creativos".
+  const repFor = (ws) => {
+    if (!ws.length) return null;
+    const withRoas = ws.filter(w => w.winnerMetrics?.roas != null);
+    if (withRoas.length > 0) {
+      return [...withRoas].sort((a, b) => Number(b.winnerMetrics.roas) - Number(a.winnerMetrics.roas))[0];
+    }
+    return ws[0];
+  };
+
+  return (
+    <Section
+      icon={<Target size={14} />}
+      title="Mapa de ánzuelos"
+      subtitle="Tu producto en el centro, los hooks que están rindiendo apuntan hacia él. Lo que más grande aparece es donde está tu palanca actual."
+    >
+      <div className="relative mx-auto" style={{ width: size, height: size, maxWidth: '100%' }}>
+        {/* SVG layer — flechas curvas desde cada nodo al centro */}
+        <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox={`0 0 ${size} ${size}`}>
+          <defs>
+            {nodes.map((n, i) => (
+              <marker
+                key={`arr-${i}`}
+                id={`arrow-${i}`}
+                viewBox="0 0 10 10"
+                refX="8" refY="5"
+                markerWidth="6" markerHeight="6"
+                orient="auto"
+              >
+                <path d="M 0 0 L 10 5 L 0 10 z" fill={n.meta.color} opacity={0.85} />
+              </marker>
+            ))}
+          </defs>
+          {nodes.map((n, i) => {
+            // Curva: control point a mitad de camino, desplazado leve para
+            // que no sea una recta. Endpoint un poco antes del centro para
+            // que la cabeza de flecha no se meta en el producto card.
+            const dx = centerX - n.x;
+            const dy = centerY - n.y;
+            const len = Math.hypot(dx, dy);
+            const stopShort = 48;
+            const tx = n.x + (dx / len) * (len - stopShort);
+            const ty = n.y + (dy / len) * (len - stopShort);
+            const midX = (n.x + centerX) / 2 + dy * 0.06;
+            const midY = (n.y + centerY) / 2 - dx * 0.06;
+            const strokeWidth = Math.max(1.5, Math.min(4, 1 + n.ws.length * 0.5));
+            return (
+              <path
+                key={`p-${i}`}
+                d={`M ${n.x} ${n.y} Q ${midX} ${midY} ${tx} ${ty}`}
+                stroke={n.meta.color}
+                strokeWidth={strokeWidth}
+                fill="none"
+                opacity={0.7}
+                markerEnd={`url(#arrow-${i})`}
+              />
+            );
+          })}
+        </svg>
+
+        {/* Producto en el centro */}
+        <div
+          className="absolute flex flex-col items-center justify-center bg-gradient-to-br from-amber-500 to-amber-600 text-white rounded-2xl shadow-lg border-2 border-amber-300 dark:border-amber-700"
+          style={{
+            left: centerX - 56, top: centerY - 56,
+            width: 112, height: 112,
+          }}
+        >
+          {productoImagen ? (
+            <img src={productoImagen} alt="" className="w-12 h-12 object-cover rounded-lg mb-1 border border-amber-200" />
+          ) : (
+            <Package size={28} className="mb-1 opacity-90" />
+          )}
+          <p className="text-[10px] font-bold uppercase tracking-wider opacity-95 px-2 text-center leading-tight line-clamp-2">
+            {productoNombre || 'Producto'}
+          </p>
+          <p className="text-[9px] opacity-80 mt-0.5">{winners.length} winners</p>
+        </div>
+
+        {/* Nodos de ánzuelos */}
+        {nodes.map((n) => {
+          const rep = repFor(n.ws);
+          const size = Math.max(72, Math.min(110, 60 + n.ws.length * 8));
+          return (
+            <div
+              key={n.key}
+              className="absolute flex flex-col items-center justify-center rounded-xl shadow-md border-2 bg-white dark:bg-gray-800"
+              style={{
+                left: n.x - size / 2, top: n.y - size / 2,
+                width: size, height: size,
+                borderColor: n.meta.color,
+              }}
+              title={`${n.ws.length} winner${n.ws.length !== 1 ? 's' : ''} con ${n.meta.label}`}
+            >
+              {rep?.imageUrl ? (
+                <img src={rep.imageUrl} alt="" className="w-7 h-7 object-cover rounded mb-1 border border-gray-200 dark:border-gray-700" />
+              ) : (
+                <div className="text-lg leading-none mb-1">{n.meta.emoji}</div>
+              )}
+              <p
+                className="text-[10px] font-bold uppercase tracking-wider"
+                style={{ color: n.meta.color }}
+              >
+                {n.meta.label}
+              </p>
+              <p className="text-[9px] text-gray-500 dark:text-gray-400 tabular-nums">
+                {n.ws.length} winner{n.ws.length !== 1 ? 's' : ''}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+    </Section>
+  );
+}
 
 // ============================================================
 // Helpers de formato — declarados antes para que estén disponibles
@@ -106,7 +275,7 @@ function BarRow({ label, count, max, color = 'amber', total }) {
 // Main export — ahora MetricCard/Section/BarRow ya están en scope.
 // ============================================================
 
-export default function WinnersReport({ winners }) {
+export default function WinnersReport({ winners, productoNombre, productoImagen }) {
   if (winners.length === 0) {
     return (
       <div className="border-2 border-dashed border-amber-300 dark:border-amber-700 rounded-xl p-12 text-center bg-amber-50/40 dark:bg-amber-900/10">
@@ -183,6 +352,15 @@ export default function WinnersReport({ winners }) {
           </p>
         </div>
       </div>
+
+      {/* Mapa radial de ánzuelos — vista de un pantallazo de los ángulos
+          ganadores. Va arriba de las barras para que sea lo primero
+          que ve el user al abrir la pestaña. */}
+      <AnzuelosMap
+        winners={winners}
+        productoNombre={productoNombre}
+        productoImagen={productoImagen}
+      />
 
       {/* Métricas */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

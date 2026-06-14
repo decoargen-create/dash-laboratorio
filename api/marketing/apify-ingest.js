@@ -56,14 +56,15 @@ export default async function handler(req, res) {
     });
   }
 
-  // Armar el startUrl según el input
+  // Armar el startUrl según el input. fbPageUrl ahora también acepta URLs
+  // de Ad Library directamente (facebook.com/ads/library/?...) — útil
+  // cuando el user copia una búsqueda armada a mano con filtros
+  // específicos (sort por impressions, country, etc).
   let startUrl;
   if (fbPageUrl) {
     startUrl = fbPageUrl.startsWith('http')
       ? fbPageUrl
       : `https://www.facebook.com/${fbPageUrl.replace(/^\/+/, '')}`;
-    // Validar que sea realmente facebook.com — sin esto, un atacante podría
-    // pasar javascript: o https://evil.com y gastar el actor run de Apify.
     try {
       const parsed = new URL(startUrl);
       if (!['http:', 'https:'].includes(parsed.protocol)) {

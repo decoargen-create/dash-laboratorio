@@ -1145,6 +1145,12 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   const removeScraping = (id) => setScrapingBrandIds(prev => { const n = new Set(prev); n.delete(id); return n; });
   // brand.id → array de ads scrapeados de la última corrida (mostrados inline).
   const [adsByBrand, setAdsByBrand] = useState({});
+  // ⚠️ TDZ FIX: declaramos `producto` ACÁ ARRIBA porque hay useEffects MÁS
+  // ABAJO que lo usan en sus dep arrays ([producto?.id]). En dev funcionaba,
+  // en prod minificado Vite/Rollup hacía "Cannot access 'H' before init"
+  // porque la dep array se evalúa al render time del useEffect, ANTES de la
+  // declaración original que estaba en la línea ~1366.
+  const producto = productos.find(p => String(p.id) === String(activeProductoId)) || null;
   // Hidratar adsByBrand desde IDB al cambiar de producto. Las brands manuales
   // ahora persisten sus ads igual que los competidores → no se pierden al
   // refrescar. Sin esto el user veía sus brands con "0 ads" después de F5.
@@ -1363,7 +1369,8 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     saveBrands(activeProductoId, brands);
   }, [brands, activeProductoId]);
 
-  const producto = productos.find(p => String(p.id) === String(activeProductoId)) || null;
+  // `producto` ya fue declarado arriba (~línea 1150) por TDZ fix — los
+  // useEffects de hidratación de comp ads lo necesitan en su dep array.
 
   // Sync uni-direccional: competidores → brands. Cada competidor cargado en
   // Setup/Competencia aparece automático en Inspiración como marca scrapeable.

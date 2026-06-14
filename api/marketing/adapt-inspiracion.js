@@ -25,6 +25,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { anthropicCost } from './_costs.js';
+import { safeFetch } from './_security.js';
 
 const MODEL = 'claude-sonnet-4-6';
 
@@ -93,6 +94,10 @@ function detectImageType(buf) {
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
+  // NOTA SECURITY: el frontend NO está mandando auth en los fetch a este
+  // endpoint todavía → habilitarlo rompería la app. Pendiente: agregar
+  // authedFetch helper en frontend y después requireAuth acá. Por ahora
+  // protegemos al menos contra SSRF (el riesgo más concreto del endpoint).
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return respondJSON(res, 500, { error: 'ANTHROPIC_API_KEY no configurada' });
@@ -111,7 +116,10 @@ export default async function handler(req, res) {
   let imageBlock = null;
   if (imageUrl) {
     try {
-      const r = await fetch(imageUrl, {
+      // SSRF GUARD: antes hacíamos fetch() libre del imageUrl pasado por el
+      // user. Un atacante podía pedir http://169.254.169.254/... y leer
+      // metadata del cloud provider. safeFetch valida host + timeout 10s.
+      const r = await safeFetch(imageUrl, {
         headers: { 'User-Agent': 'Mozilla/5.0 (compatible; VioraBot/1.0)' },
       });
       if (r.ok) {

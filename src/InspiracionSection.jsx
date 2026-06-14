@@ -1409,29 +1409,54 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   // para incluir brands cuyos ads matchearon server-side.
   const [serverMatchedAdIds, setServerMatchedAdIds] = useState(null);
   const [searchingServer, setSearchingServer] = useState(false);
+  const [serverSearchError, setServerSearchError] = useState(null);
+  // Cache de queries para no martillar Postgres con re-tipeo. TTL 60s.
+  const serverSearchCacheRef = useRef(new Map());
   useEffect(() => {
-    const q = query.trim();
-    if (q.length < 3) { setServerMatchedAdIds(null); return; }
+    const q = query.trim().slice(0, 200); // cap defensivo
+    if (q.length < 3) { setServerMatchedAdIds(null); setServerSearchError(null); return; }
+    // Cache hit?
+    const cached = serverSearchCacheRef.current.get(q);
+    if (cached && (Date.now() - cached.ts) < 60000) {
+      setServerMatchedAdIds(cached.ids);
+      setServerSearchError(null);
+      return;
+    }
     let cancelled = false;
     setSearchingServer(true);
     const timer = setTimeout(async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         const authToken = session?.access_token || '';
-        if (!authToken) { setServerMatchedAdIds(null); return; }
+        if (!authToken) {
+          if (!cancelled) { setServerMatchedAdIds(null); setServerSearchError('Sin sesión — buscando solo en memoria local'); }
+          return;
+        }
         const resp = await fetch('/api/marketing/search-ads', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
-          body: JSON.stringify({ query: q, pageSize: 200 }),
+          body: JSON.stringify({ query: q, pageSize: 500 }),
         });
-        if (!resp.ok) { setServerMatchedAdIds(null); return; }
+        if (!resp.ok) {
+          if (!cancelled) { setServerMatchedAdIds(null); setServerSearchError(`Server search ${resp.status} — buscando solo en memoria`); }
+          return;
+        }
         const data = await resp.json();
         if (!cancelled) {
-          setServerMatchedAdIds(new Set((data.ads || []).map(a => a.ad_id)));
+          const ids = new Set((data.ads || []).map(a => a.ad_id));
+          setServerMatchedAdIds(ids);
+          setServerSearchError(null);
+          serverSearchCacheRef.current.set(q, { ids, ts: Date.now() });
+          // Cap del cache a 30 entries para no crecer.
+          if (serverSearchCacheRef.current.size > 30) {
+            const firstKey = serverSearchCacheRef.current.keys().next().value;
+            serverSearchCacheRef.current.delete(firstKey);
+          }
         }
-      } catch { if (!cancelled) setServerMatchedAdIds(null); }
-      finally { if (!cancelled) setSearchingServer(false); }
-    }, 350); // debounce 350ms
+      } catch (err) {
+        if (!cancelled) { setServerMatchedAdIds(null); setServerSearchError(`Sin red — buscando solo en memoria`); }
+      } finally { if (!cancelled) setSearchingServer(false); }
+    }, 350);
     return () => { cancelled = true; clearTimeout(timer); };
   }, [query]);
   const [tipoFiltro, setTipoFiltro] = useState('all'); // 'all' | 'competidor' | 'custom'
@@ -3018,6 +3043,12 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                 />
                 {searchingServer && (
                   <Loader2 size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-amber-500 animate-spin" />
+                )}
+                {serverSearchError && !searchingServer && (
+                  <p className="absolute left-0 -bottom-4 text-[9px] text-amber-600 dark:text-amber-400 italic"
+                    title={serverSearchError}>
+                    ⚠ {serverSearchError}
+                  </p>
                 )}
               </div>
               <select value={tipoFiltro} onChange={e => setTipoFiltro(e.target.value)}

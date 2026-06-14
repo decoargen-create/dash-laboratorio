@@ -76,6 +76,42 @@ export default async function handler(req, res) {
   const pageSize = Math.max(1, Math.min(200, Number(rawPageSize) || 50));
   const offset = Math.max(0, (Number(page) - 1) * pageSize);
 
+  // Query con cap defensivo + escape de chars conflictivos.
+  const trimmedQuery = query.trim().slice(0, 200);
+
+  // Si el caller pide sort='relevance' Y hay query, usamos la RPC
+  // search_ads_ranked que ordena por ts_rank (no se puede via PostgREST
+  // directo). Para otros sorts, query directo con filters.
+  if (sort === 'relevance' && trimmedQuery) {
+    // Usamos un cliente authenticated (con el token del user) así
+    // auth.uid() adentro de la RPC matchea.
+    const userClient = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+      {
+        auth: { persistSession: false },
+        global: { headers: { Authorization: req.headers.authorization || '' } },
+      }
+    );
+    const { data, error } = await userClient.rpc('search_ads_ranked', {
+      q: trimmedQuery,
+      filter_producto: productoId || null,
+      filter_competidor: competidorId || null,
+      filter_only_winners: !!onlyWinners,
+      page_offset: offset,
+      page_size: pageSize,
+    });
+    if (error) return respondJSON(res, 500, { error: `RPC falló: ${error.message}` });
+    const total = data?.[0]?.total_count || 0;
+    return respondJSON(res, 200, {
+      ads: data || [],
+      total,
+      page: Number(page),
+      pageSize,
+      hasMore: (offset + (data?.length || 0)) < total,
+    });
+  }
+
   let q = supabase
     .from('marketing_ads')
     .select('*', { count: 'exact' })
@@ -88,20 +124,13 @@ export default async function handler(req, res) {
   if (minDays != null) q = q.gte('days_running', Number(minDays));
   if (maxDays != null) q = q.lte('days_running', Number(maxDays));
 
-  // Full-text search via Postgres tsquery.
-  if (query.trim()) {
-    // websearch_to_tsquery interpreta "or"/quoted strings naturalmente.
-    q = q.textSearch('search_vector', query.trim(), { type: 'websearch', config: 'spanish' });
+  if (trimmedQuery) {
+    q = q.textSearch('search_vector', trimmedQuery, { type: 'websearch', config: 'spanish' });
   }
 
-  // Sort.
   if (sort === 'score') q = q.order('score', { ascending: false, nullsFirst: false });
   else if (sort === 'days') q = q.order('days_running', { ascending: false, nullsFirst: false });
-  else if (sort === 'relevance' && query.trim()) {
-    // Para relevance dejamos que Postgres ordene por ts_rank — pero
-    // postgres-js no expone ranking directo, así que caemos a recent.
-    q = q.order('scraped_at', { ascending: false });
-  } else q = q.order('scraped_at', { ascending: false });
+  else q = q.order('scraped_at', { ascending: false });
 
   q = q.range(offset, offset + pageSize - 1);
 

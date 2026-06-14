@@ -143,6 +143,29 @@ function singularFormato(formato) {
   return map[formato.toLowerCase()] || formato;
 }
 
+// Formatos "no granular" — el producto se muestra como packaging cerrado,
+// no como contenido derramado/visible. Sin esto gpt-image-2 ignora el
+// "PHYSICAL FORM: crema" cuando el winner original tiene un visual fuerte
+// tipo "contenedor abierto con contenido a la vista" (ej: cápsulas en
+// mortero, polvo en cuchara) y rellena el jar/bottle del user con cápsulas
+// por default. La regla más fuerte para estos formatos es directamente
+// "no abrir el envase, no mostrar el contenido".
+const NON_GRANULAR_FORMATS = new Set([
+  'crema', 'cream', 'loción', 'locion', 'lotion', 'emulsión', 'emulsion',
+  'sérum', 'serum', 'aceite', 'oil',
+  'bálsamo', 'balsamo', 'balm',
+  'spray', 'atomizador',
+  'mascarilla', 'máscara', 'mascara', 'mask',
+  'stick', 'barra', 'bar',
+  'gel', 'shampoo', 'champú', 'champu',
+  'desodorante', 'deodorant', 'perfume', 'fragrance', 'agua', 'mist', 'tonic', 'tónico',
+]);
+
+function isNonGranular(formato) {
+  if (!formato) return false;
+  return NON_GRANULAR_FORMATS.has(String(formato).toLowerCase().trim());
+}
+
 // Dedup de líneas de ofertas: si la misma frase (case-insensitive) aparece
 // múltiple veces, mantenemos solo la primera. También dedup de tokens
 // repetidos en la misma línea (ej: "ENVÍO GRATIS · ENVÍO GRATIS" → "ENVÍO GRATIS").
@@ -638,6 +661,13 @@ function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentCol
   if (nombre) parts.push(`  • Product name: ${nombre}`);
   if (productoForm) {
     parts.push(`  • **PHYSICAL FORM**: ${productoForm} (NOT capsules/pills/another format). If reference shows the product contents, show ${productoForm}.`);
+    if (isNonGranular(productoForm)) {
+      // Sin esta sección, gpt-image-2 copia el "contenedor abierto" del
+      // winner y lo rellena con cápsulas default cuando el target es
+      // crema/loción/sérum. Es lo que pasó en producción con un winner
+      // tipo cepillo-en-bowl → variación generada con cápsulas en jar.
+      parts.push(`  • **CLOSED PACKAGING ONLY**: This product is ${productoForm} — NEVER show its contents spilled, displayed, or visible outside the package. Render the jar/bottle/tube CLOSED with its cap/lid on. Even if IMAGE 1 (the reference) shows an OPEN container with content visible (capsules in a bowl, powder in a glass, pills on a hand, etc.), you MUST show ONLY the CLOSED PACKAGE from IMAGE 2 in our generation. Do NOT invent capsules, pills, granules, or any "content" inside or beside the package. The whole point is that this is a finished cosmetic/skincare product sold as a sealed unit.`);
+    }
   }
   if (descripcion) parts.push(`  • Description: ${descripcion.slice(0, 400)}`);
   if (research) parts.push(`  • Audience and pain points: ${research.slice(0, 1500)}`);
@@ -759,6 +789,11 @@ function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio
     const singular = singularFormato(productoForm);
     parts.push(`  - **PHYSICAL FORM**: ${productoForm} (NOT capsules, NOT pills, NOT another format). If the reference ad shows the product contents (a single capsule on a hand, powder in a glass, etc.), YOU MUST show ${productoForm} instead. Any spilled/displayed product detail must visually be ${productoForm}.`);
     parts.push(`  - **TEXT OVERLAY WORDING**: If any overlay says "1 cápsula", "1 pastilla", "una pill", etc., REPLACE it with "1 ${singular}" (the correct singular form for ${productoForm}). Same rule for plural: "60 cápsulas" → "60 ${productoForm}". NEVER let a text on the canvas contradict the physical form of the product.`);
+    if (isNonGranular(productoForm)) {
+      // Productos no-granulares: el contenido NO se muestra. Ver comentario
+      // largo en buildPromptFromPlan — mismo bug.
+      parts.push(`  - **CLOSED PACKAGING ONLY**: This product is ${productoForm} — never show its contents (no capsules, no pills, no granules, no powder, no liquid spilled). Render the jar/bottle/tube CLOSED with cap on. Even if IMAGE 1 shows an open container, you MUST keep IMAGE 2's package sealed.`);
+    }
   }
   if (descripcion) parts.push(`  - Description: ${descripcion.slice(0, 400)}`);
   if (research) parts.push(`  - Audience and pain points (use to choose props/scene): ${research.slice(0, 1500)}`);

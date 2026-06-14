@@ -330,7 +330,7 @@ function BulkProgressBar({ state, onClose }) {
 // para Vite/Rollup en builds minificados.
 // =========================================================
 
-function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onScrape, onAdapt, onCrearReferencial, onToggleSelect, onRemove, onClearProgress }) {
+function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onScrape, onAdapt, onCrearReferencial, onToggleSelect, onRemove, onClearProgress, onOcrWinners }) {
   // onClearProgress se forwardea a BrandAdsGrid (que lo pasa a AdThumb) para
   // que el user pueda cerrar el overlay de error que ahora queda persistente.
   const isCompetidor = !!brand.isCompetidor;
@@ -385,6 +385,16 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
           </div>
         </div>
         {/* Botón scrape inline en el header — más compacto que antes (estaba en una fila aparte) */}
+        {onOcrWinners && ads.length > 0 && (
+          <button
+            onClick={onOcrWinners}
+            disabled={isScraping}
+            className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold text-violet-700 dark:text-violet-300 bg-violet-50 dark:bg-violet-900/30 border border-violet-300 dark:border-violet-700 rounded hover:bg-violet-100 dark:hover:bg-violet-900/50 transition disabled:opacity-50 shrink-0"
+            title="Extraer texto OCR de los top 10 winners — Santi mira las imágenes y saca el texto overlay (claims, precios, descuentos). Después podés buscar por ese texto en la lupa. Cuesta ~$0.004."
+          >
+            <Search size={10} /> OCR
+          </button>
+        )}
         {onScrape && (
           <button
             onClick={onScrape}
@@ -2138,6 +2148,91 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   // Permite cerrar la barra de bulk manualmente.
   const cerrarBulkProgress = () => setBulkProgress(null);
 
+  // OCR de los top 10 winners de una brand — extrae texto visible en
+  // imágenes (overlays, claims, descuentos) y lo guarda en ad.ocrText.
+  // Después la lupa busca también por ese texto. Usa Claude Haiku (barato).
+  const handleOcrTopWinners = async (brand) => {
+    const allAds = (brand.__ads || []).filter(a => (a.imageUrls?.length || 0) > 0);
+    if (allAds.length === 0) {
+      addToast?.({ type: 'warning', message: `${brand.nombre} no tiene ads con imagen para OCR.` });
+      return;
+    }
+    // Top 10 por winner + daysRunning + score.
+    const top = [...allAds]
+      .sort((a, b) => (b.isWinner ? 1 : 0) - (a.isWinner ? 1 : 0) || (b.score || 0) - (a.score || 0))
+      .slice(0, 10);
+    const adsForOcr = top.map(a => ({ id: a.id, imageUrl: a.imageUrls[0] }));
+    const execId = startExecution({
+      label: `OCR de ${brand.nombre}`,
+      sublabel: `Extrayendo texto de ${adsForOcr.length} winners…`,
+      kind: 'ocr',
+      estimatedMs: adsForOcr.length * 4000,
+      estimatedCost: adsForOcr.length * 0.0004,
+    });
+    try {
+      const resp = await fetch('/api/marketing/ocr-ad', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ads: adsForOcr }),
+      });
+      const data = await parseJsonOrThrow(resp, `OCR de ${brand.nombre}`);
+      if (!resp.ok) throw new Error(stringifyApiError(data.error) || `HTTP ${resp.status}`);
+      logCostsFromResponse(data, `ocr · ${brand.nombre}`);
+      // Patchear ads en el state local con el ocrText devuelto.
+      const ocrById = new Map((data.results || []).map(r => [r.id, r.ocrText || '']));
+      if (brand.isCompetidor) {
+        const comp = brand.__sourceComp;
+        if (comp && producto?.id) {
+          // Actualizar compAdsByCompId con ocrText
+          setCompAdsByCompId(prev => {
+            const ads = prev[comp.id] || [];
+            const updated = ads.map(a => ocrById.has(a.id) ? { ...a, ocrText: ocrById.get(a.id) } : a);
+            return { ...prev, [comp.id]: updated };
+          });
+          // Persistir a IDB para que sobreviva refresh
+          try {
+            const rec = await getCompAds(producto.id, comp.id);
+            if (rec?.ads) {
+              const adsUpdated = rec.ads.map(a => ocrById.has(a.id) ? { ...a, ocrText: ocrById.get(a.id) } : a);
+              await setCompAds(producto.id, comp.id, {
+                ads: adsUpdated,
+                total: rec.total || adsUpdated.length,
+                winners: rec.winners,
+                lastAdsCheck: rec.lastAdsCheck,
+              });
+            }
+          } catch {}
+        }
+      } else {
+        // Brand manual — adsByBrand
+        setAdsByBrand(prev => {
+          const ads = prev[brand.id] || [];
+          const updated = ads.map(a => ocrById.has(a.id) ? { ...a, ocrText: ocrById.get(a.id) } : a);
+          return { ...prev, [brand.id]: updated };
+        });
+        // Persistir a IDB con key brand-<id>
+        try {
+          const rec = await getCompAds(producto?.id, `brand-${brand.id}`);
+          if (rec?.ads) {
+            const adsUpdated = rec.ads.map(a => ocrById.has(a.id) ? { ...a, ocrText: ocrById.get(a.id) } : a);
+            await setCompAds(producto.id, `brand-${brand.id}`, {
+              ads: adsUpdated,
+              total: rec.total || adsUpdated.length,
+              winners: rec.winners,
+              lastAdsCheck: rec.lastAdsCheck,
+            });
+          }
+        } catch {}
+      }
+      const ok = (data.results || []).filter(r => r.ocrText && !r.error).length;
+      finishExecution(execId, { ok: true, message: `${ok}/${adsForOcr.length} ads con texto extraído`, cost: data.costUSD });
+      addToast?.({ type: 'success', message: `Santi extrajo texto de ${ok} ads — ahora podés buscarlo en la lupa.` });
+    } catch (err) {
+      addToast?.({ type: 'error', message: `OCR falló: ${err.message}` });
+      finishExecution(execId, { ok: false, message: err.message || 'Error' });
+    }
+  };
+
   // Scrapea ads activos de una marca via Apify. Si tiene fbPageUrl, prefiere
   // eso (más estable). Sino, deriva keyword del landingUrl.
   const handleScrapeBrand = async (brand) => {
@@ -2724,7 +2819,19 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         else if (estadoFiltro === 'sin-scrapear') unif = unif.filter(b => !b.lastScraped && b.__ads.length === 0);
         if (query.trim()) {
           const q = query.toLowerCase();
-          unif = unif.filter(b => `${b.nombre} ${b.landingUrl || ''} ${b.notas || ''}`.toLowerCase().includes(q));
+          unif = unif.filter(b => {
+            // 1) Match en metadata de la brand (nombre, URL, notas).
+            const meta = `${b.nombre} ${b.landingUrl || ''} ${b.notas || ''}`.toLowerCase();
+            if (meta.includes(q)) return true;
+            // 2) Match en el TEXTO de los ads — incluye body, headline, y
+            //    ad.ocrText (texto extraído por OCR de la imagen). Sin esto
+            //    el user no podía encontrar marcas por palabras que solo
+            //    aparecen overlay en las imágenes.
+            return (b.__ads || []).some(a => {
+              const adText = `${a.headline || ''} ${a.body || ''} ${a.ocrText || ''}`.toLowerCase();
+              return adText.includes(q);
+            });
+          });
         }
 
         // Ordenamiento
@@ -3036,6 +3143,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                     usedAdIds={mergedUsedAdIds}
                     progressById={progressById}
                     onScrape={() => b.isCompetidor ? handleScrapeCompetidor(b) : handleScrapeBrand(b)}
+                    onOcrWinners={() => handleOcrTopWinners(b)}
                     onAdapt={(ad) => handleAdapt(b.nombre, ad)}
                     onCrearReferencial={(ad) => crearReferencialDeAd(b.nombre, ad)}
                     onToggleSelect={(adId) => toggleSeleccion(adId)}

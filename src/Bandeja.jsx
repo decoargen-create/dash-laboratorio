@@ -168,6 +168,249 @@ function CounterCard({ label, value, color, accent = false }) {
 }
 
 
+// Definición de los "ánzuelos" que puede atacar una idea. Cada uno se
+// considera "cargado" si la idea tiene contenido en el campo correspondiente.
+// El mapa los renderiza en colores plenos; los vacíos como ghost (gris dashed)
+// para que el user vea "qué frentes me falta cubrir antes de generar".
+const IDEA_ANZUELOS = [
+  { key: 'hook',     label: 'Hook',      emoji: '🎣', color: '#f59e0b', field: 'hook' },
+  { key: 'pain',     label: 'Pain',      emoji: '💥', color: '#ef4444', field: 'painPoint' },
+  { key: 'angulo',   label: 'Ángulo',    emoji: '📐', color: '#10b981', field: 'angulo' },
+  { key: 'visual',   label: 'Visual',    emoji: '🎨', color: '#ec4899', field: 'descripcionImagen' },
+  { key: 'copy',     label: 'Copy',      emoji: '📝', color: '#8b5cf6', field: 'copy' },
+  { key: 'creencia', label: 'Creencia',  emoji: '💭', color: '#06b6d4', field: 'creenciaApalancada' },
+  { key: 'test',     label: 'Testeo',    emoji: '🎯', color: '#3b82f6', field: 'variableDeTesteo' },
+  { key: 'formato',  label: 'Formato',   emoji: '🔀', color: '#eab308', field: 'formato' },
+];
+
+function IdeaAnzuelosMap({ idea }) {
+  const [selected, setSelected] = useState(null);
+
+  // Clasificar cada ánzuelo como cargado o vacío.
+  const loaded = [];
+  const empty = [];
+  for (const a of IDEA_ANZUELOS) {
+    const value = idea?.[a.field];
+    const hasContent = typeof value === 'string' ? value.trim().length > 0 : !!value;
+    (hasContent ? loaded : empty).push({ ...a, value: hasContent ? value : null });
+  }
+
+  // Cap a 6 nodos visibles para no saturar — todos los cargados + ghosts
+  // hasta llegar a 6 mínimo (o el largo de loaded si ya supera 6).
+  const ghostBudget = Math.max(0, 6 - loaded.length);
+  const ghosts = empty.slice(0, ghostBudget).map(g => ({ ...g, ghost: true }));
+  const nodes = [...loaded.map(l => ({ ...l, ghost: false })), ...ghosts];
+
+  if (nodes.length === 0) return null;
+
+  // Layout radial.
+  const N = nodes.length;
+  const size = 320;
+  const centerX = size / 2;
+  const centerY = size / 2;
+  const radius = size * 0.34;
+  const positioned = nodes.map((node, i) => {
+    const angle = (i / N) * 2 * Math.PI - Math.PI / 2;
+    const x = centerX + radius * Math.cos(angle);
+    const y = centerY + radius * Math.sin(angle);
+    return { ...node, x, y };
+  });
+
+  const loadedCount = loaded.length;
+  // Estado de salud: ≤2 ánzuelos = "chata", 3-5 = "media", ≥6 = "completa".
+  const health = loadedCount <= 2
+    ? { label: 'Idea chata', color: '#ef4444', hint: 'Está faltando rellenar frentes — el creativo va a salir flojo. Editá la idea para sumar pain + ángulo + visual.' }
+    : loadedCount >= 6
+      ? { label: 'Idea completa', color: '#10b981', hint: 'Lista para generar — tiene los frentes que importan cubiertos.' }
+      : { label: 'Idea media', color: '#f59e0b', hint: `${loadedCount}/8 frentes cargados — generala si querés pero pensá si vale sumarle 1-2 más antes.` };
+
+  const sel = selected ? nodes.find(n => n.key === selected) : null;
+
+  return (
+    <div className="mb-4 p-3 bg-white dark:bg-gray-900/40 border border-gray-200 dark:border-gray-700 rounded-xl">
+      {/* keyframes inline — mismo razonamiento que WinnersReport (no hay
+          global CSS para reutilizar). */}
+      <style>{`
+        @keyframes idea-anzuelo-flow {
+          from { stroke-dashoffset: 14; }
+          to   { stroke-dashoffset: 0; }
+        }
+        .idea-anzuelo-path {
+          stroke-dasharray: 7 4;
+          animation: idea-anzuelo-flow 1.8s linear infinite;
+        }
+      `}</style>
+
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
+            Mapa de ánzuelos
+          </span>
+          <span
+            className="inline-flex items-center px-2 py-0.5 text-[10px] font-bold rounded-full"
+            style={{ background: `${health.color}22`, color: health.color }}
+          >
+            {health.label} · {loadedCount}/{IDEA_ANZUELOS.length}
+          </span>
+        </div>
+        <p className="text-[10px] text-gray-500 dark:text-gray-400 italic max-w-md text-right line-clamp-1" title={health.hint}>
+          {health.hint}
+        </p>
+      </div>
+
+      <div className="flex flex-col lg:flex-row gap-4 items-start">
+        {/* Diagrama radial */}
+        <div className="relative mx-auto shrink-0" style={{ width: size, height: size, maxWidth: '100%' }}>
+          <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox={`0 0 ${size} ${size}`}>
+            <defs>
+              {positioned.map((n, i) => (
+                <marker
+                  key={`im-${i}`}
+                  id={`idea-arrow-${idea.id}-${i}`}
+                  viewBox="0 0 10 10"
+                  refX="8" refY="5"
+                  markerWidth="5" markerHeight="5"
+                  orient="auto"
+                >
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill={n.ghost ? '#9ca3af' : n.color} opacity={n.ghost ? 0.4 : 0.9} />
+                </marker>
+              ))}
+            </defs>
+            {positioned.map((n, i) => {
+              const dx = centerX - n.x;
+              const dy = centerY - n.y;
+              const len = Math.hypot(dx, dy);
+              const stopShort = 44;
+              const tx = n.x + (dx / len) * (len - stopShort);
+              const ty = n.y + (dy / len) * (len - stopShort);
+              const midX = (n.x + centerX) / 2 + dy * 0.05;
+              const midY = (n.y + centerY) / 2 - dx * 0.05;
+              const isSelected = selected === n.key;
+              const isDimmed = selected && !isSelected;
+              return (
+                <path
+                  key={`ip-${i}`}
+                  className={n.ghost ? '' : 'idea-anzuelo-path'}
+                  d={`M ${n.x} ${n.y} Q ${midX} ${midY} ${tx} ${ty}`}
+                  stroke={n.ghost ? '#9ca3af' : n.color}
+                  strokeWidth={isSelected ? 3 : (n.ghost ? 1 : 2)}
+                  fill="none"
+                  opacity={n.ghost ? 0.3 : (isDimmed ? 0.2 : (isSelected ? 1 : 0.65))}
+                  strokeDasharray={n.ghost ? '3 5' : undefined}
+                  markerEnd={`url(#idea-arrow-${idea.id}-${i})`}
+                  style={isSelected ? { animationDuration: '0.9s' } : undefined}
+                />
+              );
+            })}
+          </svg>
+
+          {/* Idea en el centro */}
+          <div
+            className="absolute flex flex-col items-center justify-center rounded-2xl shadow-lg border-2 text-white"
+            style={{
+              left: centerX - 52, top: centerY - 52,
+              width: 104, height: 104,
+              background: `linear-gradient(135deg, ${health.color}, ${health.color}cc)`,
+              borderColor: `${health.color}66`,
+            }}
+          >
+            {idea.origen?.imageUrl ? (
+              <img src={idea.origen.imageUrl} alt="" className="w-10 h-10 object-cover rounded-lg mb-1 border border-white/40" />
+            ) : (
+              <span className="text-2xl leading-none mb-1">💡</span>
+            )}
+            <p className="text-[9px] font-bold uppercase tracking-wider opacity-95 px-2 text-center leading-tight line-clamp-2">
+              {idea.titulo || 'Idea'}
+            </p>
+          </div>
+
+          {/* Nodos */}
+          {positioned.map((n) => {
+            const isSelected = selected === n.key;
+            const isDimmed = selected && !isSelected;
+            const nodeSize = n.ghost ? 56 : 64;
+            return (
+              <button
+                type="button"
+                key={n.key}
+                onClick={() => setSelected(prev => prev === n.key ? null : n.key)}
+                className={`absolute flex flex-col items-center justify-center rounded-xl border-2 transition-all duration-200 ${
+                  n.ghost
+                    ? 'bg-gray-50 dark:bg-gray-900/40 border-dashed hover:bg-gray-100 dark:hover:bg-gray-800/50'
+                    : `bg-white dark:bg-gray-800 ${isSelected ? 'shadow-xl' : 'shadow-md hover:shadow-lg'}`
+                }`}
+                style={{
+                  left: n.x - nodeSize / 2, top: n.y - nodeSize / 2,
+                  width: nodeSize, height: nodeSize,
+                  borderColor: n.ghost ? '#d1d5db' : n.color,
+                  opacity: isDimmed ? 0.45 : 1,
+                  transform: isSelected ? 'scale(1.08)' : 'scale(1)',
+                  ...(isSelected ? { boxShadow: `0 0 0 3px ${n.color}55, 0 8px 24px ${n.color}33` } : {}),
+                }}
+                title={n.ghost ? `Sin ${n.label} cargado — click para tip` : `${n.label} — click para ver`}
+              >
+                <div className={`text-base leading-none mb-0.5 ${n.ghost ? 'opacity-40' : ''}`}>{n.emoji}</div>
+                <p
+                  className={`text-[9px] font-bold uppercase tracking-wider ${n.ghost ? 'text-gray-400 dark:text-gray-600' : ''}`}
+                  style={n.ghost ? undefined : { color: n.color }}
+                >
+                  {n.label}
+                </p>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Panel lateral — detalle del nodo seleccionado, o resumen si nada */}
+        <div className="flex-1 min-w-0 w-full">
+          {sel ? (
+            <div
+              className="p-3 rounded-lg border"
+              style={{
+                borderColor: sel.ghost ? '#d1d5db' : `${sel.color}66`,
+                background: sel.ghost ? '#f9fafb' : `${sel.color}0a`,
+              }}
+            >
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-bold" style={{ color: sel.ghost ? '#6b7280' : sel.color }}>
+                  {sel.emoji} {sel.label}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setSelected(null)}
+                  className="text-[10px] text-gray-500 hover:text-gray-700"
+                >
+                  cerrar ×
+                </button>
+              </div>
+              {sel.ghost ? (
+                <p className="text-[11px] text-gray-600 dark:text-gray-400">
+                  Sin <strong>{sel.label}</strong> cargado en esta idea. Editala
+                  para sumar este frente — un creativo con {loadedCount + 1}+ ánzuelos
+                  cargados rinde mejor que uno con {loadedCount}.
+                </p>
+              ) : (
+                <p className="text-xs text-gray-800 dark:text-gray-200 whitespace-pre-wrap leading-relaxed">
+                  {sel.value}
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="p-3 rounded-lg border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/30">
+              <p className="text-[11px] text-gray-600 dark:text-gray-400">
+                <strong>{loadedCount} frente{loadedCount !== 1 ? 's' : ''} cargado{loadedCount !== 1 ? 's' : ''}</strong> de {IDEA_ANZUELOS.length} posibles.
+                Click en un ánzuelo para ver su contenido. Los ánzuelos gris claro
+                son los que esta idea NO ataca — sumá esos antes de generar para
+                que el creativo salga más completo.
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function IdeaCard({
   idea, expanded, onToggle, onEstado, onRemove,
   editandoNotas, onEditNotas, notasDraft, setNotasDraft, onSaveNotas, onCancelNotas,
@@ -322,6 +565,11 @@ function IdeaCard({
       {/* Detalle expandido — 2 columnas: izquierda = output creativo, derecha = estrategia + contexto */}
       {expanded && (
         <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 px-4 py-3">
+          {/* Mapa de Ánzuelos — visual blueprint de la idea: qué frentes
+              ataca (hook + pain + ángulo + visual + copy + creencia +
+              variable de testeo) y cuáles están vacíos. Permite "auditar"
+              la idea de un pantallazo antes de gastar tokens generándola. */}
+          <IdeaAnzuelosMap idea={idea} />
           <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
             {/* COLUMNA IZQUIERDA — output creativo (3/5 del espacio) */}
             <div className="lg:col-span-3 space-y-3">

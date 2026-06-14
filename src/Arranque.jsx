@@ -3596,7 +3596,27 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                   <div>
                     <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">Ideas por corrida</label>
                     <input type="number" min="1" max={MAX_IDEAS_PER_RUN} value={genConfig.limiteDiario}
-                      onChange={e => setGenConfig(c => ({ ...c, limiteDiario: Math.max(1, Math.min(MAX_IDEAS_PER_RUN, Number(e.target.value) || 50)) }))}
+                      onChange={e => {
+                        // FIX: antes hacíamos `Number(value) || 50`. Eso pisaba
+                        // el input con 50 cuando el field quedaba vacío (al
+                        // borrar para tipear "10"), imposibilitando llegar a
+                        // números chicos. Ahora permitimos vacío y clampeamos
+                        // SOLO si el user ingresó un número válido.
+                        const raw = e.target.value;
+                        if (raw === '') {
+                          setGenConfig(c => ({ ...c, limiteDiario: '' }));
+                          return;
+                        }
+                        const n = Number(raw);
+                        if (isNaN(n)) return;
+                        setGenConfig(c => ({ ...c, limiteDiario: Math.max(1, Math.min(MAX_IDEAS_PER_RUN, n)) }));
+                      }}
+                      onBlur={e => {
+                        // Al perder foco, si quedó vacío o inválido, restauramos
+                        // el mínimo viable. Sin esto el form se rompía al submit.
+                        const n = Number(e.target.value);
+                        if (isNaN(n) || n < 1) setGenConfig(c => ({ ...c, limiteDiario: 1 }));
+                      }}
                       className="w-24 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-brand-500" />
                     <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">
                       Cuántas ideas pide el generador en cada corrida. La primera corrida del producto genera entre 50 y {MAX_IDEAS_PER_RUN} según cuántos ads tenga la competencia. El dedup evita repetir ideas entre corridas.

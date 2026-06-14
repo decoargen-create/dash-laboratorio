@@ -16,7 +16,7 @@
 // en algunos casos, y si MetricCard/Section/BarRow estaban DESPUÉS del componente
 // que los usa, producía "Cannot access 'w' before initialization" en producción.
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Trophy, TrendingUp, Target, Palette, Tag, Package } from 'lucide-react';
 
 const ANZUELO_META = {
@@ -30,6 +30,10 @@ const ANZUELO_META = {
 };
 
 function AnzuelosMap({ winners, productoNombre, productoImagen }) {
+  // v1 selecciona un ánzuelo → muestra panel debajo con los winners de
+  // ese bucket. Sin esto el mapa era solo deco; ahora es navegable.
+  const [selected, setSelected] = useState(null);
+
   // Buckets por categoría — solo las que tienen winners.
   const buckets = {};
   for (const w of winners) {
@@ -40,9 +44,22 @@ function AnzuelosMap({ winners, productoNombre, productoImagen }) {
       buckets[k].push(w);
     }
   }
-  const entries = Object.entries(buckets)
-    .filter(([k]) => ANZUELO_META[k])
+  const presentKeys = Object.keys(buckets);
+  const entries = presentKeys
+    .filter(k => ANZUELO_META[k])
+    .map(k => [k, buckets[k]])
     .sort((a, b) => b[1].length - a[1].length);
+
+  // Ánzuelos FANTASMA: categorías que NO tenés explotadas. Las renderizamos
+  // greyed-out para que el user vea de un pantallazo "qué me falta probar".
+  // Sin esto, un mapa con 2 nodos puede dar la falsa sensación de
+  // "estoy completo" cuando hay 5+ ángulos sin tocar.
+  const missingKeys = Object.keys(ANZUELO_META).filter(k => !presentKeys.includes(k));
+  // Cap a 3 fantasmas para no saturar — los más relevantes en orden de
+  // utilidad típica.
+  const ghostKeys = ['hook', 'visual', 'oferta', 'angulo', 'cta', 'copy', 'audience']
+    .filter(k => missingKeys.includes(k))
+    .slice(0, Math.max(0, 4 - entries.length)); // total nodos ≤ 4
 
   if (entries.length === 0) {
     return (
@@ -56,18 +73,22 @@ function AnzuelosMap({ winners, productoNombre, productoImagen }) {
   }
 
   // Layout radial. Container 100% x 360px alto.
-  const N = entries.length;
+  const allNodes = [
+    ...entries.map(([key, ws]) => ({ key, ws, ghost: false })),
+    ...ghostKeys.map(k => ({ key: k, ws: [], ghost: true })),
+  ];
+  const N = allNodes.length;
   const size = 360;
   const centerX = size / 2;
   const centerY = size / 2;
   const radius = size * 0.36;
   // Nodos: posición + datos.
-  const nodes = entries.map(([key, ws], i) => {
+  const nodes = allNodes.map((node, i) => {
     // Empezamos en -90° (arriba) y vamos en sentido horario.
     const angle = (i / N) * 2 * Math.PI - Math.PI / 2;
     const x = centerX + radius * Math.cos(angle);
     const y = centerY + radius * Math.sin(angle);
-    return { key, ws, x, y, meta: ANZUELO_META[key] };
+    return { ...node, x, y, meta: ANZUELO_META[node.key] };
   });
 
   // Buscamos thumbnail rep del bucket (winner con ROAS más alto si tiene,
@@ -82,12 +103,28 @@ function AnzuelosMap({ winners, productoNombre, productoImagen }) {
     return ws[0];
   };
 
+  const selectedBucket = selected ? buckets[selected] || [] : [];
+
   return (
     <Section
       icon={<Target size={14} />}
       title="Mapa de ánzuelos"
-      subtitle="Tu producto en el centro, los hooks que están rindiendo apuntan hacia él. Lo que más grande aparece es donde está tu palanca actual."
+      subtitle="Tu producto en el centro, los hooks que están rindiendo apuntan hacia él. Click en un ánzuelo para ver sus winners abajo. Los gris claro son ángulos que NO estás explotando todavía."
     >
+      {/* CSS para la animación de flujo en las flechas — dash que corre
+          hacia el centro indicando "este ánzuelo está tirando del producto".
+          keyframes inline porque el resto del proyecto no tiene un global CSS
+          para reutilizar y tailwind no provee dasharray animations out-of-box. */}
+      <style>{`
+        @keyframes anzuelo-flow {
+          from { stroke-dashoffset: 16; }
+          to   { stroke-dashoffset: 0; }
+        }
+        .anzuelo-flow-path {
+          stroke-dasharray: 8 4;
+          animation: anzuelo-flow 1.6s linear infinite;
+        }
+      `}</style>
       <div className="relative mx-auto" style={{ width: size, height: size, maxWidth: '100%' }}>
         {/* SVG layer — flechas curvas desde cada nodo al centro */}
         <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox={`0 0 ${size} ${size}`}>
@@ -101,7 +138,7 @@ function AnzuelosMap({ winners, productoNombre, productoImagen }) {
                 markerWidth="6" markerHeight="6"
                 orient="auto"
               >
-                <path d="M 0 0 L 10 5 L 0 10 z" fill={n.meta.color} opacity={0.85} />
+                <path d="M 0 0 L 10 5 L 0 10 z" fill={n.ghost ? '#9ca3af' : n.meta.color} opacity={n.ghost ? 0.4 : 0.85} />
               </marker>
             ))}
           </defs>
@@ -117,16 +154,26 @@ function AnzuelosMap({ winners, productoNombre, productoImagen }) {
             const ty = n.y + (dy / len) * (len - stopShort);
             const midX = (n.x + centerX) / 2 + dy * 0.06;
             const midY = (n.y + centerY) / 2 - dx * 0.06;
-            const strokeWidth = Math.max(1.5, Math.min(4, 1 + n.ws.length * 0.5));
+            const strokeWidth = n.ghost
+              ? 1
+              : Math.max(1.5, Math.min(4, 1 + n.ws.length * 0.5));
+            const isSelected = selected === n.key;
+            const isDimmed = selected && !isSelected;
+            // Animación: solo en flechas no-ghost. La seleccionada tira más
+            // fuerte; las demás laten suave.
+            const animClass = n.ghost ? '' : 'anzuelo-flow-path';
             return (
               <path
                 key={`p-${i}`}
+                className={animClass}
                 d={`M ${n.x} ${n.y} Q ${midX} ${midY} ${tx} ${ty}`}
-                stroke={n.meta.color}
-                strokeWidth={strokeWidth}
+                stroke={n.ghost ? '#9ca3af' : n.meta.color}
+                strokeWidth={isSelected ? strokeWidth + 1.5 : strokeWidth}
                 fill="none"
-                opacity={0.7}
+                opacity={n.ghost ? 0.35 : (isDimmed ? 0.25 : (isSelected ? 1 : 0.7))}
+                strokeDasharray={n.ghost ? '3 5' : undefined}
                 markerEnd={`url(#arrow-${i})`}
+                style={isSelected ? { animationDuration: '0.8s' } : undefined}
               />
             );
           })}
@@ -151,39 +198,144 @@ function AnzuelosMap({ winners, productoNombre, productoImagen }) {
           <p className="text-[9px] opacity-80 mt-0.5">{winners.length} winners</p>
         </div>
 
-        {/* Nodos de ánzuelos */}
+        {/* Nodos de ánzuelos — clickeables. Ghosts también para que el
+            user pueda explorar "qué pasa si pruebo este ángulo". */}
         {nodes.map((n) => {
-          const rep = repFor(n.ws);
-          const size = Math.max(72, Math.min(110, 60 + n.ws.length * 8));
+          const rep = n.ghost ? null : repFor(n.ws);
+          const nodeSize = n.ghost
+            ? 64
+            : Math.max(72, Math.min(110, 60 + n.ws.length * 8));
+          const isSelected = selected === n.key;
+          const isDimmed = selected && !isSelected;
+          const handleClick = () => {
+            if (n.ghost) {
+              setSelected(prev => prev === n.key ? null : n.key);
+              return;
+            }
+            setSelected(prev => prev === n.key ? null : n.key);
+          };
           return (
-            <div
+            <button
+              type="button"
               key={n.key}
-              className="absolute flex flex-col items-center justify-center rounded-xl shadow-md border-2 bg-white dark:bg-gray-800"
+              onClick={handleClick}
+              className={`absolute flex flex-col items-center justify-center rounded-xl border-2 transition-all duration-200 ${
+                n.ghost
+                  ? 'bg-gray-50 dark:bg-gray-900/50 border-dashed cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800/50'
+                  : `bg-white dark:bg-gray-800 cursor-pointer ${isSelected ? 'shadow-xl ring-2 ring-offset-2 dark:ring-offset-gray-900' : 'shadow-md hover:shadow-lg'}`
+              }`}
               style={{
-                left: n.x - size / 2, top: n.y - size / 2,
-                width: size, height: size,
-                borderColor: n.meta.color,
+                left: n.x - nodeSize / 2, top: n.y - nodeSize / 2,
+                width: nodeSize, height: nodeSize,
+                borderColor: n.ghost ? '#d1d5db' : n.meta.color,
+                opacity: isDimmed ? 0.5 : 1,
+                transform: isSelected ? 'scale(1.06)' : 'scale(1)',
+                // ringColor inline porque tailwind no acepta arbitrary
+                // values en ring-{color} cross-mode dinámicamente.
+                ...(isSelected ? { boxShadow: `0 0 0 3px ${n.meta.color}55, 0 8px 24px ${n.meta.color}33` } : {}),
               }}
-              title={`${n.ws.length} winner${n.ws.length !== 1 ? 's' : ''} con ${n.meta.label}`}
+              title={n.ghost
+                ? `Sin winners en ${n.meta.label} todavía — probá este ángulo`
+                : `${n.ws.length} winner${n.ws.length !== 1 ? 's' : ''} con ${n.meta.label} — click para ver`}
             >
-              {rep?.imageUrl ? (
+              {n.ghost ? (
+                <div className="text-base leading-none mb-0.5 opacity-40">{n.meta.emoji}</div>
+              ) : rep?.imageUrl ? (
                 <img src={rep.imageUrl} alt="" className="w-7 h-7 object-cover rounded mb-1 border border-gray-200 dark:border-gray-700" />
               ) : (
                 <div className="text-lg leading-none mb-1">{n.meta.emoji}</div>
               )}
               <p
-                className="text-[10px] font-bold uppercase tracking-wider"
-                style={{ color: n.meta.color }}
+                className={`text-[10px] font-bold uppercase tracking-wider ${n.ghost ? 'text-gray-400 dark:text-gray-600' : ''}`}
+                style={n.ghost ? undefined : { color: n.meta.color }}
               >
                 {n.meta.label}
               </p>
-              <p className="text-[9px] text-gray-500 dark:text-gray-400 tabular-nums">
-                {n.ws.length} winner{n.ws.length !== 1 ? 's' : ''}
-              </p>
-            </div>
+              {n.ghost ? (
+                <p className="text-[8px] text-gray-400 dark:text-gray-600 italic">sin probar</p>
+              ) : (
+                <p className="text-[9px] text-gray-500 dark:text-gray-400 tabular-nums">
+                  {n.ws.length} winner{n.ws.length !== 1 ? 's' : ''}
+                </p>
+              )}
+            </button>
           );
         })}
       </div>
+
+      {/* Panel inferior — winners del ánzuelo seleccionado, o tip si es ghost */}
+      {selected && (
+        (() => {
+          const meta = ANZUELO_META[selected];
+          if (!meta) return null;
+          if (selectedBucket.length === 0) {
+            // Ghost click — sugerencia de iteración. Sin esto el click en un
+            // ghost no daba feedback útil y parecía bug.
+            return (
+              <div
+                className="mt-4 p-3 rounded-lg border border-dashed"
+                style={{ borderColor: '#d1d5db', background: '#f9fafb' }}
+              >
+                <p className="text-xs font-bold text-gray-700 dark:text-gray-300">
+                  Sin winners en {meta.emoji} {meta.label} todavía
+                </p>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
+                  Probá generar 2-3 variantes pivoteando esta variable y marcalas
+                  como winner cuando rindan. Así sumás un ánzuelo más al producto.
+                </p>
+              </div>
+            );
+          }
+          // Top 6 winners del bucket, ordenados por ROAS si está, sino por fecha.
+          const sorted = [...selectedBucket].sort((a, b) => {
+            const ra = Number(a.winnerMetrics?.roas);
+            const rb = Number(b.winnerMetrics?.roas);
+            if (!isNaN(ra) && !isNaN(rb)) return rb - ra;
+            if (!isNaN(ra)) return -1;
+            if (!isNaN(rb)) return 1;
+            return String(b.winnerAt || '').localeCompare(String(a.winnerAt || ''));
+          }).slice(0, 6);
+          return (
+            <div className="mt-4">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-bold" style={{ color: meta.color }}>
+                  {meta.emoji} {meta.label} · {selectedBucket.length} winner{selectedBucket.length !== 1 ? 's' : ''}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setSelected(null)}
+                  className="text-[10px] text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                >
+                  cerrar ×
+                </button>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                {sorted.map(w => (
+                  <div
+                    key={w.id}
+                    className="flex items-center gap-2 p-2 bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700 rounded-lg"
+                  >
+                    {w.imageUrl ? (
+                      <img src={w.imageUrl} alt="" className="w-10 h-10 object-cover rounded border border-gray-300 dark:border-gray-600 shrink-0" />
+                    ) : (
+                      <div className="w-10 h-10 rounded bg-gray-200 dark:bg-gray-700 shrink-0" />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[11px] font-semibold truncate text-gray-800 dark:text-gray-200">
+                        {w.sourceHeadline || w.sourceBrand || w.id}
+                      </p>
+                      <p className="text-[9px] text-gray-500 dark:text-gray-400 tabular-nums">
+                        {w.winnerMetrics?.roas != null && `ROAS ${num(w.winnerMetrics.roas)}`}
+                        {w.winnerMetrics?.ctr != null && ` · CTR ${pct(w.winnerMetrics.ctr)}`}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()
+      )}
     </Section>
   );
 }

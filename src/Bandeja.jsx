@@ -1555,69 +1555,74 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
   // Columnas custom del kanban por producto — Trello-like.
   // Las 4 columnas base (pendiente, en_uso, usada, archivada) siempre existen.
   // El user puede agregar columnas extra Y renombrar las base (persistidas).
-  // CROSS-PC: ahora viven adentro de producto.data.kanbanCols / kanbanBaseTitles
-  // así sincronizan via el push de productos. Antes eran localStorage por
-  // producto (adslab-kanban-cols-X / adslab-kanban-base-titles-X) → invisibles
-  // en otra PC. Migración: si encuentro la versión legacy local, la promociono.
+  // CROSS-PC: viven adentro de producto.data.kanbanCols / kanbanBaseTitles
+  // así sincronizan via el push de productos. Migración lazy desde legacy.
+  // ⚠️ INLINE EVERYTHING para evitar TDZ en bundles minificados (Vite/Rollup
+  // re-ordena const fn = () => { ... } de forma que producía "Cannot access
+  // 'H' before initialization" en prod).
   const DEFAULT_BASE_TITLES = { pendiente: 'Pendientes', en_uso: 'En uso', usada: 'Usadas', archivada: 'Archivadas' };
-  const activeProducto = productos.find(p => String(p.id) === String(activeProductoId)) || null;
 
-  const readKanbanFromProducto = () => {
-    if (!activeProducto) return { cols: [], titles: DEFAULT_BASE_TITLES };
-    // 1) Source of truth: producto.data
-    let cols = Array.isArray(activeProducto.kanbanCols) ? activeProducto.kanbanCols : null;
-    let titles = activeProducto.kanbanBaseTitles && typeof activeProducto.kanbanBaseTitles === 'object'
-      ? { ...DEFAULT_BASE_TITLES, ...activeProducto.kanbanBaseTitles } : null;
-    // 2) Migración lazy: leer del legacy localStorage si producto no tiene aún
-    if (cols == null && activeProductoId) {
-      try { const r = localStorage.getItem(`adslab-kanban-cols-${activeProductoId}`); cols = r ? JSON.parse(r) : []; } catch { cols = []; }
+  const [customColumns, setCustomColumns] = useState(() => {
+    if (!activeProductoId) return [];
+    const p = productos.find(x => String(x.id) === String(activeProductoId));
+    if (p && Array.isArray(p.kanbanCols)) return p.kanbanCols;
+    try { const r = localStorage.getItem(`adslab-kanban-cols-${activeProductoId}`); return r ? JSON.parse(r) : []; } catch { return []; }
+  });
+  const [baseTitles, setBaseTitles] = useState(() => {
+    if (!activeProductoId) return DEFAULT_BASE_TITLES;
+    const p = productos.find(x => String(x.id) === String(activeProductoId));
+    if (p?.kanbanBaseTitles && typeof p.kanbanBaseTitles === 'object') {
+      return { ...DEFAULT_BASE_TITLES, ...p.kanbanBaseTitles };
     }
-    if (titles == null && activeProductoId) {
-      try { const r = localStorage.getItem(`adslab-kanban-base-titles-${activeProductoId}`); titles = r ? { ...DEFAULT_BASE_TITLES, ...JSON.parse(r) } : DEFAULT_BASE_TITLES; } catch { titles = DEFAULT_BASE_TITLES; }
-    }
-    return { cols: cols || [], titles: titles || DEFAULT_BASE_TITLES };
-  };
+    try { const r = localStorage.getItem(`adslab-kanban-base-titles-${activeProductoId}`); return r ? { ...DEFAULT_BASE_TITLES, ...JSON.parse(r) } : DEFAULT_BASE_TITLES; } catch { return DEFAULT_BASE_TITLES; }
+  });
 
-  const [customColumns, setCustomColumns] = useState(() => readKanbanFromProducto().cols);
-  const [baseTitles, setBaseTitles] = useState(() => readKanbanFromProducto().titles);
-
-  // Cambio de producto → re-hidratar.
+  // Cambio de producto → re-hidratar (inline para evitar TDZ).
   useEffect(() => {
-    const { cols, titles } = readKanbanFromProducto();
-    setCustomColumns(cols);
-    setBaseTitles(titles);
+    if (!activeProductoId) { setCustomColumns([]); setBaseTitles(DEFAULT_BASE_TITLES); return; }
+    const p = productos.find(x => String(x.id) === String(activeProductoId));
+    let cols = (p && Array.isArray(p.kanbanCols)) ? p.kanbanCols : null;
+    if (cols == null) { try { const r = localStorage.getItem(`adslab-kanban-cols-${activeProductoId}`); cols = r ? JSON.parse(r) : []; } catch { cols = []; } }
+    let titles = (p?.kanbanBaseTitles && typeof p.kanbanBaseTitles === 'object')
+      ? { ...DEFAULT_BASE_TITLES, ...p.kanbanBaseTitles } : null;
+    if (titles == null) { try { const r = localStorage.getItem(`adslab-kanban-base-titles-${activeProductoId}`); titles = r ? { ...DEFAULT_BASE_TITLES, ...JSON.parse(r) } : DEFAULT_BASE_TITLES; } catch { titles = DEFAULT_BASE_TITLES; } }
+    setCustomColumns(cols || []);
+    setBaseTitles(titles || DEFAULT_BASE_TITLES);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeProductoId]);
 
-  // Persistir adentro del producto en localStorage + dispatch event para
-  // que el sync hook pushee al cloud. Bandeja consume productos del hook
-  // (cloudProductos) pero la fuente de verdad para writes es localStorage.
-  const persistKanban = (patch) => {
+  // Persistir adentro del producto en localStorage + dispatch event para sync.
+  // Skipping primer render con ref para no sobreescribir con default antes
+  // de la hidratación inicial.
+  const kanbanInitRef = useRef(false);
+  useEffect(() => {
+    if (!kanbanInitRef.current) { kanbanInitRef.current = true; return; }
     if (!activeProductoId) return;
     try {
       const arr = JSON.parse(localStorage.getItem(PRODUCTOS_KEY) || '[]');
       const updated = arr.map(p =>
         String(p.id) === String(activeProductoId)
-          ? { ...p, ...patch, updated_at: new Date().toISOString() }
+          ? { ...p, kanbanCols: customColumns, updated_at: new Date().toISOString() }
           : p
       );
       localStorage.setItem(PRODUCTOS_KEY, JSON.stringify(updated));
       window.dispatchEvent(new CustomEvent('viora:marketing-storage-changed', { detail: { key: PRODUCTOS_KEY } }));
-    } catch (err) {
-      console.warn('[bandeja] persistKanban falló:', err.message);
-    }
-  };
-  // Skipping primer render para no sobreescribir con valores default antes de
-  // la hidratación inicial. Usamos un ref para detectar el primer render.
-  const kanbanInitRef = useRef(false);
-  useEffect(() => {
-    if (!kanbanInitRef.current) { kanbanInitRef.current = true; return; }
-    persistKanban({ kanbanCols: customColumns });
+    } catch (err) { console.warn('[bandeja] persistir kanbanCols falló:', err.message); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customColumns]);
   useEffect(() => {
     if (!kanbanInitRef.current) return;
-    persistKanban({ kanbanBaseTitles: baseTitles });
+    if (!activeProductoId) return;
+    try {
+      const arr = JSON.parse(localStorage.getItem(PRODUCTOS_KEY) || '[]');
+      const updated = arr.map(p =>
+        String(p.id) === String(activeProductoId)
+          ? { ...p, kanbanBaseTitles: baseTitles, updated_at: new Date().toISOString() }
+          : p
+      );
+      localStorage.setItem(PRODUCTOS_KEY, JSON.stringify(updated));
+      window.dispatchEvent(new CustomEvent('viora:marketing-storage-changed', { detail: { key: PRODUCTOS_KEY } }));
+    } catch (err) { console.warn('[bandeja] persistir kanbanBaseTitles falló:', err.message); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [baseTitles]);
 

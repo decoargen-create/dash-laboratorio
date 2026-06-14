@@ -32,6 +32,7 @@ import {
   getUserIdFromAuth,
   uploadCreativoToBucket,
   insertCreativoRow,
+  createSignedUrlsForCreativos,
 } from './_supabase-server.js';
 
 const MODEL_IMAGE = 'gpt-image-2';
@@ -1355,7 +1356,7 @@ export default async function handler(req, res) {
               image_url: imageUrl,
               created_at: new Date(ts + i).toISOString(),
             });
-            return { id: row.id, imageUrl, variantIndex: localVariantIndex, variantStyle };
+            return { id: row.id, imageUrl, storagePath, variantIndex: localVariantIndex, variantStyle };
           } catch (err) {
             console.warn(`[cloud save] imagen ${i} falló:`, err.message);
             return null;
@@ -1369,6 +1370,24 @@ export default async function handler(req, res) {
           cloudSaveError = cloudSaveError || `Todas las ${totalRequested} subidas al cloud fallaron (ver logs anteriores)`;
         } else if (cloudCreativos.length < totalRequested) {
           cloudSaveError = `Solo ${cloudCreativos.length}/${totalRequested} subidas al cloud OK — el resto fallaron`;
+        }
+        // PRIVATE BUCKET FIX: uploadCreativoToBucket usa getPublicUrl pero el
+        // bucket es privado → los <img src> dan 400/403. Firmamos cada path
+        // (1h) ANTES de devolver. Si firmar falla, dejamos la public URL
+        // como fallback — galeriaReferencialesCloud vuelve a firmar al releer.
+        if (Array.isArray(cloudCreativos) && cloudCreativos.length > 0) {
+          try {
+            const paths = cloudCreativos.map(c => c?.storagePath).filter(Boolean);
+            const signedMap = await createSignedUrlsForCreativos(paths, 3600);
+            if (signedMap.size > 0) {
+              cloudCreativos = cloudCreativos.map(c => {
+                const signed = c?.storagePath ? signedMap.get(c.storagePath) : null;
+                return signed ? { ...c, imageUrl: signed } : c;
+              });
+            }
+          } catch (err) {
+            console.warn('[cloud save] sign URLs falló:', err.message);
+          }
         }
       }
     } catch (err) {

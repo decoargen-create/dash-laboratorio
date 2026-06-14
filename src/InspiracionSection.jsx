@@ -432,6 +432,9 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
           onCrearReferencial={onCrearReferencial}
           onToggleSelect={onToggleSelect}
           onClearProgress={onClearProgress}
+          onScrape={onScrape}
+          isScraping={isScraping}
+          brandTotalAds={brand.lastAdsCheck ? ads.length : null}
         />
       )}
     </div>
@@ -647,7 +650,7 @@ function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = f
 }
 
 
-function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect, onClearProgress }) {
+function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect, onClearProgress, onScrape, isScraping, brandTotalAds }) {
   const [showRepeated, setShowRepeated] = useState(false);
   // Paginación: arranca con 30, "ver más" suma de a 60 hasta cap razonable.
   // ANTES: showAllFresh = true mostraba TODOS los ads (3000+) en DOM →
@@ -697,7 +700,37 @@ function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccion
                 <span className="block text-[8px] mt-0.5">({FRESH_LIMIT}/{fresh.length})</span>
               </button>
             )}
-            {FRESH_LIMIT > 30 && (
+            {/* Card de "fin del listado": aparece cuando el user VIO TODOS los
+                ads scrapeados (FRESH_LIMIT === fresh.length). Le explica que
+                para tener más necesita re-scrapear, y le da el botón directo.
+                Antes solo había un botón "↑ Menos" confuso (era para colapsar). */}
+            {fresh.length > 0 && fresh.length <= FRESH_LIMIT && onScrape && (
+              <div className="aspect-square rounded-md flex flex-col items-center justify-center gap-1.5 p-2 bg-gradient-to-br from-brand-50 to-amber-50 dark:from-brand-900/20 dark:to-amber-900/20 border-2 border-dashed border-brand-300 dark:border-brand-700 text-[10px] text-center">
+                <p className="font-bold text-gray-700 dark:text-gray-200 leading-tight">
+                  ✓ Viste {fresh.length} estáticos
+                </p>
+                <p className="text-[9px] text-gray-500 dark:text-gray-400 leading-tight">
+                  ¿Querés más? Re-scrapeá — el cap es 2500 ads
+                </p>
+                <button
+                  onClick={onScrape}
+                  disabled={isScraping}
+                  className="mt-1 px-2 py-1 text-[9px] font-bold text-white bg-gradient-to-br from-brand-500 to-brand-600 rounded hover:from-brand-600 hover:to-brand-700 transition disabled:opacity-50"
+                >
+                  {isScraping ? '⏳ Scrapeando…' : '↻ Re-scrape'}
+                </button>
+                {FRESH_LIMIT > 30 && (
+                  <button
+                    onClick={() => setFreshLimit(30)}
+                    className="mt-0.5 text-[8px] text-gray-400 dark:text-gray-500 hover:text-amber-600 hover:underline transition"
+                    title="Colapsar a los primeros 30"
+                  >
+                    Colapsar
+                  </button>
+                )}
+              </div>
+            )}
+            {FRESH_LIMIT > 30 && fresh.length > FRESH_LIMIT && (
               <button
                 onClick={() => setFreshLimit(30)}
                 className="aspect-square rounded-md flex items-center justify-center bg-gray-50 dark:bg-gray-900 border-2 border-dashed border-gray-200 dark:border-gray-700 text-[10px] text-gray-500 dark:text-gray-400 italic hover:bg-gray-100 dark:hover:bg-gray-800 hover:border-amber-400 hover:text-amber-600 transition cursor-pointer"

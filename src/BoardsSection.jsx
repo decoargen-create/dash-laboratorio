@@ -372,7 +372,17 @@ function BoardItemCard({ item, onRemove }) {
       }
     }, { rootMargin: '200px' });
     io.observe(containerRef.current);
-    return () => { active = false; io.disconnect(); };
+    // Consistencia con AdThumb: si el cache local guarda esta imagen mientras
+    // el board está abierto, refrescamos al blob URL.
+    const onSaved = (e) => {
+      if (String(e?.detail?.adId || '') === String(item.ad_id)) fetchCached();
+    };
+    window.addEventListener('viora:ad-image-cached', onSaved);
+    return () => {
+      active = false;
+      io.disconnect();
+      window.removeEventListener('viora:ad-image-cached', onSaved);
+    };
   }, [item.ad_id]);
 
   const thumb = cachedUrl || cdnThumb;

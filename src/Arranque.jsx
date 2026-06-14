@@ -41,7 +41,7 @@ import ProductoImagenUploader from './ProductoImagenUploader.jsx';
 import GaleriaReferencialesModal from './GaleriaReferencialesModal.jsx';
 import { usePipelineRun } from './PipelineRunContext.jsx';
 import { getProductoImagen } from './productoImagen.js';
-import { setCompAds, getCompAds, hydrateCompetidoresAds } from './competidorAdsIDB.js';
+import { setCompAds, getCompAds, hydrateCompetidoresAds, removeCompAds } from './competidorAdsIDB.js';
 import { stringifyApiError } from './apiHelpers.js';
 
 // Avatar del producto: muestra el pote (foto cargada en Setup) y cae al
@@ -977,17 +977,36 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // useMemo de `competidores` mete los ads adentro para que el código
   // legacy (memos, pipeline) sigan leyendo c.ads como antes.
   const [compAdsByCompId, setCompAdsByCompId] = useState({});
+  const [hydratingAds, setHydratingAds] = useState(false);
   useEffect(() => {
     let cancelled = false;
     if (!producto?.id) { setCompAdsByCompId({}); return; }
+    setHydratingAds(true);
     (async () => {
-      const map = {};
+      // PRIORITY: IDB > inline legacy. Antes preferíamos inline si existía,
+      // lo que dejaba productos parcialmente migrados leyendo datos stale.
+      const updates = {};
       for (const c of competidoresBase) {
-        if (Array.isArray(c.ads) && c.ads.length > 0) { map[c.id] = c.ads; continue; }
         const rec = await getCompAds(producto.id, c.id);
-        if (rec?.ads?.length) map[c.id] = rec.ads;
+        if (rec?.ads?.length) { updates[c.id] = rec.ads; continue; }
+        if (Array.isArray(c.ads) && c.ads.length > 0) { updates[c.id] = c.ads; }
       }
-      if (!cancelled) setCompAdsByCompId(map);
+      if (!cancelled) {
+        // RACE FIX: MERGE en vez de reemplazar. Antes hacíamos setCompAdsByCompId(map)
+        // pisando un update directo que el scrape handler acababa de hacer
+        // → "scrape termina, ads desaparecen". Ahora solo escribimos si lo
+        // nuevo es estrictamente mejor (más ads) que lo que ya hay.
+        setCompAdsByCompId(prev => {
+          const next = { ...prev };
+          for (const [cid, ads] of Object.entries(updates)) {
+            if (!next[cid] || ads.length > (next[cid]?.length || 0)) {
+              next[cid] = ads;
+            }
+          }
+          return next;
+        });
+        setHydratingAds(false);
+      }
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1448,10 +1467,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       } catch {}
       // Y borrar los ads del competidor en IDB — no tienen razón de seguir
       // ocupando MB después de que el comp se va.
-      try {
-        const { removeCompAds } = await import('./competidorAdsIDB.js');
-        await removeCompAds(producto.id, id);
-      } catch {}
+      try { await removeCompAds(producto.id, id); } catch {}
     }
   };
 
@@ -1900,7 +1916,9 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
         // Calcular cuántos ads son NUEVOS vs ya vistos. Para esto necesitamos
         // los ads previos — antes vivían inline en c.ads, ahora en IDB.
-        const prevRecord = await getCompAds(producto.id, c.id);
+        // skipCloud: para la diferencia de "nuevos vs vistos" alcanza con
+        // los previos LOCAL. Si bajamos del cloud bloqueamos el pipeline.
+        const prevRecord = await getCompAds(producto.id, c.id, { skipCloud: true });
         const prevAds = (Array.isArray(c.ads) && c.ads.length > 0 ? c.ads : prevRecord?.ads) || [];
         const prevAdIds = new Set(prevAds.map(a => a.id));
         const newAds = ads.filter(a => !prevAdIds.has(a.id));

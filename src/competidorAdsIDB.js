@@ -25,6 +25,7 @@
 //   { ads: [...], total: N, winners: M, lastAdsCheck: ISO, ts: epoch }
 
 import { supabase, getCurrentUser } from './supabase.js';
+import { logEvent } from './debugLog.js';
 
 const DB_NAME = 'adslab-competidor-ads-v1';
 const DB_VERSION = 1;
@@ -43,7 +44,10 @@ async function uploadAdsToCloud(productoId, competidorId, payload) {
   if (!supabase) return null;
   try {
     const user = await getCurrentUser();
-    if (!user) return null;
+    if (!user) {
+      logEvent({ kind: 'fetch-error', label: '[comp-ads] sin auth — no se sube al cloud', meta: { productoId, competidorId } });
+      return null;
+    }
     const path = cloudPath(user.id, productoId, competidorId);
     const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
     const { error } = await supabase.storage
@@ -51,11 +55,20 @@ async function uploadAdsToCloud(productoId, competidorId, payload) {
       .upload(path, blob, { contentType: 'application/json', upsert: true });
     if (error) {
       console.warn('[competidorAdsIDB] cloud upload falló:', error.message);
+      // SILENT FAIL FIX: antes el error se tiraba a la basura y el caller
+      // creía que estaba sincronizado. Ahora queda en el debugLog para que
+      // el user pueda exportar y mostrarme exactamente qué falló.
+      logEvent({
+        kind: 'fetch-error',
+        label: `[comp-ads] upload falló: ${error.message}`,
+        meta: { productoId, competidorId, path, errorMsg: error.message, sizeBytes: blob.size },
+      });
       return null;
     }
     return path;
   } catch (err) {
     console.warn('[competidorAdsIDB] cloud upload error:', err.message);
+    logEvent({ kind: 'fetch-error', label: `[comp-ads] upload exception: ${err.message}`, meta: { productoId, competidorId } });
     return null;
   }
 }
@@ -71,7 +84,18 @@ async function downloadAdsFromCloud(productoId, competidorId) {
     const { data, error } = await supabase.storage.from(BUCKET).download(path);
     if (error || !data) return null;
     const text = await data.text();
-    return JSON.parse(text);
+    let parsed;
+    try { parsed = JSON.parse(text); }
+    catch (parseErr) {
+      logEvent({ kind: 'fetch-error', label: `[comp-ads] cloud JSON corrupto`, meta: { productoId, competidorId, error: parseErr.message } });
+      return null;
+    }
+    // SHAPE VALIDATION: archivos corruptos NO se cachean en IDB.
+    if (!parsed || !Array.isArray(parsed.ads)) {
+      logEvent({ kind: 'fetch-error', label: `[comp-ads] cloud shape inválido`, meta: { productoId, competidorId, hasAds: !!parsed?.ads } });
+      return null;
+    }
+    return parsed;
   } catch (err) {
     console.warn('[competidorAdsIDB] cloud download falló:', err.message);
     return null;
@@ -103,8 +127,22 @@ function makeKey(productoId, competidorId) {
 }
 
 // Cache en memoria — para no martillar IDB en cada render. Se invalida en
-// cada setCompAds.
+// cada setCompAds Y cuando otro componente/tab emite el evento de cambio.
 const memCache = new Map();
+
+// CROSS-COMPONENT INVALIDATION: cuando otra parte de la app llama setCompAds
+// el evento se emite pero el memCache de OTROS módulos seguía sirviendo el
+// valor viejo. Acá lo limpiamos para que la próxima getCompAds vuelva a IDB.
+if (typeof window !== 'undefined') {
+  window.addEventListener('adslab:comp-ads-changed', (e) => {
+    try {
+      const { productoId, competidorId } = e.detail || {};
+      if (productoId && competidorId) {
+        memCache.delete(makeKey(productoId, competidorId));
+      }
+    } catch {}
+  });
+}
 
 export async function setCompAds(productoId, competidorId, payload) {
   if (!productoId || !competidorId) return false;
@@ -145,7 +183,8 @@ export async function setCompAds(productoId, competidorId, payload) {
   }
 }
 
-export async function getCompAds(productoId, competidorId) {
+export async function getCompAds(productoId, competidorId, opts = {}) {
+  const { skipCloud = false } = opts;
   if (!productoId || !competidorId) return null;
   const key = makeKey(productoId, competidorId);
   if (memCache.has(key)) return memCache.get(key);
@@ -162,6 +201,11 @@ export async function getCompAds(productoId, competidorId) {
   } catch (err) {
     console.warn('[competidorAdsIDB] get IDB falló:', err.message);
   }
+  // PERFORMANCE: si el caller no quiere cloud fallback (ej: scrape pipeline
+  // que solo necesita "los ads previos para diff"), salir aca. Sin esto, la
+  // primera vez que un producto se scrapea, getCompAds tira N llamadas al
+  // cloud (1-3s cada una) bloqueando la UI.
+  if (skipCloud) return null;
   // 2) Fallback al cloud — caso "entré desde otra PC". Bajamos del bucket
   // y cacheamos local para próximas lecturas.
   const cloudRec = await downloadAdsFromCloud(productoId, competidorId);

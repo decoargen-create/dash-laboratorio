@@ -123,6 +123,39 @@ function dataUrlToBlob(dataUrl) {
   return new Blob([buf], { type: mime });
 }
 
+// Devuelve el path en el bucket — esto sigue siendo válido siempre porque
+// es solo un string. La función pública resolverá vía SDK download (no fetch
+// directo) ya que el bucket es PRIVADO y getPublicUrl() devuelve URLs que
+// solo funcionan si el bucket es público. SDK download respeta las RLS
+// policies y funciona para el dueño del path.
+function pathFor(uid, productoId) {
+  return `${uid}/producto-fotos/${String(productoId)}.jpg`;
+}
+
+// Baja la foto via Supabase SDK (no fetch directo). Como el bucket 'creativos'
+// es privado, esta es la única forma confiable de obtener los bytes. El SDK
+// usa las cookies de auth → RLS policy permite porque foldername[1]=auth.uid().
+async function downloadFotoFromCloud(productoId) {
+  if (!supabase) return null;
+  try {
+    const user = await getCurrentUser();
+    if (!user) return null;
+    const path = pathFor(user.id, productoId);
+    const { data, error } = await supabase.storage.from(BUCKET).download(path);
+    if (error || !data) return null;
+    return await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(data);
+    });
+  } catch (err) {
+    console.warn('[productoImagen] cloud download falló:', err.message);
+    logEvent({ kind: 'fetch-error', label: `[producto-imagen] download exception: ${err.message}`, meta: { productoId } });
+    return null;
+  }
+}
+
 // Sube la foto al bucket Supabase. Devuelve la URL pública o null si falla.
 async function uploadFotoToCloud(productoId, dataUrl) {
   if (!supabase) {
@@ -173,6 +206,9 @@ async function uploadFotoToCloud(productoId, dataUrl) {
 
 // Convierte una URL pública a data URL — usado cuando IDB local no tiene
 // la imagen pero producto.data.fotoUrl sí (caso "entré desde otra PC").
+// IMPORTANTE: el bucket 'creativos' es PRIVADO. getPublicUrl() devuelve URLs
+// que dan 400/403 al hacer fetch(). Si el fetch falla, caemos al SDK download
+// que respeta auth + RLS. Esto arregla el bug "fotos no se ven en PC2".
 async function dataUrlFromUrl(url) {
   try {
     const resp = await fetch(url);
@@ -245,26 +281,32 @@ export async function getProductoImagen(id, fallbackProducto = null) {
       return legacy;
     }
   } catch {}
-  // 3) Cloud — bajar producto.data.fotoUrl si está y cachear en IDB.
-  //    Path típico "entré desde otra PC": el cloud tiene la foto pero el
-  //    IDB local está vacío. Prioridad: fallbackProducto (cloud-first) >
-  //    readProducto (localStorage, puede estar vacío en cross-device).
-  const producto = fallbackProducto || readProducto(id);
-  if (producto?.fotoUrl) {
-    const dataUrl = await dataUrlFromUrl(producto.fotoUrl);
-    if (dataUrl) {
-      try {
-        const db = await openDB();
-        await new Promise((resolve) => {
-          const tx = db.transaction(STORE, 'readwrite');
-          tx.objectStore(STORE).put({ id: key, dataUrl, updatedAt: new Date().toISOString() });
-          tx.oncomplete = () => resolve();
-          tx.onerror = () => resolve();
-        });
-      } catch {}
-      memCache.set(key, dataUrl);
-      return dataUrl;
+  // 3) Cloud — primero SDK download (funciona aunque el bucket sea privado),
+  //    después fallback al fetch de fotoUrl (legacy). El SDK respeta RLS;
+  //    fetch directo de getPublicUrl() FALLA con 400/403 si el bucket no
+  //    es público — que es el caso actual. Por eso prioridad SDK.
+  // Path típico "entré desde otra PC": el cloud tiene la foto pero el
+  // IDB local está vacío.
+  let dataUrl = await downloadFotoFromCloud(id);
+  // Si SDK download falló (no auth, no archivo), probamos el fotoUrl legacy.
+  if (!dataUrl) {
+    const producto = fallbackProducto || readProducto(id);
+    if (producto?.fotoUrl) {
+      dataUrl = await dataUrlFromUrl(producto.fotoUrl);
     }
+  }
+  if (dataUrl) {
+    try {
+      const db = await openDB();
+      await new Promise((resolve) => {
+        const tx = db.transaction(STORE, 'readwrite');
+        tx.objectStore(STORE).put({ id: key, dataUrl, updatedAt: new Date().toISOString() });
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => resolve();
+      });
+    } catch {}
+    memCache.set(key, dataUrl);
+    return dataUrl;
   }
   return null;
 }

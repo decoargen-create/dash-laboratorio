@@ -1148,26 +1148,34 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
 
   // Hidratar ads de competidores desde IDB. Sin esto, después del refactor
   // de storage los cards de competidores muestran 0 ads aunque scrapeaste.
+  // PRIORITY: IDB primero (datos frescos), inline legacy solo si IDB vacía.
+  // RACE FIX: merge en vez de reemplazar para no pisar ads recién scrapeados.
+  // DEP FIX: incluir lastAdsCheck en deps para que el pull cross-PC refresque.
   useEffect(() => {
     if (!producto?.competidores) return;
     let cancelled = false;
     (async () => {
-      const map = {};
+      const updates = {};
       for (const c of producto.competidores) {
-        // Migración lazy: si todavía hay ads inline en localStorage (legacy),
-        // los usamos. Si no, los pedimos a IDB.
-        if (Array.isArray(c.ads) && c.ads.length > 0) {
-          map[c.id] = c.ads;
-        } else {
-          const rec = await getCompAds(producto.id, c.id);
-          if (rec?.ads?.length) map[c.id] = rec.ads;
-        }
+        const rec = await getCompAds(producto.id, c.id);
+        if (rec?.ads?.length) { updates[c.id] = rec.ads; continue; }
+        if (Array.isArray(c.ads) && c.ads.length > 0) { updates[c.id] = c.ads; }
       }
-      if (!cancelled) setCompAdsByCompId(map);
+      if (!cancelled) {
+        setCompAdsByCompId(prev => {
+          const next = { ...prev };
+          for (const [cid, ads] of Object.entries(updates)) {
+            if (!next[cid] || ads.length > (next[cid]?.length || 0)) {
+              next[cid] = ads;
+            }
+          }
+          return next;
+        });
+      }
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [producto?.id, producto?.competidores?.length]);
+  }, [producto?.id, producto?.competidores?.length, (producto?.competidores || []).map(c => c.lastAdsCheck).join('|')]);
   // ad.id → bool, true mientras se adapta al producto (loading).
   const [adaptingAdIds, setAdaptingAdIds] = useState(new Set());
   // Multi-select para bulk. Set preserva el orden de inserción → podemos

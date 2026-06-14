@@ -192,8 +192,13 @@ export async function setCompAds(productoId, competidorId, payload) {
     ads: payload.ads || [],
     total: payload.total ?? (payload.ads?.length || 0),
     winners: payload.winners ?? 0,
+    // Audit #4: si el caller pasa ts (ej: patch de OCR sobre un scrape
+    // viejo), lo preservamos. Sino, ts = ahora. Sin esto, OCR pisaba el
+    // timestamp del scrape original y rompía la lógica de merge por ts
+    // del round 3 (otra tab podía leer datos viejos creyendo que eran
+    // más frescos).
     lastAdsCheck: payload.lastAdsCheck || new Date().toISOString(),
-    ts: Date.now(),
+    ts: payload.ts || Date.now(),
   };
   try {
     const db = await openDB();

@@ -23,6 +23,8 @@
     "api/marketing/resolve-fb-page.js": { "maxDuration": 30 },
     "api/marketing/proxy-image.js": { "maxDuration": 30 },
     "api/marketing/cron-competidor-refresh.js": { "maxDuration": 300 },
+    "api/marketing/ocr-ad.js": { "maxDuration": 180 },
+    "api/marketing/transcribe-ad.js": { "maxDuration": 240 },
     "api/meta/[action].js": { "maxDuration": 60 },
     "api/meta/ad-library.js": { "maxDuration": 60 },
     "api/acta.js": { "maxDuration": 60 },

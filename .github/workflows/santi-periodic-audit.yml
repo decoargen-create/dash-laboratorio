@@ -20,7 +20,7 @@ on:
   workflow_dispatch: # permite triggear manual desde la UI
 
 permissions:
-  contents: read
+  contents: write # necesario para pushear el SHA actualizado a .github/santi-last-sha
   issues: write
   pull-requests: write
 

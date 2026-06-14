@@ -1911,12 +1911,28 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         } else {
           payload.searchKeyword = c.nombre;
         }
-        const resp = await fetch('/api/marketing/apify-ingest', {
+        let resp = await fetch('/api/marketing/apify-ingest', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
-        const data = await parseJsonResponse(resp, `Scrape de ${c.nombre}`);
+        let data = await parseJsonResponse(resp, `Scrape de ${c.nombre}`);
+        // AUTO-RETRY con limit reducido si el server lo sugiere. Esto
+        // resuelve el caso "Apify tardó demasiado y no quedó tiempo para
+        // reintentar" sin que el user tenga que reintentar a mano.
+        if (!resp.ok && data.retryWithLimit && typeof data.retryWithLimit === 'number') {
+          updateStep(stepId, { detail: `Reintentando con limit ${data.retryWithLimit}…` });
+          const retryPayload = { ...payload, limit: data.retryWithLimit };
+          resp = await fetch('/api/marketing/apify-ingest', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(retryPayload),
+          });
+          data = await parseJsonResponse(resp, `Scrape de ${c.nombre} (retry)`);
+          if (resp.ok) {
+            addToast?.({ type: 'info', message: `${c.nombre}: scrape automático bajó el limit a ${data.retryWithLimit || retryPayload.limit} y funcionó.` });
+          }
+        }
         if (!resp.ok) {
           // Si el endpoint sugiere algo (ej: cargar fbPageUrl manual), lo
           // mostramos al user — más útil que el error crudo de Apify.

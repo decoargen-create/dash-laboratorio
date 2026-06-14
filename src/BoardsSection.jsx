@@ -5,7 +5,7 @@
 //   - Lista de boards (cards con conteo + descripción)
 //   - Detalle de un board: grid de ads guardados con link a FB + descripción
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Bookmark, Plus, Loader2, Trash2, ChevronLeft, ExternalLink, X, Pencil,
   Image as ImageIcon, AlertCircle,
@@ -14,6 +14,7 @@ import {
   listBoards, createBoard, updateBoard, deleteBoard,
   listBoardItems, removeItemFromBoard,
 } from './marketingBoardsApi.js';
+import { getCachedAdImageUrl } from './adImagesStore.js';
 
 // Tailwind purga clases dinámicas — usamos map estático así sobreviven al build.
 function colorClass(color) {
@@ -339,53 +340,84 @@ function BoardDetail({ board: initialBoard, onBack, addToast }) {
 
       {items && items.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-          {items.map(it => {
-            const ad = it.ad;
-            const thumb = ad?.image_url;
-            const fbUrl = ad?.snapshot_url;
-            return (
-              <div key={it.ad_id}
-                className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden group relative">
-                <div className="aspect-square bg-gray-100 dark:bg-gray-900">
-                  {thumb ? (
-                    <img src={thumb} alt="" className="w-full h-full object-cover" loading="lazy"
-                      onError={(e) => { e.target.style.display = 'none'; }} />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center">
-                      <ImageIcon size={20} className="text-gray-300" />
-                    </div>
-                  )}
-                  <button
-                    onClick={() => handleRemove(it.ad_id)}
-                    className="absolute top-1 right-1 p-1 rounded bg-black/60 text-white opacity-0 group-hover:opacity-100 hover:bg-red-600 transition"
-                    title="Quitar de la colección"
-                  >
-                    <Trash2 size={11} />
-                  </button>
-                </div>
-                <div className="p-2 space-y-1">
-                  <p className="text-[10px] font-semibold text-gray-700 dark:text-gray-200 truncate">
-                    {ad?.page_name || '—'}
-                  </p>
-                  {ad?.body && (
-                    <p className="text-[9px] text-gray-500 dark:text-gray-400 line-clamp-2">{ad.body}</p>
-                  )}
-                  <div className="flex items-center gap-2 text-[9px] text-gray-400">
-                    {ad?.days_running > 0 && <span>{ad.days_running}d</span>}
-                    {ad?.is_winner && <span className="text-amber-500 font-bold">🏆</span>}
-                    {fbUrl && (
-                      <a href={fbUrl} target="_blank" rel="noreferrer"
-                        className="ml-auto inline-flex items-center gap-0.5 text-amber-600 hover:underline">
-                        FB <ExternalLink size={8} />
-                      </a>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+          {items.map(it => (
+            <BoardItemCard key={it.ad_id} item={it} onRemove={() => handleRemove(it.ad_id)} />
+          ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// Card individual de un ad guardado — IntersectionObserver para el cache de
+// IDB (mismo patrón que AdThumb). Las URLs de Meta expiran en ~24h; el cache
+// local sobrevive eso. content-visibility skipea render off-screen.
+function BoardItemCard({ item, onRemove }) {
+  const ad = item.ad;
+  const cdnThumb = ad?.image_url;
+  const fbUrl = ad?.snapshot_url;
+  const [cachedUrl, setCachedUrl] = useState(null);
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    if (!item.ad_id || !containerRef.current) return;
+    let active = true;
+    const fetchCached = () => {
+      getCachedAdImageUrl(item.ad_id).then(url => { if (active) setCachedUrl(url); });
+    };
+    if (typeof IntersectionObserver === 'undefined') { fetchCached(); return; }
+    const io = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) { fetchCached(); io.disconnect(); break; }
+      }
+    }, { rootMargin: '200px' });
+    io.observe(containerRef.current);
+    return () => { active = false; io.disconnect(); };
+  }, [item.ad_id]);
+
+  const thumb = cachedUrl || cdnThumb;
+  return (
+    <div ref={containerRef}
+      style={{ contentVisibility: 'auto', containIntrinsicSize: '0 220px' }}
+      className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden group relative">
+      <div className="aspect-square bg-gray-100 dark:bg-gray-900 relative">
+        {thumb ? (
+          <img src={thumb} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async"
+            onError={(e) => { e.target.style.display = 'none'; }} />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center">
+            <ImageIcon size={20} className="text-gray-300" />
+          </div>
+        )}
+        <button
+          onClick={onRemove}
+          className="absolute top-1 right-1 p-1 rounded bg-black/60 text-white opacity-0 group-hover:opacity-100 max-md:opacity-100 hover:bg-red-600 transition"
+          title="Quitar de la colección"
+        >
+          <Trash2 size={11} />
+        </button>
+        {cachedUrl && (
+          <div className="absolute top-1 left-1 w-1.5 h-1.5 rounded-full bg-emerald-400/80" title="Imagen cacheada localmente" />
+        )}
+      </div>
+      <div className="p-2 space-y-1">
+        <p className="text-[10px] font-semibold text-gray-700 dark:text-gray-200 truncate">
+          {ad?.page_name || '—'}
+        </p>
+        {ad?.body && (
+          <p className="text-[9px] text-gray-500 dark:text-gray-400 line-clamp-2">{ad.body}</p>
+        )}
+        <div className="flex items-center gap-2 text-[9px] text-gray-400">
+          {ad?.days_running > 0 && <span>{ad.days_running}d</span>}
+          {ad?.is_winner && <span className="text-amber-500 font-bold">🏆</span>}
+          {fbUrl && (
+            <a href={fbUrl} target="_blank" rel="noreferrer"
+              className="ml-auto inline-flex items-center gap-0.5 text-amber-600 hover:underline">
+              FB <ExternalLink size={8} />
+            </a>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

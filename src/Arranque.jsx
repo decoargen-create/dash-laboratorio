@@ -1911,12 +1911,28 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         } else {
           payload.searchKeyword = c.nombre;
         }
-        const resp = await fetch('/api/marketing/apify-ingest', {
+        let resp = await fetch('/api/marketing/apify-ingest', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
-        const data = await parseJsonResponse(resp, `Scrape de ${c.nombre}`);
+        let data = await parseJsonResponse(resp, `Scrape de ${c.nombre}`);
+        // AUTO-RETRY con limit reducido si el server lo sugiere. Esto
+        // resuelve el caso "Apify tardó demasiado y no quedó tiempo para
+        // reintentar" sin que el user tenga que reintentar a mano.
+        if (!resp.ok && data.retryWithLimit && typeof data.retryWithLimit === 'number') {
+          updateStep(stepId, { detail: `Reintentando con limit ${data.retryWithLimit}…` });
+          const retryPayload = { ...payload, limit: data.retryWithLimit };
+          resp = await fetch('/api/marketing/apify-ingest', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(retryPayload),
+          });
+          data = await parseJsonResponse(resp, `Scrape de ${c.nombre} (retry)`);
+          if (resp.ok) {
+            addToast?.({ type: 'info', message: `${c.nombre}: scrape automático bajó el limit a ${data.retryWithLimit || retryPayload.limit} y funcionó.` });
+          }
+        }
         if (!resp.ok) {
           // Si el endpoint sugiere algo (ej: cargar fbPageUrl manual), lo
           // mostramos al user — más útil que el error crudo de Apify.
@@ -3596,7 +3612,27 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                   <div>
                     <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">Ideas por corrida</label>
                     <input type="number" min="1" max={MAX_IDEAS_PER_RUN} value={genConfig.limiteDiario}
-                      onChange={e => setGenConfig(c => ({ ...c, limiteDiario: Math.max(1, Math.min(MAX_IDEAS_PER_RUN, Number(e.target.value) || 50)) }))}
+                      onChange={e => {
+                        // FIX: antes hacíamos `Number(value) || 50`. Eso pisaba
+                        // el input con 50 cuando el field quedaba vacío (al
+                        // borrar para tipear "10"), imposibilitando llegar a
+                        // números chicos. Ahora permitimos vacío y clampeamos
+                        // SOLO si el user ingresó un número válido.
+                        const raw = e.target.value;
+                        if (raw === '') {
+                          setGenConfig(c => ({ ...c, limiteDiario: '' }));
+                          return;
+                        }
+                        const n = Number(raw);
+                        if (isNaN(n)) return;
+                        setGenConfig(c => ({ ...c, limiteDiario: Math.max(1, Math.min(MAX_IDEAS_PER_RUN, n)) }));
+                      }}
+                      onBlur={e => {
+                        // Al perder foco, si quedó vacío o inválido, restauramos
+                        // el mínimo viable. Sin esto el form se rompía al submit.
+                        const n = Number(e.target.value);
+                        if (isNaN(n) || n < 1) setGenConfig(c => ({ ...c, limiteDiario: 1 }));
+                      }}
                       className="w-24 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-brand-500" />
                     <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">
                       Cuántas ideas pide el generador en cada corrida. La primera corrida del producto genera entre 50 y {MAX_IDEAS_PER_RUN} según cuántos ads tenga la competencia. El dedup evita repetir ideas entre corridas.

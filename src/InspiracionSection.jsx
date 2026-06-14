@@ -1145,6 +1145,25 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   const removeScraping = (id) => setScrapingBrandIds(prev => { const n = new Set(prev); n.delete(id); return n; });
   // brand.id → array de ads scrapeados de la última corrida (mostrados inline).
   const [adsByBrand, setAdsByBrand] = useState({});
+  // Hidratar adsByBrand desde IDB al cambiar de producto. Las brands manuales
+  // ahora persisten sus ads igual que los competidores → no se pierden al
+  // refrescar. Sin esto el user veía sus brands con "0 ads" después de F5.
+  useEffect(() => {
+    if (!activeProductoId || !Array.isArray(brands) || brands.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const next = {};
+      for (const b of brands) {
+        const rec = await getCompAds(activeProductoId, `brand-${b.id}`);
+        if (rec?.ads?.length) next[b.id] = rec.ads;
+      }
+      if (!cancelled && Object.keys(next).length > 0) {
+        setAdsByBrand(prev => ({ ...next, ...prev }));
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProductoId, brands.length]);
   // competidor.id → array de ads scrapeados. Antes vivían en c.ads inline en
   // localStorage pero rompía quota con muchos ads. Ahora se hidratan desde
   // IDB (competidorAdsIDB) cuando el producto se monta o cambia.
@@ -1460,6 +1479,10 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     setAdsByBrand(prev => {
       const next = { ...prev }; delete next[id]; return next;
     });
+    // Limpiar el IDB + bucket también — sino quedan archivos huérfanos.
+    if (activeProductoId) {
+      import('./competidorAdsIDB.js').then(mod => mod.removeCompAds(activeProductoId, `brand-${id}`)).catch(() => {});
+    }
     // Cascade delete: si la brand vino de un competidor (o matchea por
     // landingUrl / nombre), borramos también el competidor del producto.
     // Source of truth unificado.
@@ -2152,6 +2175,19 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       const cappedSeenIds = newSeenIds.slice(-1000);
 
       setAdsByBrand(prev => ({ ...prev, [brand.id]: enriched }));
+      // STORAGE SPLIT (igual que competidores): los ads de brands manuales
+      // ahora persisten en IDB con key brand-<brandId>. Antes vivían SOLO
+      // en runtime (adsByBrand) → al refrescar perdías los ads scrapeados.
+      try {
+        await setCompAds(activeProductoId, `brand-${brand.id}`, {
+          ads: enriched,
+          total: enriched.length,
+          winners: enriched.filter(a => a.isWinner).length,
+          lastAdsCheck: new Date().toISOString(),
+        });
+      } catch (err) {
+        console.warn('[brand-scrape] setCompAds falló:', err.message);
+      }
       const freshCount = enriched.filter(a => a.isFresh).length;
       setBrands(prev => prev.map(x => x.id === brand.id ? {
         ...x,

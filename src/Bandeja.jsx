@@ -1555,29 +1555,71 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
   // Columnas custom del kanban por producto — Trello-like.
   // Las 4 columnas base (pendiente, en_uso, usada, archivada) siempre existen.
   // El user puede agregar columnas extra Y renombrar las base (persistidas).
-  const customColsKey = activeProductoId ? `adslab-kanban-cols-${activeProductoId}` : null;
-  const baseTitlesKey = activeProductoId ? `adslab-kanban-base-titles-${activeProductoId}` : null;
+  // CROSS-PC: ahora viven adentro de producto.data.kanbanCols / kanbanBaseTitles
+  // así sincronizan via el push de productos. Antes eran localStorage por
+  // producto (adslab-kanban-cols-X / adslab-kanban-base-titles-X) → invisibles
+  // en otra PC. Migración: si encuentro la versión legacy local, la promociono.
   const DEFAULT_BASE_TITLES = { pendiente: 'Pendientes', en_uso: 'En uso', usada: 'Usadas', archivada: 'Archivadas' };
-  const [customColumns, setCustomColumns] = useState(() => {
-    if (!customColsKey) return [];
-    try { const r = localStorage.getItem(customColsKey); return r ? JSON.parse(r) : []; } catch { return []; }
-  });
-  const [baseTitles, setBaseTitles] = useState(() => {
-    if (!baseTitlesKey) return DEFAULT_BASE_TITLES;
-    try { const r = localStorage.getItem(baseTitlesKey); return r ? { ...DEFAULT_BASE_TITLES, ...JSON.parse(r) } : DEFAULT_BASE_TITLES; } catch { return DEFAULT_BASE_TITLES; }
-  });
+  const activeProducto = productos.find(p => String(p.id) === String(activeProductoId)) || null;
+
+  const readKanbanFromProducto = () => {
+    if (!activeProducto) return { cols: [], titles: DEFAULT_BASE_TITLES };
+    // 1) Source of truth: producto.data
+    let cols = Array.isArray(activeProducto.kanbanCols) ? activeProducto.kanbanCols : null;
+    let titles = activeProducto.kanbanBaseTitles && typeof activeProducto.kanbanBaseTitles === 'object'
+      ? { ...DEFAULT_BASE_TITLES, ...activeProducto.kanbanBaseTitles } : null;
+    // 2) Migración lazy: leer del legacy localStorage si producto no tiene aún
+    if (cols == null && activeProductoId) {
+      try { const r = localStorage.getItem(`adslab-kanban-cols-${activeProductoId}`); cols = r ? JSON.parse(r) : []; } catch { cols = []; }
+    }
+    if (titles == null && activeProductoId) {
+      try { const r = localStorage.getItem(`adslab-kanban-base-titles-${activeProductoId}`); titles = r ? { ...DEFAULT_BASE_TITLES, ...JSON.parse(r) } : DEFAULT_BASE_TITLES; } catch { titles = DEFAULT_BASE_TITLES; }
+    }
+    return { cols: cols || [], titles: titles || DEFAULT_BASE_TITLES };
+  };
+
+  const [customColumns, setCustomColumns] = useState(() => readKanbanFromProducto().cols);
+  const [baseTitles, setBaseTitles] = useState(() => readKanbanFromProducto().titles);
+
+  // Cambio de producto → re-hidratar.
   useEffect(() => {
-    if (customColsKey) try { localStorage.setItem(customColsKey, JSON.stringify(customColumns)); } catch {}
-  }, [customColumns, customColsKey]);
+    const { cols, titles } = readKanbanFromProducto();
+    setCustomColumns(cols);
+    setBaseTitles(titles);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProductoId]);
+
+  // Persistir adentro del producto en localStorage + dispatch event para
+  // que el sync hook pushee al cloud. Bandeja consume productos del hook
+  // (cloudProductos) pero la fuente de verdad para writes es localStorage.
+  const persistKanban = (patch) => {
+    if (!activeProductoId) return;
+    try {
+      const arr = JSON.parse(localStorage.getItem(PRODUCTOS_KEY) || '[]');
+      const updated = arr.map(p =>
+        String(p.id) === String(activeProductoId)
+          ? { ...p, ...patch, updated_at: new Date().toISOString() }
+          : p
+      );
+      localStorage.setItem(PRODUCTOS_KEY, JSON.stringify(updated));
+      window.dispatchEvent(new CustomEvent('viora:marketing-storage-changed', { detail: { key: PRODUCTOS_KEY } }));
+    } catch (err) {
+      console.warn('[bandeja] persistKanban falló:', err.message);
+    }
+  };
+  // Skipping primer render para no sobreescribir con valores default antes de
+  // la hidratación inicial. Usamos un ref para detectar el primer render.
+  const kanbanInitRef = useRef(false);
   useEffect(() => {
-    if (baseTitlesKey) try { localStorage.setItem(baseTitlesKey, JSON.stringify(baseTitles)); } catch {}
-  }, [baseTitles, baseTitlesKey]);
-  // Reset both when switching product.
+    if (!kanbanInitRef.current) { kanbanInitRef.current = true; return; }
+    persistKanban({ kanbanCols: customColumns });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customColumns]);
   useEffect(() => {
-    if (!customColsKey) { setCustomColumns([]); setBaseTitles(DEFAULT_BASE_TITLES); return; }
-    try { const r = localStorage.getItem(customColsKey); setCustomColumns(r ? JSON.parse(r) : []); } catch { setCustomColumns([]); }
-    try { const r = localStorage.getItem(baseTitlesKey); setBaseTitles(r ? { ...DEFAULT_BASE_TITLES, ...JSON.parse(r) } : DEFAULT_BASE_TITLES); } catch { setBaseTitles(DEFAULT_BASE_TITLES); }
-  }, [customColsKey, baseTitlesKey]);
+    if (!kanbanInitRef.current) return;
+    persistKanban({ kanbanBaseTitles: baseTitles });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [baseTitles]);
 
   const renameBaseColumn = (key) => {
     const currentName = baseTitles[key] || DEFAULT_BASE_TITLES[key];

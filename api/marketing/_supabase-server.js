@@ -12,7 +12,10 @@ import { createClient } from '@supabase/supabase-js';
 import crypto from 'node:crypto';
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
+// Fallback entre dos nombres porque el resto del codebase usa
+// SUPABASE_SERVICE_ROLE_KEY. Antes esta divergencia hacía que getUserIdFromAuth
+// devolviera 401 silenciosamente aunque el token fuera válido.
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 let _client = null;
 function getClient() {

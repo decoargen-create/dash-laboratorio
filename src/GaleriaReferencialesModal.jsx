@@ -19,7 +19,7 @@ import JSZip from 'jszip';
 import {
   getReferencialesByProducto, deleteReferencial, patchReferenciales,
   archiveReferencial, countReferencialesByProducto,
-  markAsWinner, unmarkWinner,
+  markAsWinner, unmarkWinner, refreshSignedUrls,
 } from './galeriaReferenciales.js';
 import WinnerForm from './WinnerForm.jsx';
 import WinnersReport from './WinnersReport.jsx';
@@ -849,13 +849,41 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
     refresh();
   };
 
+  // Baja los bytes de una URL pública y valida que sea una imagen real.
+  // Sin esto: si Supabase Storage devuelve 403 (URL expirada/RLS) o el host
+  // del CDN responde con HTML/JSON de error, fetch().blob() igual devuelve
+  // ese cuerpo y el .png queda corrupto en el ZIP (~90 bytes). El user veía
+  // "No se pudo abrir el archivo" en Vista Previa.
+  const fetchImageBlob = async (url) => {
+    const resp = await fetch(url);
+    if (!resp.ok) {
+      throw new Error(`HTTP ${resp.status} ${resp.statusText || ''}`.trim());
+    }
+    const blob = await resp.blob();
+    // Validá content-type Y tamaño. content-type puede venir vacío en algunos
+    // CDNs aunque sea imagen válida → fallback a chequeo de tamaño mínimo
+    // (las imágenes generadas son siempre >5KB; un error JSON es <2KB).
+    const ct = blob.type || '';
+    if (ct && !ct.startsWith('image/')) {
+      throw new Error(`Respuesta no es imagen (content-type: ${ct})`);
+    }
+    if (blob.size < 2048) {
+      throw new Error(`Bytes insuficientes (${blob.size} B)`);
+    }
+    return blob;
+  };
+
   // Bulk download como ZIP. Marca todos los descargados con timestamp.
   const handleBulkDownload = async () => {
     if (seleccionados.size === 0) return;
     setZipping(true);
     try {
       const zip = new JSZip();
-      const seleccionadosArr = items.filter(it => seleccionados.has(it.id));
+      let seleccionadosArr = items.filter(it => seleccionados.has(it.id));
+      // Re-firmamos signed URLs (TTL 5min) antes de bajar bytes. Las URLs
+      // viejas del load inicial pueden tener >1h y dar 403 acá. Items sin
+      // storagePath (IDB legacy) se devuelven igual.
+      seleccionadosArr = await refreshSignedUrls(seleccionadosArr);
       const yaDescargados = seleccionadosArr.filter(it => it.descargada).length;
       if (yaDescargados > 0) {
         const cont = window.confirm(
@@ -869,8 +897,11 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
       // Trackear nombres usados para evitar colisiones (ej. mismo producto +
       // fecha + brand → agregar _2, _3, etc).
       const usedNames = new Set();
-      // Para items cloud (sin imageBase64) bajamos los bytes del imageUrl en
-      // paralelo. Para items IDB legacy seguimos usando el base64 directo.
+      // Items que efectivamente entraron al ZIP — solo estos los marcamos
+      // como descargados al final. Los fallados quedan disponibles para
+      // reintentar sin ensuciar el filtro "no descargados".
+      const okItems = [];
+      const failed = []; // { name, error }
       await Promise.all(seleccionadosArr.map(async (it) => {
         let name = buildFileName(it, productoNombre);
         let dedup = 1;
@@ -879,14 +910,26 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
           name = `${base} (${++dedup}).png`;
         }
         usedNames.add(name);
-        if (it.imageBase64) {
-          zip.file(name, base64ToBlob(it.imageBase64, it.mimeType || 'image/png'));
-        } else if (it.imageUrl) {
-          const resp = await fetch(it.imageUrl);
-          const blob = await resp.blob();
+        try {
+          let blob;
+          if (it.imageBase64) {
+            blob = base64ToBlob(it.imageBase64, it.mimeType || 'image/png');
+          } else if (it.imageUrl) {
+            blob = await fetchImageBlob(it.imageUrl);
+          } else {
+            throw new Error('Sin imageBase64 ni imageUrl');
+          }
           zip.file(name, blob);
+          okItems.push(it);
+        } catch (err) {
+          failed.push({ name, error: err.message });
         }
       }));
+      if (okItems.length === 0) {
+        alert(`No se pudo bajar ninguno de los ${seleccionadosArr.length} creativos. Errores:\n\n${failed.slice(0, 5).map(f => `· ${f.name}: ${f.error}`).join('\n')}`);
+        setZipping(false);
+        return;
+      }
       const blob = await zip.generateAsync({ type: 'blob' });
       const ts = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
       const zipName = `creativos-${slugify(productoNombre)}-${ts}.zip`;
@@ -898,11 +941,14 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
       a.click();
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-      // Marcar todos como descargados con timestamp.
+      // Marcar solo los OK como descargados.
       await patchReferenciales(
-        seleccionadosArr.map(it => it.id),
+        okItems.map(it => it.id),
         { descargada: true, descargadaAt: new Date().toISOString() }
       );
+      if (failed.length > 0) {
+        alert(`ZIP listo con ${okItems.length} creativos. ${failed.length} no se pudieron bajar (URLs caídas o sin permisos) — quedaron sin marcar como descargados para reintentar:\n\n${failed.slice(0, 5).map(f => `· ${f.name}: ${f.error}`).join('\n')}${failed.length > 5 ? `\n…y ${failed.length - 5} más` : ''}`);
+      }
       limpiarSeleccion();
       refresh();
     } catch (err) {
@@ -922,9 +968,11 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
       let blob;
       if (it.imageBase64) {
         blob = base64ToBlob(it.imageBase64, it.mimeType || 'image/png');
-      } else if (it.imageUrl) {
-        const resp = await fetch(it.imageUrl);
-        blob = await resp.blob();
+      } else if (it.imageUrl || it.storagePath) {
+        // Re-firmar antes de bajar (mismo motivo que en el bulk).
+        const [refreshed] = await refreshSignedUrls([it]);
+        if (!refreshed?.imageUrl) throw new Error('No se pudo refrescar la URL del creativo');
+        blob = await fetchImageBlob(refreshed.imageUrl);
       } else {
         throw new Error('Sin imageBase64 ni imageUrl — no hay bytes para descargar');
       }
@@ -1178,12 +1226,29 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
               description='Elegí ads en Inspiración y dale "Crear creativo" — los generados aparecen acá.'
             />
           ) : visibleItems.length === 0 ? (
-            <EmptyState
-              icon={Check}
-              title="¡Todo descargado!"
-              description='Apagá el filtro "Solo no descargados" para ver todo el repositorio.'
-              secondaryAction={{ label: 'Mostrar todo', onClick: () => { setFiltroEstado('all'); setFiltroVariante('all'); setFiltroOrigen('all'); } }}
-            />
+            // Empty state context-aware. Antes siempre decía "Todo descargado"
+            // → en la pestaña Winners sin winners marcados era confuso (el user
+            // no entendía que el problema era que NO HAY winners).
+            panel === 'winners' ? (
+              <EmptyState
+                icon={Trophy}
+                title="Sin winners marcados"
+                description='Marcá un creativo como winner clickeando la copa 🏆 en su card. Los winners marcados aparecen acá.'
+              />
+            ) : panel === 'archivados' ? (
+              <EmptyState
+                icon={Archive}
+                title="Sin archivados"
+                description='Archivá un creativo desde su menú para que aparezca acá.'
+              />
+            ) : (
+              <EmptyState
+                icon={Check}
+                title="¡Todo descargado!"
+                description='Apagá el filtro "Solo no descargados" para ver todo el repositorio.'
+                secondaryAction={{ label: 'Mostrar todo', onClick: () => { setFiltroEstado('all'); setFiltroVariante('all'); setFiltroOrigen('all'); } }}
+              />
+            )
           ) : viewMode === 'grid' ? (
             <GalleryGridView items={visibleItems} blobUrls={blobUrls} seleccionados={seleccionados} selectedOrder={selectedOrder}
               onToggleSelect={toggleSeleccion} onOpen={setSelected} onArchive={handleArchive} onToggleWinner={handleToggleWinner} />

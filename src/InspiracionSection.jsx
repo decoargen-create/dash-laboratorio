@@ -493,6 +493,13 @@ function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = f
   return (
     <div
       ref={containerRef}
+      // ⚡ content-visibility: auto + contain-intrinsic-size: el browser SKIPEA
+      // el rendering, paint y layout de este card cuando está fuera del viewport.
+      // Soporte: Chrome 85+, Edge, Opera (mayoría del mercado). Firefox 125+
+      // parcial. Sin esto, 2500 thumbnails decodificadas en RAM como pixel
+      // buffers de ~3MB cada uno cuelga Chrome. Con esto, solo los ~20 ads
+      // visibles + buffer cuentan en el render tree.
+      style={{ contentVisibility: 'auto', containIntrinsicSize: '0 200px' }}
       className={`group/thumb relative aspect-square rounded-md overflow-hidden bg-gray-100 dark:bg-gray-900 border-2 transition ${
         used && !selected ? 'opacity-50 grayscale-[40%] hover:opacity-100 hover:grayscale-0' : ''
       } ${

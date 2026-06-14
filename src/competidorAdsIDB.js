@@ -331,6 +331,41 @@ export async function removeAllForProducto(productoId) {
   return removed;
 }
 
+// Trim un ad a campos esenciales para state/render — reduce footprint de
+// memoria sin perder funcionalidad. Body limitado a 300 chars (mostramos
+// solo preview en lista), imageUrls/videoUrls limitados a 1 (thumbnail).
+// Para acciones que necesitan el ad COMPLETO (adapt, replicar) el caller
+// busca por id en el record IDB que conserva el shape full.
+export function lightAd(ad) {
+  if (!ad || typeof ad !== 'object') return ad;
+  return {
+    id: ad.id,
+    pageName: ad.pageName,
+    pageId: ad.pageId,
+    headline: ad.headline,
+    body: typeof ad.body === 'string' && ad.body.length > 300 ? ad.body.slice(0, 300) : ad.body,
+    cta: ad.cta,
+    ctaLink: ad.ctaLink,
+    startDate: ad.startDate,
+    daysRunning: ad.daysRunning,
+    platforms: ad.platforms,
+    isMultiplatform: ad.isMultiplatform,
+    // Solo el primer thumbnail/video — el resto solo se usa en lightbox que
+    // puede consultar el record full por ad.id.
+    imageUrls: Array.isArray(ad.imageUrls) ? ad.imageUrls.slice(0, 1) : ad.imageUrls,
+    videoUrls: Array.isArray(ad.videoUrls) ? ad.videoUrls.slice(0, 1) : ad.videoUrls,
+    displayFormat: ad.displayFormat,
+    formato: ad.formato,
+    snapshotUrl: ad.snapshotUrl,
+    pageLikeCount: ad.pageLikeCount,
+    score: ad.score,
+    variantes: ad.variantes,
+    isWinner: ad.isWinner,
+    winnerTier: ad.winnerTier,
+    isFresh: ad.isFresh,
+  };
+}
+
 // Hidrata el array `ads` en cada competidor desde IDB. Devuelve un nuevo
 // array de competidores con `ads` poblado. Si IDB no tiene nada para un
 // (producto, competidor), respeta `c.ads` legacy inline si existe (sino [] ).

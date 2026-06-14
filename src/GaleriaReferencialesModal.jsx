@@ -162,7 +162,12 @@ function GalleryGridView({ items, blobUrls, seleccionados, selectedOrder, onTogg
           // Sin HoverPreview en grid: la imagen ya se ve grande, el preview
           // flotante tapaba thumbnails vecinos y resultaba molesto. Se mantiene
           // en list/table view donde los thumbs son chicos.
-          <div key={it.id} className="group relative">
+          <div key={it.id}
+            // content-visibility skipea rendering fuera del viewport →
+            // mismo que en InspiracionSection. Crítico para galerías de
+            // 500+ creativos donde cada thumb cargado se come ~3MB de RAM.
+            style={{ contentVisibility: 'auto', containIntrinsicSize: '0 200px' }}
+            className="group relative">
             <button
               onClick={() => onOpen(it)}
               className={`block w-full aspect-square rounded-lg overflow-hidden border-2 transition ${

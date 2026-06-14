@@ -72,8 +72,20 @@ export default async function handler(req, res) {
     });
   }
 
-  // Cap defensivo — TikTok actors cobran por result.
-  const limit = Math.max(1, Math.min(500, Number(rawLimit) || 100));
+  // Cap defensivo — TikTok actors cobran por result. Antes era 500; bajamos
+  // a 200 porque la UI hardcodea 100 y un 500 expuesto sin chequeo de plan
+  // habilita gasto runaway si alguien lo descubre. Audit MED #2.
+  const limit = Math.max(1, Math.min(200, Number(rawLimit) || 100));
+
+  // Auth ANTES de gastar Apify (audit MED #1). Si el caller mandó
+  // productoId+competidorId pretende que upserteemos al index → requiere
+  // auth válida. Si la auth falla, no tiene sentido scrape sin guardar.
+  // Si NO mandó productoId/competidorId, permitimos scrape anónimo para que
+  // el endpoint sea consumible directo (debugging).
+  const userId = await getUserIdFromAuth(req);
+  if ((productoId || competidorId) && !userId) {
+    return respondJSON(res, 401, { error: 'No autorizado — auth requerida para guardar al index' });
+  }
 
   const actorId = process.env.APIFY_TIKTOK_ACTOR_ID || DEFAULT_ACTOR;
   const input = buildTiktokInput({ keywords, hashtag, author, country, maxItems: limit });
@@ -106,8 +118,7 @@ export default async function handler(req, res) {
   });
 
   // Upsert al index server-side si caller mandó productoId+competidorId
-  // (best-effort: no rompemos si falla).
-  const userId = await getUserIdFromAuth(req);
+  // (best-effort: no rompemos si falla). userId ya verificado arriba.
   if (userId && productoId && competidorId) {
     try {
       await upsertAdsToIndex({

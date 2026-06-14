@@ -1930,20 +1930,26 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     // biblioteca. Los ads que ya deep-analizamos en corridas previas se
     // saltean en el paso de análisis (no gastan Claude de nuevo). El user
     // quiere ver la diff: cuántos son nuevos vs ya vistos.
+    //
+    // PARALELIZACIÓN: antes era secuencial (`for (const c of comps)`), 4
+    // comps × ~120s polling Apify = ~480s. Con concurrency 3 baja a ~200s.
+    // Los react updates concurrentes son safe porque setCompetidores +
+    // setCompAdsByCompId usan functional updaters (cada uno modifica solo su
+    // propia entrada).
     const compWithAds = []; // { comp, winners }
     let apifyQuotaExhausted = false;
-    for (const c of competidoresLocal) {
-      if (cancelledRef.current) break;
+    const SCRAPE_CONCURRENCY = 3;
+
+    // Closure por competidor — antes era el cuerpo del for-loop.
+    const scrapeOneCompetidor = async (c) => {
+      if (cancelledRef.current) return;
       if (apifyQuotaExhausted) {
-        // Si Apify se quedó sin quota mensual no tiene sentido seguir —
-        // todos los siguientes van a tirar el mismo error. Marcamos como
-        // pending → done con nota.
         updateStep(`scrape-${c.id}`, {
           status: 'error',
           endedAt: Date.now(),
           detail: 'Salteado · Apify sin quota mensual',
         });
-        continue;
+        return;
       }
       const stepId = `scrape-${c.id}`;
       updateStep(stepId, { status: 'running', startedAt: Date.now() });
@@ -2102,6 +2108,24 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           });
         }
       }
+    };
+
+    // Ejecutar scrapes en batches paralelos. Si en cualquier batch detectamos
+    // que el user canceló o que Apify se quedó sin quota, salimos del loop.
+    for (let i = 0; i < competidoresLocal.length; i += SCRAPE_CONCURRENCY) {
+      if (cancelledRef.current) break;
+      if (apifyQuotaExhausted) {
+        // Marcamos los que quedan como salteados.
+        for (const c of competidoresLocal.slice(i)) {
+          updateStep(`scrape-${c.id}`, {
+            status: 'error', endedAt: Date.now(),
+            detail: 'Salteado · Apify sin quota mensual',
+          });
+        }
+        break;
+      }
+      const batch = competidoresLocal.slice(i, i + SCRAPE_CONCURRENCY);
+      await Promise.allSettled(batch.map(scrapeOneCompetidor));
     }
 
     // Cap GLOBAL de deep-analyze por corrida. Antes se analizaban hasta 20

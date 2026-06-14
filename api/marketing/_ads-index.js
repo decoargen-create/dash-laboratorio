@@ -60,12 +60,30 @@ export async function upsertAdsToIndex({ userId, productoId, competidorId, ads, 
   const CHUNK = 500;
   let upserted = 0;
   let errors = 0;
+  // Si la migration 0016 no corrió en prod, la columna `platform` no existe
+  // todavía. El primer error lo detectamos, dropeamos el field y retry — los
+  // chunks siguientes ya van sin platform. Sin esto, el cron de FB (que
+  // ahora pasa platform por default) rompería 100% en un Supabase no
+  // migrado. Audit MED #3.
+  let stripPlatform = false;
   for (let i = 0; i < ads.length; i += CHUNK) {
     const slice = ads.slice(i, i + CHUNK);
-    const rows = slice.map(ad => adToRow(ad, userId, productoId, competidorId, platform));
-    const { error } = await supabase
+    let rows = slice.map(ad => adToRow(ad, userId, productoId, competidorId, platform));
+    if (stripPlatform) rows = rows.map(({ platform: _p, ...rest }) => rest);
+    let { error } = await supabase
       .from('marketing_ads')
       .upsert(rows, { onConflict: 'user_id,producto_id,competidor_id,ad_id' });
+    if (error && /column .*platform.* does not exist/i.test(error.message)) {
+      stripPlatform = true;
+      const fallbackRows = rows.map(({ platform: _p, ...rest }) => rest);
+      const retry = await supabase
+        .from('marketing_ads')
+        .upsert(fallbackRows, { onConflict: 'user_id,producto_id,competidor_id,ad_id' });
+      error = retry.error;
+      if (!error) {
+        console.info('[ads-index] columna platform no existe → migration 0016 pendiente. Upsert con fallback OK.');
+      }
+    }
     if (error) {
       errors++;
       console.warn(`[ads-index] upsert chunk falló:`, error.message);

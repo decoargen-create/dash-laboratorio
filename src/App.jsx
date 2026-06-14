@@ -45,6 +45,7 @@ import { useUserPrefs } from './useUserPrefs.js';
 import { supabase, onAuthChange } from './supabase.js';
 import { generateCSV, downloadCSV, parseCSV, toNumber, toBool } from './csv.js';
 import { loadVioraState, saveVioraState, clearVioraState, createBackup } from './vioraStorage.js';
+import { safeSetItem } from './safeStorage.js';
 
 // Estados del pipeline de producción de una orden
 export const ORDER_STATES = [
@@ -1627,7 +1628,9 @@ function AppShell({ onExit }) {
     } else {
       root.classList.remove('dark');
     }
-    localStorage.setItem('dash-dark-mode', String(darkMode));
+    // Safari private mode tira QuotaExceededError aunque setItem sea trivial
+    // → safeSetItem evita que el toggle del dark mode crashee la app.
+    safeSetItem('dash-dark-mode', String(darkMode));
   }, [darkMode]);
 
   const toggleDarkMode = () => setDarkMode(prev => !prev);
@@ -1691,6 +1694,23 @@ function AppShell({ onExit }) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // CROSS-TAB LOGOUT SYNC: si el user hace logout en tab A, tab B sigue
+  // mostrando la UI logueada (con data del user!) hasta que recargue. El
+  // event `storage` se dispara EN OTRAS TABS cuando localStorage cambia.
+  // Si la key `adslab-session` fue borrada (newValue === null) → forzamos
+  // reload para que tab B vaya al login. Mantenemos la UX simple: reload >
+  // intentar limpiar state manualmente (state está distribuido entre 20+
+  // reducers + IDB y limpiarlo todo "en caliente" es propenso a bugs).
+  useEffect(() => {
+    const onStorage = (e) => {
+      if (e.key === 'adslab-session' && !e.newValue) {
+        window.location.reload();
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
   }, []);
 
   // Bootstrap de sesión al montar:

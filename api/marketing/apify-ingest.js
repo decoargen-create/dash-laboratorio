@@ -13,7 +13,7 @@
 //   APIFY_TOKEN           — obligatoria
 //   APIFY_ACTOR_ID        — opcional (default: apify/facebook-ads-scraper)
 
-import { runActorSync, normalizeAd, scoreAd, buildAdLibraryUrl, WINNER_CRITERIA } from './_apify.js';
+import { runActorSync, runActorAsync, normalizeAd, scoreAd, buildAdLibraryUrl, WINNER_CRITERIA } from './_apify.js';
 
 const DEFAULT_ACTOR = 'apify/facebook-ads-scraper';
 
@@ -84,16 +84,15 @@ export default async function handler(req, res) {
   // El actor de Apify cambió su API: ahora requiere maxItems > 0 además de
   // resultsLimit (que dejó de ser el field principal). Mandamos ambos para
   // compatibilidad con cualquier versión del actor.
-  // Cap pragmático ajustado. Bajado a 800 (de 1500) tras feedback del
-  // user: páginas grandes con 1000+ ads activos no terminaban en 240s y
-  // dejaban sin tiempo al retry. 800 cubre la mayoría de los casos
-  // reales (DTC grandes raramente pasan 600 ads activos al mismo tiempo)
-  // y deja margen para retry si falla. Para más ads habría que migrar a
-  // run-async + polling (que sí permite >300s real).
+  // Cap subido a 2500 — gracias al modo ASYNC + polling rompemos la
+  // barrera del timeout de 240s de run-sync. Ahora podemos durar los 300s
+  // completos de Vercel haciendo polling. Marcas con 1500-2500 ads activos
+  // (Shopify, big DTC) ahora caben. Si el run no termina en 270s, agarramos
+  // los items parciales del dataset igual.
   const requestedLimit = Math.max(limit, 5);
-  const cappedLimit = Math.min(requestedLimit, 800);
+  const cappedLimit = Math.min(requestedLimit, 2500);
   const limitNote = requestedLimit > cappedLimit
-    ? `Pediste ${requestedLimit} pero capeamos a ${cappedLimit} para que Apify termine antes del timeout de Vercel (300s). Para más, hay que migrar a run-async + polling.`
+    ? `Pediste ${requestedLimit} pero capeamos a ${cappedLimit}. Para más, habría que migrar a webhook + polling client-side (out of scope).`
     : null;
   const input = {
     startUrls: [{ url: startUrl }],
@@ -127,13 +126,27 @@ export default async function handler(req, res) {
   let items;
   let usedLimit = input.resultsLimit;
   let attemptNote = limitNote;
-  // TIMEOUT DEL PRIMER INTENTO: 180s (no 240s). Si fallaba a los 240s
-  // quedaban ~60s para retry — borderline. Con 180s tenemos ~100s para
-  // retry cómodo, lo que es la diferencia entre "fallo con sugerencia
-  // accionable" y "fallo de 240s sin retry". Sumado al cap más bajo
-  // (800), el flujo se completa más seguido al primer intento.
+  let partial = false;
+  // MODO ASYNC + POLLING (nuevo): rompe el cap de 240s de Apify run-sync.
+  // Para limits <= 200 seguimos usando sync (es más rápido). Para limits
+  // grandes (cap actual 2500), async + polling permite agarrar items
+  // PARCIALES si Vercel está por matarnos a los 300s.
+  const useAsync = cappedLimit > 200;
   try {
-    items = await runActorSync(actorId, input, token, { timeout: Math.min(180, remainingBudget()) });
+    if (useAsync) {
+      const asyncBudget = Math.max(60, remainingBudget() - 30);
+      const result = await runActorAsync(actorId, input, token, {
+        maxWaitSec: asyncBudget,
+        pollIntervalSec: cappedLimit > 1000 ? 8 : 5,
+      });
+      items = result.items;
+      partial = !!result.partial;
+      if (partial) {
+        attemptNote = (attemptNote ? attemptNote + ' · ' : '') + `Apify aún corría (${result.status}) cuando agotamos el budget de ${asyncBudget}s. Se recuperaron ${items.length} items parciales de los hasta ${cappedLimit} pedidos. Re-scrapealo más tarde para completar.`;
+      }
+    } else {
+      items = await runActorSync(actorId, input, token, { timeout: Math.min(180, remainingBudget()) });
+    }
   } catch (err) {
     const msg = String(err.message || '');
 

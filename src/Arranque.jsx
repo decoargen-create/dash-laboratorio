@@ -3603,6 +3603,23 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                       {winners > 0 && <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">{winners} ganadores 🏆</p>}
                     </div>
                   )}
+                  {/* Toggle "auto-refresh diario" — opt-in. Si activado, el
+                      cron de las 6 AM scrapea este competidor diariamente. */}
+                  <button
+                    onClick={() => setCompetidores(prev => prev.map(x =>
+                      x.id === c.id ? { ...x, autoRefresh: !x.autoRefresh } : x
+                    ))}
+                    className={`p-1.5 rounded transition shrink-0 ${
+                      c.autoRefresh
+                        ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100'
+                        : 'text-gray-300 hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/20'
+                    }`}
+                    title={c.autoRefresh
+                      ? 'Auto-refresh diario ACTIVADO — el cron scrapea este competidor a las 3 AM (Buenos Aires). Click para desactivar.'
+                      : 'Activar auto-refresh diario — Santi va a scrapear este competidor todas las noches a las 3 AM sin que tengas que pedirlo.'}
+                  >
+                    <Clock size={14} />
+                  </button>
                   <button onClick={() => handleRemoveCompetidor(c.id)}
                     className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition shrink-0"
                     title="Quitar competidor">

@@ -94,14 +94,27 @@ export default async function handler(req, res) {
   if (body.imageUrl && !body.ads) {
     try {
       const r = await ocrOne(client, body.imageUrl);
-      const costUSD = anthropicCost(MODEL, r.tokens.input, r.tokens.output);
+      // FIX audit #1: anthropicCost(usage, model) — usage es OBJETO con
+      // input_tokens/output_tokens, no posicional. Antes pasábamos
+      // (MODEL, in, out) y NaN se silenciaba a 0 — todo OCR costo $0.
+      const costUSD = anthropicCost({ input_tokens: r.tokens.input, output_tokens: r.tokens.output }, MODEL);
+      // FIX audit #2: si hubo error en fetchImageBase64, lo surface como 502.
+      if (r.error) {
+        return respondJSON(res, 502, { error: r.error });
+      }
       return respondJSON(res, 200, {
         ocrText: r.ocrText,
-        error: r.error || null,
         costUSD: Math.round(costUSD * 10000) / 10000,
         cost: { anthropic: costUSD },
       });
     } catch (err) {
+      // FIX audit #3: si es rate-limit de Anthropic, devolvemos retry-after.
+      if (err.status === 429 || /rate.?limit|too.?many/i.test(err.message || '')) {
+        return respondJSON(res, 429, {
+          error: 'Anthropic rate limit — reintentá en 20s',
+          retryAfter: err.headers?.['retry-after'] || 20,
+        });
+      }
       return respondJSON(res, 502, { error: err.message || 'OCR falló' });
     }
   }
@@ -120,18 +133,31 @@ export default async function handler(req, res) {
       while (idx < cap.length) {
         const i = idx++;
         const item = cap[i];
-        try {
-          const r = await ocrOne(client, item.imageUrl);
-          totalIn += r.tokens.input;
-          totalOut += r.tokens.output;
-          results[i] = { id: item.id, ocrText: r.ocrText, error: r.error || null };
-        } catch (err) {
-          results[i] = { id: item.id, ocrText: null, error: err.message?.slice(0, 200) };
+        let attempt = 0;
+        while (attempt < 3) {
+          try {
+            const r = await ocrOne(client, item.imageUrl);
+            totalIn += r.tokens.input;
+            totalOut += r.tokens.output;
+            results[i] = { id: item.id, ocrText: r.ocrText, error: r.error || null };
+            break;
+          } catch (err) {
+            // Backoff exponencial en rate limit (audit #3).
+            const isRateLimit = err.status === 429 || /rate.?limit|too.?many/i.test(err.message || '');
+            if (isRateLimit && attempt < 2) {
+              const retryAfter = Number(err.headers?.['retry-after']) || (2 ** attempt) * 5;
+              await new Promise(r => setTimeout(r, retryAfter * 1000));
+              attempt++;
+              continue;
+            }
+            results[i] = { id: item.id, ocrText: null, error: `${err.status || ''} ${err.message?.slice(0, 180)}`.trim() };
+            break;
+          }
         }
       }
     }
     await Promise.all(Array.from({ length: CONCURRENCY }, worker));
-    const costUSD = anthropicCost(MODEL, totalIn, totalOut);
+    const costUSD = anthropicCost({ input_tokens: totalIn, output_tokens: totalOut }, MODEL);
     return respondJSON(res, 200, {
       results,
       processed: results.filter(r => r.ocrText !== null && !r.error).length,

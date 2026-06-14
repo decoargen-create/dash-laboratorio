@@ -26,7 +26,7 @@ import {
   Sparkles, Package, ChevronRight, ChevronDown, Plus, Trash2, Link2, X,
   Loader2, Download, Image as ImageIcon, ExternalLink, Wand2, Search,
   Check, AlertCircle, LayoutGrid, Rows3, Table2, Settings2, RefreshCw,
-  Inbox,
+  Inbox, Bookmark,
 } from 'lucide-react';
 import { logCostsFromResponse } from './costsStore.js';
 import { addGeneratedIdeas } from './bandejaStore.js';
@@ -41,6 +41,7 @@ import { supabase } from './supabase.js';
 import { notifyMarketingChange } from './useMarketingSync.js';
 import { safeSetItem } from './safeStorage.js';
 import { setCompAds, getCompAds } from './competidorAdsIDB.js';
+import { listBoards, createBoard, addItemsToBoard } from './marketingBoardsApi.js';
 // Galería ahora vive como tab independiente en el workspace (Arranque),
 // no más como modal acá.
 
@@ -330,7 +331,196 @@ function BulkProgressBar({ state, onClose }) {
 // para Vite/Rollup en builds minificados.
 // =========================================================
 
-function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onScrape, onAdapt, onCrearReferencial, onToggleSelect, onRemove, onClearProgress, onOcrWinners, onTranscribeVideos }) {
+// Picker de boards — modal que aparece cuando el user clickea "guardar en
+// colección" sobre un ad. Lista los boards del user, permite crear uno nuevo
+// inline, y guarda el item via /api/marketing/boards.
+function BoardPickerModal({ data, onClose, addToast }) {
+  const [boards, setBoards] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [savingId, setSavingId] = useState(null);
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (!data) return;
+    let cancel = false;
+    setLoading(true); setError(null);
+    listBoards().then(bs => {
+      if (!cancel) setBoards(bs);
+    }).catch(err => {
+      if (!cancel) setError(err.message || 'Error cargando boards');
+    }).finally(() => {
+      if (!cancel) setLoading(false);
+    });
+    return () => { cancel = true; };
+  }, [data]);
+
+  // Escape para cerrar — convención estándar de modales.
+  useEffect(() => {
+    if (!data) return;
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [data, onClose]);
+
+  if (!data) return null;
+  const { ad, brand, productoId } = data;
+  // Defensa: si el ad no tiene id válido, no puede ir a la tabla de boards
+  // (constraint de marketing_board_items.ad_id). Evita insertar "undefined".
+  const adIdValid = ad?.id && String(ad.id).trim() && String(ad.id) !== 'undefined';
+
+  const saveToBoard = async (boardId, boardName) => {
+    if (!adIdValid) { setError('Este ad no tiene ID válido — no se puede guardar'); return; }
+    setSavingId(boardId); setError(null);
+    try {
+      await addItemsToBoard(boardId, [{
+        productoId: String(productoId),
+        competidorId: String(brand.id),
+        adId: String(ad.id),
+      }]);
+      addToast?.({ type: 'success', message: `Guardado en "${boardName}"` });
+      try { window.dispatchEvent(new CustomEvent('viora:boards-changed')); } catch {}
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Error al guardar');
+      setSavingId(null);
+    }
+  };
+
+  const createAndSave = async () => {
+    const name = newName.trim();
+    if (!name) return;
+    if (!adIdValid) { setError('Este ad no tiene ID válido — no se puede guardar'); return; }
+    setSavingId('__new__'); setError(null);
+    try {
+      const board = await createBoard({ nombre: name });
+      await addItemsToBoard(board.id, [{
+        productoId: String(productoId),
+        competidorId: String(brand.id),
+        adId: String(ad.id),
+      }]);
+      addToast?.({ type: 'success', message: `Board "${board.nombre}" creado y guardado` });
+      try { window.dispatchEvent(new CustomEvent('viora:boards-changed')); } catch {}
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Error al crear board');
+      setSavingId(null);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-md max-h-[80vh] overflow-hidden flex flex-col"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Bookmark size={16} className="text-amber-500" />
+            <p className="text-sm font-bold text-gray-900 dark:text-gray-100">
+              Guardar en colección
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="px-4 py-2 bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700 text-[11px] text-gray-600 dark:text-gray-400">
+          De <span className="font-semibold">{brand.nombre}</span>
+          {ad.body && <> · "{ad.body.slice(0, 60)}{ad.body.length > 60 ? '…' : ''}"</>}
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+          {loading && (
+            <div className="flex items-center justify-center gap-2 py-6 text-sm text-gray-500">
+              <Loader2 size={14} className="animate-spin" /> Cargando colecciones…
+            </div>
+          )}
+
+          {error && (
+            <div className="px-3 py-2 text-[11px] text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 rounded">
+              {error}
+            </div>
+          )}
+
+          {!loading && boards && boards.length === 0 && (
+            <p className="text-[11px] italic text-center text-gray-500 dark:text-gray-400 py-2">
+              Todavía no tenés ninguna colección. Creá la primera abajo.
+            </p>
+          )}
+
+          {!loading && boards && boards.length > 0 && (
+            <div className="space-y-1">
+              {boards.map(b => (
+                <button
+                  key={b.id}
+                  onClick={() => saveToBoard(b.id, b.nombre)}
+                  disabled={savingId === b.id}
+                  className="w-full text-left px-3 py-2 rounded-md border border-gray-200 dark:border-gray-700 hover:border-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition disabled:opacity-50 flex items-center gap-2"
+                >
+                  <Bookmark size={14} className={`text-${b.color || 'amber'}-500 shrink-0`} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{b.nombre}</p>
+                    {b.descripcion && (
+                      <p className="text-[10px] text-gray-500 dark:text-gray-400 truncate">{b.descripcion}</p>
+                    )}
+                  </div>
+                  <span className="text-[10px] text-gray-400 shrink-0">{b.itemCount || 0} ads</span>
+                  {savingId === b.id && <Loader2 size={12} className="animate-spin text-amber-500" />}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Crear nueva */}
+          {!creating ? (
+            <button
+              onClick={() => setCreating(true)}
+              className="w-full px-3 py-2 mt-2 rounded-md border-2 border-dashed border-gray-300 dark:border-gray-600 hover:border-amber-400 text-xs font-semibold text-gray-600 dark:text-gray-300 hover:text-amber-600 transition flex items-center justify-center gap-1"
+            >
+              <Plus size={12} /> Crear nueva colección
+            </button>
+          ) : (
+            <div className="mt-2 p-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md space-y-2">
+              <input
+                type="text"
+                value={newName}
+                onChange={e => setNewName(e.target.value)}
+                placeholder="Nombre de la colección"
+                autoFocus
+                onKeyDown={e => { if (e.key === 'Enter') createAndSave(); }}
+                className="w-full px-2 py-1.5 text-sm bg-white dark:bg-gray-900 border border-amber-300 dark:border-amber-700 rounded focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { setCreating(false); setNewName(''); }}
+                  className="flex-1 px-2 py-1 text-[11px] font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-600 transition"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={createAndSave}
+                  disabled={!newName.trim() || savingId === '__new__'}
+                  className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1 text-[11px] font-bold text-white bg-gradient-to-br from-amber-500 to-brand-500 rounded hover:from-amber-600 hover:to-brand-600 transition disabled:opacity-50"
+                >
+                  {savingId === '__new__' ? <Loader2 size={10} className="animate-spin" /> : <Check size={10} />}
+                  Crear y guardar
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onScrape, onAdapt, onCrearReferencial, onToggleSelect, onSaveToBoard, onRemove, onClearProgress, onOcrWinners, onTranscribeVideos }) {
   // onClearProgress se forwardea a BrandAdsGrid (que lo pasa a AdThumb) para
   // que el user pueda cerrar el overlay de error que ahora queda persistente.
   const isCompetidor = !!brand.isCompetidor;
@@ -442,6 +632,8 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
         <BrandAdsGrid
           ads={ads}
           brandNombre={brand.nombre}
+          brandId={brand.id}
+          isCompetidor={!!brand.isCompetidor}
           adaptingAdIds={adaptingAdIds}
           creandoAdIds={creandoAdIds}
           seleccionados={seleccionados}
@@ -451,6 +643,7 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
           onAdapt={onAdapt}
           onCrearReferencial={onCrearReferencial}
           onToggleSelect={onToggleSelect}
+          onSaveToBoard={onSaveToBoard}
           onClearProgress={onClearProgress}
           onScrape={onScrape}
           isScraping={isScraping}
@@ -462,7 +655,7 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
 }
 
 
-function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = false, selected = false, selectionIndex = null, used = false, onAdapt, onCrearReferencial, onToggleSelect, progress = null, onClearProgress = null }) {
+function AdThumb({ ad, brandNombre, brandId = null, isCompetidor = false, fresh = false, adapting = false, creando = false, selected = false, selectionIndex = null, used = false, onAdapt, onCrearReferencial, onToggleSelect, onSaveToBoard = null, progress = null, onClearProgress = null }) {
   const cdnThumb = ad.imageUrls?.[0];
   const fbUrl = ad.snapshotUrl;
   // Si tenemos el ad cacheado en IndexedDB (sobreviven el TTL de 24h del CDN),
@@ -609,12 +802,14 @@ function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = f
         </div>
       )}
 
-      <div className="absolute inset-0 bg-black/0 group-hover/thumb:bg-black/60 transition flex flex-col items-stretch justify-end gap-1 p-1.5">
+      {/* En mobile (max-md) los devices sin hover no pueden activar el overlay
+          → forzamos opacity 100 y un tinte oscuro para mantener contraste. */}
+      <div className="absolute inset-0 bg-black/0 group-hover/thumb:bg-black/60 max-md:bg-gradient-to-t max-md:from-black/70 max-md:to-transparent transition flex flex-col items-stretch justify-end gap-1 p-1.5">
         {onCrearReferencial && (
           <button
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); onCrearReferencial(); }}
             disabled={creando}
-            className="opacity-0 group-hover/thumb:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded disabled:opacity-70"
+            className="opacity-0 group-hover/thumb:opacity-100 max-md:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded disabled:opacity-70"
             title="Genera 2 variaciones con tu producto real"
           >
             {creando
@@ -627,7 +822,7 @@ function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = f
           <button
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); onAdapt(); }}
             disabled={adapting}
-            className="opacity-0 group-hover/thumb:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-amber-500/90 hover:bg-amber-600 rounded disabled:opacity-70"
+            className="opacity-0 group-hover/thumb:opacity-100 max-md:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-amber-500/90 hover:bg-amber-600 rounded disabled:opacity-70"
             title="Genera ideas (texto) en la Bandeja"
           >
             {adapting
@@ -638,10 +833,21 @@ function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = f
         )}
         <a
           href={fbUrl} target="_blank" rel="noreferrer"
-          className="opacity-0 group-hover/thumb:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-black/70 hover:bg-black/90 rounded"
+          className="opacity-0 group-hover/thumb:opacity-100 max-md:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-black/70 hover:bg-black/90 rounded"
         >
           <ExternalLink size={10} /> Ver en FB
         </a>
+        {/* Guardar en colección (board) — solo aparece cuando el ad es de un
+            competidor (boards requieren competidor_id en el schema). */}
+        {onSaveToBoard && isCompetidor && brandId && (
+          <button
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onSaveToBoard(ad, { id: brandId, nombre: brandNombre }); }}
+            className="opacity-0 group-hover/thumb:opacity-100 max-md:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-amber-600/90 hover:bg-amber-700 rounded"
+            title="Guardar en una colección cross-producto"
+          >
+            <Bookmark size={10} /> Guardar
+          </button>
+        )}
         {/* Toggle manual de "usado" — persiste por ad.id (Ad Archive ID),
             sobrevive al re-scrapeo. Gris = ya lo usé. */}
         <button
@@ -649,7 +855,7 @@ function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = f
             e.preventDefault(); e.stopPropagation();
             window.dispatchEvent(new CustomEvent('viora:toggle-used-ad', { detail: { adId: ad.id } }));
           }}
-          className={`opacity-0 group-hover/thumb:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white rounded ${
+          className={`opacity-0 group-hover/thumb:opacity-100 max-md:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white rounded ${
             used ? 'bg-gray-600 hover:bg-gray-700' : 'bg-emerald-600/90 hover:bg-emerald-700'
           }`}
           title={used ? 'Quitar marca de usado' : 'Marcar como usado (queda en gris)'}
@@ -677,7 +883,7 @@ function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = f
 }
 
 
-function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect, onClearProgress, onScrape, isScraping, brandTotalAds }) {
+function BrandAdsGrid({ ads, brandNombre, brandId = null, isCompetidor = false, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect, onSaveToBoard, onClearProgress, onScrape, isScraping, brandTotalAds }) {
   const [showRepeated, setShowRepeated] = useState(false);
   // Paginación: arranca con 30, "ver más" suma de a 60 hasta cap razonable.
   // ANTES: showAllFresh = true mostraba TODOS los ads (3000+) en DOM →
@@ -704,6 +910,8 @@ function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccion
                 key={ad.id}
                 ad={ad}
                 brandNombre={brandNombre}
+                brandId={brandId}
+                isCompetidor={isCompetidor}
                 fresh
                 adapting={adaptingAdIds?.has(ad.id)}
                 creando={creandoAdIds?.has(ad.id)}
@@ -714,6 +922,7 @@ function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccion
                 onAdapt={onAdapt ? () => onAdapt(ad) : null}
                 onCrearReferencial={onCrearReferencial ? () => onCrearReferencial(ad) : null}
                 onToggleSelect={onToggleSelect ? () => onToggleSelect(ad.id) : null}
+                onSaveToBoard={onSaveToBoard}
                 onClearProgress={onClearProgress}
               />
             ))}
@@ -791,6 +1000,8 @@ function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccion
                   key={ad.id}
                   ad={ad}
                   brandNombre={brandNombre}
+                  brandId={brandId}
+                  isCompetidor={isCompetidor}
                   adapting={adaptingAdIds?.has(ad.id)}
                   creando={creandoAdIds?.has(ad.id)}
                   selected={seleccionados?.has(ad.id)}
@@ -798,6 +1009,7 @@ function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccion
                   onAdapt={onAdapt ? () => onAdapt(ad) : null}
                   onCrearReferencial={onCrearReferencial ? () => onCrearReferencial(ad) : null}
                   onToggleSelect={onToggleSelect ? () => onToggleSelect(ad.id) : null}
+                  onSaveToBoard={onSaveToBoard}
                 />
               ))}
               {repeated.length > REPEATED_LIMIT && (
@@ -827,7 +1039,7 @@ function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccion
 // strip horizontal. Cada item es un AdThumb con sus acciones normales
 // (Crear creativo, + ideas en Bandeja, multi-select).
 
-function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect, onClearProgress }) {
+function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect, onSaveToBoard, onClearProgress }) {
   const [expanded, setExpanded] = useState(true);
   // Vista del Top 10 — persistida en localStorage. 3 opciones:
   //   grid: strip horizontal de 10 thumbs (default, denso)
@@ -893,6 +1105,7 @@ function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, se
             <TopGridView items={items} adaptingAdIds={adaptingAdIds} creandoAdIds={creandoAdIds}
               seleccionados={seleccionados} selectedOrder={selectedOrder} usedAdIds={usedAdIds} progressById={progressById}
               onAdapt={onAdapt} onCrearReferencial={onCrearReferencial} onToggleSelect={onToggleSelect}
+              onSaveToBoard={onSaveToBoard}
               onClearProgress={onClearProgress} />
           )}
           {viewMode === 'list' && (
@@ -913,10 +1126,10 @@ function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, se
 
 // VISTA 1 — Grid: el strip horizontal original con 10 thumbs grandes.
 
-function TopGridView({ items, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect, onClearProgress }) {
+function TopGridView({ items, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect, onSaveToBoard, onClearProgress }) {
   return (
     <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-10 gap-2">
-      {items.map(({ ad, brandNombre, isCompetidor }, idx) => (
+      {items.map(({ ad, brandNombre, brandId, isCompetidor }, idx) => (
         <div key={ad.id} className="relative">
           <div className={`absolute -top-1 -left-1 z-20 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shadow-md ${
             idx === 0 ? 'bg-gradient-to-br from-amber-400 to-amber-600'
@@ -924,13 +1137,14 @@ function TopGridView({ items, adaptingAdIds, creandoAdIds, seleccionados, select
             : 'bg-gradient-to-br from-gray-600 to-gray-700'
           }`}>{idx + 1}</div>
           <AdThumb
-            ad={ad} brandNombre={brandNombre} fresh={ad.isFresh !== false}
+            ad={ad} brandNombre={brandNombre} brandId={brandId} isCompetidor={isCompetidor} fresh={ad.isFresh !== false}
             adapting={adaptingAdIds?.has(ad.id)} creando={creandoAdIds?.has(ad.id)}
             selected={seleccionados?.has(ad.id)} selectionIndex={selectedOrder?.get(ad.id) || null} used={usedAdIds?.has(ad.id)}
             progress={progressById?.[ad.id]}
             onAdapt={onAdapt ? () => onAdapt(brandNombre, ad) : null}
             onCrearReferencial={onCrearReferencial ? () => onCrearReferencial(brandNombre, ad) : null}
             onToggleSelect={onToggleSelect ? () => onToggleSelect(ad.id) : null}
+            onSaveToBoard={onSaveToBoard}
             onClearProgress={onClearProgress}
           />
           <div className="mt-1 px-0.5">
@@ -1195,6 +1409,8 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     : setActiveProductoIdRaw;
   const [brands, setBrands] = useState(() => loadBrands(activeProductoId));
   const [showAddForm, setShowAddForm] = useState(false);
+  // Modal de "Guardar en colección" — null = cerrado; {ad, brand, productoId} = abierto.
+  const [boardPickerData, setBoardPickerData] = useState(null);
   const [draft, setDraft] = useState({ nombre: '', landingUrl: '', fbPageUrl: '', notas: '' });
   // Set de IDs scrapeando en paralelo. Antes era un único string — al
   // arrancar un 2do scrape se pisaba el 1ro y la card #1 perdía su
@@ -3002,7 +3218,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
             // Solo ads con imagen + score conocido (ya pasaron por scoreAd).
             if ((ad.imageUrls?.length || 0) === 0) return;
             if (typeof ad.score !== 'number') return;
-            allAdsForRanking.push({ ad, brandNombre: b.nombre, isCompetidor: b.isCompetidor });
+            allAdsForRanking.push({ ad, brandNombre: b.nombre, brandId: b.id, isCompetidor: b.isCompetidor });
           });
         });
         const topEscalados = allAdsForRanking
@@ -3024,6 +3240,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                 onAdapt={(brandNombre, ad) => handleAdapt(brandNombre, ad)}
                 onCrearReferencial={(brandNombre, ad) => crearReferencialDeAd(brandNombre, ad)}
                 onToggleSelect={(adId) => toggleSeleccion(adId)}
+                onSaveToBoard={(ad, brandInfo) => setBoardPickerData({ ad, brand: brandInfo, productoId: producto.id })}
                 onClearProgress={(adId) => setProgressById(prev => {
                   const next = { ...prev }; delete next[adId]; return next;
                 })}
@@ -3303,6 +3520,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                     onAdapt={(ad) => handleAdapt(b.nombre, ad)}
                     onCrearReferencial={(ad) => crearReferencialDeAd(b.nombre, ad)}
                     onToggleSelect={(adId) => toggleSeleccion(adId)}
+                    onSaveToBoard={(ad, brandInfo) => setBoardPickerData({ ad, brand: brandInfo, productoId: producto.id })}
                     onRemove={b.isCompetidor ? null : () => handleRemoveBrand(b.id)}
                     onClearProgress={(adId) => setProgressById(prev => {
                       const next = { ...prev }; delete next[adId]; return next;
@@ -3314,6 +3532,13 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           </div>
         );
       })()}
+
+      {/* Modal de board picker — aparece cuando el user clickea "Guardar" sobre un ad */}
+      <BoardPickerModal
+        data={boardPickerData}
+        onClose={() => setBoardPickerData(null)}
+        addToast={addToast}
+      />
     </div>
   );
 }

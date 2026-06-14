@@ -23,6 +23,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { runActorAsync, normalizeAd, scoreAd } from './_apify.js';
+import { upsertAdsToIndex } from './_ads-index.js';
 
 const DAILY_COST_CAP_USD = 25; // cap de gasto diario hard-coded
 const PER_COMP_LIMIT = 500;     // ads por competidor en cada refresh
@@ -165,6 +166,19 @@ export default async function handler(req, res) {
         await supabase.storage.from('creativos').upload(path, blob, {
           contentType: 'application/json', upsert: true,
         });
+
+        // También upsert al index server-side para search rápido.
+        // Best effort — si falla, los ads siguen en el bucket.
+        try {
+          await upsertAdsToIndex({
+            userId: row.user_id,
+            productoId: row.id,
+            competidorId: comp.id,
+            ads: scored,
+          });
+        } catch (idxErr) {
+          console.warn('[cron] upsertAdsToIndex falló:', idxErr.message);
+        }
 
         // Actualizar la metadata del competidor en el row del producto.
         const updatedCompetidores = competidores.map(c => {

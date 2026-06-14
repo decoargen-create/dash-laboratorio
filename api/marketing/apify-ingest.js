@@ -14,6 +14,8 @@
 //   APIFY_ACTOR_ID        — opcional (default: apify/facebook-ads-scraper)
 
 import { runActorSync, runActorAsync, normalizeAd, scoreAd, buildAdLibraryUrl, WINNER_CRITERIA } from './_apify.js';
+import { upsertAdsToIndex } from './_ads-index.js';
+import { getUserIdFromAuth } from './_supabase-server.js';
 
 const DEFAULT_ACTOR = 'apify/facebook-ads-scraper';
 
@@ -232,6 +234,26 @@ export default async function handler(req, res) {
     scored.sort((a, b) => b.score - a.score);
 
     const winnersCount = scored.filter(a => a.isWinner).length;
+
+    // SEARCH INDEX: si el cliente mandó productoId + competidorId + auth,
+    // upsertear al index server-side para que la lupa rápida los encuentre.
+    // Si NO mandó auth o IDs, los ads quedan en IDB local + bucket JSON
+    // (search server-side los pierde hasta el próximo cron).
+    if (body.productoId && body.competidorId) {
+      const uid = await getUserIdFromAuth(req);
+      if (uid) {
+        try {
+          await upsertAdsToIndex({
+            userId: uid,
+            productoId: body.productoId,
+            competidorId: body.competidorId,
+            ads: scored,
+          });
+        } catch (idxErr) {
+          console.warn('[apify-ingest] upsertAdsToIndex falló:', idxErr.message);
+        }
+      }
+    }
 
     // Costo estimado: Apify facebook-ads-scraper cobra ~$5.80/1000 ads en el
     // plan free (usage-based). ~$0.0058 por ad scrapeado.

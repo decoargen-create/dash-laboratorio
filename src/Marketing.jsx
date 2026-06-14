@@ -11,6 +11,7 @@
 
 import React, { useEffect, useState, useRef, Fragment } from 'react';
 import { deleteProducto as deleteProductoFromCloud } from './marketingSync.js';
+import { safeSetItem } from './safeStorage.js';
 import {
   FileText, Sparkles, Download, Loader2, Check, AlertTriangle, X,
   RefreshCw, Trash2, ChevronRight, Copy, Package, Plus, MessageSquare,
@@ -109,15 +110,20 @@ function loadProductos() {
 }
 
 function saveProductos(list) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+  // safeSetItem: Safari private mode tira QuotaExceededError aunque la lista
+  // sea chica. Antes el catch silenciaba todo y el dispatch nunca corría —
+  // pero el dispatch sin write no tiene sentido (todos releen el storage).
+  // Condicionamos el dispatch a un write efectivo.
+  if (safeSetItem(STORAGE_KEY, JSON.stringify(list))) {
     // Notificar al sync layer + a otros componentes (Arranque, InspiracionSection)
     // que tienen su propio state de productos. Sin este dispatch, Marketing
     // podía quedar fuera de sync con los otros.
-    window.dispatchEvent(new CustomEvent('viora:marketing-storage-changed', {
-      detail: { key: STORAGE_KEY },
-    }));
-  } catch {}
+    try {
+      window.dispatchEvent(new CustomEvent('viora:marketing-storage-changed', {
+        detail: { key: STORAGE_KEY },
+      }));
+    } catch {}
+  }
 }
 
 function downloadText(content, filename) {

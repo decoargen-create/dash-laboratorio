@@ -39,6 +39,7 @@ import { playDoneChime, playBulkDoneChime, playErrorTone } from './sounds.js';
 import EmptyState from './EmptyState.jsx';
 import { supabase } from './supabase.js';
 import { notifyMarketingChange } from './useMarketingSync.js';
+import { safeSetItem } from './safeStorage.js';
 import { setCompAds, getCompAds } from './competidorAdsIDB.js';
 // Galería ahora vive como tab independiente en el workspace (Arranque),
 // no más como modal acá.
@@ -203,12 +204,15 @@ function loadBrands(productoId) {
 function saveBrands(productoId, brands) {
   if (!productoId) return;
   const key = brandsKey(productoId);
-  try {
-    localStorage.setItem(key, JSON.stringify(brands));
+  // safeSetItem: en Safari private mode setItem tira QuotaExceededError aunque
+  // los datos quepan. Con el try/catch viejo el write silenciosamente fallaba
+  // y los brands no se persistían — el dispatch tampoco se enviaba. Acá
+  // condicionamos el notify al éxito real del write.
+  if (safeSetItem(key, JSON.stringify(brands))) {
     // Notificar al sync hook — sin esto el push al cloud nunca corre y
     // al recargar el pull pisa los cambios con datos viejos.
     notifyMarketingChange(key);
-  } catch {}
+  }
 }
 
 // Props:

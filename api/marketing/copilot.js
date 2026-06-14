@@ -42,7 +42,7 @@ function buildEstableBlock(ctx) {
   if (ctx.offerBrief) parts.push(`\n--- OFFER BRIEF ---\n${String(ctx.offerBrief).slice(0, 8000)}`);
   if (ctx.beliefs) parts.push(`\n--- CREENCIAS NECESARIAS ---\n${String(ctx.beliefs).slice(0, 4000)}`);
   if (parts.length === 1) {
-    parts.push('(El producto todavía no tiene research. Corré el pipeline para que el copiloto tenga material — por ahora respondé con criterio general.)');
+    parts.push('(El producto todavía no tiene research. Corré el pipeline para que tengas material — por ahora respondé con criterio general, decí que falta el research.)');
   }
   return parts.join('\n');
 }
@@ -125,7 +125,7 @@ export default async function handler(req, res) {
 
     const textBlock = (resp.content || []).find(c => c.type === 'text');
     const reply = textBlock?.text?.trim() || '';
-    if (!reply) return respondJSON(res, 502, { error: 'El copiloto no devolvió respuesta' });
+    if (!reply) return respondJSON(res, 502, { error: 'Santi no devolvió respuesta' });
 
     return respondJSON(res, 200, {
       reply,
@@ -135,6 +135,6 @@ export default async function handler(req, res) {
     });
   } catch (err) {
     console.error('copilot error:', err);
-    return respondJSON(res, 500, { error: err?.message || 'Error en el copiloto' });
+    return respondJSON(res, 500, { error: err?.message || 'Error interno' });
   }
 }

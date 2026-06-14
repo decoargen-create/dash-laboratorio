@@ -82,6 +82,14 @@ export default async function handler(req, res) {
       break;
     }
     const data = row.data || {};
+    // MASTER SWITCH per-producto: si autoRefreshEnabled !== true, SKIP el
+    // producto entero. El user puede tener competidores con autoRefresh:true
+    // marcados pero NO querer scrape automático para ESTE producto en
+    // particular. El cron respeta el master switch del producto antes que
+    // los toggles individuales.
+    if (data.autoRefreshEnabled !== true) {
+      continue;
+    }
     const competidores = data.competidores || [];
     // Solo refreshamos los competidores que el user opted-in.
     const optedIn = competidores.filter(c => c.autoRefresh === true);

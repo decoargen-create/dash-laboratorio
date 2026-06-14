@@ -3549,6 +3549,46 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           </div>
         )}
 
+        {/* Master switch del auto-refresh — controla si el cron diario
+            scrapea ESTE producto. Si está OFF, ningún competidor de este
+            producto se refresca automático (independiente de sus toggles
+            individuales). Default OFF — opt-in explícito del user. */}
+        {competidores.length > 0 && (
+          <div className="mb-3 px-3 py-2 rounded-lg border border-emerald-200 dark:border-emerald-800 bg-emerald-50/60 dark:bg-emerald-900/20 flex items-center gap-2.5">
+            <Clock size={14} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-bold text-gray-900 dark:text-gray-100 leading-tight">
+                Auto-refresh diario {producto?.autoRefreshEnabled ? '✓ ON' : '○ OFF'}
+              </p>
+              <p className="text-[10px] text-gray-600 dark:text-gray-400 leading-tight mt-0.5">
+                {producto?.autoRefreshEnabled
+                  ? 'Santi scrapea los competidores marcados con ⏰ a las 3 AM. Activá ⏰ en cada uno que quieras refrescar.'
+                  : 'Cada producto controla su propio auto-refresh. Activá si querés que el cron scrapee TUS competidores de este producto.'}
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                if (!producto) return;
+                setProductos(prev => prev.map(p =>
+                  String(p.id) === String(producto.id)
+                    ? { ...p, autoRefreshEnabled: !p.autoRefreshEnabled, updated_at: new Date().toISOString() }
+                    : p
+                ));
+              }}
+              className={`shrink-0 relative inline-flex h-6 w-11 items-center rounded-full transition ${
+                producto?.autoRefreshEnabled ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-gray-600'
+              }`}
+              title={producto?.autoRefreshEnabled ? 'Desactivar auto-refresh para este producto' : 'Activar auto-refresh para este producto'}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white transition ${
+                  producto?.autoRefreshEnabled ? 'translate-x-6' : 'translate-x-1'
+                }`}
+              />
+            </button>
+          </div>
+        )}
+
         {/* Lista de competidores */}
         {competidores.length === 0 ? (
           <p className="text-xs text-gray-500 dark:text-gray-400 italic">

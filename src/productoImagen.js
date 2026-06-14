@@ -250,6 +250,35 @@ async function migrateLocalPhotoToCloud(id, dataUrl) {
 export async function getProductoImagen(id, fallbackProducto = null) {
   if (!id) return null;
   const key = String(id);
+  // CACHE-BUST por fotoUpdatedAt: si la foto del cloud es más nueva que la
+  // que tenemos local, invalidamos el cache para forzar re-download.
+  // Sin esto PC2 mostraba la foto vieja para siempre si PC1 re-subía.
+  try {
+    const producto = fallbackProducto || readProducto(id);
+    const cloudTs = producto?.fotoUpdatedAt ? Date.parse(producto.fotoUpdatedAt) : 0;
+    if (cloudTs > 0) {
+      const db = await openDB();
+      const localRec = await new Promise((resolve) => {
+        const tx = db.transaction(STORE, 'readonly');
+        const req = tx.objectStore(STORE).get(key);
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => resolve(null);
+      });
+      const localTs = localRec?.updatedAt ? Date.parse(localRec.updatedAt) : 0;
+      if (cloudTs > localTs + 1000) {
+        // Cloud más nuevo — invalidar cache local antes de devolver.
+        memCache.delete(key);
+        try {
+          await new Promise((resolve) => {
+            const txw = db.transaction(STORE, 'readwrite');
+            txw.objectStore(STORE).delete(key);
+            txw.oncomplete = () => resolve();
+            txw.onerror = () => resolve();
+          });
+        } catch {}
+      }
+    }
+  } catch {}
   if (memCache.has(key)) return memCache.get(key);
   // 1) Intentar IDB
   try {

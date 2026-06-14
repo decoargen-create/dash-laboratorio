@@ -346,9 +346,20 @@ export async function pullMarketingFromCloud() {
 // of truth es la tabla marketing_ideas. Si dejamos el inline array, el push
 // constante de producto pisa el cloud con la versión local (race) y la tabla
 // y el array divergen.
+// ADEMÁS strip de competidores[].ads — desde el refactor IDB los ads viven en
+// IndexedDB local + bucket Supabase. Si dejamos el inline array, el push
+// los re-sube al row del producto (defeats el refactor — el row vuelve a
+// medir MB).
 function stripIdeas(producto) {
   if (!producto || typeof producto !== 'object') return producto;
   const { bandejaIdeas, ...rest } = producto;
+  if (Array.isArray(rest.competidores)) {
+    rest.competidores = rest.competidores.map(c => {
+      if (!c || typeof c !== 'object') return c;
+      const { ads: _legacyAds, ...cMeta } = c;
+      return cMeta;
+    });
+  }
   return rest;
 }
 

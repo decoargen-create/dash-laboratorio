@@ -84,12 +84,17 @@ export default async function handler(req, res) {
   // El actor de Apify cambió su API: ahora requiere maxItems > 0 además de
   // resultsLimit (que dejó de ser el field principal). Mandamos ambos para
   // compatibilidad con cualquier versión del actor.
-  // Cap subido 200→5000 para soportar competidores grandes (user pidió
-  // poder analizar hasta 3000 ads de un competidor). El cliente almacena
-  // ads en IndexedDB (no localStorage), así que el storage local no es
-  // bottleneck. El cuello de botella ahora es Apify run-sync timeout
-  // (300s) + el cap de top-60 ads que se mandan al prompt de Claude.
-  const cappedLimit = Math.min(Math.max(limit, 5), 5000);
+  // Cap pragmático en 1500. El user pidió hasta 3000 pero los runs grandes
+  // de Apify no terminan en el budget de 240s + retry (300s total Vercel),
+  // y devolvían 504. 1500 cubre 90% de los casos reales (competidores DTC
+  // grandes raramente pasan 800 ads activos al mismo tiempo) y mantiene el
+  // pipeline confiable. Si pediís más alto, automáticamente capeamos +
+  // logueamos en attemptNote para que sepas qué pasó.
+  const requestedLimit = Math.max(limit, 5);
+  const cappedLimit = Math.min(requestedLimit, 1500);
+  const limitNote = requestedLimit > cappedLimit
+    ? `Pediste ${requestedLimit} pero capeamos a ${cappedLimit} para que Apify termine antes del timeout de Vercel (300s). Para más, hay que migrar a run-async + polling.`
+    : null;
   const input = {
     startUrls: [{ url: startUrl }],
     resultsLimit: cappedLimit,
@@ -121,7 +126,7 @@ export default async function handler(req, res) {
 
   let items;
   let usedLimit = input.resultsLimit;
-  let attemptNote = null;
+  let attemptNote = limitNote;
   try {
     items = await runActorSync(actorId, input, token, { timeout: Math.min(240, remainingBudget()) });
   } catch (err) {

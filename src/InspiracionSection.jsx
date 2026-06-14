@@ -1146,27 +1146,45 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   // IDB (competidorAdsIDB) cuando el producto se monta o cambia.
   const [compAdsByCompId, setCompAdsByCompId] = useState({});
 
-  // Hidratar ads de competidores desde IDB. Sin esto, después del refactor
-  // de storage los cards de competidores muestran 0 ads aunque scrapeaste.
-  // PRIORITY: IDB primero (datos frescos), inline legacy solo si IDB vacía.
-  // RACE FIX: merge en vez de reemplazar para no pisar ads recién scrapeados.
-  // DEP FIX: incluir lastAdsCheck en deps para que el pull cross-PC refresque.
+  // Hidratar ads de competidores desde IDB.
+  // - PRIORITY: IDB primero, inline legacy solo si IDB vacía.
+  // - MERGE por TIMESTAMP (no por length) — re-scrape con menos ads gana si
+  //   es más reciente.
+  // - RESET al cambiar producto — sin esto el state acumulaba entries de
+  //   todos los productos navegados (memory leak).
+  // - DROP ZOMBI: filtrar entries de comps que ya no existen.
+  const prevProductoIdRefInsp = useRef(null);
+  useEffect(() => {
+    if (prevProductoIdRefInsp.current && prevProductoIdRefInsp.current !== producto?.id) {
+      setCompAdsByCompId({});
+    }
+    prevProductoIdRefInsp.current = producto?.id;
+  }, [producto?.id]);
   useEffect(() => {
     if (!producto?.competidores) return;
     let cancelled = false;
     (async () => {
       const updates = {};
+      const recordsByCompId = {};
       for (const c of producto.competidores) {
         const rec = await getCompAds(producto.id, c.id);
-        if (rec?.ads?.length) { updates[c.id] = rec.ads; continue; }
+        if (rec?.ads?.length) { updates[c.id] = rec.ads; recordsByCompId[c.id] = rec; continue; }
         if (Array.isArray(c.ads) && c.ads.length > 0) { updates[c.id] = c.ads; }
       }
       if (!cancelled) {
         setCompAdsByCompId(prev => {
-          const next = { ...prev };
+          const next = {};
+          const validIds = new Set((producto.competidores || []).map(c => c.id));
+          for (const [k, v] of Object.entries(prev)) {
+            if (validIds.has(k)) next[k] = v;
+          }
           for (const [cid, ads] of Object.entries(updates)) {
-            if (!next[cid] || ads.length > (next[cid]?.length || 0)) {
+            const rec = recordsByCompId[cid];
+            const incomingTs = rec?.ts || 0;
+            const currentTs = next[cid]?._ts || 0;
+            if (!next[cid] || incomingTs >= currentTs) {
               next[cid] = ads;
+              if (incomingTs) ads._ts = incomingTs;
             }
           }
           return next;

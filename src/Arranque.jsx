@@ -978,6 +978,16 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // legacy (memos, pipeline) sigan leyendo c.ads como antes.
   const [compAdsByCompId, setCompAdsByCompId] = useState({});
   const [hydratingAds, setHydratingAds] = useState(false);
+  // RESET al cambiar producto — sin esto el state acumula entries de TODOS
+  // los productos navegados → memory leak masivo (50 productos × 5 comps ×
+  // 200 ads × 5KB ≈ 250MB en el state). Hacemos cleanup explícito.
+  const prevProductoIdRef = useRef(null);
+  useEffect(() => {
+    if (prevProductoIdRef.current && prevProductoIdRef.current !== producto?.id) {
+      setCompAdsByCompId({});
+    }
+    prevProductoIdRef.current = producto?.id;
+  }, [producto?.id]);
   useEffect(() => {
     let cancelled = false;
     if (!producto?.id) { setCompAdsByCompId({}); return; }
@@ -986,21 +996,32 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       // PRIORITY: IDB > inline legacy. Antes preferíamos inline si existía,
       // lo que dejaba productos parcialmente migrados leyendo datos stale.
       const updates = {};
+      const recordsByCompId = {};
       for (const c of competidoresBase) {
         const rec = await getCompAds(producto.id, c.id);
-        if (rec?.ads?.length) { updates[c.id] = rec.ads; continue; }
+        if (rec?.ads?.length) { updates[c.id] = rec.ads; recordsByCompId[c.id] = rec; continue; }
         if (Array.isArray(c.ads) && c.ads.length > 0) { updates[c.id] = c.ads; }
       }
       if (!cancelled) {
-        // RACE FIX: MERGE en vez de reemplazar. Antes hacíamos setCompAdsByCompId(map)
-        // pisando un update directo que el scrape handler acababa de hacer
-        // → "scrape termina, ads desaparecen". Ahora solo escribimos si lo
-        // nuevo es estrictamente mejor (más ads) que lo que ya hay.
+        // MERGE FIX (round 3): antes comparábamos `ads.length > prev.length`
+        // que perdía datos cuando un re-scrape devolvía MENOS ads (algunos
+        // expiraron en Meta). Ahora comparamos por timestamp (ts del record
+        // IDB). El más fresco gana, sin importar el length.
         setCompAdsByCompId(prev => {
-          const next = { ...prev };
+          const next = {};
+          const validIds = new Set(competidoresBase.map(c => c.id));
+          // Conservar solo entries de comps que aún existen (drop zombi).
+          for (const [k, v] of Object.entries(prev)) {
+            if (validIds.has(k)) next[k] = v;
+          }
+          // Aplicar updates priorizando frescura por timestamp.
           for (const [cid, ads] of Object.entries(updates)) {
-            if (!next[cid] || ads.length > (next[cid]?.length || 0)) {
+            const rec = recordsByCompId[cid];
+            const incomingTs = rec?.ts || 0;
+            const currentTs = next[cid]?._ts || 0;
+            if (!next[cid] || incomingTs >= currentTs) {
               next[cid] = ads;
+              if (incomingTs) ads._ts = incomingTs;
             }
           }
           return next;
@@ -2118,8 +2139,12 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         // los `adsAnalysis` recién guardados por el deep-analyze loop. Antes
         // leíamos `loadJSON(COMPETIDORES_KEY, ...)` que está borrada tras la
         // migración → caía al fallback del closure y perdía análisis frescos.
+        // CRÍTICO POST-REFACTOR: productosRef.current tiene ads STRIPPED (viven
+        // en IDB ahora). Sin hidratar, el pipeline corre ciego — allCompAds
+        // queda vacío y el generador no recibe contexto de competencia.
         const productoFreshGen = productosRef.current.find(p => String(p.id) === String(producto.id));
-        const compsActualizados = productoFreshGen?.competidores || competidores;
+        const compsBase = productoFreshGen?.competidores || competidores;
+        const compsActualizados = await hydrateCompetidoresAds(compsBase, producto.id);
         for (const c of compsActualizados) {
           // Deep-analyzed (con insights completos)
           const analyses = c.adsAnalysis || {};

@@ -1830,6 +1830,37 @@ function AppShell({ onExit }) {
     if (supabase) {
       try { await supabase.auth.signOut(); } catch {}
     }
+    // PRIVACY/DATA-THEFT FIX: antes solo borrábamos adslab-session. Toda la
+    // data del user (productos, brands, ideas, fotos cacheadas, etc.) queda
+    // en localStorage + IDB. Si user B logea en la misma PC: (1) ve la data
+    // de A hasta el primer pull, (2) migrateLocalToCloud puede empujar la
+    // data de A al cloud de B (data corruption). Borramos TODO.
+    try {
+      const keysToWipe = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (!k) continue;
+        // Conservamos solo cosas de prefs UI globales (dark mode, font, etc.)
+        if (k.startsWith('adslab-marketing-') ||
+            k.startsWith('adslab-kanban-') ||
+            k.startsWith('adslab-producto-') ||
+            k.startsWith('adslab-creative-refresh-') ||
+            k.startsWith('adslab-auto-ig-') ||
+            k.startsWith('adslab-balances') ||
+            k.startsWith('adslab-costs-log') ||
+            k.startsWith('adslab-activity-log') ||
+            k.startsWith('adslab-debug-log') ||
+            k.startsWith('adslab-bulk-progress')) {
+          keysToWipe.push(k);
+        }
+      }
+      for (const k of keysToWipe) localStorage.removeItem(k);
+    } catch {}
+    // Borramos los IDB stores con data del user.
+    if (typeof indexedDB !== 'undefined') {
+      ['adslab-competidor-ads-v1', 'lab-viora-ads-images', 'lab-viora-referenciales', 'adslab-producto-imagenes']
+        .forEach(name => { try { indexedDB.deleteDatabase(name); } catch {} });
+    }
     localStorage.removeItem('adslab-session');
     setCurrentUser(null);
     setSupabaseUser(null);

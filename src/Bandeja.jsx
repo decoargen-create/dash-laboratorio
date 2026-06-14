@@ -2090,16 +2090,34 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
                 // Solo ideas de IMAGEN con contenido. Las de video se ignoran
                 // (no se pueden generar como estático).
                 const valid = [];
+                let skipUsadas = 0;
                 for (const id of selected) {
                   const idea = ideas.find(i => i.id === id);
                   if (!idea) continue;
                   if (idea.formato === 'video') continue;
                   if (!(idea.hook || idea.titulo || idea.descripcionImagen)) continue;
+                  // Anti-gasto duplicado: si la idea ya fue generada antes
+                  // (estado='usada'), no la re-disparamos al endpoint. Cada
+                  // call cuesta $0.18 en gpt-image-2 quality high. Antes el
+                  // bulk re-procesaba todo lo seleccionado sin filtro.
+                  if (idea.estado === 'usada' || idea.estado === 'archivada') {
+                    skipUsadas++;
+                    continue;
+                  }
                   valid.push(idea);
                 }
                 if (valid.length === 0) {
-                  addToast?.({ type: 'error', message: 'Las seleccionadas no tienen ideas de imagen para generar (las de video no aplican).' });
+                  const msg = skipUsadas > 0
+                    ? `Las ${skipUsadas} seleccionadas ya fueron generadas (estado 'usada'). Para re-generar, archivá y volvé a marcar pendiente.`
+                    : 'Las seleccionadas no tienen ideas de imagen para generar (las de video no aplican).';
+                  addToast?.({ type: 'error', message: msg });
                   return;
+                }
+                if (skipUsadas > 0) {
+                  addToast?.({
+                    type: 'info',
+                    message: `${skipUsadas} ya generada${skipUsadas !== 1 ? 's' : ''} salteada${skipUsadas !== 1 ? 's' : ''} — ${valid.length} a procesar`,
+                  });
                 }
                 const producto = productos.find(p => String(p.id) === String(activeProductoId));
                 if (!producto) {

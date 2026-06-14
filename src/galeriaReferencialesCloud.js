@@ -283,16 +283,25 @@ export async function countReferencialesByProductoCloud(productoId) {
 
   // 4 queries paralelas para los conteos. Filtramos por user_id además
   // de RLS — defense-in-depth contra una eventual misconfig de policy.
+  // allSettled: si una columna no existe en prod (ej. migration 0007
+  // pendiente), las otras 3 igual devuelven valor — antes Promise.all
+  // rejectaba todo y el modal mostraba "Todos 0" engañoso.
   const pid = String(productoId);
-  const [total, archived, downloaded, winners] = await Promise.all([
+  const results = await Promise.allSettled([
     supabase.from('marketing_creativos').select('id', { count: 'exact', head: true }).eq('producto_id', pid).eq('user_id', user.id),
     supabase.from('marketing_creativos').select('id', { count: 'exact', head: true }).eq('producto_id', pid).eq('user_id', user.id).eq('archivado', true),
     supabase.from('marketing_creativos').select('id', { count: 'exact', head: true }).eq('producto_id', pid).eq('user_id', user.id).eq('descargada', true),
     supabase.from('marketing_creativos').select('id', { count: 'exact', head: true }).eq('producto_id', pid).eq('user_id', user.id).eq('winner', true),
   ]);
-  const t = total.count || 0;
-  const a = archived.count || 0;
-  return { total: t, active: t - a, archived: a, downloaded: downloaded.count || 0, winners: winners.count || 0 };
+  const pick = (r) => r.status === 'fulfilled' ? (r.value?.count || 0) : 0;
+  const t = pick(results[0]);
+  const a = pick(results[1]);
+  const d = pick(results[2]);
+  const w = pick(results[3]);
+  if (results[3].status === 'rejected') {
+    console.warn('[galería cloud] count winners falló (¿migration 0007 aplicada?):', results[3].reason?.message || results[3].reason);
+  }
+  return { total: t, active: t - a, archived: a, downloaded: d, winners: w };
 }
 
 // Set de sourceAdId que ya fueron usados para generar (para marcar en Inspiración).
@@ -338,6 +347,15 @@ export async function patchReferencialesCloud(ids, patch) {
     .select('id');
   if (error) {
     console.warn('[galería cloud] patch error:', error.message);
+    // Errores de schema (columna inexistente) son los que rompen winner y
+    // tarda en notarse. Re-throw para que el caller pueda mostrar toast.
+    // Antes era silencioso → user clickeaba la copa, no pasaba nada, y no
+    // había forma de enterarse hasta abrir DevTools.
+    if (/column .* does not exist/i.test(error.message)) {
+      const err = new Error(`Falta aplicar una migration en Supabase: ${error.message}`);
+      err.code = 'schema_missing';
+      throw err;
+    }
     return 0;
   }
   return (data || []).length;

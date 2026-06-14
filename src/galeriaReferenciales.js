@@ -143,10 +143,34 @@ export async function getReferencialesByProducto(productoId, opts = {}) {
     });
   } catch {}
 
-  // Merge cloud + IDB con dedupe por id. Cloud gana.
+  // Merge cloud + IDB con dedupe por id. Cloud gana en general (source of
+  // truth), PERO los flags locales-only ganan sobre cloud si están en true.
+  // Sin esto: si la migration 0007 (columna `winner`) no se aplicó en prod,
+  // el cloud-patch en patchReferenciales falla silencioso, IDB sí persiste
+  // winner=true, pero el cloud reload pisaba con winner=false → la pestaña
+  // Winners quedaba vacía pese al click en la copa.
+  // Mismo razonamiento para descargada/archivado: si el cloud-patch falla,
+  // el flag IDB es el más fresco y debe ganar.
   const byId = new Map();
   for (const it of cloudItems) byId.set(it.id, it);
-  for (const it of idbItems) if (!byId.has(it.id)) byId.set(it.id, it);
+  for (const it of idbItems) {
+    const existing = byId.get(it.id);
+    if (!existing) {
+      byId.set(it.id, it);
+      continue;
+    }
+    // IDB tiene flags más frescos que cloud — mergear lado a lado.
+    byId.set(it.id, {
+      ...existing,
+      winner: existing.winner || it.winner,
+      winnerAt: existing.winnerAt || it.winnerAt,
+      winnerMetrics: existing.winnerMetrics || it.winnerMetrics,
+      descargada: existing.descargada || it.descargada,
+      descargadaAt: existing.descargadaAt || it.descargadaAt,
+      archivado: existing.archivado || it.archivado,
+      archivadoAt: existing.archivadoAt || it.archivadoAt,
+    });
+  }
   const merged = Array.from(byId.values());
   merged.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
   return merged;
@@ -237,6 +261,12 @@ export async function patchReferenciales(ids, patch) {
       updated = await patchReferencialesCloud(ids, patch);
     } catch (err) {
       console.warn('[galería] cloud patch falló:', err.message);
+      // Schema missing: el IDB patch de abajo igual persiste el cambio
+      // localmente, y el merge en getReferencialesByProducto respeta los
+      // flags=true de IDB sobre cloud=false. Loggear para debug.
+      if (err.code === 'schema_missing') {
+        console.error('[galería] Falta aplicar una migration:', err.message);
+      }
     }
   }
   // Patch IDB también — para que el cache local refleje los cambios.

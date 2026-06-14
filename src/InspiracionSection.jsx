@@ -2279,8 +2279,10 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     });
     try {
       const payload = { country: 'ALL', limit: 100 };
-      if (comp.fbPageUrl) {
-        payload.fbPageUrl = comp.fbPageUrl.startsWith('http') ? comp.fbPageUrl : `https://www.facebook.com/${comp.fbPageUrl}`;
+      // adLibraryUrl > fbPageUrl > landingUrl→resolve > keyword.
+      const directUrl = comp.adLibraryUrl || comp.fbPageUrl;
+      if (directUrl) {
+        payload.fbPageUrl = directUrl.startsWith('http') ? directUrl : `https://www.facebook.com/${directUrl}`;
       } else if (comp.landingUrl) {
         updateExecution(execId, { stage: 'Buscando la FB page del competidor…' });
         try {

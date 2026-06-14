@@ -1071,7 +1071,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
   // Wizard competitors
   const [showCompForm, setShowCompForm] = useState(false);
-  const [compDraft, setCompDraft] = useState({ nombre: '', landingUrl: '' });
+  const [compDraft, setCompDraft] = useState({ nombre: '', landingUrl: '', adLibraryUrl: '' });
 
   // Meta ad account picker
   const [metaConnected, setMetaConnected] = useState(null); // null = unknown, bool = checked
@@ -1400,6 +1400,21 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
   const handleAddCompetidor = async () => {
     const landingUrl = compDraft.landingUrl.trim();
+    const adLibraryUrl = compDraft.adLibraryUrl.trim();
+    // Validar adLibraryUrl si la pegó: debe ser facebook.com.
+    if (adLibraryUrl) {
+      try {
+        const u = new URL(adLibraryUrl);
+        const host = u.hostname.toLowerCase();
+        if (!(host === 'facebook.com' || host.endsWith('.facebook.com'))) {
+          addToast?.({ type: 'error', message: `La biblioteca de anuncios tiene que ser de facebook.com (mandaste ${host}).` });
+          return;
+        }
+      } catch {
+        addToast?.({ type: 'error', message: 'La URL de la biblioteca de anuncios no es válida.' });
+        return;
+      }
+    }
     // Nombre: si el user no puso uno, o puso algo poco descriptivo (vacío o
     // puramente numérico tipo "5"), lo derivamos de la URL de la landing.
     // Así la lista muestra "Femprobiotics" en vez de "5".
@@ -1427,6 +1442,10 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       id: nuevoId,
       nombre,
       landingUrl,
+      // adLibraryUrl: URL DIRECTA de Meta Ad Library (con filtros + sort)
+      // que el user pegó a mano. Tiene prioridad sobre fbPageUrl y
+      // searchKeyword al scrapear — si la pegó, sabe qué quiere ver.
+      adLibraryUrl: adLibraryUrl || '',
       fbPageUrl: '',
       notas: '',
       ads: [],
@@ -1434,7 +1453,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       createdAt: new Date().toISOString(),
     };
     setCompetidores(prev => [nuevo, ...prev]);
-    setCompDraft({ nombre: '', landingUrl: '' });
+    setCompDraft({ nombre: '', landingUrl: '', adLibraryUrl: '' });
     setShowCompForm(false);
     addToast?.({ type: 'success', message: `Competidor "${nombre}" sumado` });
 
@@ -1881,11 +1900,12 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         // el competidor en la biblioteca por primera vez. Refreshes
         // posteriores usan 100 (en InspiracionSection).
         const payload = { country: 'ALL', limit: 500 };
-        // Fallback auto-resolver: si no tenemos fbPageUrl pero sí landing,
-        // intentamos detectar la FB page antes de caer a keyword. Scrapear
-        // por Page es mucho más estable que por keyword (keyword a veces
-        // aborta en Apify). Si no la encontramos, seguimos con keyword.
-        let resolvedFbPage = c.fbPageUrl;
+        // PRIORIDAD: adLibraryUrl (URL armada a mano por el user con filtros
+        // + sort específicos) > fbPageUrl resuelto > searchKeyword. La URL
+        // a mano es la más precisa porque garantiza scrapear los ads
+        // reales de la marca (no random que pueda resolver una FB page
+        // genérica como Shopify).
+        let resolvedFbPage = c.adLibraryUrl || c.fbPageUrl;
         if (!resolvedFbPage && c.landingUrl) {
           updateStep(stepId, { detail: 'Detectando Facebook Page de la landing…' });
           try {
@@ -3493,15 +3513,31 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
         {/* Form de agregar */}
         {showCompForm && (
-          <div className="bg-gray-50 dark:bg-gray-900/40 border border-brand-300 dark:border-brand-700 rounded-xl p-3 mb-3 flex flex-col sm:flex-row gap-2 items-stretch">
-            <input type="text" value={compDraft.nombre} onChange={e => setCompDraft({ ...compDraft, nombre: e.target.value })}
-              placeholder="Nombre de la marca (opcional)"
-              className="flex-1 px-2.5 py-1.5 text-sm bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
-            <input type="url" value={compDraft.landingUrl} onChange={e => setCompDraft({ ...compDraft, landingUrl: e.target.value })}
-              placeholder="https://landing-del-competidor.com (recomendado)"
-              className="flex-1 px-2.5 py-1.5 text-sm bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
-            <div className="flex gap-1">
-              <button onClick={() => { setShowCompForm(false); setCompDraft({ nombre: '', landingUrl: '' }); }}
+          <div className="bg-gray-50 dark:bg-gray-900/40 border border-brand-300 dark:border-brand-700 rounded-xl p-3 mb-3 flex flex-col gap-2">
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input type="text" value={compDraft.nombre} onChange={e => setCompDraft({ ...compDraft, nombre: e.target.value })}
+                placeholder="Nombre de la marca (opcional)"
+                className="flex-1 px-2.5 py-1.5 text-sm bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
+              <input type="url" value={compDraft.landingUrl} onChange={e => setCompDraft({ ...compDraft, landingUrl: e.target.value })}
+                placeholder="https://landing-del-competidor.com (recomendado)"
+                className="flex-1 px-2.5 py-1.5 text-sm bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
+            </div>
+            {/* Biblioteca de anuncios DIRECTA — Meta Ad Library URL con
+                filtros + sort que el user armó a mano. Es la forma más
+                precisa de scrapear: garantiza que veamos los ads que
+                realmente pertenecen a la marca (no los random que resuelva
+                la FB page). Es opcional pero recomendado para marcas
+                grandes con muchos ads. */}
+            <div className="flex flex-col gap-1">
+              <input type="url" value={compDraft.adLibraryUrl} onChange={e => setCompDraft({ ...compDraft, adLibraryUrl: e.target.value })}
+                placeholder="https://www.facebook.com/ads/library/?... (opcional, URL armada a mano)"
+                className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
+              <p className="text-[10px] text-gray-500 dark:text-gray-400 italic px-1">
+                Si pegás la URL exacta de la biblioteca de anuncios (con filtros, sort por impressions, etc), la usamos directo en vez de adivinar la FB page. Recomendado para marcas con muchos ads.
+              </p>
+            </div>
+            <div className="flex gap-1 justify-end">
+              <button onClick={() => { setShowCompForm(false); setCompDraft({ nombre: '', landingUrl: '', adLibraryUrl: '' }); }}
                 className="px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 transition">
                 Cancelar
               </button>

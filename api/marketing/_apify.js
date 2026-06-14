@@ -142,25 +142,41 @@ export async function runActorAsync(actorId, input, token, opts = {}) {
   let lastReadyItems = 0;
   while (Date.now() - startedAt < maxWaitSec * 1000) {
     await new Promise(r => setTimeout(r, pollIntervalSec * 1000));
+    // Re-chequear el deadline DESPUÉS del sleep — sino podemos hacer un fetch
+    // de status cuando ya nos pasamos del budget. Con AbortController abajo
+    // tampoco esperamos más de pollIntervalSec por status response.
+    if (Date.now() - startedAt >= maxWaitSec * 1000) break;
+    const statusAc = new AbortController();
+    const statusTimer = setTimeout(() => statusAc.abort(), Math.min(pollIntervalSec * 1000, 10000));
     let statusResp;
     try {
-      statusResp = await fetch(`${APIFY_API_BASE}/actor-runs/${runId}?token=${token}`);
-    } catch { continue; }
+      statusResp = await fetch(`${APIFY_API_BASE}/actor-runs/${runId}?token=${token}`, { signal: statusAc.signal });
+    } catch { clearTimeout(statusTimer); continue; }
+    clearTimeout(statusTimer);
     if (!statusResp.ok) continue;
     const statusData = await statusResp.json();
     status = statusData?.data?.status || 'RUNNING';
     const stats = statusData?.data?.stats || {};
-    const ready = stats.outputBodyBytes != null ? stats.outputBodyBytes : lastReadyItems;
+    // itemCount es el campo real de "items listos" en Apify; outputBodyBytes
+    // era una proxy en bytes (engañosa para mostrar progress al user).
+    const ready = stats.outputDatasetItemCount ?? stats.itemCount ?? lastReadyItems;
     if (ready !== lastReadyItems) {
       lastReadyItems = ready;
-      onProgress?.({ status, bytes: ready });
+      onProgress?.({ status, items: ready });
     }
     if (['SUCCEEDED', 'FAILED', 'ABORTED', 'TIMED-OUT', 'TIMED_OUT'].includes(status)) break;
   }
 
   // 3. Bajar los items del dataset (incluso si el run no terminó, agarramos
-  //    lo parcial — es mejor que nada).
-  const itemsResp = await fetch(`${APIFY_API_BASE}/datasets/${datasetId}/items?token=${token}&format=json`);
+  //    lo parcial — es mejor que nada). Con AbortController + timeout.
+  const itemsAc = new AbortController();
+  const itemsTimer = setTimeout(() => itemsAc.abort(), 15000);
+  let itemsResp;
+  try {
+    itemsResp = await fetch(`${APIFY_API_BASE}/datasets/${datasetId}/items?token=${token}&format=json`, { signal: itemsAc.signal });
+  } finally {
+    clearTimeout(itemsTimer);
+  }
   if (!itemsResp.ok) {
     const text = await itemsResp.text();
     throw new Error(`[apify-async] fetch dataset falló (${itemsResp.status}): ${text.slice(0, 200)}`);
@@ -168,8 +184,11 @@ export async function runActorAsync(actorId, input, token, opts = {}) {
   const items = await itemsResp.json();
 
   // 4. Si el run no terminó OK y no hay items, propagamos el error.
+  //    Usamos keyword 'timeout' explícito en el mensaje para que el retry
+  //    del caller (regex /ABORTED|run-failed|timeout|memory|400|429|503/i)
+  //    lo detecte y aplique fallback a sync con limit reducido.
   if (status !== 'SUCCEEDED' && (!Array.isArray(items) || items.length === 0)) {
-    throw new Error(`[apify-async] run ${status} sin items recuperables (${Math.round((Date.now() - startedAt) / 1000)}s)`);
+    throw new Error(`[apify-async] run ${status} timeout sin items recuperables (${Math.round((Date.now() - startedAt) / 1000)}s)`);
   }
 
   return { items, status, runId, partial: status !== 'SUCCEEDED', durationSec: Math.round((Date.now() - startedAt) / 1000) };

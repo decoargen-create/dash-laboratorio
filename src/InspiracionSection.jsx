@@ -1022,7 +1022,7 @@ function BrandAdsGrid({ ads, brandNombre, brandId = null, isCompetidor = false, 
 // strip horizontal. Cada item es un AdThumb con sus acciones normales
 // (Crear creativo, + ideas en Bandeja, multi-select).
 
-function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect, onClearProgress }) {
+function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect, onSaveToBoard, onClearProgress }) {
   const [expanded, setExpanded] = useState(true);
   // Vista del Top 10 — persistida en localStorage. 3 opciones:
   //   grid: strip horizontal de 10 thumbs (default, denso)
@@ -1088,6 +1088,7 @@ function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, se
             <TopGridView items={items} adaptingAdIds={adaptingAdIds} creandoAdIds={creandoAdIds}
               seleccionados={seleccionados} selectedOrder={selectedOrder} usedAdIds={usedAdIds} progressById={progressById}
               onAdapt={onAdapt} onCrearReferencial={onCrearReferencial} onToggleSelect={onToggleSelect}
+              onSaveToBoard={onSaveToBoard}
               onClearProgress={onClearProgress} />
           )}
           {viewMode === 'list' && (
@@ -1108,10 +1109,10 @@ function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, se
 
 // VISTA 1 — Grid: el strip horizontal original con 10 thumbs grandes.
 
-function TopGridView({ items, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect, onClearProgress }) {
+function TopGridView({ items, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect, onSaveToBoard, onClearProgress }) {
   return (
     <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-10 gap-2">
-      {items.map(({ ad, brandNombre, isCompetidor }, idx) => (
+      {items.map(({ ad, brandNombre, brandId, isCompetidor }, idx) => (
         <div key={ad.id} className="relative">
           <div className={`absolute -top-1 -left-1 z-20 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shadow-md ${
             idx === 0 ? 'bg-gradient-to-br from-amber-400 to-amber-600'
@@ -1119,13 +1120,14 @@ function TopGridView({ items, adaptingAdIds, creandoAdIds, seleccionados, select
             : 'bg-gradient-to-br from-gray-600 to-gray-700'
           }`}>{idx + 1}</div>
           <AdThumb
-            ad={ad} brandNombre={brandNombre} fresh={ad.isFresh !== false}
+            ad={ad} brandNombre={brandNombre} brandId={brandId} isCompetidor={isCompetidor} fresh={ad.isFresh !== false}
             adapting={adaptingAdIds?.has(ad.id)} creando={creandoAdIds?.has(ad.id)}
             selected={seleccionados?.has(ad.id)} selectionIndex={selectedOrder?.get(ad.id) || null} used={usedAdIds?.has(ad.id)}
             progress={progressById?.[ad.id]}
             onAdapt={onAdapt ? () => onAdapt(brandNombre, ad) : null}
             onCrearReferencial={onCrearReferencial ? () => onCrearReferencial(brandNombre, ad) : null}
             onToggleSelect={onToggleSelect ? () => onToggleSelect(ad.id) : null}
+            onSaveToBoard={onSaveToBoard}
             onClearProgress={onClearProgress}
           />
           <div className="mt-1 px-0.5">
@@ -3199,7 +3201,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
             // Solo ads con imagen + score conocido (ya pasaron por scoreAd).
             if ((ad.imageUrls?.length || 0) === 0) return;
             if (typeof ad.score !== 'number') return;
-            allAdsForRanking.push({ ad, brandNombre: b.nombre, isCompetidor: b.isCompetidor });
+            allAdsForRanking.push({ ad, brandNombre: b.nombre, brandId: b.id, isCompetidor: b.isCompetidor });
           });
         });
         const topEscalados = allAdsForRanking
@@ -3221,6 +3223,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                 onAdapt={(brandNombre, ad) => handleAdapt(brandNombre, ad)}
                 onCrearReferencial={(brandNombre, ad) => crearReferencialDeAd(brandNombre, ad)}
                 onToggleSelect={(adId) => toggleSeleccion(adId)}
+                onSaveToBoard={(ad, brandInfo) => setBoardPickerData({ ad, brand: brandInfo, productoId: producto.id })}
                 onClearProgress={(adId) => setProgressById(prev => {
                   const next = { ...prev }; delete next[adId]; return next;
                 })}

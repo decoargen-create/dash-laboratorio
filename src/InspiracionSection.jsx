@@ -787,12 +787,14 @@ function AdThumb({ ad, brandNombre, brandId = null, isCompetidor = false, fresh 
         </div>
       )}
 
-      <div className="absolute inset-0 bg-black/0 group-hover/thumb:bg-black/60 transition flex flex-col items-stretch justify-end gap-1 p-1.5">
+      {/* En mobile (max-md) los devices sin hover no pueden activar el overlay
+          → forzamos opacity 100 y un tinte oscuro para mantener contraste. */}
+      <div className="absolute inset-0 bg-black/0 group-hover/thumb:bg-black/60 max-md:bg-gradient-to-t max-md:from-black/70 max-md:to-transparent transition flex flex-col items-stretch justify-end gap-1 p-1.5">
         {onCrearReferencial && (
           <button
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); onCrearReferencial(); }}
             disabled={creando}
-            className="opacity-0 group-hover/thumb:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded disabled:opacity-70"
+            className="opacity-0 group-hover/thumb:opacity-100 max-md:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded disabled:opacity-70"
             title="Genera 2 variaciones con tu producto real"
           >
             {creando
@@ -805,7 +807,7 @@ function AdThumb({ ad, brandNombre, brandId = null, isCompetidor = false, fresh 
           <button
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); onAdapt(); }}
             disabled={adapting}
-            className="opacity-0 group-hover/thumb:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-amber-500/90 hover:bg-amber-600 rounded disabled:opacity-70"
+            className="opacity-0 group-hover/thumb:opacity-100 max-md:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-amber-500/90 hover:bg-amber-600 rounded disabled:opacity-70"
             title="Genera ideas (texto) en la Bandeja"
           >
             {adapting
@@ -816,7 +818,7 @@ function AdThumb({ ad, brandNombre, brandId = null, isCompetidor = false, fresh 
         )}
         <a
           href={fbUrl} target="_blank" rel="noreferrer"
-          className="opacity-0 group-hover/thumb:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-black/70 hover:bg-black/90 rounded"
+          className="opacity-0 group-hover/thumb:opacity-100 max-md:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-black/70 hover:bg-black/90 rounded"
         >
           <ExternalLink size={10} /> Ver en FB
         </a>
@@ -825,7 +827,7 @@ function AdThumb({ ad, brandNombre, brandId = null, isCompetidor = false, fresh 
         {onSaveToBoard && isCompetidor && brandId && (
           <button
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); onSaveToBoard(ad, { id: brandId, nombre: brandNombre }); }}
-            className="opacity-0 group-hover/thumb:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-amber-600/90 hover:bg-amber-700 rounded"
+            className="opacity-0 group-hover/thumb:opacity-100 max-md:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-amber-600/90 hover:bg-amber-700 rounded"
             title="Guardar en una colección cross-producto"
           >
             <Bookmark size={10} /> Guardar
@@ -838,7 +840,7 @@ function AdThumb({ ad, brandNombre, brandId = null, isCompetidor = false, fresh 
             e.preventDefault(); e.stopPropagation();
             window.dispatchEvent(new CustomEvent('viora:toggle-used-ad', { detail: { adId: ad.id } }));
           }}
-          className={`opacity-0 group-hover/thumb:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white rounded ${
+          className={`opacity-0 group-hover/thumb:opacity-100 max-md:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white rounded ${
             used ? 'bg-gray-600 hover:bg-gray-700' : 'bg-emerald-600/90 hover:bg-emerald-700'
           }`}
           title={used ? 'Quitar marca de usado' : 'Marcar como usado (queda en gris)'}

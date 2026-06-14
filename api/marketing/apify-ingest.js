@@ -153,7 +153,8 @@ export default async function handler(req, res) {
       try {
         items = await runActorSync(actorId, { ...input, resultsLimit: reducedLimit, maxItems: reducedLimit, maxResults: reducedLimit }, token, { timeout: budget });
         usedLimit = reducedLimit;
-        attemptNote = `Apify abortó con limit ${input.resultsLimit}. Reintentado con limit ${reducedLimit} y funcionó.`;
+        // Append (no overwrite) — sin esto perdíamos el limitNote del cap 1500.
+        attemptNote = (attemptNote ? attemptNote + ' · ' : '') + `Apify abortó con limit ${input.resultsLimit}. Reintentado con limit ${reducedLimit} y funcionó.`;
       } catch (err2) {
         const sugerencia = fbPageUrl
           ? 'Probá si la URL de Facebook page es correcta (debería ser https://www.facebook.com/<handle>).'

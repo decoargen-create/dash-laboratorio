@@ -1850,15 +1850,22 @@ function AppShell({ onExit }) {
             k.startsWith('adslab-costs-log') ||
             k.startsWith('adslab-activity-log') ||
             k.startsWith('adslab-debug-log') ||
-            k.startsWith('adslab-bulk-progress')) {
+            k.startsWith('adslab-bulk-progress') ||
+            k.startsWith('adslab-state-v') ||
+            k.startsWith('adslab-bocetos-') ||
+            k.startsWith('adslab-stack-costs-') ||
+            k.startsWith('adslab-calc-escenarios-') ||
+            k === 'adslab-last-user') {
           keysToWipe.push(k);
         }
       }
       for (const k of keysToWipe) localStorage.removeItem(k);
     } catch {}
-    // Borramos los IDB stores con data del user.
+    // Borramos los IDB stores con data del user — incluyendo lab-viora (state
+    // global de sales/orders/clients post-migración a IDB). Sin este, user B
+    // veía la data de A entera al loguear en la misma PC.
     if (typeof indexedDB !== 'undefined') {
-      ['adslab-competidor-ads-v1', 'lab-viora-ads-images', 'lab-viora-referenciales', 'adslab-producto-imagenes']
+      ['adslab-competidor-ads-v1', 'lab-viora-ads-images', 'lab-viora-referenciales', 'adslab-producto-imagenes', 'lab-viora']
         .forEach(name => { try { indexedDB.deleteDatabase(name); } catch {} });
     }
     localStorage.removeItem('adslab-session');

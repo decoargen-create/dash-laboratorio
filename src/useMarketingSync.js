@@ -295,6 +295,20 @@ export function useMarketingSync({ addToast } = {}) {
     };
 
     const doPush = async (key) => {
+      // CROSS-TAB DATA-LOSS GUARD: si tab A hace logout, los removeItem
+      // disparan 'storage' event en tab B (otro tab del mismo browser, sesión
+      // aún válida). Tab B intentaría pushear el localStorage vacío al cloud
+      // → BORRA EL CLOUD ENTERO. Sin esto, un logout en una tab podía
+      // limpiar la cuenta entera. Verificamos sesión activa antes de pushear.
+      try {
+        if (supabase) {
+          const { data } = await supabase.auth.getSession();
+          if (!data?.session) {
+            console.warn(`[sync] push de ${key} dropeado — no hay sesión activa`);
+            return;
+          }
+        }
+      } catch {}
       // Guard: si el primer pull aún no terminó, el localStorage puede no
       // reflejar lo que hay en el cloud. Pushear ahora puede borrar datos
       // (race condition que afectó al user el 2026-06-08).

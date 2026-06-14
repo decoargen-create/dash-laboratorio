@@ -265,7 +265,12 @@ export async function getProductoImagen(id, fallbackProducto = null) {
         req.onerror = () => resolve(null);
       });
       const localTs = localRec?.updatedAt ? Date.parse(localRec.updatedAt) : 0;
-      if (cloudTs > localTs + 1000) {
+      // Tolerancia 5s en vez de 1s: el upload background tras setProductoImagen
+      // setea fotoUpdatedAt que típicamente queda 2-4s después del write local
+      // → 1s de tolerancia disparaba re-download innecesario de la imagen
+      // recién subida. 5s da margen para race natural del upload sin perder
+      // la detección de actualizaciones reales cross-PC.
+      if (cloudTs > localTs + 5000) {
         // Cloud más nuevo — invalidar cache local antes de devolver.
         memCache.delete(key);
         try {

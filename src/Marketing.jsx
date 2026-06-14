@@ -278,7 +278,20 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-      const updated = competidores.map(c => c.id === comp.id ? { ...c, ads: data.ads || [], lastCheck: new Date().toISOString() } : c);
+      // STORAGE SPLIT: ads van a IDB (sin cap), metadata a localStorage.
+      // Antes guardábamos ads inline en producto.competidores[i].ads, que
+      // reventaba quota localStorage con muchos ads (regression del refactor).
+      try {
+        const { setCompAds } = await import('./competidorAdsIDB.js');
+        await setCompAds(p.id, comp.id, {
+          ads: data.ads || [],
+          total: data.total || (data.ads?.length || 0),
+          lastAdsCheck: new Date().toISOString(),
+        });
+      } catch (err) {
+        console.warn('[Marketing.checkCompetitorAds] setCompAds falló:', err.message);
+      }
+      const updated = competidores.map(c => c.id === comp.id ? { ...c, adsTotal: data.total || (data.ads?.length || 0), lastCheck: new Date().toISOString() } : c);
       onUpdateProduct({
         competidores: updated,
         historial: [...historial, { tipo: 'ads-check', at: new Date().toISOString(), meta: `${comp.nombre}: ${data.total} ads` }],
@@ -881,11 +894,19 @@ export default function MarketingSection({ addToast, bgAnalysis, onStart, onCanc
             });
             if (!resp.ok) continue; // silencioso: si falla, no molestamos al user
             const data = await resp.json();
-            // Actualizo el producto en el state, preservando todo lo demás.
+            // Mismo storage split — ads a IDB, solo metadata inline.
+            try {
+              const { setCompAds } = await import('./competidorAdsIDB.js');
+              await setCompAds(p.id, c.id, {
+                ads: data.ads || [],
+                total: data.total || (data.ads?.length || 0),
+                lastAdsCheck: new Date().toISOString(),
+              });
+            } catch {}
             setProductos(prev => prev.map(prod => {
               if (prod.id !== p.id) return prod;
               const updatedComps = (prod.competidores || []).map(cc =>
-                cc.id === c.id ? { ...cc, ads: data.ads || [], lastCheck: new Date().toISOString() } : cc
+                cc.id === c.id ? { ...cc, adsTotal: data.total || (data.ads?.length || 0), lastCheck: new Date().toISOString() } : cc
               );
               return { ...prod, competidores: updatedComps, updatedAt: new Date().toISOString() };
             }));

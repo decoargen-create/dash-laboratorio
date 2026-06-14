@@ -2100,7 +2100,9 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
                   // (estado='usada'), no la re-disparamos al endpoint. Cada
                   // call cuesta $0.18 en gpt-image-2 quality high. Antes el
                   // bulk re-procesaba todo lo seleccionado sin filtro.
-                  if (idea.estado === 'usada' || idea.estado === 'archivada') {
+                  // en_uso = está siendo generada por OTRA tanda concurrente.
+                  // Re-disparar la mismas idea en paralelo gasta tokens 2x.
+                  if (idea.estado === 'usada' || idea.estado === 'archivada' || idea.estado === 'en_uso') {
                     skipUsadas++;
                     continue;
                   }

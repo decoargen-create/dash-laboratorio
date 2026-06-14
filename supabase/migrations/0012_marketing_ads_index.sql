@@ -83,8 +83,20 @@ create trigger marketing_ads_search_vector_trigger
 
 -- RLS — cada user solo ve sus propios ads.
 alter table public.marketing_ads enable row level security;
+-- drop+create para que un re-run no falle con "policy already exists".
+drop policy if exists "marketing_ads_self_all" on public.marketing_ads;
 create policy "marketing_ads_self_all" on public.marketing_ads
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 -- Realtime para que el cliente reciba updates cuando el cron escribe.
-alter publication supabase_realtime add table public.marketing_ads;
+-- Guard: `alter publication ... add table` tira error si la tabla ya está
+-- adentro. El IF en plpgsql lo verifica primero.
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'marketing_ads'
+  ) then
+    alter publication supabase_realtime add table public.marketing_ads;
+  end if;
+end $$;

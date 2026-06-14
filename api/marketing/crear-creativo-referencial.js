@@ -143,6 +143,115 @@ function singularFormato(formato) {
   return map[formato.toLowerCase()] || formato;
 }
 
+// Formatos "no granular" — el producto se muestra como packaging cerrado,
+// no como contenido derramado/visible. Sin esto gpt-image-2 ignora el
+// "PHYSICAL FORM: crema" cuando el winner original tiene un visual fuerte
+// tipo "contenedor abierto con contenido a la vista" (ej: cápsulas en
+// mortero, polvo en cuchara) y rellena el jar/bottle del user con cápsulas
+// por default. La regla más fuerte para estos formatos es directamente
+// "no abrir el envase, no mostrar el contenido".
+const NON_GRANULAR_FORMATS = new Set([
+  'crema', 'cream', 'loción', 'locion', 'lotion', 'emulsión', 'emulsion',
+  'sérum', 'serum', 'aceite', 'oil',
+  'bálsamo', 'balsamo', 'balm',
+  'spray', 'atomizador',
+  'mascarilla', 'máscara', 'mascara', 'mask',
+  'stick', 'barra', 'bar',
+  'gel', 'shampoo', 'champú', 'champu',
+  'desodorante', 'deodorant', 'perfume', 'fragrance', 'agua', 'mist', 'tonic', 'tónico',
+]);
+
+function isNonGranular(formato) {
+  if (!formato) return false;
+  return NON_GRANULAR_FORMATS.has(String(formato).toLowerCase().trim());
+}
+
+// Devuelve la "categoría de uso" del producto — el contexto en el que vive
+// el producto naturalmente. gpt-image-2 lo usa para ADAPTAR PROPS y FONDO
+// del winner cuando son category-specific del producto original (ej:
+// warehouse boxes para supplement → vanity para skincare). Mantiene la
+// composición/paleta/mood del winner, pero traslada la escena al hábitat
+// del producto NUEVO. Sin esto el modelo deja un jar de crema en un
+// fondo de mortero o cápsulas o cepillos drenaje.
+function inferProductCategory(formato) {
+  if (!formato) return null;
+  const f = String(formato).toLowerCase().trim();
+  // Skincare/cosmética: vive en vanity, baño, manos de mujer, gestos de aplicación.
+  if (['crema', 'cream', 'loción', 'locion', 'lotion', 'emulsión', 'emulsion',
+       'sérum', 'serum', 'aceite', 'oil', 'bálsamo', 'balsamo', 'balm',
+       'mascarilla', 'máscara', 'mascara', 'mask', 'gel'].includes(f)) {
+    return {
+      label: 'skincare / cosmética',
+      context: 'bathroom vanity, dressing table with mirror, marble countertop, soft natural light from a window, hands applying product to face or arms, terry cloth towels, eucalyptus branch, ceramic bowls — clean editorial cosmetic moodboard',
+      avoidContext: 'warehouse boxes, gym equipment, kitchen prep, pills/capsules, mortar and pestle, food, supplement-shop counters',
+    };
+  }
+  if (['shampoo', 'champú', 'champu'].includes(f)) {
+    return {
+      label: 'haircare',
+      context: 'shower tiles, wet hair, bathroom shelf, water droplets, terry towel turban, mirror reflection',
+      avoidContext: 'kitchen counter, pills, supplement scenes',
+    };
+  }
+  if (['perfume', 'fragrance', 'desodorante', 'deodorant'].includes(f)) {
+    return {
+      label: 'fragancia / personal care',
+      context: 'dressing table with mirror, jewelry pieces, silk fabric, soft side light, makeup brushes nearby',
+      avoidContext: 'kitchen, pills, supplement scenes',
+    };
+  }
+  if (['spray', 'mist', 'atomizador'].includes(f)) {
+    return {
+      label: 'spray cosmético',
+      context: 'vanity, hand holding bottle, mist arc visible, soft light',
+      avoidContext: 'industrial/cleaning context unless product is cleaning',
+    };
+  }
+  if (['cápsulas', 'capsulas', 'capsules', 'softgels', 'pastillas', 'tabletas', 'tablets', 'comprimidos'].includes(f)) {
+    return {
+      label: 'suplemento (cápsulas)',
+      context: 'kitchen counter, breakfast scene, water glass, morning light, hand holding capsule',
+      avoidContext: 'bathroom vanity (skincare), industrial settings',
+    };
+  }
+  if (['gomitas', 'gummies', 'gummys'].includes(f)) {
+    return {
+      label: 'suplemento (gomitas)',
+      context: 'kitchen counter, breakfast scene, gummies spilled artfully, hand picking one, morning light',
+      avoidContext: 'bathroom vanity, capsule/pill imagery',
+    };
+  }
+  if (['polvo', 'powder'].includes(f)) {
+    return {
+      label: 'suplemento en polvo',
+      context: 'kitchen counter, scoop and shaker bottle, smoothie glass, fruit slices, scoop with powder',
+      avoidContext: 'bathroom, pills/capsules',
+    };
+  }
+  if (['shot', 'liquid', 'líquido', 'gotas', 'drops', 'tónico', 'tonic'].includes(f)) {
+    return {
+      label: 'líquido / shot',
+      context: 'kitchen or vanity (depending on use), glass with liquid, dropper, morning or evening light',
+      avoidContext: 'pills/capsules',
+    };
+  }
+  if (['parches', 'patches', 'stick', 'barra', 'bar'].includes(f)) {
+    return {
+      label: 'aplicación tópica directa',
+      context: 'close-up of arm or skin with product applied, hand peeling/sliding, neutral background',
+      avoidContext: 'pills/capsules, supplement scenes',
+    };
+  }
+  if (['sachet', 'sticks individuales'].includes(f)) {
+    return {
+      label: 'sachet / single-serve',
+      context: 'kitchen counter or hand holding sachet, water glass, mid-morning light',
+      avoidContext: 'jar/bottle imagery',
+    };
+  }
+  return null;
+}
+
 // Dedup de líneas de ofertas: si la misma frase (case-insensitive) aparece
 // múltiple veces, mantenemos solo la primera. También dedup de tokens
 // repetidos en la misma línea (ej: "ENVÍO GRATIS · ENVÍO GRATIS" → "ENVÍO GRATIS").
@@ -424,14 +533,23 @@ async function extractSkeletonHaiku({ apiKey, refImgBuf, refMime, producto }) {
   // sobre offerBrief — es el campo focalizado que el user llena en Setup
   // con su precio/promo real (ej: "USD 49 + envío gratis").
   const ofertasReales = dedupOfertas((producto?.ofertasReales || producto?.offerBrief || producto?.docs?.offerBrief || '').toString().trim());
+  // Avatar + research mergeados para que Vision tenga TODO el contexto del
+  // target al adaptar textos: tipo de producto, pain points, valores,
+  // objeciones, demografía. Antes solo iba research (1500 chars) y los
+  // content_adapted salían genéricos.
+  const avatarTextV = (producto?.avatar || producto?.docs?.avatar || '').toString().trim();
+  const fullContextV = [
+    avatarTextV ? `### AVATAR\n${avatarTextV}` : '',
+    producto?.research ? `### RESEARCH\n${String(producto.research)}` : '',
+  ].filter(Boolean).join('\n\n');
   const productoCtx = [
     `Nombre: ${producto?.nombre || 'N/A'}`,
     productoForm ? `**FORMATO FÍSICO: ${productoForm.toUpperCase()}** (este producto viene en ${productoForm} — NO es otro formato).` : '',
-    producto?.descripcion ? `Descripción: ${producto.descripcion.slice(0, 300)}` : '',
+    producto?.descripcion ? `Descripción: ${producto.descripcion.slice(0, 500)}` : '',
     ofertasReales
       ? `**OFERTAS / PRECIOS / CLAIMS REALES DEL USUARIO** (estos son los ÚNICOS que podés mencionar — si el ad ref menciona algo distinto, REEMPLAZALO por esto, NO lo dejes literal):\n${ofertasReales.slice(0, 1500)}`
       : '**SIN OFERTAS NI CLAIMS DECLARADOS** — NO inventes descuentos, % off, "comprá 3 y ahorrá", FDA, ANMAT, ni claims médicos.',
-    producto?.research ? `Audiencia y pain points:\n${String(producto.research).slice(0, 1500)}` : '',
+    fullContextV ? `**AVATAR + RESEARCH** (USAR para entender al target, sus pain points, objeciones, valores — y reescribir los textos para que LE HABLEN específicamente):\n${fullContextV.slice(0, 3000)}` : '',
   ].filter(Boolean).join('\n');
 
   const system = `Sos analista visual + copywriter de DTC argentino. Tu trabajo es leer un ad ganador y devolver:
@@ -638,9 +756,45 @@ function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentCol
   if (nombre) parts.push(`  • Product name: ${nombre}`);
   if (productoForm) {
     parts.push(`  • **PHYSICAL FORM**: ${productoForm} (NOT capsules/pills/another format). If reference shows the product contents, show ${productoForm}.`);
+    if (isNonGranular(productoForm)) {
+      // Sin esta sección, gpt-image-2 copia el "contenedor abierto" del
+      // winner y lo rellena con cápsulas default cuando el target es
+      // crema/loción/sérum. Es lo que pasó en producción con un winner
+      // tipo cepillo-en-bowl → variación generada con cápsulas en jar.
+      parts.push(`  • **CLOSED PACKAGING ONLY**: This product is ${productoForm} — NEVER show its contents spilled, displayed, or visible outside the package. Render the jar/bottle/tube CLOSED with its cap/lid on. Even if IMAGE 1 (the reference) shows an OPEN container with content visible (capsules in a bowl, powder in a glass, pills on a hand, etc.), you MUST show ONLY the CLOSED PACKAGE from IMAGE 2 in our generation. Do NOT invent capsules, pills, granules, or any "content" inside or beside the package. The whole point is that this is a finished cosmetic/skincare product sold as a sealed unit.`);
+    }
+    const category = inferProductCategory(productoForm);
+    if (category) {
+      // ADAPT SCENE: si el winner es de otra categoría (ej: suplemento en
+      // warehouse + cápsulas) y el target es skincare, los props de IMAGE 1
+      // (cajas de warehouse, mortero, cápsulas, etc.) no tienen sentido
+      // alrededor de una crema. Le decimos al modelo: copiá composición/
+      // paleta/mood/text overlays del winner, pero TRASLADÁ la escena al
+      // hábitat natural del producto nuevo.
+      parts.push(`  • **PRODUCT CATEGORY**: ${category.label}. Natural setting for this product: ${category.context}.`);
+      parts.push(`  • **SCENE ADAPTATION**: Keep the COMPOSITION (camera angle, framing, product placement, text overlay positions, palette, lighting mood) of IMAGE 1, but TRANSLATE the BACKGROUND and PROPS to match the natural habitat of the new product. AVOID props/settings that belong to other categories: ${category.avoidContext}. Example: if IMAGE 1 was shot in a warehouse with cardboard boxes (typical of supplements) but our product is ${productoForm} (${category.label}), the scene should move to ${category.context} — same composition, same overlay style, same palette, different habitat.`);
+    }
   }
-  if (descripcion) parts.push(`  • Description: ${descripcion.slice(0, 400)}`);
-  if (research) parts.push(`  • Audience and pain points: ${research.slice(0, 1500)}`);
+  if (descripcion) parts.push(`  • Description: ${descripcion.slice(0, 600)}`);
+  // Merge avatar + research. Pueden venir separados (docs.avatar +
+  // docs.research) o el research ya tener el avatar embebido. Concatenamos
+  // priorizando avatar primero (más estructurado) si vino separado.
+  const avatarText = (producto?.avatar || producto?.docs?.avatar || '').toString().trim();
+  const fullContext = [
+    avatarText ? `### AVATAR (estructurado)\n${avatarText}` : '',
+    research ? `### RESEARCH DOC\n${research}` : '',
+  ].filter(Boolean).join('\n\n');
+  if (fullContext) {
+    // El context (avatar + research) contiene: tipo de producto, pain points,
+    // valores, objeciones, demográfico, lifestyle. El modelo debe USARLO para
+    // elegir props/escena/mood específicos — no defaultear a "generic
+    // skincare" o "generic supplement". Subimos a 3500 chars (era 1500).
+    parts.push('');
+    parts.push(`**AVATAR & RESEARCH (USE this to pick SPECIFIC props, scene details, mood, body language — not generic templates)**:`);
+    parts.push(fullContext.slice(0, 3500));
+    parts.push('');
+    parts.push(`  • **USE THE AVATAR + RESEARCH ABOVE TO CHOOSE PROPS DELIBERATELY**: don't render a "generic skincare scene" — render a scene that speaks to THIS specific avatar. E.g., avatar "mujer 45+, piel madura, problemas hormonales, valora natural y argentino" → vanity con un mate, libro, planta, luz cálida, manos NO jóvenes, NO modelos Gen Z, NO empaque hiper-minimalista. Avatar pain "no tengo tiempo, soy mamá" → escena en la cocina haciendo algo, NO spa. Address an OBJECTION visually: if avatar objects "no me alcanza la plata" → make scene feel achievable (kitchen vanity, not luxury bathroom). The props are the visual proof that the ad SEES the avatar.`);
+  }
   // Ofertas reales del user — para que gpt-image-2 NO copie precios/promos
   // del ad ref cuando hay overlays de texto con números. Si el plan ya
   // adaptó los badges_adapted/ctaElements_adapted con esto, los text overlays
@@ -759,9 +913,32 @@ function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio
     const singular = singularFormato(productoForm);
     parts.push(`  - **PHYSICAL FORM**: ${productoForm} (NOT capsules, NOT pills, NOT another format). If the reference ad shows the product contents (a single capsule on a hand, powder in a glass, etc.), YOU MUST show ${productoForm} instead. Any spilled/displayed product detail must visually be ${productoForm}.`);
     parts.push(`  - **TEXT OVERLAY WORDING**: If any overlay says "1 cápsula", "1 pastilla", "una pill", etc., REPLACE it with "1 ${singular}" (the correct singular form for ${productoForm}). Same rule for plural: "60 cápsulas" → "60 ${productoForm}". NEVER let a text on the canvas contradict the physical form of the product.`);
+    if (isNonGranular(productoForm)) {
+      // Productos no-granulares: el contenido NO se muestra. Ver comentario
+      // largo en buildPromptFromPlan — mismo bug.
+      parts.push(`  - **CLOSED PACKAGING ONLY**: This product is ${productoForm} — never show its contents (no capsules, no pills, no granules, no powder, no liquid spilled). Render the jar/bottle/tube CLOSED with cap on. Even if IMAGE 1 shows an open container, you MUST keep IMAGE 2's package sealed.`);
+    }
+    const category = inferProductCategory(productoForm);
+    if (category) {
+      // ADAPT SCENE — ver comentario en buildPromptFromPlan.
+      parts.push(`  - **PRODUCT CATEGORY**: ${category.label}. Natural setting: ${category.context}.`);
+      parts.push(`  - **SCENE ADAPTATION**: Keep IMAGE 1's composition/palette/mood/overlay positions, but TRANSLATE background and props to the new product's habitat. AVOID props belonging to other categories: ${category.avoidContext}.`);
+    }
   }
-  if (descripcion) parts.push(`  - Description: ${descripcion.slice(0, 400)}`);
-  if (research) parts.push(`  - Audience and pain points (use to choose props/scene): ${research.slice(0, 1500)}`);
+  if (descripcion) parts.push(`  - Description: ${descripcion.slice(0, 600)}`);
+  // Merge avatar + research (mismo razonamiento que en buildPromptFromPlan).
+  const avatarText2 = (producto?.avatar || producto?.docs?.avatar || '').toString().trim();
+  const fullContext2 = [
+    avatarText2 ? `### AVATAR (estructurado)\n${avatarText2}` : '',
+    research ? `### RESEARCH DOC\n${research}` : '',
+  ].filter(Boolean).join('\n\n');
+  if (fullContext2) {
+    parts.push('');
+    parts.push(`**AVATAR & RESEARCH (USE this to choose SPECIFIC props/scene/mood/body language — not generic templates)**:`);
+    parts.push(fullContext2.slice(0, 3500));
+    parts.push('');
+    parts.push(`  - The props are the visual proof that the ad SEES the avatar. Match scene specifics (age, lifestyle, location, pain, OBJECTIONS) to the research — do NOT default to "generic premium skincare" or "generic supplement". If avatar objects something, address it visually (e.g., "no me alcanza" → escena hogareña achievable, NO spa luxury).`);
+  }
   // Ofertas reales del user — refuerzo para que gpt-image-2 NO copie precios
   // del ad ref. Si IMAGE 1 muestra un overlay "$29" y no coincide con nuestras
   // ofertas, debe usar las del user o omitir.

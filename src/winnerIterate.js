@@ -74,6 +74,11 @@ export async function generateFromWinner(creativo, producto, opts = {}) {
       nombre: producto.nombre,
       descripcion: producto.descripcion,
       research: producto.docs?.research,
+      // avatar separado: el research a veces lo tiene embebido y a veces no.
+      // Pasamos los dos y en el backend mergeamos defensivo. Sin esto el
+      // model defaulteaba a "generic skincare" porque le faltaba contexto
+      // de quién es el target real.
+      avatar: producto.docs?.avatar || '',
       formato: producto.formato || '',
       ofertasReales: producto.ofertasReales || '',
       offerBrief: producto.ofertasReales || producto.docs?.offerBrief || '',

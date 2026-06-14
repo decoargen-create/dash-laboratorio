@@ -43,7 +43,11 @@ async function readBody(req) {
 
 function getClientForUser(req) {
   const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  // Aceptamos ambos nombres: `SUPABASE_SERVICE_KEY` es el que está seteado
+  // en prod (Vercel) y `SUPABASE_SERVICE_ROLE_KEY` el que algunos archivos
+  // documentaban primero. Sin este fallback, en prod (donde solo existe
+  // `SUPABASE_SERVICE_KEY`) este endpoint y otros server-side daban 503.
+  const key = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return null;
   return createClient(url, key, { auth: { persistSession: false } });
 }

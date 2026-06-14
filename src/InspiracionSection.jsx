@@ -1402,6 +1402,38 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
 
   // Filtros + ordenamiento (vistas)
   const [query, setQuery] = useState('');
+  // SEARCH SERVER-SIDE: cuando el user tipea, además del filter local
+  // (brand metadata + ads in-memory), pegamos al /api/marketing/search-ads
+  // que tiene GIN full-text de TODOS los ads del user, incluyendo OCR y
+  // transcripts. Resultados llegan en serverMatchedAdIds (Set) y se usan
+  // para incluir brands cuyos ads matchearon server-side.
+  const [serverMatchedAdIds, setServerMatchedAdIds] = useState(null);
+  const [searchingServer, setSearchingServer] = useState(false);
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 3) { setServerMatchedAdIds(null); return; }
+    let cancelled = false;
+    setSearchingServer(true);
+    const timer = setTimeout(async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const authToken = session?.access_token || '';
+        if (!authToken) { setServerMatchedAdIds(null); return; }
+        const resp = await fetch('/api/marketing/search-ads', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
+          body: JSON.stringify({ query: q, pageSize: 200 }),
+        });
+        if (!resp.ok) { setServerMatchedAdIds(null); return; }
+        const data = await resp.json();
+        if (!cancelled) {
+          setServerMatchedAdIds(new Set((data.ads || []).map(a => a.ad_id)));
+        }
+      } catch { if (!cancelled) setServerMatchedAdIds(null); }
+      finally { if (!cancelled) setSearchingServer(false); }
+    }, 350); // debounce 350ms
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [query]);
   const [tipoFiltro, setTipoFiltro] = useState('all'); // 'all' | 'competidor' | 'custom'
   const [estadoFiltro, setEstadoFiltro] = useState('all'); // 'all' | 'con-ads' | 'sin-scrapear'
   const [orderBy, setOrderBy] = useState('reciente'); // 'reciente' | 'nombre' | 'ads-count'
@@ -2905,16 +2937,21 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
             // 1) Match en metadata de la brand (nombre, URL, notas).
             const meta = `${b.nombre} ${b.landingUrl || ''} ${b.notas || ''}`.toLowerCase();
             if (meta.includes(q)) return true;
-            // 2) Match en el TEXTO de los ads — incluye body, headline, y
-            //    ad.ocrText (texto extraído por OCR de la imagen). Sin esto
-            //    el user no podía encontrar marcas por palabras que solo
-            //    aparecen overlay en las imágenes.
-            // OCR (texto en imagen) + transcript (audio del video) ambos
-            // suman al haystack — la lupa AdSpy-like busca en todo.
-            return (b.__ads || []).some(a => {
+            // 2) Match in-memory: body + headline + ocr + transcript de los
+            //    ads HIDRATADOS. Cubre lo que el user tiene a mano.
+            const inMem = (b.__ads || []).some(a => {
               const adText = `${a.headline || ''} ${a.body || ''} ${a.ocrText || ''} ${a.transcript || ''}`.toLowerCase();
               return adText.includes(q);
             });
+            if (inMem) return true;
+            // 3) Match server-side: GIN index del backend tiene TODOS los
+            //    ads del user (cross-product). Si el server matcheó algún
+            //    ad de esta brand, la incluimos. Esto da el efecto AdSpy
+            //    "buscar en mi biblioteca entera" sin paginar.
+            if (serverMatchedAdIds) {
+              return (b.__ads || []).some(a => serverMatchedAdIds.has(a.id));
+            }
+            return false;
           });
         }
 
@@ -2976,9 +3013,12 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                 <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
                   type="text" value={query} onChange={e => setQuery(e.target.value)}
-                  placeholder="Buscar marca, URL, notas…"
-                  className="w-full pl-7 pr-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded focus:outline-none focus:ring-1 focus:ring-amber-500"
+                  placeholder="Buscar — marca, URL, body, OCR, audio del video…"
+                  className="w-full pl-7 pr-7 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded focus:outline-none focus:ring-1 focus:ring-amber-500"
                 />
+                {searchingServer && (
+                  <Loader2 size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-amber-500 animate-spin" />
+                )}
               </div>
               <select value={tipoFiltro} onChange={e => setTipoFiltro(e.target.value)}
                 className="px-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded">

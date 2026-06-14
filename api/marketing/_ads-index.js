@@ -18,12 +18,13 @@ function getServerClient() {
 }
 
 // Convierte un ad normalizado a row de marketing_ads.
-function adToRow(ad, userId, productoId, competidorId) {
+function adToRow(ad, userId, productoId, competidorId, platform = 'facebook') {
   return {
     user_id: userId,
     producto_id: String(productoId),
     competidor_id: String(competidorId),
     ad_id: String(ad.id),
+    platform,
     page_name: ad.pageName || null,
     page_id: ad.pageId || null,
     headline: ad.headline || null,
@@ -47,7 +48,9 @@ function adToRow(ad, userId, productoId, competidorId) {
 }
 
 // Upsert un batch de ads. Best-effort. Si falla, loguea y sigue.
-export async function upsertAdsToIndex({ userId, productoId, competidorId, ads }) {
+// platform default 'facebook' por backward compat (callers existentes no
+// pasan platform; el cron de FB es el principal usuario).
+export async function upsertAdsToIndex({ userId, productoId, competidorId, ads, platform = 'facebook' }) {
   if (!userId || !productoId || !competidorId) return { ok: false, reason: 'missing keys' };
   if (!Array.isArray(ads) || ads.length === 0) return { ok: true, upserted: 0 };
   const supabase = getServerClient();
@@ -59,7 +62,7 @@ export async function upsertAdsToIndex({ userId, productoId, competidorId, ads }
   let errors = 0;
   for (let i = 0; i < ads.length; i += CHUNK) {
     const slice = ads.slice(i, i + CHUNK);
-    const rows = slice.map(ad => adToRow(ad, userId, productoId, competidorId));
+    const rows = slice.map(ad => adToRow(ad, userId, productoId, competidorId, platform));
     const { error } = await supabase
       .from('marketing_ads')
       .upsert(rows, { onConflict: 'user_id,producto_id,competidor_id,ad_id' });

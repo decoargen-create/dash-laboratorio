@@ -27,6 +27,7 @@
     "api/marketing/transcribe-ad.js": { "maxDuration": 240 },
     "api/marketing/search-ads.js": { "maxDuration": 30 },
     "api/marketing/boards.js": { "maxDuration": 30 },
+    "api/marketing/scrape-tiktok.js": { "maxDuration": 300 },
     "api/meta/[action].js": { "maxDuration": 60 },
     "api/meta/ad-library.js": { "maxDuration": 60 },
     "api/acta.js": { "maxDuration": 60 },

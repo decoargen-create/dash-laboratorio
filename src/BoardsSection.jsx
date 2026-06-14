@@ -15,6 +15,20 @@ import {
   listBoardItems, removeItemFromBoard,
 } from './marketingBoardsApi.js';
 
+// Tailwind purga clases dinámicas — usamos map estático así sobreviven al build.
+function colorClass(color) {
+  const map = {
+    amber: 'text-amber-500',
+    emerald: 'text-emerald-500',
+    brand: 'text-brand-500',
+    violet: 'text-violet-500',
+    blue: 'text-blue-500',
+    red: 'text-red-500',
+    gray: 'text-gray-500',
+  };
+  return map[color] || map.amber;
+}
+
 export default function BoardsSection({ addToast }) {
   const [boards, setBoards] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -38,6 +52,14 @@ export default function BoardsSection({ addToast }) {
   };
 
   useEffect(() => { reload(); }, []);
+
+  // Si el user guarda un ad en un board desde Inspiración, el listado
+  // (que vive en otra sección) debería verlo. Escuchamos el event y refetch.
+  useEffect(() => {
+    const onChange = () => reload();
+    window.addEventListener('viora:boards-changed', onChange);
+    return () => window.removeEventListener('viora:boards-changed', onChange);
+  }, []);
 
   const handleCreate = async () => {
     const name = draftName.trim();
@@ -161,7 +183,7 @@ export default function BoardsSection({ addToast }) {
               className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 hover:border-amber-400 hover:shadow-md transition cursor-pointer group"
             >
               <div className="flex items-start justify-between gap-2 mb-2">
-                <Bookmark size={16} className={`text-${b.color || 'amber'}-500 shrink-0 mt-0.5`} />
+                <Bookmark size={16} className={`${colorClass(b.color)} shrink-0 mt-0.5`} />
                 <button
                   onClick={(e) => { e.stopPropagation(); handleDelete(b); }}
                   className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 transition"
@@ -185,13 +207,17 @@ export default function BoardsSection({ addToast }) {
   );
 }
 
-function BoardDetail({ board, onBack, addToast }) {
+function BoardDetail({ board: initialBoard, onBack, addToast }) {
+  // Mantenemos una copia local del board para que las ediciones se reflejen
+  // sin esperar al refetch del parent (issue #1 del audit).
+  const [board, setBoard] = useState(initialBoard);
   const [items, setItems] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [editing, setEditing] = useState(false);
-  const [editName, setEditName] = useState(board?.nombre || '');
-  const [editDesc, setEditDesc] = useState(board?.descripcion || '');
+  const [editName, setEditName] = useState(initialBoard?.nombre || '');
+  const [editDesc, setEditDesc] = useState(initialBoard?.descripcion || '');
+  useEffect(() => { setBoard(initialBoard); }, [initialBoard?.id]);
 
   const reload = async () => {
     if (!board) return;
@@ -212,7 +238,7 @@ function BoardDetail({ board, onBack, addToast }) {
     if (!confirm('¿Quitar este ad de la colección?')) return;
     try {
       await removeItemFromBoard(board.id, adId);
-      setItems(prev => prev.filter(it => it.ad_id !== adId));
+      setItems(prev => (prev || []).filter(it => it.ad_id !== adId));
       addToast?.({ type: 'success', message: 'Quitado de la colección' });
     } catch (err) {
       addToast?.({ type: 'error', message: err.message || 'Error al quitar' });
@@ -222,12 +248,13 @@ function BoardDetail({ board, onBack, addToast }) {
   const handleSaveEdit = async () => {
     const name = editName.trim();
     if (!name) return;
+    const desc = editDesc.trim();
     try {
-      await updateBoard(board.id, { nombre: name, descripcion: editDesc.trim() });
+      const updated = await updateBoard(board.id, { nombre: name, descripcion: desc });
+      // Mergeamos local para que el header refleje el cambio al instante.
+      setBoard(prev => ({ ...prev, ...(updated || {}), nombre: name, descripcion: desc }));
       addToast?.({ type: 'success', message: 'Colección actualizada' });
       setEditing(false);
-      // El parent va a refetcher al volver — pero acá tampoco hay re-render
-      // del nombre. Para no complicar, salimos y volvemos.
     } catch (err) {
       addToast?.({ type: 'error', message: err.message || 'Error al guardar' });
     }

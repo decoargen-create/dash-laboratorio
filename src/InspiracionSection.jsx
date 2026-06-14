@@ -356,10 +356,22 @@ function BoardPickerModal({ data, onClose, addToast }) {
     return () => { cancel = true; };
   }, [data]);
 
+  // Escape para cerrar — convención estándar de modales.
+  useEffect(() => {
+    if (!data) return;
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [data, onClose]);
+
   if (!data) return null;
   const { ad, brand, productoId } = data;
+  // Defensa: si el ad no tiene id válido, no puede ir a la tabla de boards
+  // (constraint de marketing_board_items.ad_id). Evita insertar "undefined".
+  const adIdValid = ad?.id && String(ad.id).trim() && String(ad.id) !== 'undefined';
 
   const saveToBoard = async (boardId, boardName) => {
+    if (!adIdValid) { setError('Este ad no tiene ID válido — no se puede guardar'); return; }
     setSavingId(boardId); setError(null);
     try {
       await addItemsToBoard(boardId, [{
@@ -368,6 +380,7 @@ function BoardPickerModal({ data, onClose, addToast }) {
         adId: String(ad.id),
       }]);
       addToast?.({ type: 'success', message: `Guardado en "${boardName}"` });
+      try { window.dispatchEvent(new CustomEvent('viora:boards-changed')); } catch {}
       onClose();
     } catch (err) {
       setError(err.message || 'Error al guardar');
@@ -378,6 +391,7 @@ function BoardPickerModal({ data, onClose, addToast }) {
   const createAndSave = async () => {
     const name = newName.trim();
     if (!name) return;
+    if (!adIdValid) { setError('Este ad no tiene ID válido — no se puede guardar'); return; }
     setSavingId('__new__'); setError(null);
     try {
       const board = await createBoard({ nombre: name });
@@ -387,6 +401,7 @@ function BoardPickerModal({ data, onClose, addToast }) {
         adId: String(ad.id),
       }]);
       addToast?.({ type: 'success', message: `Board "${board.nombre}" creado y guardado` });
+      try { window.dispatchEvent(new CustomEvent('viora:boards-changed')); } catch {}
       onClose();
     } catch (err) {
       setError(err.message || 'Error al crear board');

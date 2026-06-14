@@ -1931,9 +1931,22 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         } else {
           payload.searchKeyword = c.nombre;
         }
+        // Pasamos productoId + competidorId + auth para que el server pueda
+        // upsertear al search index. Si no podemos obtener token, igual
+        // funciona el scrape — solo no entra al index.
+        payload.productoId = producto.id;
+        payload.competidorId = c.id;
+        let authToken = '';
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          authToken = session?.access_token || '';
+        } catch {}
         let resp = await fetch('/api/marketing/apify-ingest', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
+          },
           body: JSON.stringify(payload),
         });
         let data = await parseJsonResponse(resp, `Scrape de ${c.nombre}`);

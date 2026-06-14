@@ -1699,7 +1699,10 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         // accionables como "cargá fbPageUrl en Setup"). Sin esto el user veía
         // solo el error técnico sin context.
         const base = stringifyApiError(data.error) || `HTTP ${resp.status}`;
-        throw new Error(data.sugerencia ? `${base} — ${data.sugerencia}` : base);
+        // Si sugerencia es objeto (shape futuro), serializamos sin perder info.
+        const sug = typeof data.sugerencia === 'string' ? data.sugerencia
+                  : data.sugerencia ? JSON.stringify(data.sugerencia) : '';
+        throw new Error(sug ? `${base} — ${sug}` : base);
       }
         return data;
       } catch (err) {
@@ -2125,7 +2128,10 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         // accionables como "cargá fbPageUrl en Setup"). Sin esto el user veía
         // solo el error técnico sin context.
         const base = stringifyApiError(data.error) || `HTTP ${resp.status}`;
-        throw new Error(data.sugerencia ? `${base} — ${data.sugerencia}` : base);
+        // Si sugerencia es objeto (shape futuro), serializamos sin perder info.
+        const sug = typeof data.sugerencia === 'string' ? data.sugerencia
+                  : data.sugerencia ? JSON.stringify(data.sugerencia) : '';
+        throw new Error(sug ? `${base} — ${sug}` : base);
       }
       const scrapeCost = logCostsFromResponse(data, `inspiracion · ${brand.nombre}`);
 
@@ -2241,7 +2247,10 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         // accionables como "cargá fbPageUrl en Setup"). Sin esto el user veía
         // solo el error técnico sin context.
         const base = stringifyApiError(data.error) || `HTTP ${resp.status}`;
-        throw new Error(data.sugerencia ? `${base} — ${data.sugerencia}` : base);
+        // Si sugerencia es objeto (shape futuro), serializamos sin perder info.
+        const sug = typeof data.sugerencia === 'string' ? data.sugerencia
+                  : data.sugerencia ? JSON.stringify(data.sugerencia) : '';
+        throw new Error(sug ? `${base} — ${sug}` : base);
       }
       const scrapeCost = logCostsFromResponse(data, `inspiracion · ${comp.nombre}`);
 

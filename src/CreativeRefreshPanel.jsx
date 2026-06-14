@@ -22,9 +22,22 @@ import {
   RefreshCw, Pause, AlertTriangle, Heart, Instagram,
 } from 'lucide-react';
 
-const STATE_PREFIX = 'adslab-creative-refresh-';
+const STATE_PREFIX = 'adslab-creative-refresh-'; // legacy fallback
+const PRODUCTOS_KEY = 'adslab-marketing-productos-v1';
 
+// CROSS-PC: el state vive ahora adentro de producto.data.creativeRefresh así
+// sincroniza via el push de productos. Sin esto, el user configuraba en PC1
+// la automatización y en PC2 no aparecía. Mantenemos fallback al legacy
+// localStorage para items no migrados.
 function loadPersisted(productoId) {
+  if (!productoId) return null;
+  // 1) Source of truth: adentro del producto en localStorage.
+  try {
+    const arr = JSON.parse(localStorage.getItem(PRODUCTOS_KEY) || '[]');
+    const p = arr.find(x => String(x.id) === String(productoId));
+    if (p?.creativeRefresh) return p.creativeRefresh;
+  } catch {}
+  // 2) Fallback legacy.
   try {
     const raw = localStorage.getItem(STATE_PREFIX + productoId);
     if (!raw) return null;
@@ -33,7 +46,21 @@ function loadPersisted(productoId) {
 }
 
 function savePersisted(productoId, payload) {
-  try { localStorage.setItem(STATE_PREFIX + productoId, JSON.stringify(payload)); } catch {}
+  if (!productoId) return;
+  // Escribir adentro del producto + disparar sync.
+  try {
+    const arr = JSON.parse(localStorage.getItem(PRODUCTOS_KEY) || '[]');
+    const updated = arr.map(p =>
+      String(p.id) === String(productoId)
+        ? { ...p, creativeRefresh: payload, updated_at: new Date().toISOString() }
+        : p
+    );
+    localStorage.setItem(PRODUCTOS_KEY, JSON.stringify(updated));
+    window.dispatchEvent(new CustomEvent('viora:marketing-storage-changed', { detail: { key: PRODUCTOS_KEY } }));
+  } catch {
+    // Si el productos no se puede leer/escribir, caer al legacy local.
+    try { localStorage.setItem(STATE_PREFIX + productoId, JSON.stringify(payload)); } catch {}
+  }
 }
 
 const DEFAULT_CONFIG = {

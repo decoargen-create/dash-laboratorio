@@ -48,11 +48,28 @@ create index if not exists marketing_board_items_board_idx
 alter table public.marketing_boards enable row level security;
 alter table public.marketing_board_items enable row level security;
 
+-- drop+create para que un re-run no falle con "policy already exists".
+drop policy if exists "boards_self_all" on public.marketing_boards;
 create policy "boards_self_all" on public.marketing_boards
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists "board_items_self_all" on public.marketing_board_items;
 create policy "board_items_self_all" on public.marketing_board_items
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
--- Realtime
-alter publication supabase_realtime add table public.marketing_boards;
-alter publication supabase_realtime add table public.marketing_board_items;
+-- Realtime — guard contra "table already in publication".
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'marketing_boards'
+  ) then
+    alter publication supabase_realtime add table public.marketing_boards;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'marketing_board_items'
+  ) then
+    alter publication supabase_realtime add table public.marketing_board_items;
+  end if;
+end $$;

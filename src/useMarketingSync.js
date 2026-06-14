@@ -218,7 +218,10 @@ export function useMarketingSync({ addToast } = {}) {
               ...p,
               bandejaIdeas: byProducto.get(String(p.id)) || [],
             }));
-            localStorage.setItem(KEYS.productos, JSON.stringify(updated));
+            // safeSetItem swallows quota errors (Safari private mode crash)
+            // y emite warning — pero dispatch event SIEMPRE para que el state
+            // in-memory se actualice aunque la persistencia falle.
+            try { localStorage.setItem(KEYS.productos, JSON.stringify(updated)); } catch (err) { console.warn('[sync] localStorage write falló (storage / quota):', err.message); }
             window.dispatchEvent(new Event('viora:marketing-pulled'));
             console.info(`[realtime] ideas refrescadas: ${ideas.length} ideas en ${byProducto.size} productos`);
           }

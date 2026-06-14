@@ -52,6 +52,16 @@ function openDB() {
 // round-trip a IDB. Con cache es instant tras la primera lectura.
 const memCache = new Map();
 
+// Helper para logout — cierra conexión IDB + limpia cache. Sin esto, user B
+// loggeando en la misma PC heredaba fotos del memCache de user A.
+export function _resetForLogout() {
+  memCache.clear();
+  if (dbPromise) {
+    dbPromise.then(db => { try { db.close(); } catch {} }).catch(() => {});
+    dbPromise = null;
+  }
+}
+
 // Helpers: leer/escribir producto.data via localStorage.
 function readProducto(id) {
   try {

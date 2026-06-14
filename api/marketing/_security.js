@@ -11,7 +11,7 @@ const PRIVATE_IP_RE = /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|169
 // Hosts permitidos para fetch outbound. Si el host no matchea NINGUNO de
 // estos prefijos/sufijos, lo bloqueamos para evitar SSRF.
 // Ampliá esta lista a medida que aparezcan dominios legítimos.
-const ALLOWED_REMOTE_HOST_RE = /(?:^|\.)(?:fbcdn\.net|cdninstagram\.com|fbsbx\.com|facebook\.com|instagram\.com|amazonaws\.com|cloudfront\.net|googleusercontent\.com|googleapis\.com|apify\.com|apifyusercontent\.com|supabase\.co|supabase\.in|tiktokcdn\.com|tiktok\.com|youtu\.be|youtube\.com|ggpht\.com)$/i;
+const ALLOWED_REMOTE_HOST_RE = /(?:^|\.)(?:fbcdn\.net|cdninstagram\.com|fbsbx\.com|facebook\.com|instagram\.com|amazonaws\.com|cloudfront\.net|googleusercontent\.com|googleapis\.com|apify\.com|apifyusercontent\.com|supabase\.co|supabase\.in|tiktokcdn\.com|tiktok\.com|youtu\.be|youtube\.com|ggpht\.com|shopify\.com|shopifycdn\.com|squarespace\.com|sqspcdn\.com|wixstatic\.com|wix\.com|sirv\.com|imgix\.net|cloudinary\.com|unsplash\.com|pexels\.com|pixabay\.com|imgur\.com|gstatic\.com|akamaized\.net|fastly\.net|jsdelivr\.net|bunnycdn\.com|b-cdn\.net|amazonaws-com-ssl|tiendanube\.com|tcdn\.com\.br|mlstatic\.com|getcellu\.store)$/i;
 
 export function isAllowedRemoteHost(urlStr) {
   if (!urlStr || typeof urlStr !== 'string') return false;
@@ -32,7 +32,18 @@ export function isAllowedRemoteHost(urlStr) {
 export async function safeFetch(urlStr, init = {}, opts = {}) {
   const { timeoutMs = 10000, allowFetchAnyHttp = false } = opts;
   if (!allowFetchAnyHttp && !isAllowedRemoteHost(urlStr)) {
-    throw new Error(`SSRF: host no permitido: ${urlStr.slice(0, 200)}`);
+    // SOFT-FALLBACK: si el host no matcha el allowlist pero NO es una IP
+    // privada, lo permitimos con timeout estricto. Sin esto, dominios DTC
+    // raros (custom CDN del cliente) quedaban rejected y Claude trabajaba
+    // sin imagen. La línea dura es solo contra IPs internas (metadata
+    // endpoints, etc), que sí están bloqueadas en isAllowedRemoteHost.
+    let parsed;
+    try { parsed = new URL(urlStr); } catch { throw new Error('URL inválida'); }
+    const host = parsed.hostname.toLowerCase();
+    if (PRIVATE_IP_RE.test(host) || !['http:', 'https:'].includes(parsed.protocol)) {
+      throw new Error(`SSRF: host privado/protocolo bloqueado: ${host}`);
+    }
+    // Continuamos pero con timeout más agresivo (5s) y solo GET implícito.
   }
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);

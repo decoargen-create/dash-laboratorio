@@ -924,8 +924,11 @@ async function callGptImage2Edit(params) {
   for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
     const elapsed = Date.now() - budgetStartedAt;
     if (elapsed > HANDLER_TIMEOUT_MS - 30000) {
-      // Sin tiempo para otro intento. Fallar inmediato.
-      throw new Error(`crear-creativo-referencial sin budget de tiempo (${Math.round(elapsed/1000)}s). Probá con menos ads o quality medium.`);
+      // Sin tiempo para otro intento. Incluimos el lastErr en el mensaje —
+      // sin esto el user veía "sin budget" sin pista del error real (rate
+      // limit, safety reject, etc) que consumió el budget.
+      const detail = lastErr?.message ? ` — último error: ${lastErr.message.slice(0, 200)}` : '';
+      throw new Error(`crear-creativo-referencial sin budget de tiempo (${Math.round(elapsed/1000)}s)${detail}. Probá con menos ads o quality medium.`);
     }
     const form = buildEditForm({ ...params, aggressiveSanitization });
     // AbortController por call individual. El abort tiene que ser BUDGET-AWARE:

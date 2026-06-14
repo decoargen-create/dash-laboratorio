@@ -1694,7 +1694,13 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           signal: ac.signal,
         });
         const data = await parseJsonOrThrow(resp, 'crear-creativo-referencial');
-        if (!resp.ok) throw new Error(stringifyApiError(data.error) || `HTTP ${resp.status}`);
+        if (!resp.ok) {
+        // Propagar la sugerencia del backend (apify-ingest devuelve sugerencias
+        // accionables como "cargá fbPageUrl en Setup"). Sin esto el user veía
+        // solo el error técnico sin context.
+        const base = stringifyApiError(data.error) || `HTTP ${resp.status}`;
+        throw new Error(data.sugerencia ? `${base} — ${data.sugerencia}` : base);
+      }
         return data;
       } catch (err) {
         if (err?.name === 'AbortError') {
@@ -2114,7 +2120,13 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         body: JSON.stringify(payload),
       });
       const data = await parseJsonOrThrow(resp, 'apify-ingest');
-      if (!resp.ok) throw new Error(stringifyApiError(data.error) || `HTTP ${resp.status}`);
+      if (!resp.ok) {
+        // Propagar la sugerencia del backend (apify-ingest devuelve sugerencias
+        // accionables como "cargá fbPageUrl en Setup"). Sin esto el user veía
+        // solo el error técnico sin context.
+        const base = stringifyApiError(data.error) || `HTTP ${resp.status}`;
+        throw new Error(data.sugerencia ? `${base} — ${data.sugerencia}` : base);
+      }
       const scrapeCost = logCostsFromResponse(data, `inspiracion · ${brand.nombre}`);
 
       const allAds = data.ads || [];
@@ -2224,7 +2236,13 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         body: JSON.stringify(payload),
       });
       const data = await parseJsonOrThrow(resp, 'apify-ingest');
-      if (!resp.ok) throw new Error(stringifyApiError(data.error) || `HTTP ${resp.status}`);
+      if (!resp.ok) {
+        // Propagar la sugerencia del backend (apify-ingest devuelve sugerencias
+        // accionables como "cargá fbPageUrl en Setup"). Sin esto el user veía
+        // solo el error técnico sin context.
+        const base = stringifyApiError(data.error) || `HTTP ${resp.status}`;
+        throw new Error(data.sugerencia ? `${base} — ${data.sugerencia}` : base);
+      }
       const scrapeCost = logCostsFromResponse(data, `inspiracion · ${comp.nombre}`);
 
       const ads = data.ads || [];

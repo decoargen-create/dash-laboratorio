@@ -176,13 +176,17 @@ if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
   // El flag se borra al cerrar la pestaña — solo previene loop dentro de la
   // misma session.
   navigator.serviceWorker.addEventListener('controllerchange', () => {
+    // ANTI-LOOP con timestamp en vez de flag binario — el flag binario
+    // prevenía reloads legítimos de un SEGUNDO deploy en sesiones largas.
+    // Ahora solo ignoramos si el último reload fue hace < 60s (es indicador
+    // de loop, no de update genuino).
     try {
-      const alreadyReloaded = sessionStorage.getItem('viora-sw-reloaded');
-      if (alreadyReloaded) {
-        console.warn('[SW] controllerchange ya disparó reload este session — ignorando para evitar loop');
+      const lastTs = Number(sessionStorage.getItem('viora-sw-reloaded-at') || 0);
+      if (lastTs && (Date.now() - lastTs) < 60000) {
+        console.warn('[SW] controllerchange < 60s después del último reload — ignorando (probable loop)');
         return;
       }
-      sessionStorage.setItem('viora-sw-reloaded', '1');
+      sessionStorage.setItem('viora-sw-reloaded-at', String(Date.now()));
     } catch {}
     console.info('[SW] nueva versión activa — recargando');
     window.location.reload();

@@ -1875,11 +1875,25 @@ function AppShell({ onExit }) {
             k.startsWith('adslab-bocetos-') ||
             k.startsWith('adslab-stack-costs-') ||
             k.startsWith('adslab-calc-escenarios-') ||
+            k.startsWith('adslab-supabase-auth') ||
+            k.startsWith('sb-') ||
             k === 'adslab-last-user') {
           keysToWipe.push(k);
         }
       }
       for (const k of keysToWipe) localStorage.removeItem(k);
+    } catch {}
+    // CERRAR conexiones IDB antes de deleteDatabase — sin esto el delete queda
+    // BLOQUEADO hasta que cierres todas las conexiones, y onExit() corre antes
+    // → user B veía IDB intacto. Importamos dinámico para no acoplar App.jsx
+    // con cada store.
+    try {
+      const [{ _resetForLogout: resetCompAds }, { _resetForLogout: resetProductoImg }] = await Promise.all([
+        import('./competidorAdsIDB.js'),
+        import('./productoImagen.js'),
+      ]);
+      resetCompAds?.();
+      resetProductoImg?.();
     } catch {}
     // Borramos los IDB stores con data del user — incluyendo lab-viora (state
     // global de sales/orders/clients post-migración a IDB). Sin este, user B

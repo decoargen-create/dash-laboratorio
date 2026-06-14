@@ -130,6 +130,17 @@ function makeKey(productoId, competidorId) {
 // cada setCompAds Y cuando otro componente/tab emite el evento de cambio.
 const memCache = new Map();
 
+// Export para que logout pueda limpiarlo + cerrar la conexión IDB. Sin esto,
+// user B logueando en la misma PC heredaba ads del memCache de user A.
+export function _resetForLogout() {
+  memCache.clear();
+  if (dbPromise) {
+    dbPromise.then(db => { try { db.close(); } catch {} }).catch(() => {});
+    dbPromise = null;
+  }
+  if (_compAdsChannel) { try { _compAdsChannel.close(); } catch {} _compAdsChannel = null; }
+}
+
 // CROSS-COMPONENT INVALIDATION: cuando otra parte de la app llama setCompAds
 // el evento se emite pero el memCache de OTROS módulos seguía sirviendo el
 // valor viejo. Acá lo limpiamos para que la próxima getCompAds vuelva a IDB.
@@ -327,9 +338,13 @@ export async function removeAllForProducto(productoId) {
 export async function hydrateCompetidoresAds(competidores, productoId) {
   if (!Array.isArray(competidores) || !productoId) return competidores || [];
   return await Promise.all(competidores.map(async (c) => {
-    if (Array.isArray(c.ads) && c.ads.length > 0) return c; // legacy inline
+    // PRIORITY: IDB primero (datos frescos), inline legacy SOLO si IDB vacía.
+    // Antes priorizábamos inline si existía, lo que dejaba productos
+    // parcialmente migrados leyendo 5 ads viejos en vez de 50 nuevos en IDB.
     const rec = await getCompAds(productoId, c.id);
-    return { ...c, ads: rec?.ads || [] };
+    if (rec?.ads?.length) return { ...c, ads: rec.ads };
+    if (Array.isArray(c.ads) && c.ads.length > 0) return c;
+    return { ...c, ads: [] };
   }));
 }
 

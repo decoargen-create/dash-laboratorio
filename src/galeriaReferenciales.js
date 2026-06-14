@@ -20,7 +20,13 @@ import {
   archiveReferencialCloud,
   deleteReferencialCloud,
   listAllWinnersCloud,
+  refreshSignedUrls,
 } from './galeriaReferencialesCloud.js';
+
+// Re-export para que el modal pueda re-firmar signed URLs antes de descargar
+// (sin esto las URLs viejas, 1h TTL, daban 403 → blob de ~90B → .png corrupto
+// en el ZIP).
+export { refreshSignedUrls };
 
 const DB_NAME = 'lab-viora-referenciales';
 const DB_VERSION = 1;

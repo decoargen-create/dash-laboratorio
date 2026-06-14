@@ -46,6 +46,33 @@ export async function isCloudReady() {
   return _cloudReadyCache;
 }
 
+// Re-firma signed URLs justo antes de descargar. Las URLs generadas al
+// cargar la galería tienen TTL de 1h — si el user demora más en hacer
+// click en "Descargar ZIP", las URLs expiran y devuelven 403 con un body
+// JSON de ~90 bytes que se guardaba como .png corrupto en el ZIP.
+//
+// Recibe items con `storagePath` y devuelve los mismos items con
+// `imageUrl` reemplazada por una signed URL fresca de 5min de validez.
+// Si no hay storagePath (items legacy IDB), deja imageUrl como está.
+export async function refreshSignedUrls(items) {
+  if (!supabase || !Array.isArray(items) || items.length === 0) return items;
+  const conPath = items.filter(it => it?.storagePath);
+  if (conPath.length === 0) return items;
+  try {
+    const { data: signedList, error } = await supabase.storage
+      .from(BUCKET)
+      .createSignedUrls(conPath.map(it => it.storagePath), 300);
+    if (error || !Array.isArray(signedList)) return items;
+    const byPath = new Map(signedList.map(s => [s.path, s.signedUrl]));
+    return items.map(it => {
+      const fresh = it?.storagePath ? byPath.get(it.storagePath) : null;
+      return fresh ? { ...it, imageUrl: fresh } : it;
+    });
+  } catch {
+    return items;
+  }
+}
+
 // Convierte base64 puro a Blob para subir al Storage.
 function base64ToBlob(b64, mimeType = 'image/png') {
   const byteChars = atob(b64);

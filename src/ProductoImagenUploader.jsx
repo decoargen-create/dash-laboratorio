@@ -10,7 +10,7 @@ import {
 } from './productoImagen.js';
 import { extractPalette } from './extractPalette.js';
 
-export default function ProductoImagenUploader({ productoId, addToast }) {
+export default function ProductoImagenUploader({ productoId, producto = null, addToast }) {
   const [imagen, setImagen] = useState(null);
   const [accent, setAccent] = useState('');
   const [procesando, setProcesando] = useState(false);
@@ -24,7 +24,9 @@ export default function ProductoImagenUploader({ productoId, addToast }) {
     let cancelled = false;
     (async () => {
       try {
-        const img = await getProductoImagen(productoId);
+        // Cross-PC: pasamos producto como fallback para que el cloud
+        // fotoUrl se baje incluso si localStorage está stale.
+        const img = await getProductoImagen(productoId, producto);
         if (cancelled) return;
         setImagen(img);
         setAccent(getAccentColor(productoId) || '');

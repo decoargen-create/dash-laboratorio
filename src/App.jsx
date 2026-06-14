@@ -7,9 +7,10 @@ import {
   Menu, LogOut, Home, ShoppingCart, Package, Users, AlertCircle, CreditCard,
   UserCheck, TrendingUp, Plus, Filter, Eye, Edit2, Trash2, Calendar, DollarSign,
   Moon, Sun, ChevronDown, ChevronRight, Search, X, Command, Check, Bell,
-  AlignJustify, LayoutGrid, Columns3, Sparkles, Bot, Zap, Activity, FileText, Settings, Loader2, Calculator, Copy, Save, RotateCcw, Target, Play, Inbox, BarChart3, Instagram, SlidersHorizontal, ClipboardList, AlertTriangle, Trophy
+  AlignJustify, LayoutGrid, Columns3, Sparkles, Bot, Zap, Activity, FileText, Settings, Loader2, Calculator, Copy, Save, RotateCcw, Target, Play, Inbox, BarChart3, Instagram, SlidersHorizontal, ClipboardList, AlertTriangle, Trophy, Bookmark
 } from 'lucide-react';
 import { VioraLogo, VioraMark, AdsLabLogo, AdsLabMark } from './logo.jsx';
+import { installDebugLog, exportDebugLog } from './debugLog.js';
 import LandingPage from './LandingPage.jsx';
 import BocetosSection from './Bocetos.jsx';
 import MarketingSection from './Marketing.jsx';
@@ -29,6 +30,7 @@ import AutoIGSection from './AutoIG.jsx';
 import InspiracionSection from './InspiracionSection.jsx';
 import WinnersGlobalSection from './WinnersGlobalSection.jsx';
 import InspiracionGlobalSection from './InspiracionGlobalSection.jsx';
+import BoardsSection from './BoardsSection.jsx';
 import ConsultoriaSection from './Consultoria.jsx';
 import { PipelineRunProvider } from './PipelineRunContext.jsx';
 import PipelineRunOverlay from './PipelineRunOverlay.jsx';
@@ -44,6 +46,7 @@ import { useUserPrefs } from './useUserPrefs.js';
 import { supabase, onAuthChange } from './supabase.js';
 import { generateCSV, downloadCSV, parseCSV, toNumber, toBool } from './csv.js';
 import { loadVioraState, saveVioraState, clearVioraState, createBackup } from './vioraStorage.js';
+import { safeSetItem } from './safeStorage.js';
 
 // Estados del pipeline de producción de una orden
 export const ORDER_STATES = [
@@ -1423,7 +1426,7 @@ function AppShell({ onExit }) {
       // Si tenía una sección de Viora/Senydrop/MetaAds, defaulteamos a la
       // de Marketing. Lista de secciones válidas en las plataformas activas:
       const validSections = ['mk-arranque', 'mk-bandeja', 'mk-auto-ig',
-        'mk-inspiracion', 'mk-inspiracion-global', 'mk-winners', 'mk-gastos', 'mk-docs', 'con-acta'];
+        'mk-inspiracion', 'mk-inspiracion-global', 'mk-winners', 'mk-boards', 'mk-gastos', 'mk-docs', 'con-acta'];
       return validSections.includes(saved) ? saved : 'mk-arranque';
     } catch { return 'mk-arranque'; }
   });
@@ -1626,7 +1629,9 @@ function AppShell({ onExit }) {
     } else {
       root.classList.remove('dark');
     }
-    localStorage.setItem('dash-dark-mode', String(darkMode));
+    // Safari private mode tira QuotaExceededError aunque setItem sea trivial
+    // → safeSetItem evita que el toggle del dark mode crashee la app.
+    safeSetItem('dash-dark-mode', String(darkMode));
   }, [darkMode]);
 
   const toggleDarkMode = () => setDarkMode(prev => !prev);
@@ -1690,6 +1695,23 @@ function AppShell({ onExit }) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // CROSS-TAB LOGOUT SYNC: si el user hace logout en tab A, tab B sigue
+  // mostrando la UI logueada (con data del user!) hasta que recargue. El
+  // event `storage` se dispara EN OTRAS TABS cuando localStorage cambia.
+  // Si la key `adslab-session` fue borrada (newValue === null) → forzamos
+  // reload para que tab B vaya al login. Mantenemos la UX simple: reload >
+  // intentar limpiar state manualmente (state está distribuido entre 20+
+  // reducers + IDB y limpiarlo todo "en caliente" es propenso a bugs).
+  useEffect(() => {
+    const onStorage = (e) => {
+      if (e.key === 'adslab-session' && !e.newValue) {
+        window.location.reload();
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
   }, []);
 
   // Bootstrap de sesión al montar:
@@ -1828,6 +1850,58 @@ function AppShell({ onExit }) {
     // (null). Pero por las dudas también limpiamos acá la sesión legacy.
     if (supabase) {
       try { await supabase.auth.signOut(); } catch {}
+    }
+    // PRIVACY/DATA-THEFT FIX: antes solo borrábamos adslab-session. Toda la
+    // data del user (productos, brands, ideas, fotos cacheadas, etc.) queda
+    // en localStorage + IDB. Si user B logea en la misma PC: (1) ve la data
+    // de A hasta el primer pull, (2) migrateLocalToCloud puede empujar la
+    // data de A al cloud de B (data corruption). Borramos TODO.
+    try {
+      const keysToWipe = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (!k) continue;
+        // Conservamos solo cosas de prefs UI globales (dark mode, font, etc.)
+        if (k.startsWith('adslab-marketing-') ||
+            k.startsWith('adslab-kanban-') ||
+            k.startsWith('adslab-producto-') ||
+            k.startsWith('adslab-creative-refresh-') ||
+            k.startsWith('adslab-auto-ig-') ||
+            k.startsWith('adslab-balances') ||
+            k.startsWith('adslab-costs-log') ||
+            k.startsWith('adslab-activity-log') ||
+            k.startsWith('adslab-debug-log') ||
+            k.startsWith('adslab-bulk-progress') ||
+            k.startsWith('adslab-state-v') ||
+            k.startsWith('adslab-bocetos-') ||
+            k.startsWith('adslab-stack-costs-') ||
+            k.startsWith('adslab-calc-escenarios-') ||
+            k.startsWith('adslab-supabase-auth') ||
+            k.startsWith('sb-') ||
+            k === 'adslab-last-user') {
+          keysToWipe.push(k);
+        }
+      }
+      for (const k of keysToWipe) localStorage.removeItem(k);
+    } catch {}
+    // CERRAR conexiones IDB antes de deleteDatabase — sin esto el delete queda
+    // BLOQUEADO hasta que cierres todas las conexiones, y onExit() corre antes
+    // → user B veía IDB intacto. Importamos dinámico para no acoplar App.jsx
+    // con cada store.
+    try {
+      const [{ _resetForLogout: resetCompAds }, { _resetForLogout: resetProductoImg }] = await Promise.all([
+        import('./competidorAdsIDB.js'),
+        import('./productoImagen.js'),
+      ]);
+      resetCompAds?.();
+      resetProductoImg?.();
+    } catch {}
+    // Borramos los IDB stores con data del user — incluyendo lab-viora (state
+    // global de sales/orders/clients post-migración a IDB). Sin este, user B
+    // veía la data de A entera al loguear en la misma PC.
+    if (typeof indexedDB !== 'undefined') {
+      ['adslab-competidor-ads-v1', 'lab-viora-ads-images', 'lab-viora-referenciales', 'adslab-producto-imagenes', 'lab-viora']
+        .forEach(name => { try { indexedDB.deleteDatabase(name); } catch {} });
     }
     localStorage.removeItem('adslab-session');
     setCurrentUser(null);
@@ -2131,6 +2205,7 @@ function AppShell({ onExit }) {
                 <NavItem icon={Play} label="Marketing" section="mk-arranque" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                 <NavItem icon={Sparkles} label="Inspiración" section="mk-inspiracion-global" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                 <NavItem icon={Trophy} label="Winners" section="mk-winners" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                <NavItem icon={Bookmark} label="Colecciones" section="mk-boards" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               </NavSection>
               <NavSection title="Automatización" sectionKey="mk-auto" sidebarOpen={sidebarOpen} defaultOpen={false}>
                 <NavItem icon={Instagram} label="Automatización IG" section="mk-auto-ig" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
@@ -2179,8 +2254,15 @@ function AppShell({ onExit }) {
         </div>
       </aside>
 
-      {/* Main Content */}
-      <main className="flex-1 overflow-auto relative">
+      {/* Main Content
+          - pb-32 deja espacio abajo para que las barras flotantes fixed (bulk
+            actions de Bandeja/Galería/Inspiración, ExecutionsTray bottom-right,
+            BulkProgressBar bottom-center) NO tapen los últimos 100-120px del
+            contenido scrollable. Sin esto el user no podía llegar al final.
+          - scroll-pt-20 compensa los ~80px del StickyHeader sticky en
+            smooth-scroll y anchor-jumps para que el anchor no quede tapado.
+          - scroll-pb-32 simétrico para anchors al pie. */}
+      <main className="flex-1 overflow-auto relative pb-32 scroll-pt-20 scroll-pb-32">
         {/* Pill flotante del análisis en bg: visible desde cualquier sección
             cuando hay un análisis en curso. Click "Ver" → te lleva a Marketing. */}
         {bgAnalysis && (
@@ -2229,6 +2311,7 @@ function AppShell({ onExit }) {
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-inspiracion' && <InspiracionSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-inspiracion-global' && <InspiracionGlobalSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-winners' && <WinnersGlobalSection addToast={addToast} onGoToSection={setCurrentSection} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-boards' && <BoardsSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-gastos' && <GastosStackSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-docs' && (
             <MarketingSection
@@ -2298,7 +2381,7 @@ const PRODUCT_TABS = {
     { id: 'inspiracion', label: 'Inspiración', emoji: '✨' },
     { id: 'creativos',   label: 'Creativos',   emoji: '🎨' },
     { id: 'galeria',     label: 'Galería',     emoji: '🖼️' },
-    { id: 'copiloto',    label: 'Copiloto',    emoji: '🤖' },
+    { id: 'copiloto',    label: 'Santi',       emoji: '🧠' },
   ],
 };
 
@@ -8746,6 +8829,11 @@ export default function App() {
       console.info(`%c[AdsLab build] ${tag}`, 'color: #c026d3; font-weight: bold');
       window.__VIORA_BUILD__ = tag;
     } catch {}
+    // Instalar el debug log global — captura fetch, errores, rejections y
+    // console.error en un buffer exportable. Ctrl+Shift+L descarga el JSON.
+    // Sin esto, cuando algo falla y el toast efímero desaparece, no hay
+    // forma de reproducir qué pasó sin reproducir el flow desde cero.
+    try { installDebugLog(); window.__exportDebugLog = exportDebugLog; } catch {}
     return () => window.removeEventListener('popstate', onPop);
   }, []);
 

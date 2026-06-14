@@ -1555,29 +1555,76 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
   // Columnas custom del kanban por producto — Trello-like.
   // Las 4 columnas base (pendiente, en_uso, usada, archivada) siempre existen.
   // El user puede agregar columnas extra Y renombrar las base (persistidas).
-  const customColsKey = activeProductoId ? `adslab-kanban-cols-${activeProductoId}` : null;
-  const baseTitlesKey = activeProductoId ? `adslab-kanban-base-titles-${activeProductoId}` : null;
+  // CROSS-PC: viven adentro de producto.data.kanbanCols / kanbanBaseTitles
+  // así sincronizan via el push de productos. Migración lazy desde legacy.
+  // ⚠️ INLINE EVERYTHING para evitar TDZ en bundles minificados (Vite/Rollup
+  // re-ordena const fn = () => { ... } de forma que producía "Cannot access
+  // 'H' before initialization" en prod).
   const DEFAULT_BASE_TITLES = { pendiente: 'Pendientes', en_uso: 'En uso', usada: 'Usadas', archivada: 'Archivadas' };
+
   const [customColumns, setCustomColumns] = useState(() => {
-    if (!customColsKey) return [];
-    try { const r = localStorage.getItem(customColsKey); return r ? JSON.parse(r) : []; } catch { return []; }
+    if (!activeProductoId) return [];
+    const p = productos.find(x => String(x.id) === String(activeProductoId));
+    if (p && Array.isArray(p.kanbanCols)) return p.kanbanCols;
+    try { const r = localStorage.getItem(`adslab-kanban-cols-${activeProductoId}`); return r ? JSON.parse(r) : []; } catch { return []; }
   });
   const [baseTitles, setBaseTitles] = useState(() => {
-    if (!baseTitlesKey) return DEFAULT_BASE_TITLES;
-    try { const r = localStorage.getItem(baseTitlesKey); return r ? { ...DEFAULT_BASE_TITLES, ...JSON.parse(r) } : DEFAULT_BASE_TITLES; } catch { return DEFAULT_BASE_TITLES; }
+    if (!activeProductoId) return DEFAULT_BASE_TITLES;
+    const p = productos.find(x => String(x.id) === String(activeProductoId));
+    if (p?.kanbanBaseTitles && typeof p.kanbanBaseTitles === 'object') {
+      return { ...DEFAULT_BASE_TITLES, ...p.kanbanBaseTitles };
+    }
+    try { const r = localStorage.getItem(`adslab-kanban-base-titles-${activeProductoId}`); return r ? { ...DEFAULT_BASE_TITLES, ...JSON.parse(r) } : DEFAULT_BASE_TITLES; } catch { return DEFAULT_BASE_TITLES; }
   });
+
+  // Cambio de producto → re-hidratar (inline para evitar TDZ).
   useEffect(() => {
-    if (customColsKey) try { localStorage.setItem(customColsKey, JSON.stringify(customColumns)); } catch {}
-  }, [customColumns, customColsKey]);
+    if (!activeProductoId) { setCustomColumns([]); setBaseTitles(DEFAULT_BASE_TITLES); return; }
+    const p = productos.find(x => String(x.id) === String(activeProductoId));
+    let cols = (p && Array.isArray(p.kanbanCols)) ? p.kanbanCols : null;
+    if (cols == null) { try { const r = localStorage.getItem(`adslab-kanban-cols-${activeProductoId}`); cols = r ? JSON.parse(r) : []; } catch { cols = []; } }
+    let titles = (p?.kanbanBaseTitles && typeof p.kanbanBaseTitles === 'object')
+      ? { ...DEFAULT_BASE_TITLES, ...p.kanbanBaseTitles } : null;
+    if (titles == null) { try { const r = localStorage.getItem(`adslab-kanban-base-titles-${activeProductoId}`); titles = r ? { ...DEFAULT_BASE_TITLES, ...JSON.parse(r) } : DEFAULT_BASE_TITLES; } catch { titles = DEFAULT_BASE_TITLES; } }
+    setCustomColumns(cols || []);
+    setBaseTitles(titles || DEFAULT_BASE_TITLES);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProductoId]);
+
+  // Persistir adentro del producto en localStorage + dispatch event para sync.
+  // Skipping primer render con ref para no sobreescribir con default antes
+  // de la hidratación inicial.
+  const kanbanInitRef = useRef(false);
   useEffect(() => {
-    if (baseTitlesKey) try { localStorage.setItem(baseTitlesKey, JSON.stringify(baseTitles)); } catch {}
-  }, [baseTitles, baseTitlesKey]);
-  // Reset both when switching product.
+    if (!kanbanInitRef.current) { kanbanInitRef.current = true; return; }
+    if (!activeProductoId) return;
+    try {
+      const arr = JSON.parse(localStorage.getItem(PRODUCTOS_KEY) || '[]');
+      const updated = arr.map(p =>
+        String(p.id) === String(activeProductoId)
+          ? { ...p, kanbanCols: customColumns, updated_at: new Date().toISOString() }
+          : p
+      );
+      localStorage.setItem(PRODUCTOS_KEY, JSON.stringify(updated));
+      window.dispatchEvent(new CustomEvent('viora:marketing-storage-changed', { detail: { key: PRODUCTOS_KEY } }));
+    } catch (err) { console.warn('[bandeja] persistir kanbanCols falló:', err.message); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customColumns]);
   useEffect(() => {
-    if (!customColsKey) { setCustomColumns([]); setBaseTitles(DEFAULT_BASE_TITLES); return; }
-    try { const r = localStorage.getItem(customColsKey); setCustomColumns(r ? JSON.parse(r) : []); } catch { setCustomColumns([]); }
-    try { const r = localStorage.getItem(baseTitlesKey); setBaseTitles(r ? { ...DEFAULT_BASE_TITLES, ...JSON.parse(r) } : DEFAULT_BASE_TITLES); } catch { setBaseTitles(DEFAULT_BASE_TITLES); }
-  }, [customColsKey, baseTitlesKey]);
+    if (!kanbanInitRef.current) return;
+    if (!activeProductoId) return;
+    try {
+      const arr = JSON.parse(localStorage.getItem(PRODUCTOS_KEY) || '[]');
+      const updated = arr.map(p =>
+        String(p.id) === String(activeProductoId)
+          ? { ...p, kanbanBaseTitles: baseTitles, updated_at: new Date().toISOString() }
+          : p
+      );
+      localStorage.setItem(PRODUCTOS_KEY, JSON.stringify(updated));
+      window.dispatchEvent(new CustomEvent('viora:marketing-storage-changed', { detail: { key: PRODUCTOS_KEY } }));
+    } catch (err) { console.warn('[bandeja] persistir kanbanBaseTitles falló:', err.message); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [baseTitles]);
 
   const renameBaseColumn = (key) => {
     const currentName = baseTitles[key] || DEFAULT_BASE_TITLES[key];
@@ -1734,10 +1781,25 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
 
   const handleRemove = async (id) => {
     if (!window.confirm('¿Borrar esta idea? No se puede deshacer.')) return;
+    // Si era réplica de un ad de competencia, sacar el adId de
+    // producto.usedAdIds para que en Inspiración el ad deje de aparecer
+    // gris/"usado". Sin esto quedaba un ref zombi.
+    const idea = ideas.find(i => i.id === id);
+    const sourceAdId = idea?.origen?.adId;
+    if (sourceAdId && activeProductoId) {
+      try {
+        const arr = JSON.parse(localStorage.getItem('adslab-marketing-productos-v1') || '[]');
+        const updated = arr.map(p => {
+          if (String(p.id) !== String(activeProductoId)) return p;
+          const set = new Set(p.usedAdIds || []);
+          set.delete(String(sourceAdId));
+          return { ...p, usedAdIds: Array.from(set), updated_at: new Date().toISOString() };
+        });
+        localStorage.setItem('adslab-marketing-productos-v1', JSON.stringify(updated));
+        try { window.dispatchEvent(new CustomEvent('viora:marketing-storage-changed', { detail: { key: 'adslab-marketing-productos-v1' } })); } catch {}
+      } catch {}
+    }
     setIdeas(removeIdea(id));
-    // (Fase 2 cloud-first: ya no borramos legacy IDB — los creativos
-    // ahora viven en Supabase Storage + marketing_creativos. La galería
-    // sigue su propio ciclo de vida.)
     setSelected(prev => {
       const next = new Set(prev); next.delete(id); return next;
     });
@@ -2075,16 +2137,36 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
                 // Solo ideas de IMAGEN con contenido. Las de video se ignoran
                 // (no se pueden generar como estático).
                 const valid = [];
+                let skipUsadas = 0;
                 for (const id of selected) {
                   const idea = ideas.find(i => i.id === id);
                   if (!idea) continue;
                   if (idea.formato === 'video') continue;
                   if (!(idea.hook || idea.titulo || idea.descripcionImagen)) continue;
+                  // Anti-gasto duplicado: si la idea ya fue generada antes
+                  // (estado='usada'), no la re-disparamos al endpoint. Cada
+                  // call cuesta $0.18 en gpt-image-2 quality high. Antes el
+                  // bulk re-procesaba todo lo seleccionado sin filtro.
+                  // en_uso = está siendo generada por OTRA tanda concurrente.
+                  // Re-disparar la mismas idea en paralelo gasta tokens 2x.
+                  if (idea.estado === 'usada' || idea.estado === 'archivada' || idea.estado === 'en_uso') {
+                    skipUsadas++;
+                    continue;
+                  }
                   valid.push(idea);
                 }
                 if (valid.length === 0) {
-                  addToast?.({ type: 'error', message: 'Las seleccionadas no tienen ideas de imagen para generar (las de video no aplican).' });
+                  const msg = skipUsadas > 0
+                    ? `Las ${skipUsadas} seleccionadas ya fueron generadas (estado 'usada'). Para re-generar, archivá y volvé a marcar pendiente.`
+                    : 'Las seleccionadas no tienen ideas de imagen para generar (las de video no aplican).';
+                  addToast?.({ type: 'error', message: msg });
                   return;
+                }
+                if (skipUsadas > 0) {
+                  addToast?.({
+                    type: 'info',
+                    message: `${skipUsadas} ya generada${skipUsadas !== 1 ? 's' : ''} salteada${skipUsadas !== 1 ? 's' : ''} — ${valid.length} a procesar`,
+                  });
                 }
                 const producto = productos.find(p => String(p.id) === String(activeProductoId));
                 if (!producto) {
@@ -2097,6 +2179,17 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
                     ideas: valid, producto, n: bulkN, quality: bulkQuality, size: bulkSize, addToast,
                   });
                   if (result.ok > 0) setSelected(new Set());
+                } catch (err) {
+                  // bulkGenerateFromIdeas puede tirar ANTES de su propio
+                  // finishExecution (ej: getProductoImagen falla, supabase
+                  // auth crashea, fetch sin red). Sin este catch, el error
+                  // queda como unhandled rejection y el user no ve nada
+                  // — solo el botón se reactiva sin explicación.
+                  console.error('[bulk-generate] crash temprano:', err);
+                  addToast?.({
+                    type: 'error',
+                    message: `No pude arrancar el bulk: ${err?.message || err}`,
+                  });
                 } finally {
                   setBulkRunning(false);
                 }

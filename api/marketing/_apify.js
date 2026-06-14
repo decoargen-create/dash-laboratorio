@@ -81,6 +81,119 @@ export async function runActorSync(actorId, input, token, opts = {}) {
   return await resp.json();
 }
 
+// Runs un actor en modo ASYNC: dispara el run y polea hasta que termine.
+// Permite scrapear MÁS ads dentro del budget de Vercel (300s) que el
+// modo sync (que tiene timeout interno de Apify ~240s).
+//
+// Ventaja vs runActorSync:
+//   - Apify run-sync mata el run a los 240s, perdiendo todo lo scrapeado.
+//   - Async: si llegamos a 270s sin que termine, podemos abortar el run
+//     pero también podemos sacar los items parciales del dataset.
+//
+// Endpoints:
+//   POST /acts/{actorId}/runs?token=X         → arranca run, devuelve runId
+//   GET  /actor-runs/{runId}?token=X          → status del run
+//   GET  /datasets/{datasetId}/items?token=X  → items del dataset
+//
+// onProgress(stage) opcional — llamado cada iteración del polling.
+export async function runActorAsync(actorId, input, token, opts = {}) {
+  const { maxWaitSec = 270, pollIntervalSec = 5, onProgress } = opts;
+  const actorPath = actorId.replace('/', '~');
+
+  // maxItems sigue siendo OBLIGATORIO para PPR actors (gasto cap).
+  const maxItems = Math.max(1, Number(input?.maxItems || input?.maxResults || input?.resultsLimit || 50));
+
+  const finalInput = {
+    ...input,
+    maxItems,
+    resultsLimit: maxItems,
+    maxResults: maxItems,
+    count: maxItems,
+    maxCharged: maxItems,
+  };
+
+  // 1. Disparar el run.
+  const startParams = new URLSearchParams({ token, maxItems: String(maxItems), memory: '1024' });
+  const startUrl = `${APIFY_API_BASE}/acts/${actorPath}/runs?${startParams.toString()}`;
+  let startResp;
+  try {
+    startResp = await fetch(startUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(finalInput),
+    });
+  } catch (err) {
+    throw new Error(`[apify-async] no pude disparar el run: ${err.message}`);
+  }
+  if (!startResp.ok) {
+    const text = await startResp.text();
+    throw new Error(`[apify-async] start failed (${startResp.status}): ${text.slice(0, 260)}`);
+  }
+  const startData = await startResp.json();
+  const runId = startData?.data?.id;
+  const datasetId = startData?.data?.defaultDatasetId;
+  if (!runId || !datasetId) {
+    throw new Error(`[apify-async] respuesta sin runId/datasetId: ${JSON.stringify(startData).slice(0, 200)}`);
+  }
+
+  // 2. Polling hasta SUCCEEDED, FAILED, ABORTED, TIMED-OUT.
+  const startedAt = Date.now();
+  let status = 'RUNNING';
+  let lastReadyItems = 0;
+  while (Date.now() - startedAt < maxWaitSec * 1000) {
+    await new Promise(r => setTimeout(r, pollIntervalSec * 1000));
+    // Re-chequear el deadline DESPUÉS del sleep — sino podemos hacer un fetch
+    // de status cuando ya nos pasamos del budget. Con AbortController abajo
+    // tampoco esperamos más de pollIntervalSec por status response.
+    if (Date.now() - startedAt >= maxWaitSec * 1000) break;
+    const statusAc = new AbortController();
+    const statusTimer = setTimeout(() => statusAc.abort(), Math.min(pollIntervalSec * 1000, 10000));
+    let statusResp;
+    try {
+      statusResp = await fetch(`${APIFY_API_BASE}/actor-runs/${runId}?token=${token}`, { signal: statusAc.signal });
+    } catch { clearTimeout(statusTimer); continue; }
+    clearTimeout(statusTimer);
+    if (!statusResp.ok) continue;
+    const statusData = await statusResp.json();
+    status = statusData?.data?.status || 'RUNNING';
+    const stats = statusData?.data?.stats || {};
+    // itemCount es el campo real de "items listos" en Apify; outputBodyBytes
+    // era una proxy en bytes (engañosa para mostrar progress al user).
+    const ready = stats.outputDatasetItemCount ?? stats.itemCount ?? lastReadyItems;
+    if (ready !== lastReadyItems) {
+      lastReadyItems = ready;
+      onProgress?.({ status, items: ready });
+    }
+    if (['SUCCEEDED', 'FAILED', 'ABORTED', 'TIMED-OUT', 'TIMED_OUT'].includes(status)) break;
+  }
+
+  // 3. Bajar los items del dataset (incluso si el run no terminó, agarramos
+  //    lo parcial — es mejor que nada). Con AbortController + timeout.
+  const itemsAc = new AbortController();
+  const itemsTimer = setTimeout(() => itemsAc.abort(), 15000);
+  let itemsResp;
+  try {
+    itemsResp = await fetch(`${APIFY_API_BASE}/datasets/${datasetId}/items?token=${token}&format=json`, { signal: itemsAc.signal });
+  } finally {
+    clearTimeout(itemsTimer);
+  }
+  if (!itemsResp.ok) {
+    const text = await itemsResp.text();
+    throw new Error(`[apify-async] fetch dataset falló (${itemsResp.status}): ${text.slice(0, 200)}`);
+  }
+  const items = await itemsResp.json();
+
+  // 4. Si el run no terminó OK y no hay items, propagamos el error.
+  //    Usamos keyword 'timeout' explícito en el mensaje para que el retry
+  //    del caller (regex /ABORTED|run-failed|timeout|memory|400|429|503/i)
+  //    lo detecte y aplique fallback a sync con limit reducido.
+  if (status !== 'SUCCEEDED' && (!Array.isArray(items) || items.length === 0)) {
+    throw new Error(`[apify-async] run ${status} timeout sin items recuperables (${Math.round((Date.now() - startedAt) / 1000)}s)`);
+  }
+
+  return { items, status, runId, partial: status !== 'SUCCEEDED', durationSec: Math.round((Date.now() - startedAt) / 1000) };
+}
+
 // Parsea el start_date del ad (distintos formatos según actor) a ISO string.
 function parseStartDate(raw) {
   const candidates = [
@@ -294,7 +407,13 @@ export const WINNER_CRITERIA = {
 // Limitar a AR dejaba afuera la mayoría de marcas DTC internacionales que
 // pautan a otros países. is_targeted_country=false para no restringir
 // a anuncios targeteados al país del que mira.
+//
+// SORT POR IMPRESSIONS DESC: los ads que más se sirven (ergo, más gastan)
+// vienen primero. Para una marca con 2500 ads activos, sortear por
+// impressions agarra primero los winners reales (los que la marca está
+// escalando). Sin sort, Apify devuelve por orden de scrape (random
+// efectivo) y los top winners pueden quedar fuera del cap.
 export function buildAdLibraryUrl({ keyword, country = 'ALL' }) {
   const q = encodeURIComponent(keyword);
-  return `https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=${country}&is_targeted_country=false&q=${q}&search_type=keyword_unordered&media_type=all`;
+  return `https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=${country}&is_targeted_country=false&q=${q}&search_type=keyword_unordered&media_type=all&sort_data[mode]=total_impressions&sort_data[direction]=desc`;
 }

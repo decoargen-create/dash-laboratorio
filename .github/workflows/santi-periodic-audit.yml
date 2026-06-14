@@ -1,0 +1,262 @@
+name: Santi periodic audit
+
+# Loop automático cada 30 minutos — Santi audita el repo en busca de bugs
+# o regresiones nuevas y abre/comenta un Issue si encuentra algo.
+#
+# Dos capas:
+#   1. ESTÁTICA (gratis): build + lint estáticos (console.log, TODO, conflict
+#      markers olvidados, etc). Corre siempre.
+#   2. LLM (opcional, ~$0.04/corrida): cuando hay diff vs el SHA del último
+#      audit que pasó, Claude (Sonnet) mira el diff y reporta bugs lógicos.
+#      Skip si no hay diff (ahorra plata).
+#
+# Requiere secrets:
+#   ANTHROPIC_API_KEY — opcional (sin esto, solo corre la capa estática).
+#   GITHUB_TOKEN viene auto.
+
+on:
+  schedule:
+    - cron: '*/30 * * * *' # cada 30 minutos
+  workflow_dispatch: # permite triggear manual desde la UI
+
+permissions:
+  contents: write # necesario para pushear el SHA actualizado a .github/santi-last-sha
+  issues: write
+  pull-requests: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 50
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install deps
+        run: npm ci --no-audit --no-fund
+
+      - name: Build check
+        id: build
+        run: |
+          if npm run build 2>&1 | tee build.log; then
+            echo "build_ok=true" >> $GITHUB_OUTPUT
+          else
+            echo "build_ok=false" >> $GITHUB_OUTPUT
+            tail -30 build.log > build-tail.txt
+          fi
+        continue-on-error: true
+
+      - name: Static checks
+        id: static
+        run: |
+          consoles=$(grep -rn "console\.log" src/ --include="*.jsx" --include="*.js" 2>/dev/null | grep -v "// eslint-disable" | wc -l)
+          echo "consoles=$consoles" >> $GITHUB_OUTPUT
+          todos=$(grep -rn "TODO\|FIXME" src/ api/ --include="*.jsx" --include="*.js" 2>/dev/null | wc -l)
+          echo "todos=$todos" >> $GITHUB_OUTPUT
+          conflicts=$(grep -rn '<<<<<<<\|>>>>>>>' src/ api/ --include="*.jsx" --include="*.js" 2>/dev/null | wc -l)
+          echo "conflicts=$conflicts" >> $GITHUB_OUTPUT
+
+      # ===========================================================
+      # CAPA LLM (Claude Sonnet)
+      # ===========================================================
+      # Detectar diff vs el último SHA auditado. Lo guardamos en un Gist
+      # "santi-last-audit-sha" (privado) para no requerir un branch de state.
+      # Si no hay gist (1era corrida) o no hay diff → skip.
+      - name: Detect diff since last audit
+        id: diff
+        if: env.ANTHROPIC_API_KEY != ''
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Buscar archivo de cache. Si no existe el archivo (primera vez), tomamos los últimos 5 commits.
+          mkdir -p .santi-state
+          LAST_SHA=$(gh api -X GET repos/${{ github.repository }}/contents/.github/santi-last-sha 2>/dev/null | jq -r '.content // ""' | base64 -d 2>/dev/null || echo "")
+          CURRENT_SHA=$(git rev-parse HEAD)
+          if [ -z "$LAST_SHA" ] || [ "$LAST_SHA" = "$CURRENT_SHA" ]; then
+            # Sin baseline o sin cambios → no llamamos a Claude.
+            # Para 1ra corrida usamos el commit anterior como baseline.
+            if [ -z "$LAST_SHA" ]; then
+              LAST_SHA=$(git rev-parse HEAD~1 2>/dev/null || echo "")
+            fi
+            if [ "$LAST_SHA" = "$CURRENT_SHA" ] || [ -z "$LAST_SHA" ]; then
+              echo "skip=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          fi
+          # Generar diff capeado a 8000 líneas (evita costos descontrolados).
+          git diff "$LAST_SHA"..HEAD -- 'src/**' 'api/**' '*.json' '*.js' '*.jsx' '*.ts' '*.tsx' 2>/dev/null > diff.patch || true
+          DIFF_LINES=$(wc -l < diff.patch)
+          if [ "$DIFF_LINES" -eq 0 ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          if [ "$DIFF_LINES" -gt 8000 ]; then
+            head -8000 diff.patch > diff.trim
+            mv diff.trim diff.patch
+            echo "diff_truncated=true" >> $GITHUB_OUTPUT
+          fi
+          echo "diff_lines=$DIFF_LINES" >> $GITHUB_OUTPUT
+          echo "current_sha=$CURRENT_SHA" >> $GITHUB_OUTPUT
+          echo "last_sha=$LAST_SHA" >> $GITHUB_OUTPUT
+          echo "skip=false" >> $GITHUB_OUTPUT
+
+      - name: Claude audit
+        id: claude
+        if: steps.diff.outputs.skip == 'false'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          DIFF=$(cat diff.patch)
+          PROMPT=$(cat <<PROMPT_END
+          Sos Santi, un auditor de código senior de un proyecto React + Vite + Supabase + Vercel.
+          Mirá este diff de los commits que llegaron al repo desde el último audit. Buscá bugs CONCRETOS:
+          - Race conditions (await faltante, dep array de useEffect incompleto, etc).
+          - Regresiones lógicas (cambio de signature, removed validation, error handling swallow).
+          - Edge cases (null/undefined no manejado, array vacío crashea).
+          - Sec issues (XSS, SSRF, auth bypass).
+
+          NO reportes:
+          - Estilo (formatting, naming).
+          - Refactor cosmético.
+          - "Considerar usar X" sin un bug concreto.
+
+          Output esperado: lista corta (máximo 5 items) tipo "file:line · descripción · severidad (high/med/low)".
+          Si no encontrás nada concreto, devolvé exactamente "OK_NO_FINDINGS".
+
+          Diff:
+          \`\`\`
+          $DIFF
+          \`\`\`
+          PROMPT_END
+          )
+          RESPONSE=$(curl -s https://api.anthropic.com/v1/messages \
+            -H "x-api-key: $ANTHROPIC_API_KEY" \
+            -H "anthropic-version: 2023-06-01" \
+            -H "content-type: application/json" \
+            -d "$(jq -n --arg p "$PROMPT" '{
+              model: "claude-sonnet-4-6",
+              max_tokens: 1500,
+              messages: [{role: "user", content: $p}]
+            }')")
+          FINDINGS=$(echo "$RESPONSE" | jq -r '.content[0].text // "ERROR_CLAUDE_NO_RESPUESTA"')
+          # Capturar costo aproximado para reporting.
+          INPUT_T=$(echo "$RESPONSE" | jq -r '.usage.input_tokens // 0')
+          OUTPUT_T=$(echo "$RESPONSE" | jq -r '.usage.output_tokens // 0')
+          COST=$(awk "BEGIN {printf \"%.4f\", ($INPUT_T * 3 + $OUTPUT_T * 15) / 1000000}")
+          # Guardar findings + costo a archivos para el step de reporte.
+          echo "$FINDINGS" > findings.txt
+          echo "cost=$COST" >> $GITHUB_OUTPUT
+          echo "input_tokens=$INPUT_T" >> $GITHUB_OUTPUT
+          echo "output_tokens=$OUTPUT_T" >> $GITHUB_OUTPUT
+          if [ "$FINDINGS" = "OK_NO_FINDINGS" ]; then
+            echo "has_findings=false" >> $GITHUB_OUTPUT
+          else
+            echo "has_findings=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Update last audited SHA
+        if: steps.diff.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Usamos un archivo en el repo para guardar el SHA del último audit.
+          # Push al main directo con un token bot.
+          CURRENT_SHA="${{ steps.diff.outputs.current_sha }}"
+          # Solo update si el step de claude llegó hasta acá (no falló).
+          if [ -f findings.txt ]; then
+            git config user.name "santi-audit-bot"
+            git config user.email "santi-audit@noreply.local"
+            mkdir -p .github
+            echo "$CURRENT_SHA" > .github/santi-last-sha
+            git add .github/santi-last-sha
+            git commit -m "chore(santi-audit): update last audited SHA to ${CURRENT_SHA:0:7}" || true
+            git push origin main || echo "push failed — probable concurrent run; siguiente audit retry"
+          fi
+
+      - name: Report findings
+        if: steps.build.outputs.build_ok == 'false' || steps.static.outputs.conflicts != '0' || steps.claude.outputs.has_findings == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const buildOk = '${{ steps.build.outputs.build_ok }}' === 'true';
+            const conflicts = parseInt('${{ steps.static.outputs.conflicts }}', 10);
+            const hasLlm = '${{ steps.claude.outputs.has_findings }}' === 'true';
+
+            let llmSection = '';
+            if (hasLlm) {
+              const findings = fs.readFileSync('findings.txt', 'utf8');
+              const cost = '${{ steps.claude.outputs.cost }}';
+              const inT = '${{ steps.claude.outputs.input_tokens }}';
+              const outT = '${{ steps.claude.outputs.output_tokens }}';
+              llmSection = `\n\n## Claude audit findings\n\n${findings}\n\n_Tokens: in=${inT} out=${outT} · costo: $${cost}_`;
+            }
+
+            const body = `# Santi periodic audit — encontró algo
+
+            - **Build status**: ${buildOk ? '✅ OK' : '❌ FAIL'}
+            - **Conflict markers olvidados**: ${conflicts}
+            - **Console.log debug**: ${{ steps.static.outputs.consoles }}
+            - **TODO/FIXME**: ${{ steps.static.outputs.todos }}
+            ${llmSection}
+
+            Logs del job: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}
+
+            Si querés que arregle algo, mencioname o reasigname.`;
+
+            const { data: existing } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'santi-audit',
+            });
+            if (existing.length > 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing[0].number,
+                body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: 'Santi periodic audit — findings',
+                body,
+                labels: ['santi-audit'],
+              });
+            }
+
+      - name: All clear — close stale audit issues
+        if: steps.build.outputs.build_ok == 'true' && steps.static.outputs.conflicts == '0' && steps.claude.outputs.has_findings != 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: existing } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'santi-audit',
+            });
+            for (const iss of existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: iss.number,
+                body: '✅ Audit OK — build pasa, sin findings nuevos del LLM. Cerrando.',
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: iss.number,
+                state: 'closed',
+              });
+            }

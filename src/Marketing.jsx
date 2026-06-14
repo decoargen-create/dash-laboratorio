@@ -11,6 +11,7 @@
 
 import React, { useEffect, useState, useRef, Fragment } from 'react';
 import { deleteProducto as deleteProductoFromCloud } from './marketingSync.js';
+import { safeSetItem } from './safeStorage.js';
 import {
   FileText, Sparkles, Download, Loader2, Check, AlertTriangle, X,
   RefreshCw, Trash2, ChevronRight, Copy, Package, Plus, MessageSquare,
@@ -109,15 +110,20 @@ function loadProductos() {
 }
 
 function saveProductos(list) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+  // safeSetItem: Safari private mode tira QuotaExceededError aunque la lista
+  // sea chica. Antes el catch silenciaba todo y el dispatch nunca corría —
+  // pero el dispatch sin write no tiene sentido (todos releen el storage).
+  // Condicionamos el dispatch a un write efectivo.
+  if (safeSetItem(STORAGE_KEY, JSON.stringify(list))) {
     // Notificar al sync layer + a otros componentes (Arranque, InspiracionSection)
     // que tienen su propio state de productos. Sin este dispatch, Marketing
     // podía quedar fuera de sync con los otros.
-    window.dispatchEvent(new CustomEvent('viora:marketing-storage-changed', {
-      detail: { key: STORAGE_KEY },
-    }));
-  } catch {}
+    try {
+      window.dispatchEvent(new CustomEvent('viora:marketing-storage-changed', {
+        detail: { key: STORAGE_KEY },
+      }));
+    } catch {}
+  }
 }
 
 function downloadText(content, filename) {
@@ -148,6 +154,10 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
   const [compUrl, setCompUrl] = useState('');
   const [compPageId, setCompPageId] = useState('');
   const [hooksRunning, setHooksRunning] = useState(false);
+  // Error latcheado del generador de hooks — sin esto el toast efímero (3.5s)
+  // desaparece antes que el user pueda leer un fallo después de 30-60s.
+  // Mismo patrón que CreativosTab.jsx tras commit 83f5e62.
+  const [hooksError, setHooksError] = useState(null);
   const [hooksTono, setHooksTono] = useState('argentino coloquial, directo');
   const [hooksObjetivo, setHooksObjetivo] = useState('TOFU');
   const [hooksRestricciones, setHooksRestricciones] = useState('');
@@ -179,6 +189,7 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
 
   const generarHooks = async () => {
     setHooksRunning(true);
+    setHooksError(null);
     try {
       const resp = await fetch('/api/marketing/creatives', {
         method: 'POST',
@@ -216,6 +227,7 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
       });
       addToast?.({ type: 'success', message: `${data.hooks?.length || 0} hooks generados` });
     } catch (err) {
+      setHooksError(err.message || 'Error desconocido');
       addToast?.({ type: 'error', message: err.message });
     } finally {
       setHooksRunning(false);
@@ -272,7 +284,20 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-      const updated = competidores.map(c => c.id === comp.id ? { ...c, ads: data.ads || [], lastCheck: new Date().toISOString() } : c);
+      // STORAGE SPLIT: ads van a IDB (sin cap), metadata a localStorage.
+      // Antes guardábamos ads inline en producto.competidores[i].ads, que
+      // reventaba quota localStorage con muchos ads (regression del refactor).
+      try {
+        const { setCompAds } = await import('./competidorAdsIDB.js');
+        await setCompAds(p.id, comp.id, {
+          ads: data.ads || [],
+          total: data.total || (data.ads?.length || 0),
+          lastAdsCheck: new Date().toISOString(),
+        });
+      } catch (err) {
+        console.warn('[Marketing.checkCompetitorAds] setCompAds falló:', err.message);
+      }
+      const updated = competidores.map(c => c.id === comp.id ? { ...c, adsTotal: data.total || (data.ads?.length || 0), lastCheck: new Date().toISOString() } : c);
       onUpdateProduct({
         competidores: updated,
         historial: [...historial, { tipo: 'ads-check', at: new Date().toISOString(), meta: `${comp.nombre}: ${data.total} ads` }],
@@ -490,10 +515,18 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
                         <button onClick={() => removeCompetidor(c.id)} className="p-1 text-gray-400 hover:text-red-600 transition"><Trash2 size={12} /></button>
                       </div>
                     </div>
-                    {/* Ads del competidor */}
+                    {/* Ads del competidor — POST-REFACTOR IDB: el array
+                        inline ya no se guarda. Si hay adsTotal pero c.ads
+                        vacío, mostramos solo el counter (UI completa vive
+                        en Inspiración con hidratación). */}
+                    {!Array.isArray(c.ads) && c.adsTotal > 0 && (
+                      <p className="mt-2 text-[10px] text-gray-500 dark:text-gray-400 italic">
+                        {c.adsTotal} ads scrapeados — ver detalle en la tab Inspiración
+                      </p>
+                    )}
                     {Array.isArray(c.ads) && c.ads.length > 0 && (
                       <div className="mt-2 space-y-1.5">
-                        <p className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase">{c.ads.length} ads activos (top por días corriendo)</p>
+                        <p className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase">{c.adsTotal || c.ads.length} ads activos (top por días corriendo)</p>
                         {c.ads.slice(0, 5).map((ad, idx) => (
                           <div key={ad.id || idx} className="flex gap-2 p-2 bg-white dark:bg-gray-800 rounded border border-gray-100 dark:border-gray-700 text-xs">
                             <div className="flex-1 min-w-0">
@@ -506,7 +539,7 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
                             </div>
                           </div>
                         ))}
-                        {c.ads.length > 5 && <p className="text-[10px] text-gray-400 dark:text-gray-500">+ {c.ads.length - 5} ads más</p>}
+                        {(c.adsTotal || c.ads.length) > 5 && <p className="text-[10px] text-gray-400 dark:text-gray-500">+ {(c.adsTotal || c.ads.length) - 5} ads más</p>}
                       </div>
                     )}
                   </div>
@@ -561,6 +594,28 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
               </button>
               {creativos?.fase1?.generatedAt && (
                 <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-2">Última generación: {new Date(creativos.fase1.generatedAt).toLocaleString('es-AR')}</p>
+              )}
+              {/* Cartel rojo persistente — sin esto un error de 30-60s después
+                  del click se muestra solo como toast efímero (3.5s) y el user
+                  no puede leer el motivo del fallo. Mismo patrón que CreativosTab. */}
+              {hooksError && !hooksRunning && (
+                <div className="mt-3 bg-red-50 dark:bg-red-900/20 border border-red-300 dark:border-red-800 rounded-lg p-3 flex items-start gap-2">
+                  <AlertTriangle size={16} className="text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-bold text-red-800 dark:text-red-200 mb-1">Falló el generador de hooks</p>
+                    <p className="text-xs text-red-700 dark:text-red-300 break-words">{hooksError}</p>
+                    <div className="mt-2 flex items-center gap-2">
+                      <button onClick={generarHooks}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-white bg-red-600 hover:bg-red-700 rounded transition">
+                        <Sparkles size={11} /> Reintentar
+                      </button>
+                      <button onClick={() => setHooksError(null)}
+                        className="text-[11px] text-red-700 dark:text-red-300 hover:underline">
+                        Cerrar
+                      </button>
+                    </div>
+                  </div>
+                </div>
               )}
             </div>
 
@@ -853,11 +908,19 @@ export default function MarketingSection({ addToast, bgAnalysis, onStart, onCanc
             });
             if (!resp.ok) continue; // silencioso: si falla, no molestamos al user
             const data = await resp.json();
-            // Actualizo el producto en el state, preservando todo lo demás.
+            // Mismo storage split — ads a IDB, solo metadata inline.
+            try {
+              const { setCompAds } = await import('./competidorAdsIDB.js');
+              await setCompAds(p.id, c.id, {
+                ads: data.ads || [],
+                total: data.total || (data.ads?.length || 0),
+                lastAdsCheck: new Date().toISOString(),
+              });
+            } catch {}
             setProductos(prev => prev.map(prod => {
               if (prod.id !== p.id) return prod;
               const updatedComps = (prod.competidores || []).map(cc =>
-                cc.id === c.id ? { ...cc, ads: data.ads || [], lastCheck: new Date().toISOString() } : cc
+                cc.id === c.id ? { ...cc, adsTotal: data.total || (data.ads?.length || 0), lastCheck: new Date().toISOString() } : cc
               );
               return { ...prod, competidores: updatedComps, updatedAt: new Date().toISOString() };
             }));

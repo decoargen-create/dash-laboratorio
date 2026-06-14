@@ -68,7 +68,9 @@ export default function GeneradorRapido({ producto, addToast, onDone }) {
   const competidores = producto?.competidores || [];
   const tieneResearch = !!(producto?.docs?.research || producto?.research);
   const numAnalisis = competidores.reduce((s, c) => s + Object.keys(c.adsAnalysis || {}).length, 0);
-  const numAds = competidores.reduce((s, c) => s + (c.ads?.length || 0), 0);
+  // Fallback a adsTotal (metadata) post-refactor IDB — c.ads puede estar
+  // vacío si compAdsByCompId aún no hidrató desde IDB.
+  const numAds = competidores.reduce((s, c) => s + (c.adsTotal || c.ads?.length || 0), 0);
 
   // Cronómetro derivado del startedAt del store (no de un mount local), así
   // muestra el tiempo real aunque hayas navegado y vuelto.

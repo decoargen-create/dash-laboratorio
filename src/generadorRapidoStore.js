@@ -17,6 +17,7 @@
 import { addGeneratedIdeas, loadIdeas, formatoDeAd } from './bandejaStore.js';
 import { logCostsFromResponse } from './costsStore.js';
 import { startExecution, updateExecution, finishExecution } from './executionsStore.js';
+import { hydrateCompetidoresAds } from './competidorAdsIDB.js';
 
 const CHUNK = 4;
 // Cuántas tandas corren EN PARALELO. Tandas chicas + paralelas = rápido y sin
@@ -120,7 +121,10 @@ export async function runGeneradorRapido({ producto, formato, cantidad, formatoM
 
   try {
     // Contexto desde lo ya guardado — sin scrape ni deep-analyze.
-    const competidores = producto?.competidores || [];
+    // CRÍTICO: ads de competidores ahora viven en IDB (storage split).
+    // Sin hidratar, allCompAds queda vacío y el generador corre ciego.
+    const competidoresBase = producto?.competidores || [];
+    const competidores = await hydrateCompetidoresAds(competidoresBase, producto?.id);
     const compAnalisis = [];
     const allCompAds = [];
     for (const c of competidores) {

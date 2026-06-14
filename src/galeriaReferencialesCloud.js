@@ -46,6 +46,33 @@ export async function isCloudReady() {
   return _cloudReadyCache;
 }
 
+// Re-firma signed URLs justo antes de descargar. Las URLs generadas al
+// cargar la galería tienen TTL de 1h — si el user demora más en hacer
+// click en "Descargar ZIP", las URLs expiran y devuelven 403 con un body
+// JSON de ~90 bytes que se guardaba como .png corrupto en el ZIP.
+//
+// Recibe items con `storagePath` y devuelve los mismos items con
+// `imageUrl` reemplazada por una signed URL fresca de 5min de validez.
+// Si no hay storagePath (items legacy IDB), deja imageUrl como está.
+export async function refreshSignedUrls(items) {
+  if (!supabase || !Array.isArray(items) || items.length === 0) return items;
+  const conPath = items.filter(it => it?.storagePath);
+  if (conPath.length === 0) return items;
+  try {
+    const { data: signedList, error } = await supabase.storage
+      .from(BUCKET)
+      .createSignedUrls(conPath.map(it => it.storagePath), 300);
+    if (error || !Array.isArray(signedList)) return items;
+    const byPath = new Map(signedList.map(s => [s.path, s.signedUrl]));
+    return items.map(it => {
+      const fresh = it?.storagePath ? byPath.get(it.storagePath) : null;
+      return fresh ? { ...it, imageUrl: fresh } : it;
+    });
+  } catch {
+    return items;
+  }
+}
+
 // Convierte base64 puro a Blob para subir al Storage.
 function base64ToBlob(b64, mimeType = 'image/png') {
   const byteChars = atob(b64);
@@ -176,7 +203,30 @@ export async function getReferencialesByProductoCloud(productoId, opts = {}) {
     console.warn('[galería cloud] query error:', error.message);
     return [];
   }
-  return (data || []).map(rowToRef);
+  // PRIVATE BUCKET FIX: el bucket 'creativos' es privado → la public URL
+  // guardada en row.image_url da 400/403 al cargar como <img src>. Generamos
+  // signed URLs (1 hora de validez) para los items con storage_path. Si el
+  // signing falla, dejamos la public URL como fallback (puede funcionar si
+  // alguien hizo público el bucket después).
+  const items = (data || []).map(rowToRef);
+  const itemsConStoragePath = items.filter(it => it.storagePath);
+  if (itemsConStoragePath.length > 0) {
+    try {
+      const { data: signedList, error: signErr } = await supabase.storage
+        .from(BUCKET)
+        .createSignedUrls(itemsConStoragePath.map(it => it.storagePath), 3600);
+      if (!signErr && Array.isArray(signedList)) {
+        const byPath = new Map(signedList.map(s => [s.path, s.signedUrl]));
+        for (const it of items) {
+          const signed = byPath.get(it.storagePath);
+          if (signed) it.imageUrl = signed;
+        }
+      }
+    } catch (err) {
+      console.warn('[galería cloud] signed URL falló:', err.message);
+    }
+  }
+  return items;
 }
 
 // Lista TODOS los winners del usuario, de TODOS sus productos (galería global
@@ -203,7 +253,27 @@ export async function listAllWinnersCloud() {
     console.warn('[winners cloud] query error:', error.message);
     return [];
   }
-  return (data || []).map(rowToRef);
+  // Mismo fix de signed URLs que getReferencialesByProductoCloud — el bucket
+  // privado rompe los <img src> sin esto.
+  const items = (data || []).map(rowToRef);
+  const itemsConStoragePath = items.filter(it => it.storagePath);
+  if (itemsConStoragePath.length > 0) {
+    try {
+      const { data: signedList, error: signErr } = await supabase.storage
+        .from(BUCKET)
+        .createSignedUrls(itemsConStoragePath.map(it => it.storagePath), 3600);
+      if (!signErr && Array.isArray(signedList)) {
+        const byPath = new Map(signedList.map(s => [s.path, s.signedUrl]));
+        for (const it of items) {
+          const signed = byPath.get(it.storagePath);
+          if (signed) it.imageUrl = signed;
+        }
+      }
+    } catch (err) {
+      console.warn('[winners cloud] signed URL falló:', err.message);
+    }
+  }
+  return items;
 }
 
 export async function countReferencialesByProductoCloud(productoId) {

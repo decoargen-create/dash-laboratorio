@@ -21,7 +21,7 @@ import React, { useState, useEffect, useRef, useMemo, Fragment } from 'react';
 import {
   Package, Target, Play, Check, Loader2, AlertTriangle, ChevronRight, ChevronDown,
   Plus, X, Sparkles, Link2, Search, Clock, Inbox, Trash2, Upload, Download, Activity,
-  LayoutGrid, List as ListIcon, BarChart3, Copy, Pencil,
+  LayoutGrid, List as ListIcon, BarChart3, Copy, Pencil, Music,
 } from 'lucide-react';
 import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGeneradorHoy, updateIdea, formatoDeAd } from './bandejaStore.js';
 import { deleteProducto as deleteProductoFromCloud } from './marketingSync.js';
@@ -41,12 +41,13 @@ import ProductoImagenUploader from './ProductoImagenUploader.jsx';
 import GaleriaReferencialesModal from './GaleriaReferencialesModal.jsx';
 import { usePipelineRun } from './PipelineRunContext.jsx';
 import { getProductoImagen } from './productoImagen.js';
+import { setCompAds, getCompAds, hydrateCompetidoresAds, removeCompAds } from './competidorAdsIDB.js';
 import { stringifyApiError } from './apiHelpers.js';
 
 // Avatar del producto: muestra el pote (foto cargada en Setup) y cae al
 // gradiente con la inicial si todavía no hay foto. getProductoImagen resuelve
 // desde IDB/cloud y está memoizado, así que es barato re-montarlo por card.
-function ProductAvatar({ id, nombre, sizeClass = 'w-12 h-12', radiusClass = 'rounded-lg', extra = '' }) {
+function ProductAvatar({ id, nombre, producto = null, sizeClass = 'w-12 h-12', radiusClass = 'rounded-lg', extra = '' }) {
   const [src, setSrc] = useState(null);
   useEffect(() => {
     let alive = true;
@@ -54,7 +55,12 @@ function ProductAvatar({ id, nombre, sizeClass = 'w-12 h-12', radiusClass = 'rou
     // reusa para otro producto, no mostramos la foto vieja mientras carga.
     setSrc(null);
     const load = () => {
-      getProductoImagen(id)
+      // ⚠️ CROSS-PC FIX: pasamos producto como fallback. Sin esto,
+      // getProductoImagen leía readProducto(id) de localStorage; en PC2
+      // el localStorage puede estar stale → fotoUrl ausente → null →
+      // caía al avatar de letra ("C", "B", "P"). Con el producto en mano
+      // (que el caller ya tiene del cloud-pull), accede a fotoUrl directo.
+      getProductoImagen(id, producto)
         .then(img => { if (alive) setSrc(img || null); })
         .catch(() => {});
     };
@@ -142,6 +148,36 @@ function saveJSON(key, value) {
     // (storage disabled en navegadores raros) no son accionables y mantienen
     // el comportamiento previo de fallar silencioso.
     if (err && (err.name === 'QuotaExceededError' || err.code === 22 || err.code === 1014)) {
+      // ANTES: dispatcheábamos el toast en seguida sin intentar liberar
+      // nada. Pero hay caches gordas (skeleton, creative-refresh, debug log
+      // viejo) que ocupan MB y son descartables. Replicamos la estrategia
+      // de marketingSync.js: liberar caches → retry → si AÚN no entra,
+      // recién ahí surface el error al user.
+      const cachesAReleasar = [
+        'adslab-marketing-skeleton-cache',
+        'adslab-marketing-creative-refresh-cache',
+        'adslab-marketing-execution-log',
+        'adslab-marketing-cost-log',
+        'adslab-debug-log-v1',
+      ];
+      let liberadas = 0;
+      for (const k of cachesAReleasar) {
+        try {
+          if (localStorage.getItem(k)) { localStorage.removeItem(k); liberadas++; }
+        } catch {}
+      }
+      if (liberadas > 0) {
+        try {
+          localStorage.setItem(key, JSON.stringify(value));
+          if (key.startsWith('adslab-marketing-')) {
+            try { window.dispatchEvent(new CustomEvent('viora:marketing-storage-changed', { detail: { key } })); } catch {}
+          }
+          console.info(`[saveJSON] quota recuperado liberando ${liberadas} caches`);
+          return true;
+        } catch {
+          // sigue sin entrar — caer al toast
+        }
+      }
       try {
         // Notificamos vía CustomEvent así el componente puede mostrar toast
         // sin tener que pasar `addToast` a esta función pura.
@@ -306,11 +342,25 @@ async function parseJsonResponse(resp, contextLabel) {
   try {
     return JSON.parse(raw);
   } catch {
-    const isTimeout = /timeout|FUNCTION_INVOCATION|gateway/i.test(raw)
-      || resp.status === 504 || resp.status === 502;
-    const detalle = isTimeout
-      ? 'el servidor tardó demasiado y cortó la conexión (timeout) — reintentá en la próxima corrida'
-      : `el servidor devolvió un error inesperado (HTTP ${resp.status})`;
+    // Vercel mata la función serverless al pasar maxDuration y devuelve
+    // su página HTML genérica "Internal Server Error" / "An error occurred
+    // with your deployment". Detectamos esos patrones para dar un mensaje
+    // accionable en lugar del críptico "Unexpected token '<' is not JSON".
+    const isVercelTimeout = /FUNCTION_INVOCATION_TIMEOUT|TIMEOUT|gateway timeout/i.test(raw);
+    const isVercelGenericError = /Internal Server Error|An error occurred with your deployment|FUNCTION_INVOCATION_FAILED/i.test(raw);
+    const isHTML = /^\s*<(!doctype|html)/i.test(raw);
+    const status5xx = resp.status === 504 || resp.status === 502 || resp.status === 500;
+
+    let detalle;
+    if (isVercelTimeout || resp.status === 504) {
+      detalle = 'el servidor tardó demasiado y cortó la conexión (timeout > 300s) — reintentá en la próxima corrida';
+    } else if (isVercelGenericError || (isHTML && status5xx)) {
+      detalle = 'la función serverless crasheó o agotó memoria — Vercel devolvió error genérico. Reintentá; si persiste, revisá los logs en Vercel';
+    } else if (status5xx) {
+      detalle = `el servidor devolvió un error inesperado (HTTP ${resp.status})`;
+    } else {
+      detalle = `respuesta no-JSON inesperada (HTTP ${resp.status})`;
+    }
     throw new Error(`${contextLabel}: ${detalle}`);
   }
 }
@@ -466,7 +516,7 @@ const FLOW_STEPS = [
   { emoji: '▶️', tab: null, titulo: 'Correr pipeline', desc: 'Leemos los ads ganadores de la competencia y armamos ideas.' },
   { emoji: '📥', tab: 'bandeja', titulo: 'Bandeja', desc: 'Revisás cada idea y generás el creativo ahí mismo.' },
   { emoji: '🎨', tab: 'creativos', titulo: 'Creativos', desc: 'Ves los estáticos generados, listos para descargar.' },
-  { emoji: '🤖', tab: 'copiloto', titulo: 'Copiloto', desc: 'Pedís más variantes o ajustes en lenguaje natural.' },
+  { emoji: '🧠', tab: 'copiloto', titulo: 'Santi', desc: 'Hablale a Santi — el cerebro de la plataforma. Pedíle variantes, ajustes o feedback en lenguaje natural.' },
 ];
 
 function FlowGuide() {
@@ -552,7 +602,7 @@ function ProductTabs({ activeTab, onChange }) {
         { id: 'inspiracion', label: 'Inspiración', emoji: '✨' },
         { id: 'creativos', label: 'Creativos', emoji: '🎨' },
         { id: 'galeria', label: 'Galería', emoji: '🖼️' },
-        { id: 'copiloto', label: 'Copiloto', emoji: '🤖' },
+        { id: 'copiloto', label: 'Santi', emoji: '🧠' },
       ],
     },
   ];
@@ -922,7 +972,70 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
   // Producto activo derivado + competidores + cuenta Meta del producto activo.
   const producto = productos.find(p => String(p.id) === String(activeProductoId)) || null;
-  const competidores = producto?.competidores || [];
+  const competidoresBase = producto?.competidores || [];
+  // Ads ahora viven en IDB. compAdsByCompId hidrata por competidor.id.
+  // useMemo de `competidores` mete los ads adentro para que el código
+  // legacy (memos, pipeline) sigan leyendo c.ads como antes.
+  const [compAdsByCompId, setCompAdsByCompId] = useState({});
+  const [hydratingAds, setHydratingAds] = useState(false);
+  // RESET al cambiar producto — sin esto el state acumula entries de TODOS
+  // los productos navegados → memory leak masivo (50 productos × 5 comps ×
+  // 200 ads × 5KB ≈ 250MB en el state). Hacemos cleanup explícito.
+  const prevProductoIdRef = useRef(null);
+  useEffect(() => {
+    if (prevProductoIdRef.current && prevProductoIdRef.current !== producto?.id) {
+      setCompAdsByCompId({});
+    }
+    prevProductoIdRef.current = producto?.id;
+  }, [producto?.id]);
+  useEffect(() => {
+    let cancelled = false;
+    if (!producto?.id) { setCompAdsByCompId({}); return; }
+    setHydratingAds(true);
+    (async () => {
+      // PRIORITY: IDB > inline legacy. Antes preferíamos inline si existía,
+      // lo que dejaba productos parcialmente migrados leyendo datos stale.
+      const updates = {};
+      const recordsByCompId = {};
+      for (const c of competidoresBase) {
+        const rec = await getCompAds(producto.id, c.id);
+        if (rec?.ads?.length) { updates[c.id] = rec.ads; recordsByCompId[c.id] = rec; continue; }
+        if (Array.isArray(c.ads) && c.ads.length > 0) { updates[c.id] = c.ads; }
+      }
+      if (!cancelled) {
+        // MERGE FIX (round 3): antes comparábamos `ads.length > prev.length`
+        // que perdía datos cuando un re-scrape devolvía MENOS ads (algunos
+        // expiraron en Meta). Ahora comparamos por timestamp (ts del record
+        // IDB). El más fresco gana, sin importar el length.
+        setCompAdsByCompId(prev => {
+          const next = {};
+          const validIds = new Set(competidoresBase.map(c => c.id));
+          // Conservar solo entries de comps que aún existen (drop zombi).
+          for (const [k, v] of Object.entries(prev)) {
+            if (validIds.has(k)) next[k] = v;
+          }
+          // Aplicar updates priorizando frescura por timestamp.
+          for (const [cid, ads] of Object.entries(updates)) {
+            const rec = recordsByCompId[cid];
+            const incomingTs = rec?.ts || 0;
+            const currentTs = next[cid]?._ts || 0;
+            if (!next[cid] || incomingTs >= currentTs) {
+              next[cid] = ads;
+              if (incomingTs) ads._ts = incomingTs;
+            }
+          }
+          return next;
+        });
+        setHydratingAds(false);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [producto?.id, competidoresBase.length, competidoresBase.map(c => c.lastAdsCheck).join('|')]);
+  const competidores = useMemo(
+    () => competidoresBase.map(c => (compAdsByCompId[c.id] ? { ...c, ads: compAdsByCompId[c.id] } : c)),
+    [competidoresBase, compAdsByCompId]
+  );
   const metaAccount = producto?.metaAccount || null;
   // Setter de competidores que los guarda DENTRO del producto activo.
   const setCompetidores = (updater) => {
@@ -958,7 +1071,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
   // Wizard competitors
   const [showCompForm, setShowCompForm] = useState(false);
-  const [compDraft, setCompDraft] = useState({ nombre: '', landingUrl: '' });
+  const [compDraft, setCompDraft] = useState({ nombre: '', landingUrl: '', adLibraryUrl: '', tiktokKeywords: '' });
 
   // Meta ad account picker
   const [metaConnected, setMetaConnected] = useState(null); // null = unknown, bool = checked
@@ -1287,6 +1400,21 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
   const handleAddCompetidor = async () => {
     const landingUrl = compDraft.landingUrl.trim();
+    const adLibraryUrl = compDraft.adLibraryUrl.trim();
+    // Validar adLibraryUrl si la pegó: debe ser facebook.com.
+    if (adLibraryUrl) {
+      try {
+        const u = new URL(adLibraryUrl);
+        const host = u.hostname.toLowerCase();
+        if (!(host === 'facebook.com' || host.endsWith('.facebook.com'))) {
+          addToast?.({ type: 'error', message: `La biblioteca de anuncios tiene que ser de facebook.com (mandaste ${host}).` });
+          return;
+        }
+      } catch {
+        addToast?.({ type: 'error', message: 'La URL de la biblioteca de anuncios no es válida.' });
+        return;
+      }
+    }
     // Nombre: si el user no puso uno, o puso algo poco descriptivo (vacío o
     // puramente numérico tipo "5"), lo derivamos de la URL de la landing.
     // Así la lista muestra "Femprobiotics" en vez de "5".
@@ -1314,14 +1442,22 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       id: nuevoId,
       nombre,
       landingUrl,
+      // adLibraryUrl: URL DIRECTA de Meta Ad Library (con filtros + sort)
+      // que el user pegó a mano. Tiene prioridad sobre fbPageUrl y
+      // searchKeyword al scrapear — si la pegó, sabe qué quiere ver.
+      adLibraryUrl: adLibraryUrl || '',
       fbPageUrl: '',
+      // tiktokKeywords: lista CSV de términos para scraping de TikTok ads.
+      // El user puede pegar "femprobiotics, prebiotico, gut health" y vamos
+      // a buscar esos en TikTok Creative Center.
+      tiktokKeywords: compDraft.tiktokKeywords?.trim() || '',
       notas: '',
       ads: [],
       lastAdsCheck: null,
       createdAt: new Date().toISOString(),
     };
     setCompetidores(prev => [nuevo, ...prev]);
-    setCompDraft({ nombre: '', landingUrl: '' });
+    setCompDraft({ nombre: '', landingUrl: '', adLibraryUrl: '', tiktokKeywords: '' });
     setShowCompForm(false);
     addToast?.({ type: 'success', message: `Competidor "${nombre}" sumado` });
 
@@ -1355,9 +1491,76 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     }
   };
 
-  const handleRemoveCompetidor = (id) => {
+  // Set de comp IDs cuyo scrape TikTok está en curso.
+  const [tiktokScrapingIds, setTiktokScrapingIds] = useState(() => new Set());
+
+  // Dispara el scrape TikTok manual para un competidor. Si no tiene keywords
+  // configurados, prompt para que los agregue al toque.
+  const handleScrapeTiktok = async (c) => {
+    let keywords = (c.tiktokKeywords || '').trim();
+    if (!keywords) {
+      const promptVal = window.prompt(
+        `Términos TikTok para "${c.nombre}" (separados por coma):`,
+        c.nombre
+      );
+      if (!promptVal) return;
+      keywords = promptVal.trim();
+      // Persistir en el competidor.
+      setCompetidores(prev => prev.map(x =>
+        x.id === c.id ? { ...x, tiktokKeywords: keywords } : x
+      ));
+    }
+    setTiktokScrapingIds(prev => { const n = new Set(prev); n.add(c.id); return n; });
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers = { 'Content-Type': 'application/json' };
+      if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`;
+      const resp = await fetch('/api/marketing/scrape-tiktok', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          keywords: keywords.split(',').map(s => s.trim()).filter(Boolean),
+          country: 'AR',
+          limit: 100,
+          productoId: producto?.id,
+          competidorId: c.id,
+        }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      addToast?.({
+        type: 'success',
+        message: `TikTok ${c.nombre}: ${data.total || 0} ads (${data.winners || 0} ganadores)`,
+      });
+    } catch (err) {
+      addToast?.({ type: 'error', message: `TikTok ${c.nombre}: ${err.message}` });
+    } finally {
+      setTiktokScrapingIds(prev => { const n = new Set(prev); n.delete(c.id); return n; });
+    }
+  };
+
+  const handleRemoveCompetidor = async (id) => {
     if (!window.confirm('¿Sacar a este competidor de la lista?')) return;
     setCompetidores(prev => prev.filter(c => c.id !== id));
+    // Limpiar el brand "auto-sincronizado" en Inspiración (fromCompetidorId)
+    // → sin esto quedaba una marca huérfana en la galería de inspiración
+    // apuntando a un competidor que ya no existe.
+    if (producto?.id) {
+      try {
+        const brandsKey = `adslab-marketing-inspiracion-brands-${producto.id}`;
+        const raw = localStorage.getItem(brandsKey);
+        if (raw) {
+          const arr = JSON.parse(raw);
+          const filtered = arr.filter(b => String(b.fromCompetidorId || '') !== String(id));
+          if (filtered.length !== arr.length) {
+            localStorage.setItem(brandsKey, JSON.stringify(filtered));
+          }
+        }
+      } catch {}
+      // Y borrar los ads del competidor en IDB — no tienen razón de seguir
+      // ocupando MB después de que el comp se va.
+      try { await removeCompAds(producto.id, id); } catch {}
+    }
   };
 
   // Sugerencia automática de competidores: buscamos en Ad Library por keyword
@@ -1727,20 +1930,26 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     // biblioteca. Los ads que ya deep-analizamos en corridas previas se
     // saltean en el paso de análisis (no gastan Claude de nuevo). El user
     // quiere ver la diff: cuántos son nuevos vs ya vistos.
+    //
+    // PARALELIZACIÓN: antes era secuencial (`for (const c of comps)`), 4
+    // comps × ~120s polling Apify = ~480s. Con concurrency 3 baja a ~200s.
+    // Los react updates concurrentes son safe porque setCompetidores +
+    // setCompAdsByCompId usan functional updaters (cada uno modifica solo su
+    // propia entrada).
     const compWithAds = []; // { comp, winners }
     let apifyQuotaExhausted = false;
-    for (const c of competidoresLocal) {
-      if (cancelledRef.current) break;
+    const SCRAPE_CONCURRENCY = 3;
+
+    // Closure por competidor — antes era el cuerpo del for-loop.
+    const scrapeOneCompetidor = async (c) => {
+      if (cancelledRef.current) return;
       if (apifyQuotaExhausted) {
-        // Si Apify se quedó sin quota mensual no tiene sentido seguir —
-        // todos los siguientes van a tirar el mismo error. Marcamos como
-        // pending → done con nota.
         updateStep(`scrape-${c.id}`, {
           status: 'error',
           endedAt: Date.now(),
           detail: 'Salteado · Apify sin quota mensual',
         });
-        continue;
+        return;
       }
       const stepId = `scrape-${c.id}`;
       updateStep(stepId, { status: 'running', startedAt: Date.now() });
@@ -1749,11 +1958,12 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         // el competidor en la biblioteca por primera vez. Refreshes
         // posteriores usan 100 (en InspiracionSection).
         const payload = { country: 'ALL', limit: 500 };
-        // Fallback auto-resolver: si no tenemos fbPageUrl pero sí landing,
-        // intentamos detectar la FB page antes de caer a keyword. Scrapear
-        // por Page es mucho más estable que por keyword (keyword a veces
-        // aborta en Apify). Si no la encontramos, seguimos con keyword.
-        let resolvedFbPage = c.fbPageUrl;
+        // PRIORIDAD: adLibraryUrl (URL armada a mano por el user con filtros
+        // + sort específicos) > fbPageUrl resuelto > searchKeyword. La URL
+        // a mano es la más precisa porque garantiza scrapear los ads
+        // reales de la marca (no random que pueda resolver una FB page
+        // genérica como Shopify).
+        let resolvedFbPage = c.adLibraryUrl || c.fbPageUrl;
         if (!resolvedFbPage && c.landingUrl) {
           updateStep(stepId, { detail: 'Detectando Facebook Page de la landing…' });
           try {
@@ -1779,12 +1989,41 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         } else {
           payload.searchKeyword = c.nombre;
         }
-        const resp = await fetch('/api/marketing/apify-ingest', {
+        // Pasamos productoId + competidorId + auth para que el server pueda
+        // upsertear al search index. Si no podemos obtener token, igual
+        // funciona el scrape — solo no entra al index.
+        payload.productoId = producto.id;
+        payload.competidorId = c.id;
+        let authToken = '';
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          authToken = session?.access_token || '';
+        } catch {}
+        let resp = await fetch('/api/marketing/apify-ingest', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
+          },
           body: JSON.stringify(payload),
         });
-        const data = await parseJsonResponse(resp, `Scrape de ${c.nombre}`);
+        let data = await parseJsonResponse(resp, `Scrape de ${c.nombre}`);
+        // AUTO-RETRY con limit reducido si el server lo sugiere. Esto
+        // resuelve el caso "Apify tardó demasiado y no quedó tiempo para
+        // reintentar" sin que el user tenga que reintentar a mano.
+        if (!resp.ok && data.retryWithLimit && typeof data.retryWithLimit === 'number') {
+          updateStep(stepId, { detail: `Reintentando con limit ${data.retryWithLimit}…` });
+          const retryPayload = { ...payload, limit: data.retryWithLimit };
+          resp = await fetch('/api/marketing/apify-ingest', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(retryPayload),
+          });
+          data = await parseJsonResponse(resp, `Scrape de ${c.nombre} (retry)`);
+          if (resp.ok) {
+            addToast?.({ type: 'info', message: `${c.nombre}: scrape automático bajó el limit a ${data.retryWithLimit || retryPayload.limit} y funcionó.` });
+          }
+        }
         if (!resp.ok) {
           // Si el endpoint sugiere algo (ej: cargar fbPageUrl manual), lo
           // mostramos al user — más útil que el error crudo de Apify.
@@ -1803,12 +2042,26 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         const ads = data.ads || [];
         const allWinners = ads.filter(a => a.isWinner);
 
-        // Calcular cuántos ads son NUEVOS vs ya vistos (para transparencia).
-        const prevAdIds = new Set((c.ads || []).map(a => a.id));
+        // Calcular cuántos ads son NUEVOS vs ya vistos. Para esto necesitamos
+        // los ads previos — antes vivían inline en c.ads, ahora en IDB.
+        // skipCloud: para la diferencia de "nuevos vs vistos" alcanza con
+        // los previos LOCAL. Si bajamos del cloud bloqueamos el pipeline.
+        const prevRecord = await getCompAds(producto.id, c.id, { skipCloud: true });
+        const prevAds = (Array.isArray(c.ads) && c.ads.length > 0 ? c.ads : prevRecord?.ads) || [];
+        const prevAdIds = new Set(prevAds.map(a => a.id));
         const newAds = ads.filter(a => !prevAdIds.has(a.id));
         const seenAds = ads.filter(a => prevAdIds.has(a.id));
 
-        // Guardar en el competidor (con historial de corridas)
+        // STORAGE SPLIT: ads → IDB (sin cap); metadata → localStorage.
+        await setCompAds(producto.id, c.id, {
+          ads,
+          total: data.total || 0,
+          winners: data.winners || 0,
+          lastAdsCheck: new Date().toISOString(),
+        });
+        setCompAdsByCompId(prev => ({ ...prev, [c.id]: ads }));
+
+        // Guardar SOLO metadata en el competidor (con historial de corridas)
         setCompetidores(prev => prev.map(x => {
           if (x.id !== c.id) return x;
           const prevHistory = Array.isArray(x.adsHistory) ? x.adsHistory : [];
@@ -1818,12 +2071,12 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             winners: data.winners || 0,
             newAds: newAds.length,
           }].slice(-10);
-          // consecutiveZeroAds: tracking para "estable" en el smart scrape.
-          // Se inicializa acá y se incrementa/resetea en InspiracionSection
-          // según haya o no ads nuevos en cada refresh.
+          // Quitamos `ads` inline (vive en IDB). consecutiveZeroAds: tracking
+          // para "estable" en el smart scrape.
           const prevZeroes = x.consecutiveZeroAds || 0;
+          const { ads: _legacy, ...meta } = x;
           return {
-            ...x, ads, adsTotal: data.total || 0, winnersCount: data.winners || 0,
+            ...meta, adsTotal: data.total || 0, winnersCount: data.winners || 0,
             lastAdsCheck: new Date().toISOString(), adsHistory: history,
             consecutiveZeroAds: newAds.length > 0 ? 0 : prevZeroes + 1,
           };
@@ -1855,6 +2108,24 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           });
         }
       }
+    };
+
+    // Ejecutar scrapes en batches paralelos. Si en cualquier batch detectamos
+    // que el user canceló o que Apify se quedó sin quota, salimos del loop.
+    for (let i = 0; i < competidoresLocal.length; i += SCRAPE_CONCURRENCY) {
+      if (cancelledRef.current) break;
+      if (apifyQuotaExhausted) {
+        // Marcamos los que quedan como salteados.
+        for (const c of competidoresLocal.slice(i)) {
+          updateStep(`scrape-${c.id}`, {
+            status: 'error', endedAt: Date.now(),
+            detail: 'Salteado · Apify sin quota mensual',
+          });
+        }
+        break;
+      }
+      const batch = competidoresLocal.slice(i, i + SCRAPE_CONCURRENCY);
+      await Promise.allSettled(batch.map(scrapeOneCompetidor));
     }
 
     // Cap GLOBAL de deep-analyze por corrida. Antes se analizaban hasta 20
@@ -1993,8 +2264,12 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         // los `adsAnalysis` recién guardados por el deep-analyze loop. Antes
         // leíamos `loadJSON(COMPETIDORES_KEY, ...)` que está borrada tras la
         // migración → caía al fallback del closure y perdía análisis frescos.
+        // CRÍTICO POST-REFACTOR: productosRef.current tiene ads STRIPPED (viven
+        // en IDB ahora). Sin hidratar, el pipeline corre ciego — allCompAds
+        // queda vacío y el generador no recibe contexto de competencia.
         const productoFreshGen = productosRef.current.find(p => String(p.id) === String(producto.id));
-        const compsActualizados = productoFreshGen?.competidores || competidores;
+        const compsBase = productoFreshGen?.competidores || competidores;
+        const compsActualizados = await hydrateCompetidoresAds(compsBase, producto.id);
         for (const c of compsActualizados) {
           // Deep-analyzed (con insights completos)
           const analyses = c.adsAnalysis || {};
@@ -2564,7 +2839,10 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 acc[i.estado || 'pendiente'] = (acc[i.estado || 'pendiente'] || 0) + 1;
                 return acc;
               }, {});
-              const adsScrapeados = comps.reduce((sum, c) => sum + (c.ads?.length || 0), 0);
+              // adsTotal vive en localStorage (metadata). c.ads.length solo
+              // existe si los ads aún están hidratados en memory. Fallback a
+              // adsTotal previene el bug "0 ads tras reload" post-refactor IDB.
+              const adsScrapeados = comps.reduce((sum, c) => sum + (c.adsTotal || c.ads?.length || 0), 0);
               const deepAnalyses = comps.reduce((sum, c) => sum + Object.keys(c.adsAnalysis || {}).length, 0);
               const runsDelProducto = runHistory.filter(r => String(r.productoId || '') === String(p.id));
               const ultimoRun = runsDelProducto[0];
@@ -2690,7 +2968,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 return (
                   <div key={p.id} onClick={open}
                     className="group flex items-center gap-3 bg-white dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/80 rounded-xl px-3 py-2.5 cursor-pointer hover:border-brand-300 dark:hover:border-brand-700 hover:shadow-md transition">
-                    <ProductAvatar id={p.id} nombre={p.nombre} sizeClass="w-10 h-10" extra="text-base shrink-0" />
+                    <ProductAvatar id={p.id} nombre={p.nombre} producto={p} sizeClass="w-10 h-10" extra="text-base shrink-0" />
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{p.nombre}</p>
                       {/* Un solo chip de estado (research) + stage en texto sutil. */}
@@ -2736,7 +3014,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                   </div>
                   {/* Header */}
                   <div className="flex items-center gap-3 mb-4 pr-20">
-                    <ProductAvatar id={p.id} nombre={p.nombre} extra="text-lg group-hover:scale-105 transition" />
+                    <ProductAvatar id={p.id} nombre={p.nombre} producto={p} extra="text-lg group-hover:scale-105 transition" />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{p.nombre}</p>
                       <div className="flex items-center gap-2 mt-1">
@@ -2790,6 +3068,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         <ProductAvatar
           id={producto.id}
           nombre={producto.nombre}
+          producto={producto}
           radiusClass="rounded-xl"
           extra="shadow-sm text-xl"
         />
@@ -2957,7 +3236,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
             {/* Foto del producto para usar como referencia en gpt-image-2
                 cuando se generan creativos referenciales desde Inspiración. */}
-            <ProductoImagenUploader productoId={producto.id} addToast={addToast} />
+            <ProductoImagenUploader productoId={producto.id} producto={producto} addToast={addToast} />
 
             {/* Activo visual de marca — elemento icónico reutilizable que se
                 propaga a todos los prompts de imagen. */}
@@ -3323,15 +3602,41 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
         {/* Form de agregar */}
         {showCompForm && (
-          <div className="bg-gray-50 dark:bg-gray-900/40 border border-brand-300 dark:border-brand-700 rounded-xl p-3 mb-3 flex flex-col sm:flex-row gap-2 items-stretch">
-            <input type="text" value={compDraft.nombre} onChange={e => setCompDraft({ ...compDraft, nombre: e.target.value })}
-              placeholder="Nombre de la marca (opcional)"
-              className="flex-1 px-2.5 py-1.5 text-sm bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
-            <input type="url" value={compDraft.landingUrl} onChange={e => setCompDraft({ ...compDraft, landingUrl: e.target.value })}
-              placeholder="https://landing-del-competidor.com (recomendado)"
-              className="flex-1 px-2.5 py-1.5 text-sm bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
-            <div className="flex gap-1">
-              <button onClick={() => { setShowCompForm(false); setCompDraft({ nombre: '', landingUrl: '' }); }}
+          <div className="bg-gray-50 dark:bg-gray-900/40 border border-brand-300 dark:border-brand-700 rounded-xl p-3 mb-3 flex flex-col gap-2">
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input type="text" value={compDraft.nombre} onChange={e => setCompDraft({ ...compDraft, nombre: e.target.value })}
+                placeholder="Nombre de la marca (opcional)"
+                className="flex-1 px-2.5 py-1.5 text-sm bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
+              <input type="url" value={compDraft.landingUrl} onChange={e => setCompDraft({ ...compDraft, landingUrl: e.target.value })}
+                placeholder="https://landing-del-competidor.com (recomendado)"
+                className="flex-1 px-2.5 py-1.5 text-sm bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
+            </div>
+            {/* Biblioteca de anuncios DIRECTA — Meta Ad Library URL con
+                filtros + sort que el user armó a mano. Es la forma más
+                precisa de scrapear: garantiza que veamos los ads que
+                realmente pertenecen a la marca (no los random que resuelva
+                la FB page). Es opcional pero recomendado para marcas
+                grandes con muchos ads. */}
+            <div className="flex flex-col gap-1">
+              <input type="url" value={compDraft.adLibraryUrl} onChange={e => setCompDraft({ ...compDraft, adLibraryUrl: e.target.value })}
+                placeholder="https://www.facebook.com/ads/library/?... (opcional, URL armada a mano)"
+                className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
+              <p className="text-[10px] text-gray-500 dark:text-gray-400 italic px-1">
+                Si pegás la URL exacta de la biblioteca de anuncios (con filtros, sort por impressions, etc), la usamos directo en vez de adivinar la FB page. Recomendado para marcas con muchos ads.
+              </p>
+            </div>
+            {/* TikTok keywords — opcional. Términos coma-separados para
+                buscar en TikTok Creative Center (en el momento del scrape). */}
+            <div className="flex flex-col gap-1">
+              <input type="text" value={compDraft.tiktokKeywords} onChange={e => setCompDraft({ ...compDraft, tiktokKeywords: e.target.value })}
+                placeholder="TikTok keywords (opcional): femprobiotics, gut health, prebiotico"
+                className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
+              <p className="text-[10px] text-gray-500 dark:text-gray-400 italic px-1">
+                Términos para buscar en TikTok Creative Center. Si lo dejás vacío, no scrapeamos TikTok para este competidor.
+              </p>
+            </div>
+            <div className="flex gap-1 justify-end">
+              <button onClick={() => { setShowCompForm(false); setCompDraft({ nombre: '', landingUrl: '', adLibraryUrl: '', tiktokKeywords: '' }); }}
                 className="px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 transition">
                 Cancelar
               </button>
@@ -3340,6 +3645,46 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 <Check size={12} /> Agregar
               </button>
             </div>
+          </div>
+        )}
+
+        {/* Master switch del auto-refresh — controla si el cron diario
+            scrapea ESTE producto. Si está OFF, ningún competidor de este
+            producto se refresca automático (independiente de sus toggles
+            individuales). Default OFF — opt-in explícito del user. */}
+        {competidores.length > 0 && (
+          <div className="mb-3 px-3 py-2 rounded-lg border border-emerald-200 dark:border-emerald-800 bg-emerald-50/60 dark:bg-emerald-900/20 flex items-center gap-2.5">
+            <Clock size={14} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-bold text-gray-900 dark:text-gray-100 leading-tight">
+                Auto-refresh diario {producto?.autoRefreshEnabled ? '✓ ON' : '○ OFF'}
+              </p>
+              <p className="text-[10px] text-gray-600 dark:text-gray-400 leading-tight mt-0.5">
+                {producto?.autoRefreshEnabled
+                  ? 'Santi scrapea los competidores marcados con ⏰ a las 3 AM. Activá ⏰ en cada uno que quieras refrescar.'
+                  : 'Cada producto controla su propio auto-refresh. Activá si querés que el cron scrapee TUS competidores de este producto.'}
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                if (!producto) return;
+                setProductos(prev => prev.map(p =>
+                  String(p.id) === String(producto.id)
+                    ? { ...p, autoRefreshEnabled: !p.autoRefreshEnabled, updated_at: new Date().toISOString() }
+                    : p
+                ));
+              }}
+              className={`shrink-0 relative inline-flex h-6 w-11 items-center rounded-full transition ${
+                producto?.autoRefreshEnabled ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-gray-600'
+              }`}
+              title={producto?.autoRefreshEnabled ? 'Desactivar auto-refresh para este producto' : 'Activar auto-refresh para este producto'}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white transition ${
+                  producto?.autoRefreshEnabled ? 'translate-x-6' : 'translate-x-1'
+                }`}
+              />
+            </button>
           </div>
         )}
 
@@ -3397,6 +3742,46 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                       {winners > 0 && <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">{winners} ganadores 🏆</p>}
                     </div>
                   )}
+                  {/* Botón TikTok scrape manual — solo aparece si el comp
+                      tiene tiktokKeywords (o el user lo dispara y los pone
+                      al toque via prompt). */}
+                  <button
+                    onClick={() => handleScrapeTiktok(c)}
+                    disabled={tiktokScrapingIds.has(c.id)}
+                    className={`p-1.5 rounded transition shrink-0 ${
+                      tiktokScrapingIds.has(c.id)
+                        ? 'text-pink-500 bg-pink-50 dark:bg-pink-900/30 cursor-wait'
+                        : c.tiktokKeywords
+                          ? 'text-pink-600 dark:text-pink-400 hover:bg-pink-50 dark:hover:bg-pink-900/20'
+                          : 'text-gray-300 hover:text-pink-500 hover:bg-pink-50 dark:hover:bg-pink-900/20'
+                    }`}
+                    title={tiktokScrapingIds.has(c.id)
+                      ? 'Scrapeando TikTok…'
+                      : c.tiktokKeywords
+                        ? `Scrapear TikTok ahora — keywords: ${c.tiktokKeywords}`
+                        : 'Scrapear TikTok (te pregunto los keywords)'}
+                  >
+                    {tiktokScrapingIds.has(c.id)
+                      ? <Loader2 size={14} className="animate-spin" />
+                      : <Music size={14} />}
+                  </button>
+                  {/* Toggle "auto-refresh diario" — opt-in. Si activado, el
+                      cron de las 6 AM scrapea este competidor diariamente. */}
+                  <button
+                    onClick={() => setCompetidores(prev => prev.map(x =>
+                      x.id === c.id ? { ...x, autoRefresh: !x.autoRefresh } : x
+                    ))}
+                    className={`p-1.5 rounded transition shrink-0 ${
+                      c.autoRefresh
+                        ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100'
+                        : 'text-gray-300 hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/20'
+                    }`}
+                    title={c.autoRefresh
+                      ? 'Auto-refresh diario ACTIVADO — el cron scrapea este competidor a las 3 AM (Buenos Aires). Click para desactivar.'
+                      : 'Activar auto-refresh diario — Santi va a scrapear este competidor todas las noches a las 3 AM sin que tengas que pedirlo.'}
+                  >
+                    <Clock size={14} />
+                  </button>
                   <button onClick={() => handleRemoveCompetidor(c.id)}
                     className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition shrink-0"
                     title="Quitar competidor">
@@ -3442,7 +3827,27 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                   <div>
                     <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase mb-1">Ideas por corrida</label>
                     <input type="number" min="1" max={MAX_IDEAS_PER_RUN} value={genConfig.limiteDiario}
-                      onChange={e => setGenConfig(c => ({ ...c, limiteDiario: Math.max(1, Math.min(MAX_IDEAS_PER_RUN, Number(e.target.value) || 50)) }))}
+                      onChange={e => {
+                        // FIX: antes hacíamos `Number(value) || 50`. Eso pisaba
+                        // el input con 50 cuando el field quedaba vacío (al
+                        // borrar para tipear "10"), imposibilitando llegar a
+                        // números chicos. Ahora permitimos vacío y clampeamos
+                        // SOLO si el user ingresó un número válido.
+                        const raw = e.target.value;
+                        if (raw === '') {
+                          setGenConfig(c => ({ ...c, limiteDiario: '' }));
+                          return;
+                        }
+                        const n = Number(raw);
+                        if (isNaN(n)) return;
+                        setGenConfig(c => ({ ...c, limiteDiario: Math.max(1, Math.min(MAX_IDEAS_PER_RUN, n)) }));
+                      }}
+                      onBlur={e => {
+                        // Al perder foco, si quedó vacío o inválido, restauramos
+                        // el mínimo viable. Sin esto el form se rompía al submit.
+                        const n = Number(e.target.value);
+                        if (isNaN(n) || n < 1) setGenConfig(c => ({ ...c, limiteDiario: 1 }));
+                      }}
                       className="w-24 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-brand-500" />
                     <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">
                       Cuántas ideas pide el generador en cada corrida. La primera corrida del producto genera entre 50 y {MAX_IDEAS_PER_RUN} según cuántos ads tenga la competencia. El dedup evita repetir ideas entre corridas.

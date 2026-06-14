@@ -26,7 +26,7 @@ import {
   Sparkles, Package, ChevronRight, ChevronDown, Plus, Trash2, Link2, X,
   Loader2, Download, Image as ImageIcon, ExternalLink, Wand2, Search,
   Check, AlertCircle, LayoutGrid, Rows3, Table2, Settings2, RefreshCw,
-  Inbox,
+  Inbox, Bookmark,
 } from 'lucide-react';
 import { logCostsFromResponse } from './costsStore.js';
 import { addGeneratedIdeas } from './bandejaStore.js';
@@ -39,6 +39,9 @@ import { playDoneChime, playBulkDoneChime, playErrorTone } from './sounds.js';
 import EmptyState from './EmptyState.jsx';
 import { supabase } from './supabase.js';
 import { notifyMarketingChange } from './useMarketingSync.js';
+import { safeSetItem } from './safeStorage.js';
+import { setCompAds, getCompAds } from './competidorAdsIDB.js';
+import { listBoards, createBoard, addItemsToBoard } from './marketingBoardsApi.js';
 // Galería ahora vive como tab independiente en el workspace (Arranque),
 // no más como modal acá.
 
@@ -150,8 +153,19 @@ async function parseJsonOrThrow(resp, contexto = 'API') {
     data = JSON.parse(raw);
   } catch {
     // No es JSON — heurísticas para errores conocidos del servidor.
-    if (resp.status === 504 || /timeout/i.test(raw) || /An error occurred with your deployment/i.test(raw)) {
+    // Vercel mata la función al pasar maxDuration y devuelve HTML/texto
+    // genérico. Cubrimos las variantes: "Internal Server Error" (texto
+    // plano), "An error occurred with your deployment" (HTML), 504 timeout,
+    // FUNCTION_INVOCATION_FAILED, etc.
+    const isTimeout = resp.status === 504 || /timeout|FUNCTION_INVOCATION_TIMEOUT|gateway timeout/i.test(raw);
+    const isVercelKill = /An error occurred with your deployment|FUNCTION_INVOCATION_FAILED/i.test(raw)
+                        || /^Internal Server Error\s*$/i.test(raw.trim())
+                        || /^\s*<(!doctype|html)/i.test(raw);
+    if (isTimeout) {
       throw new Error(`${contexto} timeout — la operación tardó más que el límite del servidor. Reintentá con menos ads seleccionados o quality medium.`);
+    }
+    if (isVercelKill) {
+      throw new Error(`${contexto} crasheó en el servidor (Vercel devolvió "Internal Server Error"). Suele ser timeout o memoria. Reintentá con menos ads en paralelo o quality medium; si persiste, revisá los logs en Vercel.`);
     }
     if (resp.status >= 500) {
       throw new Error(`${contexto} error ${resp.status} — el servidor devolvió HTML/texto en vez de JSON. Probá de nuevo en unos segundos.`);
@@ -191,12 +205,15 @@ function loadBrands(productoId) {
 function saveBrands(productoId, brands) {
   if (!productoId) return;
   const key = brandsKey(productoId);
-  try {
-    localStorage.setItem(key, JSON.stringify(brands));
+  // safeSetItem: en Safari private mode setItem tira QuotaExceededError aunque
+  // los datos quepan. Con el try/catch viejo el write silenciosamente fallaba
+  // y los brands no se persistían — el dispatch tampoco se enviaba. Acá
+  // condicionamos el notify al éxito real del write.
+  if (safeSetItem(key, JSON.stringify(brands))) {
     // Notificar al sync hook — sin esto el push al cloud nunca corre y
     // al recargar el pull pisa los cambios con datos viejos.
     notifyMarketingChange(key);
-  } catch {}
+  }
 }
 
 // Props:
@@ -314,7 +331,198 @@ function BulkProgressBar({ state, onClose }) {
 // para Vite/Rollup en builds minificados.
 // =========================================================
 
-function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onScrape, onAdapt, onCrearReferencial, onToggleSelect, onRemove }) {
+// Picker de boards — modal que aparece cuando el user clickea "guardar en
+// colección" sobre un ad. Lista los boards del user, permite crear uno nuevo
+// inline, y guarda el item via /api/marketing/boards.
+function BoardPickerModal({ data, onClose, addToast }) {
+  const [boards, setBoards] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [savingId, setSavingId] = useState(null);
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (!data) return;
+    let cancel = false;
+    setLoading(true); setError(null);
+    listBoards().then(bs => {
+      if (!cancel) setBoards(bs);
+    }).catch(err => {
+      if (!cancel) setError(err.message || 'Error cargando boards');
+    }).finally(() => {
+      if (!cancel) setLoading(false);
+    });
+    return () => { cancel = true; };
+  }, [data]);
+
+  // Escape para cerrar — convención estándar de modales.
+  useEffect(() => {
+    if (!data) return;
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [data, onClose]);
+
+  if (!data) return null;
+  const { ad, brand, productoId } = data;
+  // Defensa: si el ad no tiene id válido, no puede ir a la tabla de boards
+  // (constraint de marketing_board_items.ad_id). Evita insertar "undefined".
+  const adIdValid = ad?.id && String(ad.id).trim() && String(ad.id) !== 'undefined';
+
+  const saveToBoard = async (boardId, boardName) => {
+    if (!adIdValid) { setError('Este ad no tiene ID válido — no se puede guardar'); return; }
+    setSavingId(boardId); setError(null);
+    try {
+      await addItemsToBoard(boardId, [{
+        productoId: String(productoId),
+        competidorId: String(brand.id),
+        adId: String(ad.id),
+      }]);
+      addToast?.({ type: 'success', message: `Guardado en "${boardName}"` });
+      try { window.dispatchEvent(new CustomEvent('viora:boards-changed')); } catch {}
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Error al guardar');
+      setSavingId(null);
+    }
+  };
+
+  const createAndSave = async () => {
+    const name = newName.trim();
+    if (!name) return;
+    if (!adIdValid) { setError('Este ad no tiene ID válido — no se puede guardar'); return; }
+    setSavingId('__new__'); setError(null);
+    try {
+      const board = await createBoard({ nombre: name });
+      await addItemsToBoard(board.id, [{
+        productoId: String(productoId),
+        competidorId: String(brand.id),
+        adId: String(ad.id),
+      }]);
+      addToast?.({ type: 'success', message: `Board "${board.nombre}" creado y guardado` });
+      try { window.dispatchEvent(new CustomEvent('viora:boards-changed')); } catch {}
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Error al crear board');
+      setSavingId(null);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-md max-h-[80vh] overflow-hidden flex flex-col"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Bookmark size={16} className="text-amber-500" />
+            <p className="text-sm font-bold text-gray-900 dark:text-gray-100">
+              Guardar en colección
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="px-4 py-2 bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700 text-[11px] text-gray-600 dark:text-gray-400">
+          De <span className="font-semibold">{brand.nombre}</span>
+          {ad.body && <> · "{ad.body.slice(0, 60)}{ad.body.length > 60 ? '…' : ''}"</>}
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+          {loading && (
+            <div className="flex items-center justify-center gap-2 py-6 text-sm text-gray-500">
+              <Loader2 size={14} className="animate-spin" /> Cargando colecciones…
+            </div>
+          )}
+
+          {error && (
+            <div className="px-3 py-2 text-[11px] text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 rounded">
+              {error}
+            </div>
+          )}
+
+          {!loading && boards && boards.length === 0 && (
+            <p className="text-[11px] italic text-center text-gray-500 dark:text-gray-400 py-2">
+              Todavía no tenés ninguna colección. Creá la primera abajo.
+            </p>
+          )}
+
+          {!loading && boards && boards.length > 0 && (
+            <div className="space-y-1">
+              {boards.map(b => (
+                <button
+                  key={b.id}
+                  onClick={() => saveToBoard(b.id, b.nombre)}
+                  disabled={savingId === b.id}
+                  className="w-full text-left px-3 py-2 rounded-md border border-gray-200 dark:border-gray-700 hover:border-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition disabled:opacity-50 flex items-center gap-2"
+                >
+                  <Bookmark size={14} className={`text-${b.color || 'amber'}-500 shrink-0`} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{b.nombre}</p>
+                    {b.descripcion && (
+                      <p className="text-[10px] text-gray-500 dark:text-gray-400 truncate">{b.descripcion}</p>
+                    )}
+                  </div>
+                  <span className="text-[10px] text-gray-400 shrink-0">{b.itemCount || 0} ads</span>
+                  {savingId === b.id && <Loader2 size={12} className="animate-spin text-amber-500" />}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Crear nueva */}
+          {!creating ? (
+            <button
+              onClick={() => setCreating(true)}
+              className="w-full px-3 py-2 mt-2 rounded-md border-2 border-dashed border-gray-300 dark:border-gray-600 hover:border-amber-400 text-xs font-semibold text-gray-600 dark:text-gray-300 hover:text-amber-600 transition flex items-center justify-center gap-1"
+            >
+              <Plus size={12} /> Crear nueva colección
+            </button>
+          ) : (
+            <div className="mt-2 p-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md space-y-2">
+              <input
+                type="text"
+                value={newName}
+                onChange={e => setNewName(e.target.value)}
+                placeholder="Nombre de la colección"
+                autoFocus
+                onKeyDown={e => { if (e.key === 'Enter') createAndSave(); }}
+                className="w-full px-2 py-1.5 text-sm bg-white dark:bg-gray-900 border border-amber-300 dark:border-amber-700 rounded focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { setCreating(false); setNewName(''); }}
+                  className="flex-1 px-2 py-1 text-[11px] font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-600 transition"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={createAndSave}
+                  disabled={!newName.trim() || savingId === '__new__'}
+                  className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1 text-[11px] font-bold text-white bg-gradient-to-br from-amber-500 to-brand-500 rounded hover:from-amber-600 hover:to-brand-600 transition disabled:opacity-50"
+                >
+                  {savingId === '__new__' ? <Loader2 size={10} className="animate-spin" /> : <Check size={10} />}
+                  Crear y guardar
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onScrape, onAdapt, onCrearReferencial, onToggleSelect, onSaveToBoard, onRemove, onClearProgress, onOcrWinners, onTranscribeVideos }) {
+  // onClearProgress se forwardea a BrandAdsGrid (que lo pasa a AdThumb) para
+  // que el user pueda cerrar el overlay de error que ahora queda persistente.
   const isCompetidor = !!brand.isCompetidor;
   return (
     <div className="group/brand bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 hover:border-amber-300 dark:hover:border-amber-700 transition">
@@ -367,6 +575,26 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
           </div>
         </div>
         {/* Botón scrape inline en el header — más compacto que antes (estaba en una fila aparte) */}
+        {onOcrWinners && ads.length > 0 && (
+          <button
+            onClick={onOcrWinners}
+            disabled={isScraping}
+            className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold text-violet-700 dark:text-violet-300 bg-violet-50 dark:bg-violet-900/30 border border-violet-300 dark:border-violet-700 rounded hover:bg-violet-100 dark:hover:bg-violet-900/50 transition disabled:opacity-50 shrink-0"
+            title="Extraer texto OCR de los top 10 winners — Santi mira las imágenes y saca el texto overlay (claims, precios, descuentos). Después podés buscar por ese texto en la lupa. Cuesta ~$0.004."
+          >
+            <Search size={10} /> OCR
+          </button>
+        )}
+        {onTranscribeVideos && ads.some(a => (a.videoUrls?.length || 0) > 0) && (
+          <button
+            onClick={onTranscribeVideos}
+            disabled={isScraping}
+            className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/30 border border-blue-300 dark:border-blue-700 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50 transition disabled:opacity-50 shrink-0"
+            title="Transcribir los top 5 videos winners con Whisper — Santi escucha el audio y devuelve el guion completo. Buscable en la lupa. Cuesta ~$0.025."
+          >
+            <Search size={10} /> 🎤 Whisper
+          </button>
+        )}
         {onScrape && (
           <button
             onClick={onScrape}
@@ -404,6 +632,8 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
         <BrandAdsGrid
           ads={ads}
           brandNombre={brand.nombre}
+          brandId={brand.id}
+          isCompetidor={!!brand.isCompetidor}
           adaptingAdIds={adaptingAdIds}
           creandoAdIds={creandoAdIds}
           seleccionados={seleccionados}
@@ -413,6 +643,11 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
           onAdapt={onAdapt}
           onCrearReferencial={onCrearReferencial}
           onToggleSelect={onToggleSelect}
+          onSaveToBoard={onSaveToBoard}
+          onClearProgress={onClearProgress}
+          onScrape={onScrape}
+          isScraping={isScraping}
+          brandTotalAds={brand.lastAdsCheck ? ads.length : null}
         />
       )}
     </div>
@@ -420,7 +655,7 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
 }
 
 
-function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = false, selected = false, selectionIndex = null, used = false, onAdapt, onCrearReferencial, onToggleSelect, progress = null }) {
+function AdThumb({ ad, brandNombre, brandId = null, isCompetidor = false, fresh = false, adapting = false, creando = false, selected = false, selectionIndex = null, used = false, onAdapt, onCrearReferencial, onToggleSelect, onSaveToBoard = null, progress = null, onClearProgress = null }) {
   const cdnThumb = ad.imageUrls?.[0];
   const fbUrl = ad.snapshotUrl;
   // Si tenemos el ad cacheado en IndexedDB (sobreviven el TTL de 24h del CDN),
@@ -471,6 +706,13 @@ function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = f
   return (
     <div
       ref={containerRef}
+      // ⚡ content-visibility: auto + contain-intrinsic-size: el browser SKIPEA
+      // el rendering, paint y layout de este card cuando está fuera del viewport.
+      // Soporte: Chrome 85+, Edge, Opera (mayoría del mercado). Firefox 125+
+      // parcial. Sin esto, 2500 thumbnails decodificadas en RAM como pixel
+      // buffers de ~3MB cada uno cuelga Chrome. Con esto, solo los ~20 ads
+      // visibles + buffer cuentan en el render tree.
+      style={{ contentVisibility: 'auto', containIntrinsicSize: '0 200px' }}
       className={`group/thumb relative aspect-square rounded-md overflow-hidden bg-gray-100 dark:bg-gray-900 border-2 transition ${
         used && !selected ? 'opacity-50 grayscale-[40%] hover:opacity-100 hover:grayscale-0' : ''
       } ${
@@ -543,17 +785,31 @@ function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = f
             </>
           )}
           {progress.stage === 'error' && progress.error && (
-            <p className="text-[9px] text-red-200 text-center line-clamp-2">{progress.error}</p>
+            <>
+              <p className="text-[9px] text-red-200 text-center line-clamp-3 px-1">{progress.error}</p>
+              {/* Sin esto el overlay del error queda para siempre tapando el
+                  thumb. El user lo cierra acá o reintenta clickeando el ad. */}
+              {onClearProgress && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onClearProgress(ad.id); }}
+                  className="mt-1 px-2 py-0.5 text-[9px] font-bold text-white bg-red-600 hover:bg-red-700 rounded transition"
+                >
+                  Cerrar
+                </button>
+              )}
+            </>
           )}
         </div>
       )}
 
-      <div className="absolute inset-0 bg-black/0 group-hover/thumb:bg-black/60 transition flex flex-col items-stretch justify-end gap-1 p-1.5">
+      {/* En mobile (max-md) los devices sin hover no pueden activar el overlay
+          → forzamos opacity 100 y un tinte oscuro para mantener contraste. */}
+      <div className="absolute inset-0 bg-black/0 group-hover/thumb:bg-black/60 max-md:bg-gradient-to-t max-md:from-black/70 max-md:to-transparent transition flex flex-col items-stretch justify-end gap-1 p-1.5">
         {onCrearReferencial && (
           <button
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); onCrearReferencial(); }}
             disabled={creando}
-            className="opacity-0 group-hover/thumb:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded disabled:opacity-70"
+            className="opacity-0 group-hover/thumb:opacity-100 max-md:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded disabled:opacity-70"
             title="Genera 2 variaciones con tu producto real"
           >
             {creando
@@ -566,7 +822,7 @@ function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = f
           <button
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); onAdapt(); }}
             disabled={adapting}
-            className="opacity-0 group-hover/thumb:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-amber-500/90 hover:bg-amber-600 rounded disabled:opacity-70"
+            className="opacity-0 group-hover/thumb:opacity-100 max-md:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-amber-500/90 hover:bg-amber-600 rounded disabled:opacity-70"
             title="Genera ideas (texto) en la Bandeja"
           >
             {adapting
@@ -577,10 +833,21 @@ function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = f
         )}
         <a
           href={fbUrl} target="_blank" rel="noreferrer"
-          className="opacity-0 group-hover/thumb:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-black/70 hover:bg-black/90 rounded"
+          className="opacity-0 group-hover/thumb:opacity-100 max-md:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-black/70 hover:bg-black/90 rounded"
         >
           <ExternalLink size={10} /> Ver en FB
         </a>
+        {/* Guardar en colección (board) — solo aparece cuando el ad es de un
+            competidor (boards requieren competidor_id en el schema). */}
+        {onSaveToBoard && isCompetidor && brandId && (
+          <button
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onSaveToBoard(ad, { id: brandId, nombre: brandNombre }); }}
+            className="opacity-0 group-hover/thumb:opacity-100 max-md:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-amber-600/90 hover:bg-amber-700 rounded"
+            title="Guardar en una colección cross-producto"
+          >
+            <Bookmark size={10} /> Guardar
+          </button>
+        )}
         {/* Toggle manual de "usado" — persiste por ad.id (Ad Archive ID),
             sobrevive al re-scrapeo. Gris = ya lo usé. */}
         <button
@@ -588,7 +855,7 @@ function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = f
             e.preventDefault(); e.stopPropagation();
             window.dispatchEvent(new CustomEvent('viora:toggle-used-ad', { detail: { adId: ad.id } }));
           }}
-          className={`opacity-0 group-hover/thumb:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white rounded ${
+          className={`opacity-0 group-hover/thumb:opacity-100 max-md:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white rounded ${
             used ? 'bg-gray-600 hover:bg-gray-700' : 'bg-emerald-600/90 hover:bg-emerald-700'
           }`}
           title={used ? 'Quitar marca de usado' : 'Marcar como usado (queda en gris)'}
@@ -616,14 +883,18 @@ function AdThumb({ ad, brandNombre, fresh = false, adapting = false, creando = f
 }
 
 
-function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect }) {
+function BrandAdsGrid({ ads, brandNombre, brandId = null, isCompetidor = false, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect, onSaveToBoard, onClearProgress, onScrape, isScraping, brandTotalAds }) {
   const [showRepeated, setShowRepeated] = useState(false);
-  const [showAllFresh, setShowAllFresh] = useState(false);
-  const [showAllRepeated, setShowAllRepeated] = useState(false);
+  // Paginación: arranca con 30, "ver más" suma de a 60 hasta cap razonable.
+  // ANTES: showAllFresh = true mostraba TODOS los ads (3000+) en DOM →
+  // Chrome se colgaba renderizando esa cantidad de thumbnails.
+  const [freshLimit, setFreshLimit] = useState(30);
+  const [repeatedLimit, setRepeatedLimit] = useState(30);
   const fresh = ads.filter(a => a.isFresh !== false);
   const repeated = ads.filter(a => a.isFresh === false);
-  const FRESH_LIMIT = showAllFresh ? fresh.length : 30;
-  const REPEATED_LIMIT = showAllRepeated ? repeated.length : 30;
+  const FRESH_LIMIT = Math.min(freshLimit, fresh.length);
+  const REPEATED_LIMIT = Math.min(repeatedLimit, repeated.length);
+  const PAGE_STEP = 60;
 
   return (
     <div className="mt-3 space-y-3">
@@ -639,6 +910,8 @@ function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccion
                 key={ad.id}
                 ad={ad}
                 brandNombre={brandNombre}
+                brandId={brandId}
+                isCompetidor={isCompetidor}
                 fresh
                 adapting={adaptingAdIds?.has(ad.id)}
                 creando={creandoAdIds?.has(ad.id)}
@@ -649,15 +922,57 @@ function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccion
                 onAdapt={onAdapt ? () => onAdapt(ad) : null}
                 onCrearReferencial={onCrearReferencial ? () => onCrearReferencial(ad) : null}
                 onToggleSelect={onToggleSelect ? () => onToggleSelect(ad.id) : null}
+                onSaveToBoard={onSaveToBoard}
+                onClearProgress={onClearProgress}
               />
             ))}
-            {fresh.length > 30 && (
+            {fresh.length > FRESH_LIMIT && (
               <button
-                onClick={() => setShowAllFresh(s => !s)}
+                onClick={() => setFreshLimit(l => l + PAGE_STEP)}
                 className="aspect-square rounded-md flex items-center justify-center bg-gray-50 dark:bg-gray-900 border-2 border-dashed border-gray-200 dark:border-gray-700 text-[10px] text-gray-500 dark:text-gray-400 italic hover:bg-gray-100 dark:hover:bg-gray-800 hover:border-brand-400 dark:hover:border-brand-600 hover:text-brand-600 dark:hover:text-brand-300 transition cursor-pointer"
-                title={showAllFresh ? 'Ver solo los 30 primeros' : `Ver los ${fresh.length - 30} restantes`}
+                title={`Cargar otros ${Math.min(PAGE_STEP, fresh.length - FRESH_LIMIT)} de ${fresh.length - FRESH_LIMIT} restantes`}
               >
-                {showAllFresh ? 'Mostrar menos' : `+${fresh.length - 30} más`}
+                +{Math.min(PAGE_STEP, fresh.length - FRESH_LIMIT)} más
+                <span className="block text-[8px] mt-0.5">({FRESH_LIMIT}/{fresh.length})</span>
+              </button>
+            )}
+            {/* Card de "fin del listado": aparece cuando el user VIO TODOS los
+                ads scrapeados (FRESH_LIMIT === fresh.length). Le explica que
+                para tener más necesita re-scrapear, y le da el botón directo.
+                Antes solo había un botón "↑ Menos" confuso (era para colapsar). */}
+            {fresh.length > 0 && fresh.length <= FRESH_LIMIT && onScrape && (
+              <div className="aspect-square rounded-md flex flex-col items-center justify-center gap-1.5 p-2 bg-gradient-to-br from-brand-50 to-amber-50 dark:from-brand-900/20 dark:to-amber-900/20 border-2 border-dashed border-brand-300 dark:border-brand-700 text-[10px] text-center">
+                <p className="font-bold text-gray-700 dark:text-gray-200 leading-tight">
+                  ✓ Viste {fresh.length} estáticos
+                </p>
+                <p className="text-[9px] text-gray-500 dark:text-gray-400 leading-tight">
+                  ¿Querés más? Re-scrapeá — el cap es 2500 ads
+                </p>
+                <button
+                  onClick={onScrape}
+                  disabled={isScraping}
+                  className="mt-1 px-2 py-1 text-[9px] font-bold text-white bg-gradient-to-br from-brand-500 to-brand-600 rounded hover:from-brand-600 hover:to-brand-700 transition disabled:opacity-50"
+                >
+                  {isScraping ? '⏳ Scrapeando…' : '↻ Re-scrape'}
+                </button>
+                {FRESH_LIMIT > 30 && (
+                  <button
+                    onClick={() => setFreshLimit(30)}
+                    className="mt-0.5 text-[8px] text-gray-400 dark:text-gray-500 hover:text-amber-600 hover:underline transition"
+                    title="Colapsar a los primeros 30"
+                  >
+                    Colapsar
+                  </button>
+                )}
+              </div>
+            )}
+            {FRESH_LIMIT > 30 && fresh.length > FRESH_LIMIT && (
+              <button
+                onClick={() => setFreshLimit(30)}
+                className="aspect-square rounded-md flex items-center justify-center bg-gray-50 dark:bg-gray-900 border-2 border-dashed border-gray-200 dark:border-gray-700 text-[10px] text-gray-500 dark:text-gray-400 italic hover:bg-gray-100 dark:hover:bg-gray-800 hover:border-amber-400 hover:text-amber-600 transition cursor-pointer"
+                title="Volver a mostrar los primeros 30"
+              >
+                ↑ Menos
               </button>
             )}
           </div>
@@ -685,6 +1000,8 @@ function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccion
                   key={ad.id}
                   ad={ad}
                   brandNombre={brandNombre}
+                  brandId={brandId}
+                  isCompetidor={isCompetidor}
                   adapting={adaptingAdIds?.has(ad.id)}
                   creando={creandoAdIds?.has(ad.id)}
                   selected={seleccionados?.has(ad.id)}
@@ -692,15 +1009,17 @@ function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccion
                   onAdapt={onAdapt ? () => onAdapt(ad) : null}
                   onCrearReferencial={onCrearReferencial ? () => onCrearReferencial(ad) : null}
                   onToggleSelect={onToggleSelect ? () => onToggleSelect(ad.id) : null}
+                  onSaveToBoard={onSaveToBoard}
                 />
               ))}
-              {repeated.length > 30 && (
+              {repeated.length > REPEATED_LIMIT && (
                 <button
-                  onClick={() => setShowAllRepeated(s => !s)}
+                  onClick={() => setRepeatedLimit(l => l + PAGE_STEP)}
                   className="aspect-square rounded-md flex items-center justify-center bg-gray-50 dark:bg-gray-900 border-2 border-dashed border-gray-200 dark:border-gray-700 text-[10px] text-gray-400 italic hover:bg-gray-100 dark:hover:bg-gray-800 hover:border-brand-400 hover:text-brand-600 transition cursor-pointer"
-                  title={showAllRepeated ? 'Ver solo los 30 primeros' : `Ver los ${repeated.length - 30} restantes`}
+                  title={`Cargar ${Math.min(PAGE_STEP, repeated.length - REPEATED_LIMIT)} más`}
                 >
-                  {showAllRepeated ? 'Menos' : `+${repeated.length - 30} más`}
+                  +{Math.min(PAGE_STEP, repeated.length - REPEATED_LIMIT)} más
+                  <span className="block text-[8px] mt-0.5">({REPEATED_LIMIT}/{repeated.length})</span>
                 </button>
               )}
             </div>
@@ -720,7 +1039,7 @@ function BrandAdsGrid({ ads, brandNombre, adaptingAdIds, creandoAdIds, seleccion
 // strip horizontal. Cada item es un AdThumb con sus acciones normales
 // (Crear creativo, + ideas en Bandeja, multi-select).
 
-function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect }) {
+function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect, onSaveToBoard, onClearProgress }) {
   const [expanded, setExpanded] = useState(true);
   // Vista del Top 10 — persistida en localStorage. 3 opciones:
   //   grid: strip horizontal de 10 thumbs (default, denso)
@@ -785,7 +1104,9 @@ function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, se
           {viewMode === 'grid' && (
             <TopGridView items={items} adaptingAdIds={adaptingAdIds} creandoAdIds={creandoAdIds}
               seleccionados={seleccionados} selectedOrder={selectedOrder} usedAdIds={usedAdIds} progressById={progressById}
-              onAdapt={onAdapt} onCrearReferencial={onCrearReferencial} onToggleSelect={onToggleSelect} />
+              onAdapt={onAdapt} onCrearReferencial={onCrearReferencial} onToggleSelect={onToggleSelect}
+              onSaveToBoard={onSaveToBoard}
+              onClearProgress={onClearProgress} />
           )}
           {viewMode === 'list' && (
             <TopListView items={items} seleccionados={seleccionados} selectedOrder={selectedOrder}
@@ -805,10 +1126,10 @@ function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, se
 
 // VISTA 1 — Grid: el strip horizontal original con 10 thumbs grandes.
 
-function TopGridView({ items, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect }) {
+function TopGridView({ items, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect, onSaveToBoard, onClearProgress }) {
   return (
     <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-10 gap-2">
-      {items.map(({ ad, brandNombre, isCompetidor }, idx) => (
+      {items.map(({ ad, brandNombre, brandId, isCompetidor }, idx) => (
         <div key={ad.id} className="relative">
           <div className={`absolute -top-1 -left-1 z-20 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shadow-md ${
             idx === 0 ? 'bg-gradient-to-br from-amber-400 to-amber-600'
@@ -816,13 +1137,15 @@ function TopGridView({ items, adaptingAdIds, creandoAdIds, seleccionados, select
             : 'bg-gradient-to-br from-gray-600 to-gray-700'
           }`}>{idx + 1}</div>
           <AdThumb
-            ad={ad} brandNombre={brandNombre} fresh={ad.isFresh !== false}
+            ad={ad} brandNombre={brandNombre} brandId={brandId} isCompetidor={isCompetidor} fresh={ad.isFresh !== false}
             adapting={adaptingAdIds?.has(ad.id)} creando={creandoAdIds?.has(ad.id)}
             selected={seleccionados?.has(ad.id)} selectionIndex={selectedOrder?.get(ad.id) || null} used={usedAdIds?.has(ad.id)}
             progress={progressById?.[ad.id]}
             onAdapt={onAdapt ? () => onAdapt(brandNombre, ad) : null}
             onCrearReferencial={onCrearReferencial ? () => onCrearReferencial(brandNombre, ad) : null}
             onToggleSelect={onToggleSelect ? () => onToggleSelect(ad.id) : null}
+            onSaveToBoard={onSaveToBoard}
+            onClearProgress={onClearProgress}
           />
           <div className="mt-1 px-0.5">
             <p className="text-[9px] font-semibold text-gray-700 dark:text-gray-200 truncate">
@@ -1086,6 +1409,8 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     : setActiveProductoIdRaw;
   const [brands, setBrands] = useState(() => loadBrands(activeProductoId));
   const [showAddForm, setShowAddForm] = useState(false);
+  // Modal de "Guardar en colección" — null = cerrado; {ad, brand, productoId} = abierto.
+  const [boardPickerData, setBoardPickerData] = useState(null);
   const [draft, setDraft] = useState({ nombre: '', landingUrl: '', fbPageUrl: '', notas: '' });
   // Set de IDs scrapeando en paralelo. Antes era un único string — al
   // arrancar un 2do scrape se pisaba el 1ro y la card #1 perdía su
@@ -1096,6 +1421,84 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   const removeScraping = (id) => setScrapingBrandIds(prev => { const n = new Set(prev); n.delete(id); return n; });
   // brand.id → array de ads scrapeados de la última corrida (mostrados inline).
   const [adsByBrand, setAdsByBrand] = useState({});
+  // ⚠️ TDZ FIX: declaramos `producto` ACÁ ARRIBA porque hay useEffects MÁS
+  // ABAJO que lo usan en sus dep arrays ([producto?.id]). En dev funcionaba,
+  // en prod minificado Vite/Rollup hacía "Cannot access 'H' before init"
+  // porque la dep array se evalúa al render time del useEffect, ANTES de la
+  // declaración original que estaba en la línea ~1366.
+  const producto = productos.find(p => String(p.id) === String(activeProductoId)) || null;
+  // Hidratar adsByBrand desde IDB al cambiar de producto. Las brands manuales
+  // ahora persisten sus ads igual que los competidores → no se pierden al
+  // refrescar. Sin esto el user veía sus brands con "0 ads" después de F5.
+  useEffect(() => {
+    if (!activeProductoId || !Array.isArray(brands) || brands.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const next = {};
+      for (const b of brands) {
+        const rec = await getCompAds(activeProductoId, `brand-${b.id}`);
+        if (rec?.ads?.length) next[b.id] = rec.ads;
+      }
+      if (!cancelled && Object.keys(next).length > 0) {
+        setAdsByBrand(prev => ({ ...next, ...prev }));
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProductoId, brands.length]);
+  // competidor.id → array de ads scrapeados. Antes vivían en c.ads inline en
+  // localStorage pero rompía quota con muchos ads. Ahora se hidratan desde
+  // IDB (competidorAdsIDB) cuando el producto se monta o cambia.
+  const [compAdsByCompId, setCompAdsByCompId] = useState({});
+
+  // Hidratar ads de competidores desde IDB.
+  // - PRIORITY: IDB primero, inline legacy solo si IDB vacía.
+  // - MERGE por TIMESTAMP (no por length) — re-scrape con menos ads gana si
+  //   es más reciente.
+  // - RESET al cambiar producto — sin esto el state acumulaba entries de
+  //   todos los productos navegados (memory leak).
+  // - DROP ZOMBI: filtrar entries de comps que ya no existen.
+  const prevProductoIdRefInsp = useRef(null);
+  useEffect(() => {
+    if (prevProductoIdRefInsp.current && prevProductoIdRefInsp.current !== producto?.id) {
+      setCompAdsByCompId({});
+    }
+    prevProductoIdRefInsp.current = producto?.id;
+  }, [producto?.id]);
+  useEffect(() => {
+    if (!producto?.competidores) return;
+    let cancelled = false;
+    (async () => {
+      const updates = {};
+      const recordsByCompId = {};
+      for (const c of producto.competidores) {
+        const rec = await getCompAds(producto.id, c.id);
+        if (rec?.ads?.length) { updates[c.id] = rec.ads; recordsByCompId[c.id] = rec; continue; }
+        if (Array.isArray(c.ads) && c.ads.length > 0) { updates[c.id] = c.ads; }
+      }
+      if (!cancelled) {
+        setCompAdsByCompId(prev => {
+          const next = {};
+          const validIds = new Set((producto.competidores || []).map(c => c.id));
+          for (const [k, v] of Object.entries(prev)) {
+            if (validIds.has(k)) next[k] = v;
+          }
+          for (const [cid, ads] of Object.entries(updates)) {
+            const rec = recordsByCompId[cid];
+            const incomingTs = rec?.ts || 0;
+            const currentTs = next[cid]?._ts || 0;
+            if (!next[cid] || incomingTs >= currentTs) {
+              next[cid] = ads;
+              if (incomingTs) ads._ts = incomingTs;
+            }
+          }
+          return next;
+        });
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [producto?.id, producto?.competidores?.length, (producto?.competidores || []).map(c => c.lastAdsCheck).join('|')]);
   // ad.id → bool, true mientras se adapta al producto (loading).
   const [adaptingAdIds, setAdaptingAdIds] = useState(new Set());
   // Multi-select para bulk. Set preserva el orden de inserción → podemos
@@ -1215,6 +1618,63 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
 
   // Filtros + ordenamiento (vistas)
   const [query, setQuery] = useState('');
+  // SEARCH SERVER-SIDE: cuando el user tipea, además del filter local
+  // (brand metadata + ads in-memory), pegamos al /api/marketing/search-ads
+  // que tiene GIN full-text de TODOS los ads del user, incluyendo OCR y
+  // transcripts. Resultados llegan en serverMatchedAdIds (Set) y se usan
+  // para incluir brands cuyos ads matchearon server-side.
+  const [serverMatchedAdIds, setServerMatchedAdIds] = useState(null);
+  const [searchingServer, setSearchingServer] = useState(false);
+  const [serverSearchError, setServerSearchError] = useState(null);
+  // Cache de queries para no martillar Postgres con re-tipeo. TTL 60s.
+  const serverSearchCacheRef = useRef(new Map());
+  useEffect(() => {
+    const q = query.trim().slice(0, 200); // cap defensivo
+    if (q.length < 3) { setServerMatchedAdIds(null); setServerSearchError(null); return; }
+    // Cache hit?
+    const cached = serverSearchCacheRef.current.get(q);
+    if (cached && (Date.now() - cached.ts) < 60000) {
+      setServerMatchedAdIds(cached.ids);
+      setServerSearchError(null);
+      return;
+    }
+    let cancelled = false;
+    setSearchingServer(true);
+    const timer = setTimeout(async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const authToken = session?.access_token || '';
+        if (!authToken) {
+          if (!cancelled) { setServerMatchedAdIds(null); setServerSearchError('Sin sesión — buscando solo en memoria local'); }
+          return;
+        }
+        const resp = await fetch('/api/marketing/search-ads', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
+          body: JSON.stringify({ query: q, pageSize: 500 }),
+        });
+        if (!resp.ok) {
+          if (!cancelled) { setServerMatchedAdIds(null); setServerSearchError(`Server search ${resp.status} — buscando solo en memoria`); }
+          return;
+        }
+        const data = await resp.json();
+        if (!cancelled) {
+          const ids = new Set((data.ads || []).map(a => a.ad_id));
+          setServerMatchedAdIds(ids);
+          setServerSearchError(null);
+          serverSearchCacheRef.current.set(q, { ids, ts: Date.now() });
+          // Cap del cache a 30 entries para no crecer.
+          if (serverSearchCacheRef.current.size > 30) {
+            const firstKey = serverSearchCacheRef.current.keys().next().value;
+            serverSearchCacheRef.current.delete(firstKey);
+          }
+        }
+      } catch (err) {
+        if (!cancelled) { setServerMatchedAdIds(null); setServerSearchError(`Sin red — buscando solo en memoria`); }
+      } finally { if (!cancelled) setSearchingServer(false); }
+    }, 350);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [query]);
   const [tipoFiltro, setTipoFiltro] = useState('all'); // 'all' | 'competidor' | 'custom'
   const [estadoFiltro, setEstadoFiltro] = useState('all'); // 'all' | 'con-ads' | 'sin-scrapear'
   const [orderBy, setOrderBy] = useState('reciente'); // 'reciente' | 'nombre' | 'ads-count'
@@ -1242,7 +1702,8 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     saveBrands(activeProductoId, brands);
   }, [brands, activeProductoId]);
 
-  const producto = productos.find(p => String(p.id) === String(activeProductoId)) || null;
+  // `producto` ya fue declarado arriba (~línea 1150) por TDZ fix — los
+  // useEffects de hidratación de comp ads lo necesitan en su dep array.
 
   // Sync uni-direccional: competidores → brands. Cada competidor cargado en
   // Setup/Competencia aparece automático en Inspiración como marca scrapeable.
@@ -1358,6 +1819,10 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     setAdsByBrand(prev => {
       const next = { ...prev }; delete next[id]; return next;
     });
+    // Limpiar el IDB + bucket también — sino quedan archivos huérfanos.
+    if (activeProductoId) {
+      import('./competidorAdsIDB.js').then(mod => mod.removeCompAds(activeProductoId, `brand-${id}`)).catch(() => {});
+    }
     // Cascade delete: si la brand vino de un competidor (o matchea por
     // landingUrl / nombre), borramos también el competidor del producto.
     // Source of truth unificado.
@@ -1592,7 +2057,16 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           signal: ac.signal,
         });
         const data = await parseJsonOrThrow(resp, 'crear-creativo-referencial');
-        if (!resp.ok) throw new Error(stringifyApiError(data.error) || `HTTP ${resp.status}`);
+        if (!resp.ok) {
+        // Propagar la sugerencia del backend (apify-ingest devuelve sugerencias
+        // accionables como "cargá fbPageUrl en Setup"). Sin esto el user veía
+        // solo el error técnico sin context.
+        const base = stringifyApiError(data.error) || `HTTP ${resp.status}`;
+        // Si sugerencia es objeto (shape futuro), serializamos sin perder info.
+        const sug = typeof data.sugerencia === 'string' ? data.sugerencia
+                  : data.sugerencia ? JSON.stringify(data.sugerencia) : '';
+        throw new Error(sug ? `${base} — ${sug}` : base);
+      }
         return data;
       } catch (err) {
         if (err?.name === 'AbortError') {
@@ -1757,12 +2231,11 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       addToast?.({ type: 'error', message: `No pude generar: ${err.message}` });
       finishExecution(execId, { ok: false, message: err.message || 'Error' });
       playErrorTone();
-      // Limpiar el error después de 5s.
-      trackedTimeout(() => {
-        setProgressById(prev => {
-          const next = { ...prev }; delete next[ad.id]; return next;
-        });
-      }, 5000);
+      // ANTES borrábamos el error a los 5s — pero generar tarda 30-60s, el
+      // user típicamente no está mirando cuando explota y perdía el motivo
+      // del fallo de una operación cara ($0.18/imagen). Ahora el error queda
+      // persistente en progressById hasta que el user lo cierre manualmente
+      // (botón X en el badge de progreso) o reintente.
       return false;
     } finally {
       if (mountedRef.current) {
@@ -1788,10 +2261,11 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     }
     if (seleccionados.size === 0) return;
     if (!producto) return;
-    // Reusamos el mismo lookup que handleBulkCrear.
+    // POST-REFACTOR: c.ads inline está stripped. Usamos compAdsByCompId
+    // (hidratado desde IDB) para encontrar los ads seleccionados.
     const adsAGenerar = [];
     const adsCompetidores = (producto.competidores || []).flatMap(c =>
-      (c.ads || [])
+      (compAdsByCompId[c.id] || c.ads || [])
         .filter(a => seleccionados.has(a.id))
         .map(a => ({ brandNombre: c.nombre, ad: a }))
     );
@@ -1878,11 +2352,13 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     const cacheNote = visionAds < seleccionados.size ? ` (${seleccionados.size - visionAds} con skeleton cacheado)` : '';
     if (!window.confirm(`Generar ${nVarBulk} variante${nVarBulk !== 1 ? 's' : ''} ${sizeLabel} por cada uno de los ${seleccionados.size} ads${cacheNote} → ${total} imágenes total, ~$${costoEstimado.toFixed(2)}. Las requests se disparan TODAS en paralelo y el cloud-save funciona aunque cierres la pestaña. ETA: ~${Math.max(120, 75 * 2)}s. ¿Seguir?`)) return;
 
-    // Buscar los ad objects desde adsByBrand + de los competidores (que viven
-    // en producto.competidores, no en brands custom).
+    // Buscar los ad objects desde adsByBrand + de los competidores.
+    // POST-REFACTOR IDB: c.ads inline está stripped — usar compAdsByCompId
+    // (hidratado desde IDB). Sin esto el bulk-create fallaba silencioso
+    // post-reload: ningún ad de competidor matchaba los seleccionados.
     const adsAGenerar = [];
     const adsCompetidores = (producto.competidores || []).flatMap(c =>
-      (c.ads || [])
+      (compAdsByCompId[c.id] || c.ads || [])
         .filter(a => seleccionados.has(a.id) && (a.imageUrls?.length || 0) > 0)
         .map(a => ({ brandNombre: c.nombre, ad: a }))
     );
@@ -1955,6 +2431,163 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   // Permite cerrar la barra de bulk manualmente.
   const cerrarBulkProgress = () => setBulkProgress(null);
 
+  // Whisper transcription de los top 5 video winners de una brand —
+  // extrae lo que se DICE en el video y lo guarda en ad.transcript.
+  // La lupa después busca también por ese texto.
+  const handleTranscribeTopVideos = async (brand) => {
+    const videoAds = (brand.__ads || []).filter(a => (a.videoUrls?.length || 0) > 0);
+    if (videoAds.length === 0) {
+      addToast?.({ type: 'warning', message: `${brand.nombre} no tiene videos para transcribir.` });
+      return;
+    }
+    const top = [...videoAds]
+      .sort((a, b) => (b.isWinner ? 1 : 0) - (a.isWinner ? 1 : 0) || (b.score || 0) - (a.score || 0))
+      .slice(0, 5);
+    const adsForTranscribe = top.map(a => ({ id: a.id, videoUrl: a.videoUrls[0] }));
+    const execId = startExecution({
+      label: `Whisper de ${brand.nombre}`,
+      sublabel: `Transcribiendo ${adsForTranscribe.length} videos…`,
+      kind: 'whisper',
+      estimatedMs: adsForTranscribe.length * 30000,
+      estimatedCost: adsForTranscribe.length * 0.005,
+    });
+    try {
+      const resp = await fetch('/api/marketing/transcribe-ad', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ads: adsForTranscribe }),
+      });
+      const data = await parseJsonOrThrow(resp, `Whisper de ${brand.nombre}`);
+      if (!resp.ok) throw new Error(stringifyApiError(data.error) || `HTTP ${resp.status}`);
+      logCostsFromResponse(data, `whisper · ${brand.nombre}`);
+      const transcriptById = new Map((data.results || []).map(r => [r.id, r.transcript || '']));
+      const patchAd = (a) => transcriptById.has(a.id) ? { ...a, transcript: transcriptById.get(a.id) } : a;
+      if (brand.isCompetidor) {
+        const comp = brand.__sourceComp;
+        if (comp && producto?.id) {
+          setCompAdsByCompId(prev => ({ ...prev, [comp.id]: (prev[comp.id] || []).map(patchAd) }));
+          try {
+            const rec = await getCompAds(producto.id, comp.id);
+            if (rec?.ads) {
+              await setCompAds(producto.id, comp.id, {
+                ads: rec.ads.map(patchAd),
+                total: rec.total || rec.ads.length,
+                winners: rec.winners,
+                lastAdsCheck: rec.lastAdsCheck,
+                ts: rec.ts, // preservar — patch de transcript no es re-scrape
+              });
+            }
+          } catch {}
+        }
+      } else {
+        setAdsByBrand(prev => ({ ...prev, [brand.id]: (prev[brand.id] || []).map(patchAd) }));
+        try {
+          const rec = await getCompAds(producto?.id, `brand-${brand.id}`);
+          if (rec?.ads && producto?.id) {
+            await setCompAds(producto.id, `brand-${brand.id}`, {
+              ads: rec.ads.map(patchAd),
+              total: rec.total || rec.ads.length,
+              winners: rec.winners,
+              lastAdsCheck: rec.lastAdsCheck,
+              ts: rec.ts,
+            });
+          }
+        } catch {}
+      }
+      const ok = (data.results || []).filter(r => r.transcript && !r.error).length;
+      finishExecution(execId, { ok: true, message: `${ok}/${adsForTranscribe.length} videos transcriptos`, cost: data.costUSD });
+      addToast?.({ type: 'success', message: `Santi transcribió ${ok} videos — buscables en la lupa.` });
+    } catch (err) {
+      addToast?.({ type: 'error', message: `Whisper falló: ${err.message}` });
+      finishExecution(execId, { ok: false, message: err.message || 'Error' });
+    }
+  };
+
+  // OCR de los top 10 winners de una brand — extrae texto visible en
+  // imágenes (overlays, claims, descuentos) y lo guarda en ad.ocrText.
+  // Después la lupa busca también por ese texto. Usa Claude Haiku (barato).
+  const handleOcrTopWinners = async (brand) => {
+    const allAds = (brand.__ads || []).filter(a => (a.imageUrls?.length || 0) > 0);
+    if (allAds.length === 0) {
+      addToast?.({ type: 'warning', message: `${brand.nombre} no tiene ads con imagen para OCR.` });
+      return;
+    }
+    // Top 10 por winner + daysRunning + score.
+    const top = [...allAds]
+      .sort((a, b) => (b.isWinner ? 1 : 0) - (a.isWinner ? 1 : 0) || (b.score || 0) - (a.score || 0))
+      .slice(0, 10);
+    const adsForOcr = top.map(a => ({ id: a.id, imageUrl: a.imageUrls[0] }));
+    const execId = startExecution({
+      label: `OCR de ${brand.nombre}`,
+      sublabel: `Extrayendo texto de ${adsForOcr.length} winners…`,
+      kind: 'ocr',
+      estimatedMs: adsForOcr.length * 4000,
+      estimatedCost: adsForOcr.length * 0.0004,
+    });
+    try {
+      const resp = await fetch('/api/marketing/ocr-ad', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ads: adsForOcr }),
+      });
+      const data = await parseJsonOrThrow(resp, `OCR de ${brand.nombre}`);
+      if (!resp.ok) throw new Error(stringifyApiError(data.error) || `HTTP ${resp.status}`);
+      logCostsFromResponse(data, `ocr · ${brand.nombre}`);
+      // Patchear ads en el state local con el ocrText devuelto.
+      const ocrById = new Map((data.results || []).map(r => [r.id, r.ocrText || '']));
+      if (brand.isCompetidor) {
+        const comp = brand.__sourceComp;
+        if (comp && producto?.id) {
+          // Actualizar compAdsByCompId con ocrText
+          setCompAdsByCompId(prev => {
+            const ads = prev[comp.id] || [];
+            const updated = ads.map(a => ocrById.has(a.id) ? { ...a, ocrText: ocrById.get(a.id) } : a);
+            return { ...prev, [comp.id]: updated };
+          });
+          // Persistir a IDB para que sobreviva refresh
+          try {
+            const rec = await getCompAds(producto.id, comp.id);
+            if (rec?.ads) {
+              const adsUpdated = rec.ads.map(a => ocrById.has(a.id) ? { ...a, ocrText: ocrById.get(a.id) } : a);
+              await setCompAds(producto.id, comp.id, {
+                ads: adsUpdated,
+                total: rec.total || adsUpdated.length,
+                winners: rec.winners,
+                lastAdsCheck: rec.lastAdsCheck,
+              });
+            }
+          } catch {}
+        }
+      } else {
+        // Brand manual — adsByBrand
+        setAdsByBrand(prev => {
+          const ads = prev[brand.id] || [];
+          const updated = ads.map(a => ocrById.has(a.id) ? { ...a, ocrText: ocrById.get(a.id) } : a);
+          return { ...prev, [brand.id]: updated };
+        });
+        // Persistir a IDB con key brand-<id>
+        try {
+          const rec = await getCompAds(producto?.id, `brand-${brand.id}`);
+          if (rec?.ads) {
+            const adsUpdated = rec.ads.map(a => ocrById.has(a.id) ? { ...a, ocrText: ocrById.get(a.id) } : a);
+            await setCompAds(producto.id, `brand-${brand.id}`, {
+              ads: adsUpdated,
+              total: rec.total || adsUpdated.length,
+              winners: rec.winners,
+              lastAdsCheck: rec.lastAdsCheck,
+            });
+          }
+        } catch {}
+      }
+      const ok = (data.results || []).filter(r => r.ocrText && !r.error).length;
+      finishExecution(execId, { ok: true, message: `${ok}/${adsForOcr.length} ads con texto extraído`, cost: data.costUSD });
+      addToast?.({ type: 'success', message: `Santi extrajo texto de ${ok} ads — ahora podés buscarlo en la lupa.` });
+    } catch (err) {
+      addToast?.({ type: 'error', message: `OCR falló: ${err.message}` });
+      finishExecution(execId, { ok: false, message: err.message || 'Error' });
+    }
+  };
+
   // Scrapea ads activos de una marca via Apify. Si tiene fbPageUrl, prefiere
   // eso (más estable). Sino, deriva keyword del landingUrl.
   const handleScrapeBrand = async (brand) => {
@@ -2010,7 +2643,16 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         body: JSON.stringify(payload),
       });
       const data = await parseJsonOrThrow(resp, 'apify-ingest');
-      if (!resp.ok) throw new Error(stringifyApiError(data.error) || `HTTP ${resp.status}`);
+      if (!resp.ok) {
+        // Propagar la sugerencia del backend (apify-ingest devuelve sugerencias
+        // accionables como "cargá fbPageUrl en Setup"). Sin esto el user veía
+        // solo el error técnico sin context.
+        const base = stringifyApiError(data.error) || `HTTP ${resp.status}`;
+        // Si sugerencia es objeto (shape futuro), serializamos sin perder info.
+        const sug = typeof data.sugerencia === 'string' ? data.sugerencia
+                  : data.sugerencia ? JSON.stringify(data.sugerencia) : '';
+        throw new Error(sug ? `${base} — ${sug}` : base);
+      }
       const scrapeCost = logCostsFromResponse(data, `inspiracion · ${brand.nombre}`);
 
       const allAds = data.ads || [];
@@ -2030,6 +2672,19 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       const cappedSeenIds = newSeenIds.slice(-1000);
 
       setAdsByBrand(prev => ({ ...prev, [brand.id]: enriched }));
+      // STORAGE SPLIT (igual que competidores): los ads de brands manuales
+      // ahora persisten en IDB con key brand-<brandId>. Antes vivían SOLO
+      // en runtime (adsByBrand) → al refrescar perdías los ads scrapeados.
+      try {
+        await setCompAds(activeProductoId, `brand-${brand.id}`, {
+          ads: enriched,
+          total: enriched.length,
+          winners: enriched.filter(a => a.isWinner).length,
+          lastAdsCheck: new Date().toISOString(),
+        });
+      } catch (err) {
+        console.warn('[brand-scrape] setCompAds falló:', err.message);
+      }
       const freshCount = enriched.filter(a => a.isFresh).length;
       setBrands(prev => prev.map(x => x.id === brand.id ? {
         ...x,
@@ -2081,8 +2736,10 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     });
     try {
       const payload = { country: 'ALL', limit: 100 };
-      if (comp.fbPageUrl) {
-        payload.fbPageUrl = comp.fbPageUrl.startsWith('http') ? comp.fbPageUrl : `https://www.facebook.com/${comp.fbPageUrl}`;
+      // adLibraryUrl > fbPageUrl > landingUrl→resolve > keyword.
+      const directUrl = comp.adLibraryUrl || comp.fbPageUrl;
+      if (directUrl) {
+        payload.fbPageUrl = directUrl.startsWith('http') ? directUrl : `https://www.facebook.com/${directUrl}`;
       } else if (comp.landingUrl) {
         updateExecution(execId, { stage: 'Buscando la FB page del competidor…' });
         try {
@@ -2120,7 +2777,16 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         body: JSON.stringify(payload),
       });
       const data = await parseJsonOrThrow(resp, 'apify-ingest');
-      if (!resp.ok) throw new Error(stringifyApiError(data.error) || `HTTP ${resp.status}`);
+      if (!resp.ok) {
+        // Propagar la sugerencia del backend (apify-ingest devuelve sugerencias
+        // accionables como "cargá fbPageUrl en Setup"). Sin esto el user veía
+        // solo el error técnico sin context.
+        const base = stringifyApiError(data.error) || `HTTP ${resp.status}`;
+        // Si sugerencia es objeto (shape futuro), serializamos sin perder info.
+        const sug = typeof data.sugerencia === 'string' ? data.sugerencia
+                  : data.sugerencia ? JSON.stringify(data.sugerencia) : '';
+        throw new Error(sug ? `${base} — ${sug}` : base);
+      }
       const scrapeCost = logCostsFromResponse(data, `inspiracion · ${comp.nombre}`);
 
       const ads = data.ads || [];
@@ -2135,6 +2801,18 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       // scrape anterior (de la misma tanda paralela) terminó de escribir, así
       // los resultados de los 3 competidores concurrentes se acumulan en vez
       // de pisarse entre sí.
+      // STORAGE SPLIT: los ads van a IDB (sin cap), la METADATA va a localStorage
+      // (chiquito → no rompe quota). Antes guardábamos el array `ads` inline en
+      // el producto → con 5 competidores × 500 ads = 5MB+ → quota exceeded.
+      await setCompAds(producto.id, comp.id, {
+        ads,
+        total: data.total || 0,
+        winners: data.winners || 0,
+        lastAdsCheck: new Date().toISOString(),
+      });
+      // Reflejar inmediatamente en UI sin esperar al useEffect de hidratación.
+      setCompAdsByCompId(prev => ({ ...prev, [comp.id]: ads }));
+
       await withProductosLock(() => {
         const fresh = loadProductos();
         const updated = fresh.map(p => {
@@ -2142,8 +2820,11 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           const comps = (p.competidores || []).map(c => {
             if (c.id !== comp.id) return c;
             const prevZeroes = c.consecutiveZeroAds || 0;
+            // Solo metadata en localStorage. Los ads viven en IDB (setCompAds
+            // arriba). Si quedaban ads inline de antes (legacy), los borramos.
+            const { ads: _legacy, ...meta } = c;
             return {
-              ...c, ads,
+              ...meta,
               adsTotal: data.total || 0, winnersCount: data.winners || 0,
               lastAdsCheck: new Date().toISOString(),
               consecutiveZeroAds: newAds.length > 0 ? 0 : prevZeroes + 1,
@@ -2160,6 +2841,21 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         } catch {}
         setProductos(updated);
       });
+
+      // El BUG previo: handleScrapeBrand actualiza brand.lastScraped en
+      // setBrands, pero handleScrapeCompetidor (que es lo que dispara COMP
+      // de Setup) NO lo hacía — solo tocaba competidor.lastAdsCheck en
+      // localStorage. La UI lee brand.lastScraped para mostrar "sin
+      // scrapear" / "Re-scrape", así que después de un scrape exitoso de
+      // un COMP la card seguía diciendo "sin scrapear". Fix: replicar el
+      // setBrands acá también.
+      setBrands(prev => prev.map(x => x.id === brand.id ? {
+        ...x,
+        lastScraped: new Date().toISOString(),
+        // Mismo tracking de "estable" que handleScrapeBrand.
+        consecutiveZeroAds: newAds.length > 0 ? 0 : (x.consecutiveZeroAds || 0) + 1,
+      } : x));
+      setAdsByBrand(prev => ({ ...prev, [brand.id]: ads }));
 
       const msg = newAds.length > 0
         ? `${newAds.length} estáticos NUEVOS de ${comp.nombre} (${ads.length} total)`
@@ -2422,7 +3118,10 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       {(() => {
         // Construimos array unificado.
         const competidoresUnif = (producto.competidores || []).map(c => {
-          const staticAds = (c.ads || []).filter(a => (a.imageUrls?.length || 0) > 0 && (a.videoUrls?.length || 0) === 0);
+          // Ads ahora viven en IDB; compAdsByCompId los hidrata. Fallback a c.ads
+          // inline para items legacy aún no migrados.
+          const allAds = compAdsByCompId[c.id] || c.ads || [];
+          const staticAds = allAds.filter(a => (a.imageUrls?.length || 0) > 0 && (a.videoUrls?.length || 0) === 0);
           return {
             id: `comp-${c.id}`,
             nombre: c.nombre,
@@ -2475,7 +3174,26 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         else if (estadoFiltro === 'sin-scrapear') unif = unif.filter(b => !b.lastScraped && b.__ads.length === 0);
         if (query.trim()) {
           const q = query.toLowerCase();
-          unif = unif.filter(b => `${b.nombre} ${b.landingUrl || ''} ${b.notas || ''}`.toLowerCase().includes(q));
+          unif = unif.filter(b => {
+            // 1) Match en metadata de la brand (nombre, URL, notas).
+            const meta = `${b.nombre} ${b.landingUrl || ''} ${b.notas || ''}`.toLowerCase();
+            if (meta.includes(q)) return true;
+            // 2) Match in-memory: body + headline + ocr + transcript de los
+            //    ads HIDRATADOS. Cubre lo que el user tiene a mano.
+            const inMem = (b.__ads || []).some(a => {
+              const adText = `${a.headline || ''} ${a.body || ''} ${a.ocrText || ''} ${a.transcript || ''}`.toLowerCase();
+              return adText.includes(q);
+            });
+            if (inMem) return true;
+            // 3) Match server-side: GIN index del backend tiene TODOS los
+            //    ads del user (cross-product). Si el server matcheó algún
+            //    ad de esta brand, la incluimos. Esto da el efecto AdSpy
+            //    "buscar en mi biblioteca entera" sin paginar.
+            if (serverMatchedAdIds) {
+              return (b.__ads || []).some(a => serverMatchedAdIds.has(a.id));
+            }
+            return false;
+          });
         }
 
         // Ordenamiento
@@ -2500,7 +3218,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
             // Solo ads con imagen + score conocido (ya pasaron por scoreAd).
             if ((ad.imageUrls?.length || 0) === 0) return;
             if (typeof ad.score !== 'number') return;
-            allAdsForRanking.push({ ad, brandNombre: b.nombre, isCompetidor: b.isCompetidor });
+            allAdsForRanking.push({ ad, brandNombre: b.nombre, brandId: b.id, isCompetidor: b.isCompetidor });
           });
         });
         const topEscalados = allAdsForRanking
@@ -2522,6 +3240,10 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                 onAdapt={(brandNombre, ad) => handleAdapt(brandNombre, ad)}
                 onCrearReferencial={(brandNombre, ad) => crearReferencialDeAd(brandNombre, ad)}
                 onToggleSelect={(adId) => toggleSeleccion(adId)}
+                onSaveToBoard={(ad, brandInfo) => setBoardPickerData({ ad, brand: brandInfo, productoId: producto.id })}
+                onClearProgress={(adId) => setProgressById(prev => {
+                  const next = { ...prev }; delete next[adId]; return next;
+                })}
               />
             )}
 
@@ -2533,9 +3255,18 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                 <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
                   type="text" value={query} onChange={e => setQuery(e.target.value)}
-                  placeholder="Buscar marca, URL, notas…"
-                  className="w-full pl-7 pr-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded focus:outline-none focus:ring-1 focus:ring-amber-500"
+                  placeholder="Buscar — marca, URL, body, OCR, audio del video…"
+                  className="w-full pl-7 pr-7 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded focus:outline-none focus:ring-1 focus:ring-amber-500"
                 />
+                {searchingServer && (
+                  <Loader2 size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-amber-500 animate-spin" />
+                )}
+                {serverSearchError && !searchingServer && (
+                  <p className="absolute left-0 -bottom-4 text-[9px] text-amber-600 dark:text-amber-400 italic"
+                    title={serverSearchError}>
+                    ⚠ {serverSearchError}
+                  </p>
+                )}
               </div>
               <select value={tipoFiltro} onChange={e => setTipoFiltro(e.target.value)}
                 className="px-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded">
@@ -2784,10 +3515,16 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                     usedAdIds={mergedUsedAdIds}
                     progressById={progressById}
                     onScrape={() => b.isCompetidor ? handleScrapeCompetidor(b) : handleScrapeBrand(b)}
+                    onOcrWinners={() => handleOcrTopWinners(b)}
+                    onTranscribeVideos={() => handleTranscribeTopVideos(b)}
                     onAdapt={(ad) => handleAdapt(b.nombre, ad)}
                     onCrearReferencial={(ad) => crearReferencialDeAd(b.nombre, ad)}
                     onToggleSelect={(adId) => toggleSeleccion(adId)}
+                    onSaveToBoard={(ad, brandInfo) => setBoardPickerData({ ad, brand: brandInfo, productoId: producto.id })}
                     onRemove={b.isCompetidor ? null : () => handleRemoveBrand(b.id)}
+                    onClearProgress={(adId) => setProgressById(prev => {
+                      const next = { ...prev }; delete next[adId]; return next;
+                    })}
                   />
                 ))}
               </div>
@@ -2795,6 +3532,13 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           </div>
         );
       })()}
+
+      {/* Modal de board picker — aparece cuando el user clickea "Guardar" sobre un ad */}
+      <BoardPickerModal
+        data={boardPickerData}
+        onClose={() => setBoardPickerData(null)}
+        addToast={addToast}
+      />
     </div>
   );
 }

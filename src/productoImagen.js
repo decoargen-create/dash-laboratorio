@@ -17,6 +17,7 @@
 // cross-device. localStorage se mantiene como fallback de migración.
 
 import { supabase, getCurrentUser } from './supabase.js';
+import { logEvent } from './debugLog.js';
 
 const DB_NAME = 'adslab-producto-imagenes';
 const DB_VERSION = 1;
@@ -50,6 +51,16 @@ function openDB() {
 // piden la imagen varias veces por sesión. Sin esto, cada llamada hace un
 // round-trip a IDB. Con cache es instant tras la primera lectura.
 const memCache = new Map();
+
+// Helper para logout — cierra conexión IDB + limpia cache. Sin esto, user B
+// loggeando en la misma PC heredaba fotos del memCache de user A.
+export function _resetForLogout() {
+  memCache.clear();
+  if (dbPromise) {
+    dbPromise.then(db => { try { db.close(); } catch {} }).catch(() => {});
+    dbPromise = null;
+  }
+}
 
 // Helpers: leer/escribir producto.data via localStorage.
 function readProducto(id) {
@@ -122,11 +133,50 @@ function dataUrlToBlob(dataUrl) {
   return new Blob([buf], { type: mime });
 }
 
+// Devuelve el path en el bucket — esto sigue siendo válido siempre porque
+// es solo un string. La función pública resolverá vía SDK download (no fetch
+// directo) ya que el bucket es PRIVADO y getPublicUrl() devuelve URLs que
+// solo funcionan si el bucket es público. SDK download respeta las RLS
+// policies y funciona para el dueño del path.
+function pathFor(uid, productoId) {
+  return `${uid}/producto-fotos/${String(productoId)}.jpg`;
+}
+
+// Baja la foto via Supabase SDK (no fetch directo). Como el bucket 'creativos'
+// es privado, esta es la única forma confiable de obtener los bytes. El SDK
+// usa las cookies de auth → RLS policy permite porque foldername[1]=auth.uid().
+async function downloadFotoFromCloud(productoId) {
+  if (!supabase) return null;
+  try {
+    const user = await getCurrentUser();
+    if (!user) return null;
+    const path = pathFor(user.id, productoId);
+    const { data, error } = await supabase.storage.from(BUCKET).download(path);
+    if (error || !data) return null;
+    return await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(data);
+    });
+  } catch (err) {
+    console.warn('[productoImagen] cloud download falló:', err.message);
+    logEvent({ kind: 'fetch-error', label: `[producto-imagen] download exception: ${err.message}`, meta: { productoId } });
+    return null;
+  }
+}
+
 // Sube la foto al bucket Supabase. Devuelve la URL pública o null si falla.
 async function uploadFotoToCloud(productoId, dataUrl) {
-  if (!supabase) return null;
+  if (!supabase) {
+    logEvent({ kind: 'fetch-error', label: `[producto-imagen] sin supabase configurado`, meta: { productoId } });
+    return null;
+  }
   const user = await getCurrentUser();
-  if (!user) return null;
+  if (!user) {
+    logEvent({ kind: 'fetch-error', label: `[producto-imagen] sin sesión auth — no se sube foto`, meta: { productoId } });
+    return null;
+  }
   try {
     const blob = dataUrlToBlob(dataUrl);
     // El uid VA PRIMERO en el path: la policy RLS del bucket exige
@@ -139,18 +189,36 @@ async function uploadFotoToCloud(productoId, dataUrl) {
       .upload(path, blob, { contentType: blob.type || 'image/jpeg', upsert: true });
     if (error) {
       console.warn('[productoImagen] cloud upload falló:', error.message);
+      logEvent({
+        kind: 'fetch-error',
+        label: `[producto-imagen] upload falló: ${error.message}`,
+        meta: { productoId, path, errorMsg: error.message, sizeBytes: blob.size },
+      });
       return null;
     }
     const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(path);
+    logEvent({
+      kind: 'fetch',
+      label: `[producto-imagen] subido OK ${productoId}`,
+      meta: { productoId, path, publicUrl: pub?.publicUrl?.slice(0, 200) },
+    });
     return pub?.publicUrl || null;
   } catch (err) {
     console.warn('[productoImagen] cloud upload error:', err.message);
+    logEvent({
+      kind: 'fetch-error',
+      label: `[producto-imagen] upload exception: ${err.message}`,
+      meta: { productoId, error: err.message, stack: err.stack },
+    });
     return null;
   }
 }
 
 // Convierte una URL pública a data URL — usado cuando IDB local no tiene
 // la imagen pero producto.data.fotoUrl sí (caso "entré desde otra PC").
+// IMPORTANTE: el bucket 'creativos' es PRIVADO. getPublicUrl() devuelve URLs
+// que dan 400/403 al hacer fetch(). Si el fetch falla, caemos al SDK download
+// que respeta auth + RLS. Esto arregla el bug "fotos no se ven en PC2".
 async function dataUrlFromUrl(url) {
   try {
     const resp = await fetch(url);
@@ -192,6 +260,40 @@ async function migrateLocalPhotoToCloud(id, dataUrl) {
 export async function getProductoImagen(id, fallbackProducto = null) {
   if (!id) return null;
   const key = String(id);
+  // CACHE-BUST por fotoUpdatedAt: si la foto del cloud es más nueva que la
+  // que tenemos local, invalidamos el cache para forzar re-download.
+  // Sin esto PC2 mostraba la foto vieja para siempre si PC1 re-subía.
+  try {
+    const producto = fallbackProducto || readProducto(id);
+    const cloudTs = producto?.fotoUpdatedAt ? Date.parse(producto.fotoUpdatedAt) : 0;
+    if (cloudTs > 0) {
+      const db = await openDB();
+      const localRec = await new Promise((resolve) => {
+        const tx = db.transaction(STORE, 'readonly');
+        const req = tx.objectStore(STORE).get(key);
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => resolve(null);
+      });
+      const localTs = localRec?.updatedAt ? Date.parse(localRec.updatedAt) : 0;
+      // Tolerancia 5s en vez de 1s: el upload background tras setProductoImagen
+      // setea fotoUpdatedAt que típicamente queda 2-4s después del write local
+      // → 1s de tolerancia disparaba re-download innecesario de la imagen
+      // recién subida. 5s da margen para race natural del upload sin perder
+      // la detección de actualizaciones reales cross-PC.
+      if (cloudTs > localTs + 5000) {
+        // Cloud más nuevo — invalidar cache local antes de devolver.
+        memCache.delete(key);
+        try {
+          await new Promise((resolve) => {
+            const txw = db.transaction(STORE, 'readwrite');
+            txw.objectStore(STORE).delete(key);
+            txw.oncomplete = () => resolve();
+            txw.onerror = () => resolve();
+          });
+        } catch {}
+      }
+    }
+  } catch {}
   if (memCache.has(key)) return memCache.get(key);
   // 1) Intentar IDB
   try {
@@ -223,26 +325,32 @@ export async function getProductoImagen(id, fallbackProducto = null) {
       return legacy;
     }
   } catch {}
-  // 3) Cloud — bajar producto.data.fotoUrl si está y cachear en IDB.
-  //    Path típico "entré desde otra PC": el cloud tiene la foto pero el
-  //    IDB local está vacío. Prioridad: fallbackProducto (cloud-first) >
-  //    readProducto (localStorage, puede estar vacío en cross-device).
-  const producto = fallbackProducto || readProducto(id);
-  if (producto?.fotoUrl) {
-    const dataUrl = await dataUrlFromUrl(producto.fotoUrl);
-    if (dataUrl) {
-      try {
-        const db = await openDB();
-        await new Promise((resolve) => {
-          const tx = db.transaction(STORE, 'readwrite');
-          tx.objectStore(STORE).put({ id: key, dataUrl, updatedAt: new Date().toISOString() });
-          tx.oncomplete = () => resolve();
-          tx.onerror = () => resolve();
-        });
-      } catch {}
-      memCache.set(key, dataUrl);
-      return dataUrl;
+  // 3) Cloud — primero SDK download (funciona aunque el bucket sea privado),
+  //    después fallback al fetch de fotoUrl (legacy). El SDK respeta RLS;
+  //    fetch directo de getPublicUrl() FALLA con 400/403 si el bucket no
+  //    es público — que es el caso actual. Por eso prioridad SDK.
+  // Path típico "entré desde otra PC": el cloud tiene la foto pero el
+  // IDB local está vacío.
+  let dataUrl = await downloadFotoFromCloud(id);
+  // Si SDK download falló (no auth, no archivo), probamos el fotoUrl legacy.
+  if (!dataUrl) {
+    const producto = fallbackProducto || readProducto(id);
+    if (producto?.fotoUrl) {
+      dataUrl = await dataUrlFromUrl(producto.fotoUrl);
     }
+  }
+  if (dataUrl) {
+    try {
+      const db = await openDB();
+      await new Promise((resolve) => {
+        const tx = db.transaction(STORE, 'readwrite');
+        tx.objectStore(STORE).put({ id: key, dataUrl, updatedAt: new Date().toISOString() });
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => resolve();
+      });
+    } catch {}
+    memCache.set(key, dataUrl);
+    return dataUrl;
   }
   return null;
 }

@@ -173,10 +173,24 @@ export function useMarketingSync({ addToast } = {}) {
     let pullTimer = null;
     const schedulePull = () => {
       if (pullTimer) clearTimeout(pullTimer);
+      // EDITING GUARD: si hay un push pendiente o el user acaba de hacer un
+      // cambio local (último write < 5s), demoramos el pull. Sin esto, un
+      // realtime event puede pisar lo que el user está tipeando.
+      const lastLocalWrite = Number(window.__viora_last_local_write || 0);
+      const sinceLastWrite = Date.now() - lastLocalWrite;
+      const editingNow = sinceLastWrite < 5000;
+      const delay = editingNow ? 5000 - sinceLastWrite + 1000 : 1500;
       pullTimer = setTimeout(() => {
+        // Re-check al disparar — si el user siguió tipeando, re-postergamos.
+        const lastLocalNow = Number(window.__viora_last_local_write || 0);
+        if (Date.now() - lastLocalNow < 3000) {
+          console.info('[realtime] pull postergado — user sigue tipeando');
+          schedulePull();
+          return;
+        }
         console.info('[realtime] cambio remoto detectado — re-pulling cloud');
         runPull(mountedRefShared.current);
-      }, 1500);
+      }, delay);
     };
     // Refresh de ideas: lee marketing_ideas, las redistribuye en
     // producto.bandejaIdeas (localStorage), y dispatcha viora:marketing-pulled
@@ -204,7 +218,10 @@ export function useMarketingSync({ addToast } = {}) {
               ...p,
               bandejaIdeas: byProducto.get(String(p.id)) || [],
             }));
-            localStorage.setItem(KEYS.productos, JSON.stringify(updated));
+            // safeSetItem swallows quota errors (Safari private mode crash)
+            // y emite warning — pero dispatch event SIEMPRE para que el state
+            // in-memory se actualice aunque la persistencia falle.
+            try { localStorage.setItem(KEYS.productos, JSON.stringify(updated)); } catch (err) { console.warn('[sync] localStorage write falló (storage / quota):', err.message); }
             window.dispatchEvent(new Event('viora:marketing-pulled'));
             console.info(`[realtime] ideas refrescadas: ${ideas.length} ideas en ${byProducto.size} productos`);
           }
@@ -295,6 +312,27 @@ export function useMarketingSync({ addToast } = {}) {
     };
 
     const doPush = async (key) => {
+      // CROSS-TAB DATA-LOSS GUARD: si tab A hace logout, los removeItem
+      // disparan 'storage' event en tab B (otro tab del mismo browser, sesión
+      // aún válida). Tab B intentaría pushear el localStorage vacío al cloud
+      // → BORRA EL CLOUD ENTERO. Sin esto, un logout en una tab podía
+      // limpiar la cuenta entera. Verificamos sesión activa antes de pushear.
+      try {
+        if (supabase) {
+          // TIMEOUT 5s: si Supabase cuelga, no queremos bloquear el push para
+          // siempre. Race contra timeout y treat como "tal vez hay sesión".
+          const sessionResult = await Promise.race([
+            supabase.auth.getSession(),
+            new Promise(resolve => setTimeout(() => resolve({ data: { session: '__timeout__' } }), 5000)),
+          ]);
+          const session = sessionResult?.data?.session;
+          // null explícito (session expired) → drop. timeout placeholder → seguir.
+          if (session === null) {
+            console.warn(`[sync] push de ${key} dropeado — no hay sesión activa`);
+            return;
+          }
+        }
+      } catch {}
       // Guard: si el primer pull aún no terminó, el localStorage puede no
       // reflejar lo que hay en el cloud. Pushear ahora puede borrar datos
       // (race condition que afectó al user el 2026-06-08).
@@ -365,6 +403,10 @@ export function useMarketingSync({ addToast } = {}) {
     // un siguiente PR — por ahora, los componentes que escriben pueden
     // dispatchearlo a mano).
     const onLocal = (e) => {
+      // Marcamos timestamp del último write local — el schedulePull lo lee
+      // para no pisar al user mientras tipea. Sin esto, un realtime event
+      // entrante puede pisar lo que está typing.
+      try { window.__viora_last_local_write = Date.now(); } catch {}
       const key = e?.detail?.key;
       if (key) queuePush(key);
     };

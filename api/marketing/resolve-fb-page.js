@@ -44,8 +44,25 @@ function respondJSON(res, status, payload) {
 }
 
 // Fetch con timeout + user-agent de browser para evitar que nos bloqueen
-// por parecer bot.
+// por parecer bot. Validamos host antes para prevenir SSRF a IPs internas
+// (RFC1918, loopback, link-local — incl. metadata endpoints del cloud).
 async function fetchLandingHTML(url, { timeoutMs = 8000 } = {}) {
+  // Pre-check: bloquea IPs privadas/loopback/link-local. No usamos allowlist
+  // acá porque las landings son de marcas random — pero rechazamos hosts
+  // peligrosos antes del fetch.
+  try {
+    const parsed = new URL(url);
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      throw new Error('protocolo no permitido');
+    }
+    const host = parsed.hostname.toLowerCase();
+    const privateRe = /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|169\.254\.|0\.0\.0\.0|::1$|fc00:|fe80:|localhost$)/i;
+    if (privateRe.test(host)) {
+      throw new Error('host privado bloqueado por SSRF guard');
+    }
+  } catch (err) {
+    throw new Error(`landingUrl rechazada: ${err.message}`);
+  }
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);
   try {

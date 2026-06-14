@@ -13,17 +13,17 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   X, Download, Trash2, Images, ChevronDown, ChevronUp, ExternalLink,
   LayoutGrid, Rows3, Table2, Plus, Check, FileArchive, EyeOff, Eye,
-  Archive, ArchiveRestore, Trophy, Sparkles,
+  Archive, ArchiveRestore, Trophy, Sparkles, Search,
 } from 'lucide-react';
 import JSZip from 'jszip';
 import {
   getReferencialesByProducto, deleteReferencial, patchReferenciales,
   archiveReferencial, countReferencialesByProducto,
-  markAsWinner, unmarkWinner,
+  markAsWinner, unmarkWinner, refreshSignedUrls,
 } from './galeriaReferenciales.js';
 import WinnerForm from './WinnerForm.jsx';
 import WinnersReport from './WinnersReport.jsx';
-import { iterateFromWinner } from './winnerIterate.js';
+import { iterateFromWinner, generateFromWinner } from './winnerIterate.js';
 import { BarChart3 } from 'lucide-react';
 import { SkeletonGrid } from './Skeleton.jsx';
 import EmptyState from './EmptyState.jsx';
@@ -151,7 +151,7 @@ function HoverPreview({ item, imgSrc, children, className = '' }) {
 
 // VISTA 1 — Grid: thumbs cuadrados con número de selección + badge si ya descargado.
 
-function GalleryGridView({ items, blobUrls, seleccionados, selectedOrder, onToggleSelect, onOpen, onArchive }) {
+function GalleryGridView({ items, blobUrls, seleccionados, selectedOrder, onToggleSelect, onOpen, onArchive, onToggleWinner }) {
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
       {items.map(it => {
@@ -162,7 +162,12 @@ function GalleryGridView({ items, blobUrls, seleccionados, selectedOrder, onTogg
           // Sin HoverPreview en grid: la imagen ya se ve grande, el preview
           // flotante tapaba thumbnails vecinos y resultaba molesto. Se mantiene
           // en list/table view donde los thumbs son chicos.
-          <div key={it.id} className="group relative">
+          <div key={it.id}
+            // content-visibility skipea rendering fuera del viewport →
+            // mismo que en InspiracionSection. Crítico para galerías de
+            // 500+ creativos donde cada thumb cargado se come ~3MB de RAM.
+            style={{ contentVisibility: 'auto', containIntrinsicSize: '0 200px' }}
+            className="group relative">
             <button
               onClick={() => onOpen(it)}
               className={`block w-full aspect-square rounded-lg overflow-hidden border-2 transition ${
@@ -192,13 +197,28 @@ function GalleryGridView({ items, blobUrls, seleccionados, selectedOrder, onTogg
             >
               {isSel ? selIdx : <Plus size={14} />}
             </button>
-            {/* Badge "descargada" — esquina superior derecha, debajo del archive */}
+            {/* Badge "descargada" — esquina superior derecha, debajo de winner+archive */}
             {it.descargada && (
-              <div className={`absolute ${onArchive ? 'top-10' : 'top-2'} right-2 z-10 inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold text-white bg-emerald-500 rounded-md shadow-md`}
+              <div className={`absolute ${onToggleWinner && onArchive ? 'top-[4.5rem]' : onArchive || onToggleWinner ? 'top-10' : 'top-2'} right-2 z-10 inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold text-white bg-emerald-500 rounded-md shadow-md`}
                 title={`Descargado ${fmtDate(it.descargadaAt)}`}
               >
                 <Check size={10} /> ✓
               </div>
+            )}
+            {/* Trofeo: si ya es winner, siempre visible (amber sólido). Si no lo es,
+                aparece en hover para marcarlo desde la card sin entrar al lightbox. */}
+            {onToggleWinner && (
+              <button
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggleWinner(it); }}
+                className={`absolute top-2 right-2 z-10 w-7 h-7 rounded-full flex items-center justify-center shadow-md transition-all ${
+                  it.winner
+                    ? 'bg-amber-500 text-white opacity-100'
+                    : 'bg-white/90 dark:bg-gray-900/90 text-gray-500 hover:text-amber-600 hover:bg-amber-50 opacity-0 group-hover:opacity-100 hover:scale-110'
+                }`}
+                title={it.winner ? 'Es winner — click para quitar' : 'Marcar como winner (publicado y rinde)'}
+              >
+                <Trophy size={12} />
+              </button>
             )}
             {/* Botón archivar / restaurar — solo visible al hover, top-right.
                 Click rápido para sacar de la vista sin tener que entrar al
@@ -206,7 +226,7 @@ function GalleryGridView({ items, blobUrls, seleccionados, selectedOrder, onTogg
             {onArchive && (
               <button
                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); onArchive(it.id, !!it.archivado); }}
-                className={`absolute top-2 right-2 z-10 w-7 h-7 rounded-full flex items-center justify-center shadow-md transition-all ${
+                className={`absolute ${onToggleWinner ? 'top-10' : 'top-2'} right-2 z-10 w-7 h-7 rounded-full flex items-center justify-center shadow-md transition-all ${
                   it.archivado
                     ? 'bg-amber-500 text-white opacity-100'
                     : 'bg-white/90 dark:bg-gray-900/90 text-gray-500 hover:text-amber-600 hover:bg-amber-50 opacity-0 group-hover:opacity-100 hover:scale-110'
@@ -232,7 +252,7 @@ function GalleryGridView({ items, blobUrls, seleccionados, selectedOrder, onTogg
 
 // VISTA 2 — Lista: rows con thumb + info + acciones inline.
 
-function GalleryListView({ items, blobUrls, seleccionados, selectedOrder, onToggleSelect, onOpen, onDownload, onToggleDescargada, onArchive, onDelete }) {
+function GalleryListView({ items, blobUrls, seleccionados, selectedOrder, onToggleSelect, onOpen, onDownload, onToggleDescargada, onArchive, onDelete, onToggleWinner }) {
   return (
     <div className="space-y-1.5">
       {items.map(it => {
@@ -275,6 +295,13 @@ function GalleryListView({ items, blobUrls, seleccionados, selectedOrder, onTogg
                     REBRAND
                   </span>
                 )}
+                {it.winner && (
+                  <span className="inline-flex items-center gap-0.5 px-1 py-0.5 text-[9px] font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 rounded"
+                    title={`Winner ${fmtDate(it.winnerAt)}`}
+                  >
+                    <Trophy size={9} /> WINNER
+                  </span>
+                )}
                 {it.descargada && (
                   <span className="inline-flex items-center gap-0.5 px-1 py-0.5 text-[9px] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded"
                     title={`Descargado ${fmtDate(it.descargadaAt)}`}
@@ -307,6 +334,17 @@ function GalleryListView({ items, blobUrls, seleccionados, selectedOrder, onTogg
                 title={it.descargada ? 'Marcar como NO descargado' : 'Marcar como descargado'}>
                 <Check size={12} />
               </button>
+              {onToggleWinner && (
+                <button onClick={() => onToggleWinner(it)}
+                  className={`p-1.5 rounded transition ${
+                    it.winner
+                      ? 'text-amber-700 dark:text-amber-200 bg-amber-100 dark:bg-amber-900/40 hover:bg-amber-200'
+                      : 'text-gray-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20'
+                  }`}
+                  title={it.winner ? 'Es winner — click para quitar' : 'Marcar como winner'}>
+                  <Trophy size={12} />
+                </button>
+              )}
               <button onClick={() => onArchive(it.id, !!it.archivado)}
                 className={`p-1.5 rounded transition ${
                   it.archivado
@@ -331,7 +369,7 @@ function GalleryListView({ items, blobUrls, seleccionados, selectedOrder, onTogg
 
 // VISTA 3 — Tabla.
 
-function GalleryTableView({ items, blobUrls, seleccionados, selectedOrder, onToggleSelect, onOpen, onDownload, onToggleDescargada, onArchive, onDelete }) {
+function GalleryTableView({ items, blobUrls, seleccionados, selectedOrder, onToggleSelect, onOpen, onDownload, onToggleDescargada, onArchive, onDelete, onToggleWinner }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-xs">
@@ -401,6 +439,13 @@ function GalleryTableView({ items, blobUrls, seleccionados, selectedOrder, onTog
                       title={it.descargada ? 'Marcar pendiente' : 'Marcar descargado'}>
                       <Check size={11} />
                     </button>
+                    {onToggleWinner && (
+                      <button onClick={() => onToggleWinner(it)}
+                        className={`p-1 rounded ${it.winner ? 'text-amber-700 bg-amber-100 dark:bg-amber-900/40' : 'text-gray-400 hover:text-amber-600'} hover:bg-amber-50 dark:hover:bg-amber-900/30`}
+                        title={it.winner ? 'Es winner — click para quitar' : 'Marcar como winner'}>
+                        <Trophy size={11} />
+                      </button>
+                    )}
                     <button onClick={() => onArchive(it.id, !!it.archivado)}
                       className={`p-1 rounded ${it.archivado ? 'text-amber-600' : 'text-gray-400'} hover:bg-gray-100 dark:hover:bg-gray-700`}
                       title={it.archivado ? 'Restaurar' : 'Archivar'}>
@@ -423,7 +468,7 @@ function GalleryTableView({ items, blobUrls, seleccionados, selectedOrder, onTog
 
 // Lightbox separado para mantener este archivo manejable.
 
-function Lightbox({ item, imgSrc, onClose, showDebug, setShowDebug, onDownload, onDelete, onToggleDescargada, onArchive, onToggleWinner, onIterateWinner }) {
+function Lightbox({ item, imgSrc, onClose, showDebug, setShowDebug, onDownload, onDelete, onToggleDescargada, onArchive, onToggleWinner, onIterateWinner, iterating = false }) {
   const metrics = item.winnerMetrics || {};
   return (
     <div
@@ -555,8 +600,11 @@ function Lightbox({ item, imgSrc, onClose, showDebug, setShowDebug, onDownload, 
             </button>
             {item.winner && onIterateWinner && (
               <button onClick={onIterateWinner}
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 rounded-lg transition">
-                <Sparkles size={13} /> Iterar desde winner
+                disabled={iterating}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-gradient-to-br from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">
+                {iterating
+                  ? <><span className="animate-spin">⏳</span> Generando…</>
+                  : <><Sparkles size={13} /> Generar variación desde winner</>}
               </button>
             )}
             <button onClick={onToggleDescargada}
@@ -665,7 +713,12 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
   const [filtroEstado, setFiltroEstado] = useState('all');     // 'all' | 'pending' | 'downloaded'
   const [filtroVariante, setFiltroVariante] = useState('all'); // 'all' | 'reference' | 'rebrand' | 'tight' | 'medium' | 'loose'
   const [filtroOrigen, setFiltroOrigen] = useState('all');     // 'all' | 'inspiracion' | 'bandeja-idea'
+  // Búsqueda libre por texto — matchea sourceBrand, sourceHeadline, variantStyle.
+  const [searchQuery, setSearchQuery] = useState('');
   const [zipping, setZipping] = useState(false);
+  // Iteración de winner en curso — bloquea el botón y muestra progreso.
+  const [iteratingId, setIteratingId] = useState(null);
+  const [iterateProgress, setIterateProgress] = useState(null);
 
   // ⚠️ visibleItems TIENE que estar acá arriba (antes del useEffect de
   // keyboard nav que lo usa en su dep array). Estaba abajo en línea 935
@@ -684,6 +737,12 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
     if (filtroVariante !== 'all' && it.variantStyle !== filtroVariante) return false;
     if (filtroOrigen === 'inspiracion' && it.sourceType === 'bandeja-idea') return false;
     if (filtroOrigen === 'bandeja-idea' && it.sourceType !== 'bandeja-idea') return false;
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      const haystack = [it.sourceBrand, it.sourceHeadline, it.variantStyle, it.prompt]
+        .filter(Boolean).join(' ').toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
     return true;
   });
 
@@ -790,13 +849,41 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
     refresh();
   };
 
+  // Baja los bytes de una URL pública y valida que sea una imagen real.
+  // Sin esto: si Supabase Storage devuelve 403 (URL expirada/RLS) o el host
+  // del CDN responde con HTML/JSON de error, fetch().blob() igual devuelve
+  // ese cuerpo y el .png queda corrupto en el ZIP (~90 bytes). El user veía
+  // "No se pudo abrir el archivo" en Vista Previa.
+  const fetchImageBlob = async (url) => {
+    const resp = await fetch(url);
+    if (!resp.ok) {
+      throw new Error(`HTTP ${resp.status} ${resp.statusText || ''}`.trim());
+    }
+    const blob = await resp.blob();
+    // Validá content-type Y tamaño. content-type puede venir vacío en algunos
+    // CDNs aunque sea imagen válida → fallback a chequeo de tamaño mínimo
+    // (las imágenes generadas son siempre >5KB; un error JSON es <2KB).
+    const ct = blob.type || '';
+    if (ct && !ct.startsWith('image/')) {
+      throw new Error(`Respuesta no es imagen (content-type: ${ct})`);
+    }
+    if (blob.size < 2048) {
+      throw new Error(`Bytes insuficientes (${blob.size} B)`);
+    }
+    return blob;
+  };
+
   // Bulk download como ZIP. Marca todos los descargados con timestamp.
   const handleBulkDownload = async () => {
     if (seleccionados.size === 0) return;
     setZipping(true);
     try {
       const zip = new JSZip();
-      const seleccionadosArr = items.filter(it => seleccionados.has(it.id));
+      let seleccionadosArr = items.filter(it => seleccionados.has(it.id));
+      // Re-firmamos signed URLs (TTL 5min) antes de bajar bytes. Las URLs
+      // viejas del load inicial pueden tener >1h y dar 403 acá. Items sin
+      // storagePath (IDB legacy) se devuelven igual.
+      seleccionadosArr = await refreshSignedUrls(seleccionadosArr);
       const yaDescargados = seleccionadosArr.filter(it => it.descargada).length;
       if (yaDescargados > 0) {
         const cont = window.confirm(
@@ -810,8 +897,11 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
       // Trackear nombres usados para evitar colisiones (ej. mismo producto +
       // fecha + brand → agregar _2, _3, etc).
       const usedNames = new Set();
-      // Para items cloud (sin imageBase64) bajamos los bytes del imageUrl en
-      // paralelo. Para items IDB legacy seguimos usando el base64 directo.
+      // Items que efectivamente entraron al ZIP — solo estos los marcamos
+      // como descargados al final. Los fallados quedan disponibles para
+      // reintentar sin ensuciar el filtro "no descargados".
+      const okItems = [];
+      const failed = []; // { name, error }
       await Promise.all(seleccionadosArr.map(async (it) => {
         let name = buildFileName(it, productoNombre);
         let dedup = 1;
@@ -820,14 +910,26 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
           name = `${base} (${++dedup}).png`;
         }
         usedNames.add(name);
-        if (it.imageBase64) {
-          zip.file(name, base64ToBlob(it.imageBase64, it.mimeType || 'image/png'));
-        } else if (it.imageUrl) {
-          const resp = await fetch(it.imageUrl);
-          const blob = await resp.blob();
+        try {
+          let blob;
+          if (it.imageBase64) {
+            blob = base64ToBlob(it.imageBase64, it.mimeType || 'image/png');
+          } else if (it.imageUrl) {
+            blob = await fetchImageBlob(it.imageUrl);
+          } else {
+            throw new Error('Sin imageBase64 ni imageUrl');
+          }
           zip.file(name, blob);
+          okItems.push(it);
+        } catch (err) {
+          failed.push({ name, error: err.message });
         }
       }));
+      if (okItems.length === 0) {
+        alert(`No se pudo bajar ninguno de los ${seleccionadosArr.length} creativos. Errores:\n\n${failed.slice(0, 5).map(f => `· ${f.name}: ${f.error}`).join('\n')}`);
+        setZipping(false);
+        return;
+      }
       const blob = await zip.generateAsync({ type: 'blob' });
       const ts = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
       const zipName = `creativos-${slugify(productoNombre)}-${ts}.zip`;
@@ -839,11 +941,14 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
       a.click();
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-      // Marcar todos como descargados con timestamp.
+      // Marcar solo los OK como descargados.
       await patchReferenciales(
-        seleccionadosArr.map(it => it.id),
+        okItems.map(it => it.id),
         { descargada: true, descargadaAt: new Date().toISOString() }
       );
+      if (failed.length > 0) {
+        alert(`ZIP listo con ${okItems.length} creativos. ${failed.length} no se pudieron bajar (URLs caídas o sin permisos) — quedaron sin marcar como descargados para reintentar:\n\n${failed.slice(0, 5).map(f => `· ${f.name}: ${f.error}`).join('\n')}${failed.length > 5 ? `\n…y ${failed.length - 5} más` : ''}`);
+      }
       limpiarSeleccion();
       refresh();
     } catch (err) {
@@ -863,9 +968,11 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
       let blob;
       if (it.imageBase64) {
         blob = base64ToBlob(it.imageBase64, it.mimeType || 'image/png');
-      } else if (it.imageUrl) {
-        const resp = await fetch(it.imageUrl);
-        blob = await resp.blob();
+      } else if (it.imageUrl || it.storagePath) {
+        // Re-firmar antes de bajar (mismo motivo que en el bulk).
+        const [refreshed] = await refreshSignedUrls([it]);
+        if (!refreshed?.imageUrl) throw new Error('No se pudo refrescar la URL del creativo');
+        blob = await fetchImageBlob(refreshed.imageUrl);
       } else {
         throw new Error('Sin imageBase64 ni imageUrl — no hay bytes para descargar');
       }
@@ -921,19 +1028,34 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
     refresh();
   };
 
-  // Iterar desde un winner — crea idea en Bandeja y cierra galería.
+  // Iterar desde un winner — genera DIRECTO una variación nueva usando el
+  // winner como referencia visual (mismo pipeline que Inspiración, no
+  // pasa por Bandeja). La idea es que el ganador es el insumo, no la
+  // hipótesis a editar.
   const handleIterateWinner = async (item) => {
     if (!producto) {
       alert('Falta el contexto del producto para iterar.');
       return;
     }
+    if (iteratingId) return; // ya hay una iteración corriendo
+    setIteratingId(item.id);
+    setIterateProgress({ current: 0, total: 1, brand: item.sourceBrand });
     try {
-      await iterateFromWinner(item, producto);
-      // Notificar que se creó idea — Bandeja la va a levantar.
-      try { window.dispatchEvent(new Event('viora:marketing-storage-changed')); } catch {}
-      alert('✓ Idea de iteración creada en la Bandeja del producto. Andá ahí para editarla y generar variantes.');
+      const { count } = await generateFromWinner(item, producto, {
+        n: 1,
+        quality: 'high',
+        size: item.size || '1024x1024',
+        onProgress: (p) => setIterateProgress({ ...p, brand: item.sourceBrand }),
+      });
+      // El backend ya disparó viora:referencial-saved en cada save al cloud;
+      // por las dudas refresh local también.
+      refresh();
+      alert(`✓ ${count} variación nueva del winner generada y guardada al repositorio.`);
     } catch (err) {
       alert(`Error iterando: ${err.message}`);
+    } finally {
+      setIteratingId(null);
+      setIterateProgress(null);
     }
   };
 
@@ -985,6 +1107,18 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0 flex-wrap">
+            {/* Búsqueda libre — matchea brand, headline, variante, prompt. */}
+            <div className="relative">
+              <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Buscar por marca, headline…"
+                className="pl-6 pr-2 py-1.5 text-[10px] font-medium bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded focus:outline-none focus:ring-1 focus:ring-brand-500 w-40"
+                title="Búsqueda libre"
+              />
+            </div>
             {/* Filtros estilo dropdown (linear-style). Compactos. */}
             <select
               value={filtroEstado}
@@ -1092,23 +1226,40 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
               description='Elegí ads en Inspiración y dale "Crear creativo" — los generados aparecen acá.'
             />
           ) : visibleItems.length === 0 ? (
-            <EmptyState
-              icon={Check}
-              title="¡Todo descargado!"
-              description='Apagá el filtro "Solo no descargados" para ver todo el repositorio.'
-              secondaryAction={{ label: 'Mostrar todo', onClick: () => { setFiltroEstado('all'); setFiltroVariante('all'); setFiltroOrigen('all'); } }}
-            />
+            // Empty state context-aware. Antes siempre decía "Todo descargado"
+            // → en la pestaña Winners sin winners marcados era confuso (el user
+            // no entendía que el problema era que NO HAY winners).
+            panel === 'winners' ? (
+              <EmptyState
+                icon={Trophy}
+                title="Sin winners marcados"
+                description='Marcá un creativo como winner clickeando la copa 🏆 en su card. Los winners marcados aparecen acá.'
+              />
+            ) : panel === 'archivados' ? (
+              <EmptyState
+                icon={Archive}
+                title="Sin archivados"
+                description='Archivá un creativo desde su menú para que aparezca acá.'
+              />
+            ) : (
+              <EmptyState
+                icon={Check}
+                title="¡Todo descargado!"
+                description='Apagá el filtro "Solo no descargados" para ver todo el repositorio.'
+                secondaryAction={{ label: 'Mostrar todo', onClick: () => { setFiltroEstado('all'); setFiltroVariante('all'); setFiltroOrigen('all'); } }}
+              />
+            )
           ) : viewMode === 'grid' ? (
             <GalleryGridView items={visibleItems} blobUrls={blobUrls} seleccionados={seleccionados} selectedOrder={selectedOrder}
-              onToggleSelect={toggleSeleccion} onOpen={setSelected} onArchive={handleArchive} />
+              onToggleSelect={toggleSeleccion} onOpen={setSelected} onArchive={handleArchive} onToggleWinner={handleToggleWinner} />
           ) : viewMode === 'list' ? (
             <GalleryListView items={visibleItems} blobUrls={blobUrls} seleccionados={seleccionados} selectedOrder={selectedOrder}
               onToggleSelect={toggleSeleccion} onOpen={setSelected}
-              onDownload={handleSingleDownload} onToggleDescargada={toggleDescargadaFlag} onArchive={handleArchive} onDelete={handleDelete} />
+              onDownload={handleSingleDownload} onToggleDescargada={toggleDescargadaFlag} onArchive={handleArchive} onDelete={handleDelete} onToggleWinner={handleToggleWinner} />
           ) : (
             <GalleryTableView items={visibleItems} blobUrls={blobUrls} seleccionados={seleccionados} selectedOrder={selectedOrder}
               onToggleSelect={toggleSeleccion} onOpen={setSelected}
-              onDownload={handleSingleDownload} onToggleDescargada={toggleDescargadaFlag} onArchive={handleArchive} onDelete={handleDelete} />
+              onDownload={handleSingleDownload} onToggleDescargada={toggleDescargadaFlag} onArchive={handleArchive} onDelete={handleDelete} onToggleWinner={handleToggleWinner} />
           )}
         </div>
 
@@ -1158,6 +1309,17 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
         </div>
       )}
 
+      {/* Toast de progreso del iterate — visible aun si cerrás el lightbox */}
+      {iteratingId && iterateProgress && (
+        <div className="fixed top-4 right-4 z-[80] bg-gradient-to-br from-purple-600 to-pink-600 text-white rounded-lg shadow-2xl px-4 py-3 flex items-center gap-3 max-w-sm">
+          <Sparkles size={16} className="animate-pulse" />
+          <div className="text-xs">
+            <p className="font-bold">Generando desde winner{iterateProgress.brand ? ` · ${iterateProgress.brand}` : ''}</p>
+            <p className="text-white/80 text-[10px]">{iterateProgress.current}/{iterateProgress.total} · suele tardar 60-90s</p>
+          </div>
+        </div>
+      )}
+
       {/* Lightbox */}
       {selected && (
         <Lightbox
@@ -1172,6 +1334,7 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
           onArchive={() => handleArchive(selected.id, !!selected.archivado)}
           onToggleWinner={() => handleToggleWinner(selected)}
           onIterateWinner={() => handleIterateWinner(selected)}
+          iterating={iteratingId === selected.id}
         />
       )}
 

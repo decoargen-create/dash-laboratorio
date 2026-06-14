@@ -13,7 +13,9 @@
 //   APIFY_TOKEN           — obligatoria
 //   APIFY_ACTOR_ID        — opcional (default: apify/facebook-ads-scraper)
 
-import { runActorSync, normalizeAd, scoreAd, buildAdLibraryUrl, WINNER_CRITERIA } from './_apify.js';
+import { runActorSync, runActorAsync, normalizeAd, scoreAd, buildAdLibraryUrl, WINNER_CRITERIA } from './_apify.js';
+import { upsertAdsToIndex } from './_ads-index.js';
+import { getUserIdFromAuth } from './_supabase-server.js';
 
 const DEFAULT_ACTOR = 'apify/facebook-ads-scraper';
 
@@ -56,14 +58,15 @@ export default async function handler(req, res) {
     });
   }
 
-  // Armar el startUrl según el input
+  // Armar el startUrl según el input. fbPageUrl ahora también acepta URLs
+  // de Ad Library directamente (facebook.com/ads/library/?...) — útil
+  // cuando el user copia una búsqueda armada a mano con filtros
+  // específicos (sort por impressions, country, etc).
   let startUrl;
   if (fbPageUrl) {
     startUrl = fbPageUrl.startsWith('http')
       ? fbPageUrl
       : `https://www.facebook.com/${fbPageUrl.replace(/^\/+/, '')}`;
-    // Validar que sea realmente facebook.com — sin esto, un atacante podría
-    // pasar javascript: o https://evil.com y gastar el actor run de Apify.
     try {
       const parsed = new URL(startUrl);
       if (!['http:', 'https:'].includes(parsed.protocol)) {
@@ -84,7 +87,16 @@ export default async function handler(req, res) {
   // El actor de Apify cambió su API: ahora requiere maxItems > 0 además de
   // resultsLimit (que dejó de ser el field principal). Mandamos ambos para
   // compatibilidad con cualquier versión del actor.
-  const cappedLimit = Math.min(Math.max(limit, 5), 200);
+  // Cap subido a 2500 — gracias al modo ASYNC + polling rompemos la
+  // barrera del timeout de 240s de run-sync. Ahora podemos durar los 300s
+  // completos de Vercel haciendo polling. Marcas con 1500-2500 ads activos
+  // (Shopify, big DTC) ahora caben. Si el run no termina en 270s, agarramos
+  // los items parciales del dataset igual.
+  const requestedLimit = Math.max(limit, 5);
+  const cappedLimit = Math.min(requestedLimit, 2500);
+  const limitNote = requestedLimit > cappedLimit
+    ? `Pediste ${requestedLimit} pero capeamos a ${cappedLimit}. Para más, habría que migrar a webhook + polling client-side (out of scope).`
+    : null;
   const input = {
     startUrls: [{ url: startUrl }],
     resultsLimit: cappedLimit,
@@ -99,11 +111,45 @@ export default async function handler(req, res) {
   // Retry helper: si Apify aborta el run (memoria/timeout/keyword genérico),
   // reintentamos automáticamente con limit reducido. Suele resolverse así.
   // Si el segundo intento también falla, devolvemos error con sugerencia.
+  //
+  // BUDGET DE TIEMPO: Vercel mata el endpoint a los 300s (maxDuration en
+  // vercel.json). Si el primer intento se come 240s, el retry NO puede
+  // tener otros 240s — Vercel kills mid-retry y el cliente ve "Internal
+  // Server Error" genérico. Trackeamos el tiempo desde el inicio del
+  // handler y ajustamos el timeout del retry al budget restante (con un
+  // colchón de 20s para que esta función responda JSON antes del kill).
+  const VERCEL_MAX_DURATION = 300;
+  const SAFETY_BUFFER = 20;
+  const handlerStartMs = Date.now();
+  const remainingBudget = () => Math.max(
+    10,
+    VERCEL_MAX_DURATION - Math.floor((Date.now() - handlerStartMs) / 1000) - SAFETY_BUFFER
+  );
+
   let items;
   let usedLimit = input.resultsLimit;
-  let attemptNote = null;
+  let attemptNote = limitNote;
+  let partial = false;
+  // MODO ASYNC + POLLING (nuevo): rompe el cap de 240s de Apify run-sync.
+  // Para limits <= 200 seguimos usando sync (es más rápido). Para limits
+  // grandes (cap actual 2500), async + polling permite agarrar items
+  // PARCIALES si Vercel está por matarnos a los 300s.
+  const useAsync = cappedLimit > 200;
   try {
-    items = await runActorSync(actorId, input, token, { timeout: 240 });
+    if (useAsync) {
+      const asyncBudget = Math.max(60, remainingBudget() - 30);
+      const result = await runActorAsync(actorId, input, token, {
+        maxWaitSec: asyncBudget,
+        pollIntervalSec: cappedLimit > 1000 ? 8 : 5,
+      });
+      items = result.items;
+      partial = !!result.partial;
+      if (partial) {
+        attemptNote = (attemptNote ? attemptNote + ' · ' : '') + `Apify aún corría (${result.status}) cuando agotamos el budget de ${asyncBudget}s. Se recuperaron ${items.length} items parciales de los hasta ${cappedLimit} pedidos. Re-scrapealo más tarde para completar.`;
+      }
+    } else {
+      items = await runActorSync(actorId, input, token, { timeout: Math.min(180, remainingBudget()) });
+    }
   } catch (err) {
     const msg = String(err.message || '');
 
@@ -118,14 +164,18 @@ export default async function handler(req, res) {
       });
     }
 
+    const budget = remainingBudget();
     const shouldRetry = /ABORTED|run-failed|timeout|memory|400|429|503/i.test(msg);
-    if (shouldRetry && usedLimit > 25) {
+    // Solo reintentamos si queda budget razonable (>=60s). Si Vercel está a
+    // punto de matarnos, mejor devolver el error ahora con mensaje claro.
+    if (shouldRetry && usedLimit > 25 && budget >= 60) {
       const reducedLimit = Math.max(25, Math.floor(usedLimit / 4));
-      console.warn(`apify-ingest: primer intento falló (${msg.slice(0, 100)}). Retry con limit ${reducedLimit}.`);
+      console.warn(`apify-ingest: primer intento falló (${msg.slice(0, 100)}). Retry con limit ${reducedLimit}, budget ${budget}s.`);
       try {
-        items = await runActorSync(actorId, { ...input, resultsLimit: reducedLimit, maxItems: reducedLimit, maxResults: reducedLimit }, token, { timeout: 240 });
+        items = await runActorSync(actorId, { ...input, resultsLimit: reducedLimit, maxItems: reducedLimit, maxResults: reducedLimit }, token, { timeout: budget });
         usedLimit = reducedLimit;
-        attemptNote = `Apify abortó con limit ${input.resultsLimit}. Reintentado con limit ${reducedLimit} y funcionó.`;
+        // Append (no overwrite) — sin esto perdíamos el limitNote del cap 1500.
+        attemptNote = (attemptNote ? attemptNote + ' · ' : '') + `Apify abortó con limit ${input.resultsLimit}. Reintentado con limit ${reducedLimit} y funcionó.`;
       } catch (err2) {
         const sugerencia = fbPageUrl
           ? 'Probá si la URL de Facebook page es correcta (debería ser https://www.facebook.com/<handle>).'
@@ -135,6 +185,21 @@ export default async function handler(req, res) {
           sugerencia,
         });
       }
+    } else if (shouldRetry && budget < 60) {
+      // Caso explícito: el primer intento consumió casi todo el budget de
+      // Vercel. No reintentamos — devolvemos error claro para que el user
+      // sepa qué pasó. Si el limit pedido era alto, sugerimos el ajuste
+      // específico (mitad del cap actual) que tiene mejores chances.
+      const limitSugerido = Math.max(100, Math.floor(usedLimit / 2));
+      const usedSecs = VERCEL_MAX_DURATION - budget - SAFETY_BUFFER;
+      return respondJSON(res, 504, {
+        error: `Apify tardó demasiado (${usedSecs}s) y no quedó tiempo para reintentar`,
+        sugerencia: fbPageUrl
+          ? `La página de Facebook tiene demasiados ads o está lenta. Probá con limit ${limitSugerido} (intentaste ${usedLimit}). Re-scrapealo y debería completar.`
+          : 'El keyword puede ser muy amplio. Probá cargar la fbPageUrl del competidor a mano.',
+        rawApify: msg.slice(0, 300),
+        retryWithLimit: limitSugerido, // hint para que el frontend pueda auto-retry
+      });
     } else {
       const sugerencia = fbPageUrl
         ? 'Verificá la URL de Facebook page (formato: https://www.facebook.com/<handle>).'
@@ -169,6 +234,26 @@ export default async function handler(req, res) {
     scored.sort((a, b) => b.score - a.score);
 
     const winnersCount = scored.filter(a => a.isWinner).length;
+
+    // SEARCH INDEX: si el cliente mandó productoId + competidorId + auth,
+    // upsertear al index server-side para que la lupa rápida los encuentre.
+    // Si NO mandó auth o IDs, los ads quedan en IDB local + bucket JSON
+    // (search server-side los pierde hasta el próximo cron).
+    if (body.productoId && body.competidorId) {
+      const uid = await getUserIdFromAuth(req);
+      if (uid) {
+        try {
+          await upsertAdsToIndex({
+            userId: uid,
+            productoId: body.productoId,
+            competidorId: body.competidorId,
+            ads: scored,
+          });
+        } catch (idxErr) {
+          console.warn('[apify-ingest] upsertAdsToIndex falló:', idxErr.message);
+        }
+      }
+    }
 
     // Costo estimado: Apify facebook-ads-scraper cobra ~$5.80/1000 ads en el
     // plan free (usage-based). ~$0.0058 por ad scrapeado.

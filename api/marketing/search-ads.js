@@ -102,7 +102,19 @@ export default async function handler(req, res) {
       page_size: pageSize,
     });
     if (error) return respondJSON(res, 500, { error: `RPC falló: ${error.message}` });
-    const total = data?.[0]?.total_count || 0;
+    // total_count viene inyectado en cada fila por la RPC; si data está vacío
+    // (paginación pasada del final), caemos a un count del catalogo con los
+    // mismos filtros para que el frontend pueda mostrar "X de Y" coherente.
+    let total = data?.[0]?.total_count || 0;
+    if ((data?.length || 0) === 0 && offset > 0) {
+      let countQ = supabase.from('marketing_ads').select('*', { count: 'exact', head: true }).eq('user_id', userId);
+      if (productoId) countQ = countQ.eq('producto_id', String(productoId));
+      if (competidorId) countQ = countQ.eq('competidor_id', String(competidorId));
+      if (onlyWinners) countQ = countQ.eq('is_winner', true);
+      countQ = countQ.textSearch('search_vector', trimmedQuery, { type: 'websearch', config: 'spanish' });
+      const { count: backfillCount } = await countQ;
+      total = backfillCount || offset;
+    }
     return respondJSON(res, 200, {
       ads: data || [],
       total,

@@ -114,17 +114,39 @@ export default async function handler(req, res) {
     if (boardId && itemsFlag) {
       const items = Array.isArray(body.items) ? body.items : [];
       if (items.length === 0) return respondJSON(res, 400, { error: 'items array vacío' });
-      const rows = items.map(it => ({
-        board_id: boardId,
-        user_id: userId,
-        producto_id: String(it.productoId),
-        competidor_id: String(it.competidorId),
-        ad_id: String(it.adId),
-        notas: it.notas || null,
-      }));
+      // OWNERSHIP CHECK: con service_role bypaseamos RLS. Antes filtrábamos por
+      // user_id en SELECT/PATCH/DELETE pero el upsert de items NO validaba que
+      // el boardId perteneciera al user → un attacker autenticado podía
+      // insertar items en boards ajenos (board_id de otro user con su user_id).
+      const { data: boardOwner } = await supabase
+        .from('marketing_boards')
+        .select('id')
+        .eq('id', boardId)
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (!boardOwner) return respondJSON(res, 404, { error: 'Board no encontrado o no tenés permiso' });
+      const rows = items.map(it => {
+        const row = {
+          board_id: boardId,
+          user_id: userId,
+          producto_id: String(it.productoId),
+          competidor_id: String(it.competidorId),
+          ad_id: String(it.adId),
+        };
+        // Solo seteamos notas si el caller la envió — antes `it.notas || null`
+        // borraba las notas existentes al re-guardar un ad ya en el board.
+        if (it.notas !== undefined) row.notas = it.notas || null;
+        return row;
+      });
       const { error } = await supabase
         .from('marketing_board_items')
-        .upsert(rows, { onConflict: 'board_id,ad_id' });
+        .upsert(rows, {
+          // PK compuesta = (board_id, producto_id, competidor_id, ad_id) post
+          // migration 0015. Antes era (board_id, ad_id) y colisionaba ads del
+          // mismo id bajo dos comps.
+          onConflict: 'board_id,producto_id,competidor_id,ad_id',
+          ignoreDuplicates: false,
+        });
       if (error) return respondJSON(res, 500, { error: error.message });
       // Touch updated_at del board.
       await supabase

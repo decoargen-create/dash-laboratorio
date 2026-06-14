@@ -516,7 +516,7 @@ const FLOW_STEPS = [
   { emoji: '▶️', tab: null, titulo: 'Correr pipeline', desc: 'Leemos los ads ganadores de la competencia y armamos ideas.' },
   { emoji: '📥', tab: 'bandeja', titulo: 'Bandeja', desc: 'Revisás cada idea y generás el creativo ahí mismo.' },
   { emoji: '🎨', tab: 'creativos', titulo: 'Creativos', desc: 'Ves los estáticos generados, listos para descargar.' },
-  { emoji: '🤖', tab: 'copiloto', titulo: 'Copiloto', desc: 'Pedís más variantes o ajustes en lenguaje natural.' },
+  { emoji: '🧠', tab: 'copiloto', titulo: 'Santi', desc: 'Hablale a Santi — el cerebro de la plataforma. Pedíle variantes, ajustes o feedback en lenguaje natural.' },
 ];
 
 function FlowGuide() {
@@ -602,7 +602,7 @@ function ProductTabs({ activeTab, onChange }) {
         { id: 'inspiracion', label: 'Inspiración', emoji: '✨' },
         { id: 'creativos', label: 'Creativos', emoji: '🎨' },
         { id: 'galeria', label: 'Galería', emoji: '🖼️' },
-        { id: 'copiloto', label: 'Copiloto', emoji: '🤖' },
+        { id: 'copiloto', label: 'Santi', emoji: '🧠' },
       ],
     },
   ];

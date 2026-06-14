@@ -2378,7 +2378,7 @@ const PRODUCT_TABS = {
     { id: 'inspiracion', label: 'Inspiración', emoji: '✨' },
     { id: 'creativos',   label: 'Creativos',   emoji: '🎨' },
     { id: 'galeria',     label: 'Galería',     emoji: '🖼️' },
-    { id: 'copiloto',    label: 'Copiloto',    emoji: '🤖' },
+    { id: 'copiloto',    label: 'Santi',       emoji: '🧠' },
   ],
 };
 

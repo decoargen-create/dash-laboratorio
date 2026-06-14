@@ -149,10 +149,10 @@ export default function ExecutionsTray() {
           }
           <p className="text-[11px] font-bold text-gray-900 dark:text-gray-100">
             {running > 0
-              ? `${running} ${running === 1 ? 'tarea en curso' : 'tareas en curso'}`
+              ? `Santi está en ${running} ${running === 1 ? 'tarea' : 'tareas'}`
               : errored > 0
                 ? `${errored} con error`
-                : 'Listo'
+                : 'Santi listo'
             }
           </p>
         </div>

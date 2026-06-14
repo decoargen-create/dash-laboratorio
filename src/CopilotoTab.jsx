@@ -165,7 +165,7 @@ export default function CopilotoTab({ producto, addToast }) {
       setMessages(finalMsgs);
       saveCopilotChatToCloud(producto?.id, finalMsgs);
     } catch (err) {
-      addToast?.({ type: 'error', message: `Copiloto: ${err.message}` });
+      addToast?.({ type: 'error', message: `Santi: ${err.message}` });
       // Dejamos el mensaje del user en pantalla para que pueda reintentar.
       setMessages(conMensaje);
     } finally {
@@ -174,7 +174,7 @@ export default function CopilotoTab({ producto, addToast }) {
   };
 
   const limpiar = () => {
-    if (!window.confirm('¿Borrar toda la conversación del copiloto para este producto?')) return;
+    if (!window.confirm('¿Borrar toda la conversación con Santi para este producto?')) return;
     setMessages([]);
     saveCopilotChatToCloud(producto?.id, []);
   };
@@ -189,9 +189,9 @@ export default function CopilotoTab({ producto, addToast }) {
           <Sparkles size={14} />
         </div>
         <div className="flex-1 min-w-0">
-          <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Copiloto de Marketing</h3>
+          <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Santi</h3>
           <p className="text-[10px] text-gray-500 dark:text-gray-400">
-            Conoce el research, la competencia y las ideas de {producto?.nombre || 'este producto'}.
+            El cerebro de la plataforma — conoce el research, la competencia y las ideas de {producto?.nombre || 'este producto'}.
           </p>
         </div>
         {messages.length > 0 && (
@@ -211,11 +211,11 @@ export default function CopilotoTab({ producto, addToast }) {
               <Sparkles size={22} className="text-brand-500" />
             </div>
             <div>
-              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Preguntale lo que quieras</p>
+              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Hablale a Santi</p>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 max-w-sm">
                 {tieneResearch
-                  ? 'El copiloto ya tiene el research y el análisis cargados. Probá con una de estas:'
-                  : 'Todavía no corriste el pipeline — el copiloto va a responder con criterio general hasta que haya research.'}
+                  ? 'Santi ya tiene el research y el análisis cargados. Probá con una de estas:'
+                  : 'Todavía no corriste el pipeline — Santi va a responder con criterio general hasta que haya research.'}
               </p>
             </div>
             <div className="flex flex-col gap-1.5 w-full max-w-sm">

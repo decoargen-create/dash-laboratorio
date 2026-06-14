@@ -1889,10 +1889,11 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     }
     if (seleccionados.size === 0) return;
     if (!producto) return;
-    // Reusamos el mismo lookup que handleBulkCrear.
+    // POST-REFACTOR: c.ads inline está stripped. Usamos compAdsByCompId
+    // (hidratado desde IDB) para encontrar los ads seleccionados.
     const adsAGenerar = [];
     const adsCompetidores = (producto.competidores || []).flatMap(c =>
-      (c.ads || [])
+      (compAdsByCompId[c.id] || c.ads || [])
         .filter(a => seleccionados.has(a.id))
         .map(a => ({ brandNombre: c.nombre, ad: a }))
     );

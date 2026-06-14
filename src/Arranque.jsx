@@ -2714,7 +2714,10 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 acc[i.estado || 'pendiente'] = (acc[i.estado || 'pendiente'] || 0) + 1;
                 return acc;
               }, {});
-              const adsScrapeados = comps.reduce((sum, c) => sum + (c.ads?.length || 0), 0);
+              // adsTotal vive en localStorage (metadata). c.ads.length solo
+              // existe si los ads aún están hidratados en memory. Fallback a
+              // adsTotal previene el bug "0 ads tras reload" post-refactor IDB.
+              const adsScrapeados = comps.reduce((sum, c) => sum + (c.adsTotal || c.ads?.length || 0), 0);
               const deepAnalyses = comps.reduce((sum, c) => sum + Object.keys(c.adsAnalysis || {}).length, 0);
               const runsDelProducto = runHistory.filter(r => String(r.productoId || '') === String(p.id));
               const ultimoRun = runsDelProducto[0];

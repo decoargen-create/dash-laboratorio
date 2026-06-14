@@ -165,6 +165,21 @@ class ErrorBoundary extends Component {
   }
 }
 
+// SW UPDATE: detectar bundle nuevo y forzar reload. vite-plugin-pwa con
+// registerType: 'autoUpdate' DESCARGA el nuevo SW pero los tabs abiertos
+// siguen corriendo el bundle viejo hasta navegar. Si el deploy cambia
+// shape de datos (refactor IDB/cloud), el bundle viejo escribe shape vieja
+// → corrompe data. Forzamos reload cuando hay update pendiente.
+if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    // Se gatilla cuando el nuevo SW toma control. Recargamos para que el JS
+    // sea el de la versión nueva. El user puede perder texto sin guardar,
+    // pero es mejor que corromper cloud data.
+    console.info('[SW] nueva versión activa — recargando');
+    window.location.reload();
+  });
+}
+
 ReactDOM.createRoot(document.getElementById('root')).render(
   <StrictMode>
     <ErrorBoundary>

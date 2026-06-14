@@ -515,10 +515,18 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
                         <button onClick={() => removeCompetidor(c.id)} className="p-1 text-gray-400 hover:text-red-600 transition"><Trash2 size={12} /></button>
                       </div>
                     </div>
-                    {/* Ads del competidor */}
+                    {/* Ads del competidor — POST-REFACTOR IDB: el array
+                        inline ya no se guarda. Si hay adsTotal pero c.ads
+                        vacío, mostramos solo el counter (UI completa vive
+                        en Inspiración con hidratación). */}
+                    {!Array.isArray(c.ads) && c.adsTotal > 0 && (
+                      <p className="mt-2 text-[10px] text-gray-500 dark:text-gray-400 italic">
+                        {c.adsTotal} ads scrapeados — ver detalle en la tab Inspiración
+                      </p>
+                    )}
                     {Array.isArray(c.ads) && c.ads.length > 0 && (
                       <div className="mt-2 space-y-1.5">
-                        <p className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase">{c.ads.length} ads activos (top por días corriendo)</p>
+                        <p className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase">{c.adsTotal || c.ads.length} ads activos (top por días corriendo)</p>
                         {c.ads.slice(0, 5).map((ad, idx) => (
                           <div key={ad.id || idx} className="flex gap-2 p-2 bg-white dark:bg-gray-800 rounded border border-gray-100 dark:border-gray-700 text-xs">
                             <div className="flex-1 min-w-0">
@@ -531,7 +539,7 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
                             </div>
                           </div>
                         ))}
-                        {c.ads.length > 5 && <p className="text-[10px] text-gray-400 dark:text-gray-500">+ {c.ads.length - 5} ads más</p>}
+                        {(c.adsTotal || c.ads.length) > 5 && <p className="text-[10px] text-gray-400 dark:text-gray-500">+ {(c.adsTotal || c.ads.length) - 5} ads más</p>}
                       </div>
                     )}
                   </div>

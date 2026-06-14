@@ -1980,11 +1980,13 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     const cacheNote = visionAds < seleccionados.size ? ` (${seleccionados.size - visionAds} con skeleton cacheado)` : '';
     if (!window.confirm(`Generar ${nVarBulk} variante${nVarBulk !== 1 ? 's' : ''} ${sizeLabel} por cada uno de los ${seleccionados.size} ads${cacheNote} → ${total} imágenes total, ~$${costoEstimado.toFixed(2)}. Las requests se disparan TODAS en paralelo y el cloud-save funciona aunque cierres la pestaña. ETA: ~${Math.max(120, 75 * 2)}s. ¿Seguir?`)) return;
 
-    // Buscar los ad objects desde adsByBrand + de los competidores (que viven
-    // en producto.competidores, no en brands custom).
+    // Buscar los ad objects desde adsByBrand + de los competidores.
+    // POST-REFACTOR IDB: c.ads inline está stripped — usar compAdsByCompId
+    // (hidratado desde IDB). Sin esto el bulk-create fallaba silencioso
+    // post-reload: ningún ad de competidor matchaba los seleccionados.
     const adsAGenerar = [];
     const adsCompetidores = (producto.competidores || []).flatMap(c =>
-      (c.ads || [])
+      (compAdsByCompId[c.id] || c.ads || [])
         .filter(a => seleccionados.has(a.id) && (a.imageUrls?.length || 0) > 0)
         .map(a => ({ brandNombre: c.nombre, ad: a }))
     );

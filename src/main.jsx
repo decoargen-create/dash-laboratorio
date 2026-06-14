@@ -171,10 +171,19 @@ class ErrorBoundary extends Component {
 // shape de datos (refactor IDB/cloud), el bundle viejo escribe shape vieja
 // → corrompe data. Forzamos reload cuando hay update pendiente.
 if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+  // ANTI-LOOP guard: si el SW se re-instala constantemente (caso raro pero
+  // posible), evitamos reloads infinitos chequeando un flag en sessionStorage.
+  // El flag se borra al cerrar la pestaña — solo previene loop dentro de la
+  // misma session.
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    // Se gatilla cuando el nuevo SW toma control. Recargamos para que el JS
-    // sea el de la versión nueva. El user puede perder texto sin guardar,
-    // pero es mejor que corromper cloud data.
+    try {
+      const alreadyReloaded = sessionStorage.getItem('viora-sw-reloaded');
+      if (alreadyReloaded) {
+        console.warn('[SW] controllerchange ya disparó reload este session — ignorando para evitar loop');
+        return;
+      }
+      sessionStorage.setItem('viora-sw-reloaded', '1');
+    } catch {}
     console.info('[SW] nueva versión activa — recargando');
     window.location.reload();
   });

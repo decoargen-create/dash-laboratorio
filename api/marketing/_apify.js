@@ -388,7 +388,13 @@ export const WINNER_CRITERIA = {
 // Limitar a AR dejaba afuera la mayoría de marcas DTC internacionales que
 // pautan a otros países. is_targeted_country=false para no restringir
 // a anuncios targeteados al país del que mira.
+//
+// SORT POR IMPRESSIONS DESC: los ads que más se sirven (ergo, más gastan)
+// vienen primero. Para una marca con 2500 ads activos, sortear por
+// impressions agarra primero los winners reales (los que la marca está
+// escalando). Sin sort, Apify devuelve por orden de scrape (random
+// efectivo) y los top winners pueden quedar fuera del cap.
 export function buildAdLibraryUrl({ keyword, country = 'ALL' }) {
   const q = encodeURIComponent(keyword);
-  return `https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=${country}&is_targeted_country=false&q=${q}&search_type=keyword_unordered&media_type=all`;
+  return `https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=${country}&is_targeted_country=false&q=${q}&search_type=keyword_unordered&media_type=all&sort_data[mode]=total_impressions&sort_data[direction]=desc`;
 }

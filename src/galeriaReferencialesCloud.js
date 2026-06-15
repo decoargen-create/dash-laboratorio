@@ -180,6 +180,10 @@ function rowToRef(row) {
     winnerAt: row.winner_at,
     winnerMetrics: row.winner_metrics || null,
     createdAt: row.created_at,
+    // updated_at lo usa el merge cloud+IDB para decidir qué lado es más
+    // fresco para los flags (winner/descargada/archivado). El trigger
+    // touch_updated_at() en la DB lo bumpea automático en cada UPDATE.
+    updatedAt: row.updated_at,
   };
 }
 

@@ -71,12 +71,19 @@ export async function saveReferencial(ref) {
       const enriched = await saveReferencialCloud(ref);
       // Cache local de metadata (sin imageBase64 para no inflar IDB con la
       // misma imagen 2 veces — el bucket ya la tiene).
+      // updatedAt: lo que el merge cloud+IDB usa para comparar freshness.
+      // Lo seteamos al guardar inicial — patches subsiguientes lo bumpean.
       try {
         const { imageBase64, ...metaOnly } = enriched;
         const db = await openDB();
+        const ts = new Date().toISOString();
         await new Promise((resolve, reject) => {
           const tx = db.transaction(STORE, 'readwrite');
-          tx.objectStore(STORE).put({ ...metaOnly, createdAt: enriched.createdAt || new Date().toISOString() });
+          tx.objectStore(STORE).put({
+            ...metaOnly,
+            createdAt: enriched.createdAt || ts,
+            updatedAt: enriched.updatedAt || ts,
+          });
           tx.oncomplete = () => resolve();
           tx.onerror = () => reject(tx.error);
         });
@@ -101,7 +108,12 @@ export async function saveReferencial(ref) {
   const db = await openDB();
   await new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, 'readwrite');
-    tx.objectStore(STORE).put({ ...ref, createdAt: ref.createdAt || new Date().toISOString() });
+    const ts = new Date().toISOString();
+    tx.objectStore(STORE).put({
+      ...ref,
+      createdAt: ref.createdAt || ts,
+      updatedAt: ref.updatedAt || ts,
+    });
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
@@ -143,14 +155,27 @@ export async function getReferencialesByProducto(productoId, opts = {}) {
     });
   } catch {}
 
-  // Merge cloud + IDB con dedupe por id. Cloud gana en general (source of
-  // truth), PERO los flags locales-only ganan sobre cloud si están en true.
-  // Sin esto: si la migration 0007 (columna `winner`) no se aplicó en prod,
-  // el cloud-patch en patchReferenciales falla silencioso, IDB sí persiste
-  // winner=true, pero el cloud reload pisaba con winner=false → la pestaña
-  // Winners quedaba vacía pese al click en la copa.
-  // Mismo razonamiento para descargada/archivado: si el cloud-patch falla,
-  // el flag IDB es el más fresco y debe ganar.
+  // Merge cloud + IDB con dedupe por id. Estrategia de flags:
+  // - Por defecto cloud gana (source of truth)
+  // - Para flags toggle-ables (winner/descargada/archivado), comparamos
+  //   updatedAt de ambos lados y usamos el más fresco
+  //
+  // CONTEXTO HISTÓRICO (2 bugs resueltos en la misma función):
+  //
+  // Bug 1 (fix anterior — "winner no aparece"): si la migration 0007
+  // (columna `winner`) no se aplicó en prod, el cloud-patch falla
+  // silencioso, IDB sí persiste, pero el cloud reload pisaba con
+  // winner=false. Resolución: respetar IDB cuando es más fresco.
+  //
+  // Bug 2 (fix actual — cross-device stale): el OR-merge previo
+  // (`existing.winner || it.winner`) hacía que un un-mark en device A
+  // no se propagara a device B porque IDB_B tenía winner=true stale.
+  // Resolución: comparar updatedAt y usar el lado más reciente.
+  //
+  // El touch_updated_at() trigger de la DB bumpea cloud.updated_at en
+  // cada UPDATE. patchReferenciales setea IDB.updatedAt manualmente en
+  // cada toggle. Si el cloud-patch falla (schema_missing), cloud.updated_at
+  // no bumpea → IDB queda como el lado fresco → IDB gana. ✓
   const byId = new Map();
   for (const it of cloudItems) byId.set(it.id, it);
   for (const it of idbItems) {
@@ -159,16 +184,29 @@ export async function getReferencialesByProducto(productoId, opts = {}) {
       byId.set(it.id, it);
       continue;
     }
-    // IDB tiene flags más frescos que cloud — mergear lado a lado.
+    // Comparar updatedAt parseados como Date numérico — el lado con
+    // timestamp más reciente gana los flags. Sin Date.parse(), Supabase
+    // timestamptz (`2026-06-15T10:30:45.123456+00:00`, microsegundos + tz
+    // offset) y JS toISOString (`2026-06-15T10:30:45.123Z`) comparados
+    // como strings dan resultados aleatorios cuando el segundo es el
+    // mismo (la posición del char `Z` vs el microsec quirky). Date.parse
+    // normaliza a Unix ms y la comparación es correcta.
+    const cloudT = Date.parse(existing.updatedAt || existing.createdAt || '') || 0;
+    const idbT = Date.parse(it.updatedAt || it.createdAt || '') || 0;
+    const idbIsFresher = idbT > cloudT;
+    const flagsSource = idbIsFresher ? it : existing;
     byId.set(it.id, {
       ...existing,
-      winner: existing.winner || it.winner,
-      winnerAt: existing.winnerAt || it.winnerAt,
-      winnerMetrics: existing.winnerMetrics || it.winnerMetrics,
-      descargada: existing.descargada || it.descargada,
-      descargadaAt: existing.descargadaAt || it.descargadaAt,
-      archivado: existing.archivado || it.archivado,
-      archivadoAt: existing.archivadoAt || it.archivadoAt,
+      winner: !!flagsSource.winner,
+      winnerAt: flagsSource.winnerAt,
+      // Fallback ?? para no pisotear cloud.winnerMetrics con undefined
+      // cuando IDB legacy no tiene el campo.
+      winnerMetrics: flagsSource.winnerMetrics ?? existing.winnerMetrics ?? null,
+      descargada: !!flagsSource.descargada,
+      descargadaAt: flagsSource.descargadaAt,
+      archivado: !!flagsSource.archivado,
+      archivadoAt: flagsSource.archivadoAt,
+      updatedAt: idbIsFresher ? it.updatedAt : existing.updatedAt,
     });
   }
   const merged = Array.from(byId.values());
@@ -270,6 +308,9 @@ export async function patchReferenciales(ids, patch) {
     }
   }
   // Patch IDB también — para que el cache local refleje los cambios.
+  // Bumpeamos `updatedAt` para que el merge cloud+IDB pueda comparar
+  // freshness lado a lado (mismo trigger que el de la DB).
+  const idbPatch = { ...patch, updatedAt: new Date().toISOString() };
   try {
     const db = await openDB();
     await new Promise((resolve, reject) => {
@@ -278,7 +319,7 @@ export async function patchReferenciales(ids, patch) {
       ids.forEach((id) => {
         const req = store.get(id);
         req.onsuccess = () => {
-          if (req.result) store.put({ ...req.result, ...patch });
+          if (req.result) store.put({ ...req.result, ...idbPatch });
         };
       });
       tx.oncomplete = () => resolve();

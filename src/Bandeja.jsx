@@ -12,7 +12,7 @@
 //   - Click en una card expande los detalles (hook, copy, guion, notas)
 //   - Checkbox rápido para marcar "en uso" o "usada"
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useId } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Inbox, Search, Filter, ExternalLink, Trash2, Download, Package,
@@ -185,6 +185,12 @@ const IDEA_ANZUELOS = [
 
 function IdeaAnzuelosMap({ idea }) {
   const [selected, setSelected] = useState(null);
+  // useId garantiza unicidad de markers SVG entre instancias del componente.
+  // Antes usábamos `idea.id` directo — si era undefined (legacy) o tenía
+  // caracteres especiales (espacio, `:`, `/`, `#`), `url(#...)` no resolvía
+  // y las flechas quedaban sin cabeza. useId() devuelve algo tipo `:r3:`
+  // que sanitizamos a `_r3_` para que sea CSS-selector-safe.
+  const uid = useId().replace(/:/g, '_');
 
   // Clasificar cada ánzuelo como cargado o vacío.
   const loaded = [];
@@ -266,7 +272,7 @@ function IdeaAnzuelosMap({ idea }) {
               {positioned.map((n, i) => (
                 <marker
                   key={`im-${i}`}
-                  id={`idea-arrow-${idea.id}-${i}`}
+                  id={`idea-arrow-${uid}-${i}`}
                   viewBox="0 0 10 10"
                   refX="8" refY="5"
                   markerWidth="5" markerHeight="5"
@@ -297,7 +303,7 @@ function IdeaAnzuelosMap({ idea }) {
                   fill="none"
                   opacity={n.ghost ? 0.3 : (isDimmed ? 0.2 : (isSelected ? 1 : 0.65))}
                   strokeDasharray={n.ghost ? '3 5' : undefined}
-                  markerEnd={`url(#idea-arrow-${idea.id}-${i})`}
+                  markerEnd={`url(#idea-arrow-${uid}-${i})`}
                   style={isSelected ? { animationDuration: '0.9s' } : undefined}
                 />
               );

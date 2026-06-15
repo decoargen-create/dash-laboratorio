@@ -159,6 +159,14 @@ const NON_GRANULAR_FORMATS = new Set([
   'stick', 'barra', 'bar',
   'gel', 'shampoo', 'champú', 'champu',
   'desodorante', 'deodorant', 'perfume', 'fragrance', 'agua', 'mist', 'tonic', 'tónico',
+  // Agregados (audit MED): cosméticos/tópicos en envases cerrados.
+  'jabón', 'jabon', 'soap',
+  'manteca corporal', 'body butter', 'butter',
+  'ungüento', 'unguento', 'ointment',
+  'pomada',
+  'roll-on', 'rollon', 'roll on',
+  'polvo facial', 'face powder', 'maquillaje',
+  'aerosol',
 ]);
 
 function isNonGranular(formato) {
@@ -173,13 +181,72 @@ function isNonGranular(formato) {
 // composición/paleta/mood del winner, pero traslada la escena al hábitat
 // del producto NUEVO. Sin esto el modelo deja un jar de crema en un
 // fondo de mortero o cápsulas o cepillos drenaje.
+// Fallback: cuando inferProductForm falla (formato="otros" o vacío Y
+// la heurística no matchea), tratamos de inferir la categoría desde
+// nombre + descripcion + research. Sin esto, un skincare product con
+// formato="otros" generaba sin NINGUNA constraint y el bug del jar con
+// cápsulas reaparecía. Audit HIGH #2.
+function inferCategoryFromText(producto) {
+  const haystack = [
+    producto?.nombre || '',
+    producto?.descripcion || '',
+    String(producto?.research || producto?.docs?.research || '').slice(0, 3000),
+    String(producto?.avatar || producto?.docs?.avatar || '').slice(0, 1500),
+  ].join(' ').toLowerCase();
+  const patterns = [
+    { canon: 'crema',     re: /\b(crema|cream|loci[óo]n|lotion|emulsi[óo]n|hidratante|moisturizer|antiarrugas|anti-?aging|skincare|cosm[ée]tica)\b/ },
+    { canon: 'sérum',     re: /\b(s[ée]rum|elixir|essence|ampolla|vitamin\s?c|retinol|ácido hialurónico|hyaluronic)\b/ },
+    { canon: 'bálsamo',   re: /\b(b[áa]lsamo|balm|manteca corporal|body butter|labial|lip\s?balm)\b/ },
+    { canon: 'aceite',    re: /\b(aceite|oil|argan|jojoba|rosa mosqueta|coco)\b/ },
+    { canon: 'mascarilla', re: /\b(mascarilla|m[áa]scara facial|sheet mask|face mask|exfoliante)\b/ },
+    { canon: 'shampoo',   re: /\b(shampoo|champ[úu]|acondicionador|haircare|capilar|pelo|cabello)\b/ },
+    { canon: 'jabón',     re: /\b(jab[óo]n|soap)\b/ },
+    { canon: 'perfume',   re: /\b(perfume|fragancia|fragrance|eau de|colonia)\b/ },
+    { canon: 'desodorante', re: /\b(desodorante|deodorant|antitranspirante|axila)\b/ },
+    { canon: 'gomitas',   re: /\b(gomitas?|gummies)\b/ },
+    { canon: 'cápsulas',  re: /\b(c[áa]psulas?|softgels?|pastillas?|tabletas?|comprimidos?|suplemento)\b/ },
+    { canon: 'polvo',     re: /\b(polvo|powder|prote[íi]na|whey|colágeno|colageno)\b/ },
+    { canon: 'gotas',     re: /\b(gotas|drops|tintura|tincture)\b/ },
+    { canon: 'shot',      re: /\b(shot|chupito|jugo|smoothie|bebida funcional)\b/ },
+  ];
+  for (const p of patterns) {
+    if (p.re.test(haystack)) return p.canon;
+  }
+  return null;
+}
+
+// Merge avatar + research evitando duplicación. Si el avatar ya está
+// embebido en el research (caso común: el research doc fue generado
+// arriba del avatar), skipeamos el bloque de avatar para no gastar
+// tokens en texto duplicado que confunde al modelo. Audit LOW.
+function mergeAvatarResearch(avatar, research) {
+  const a = (avatar || '').toString().trim();
+  const r = (research || '').toString().trim();
+  if (!a && !r) return '';
+  if (!a) return `### RESEARCH\n${r}`;
+  if (!r) return `### AVATAR\n${a}`;
+  // Heurística: si los primeros ~150 chars del avatar aparecen dentro
+  // del research, asumimos que ya está embebido y solo devolvemos research.
+  const probe = a.slice(0, 150).toLowerCase().replace(/\s+/g, ' ');
+  const haystack = r.toLowerCase().replace(/\s+/g, ' ');
+  if (probe.length > 60 && haystack.includes(probe)) {
+    return `### RESEARCH\n${r}`;
+  }
+  return `### AVATAR\n${a}\n\n### RESEARCH\n${r}`;
+}
+
 function inferProductCategory(formato) {
   if (!formato) return null;
   const f = String(formato).toLowerCase().trim();
   // Skincare/cosmética: vive en vanity, baño, manos de mujer, gestos de aplicación.
   if (['crema', 'cream', 'loción', 'locion', 'lotion', 'emulsión', 'emulsion',
        'sérum', 'serum', 'aceite', 'oil', 'bálsamo', 'balsamo', 'balm',
-       'mascarilla', 'máscara', 'mascara', 'mask', 'gel'].includes(f)) {
+       'mascarilla', 'máscara', 'mascara', 'mask', 'gel',
+       // Agregados (audit MED): mismos formatos del NON_GRANULAR set.
+       'jabón', 'jabon', 'soap', 'manteca corporal', 'body butter', 'butter',
+       'ungüento', 'unguento', 'ointment', 'pomada',
+       'roll-on', 'rollon', 'roll on', 'polvo facial', 'face powder', 'maquillaje',
+       'aerosol'].includes(f)) {
     return {
       label: 'skincare / cosmética',
       context: 'bathroom vanity, dressing table with mirror, marble countertop, soft natural light from a window, hands applying product to face or arms, terry cloth towels, eucalyptus branch, ceramic bowls — clean editorial cosmetic moodboard',
@@ -526,7 +593,10 @@ async function extractSkeletonHaiku({ apiKey, refImgBuf, refMime, producto }) {
   // Detectamos el formato físico del producto del usuario (gomitas/cápsulas/etc.)
   // Vision lo usa para REESCRIBIR cualquier mención al formato equivocado del
   // ad de referencia (ej: "60 cápsulas" → "60 gomitas").
-  const productoForm = inferProductForm(producto);
+  // effectiveForm: fallback al text-based inference si productoForm es null
+  // (audit HIGH #2). Así Vision también reescribe textos cuando el formato
+  // explícito está vacío pero hay señal en nombre/descripcion/research.
+  const productoForm = inferProductForm(producto) || inferCategoryFromText(producto);
 
   // Contexto del producto para que Vision pueda escribir textos VERDADERAMENTE
   // adaptados (no solo traducción cosmética). ofertasReales tiene prioridad
@@ -537,11 +607,10 @@ async function extractSkeletonHaiku({ apiKey, refImgBuf, refMime, producto }) {
   // target al adaptar textos: tipo de producto, pain points, valores,
   // objeciones, demografía. Antes solo iba research (1500 chars) y los
   // content_adapted salían genéricos.
-  const avatarTextV = (producto?.avatar || producto?.docs?.avatar || '').toString().trim();
-  const fullContextV = [
-    avatarTextV ? `### AVATAR\n${avatarTextV}` : '',
-    producto?.research ? `### RESEARCH\n${String(producto.research)}` : '',
-  ].filter(Boolean).join('\n\n');
+  const fullContextV = mergeAvatarResearch(
+    producto?.avatar || producto?.docs?.avatar,
+    producto?.research,
+  );
   const productoCtx = [
     `Nombre: ${producto?.nombre || 'N/A'}`,
     productoForm ? `**FORMATO FÍSICO: ${productoForm.toUpperCase()}** (este producto viene en ${productoForm} — NO es otro formato).` : '',
@@ -754,16 +823,21 @@ function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentCol
   parts.push('');
   parts.push('THE PRODUCT (IMAGE 2):');
   if (nombre) parts.push(`  • Product name: ${nombre}`);
-  if (productoForm) {
-    parts.push(`  • **PHYSICAL FORM**: ${productoForm} (NOT capsules/pills/another format). If reference shows the product contents, show ${productoForm}.`);
-    if (isNonGranular(productoForm)) {
+  // Fallback (audit HIGH #2): si productoForm es null, igual intentamos
+  // inferir categoría desde nombre+descripcion+research para no perder
+  // el guardrail "closed packaging" / "scene adaptation" cuando el user
+  // dejó formato="otros" o vacío.
+  const effectiveForm = productoForm || inferCategoryFromText(producto);
+  if (effectiveForm) {
+    parts.push(`  • **PHYSICAL FORM**: ${effectiveForm} (NOT capsules/pills/another format). If reference shows the product contents, show ${effectiveForm}.`);
+    if (isNonGranular(effectiveForm)) {
       // Sin esta sección, gpt-image-2 copia el "contenedor abierto" del
       // winner y lo rellena con cápsulas default cuando el target es
       // crema/loción/sérum. Es lo que pasó en producción con un winner
       // tipo cepillo-en-bowl → variación generada con cápsulas en jar.
-      parts.push(`  • **CLOSED PACKAGING ONLY**: This product is ${productoForm} — NEVER show its contents spilled, displayed, or visible outside the package. Render the jar/bottle/tube CLOSED with its cap/lid on. Even if IMAGE 1 (the reference) shows an OPEN container with content visible (capsules in a bowl, powder in a glass, pills on a hand, etc.), you MUST show ONLY the CLOSED PACKAGE from IMAGE 2 in our generation. Do NOT invent capsules, pills, granules, or any "content" inside or beside the package. The whole point is that this is a finished cosmetic/skincare product sold as a sealed unit.`);
+      parts.push(`  • **CLOSED PACKAGING ONLY**: This product is ${effectiveForm} — NEVER show its contents spilled, displayed, or visible outside the package. Render the jar/bottle/tube CLOSED with its cap/lid on. Even if IMAGE 1 (the reference) shows an OPEN container with content visible (capsules in a bowl, powder in a glass, pills on a hand, etc.), you MUST show ONLY the CLOSED PACKAGE from IMAGE 2 in our generation. Do NOT invent capsules, pills, granules, or any "content" inside or beside the package. The whole point is that this is a finished cosmetic/skincare product sold as a sealed unit.`);
     }
-    const category = inferProductCategory(productoForm);
+    const category = inferProductCategory(effectiveForm);
     if (category) {
       // ADAPT SCENE: si el winner es de otra categoría (ej: suplemento en
       // warehouse + cápsulas) y el target es skincare, los props de IMAGE 1
@@ -771,19 +845,24 @@ function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentCol
       // alrededor de una crema. Le decimos al modelo: copiá composición/
       // paleta/mood/text overlays del winner, pero TRASLADÁ la escena al
       // hábitat natural del producto nuevo.
+      //
+      // Audit HIGH #1: el prompt tenía instrucciones contradictorias
+      // ("preservá composición de IMAGE 1" + "traduce props al hábitat
+      // del target"). Aclaramos la PRECEDENCIA: composition/lighting/
+      // overlays se preservan; SOLO background + props category-specific
+      // se traducen. Sin esto, en variación tight el modelo no sabe a
+      // cuál seguir.
       parts.push(`  • **PRODUCT CATEGORY**: ${category.label}. Natural setting for this product: ${category.context}.`);
-      parts.push(`  • **SCENE ADAPTATION**: Keep the COMPOSITION (camera angle, framing, product placement, text overlay positions, palette, lighting mood) of IMAGE 1, but TRANSLATE the BACKGROUND and PROPS to match the natural habitat of the new product. AVOID props/settings that belong to other categories: ${category.avoidContext}. Example: if IMAGE 1 was shot in a warehouse with cardboard boxes (typical of supplements) but our product is ${productoForm} (${category.label}), the scene should move to ${category.context} — same composition, same overlay style, same palette, different habitat.`);
+      parts.push(`  • **SCENE ADAPTATION (precedence rules)**: PRESERVE from IMAGE 1: camera angle, framing, product placement, text overlay positions, palette, lighting mood, sticker styles. TRANSLATE to new habitat: ONLY the background setting + category-specific props (warehouse boxes if skincare, gym gear if not fitness, mortar/capsules if not supplement). If a prop in IMAGE 1 is category-neutral (a fabric, a plant, a generic surface), KEEP IT. AVOID props/settings that belong to other categories: ${category.avoidContext}. Example: warehouse with capsules + cream target → vanity scene with same camera angle, same overlay positions, same palette, no cardboard boxes, no capsules.`);
     }
   }
   if (descripcion) parts.push(`  • Description: ${descripcion.slice(0, 600)}`);
-  // Merge avatar + research. Pueden venir separados (docs.avatar +
-  // docs.research) o el research ya tener el avatar embebido. Concatenamos
-  // priorizando avatar primero (más estructurado) si vino separado.
-  const avatarText = (producto?.avatar || producto?.docs?.avatar || '').toString().trim();
-  const fullContext = [
-    avatarText ? `### AVATAR (estructurado)\n${avatarText}` : '',
-    research ? `### RESEARCH DOC\n${research}` : '',
-  ].filter(Boolean).join('\n\n');
+  // Merge avatar + research evitando duplicación si el research ya tiene
+  // el avatar embebido. Audit LOW.
+  const fullContext = mergeAvatarResearch(
+    producto?.avatar || producto?.docs?.avatar,
+    research,
+  );
   if (fullContext) {
     // El context (avatar + research) contiene: tipo de producto, pain points,
     // valores, objeciones, demográfico, lifestyle. El modelo debe USARLO para
@@ -907,31 +986,32 @@ function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio
   parts.push('');
   parts.push('THE PRODUCT (IMAGE 2):');
   if (nombre) parts.push(`  - Product name: ${nombre}`);
-  if (productoForm) {
+  // Fallback (audit HIGH #2) — ver comentario en buildPromptFromPlan.
+  const effectiveForm = productoForm || inferCategoryFromText(producto);
+  if (effectiveForm) {
     // CRÍTICO: si el ad ref muestra cápsulas y nuestro producto son gomitas,
     // el modelo replica cápsulas. Hay que decírselo EXPLÍCITO.
-    const singular = singularFormato(productoForm);
-    parts.push(`  - **PHYSICAL FORM**: ${productoForm} (NOT capsules, NOT pills, NOT another format). If the reference ad shows the product contents (a single capsule on a hand, powder in a glass, etc.), YOU MUST show ${productoForm} instead. Any spilled/displayed product detail must visually be ${productoForm}.`);
-    parts.push(`  - **TEXT OVERLAY WORDING**: If any overlay says "1 cápsula", "1 pastilla", "una pill", etc., REPLACE it with "1 ${singular}" (the correct singular form for ${productoForm}). Same rule for plural: "60 cápsulas" → "60 ${productoForm}". NEVER let a text on the canvas contradict the physical form of the product.`);
-    if (isNonGranular(productoForm)) {
+    const singular = singularFormato(effectiveForm);
+    parts.push(`  - **PHYSICAL FORM**: ${effectiveForm} (NOT capsules, NOT pills, NOT another format). If the reference ad shows the product contents (a single capsule on a hand, powder in a glass, etc.), YOU MUST show ${effectiveForm} instead. Any spilled/displayed product detail must visually be ${effectiveForm}.`);
+    parts.push(`  - **TEXT OVERLAY WORDING**: If any overlay says "1 cápsula", "1 pastilla", "una pill", etc., REPLACE it with "1 ${singular}" (the correct singular form for ${effectiveForm}). Same rule for plural: "60 cápsulas" → "60 ${effectiveForm}". NEVER let a text on the canvas contradict the physical form of the product.`);
+    if (isNonGranular(effectiveForm)) {
       // Productos no-granulares: el contenido NO se muestra. Ver comentario
       // largo en buildPromptFromPlan — mismo bug.
-      parts.push(`  - **CLOSED PACKAGING ONLY**: This product is ${productoForm} — never show its contents (no capsules, no pills, no granules, no powder, no liquid spilled). Render the jar/bottle/tube CLOSED with cap on. Even if IMAGE 1 shows an open container, you MUST keep IMAGE 2's package sealed.`);
+      parts.push(`  - **CLOSED PACKAGING ONLY**: This product is ${effectiveForm} — never show its contents (no capsules, no pills, no granules, no powder, no liquid spilled). Render the jar/bottle/tube CLOSED with cap on. Even if IMAGE 1 shows an open container, you MUST keep IMAGE 2's package sealed.`);
     }
-    const category = inferProductCategory(productoForm);
+    const category = inferProductCategory(effectiveForm);
     if (category) {
-      // ADAPT SCENE — ver comentario en buildPromptFromPlan.
+      // ADAPT SCENE con precedence rules (audit HIGH #1) — ver buildPromptFromPlan.
       parts.push(`  - **PRODUCT CATEGORY**: ${category.label}. Natural setting: ${category.context}.`);
-      parts.push(`  - **SCENE ADAPTATION**: Keep IMAGE 1's composition/palette/mood/overlay positions, but TRANSLATE background and props to the new product's habitat. AVOID props belonging to other categories: ${category.avoidContext}.`);
+      parts.push(`  - **SCENE ADAPTATION (precedence)**: PRESERVE IMAGE 1's composition/palette/mood/overlay positions/sticker styles. TRANSLATE ONLY background + category-specific props. KEEP category-neutral props (fabric, plants, generic surfaces). AVOID props from other categories: ${category.avoidContext}.`);
     }
   }
   if (descripcion) parts.push(`  - Description: ${descripcion.slice(0, 600)}`);
-  // Merge avatar + research (mismo razonamiento que en buildPromptFromPlan).
-  const avatarText2 = (producto?.avatar || producto?.docs?.avatar || '').toString().trim();
-  const fullContext2 = [
-    avatarText2 ? `### AVATAR (estructurado)\n${avatarText2}` : '',
-    research ? `### RESEARCH DOC\n${research}` : '',
-  ].filter(Boolean).join('\n\n');
+  // Merge avatar + research evitando duplicación (audit LOW).
+  const fullContext2 = mergeAvatarResearch(
+    producto?.avatar || producto?.docs?.avatar,
+    research,
+  );
   if (fullContext2) {
     parts.push('');
     parts.push(`**AVATAR & RESEARCH (USE this to choose SPECIFIC props/scene/mood/body language — not generic templates)**:`);

@@ -16,7 +16,7 @@
 // en algunos casos, y si MetricCard/Section/BarRow estaban DESPUÉS del componente
 // que los usa, producía "Cannot access 'w' before initialization" en producción.
 
-import React, { useState } from 'react';
+import React, { useState, useId } from 'react';
 import { Trophy, TrendingUp, Target, Palette, Tag, Package } from 'lucide-react';
 
 const ANZUELO_META = {
@@ -29,10 +29,99 @@ const ANZUELO_META = {
   audience: { label: 'Audiencia', emoji: '👥', color: '#06b6d4' },
 };
 
+
+// ============================================================
+// Helpers de formato — declarados antes para que estén disponibles
+// en el render del componente principal.
+// ============================================================
+function avg(arr) {
+  if (!arr.length) return null;
+  return arr.reduce((a, b) => a + b, 0) / arr.length;
+}
+
+function median(arr) {
+  if (!arr.length) return null;
+  const s = [...arr].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+
+function pct(n) {
+  return n == null ? '—' : `${n.toFixed(2)}%`;
+}
+
+function num(n, decimals = 2) {
+  return n == null ? '—' : Number(n).toFixed(decimals);
+}
+
+function dollar(n) {
+  return n == null ? '—' : `$${Number(n).toFixed(2)}`;
+}
+
+// ============================================================
+// Inner components — TODOS antes del export default.
+// ============================================================
+
+function MetricCard({ icon, label, value, sub, count }) {
+  return (
+    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-3.5">
+      <div className="flex items-center gap-1 text-amber-600 dark:text-amber-400 mb-1">
+        {icon}
+        <p className="text-[10px] font-bold uppercase tracking-wider">{label}</p>
+      </div>
+      <p className="text-xl font-bold tabular-nums text-gray-900 dark:text-gray-100">{value}</p>
+      <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">
+        {count > 0 ? sub : 'sin datos'} · {count} winner{count !== 1 ? 's' : ''}
+      </p>
+    </div>
+  );
+}
+
+function Section({ icon, title, subtitle, children }) {
+  return (
+    <div>
+      <div className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400 mb-1">
+        {icon}
+        <h4 className="text-xs font-bold uppercase tracking-wider">{title}</h4>
+      </div>
+      {subtitle && <p className="text-[10px] text-gray-500 dark:text-gray-400 mb-2">{subtitle}</p>}
+      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-3">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function BarRow({ label, count, max, color = 'amber', total }) {
+  const widthPct = max > 0 ? (count / max) * 100 : 0;
+  const sharePct = total > 0 ? Math.round((count / total) * 100) : 0;
+  const colors = {
+    amber: 'bg-amber-400',
+    brand: 'bg-brand-400',
+    emerald: 'bg-emerald-400',
+  };
+  return (
+    <div className="flex items-center gap-3">
+      <p className="text-[11px] font-semibold text-gray-700 dark:text-gray-300 truncate w-32 shrink-0">{label}</p>
+      <div className="flex-1 h-5 bg-gray-100 dark:bg-gray-700/50 rounded-full overflow-hidden relative">
+        <div className={`${colors[color] || colors.amber} h-full rounded-full transition-all duration-500`} style={{ width: `${widthPct}%` }} />
+      </div>
+      <p className="text-[10px] tabular-nums text-gray-600 dark:text-gray-400 w-16 text-right shrink-0">
+        <span className="font-bold">{count}</span> · {sharePct}%
+      </p>
+    </div>
+  );
+}
+
 function AnzuelosMap({ winners, productoNombre, productoImagen }) {
   // v1 selecciona un ánzuelo → muestra panel debajo con los winners de
   // ese bucket. Sin esto el mapa era solo deco; ahora es navegable.
   const [selected, setSelected] = useState(null);
+  // useId garantiza que dos instancias del componente (ej: dos modales
+  // animados en transición) no colisionen sus markers SVG. Sin esto,
+  // `url(#arrow-0)` resolvería al primero del DOM aunque sea de otra
+  // instancia → flechas con color equivocado en transiciones.
+  const uid = useId().replace(/:/g, '_');
 
   // Buckets por categoría — solo las que tienen winners.
   const buckets = {};
@@ -132,7 +221,7 @@ function AnzuelosMap({ winners, productoNombre, productoImagen }) {
             {nodes.map((n, i) => (
               <marker
                 key={`arr-${i}`}
-                id={`arrow-${i}`}
+                id={`arrow-${uid}-${i}`}
                 viewBox="0 0 10 10"
                 refX="8" refY="5"
                 markerWidth="6" markerHeight="6"
@@ -172,7 +261,7 @@ function AnzuelosMap({ winners, productoNombre, productoImagen }) {
                 fill="none"
                 opacity={n.ghost ? 0.35 : (isDimmed ? 0.25 : (isSelected ? 1 : 0.7))}
                 strokeDasharray={n.ghost ? '3 5' : undefined}
-                markerEnd={`url(#arrow-${i})`}
+                markerEnd={`url(#arrow-${uid}-${i})`}
                 style={isSelected ? { animationDuration: '0.8s' } : undefined}
               />
             );
@@ -337,89 +426,6 @@ function AnzuelosMap({ winners, productoNombre, productoImagen }) {
         })()
       )}
     </Section>
-  );
-}
-
-// ============================================================
-// Helpers de formato — declarados antes para que estén disponibles
-// en el render del componente principal.
-// ============================================================
-function avg(arr) {
-  if (!arr.length) return null;
-  return arr.reduce((a, b) => a + b, 0) / arr.length;
-}
-
-function median(arr) {
-  if (!arr.length) return null;
-  const s = [...arr].sort((a, b) => a - b);
-  const mid = Math.floor(s.length / 2);
-  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
-}
-
-function pct(n) {
-  return n == null ? '—' : `${n.toFixed(2)}%`;
-}
-
-function num(n, decimals = 2) {
-  return n == null ? '—' : Number(n).toFixed(decimals);
-}
-
-function dollar(n) {
-  return n == null ? '—' : `$${Number(n).toFixed(2)}`;
-}
-
-// ============================================================
-// Inner components — TODOS antes del export default.
-// ============================================================
-
-function MetricCard({ icon, label, value, sub, count }) {
-  return (
-    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-3.5">
-      <div className="flex items-center gap-1 text-amber-600 dark:text-amber-400 mb-1">
-        {icon}
-        <p className="text-[10px] font-bold uppercase tracking-wider">{label}</p>
-      </div>
-      <p className="text-xl font-bold tabular-nums text-gray-900 dark:text-gray-100">{value}</p>
-      <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">
-        {count > 0 ? sub : 'sin datos'} · {count} winner{count !== 1 ? 's' : ''}
-      </p>
-    </div>
-  );
-}
-
-function Section({ icon, title, subtitle, children }) {
-  return (
-    <div>
-      <div className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400 mb-1">
-        {icon}
-        <h4 className="text-xs font-bold uppercase tracking-wider">{title}</h4>
-      </div>
-      {subtitle && <p className="text-[10px] text-gray-500 dark:text-gray-400 mb-2">{subtitle}</p>}
-      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-3">
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function BarRow({ label, count, max, color = 'amber', total }) {
-  const widthPct = max > 0 ? (count / max) * 100 : 0;
-  const sharePct = total > 0 ? Math.round((count / total) * 100) : 0;
-  const colors = {
-    amber: 'bg-amber-400',
-    brand: 'bg-brand-400',
-    emerald: 'bg-emerald-400',
-  };
-  return (
-    <div className="flex items-center gap-3">
-      <p className="text-[11px] font-semibold text-gray-700 dark:text-gray-300 truncate w-32 shrink-0">{label}</p>
-      <div className="flex-1 h-5 bg-gray-100 dark:bg-gray-700/50 rounded-full overflow-hidden relative">
-        <div className={`${colors[color] || colors.amber} h-full rounded-full transition-all duration-500`} style={{ width: `${widthPct}%` }} />
-      </div>
-      <p className="text-[10px] tabular-nums text-gray-600 dark:text-gray-400 w-16 text-right shrink-0">
-        <span className="font-bold">{count}</span> · {sharePct}%
-      </p>
-    </div>
   );
 }
 

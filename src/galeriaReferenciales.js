@@ -184,17 +184,24 @@ export async function getReferencialesByProducto(productoId, opts = {}) {
       byId.set(it.id, it);
       continue;
     }
-    // Comparar updatedAt — el lado con timestamp más reciente gana los flags.
-    // Si IDB no tiene updatedAt (items legacy), cloud gana por default.
-    const cloudT = existing.updatedAt || existing.createdAt || '';
-    const idbT = it.updatedAt || it.createdAt || '';
-    const idbIsFresher = idbT && idbT > cloudT;
+    // Comparar updatedAt parseados como Date numérico — el lado con
+    // timestamp más reciente gana los flags. Sin Date.parse(), Supabase
+    // timestamptz (`2026-06-15T10:30:45.123456+00:00`, microsegundos + tz
+    // offset) y JS toISOString (`2026-06-15T10:30:45.123Z`) comparados
+    // como strings dan resultados aleatorios cuando el segundo es el
+    // mismo (la posición del char `Z` vs el microsec quirky). Date.parse
+    // normaliza a Unix ms y la comparación es correcta.
+    const cloudT = Date.parse(existing.updatedAt || existing.createdAt || '') || 0;
+    const idbT = Date.parse(it.updatedAt || it.createdAt || '') || 0;
+    const idbIsFresher = idbT > cloudT;
     const flagsSource = idbIsFresher ? it : existing;
     byId.set(it.id, {
       ...existing,
       winner: !!flagsSource.winner,
       winnerAt: flagsSource.winnerAt,
-      winnerMetrics: flagsSource.winnerMetrics,
+      // Fallback ?? para no pisotear cloud.winnerMetrics con undefined
+      // cuando IDB legacy no tiene el campo.
+      winnerMetrics: flagsSource.winnerMetrics ?? existing.winnerMetrics ?? null,
       descargada: !!flagsSource.descargada,
       descargadaAt: flagsSource.descargadaAt,
       archivado: !!flagsSource.archivado,

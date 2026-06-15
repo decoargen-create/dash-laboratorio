@@ -2353,25 +2353,31 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           video: genConfig.formatoVideo / sumaMix,
         };
 
-        // CHUNKING: pedimos las ideas en TANDAS chicas en vez de una sola
-        // request grande. Cada brief completo pesa ~1500-2000 tokens de
-        // salida; con tandas de 8 el generador necesita ~16k tokens y
-        // termina en ~3 min — cómodo dentro del límite de 5 min de Vercel.
-        // Tandas más grandes arriesgan truncarse por timeout.
-        const CHUNK_SIZE = 8;
+        // CHUNKING + PARALELISMO: pedimos las ideas en TANDAS chicas y las
+        // corremos EN PARALELO (igual que generadorRapidoStore.js). Antes
+        // eran tandas de 8 SECUENCIALES — con contexto pobre (ej: 1 solo
+        // competidor por quota de Apify) el modelo divagaba, alargaba el
+        // time-to-first-token y la función moría en el límite de 5min de
+        // Vercel SIN emitir `complete` → "tanda truncada" en cascada.
+        // CHUNK 4 (era 8): tandas más chicas = menos tokens = menos riesgo
+        // de timeout. Concurrency 3: tiempo de pared ~3x más rápido.
+        const CHUNK_SIZE = 4;
+        const CHUNK_CONCURRENCY = 3;
         const totalTandas = Math.max(1, Math.ceil(targetCount / CHUNK_SIZE));
         let insertadas = 0;
-        let tandaNum = 0;
-        let tandasFallidasSeguidas = 0;
+        let tandasOk = 0;
+
+        // ideasExistentes se calcula UNA vez al arrancar. Las tandas paralelas
+        // no se ven entre sí (arrancan con la misma base), así que puede haber
+        // algún solape → el dedup de addGeneratedIdeas lo filtra del lado
+        // cliente. Antes era fresco por tanda (servía para el modo secuencial).
+        const ideasExistBase = loadIdeas()
+          .filter(i => String(i.productoId || '') === productoActualId)
+          .map(i => ({ titulo: i.titulo, angulo: i.angulo, tipo: i.tipo, hook: i.hook || '', estado: i.estado || 'pendiente' }));
 
         // Corre UNA tanda del generador: pide `chunkTarget` ideas, consume
         // el stream SSE e inserta en la Bandeja. Devuelve cuántas insertó.
         const correrTanda = async (chunkTarget) => {
-          // ideasExistentes fresco — incluye lo insertado en tandas
-          // anteriores para que Claude no repita.
-          const ideasExist = loadIdeas()
-            .filter(i => String(i.productoId || '') === productoActualId)
-            .map(i => ({ titulo: i.titulo, angulo: i.angulo, tipo: i.tipo, hook: i.hook || '', estado: i.estado || 'pendiente' }));
           const resp = await fetch('/api/marketing/generate-ideas', {
             method: 'POST',
             signal: pipelineSignal,
@@ -2380,7 +2386,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               producto: productoActualizado || producto || { nombre: 'Producto sin definir' },
               competidoresAnalisis: compAnalisis,
               allCompAds,
-              ideasExistentes: ideasExist,
+              ideasExistentes: ideasExistBase,
               propiosAds,
               targetCount: chunkTarget,
               formatoMix,
@@ -2424,7 +2430,9 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                   }
                   liveStats.ideasGeneradas++;
                   setLiveIdeas(prev => [...prev, ev.idea]);
-                  updateStep('generate', { detail: `Tanda ${tandaNum}/${totalTandas} · ${insertadas} ideas en la Bandeja…` });
+                  // Progreso por IDEAS (no por nº de tanda) — con tandas
+                  // paralelas el contador de tanda parpadea incoherente.
+                  updateStep('generate', { detail: `${insertadas}/${targetCount} ideas en la Bandeja…` });
                 } else if (ev.type === 'complete') {
                   costPayload = ev;
                 } else if (ev.type === 'error') {
@@ -2434,50 +2442,61 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             }
           }
           if (streamErr) throw streamErr;
-          if (costPayload) trackCost(costPayload, `generate-ideas tanda ${tandaNum} · ${(productoActualizado || producto)?.nombre || ''}`);
+          if (costPayload) trackCost(costPayload, `generate-ideas · ${(productoActualizado || producto)?.nombre || ''}`);
           // Tanda truncada: 0 ideas y sin `complete` = se cortó a mitad.
           if (!costPayload && insertadasTanda === 0 && !cancelledRef.current) {
             throw new Error('tanda truncada (timeout)');
           }
+          tandasOk++;
           return insertadasTanda;
         };
 
-        // Loop de tandas hasta cubrir el target (o agotar reintentos).
-        let restante = targetCount;
-        let tandasOk = 0;
-        while (restante > 0 && !cancelledRef.current) {
-          tandaNum++;
-          const chunkTarget = Math.min(CHUNK_SIZE, restante);
-          // Denominador `Math.max` para no mostrar "Tanda 18/17" si una
-          // tanda falló y hubo que reintentar.
-          updateStep('generate', { detail: `Tanda ${tandaNum}/${Math.max(totalTandas, tandaNum)} · generando…` });
-          try {
-            await correrTanda(chunkTarget);
-            tandasOk++;
-            tandasFallidasSeguidas = 0;
-            // Solo descontamos del target si la tanda salió OK. Si falló,
-            // `restante` no baja y la próxima iteración reintenta ese cupo
-            // — sino una tanda fallida "consumía" 12 ideas en silencio.
-            restante -= chunkTarget;
-          } catch (err) {
-            tandasFallidasSeguidas++;
-            if (err.name === 'AbortError') {
-              console.info(`generate-ideas abortado por cancel (tanda ${tandaNum})`);
-              break;
+        // Tamaños de cada tanda (ej. target=10, CHUNK=4 → [4,4,2]).
+        const chunkSizes = [];
+        for (let t = 0; t < totalTandas; t++) {
+          chunkSizes.push(Math.min(CHUNK_SIZE, targetCount - t * CHUNK_SIZE));
+        }
+
+        // Worker pool — corre las tandas en paralelo con tope de concurrencia.
+        // Mismo patrón que generadorRapidoStore.js. Guardamos el 1er error en
+        // chunkErr y solo lo propagamos si NINGUNA tanda insertó algo.
+        const queue = [...chunkSizes];
+        let chunkErr = null;
+        const worker = async () => {
+          while (queue.length && !cancelledRef.current) {
+            const size = queue.shift();
+            try {
+              await correrTanda(size);
+            } catch (e) {
+              if (e?.name === 'AbortError') throw e; // cancelación: propagar
+              console.error('generate tanda falló:', e);
+              chunkErr = chunkErr || e; // 1ra falla: guardar, seguir el resto
             }
-            console.error(`generate tanda ${tandaNum} falló:`, err);
-            // 2 tandas seguidas fallidas → cortamos, pero conservamos lo
-            // que ya se insertó en las tandas anteriores.
-            if (tandasFallidasSeguidas >= 2) break;
+          }
+        };
+        try {
+          await Promise.all(
+            Array.from({ length: Math.min(CHUNK_CONCURRENCY, queue.length) }, worker)
+          );
+        } catch (e) {
+          if (e?.name === 'AbortError') {
+            console.info('generate-ideas abortado por cancel');
+          } else {
+            throw e;
           }
         }
 
-        // Fallo real = NINGUNA tanda completó (todas truncadas / timeout).
-        // OJO: insertadas === 0 con tandas OK NO es error — es que el
-        // generador devolvió solo ideas que ya estaban en la Bandeja
-        // (dedup). Eso pasa con bandejas saturadas y NO debe marcar error.
-        if (tandasOk === 0 && !cancelledRef.current) {
-          throw new Error('El generador no pudo producir ideas (tandas truncadas o timeout). Reintentá el pipeline.');
+        // Fallo real = NINGUNA tanda completó Y hubo error. Si tandasOk > 0
+        // pero insertadas === 0, NO es error — el generador devolvió ideas
+        // que ya estaban en la Bandeja (dedup en bandejas saturadas).
+        if (tandasOk === 0 && chunkErr && !cancelledRef.current) {
+          // Mensaje accionable: distinguimos contexto pobre de timeout puro.
+          // El diagnóstico mostró que el truncado se gatilla casi siempre por
+          // poca data de competencia (scrape incompleto por quota Apify).
+          const contextoPobre = (compAnalisis?.length || 0) < 3;
+          throw new Error(contextoPobre
+            ? 'El generador se quedó sin contexto suficiente (pocos competidores analizados — probablemente el scrape no terminó por quota de Apify). Reintentá cuando tengas más ads scrapeados.'
+            : `El generador no pudo producir ideas: ${chunkErr.message}. Reintentá el pipeline.`);
         }
         setIdeasToday(countIdeasGeneradorHoy(productoActualId));
         updateStep('generate', {

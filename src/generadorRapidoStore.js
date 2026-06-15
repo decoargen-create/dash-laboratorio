@@ -19,7 +19,10 @@ import { logCostsFromResponse } from './costsStore.js';
 import { startExecution, updateExecution, finishExecution } from './executionsStore.js';
 import { hydrateCompetidoresAds } from './competidorAdsIDB.js';
 
-const CHUNK = 8;
+const CHUNK = 4;
+// Cuántas tandas corren EN PARALELO. Tandas chicas + paralelas = rápido y sin
+// timeout de Vercel (cada llamada genera pocas ideas).
+const CHUNK_CONCURRENCY = 4;
 
 // Costo estimado por idea (Claude generando briefs). Aproximado para el
 // pre-cálculo del tray; el costo real lo loguea logCostsFromResponse.
@@ -150,13 +153,15 @@ export async function runGeneradorRapido({ producto, formato, cantidad, formatoM
     }
     const mix = formatoMix || { static: 1, video: 0 };
 
-    for (let t = 0; t < totalTandas; t++) {
-      const chunkTarget = Math.min(CHUNK, cantidad - t * CHUNK);
-      patch({ tanda: { actual: t + 1, total: totalTandas } });
-      const ideasExist = loadIdeas()
-        .filter(i => String(i.productoId || '') === String(producto.id))
-        .map(i => ({ titulo: i.titulo, angulo: i.angulo, tipo: i.tipo, hook: i.hook || '', estado: i.estado || 'pendiente' }));
+    // ideasExistentes se calcula UNA vez al arrancar; las tandas paralelas no
+    // se ven entre sí, así que puede haber algún solape → el dedup por hook de
+    // addGeneratedIdeas lo filtra del lado cliente.
+    const ideasExistBase = loadIdeas()
+      .filter(i => String(i.productoId || '') === String(producto.id))
+      .map(i => ({ titulo: i.titulo, angulo: i.angulo, tipo: i.tipo, hook: i.hook || '', estado: i.estado || 'pendiente' }));
 
+    // Una tanda: pide chunkTarget ideas a Claude y procesa el stream SSE.
+    const runChunk = async (chunkTarget) => {
       const resp = await fetch('/api/marketing/generate-ideas', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -165,7 +170,7 @@ export async function runGeneradorRapido({ producto, formato, cantidad, formatoM
           producto,
           competidoresAnalisis: compAnalisis,
           allCompAds,
-          ideasExistentes: ideasExist,
+          ideasExistentes: ideasExistBase,
           propiosAds: [],
           targetCount: chunkTarget,
           formatoMix: mix,
@@ -195,7 +200,9 @@ export async function runGeneradorRapido({ producto, formato, cantidad, formatoM
             const ev = JSON.parse(payload);
             if (ev.type === 'idea' && ev.idea) {
               totalGeneradas++;
-              const nuevas = addGeneratedIdeas([ev.idea], { producto });
+              // Pasamos contextoTematico + bloqueId para que las ideas de esta
+              // corrida queden AGRUPADAS en su bloque temático.
+              const nuevas = addGeneratedIdeas([ev.idea], { producto, contextoTematico: tema, bloqueId });
               if (nuevas.length > 0) totalInsertadas++;
               const insertadasNow = totalInsertadas;
               patch(s => ({
@@ -220,7 +227,33 @@ export async function runGeneradorRapido({ producto, formato, cantidad, formatoM
         }
       }
       if (streamErr) throw streamErr;
+    };
+
+    // Tamaños de cada tanda (ej. cantidad=8, CHUNK=4 → [4,4]).
+    const chunkSizes = [];
+    for (let t = 0; t < totalTandas; t++) {
+      chunkSizes.push(Math.min(CHUNK, cantidad - t * CHUNK));
     }
+
+    // Corremos las tandas EN PARALELO (con tope de concurrencia). Cada tanda es
+    // chica (CHUNK ideas) → rápida y sin riesgo de timeout de Vercel; y al ser
+    // paralelas el tiempo de pared baja mucho vs. hacerlas en fila.
+    const queue = [...chunkSizes];
+    let chunkErr = null;
+    const worker = async () => {
+      while (queue.length) {
+        const size = queue.shift();
+        try {
+          await runChunk(size);
+        } catch (e) {
+          if (e?.name === 'AbortError') throw e; // cancelación: propagar
+          chunkErr = chunkErr || e;              // 1ra falla: guardar, seguir el resto
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(CHUNK_CONCURRENCY, queue.length) }, worker));
+    // Si NINGUNA tanda insertó nada y hubo error, lo propagamos para mostrarlo.
+    if (chunkErr && totalInsertadas === 0) throw chunkErr;
 
     patch({ status: 'done' });
     finishExecution(execId, {

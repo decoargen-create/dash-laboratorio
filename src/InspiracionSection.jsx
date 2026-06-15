@@ -35,6 +35,7 @@ import { saveReferencial, getUsedAdIdsForProducto } from './galeriaReferenciales
 import { startBulk, patchBulk, reportAdFinished, finishBulk, clearBulk, subscribeBulk } from './bulkProgressStore.js';
 import { cacheAdImagesBatch, getCachedAdImageUrl } from './adImagesStore.js';
 import { startExecution, updateExecution, finishExecution } from './executionsStore.js';
+import { trackQuotaFailure, isQuotaError, removeFromQuotaQueue, getQuotaQueue, clearQuotaQueue, subscribeQuotaQueue } from './quotaRetryStore.js';
 import { playDoneChime, playBulkDoneChime, playErrorTone } from './sounds.js';
 import EmptyState from './EmptyState.jsx';
 import { supabase } from './supabase.js';
@@ -1375,6 +1376,14 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   };
 
   const [productos, setProductos] = useState(() => loadProductos());
+  // Cola de scrapes que fallaron por quota de Apify — el user clickea
+  // "Reintentar todos" después de subir el plan en console.apify.com y
+  // se vuelven a lanzar sin tener que ir uno por uno.
+  const [quotaQueue, setQuotaQueue] = useState(() => getQuotaQueue());
+  const [retryingQuota, setRetryingQuota] = useState(false);
+  useEffect(() => {
+    return subscribeQuotaQueue(setQuotaQueue);
+  }, []);
   // Re-sync productos cuando otra parte del código (Arranque, useMarketingSync,
   // otro tab) modifica localStorage. Sin esto el state de InspiracionSection
   // queda stale después de un pull o un cambio en Setup. Comparación deep por
@@ -2704,9 +2713,16 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       cacheNewAdsInBackground(enriched, { productoId: producto?.id, brandId: brand.id, brandNombre: brand.nombre });
 
       finishExecution(execId, { ok: true, message: msg, cost: scrapeCost?.total });
+      // Si este brand estaba en cola por quota, sacarlo — el reintento OK.
+      removeFromQuotaQueue('brand', brand.id, activeProductoId);
     } catch (err) {
       addToast?.({ type: 'error', message: `No pude scrapear ${brand.nombre}: ${err.message}` });
       finishExecution(execId, { ok: false, message: err.message || 'Error' });
+      // Si fue por quota de Apify, encolar para retry en batch cuando el
+      // user suba el plan. Sin esto el user tenía que click-por-comp.
+      if (isQuotaError(err.message)) {
+        trackQuotaFailure({ kind: 'brand', id: brand.id, productoId: activeProductoId, nombre: brand.nombre });
+      }
     } finally {
       removeScraping(brand.id);
     }
@@ -2879,12 +2895,65 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       cacheNewAdsInBackground(staticAds, { productoId: producto.id, brandId: brand.id, brandNombre: comp.nombre });
 
       finishExecution(execId, { ok: true, message: msg, cost: scrapeCost?.total });
+      removeFromQuotaQueue('comp', comp.id, producto.id);
     } catch (err) {
       addToast?.({ type: 'error', message: `No pude scrapear ${brand.nombre}: ${err.message}` });
       finishExecution(execId, { ok: false, message: err.message || 'Error' });
+      if (isQuotaError(err.message)) {
+        trackQuotaFailure({ kind: 'comp', id: comp.id, productoId: producto.id, nombre: comp.nombre });
+      }
     } finally {
       removeScraping(brand.id);
     }
+  };
+
+  // Reintento batch de todos los scrapes encolados por quota. El user lo
+  // dispara DESPUÉS de subir el plan en console.apify.com. Procesa de
+  // a 2 en paralelo (mismo orden de magnitud que el pipeline manual).
+  const handleRetryQuotaAll = async () => {
+    if (retryingQuota) return;
+    const queue = getQuotaQueue();
+    if (queue.length === 0) return;
+    setRetryingQuota(true);
+    addToast?.({ type: 'info', message: `Reintentando ${queue.length} scrape${queue.length !== 1 ? 's' : ''} que fallaron por quota…` });
+
+    // Mapeo cada entry a su handler. Para 'comp' necesitamos encontrar el
+    // brand correspondiente (el wrapper que tiene __sourceComp). Para
+    // 'brand' usamos directo de `brands`.
+    const productosLocal = loadProductos();
+    const allBrands = [...brands];
+    // Generamos los brand-wrappers de comps de TODOS los productos (no
+    // solo el activo) — el user puede haber cambiado de producto entre
+    // el fallo y el retry.
+    for (const p of productosLocal) {
+      for (const c of (p.competidores || [])) {
+        allBrands.push({
+          id: `comp-${p.id}-${c.id}`,
+          nombre: c.nombre,
+          isCompetidor: true,
+          __sourceComp: c,
+          __productoId: p.id,
+        });
+      }
+    }
+
+    const CONCURRENCY = 2;
+    for (let i = 0; i < queue.length; i += CONCURRENCY) {
+      const batch = queue.slice(i, i + CONCURRENCY);
+      await Promise.allSettled(batch.map(async (entry) => {
+        try {
+          if (entry.kind === 'brand') {
+            const brand = allBrands.find(b => b.id === entry.id && !b.isCompetidor);
+            if (brand) await handleScrapeBrand(brand);
+          } else if (entry.kind === 'comp') {
+            const brand = allBrands.find(b => b.__sourceComp?.id === entry.id);
+            if (brand) await handleScrapeCompetidor(brand);
+          }
+        } catch {}
+      }));
+    }
+    setRetryingQuota(false);
+    addToast?.({ type: 'success', message: 'Reintento batch terminado. Revisá la cola por los que aún fallen.' });
   };
 
   // Cacheo asíncrono de imágenes — corre en background sin bloquear UI.
@@ -2968,6 +3037,47 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   // ====================================================================
   return (
     <div className="max-w-5xl mx-auto space-y-5">
+      {/* Banner de retry de scrapes que fallaron por quota de Apify.
+          Aparece SOLO cuando la cola tiene entries — sin esto, el user
+          tenía que volver a click-por-comp después de subir el plan. */}
+      {quotaQueue.length > 0 && (
+        <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 rounded-xl p-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="text-2xl shrink-0">⏳</div>
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-amber-900 dark:text-amber-200">
+                {quotaQueue.length} scrape{quotaQueue.length !== 1 ? 's' : ''} en cola por quota de Apify
+              </p>
+              <p className="text-[11px] text-amber-700 dark:text-amber-300 truncate">
+                {quotaQueue.slice(0, 3).map(e => e.nombre).join(', ')}{quotaQueue.length > 3 ? ` y ${quotaQueue.length - 3} más` : ''}
+                {' · '}Una vez que subas el plan en console.apify.com, clickeá Reintentar.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={handleRetryQuotaAll}
+              disabled={retryingQuota}
+              className="px-3 py-1.5 text-xs font-bold rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
+            >
+              {retryingQuota ? 'Reintentando…' : `Reintentar ${quotaQueue.length}`}
+            </button>
+            <button
+              onClick={() => {
+                if (window.confirm(`¿Vaciar la cola de ${quotaQueue.length}? Vas a tener que re-scrapear cada uno a mano si los querés.`)) {
+                  clearQuotaQueue();
+                }
+              }}
+              disabled={retryingQuota}
+              className="px-2 py-1.5 text-[11px] text-amber-700 dark:text-amber-300 hover:text-amber-900 disabled:opacity-50"
+              title="Vaciar cola"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Barra flotante cuando hay ads seleccionados — bulk action + opciones. */}
       {seleccionados.size > 0 && !bulkProgress && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-white dark:bg-gray-800 border border-brand-300 dark:border-brand-700 rounded-xl shadow-2xl px-4 py-3 flex flex-wrap items-center gap-3 max-w-[calc(100vw-3rem)]">

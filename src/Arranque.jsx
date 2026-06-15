@@ -43,6 +43,7 @@ import { usePipelineRun } from './PipelineRunContext.jsx';
 import { getProductoImagen } from './productoImagen.js';
 import { setCompAds, getCompAds, hydrateCompetidoresAds, removeCompAds } from './competidorAdsIDB.js';
 import { stringifyApiError } from './apiHelpers.js';
+import { trackQuotaFailure, isQuotaError, removeFromQuotaQueue } from './quotaRetryStore.js';
 
 // Avatar del producto: muestra el pote (foto cargada en Setup) y cae al
 // gradiente con la inicial si todavía no hay foto. getProductoImagen resuelve
@@ -1949,6 +1950,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           endedAt: Date.now(),
           detail: 'Salteado · Apify sin quota mensual',
         });
+        trackQuotaFailure({ kind: 'comp', id: c.id, productoId: producto.id, nombre: c.nombre });
         return;
       }
       const stepId = `scrape-${c.id}`;
@@ -2097,14 +2099,16 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         });
       } catch (err) {
         updateStep(stepId, { status: 'error', endedAt: Date.now(), detail: err.message });
-        // Detectar quota mensual de Apify para abortar el resto del loop.
+        // Detectar quota mensual de Apify para abortar el resto del loop +
+        // encolar el comp para retry batch cuando el user suba el plan.
         // Sin esto, los 7 competidores restantes mandan requests inútiles
-        // que igual van a fallar.
-        if (/usage hard limit|monthly|platform-feature-disabled|quota/i.test(err.message || '')) {
+        // y el user tenía que click-por-comp después de re-habilitar Apify.
+        if (isQuotaError(err.message)) {
           apifyQuotaExhausted = true;
+          trackQuotaFailure({ kind: 'comp', id: c.id, productoId: producto.id, nombre: c.nombre });
           addToast?.({
             type: 'error',
-            message: 'Apify se quedó sin quota mensual. Cancelando los competidores restantes — corré el pipeline cuando renueve la cuota.',
+            message: 'Apify se quedó sin quota mensual. Encolé este comp para reintentar — subí el plan en console.apify.com y usá "Reintentar fallidos" en Inspiración.',
           });
         }
       }
@@ -2115,12 +2119,13 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     for (let i = 0; i < competidoresLocal.length; i += SCRAPE_CONCURRENCY) {
       if (cancelledRef.current) break;
       if (apifyQuotaExhausted) {
-        // Marcamos los que quedan como salteados.
+        // Marcamos los que quedan como salteados + encolamos para retry.
         for (const c of competidoresLocal.slice(i)) {
           updateStep(`scrape-${c.id}`, {
             status: 'error', endedAt: Date.now(),
             detail: 'Salteado · Apify sin quota mensual',
           });
+          trackQuotaFailure({ kind: 'comp', id: c.id, productoId: producto.id, nombre: c.nombre });
         }
         break;
       }

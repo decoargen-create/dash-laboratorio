@@ -100,6 +100,66 @@ function inferProductForm(producto) {
   return null;
 }
 
+// Detecta la ESCALA REAL (tamaño físico) del producto, para que gpt-image-2
+// no lo dibuje del tamaño equivocado. El bug típico (reportado en producción):
+// un producto GRANDE (organizador de placard, mueble, alfombra, textil) se
+// mete en el "footprint" chico del producto de la referencia y sale como una
+// cápsula / frasco diminuto. La regla "same scale" del prompt lo encogía.
+//
+// Estrategia (en este orden):
+//   1. MEDIDAS EXPLÍCITAS que el scraper trajo de la landing: las buscamos en
+//      nombre + descripción + research ("40x30x25 cm", "60 cm", "1.5 L", "5 kg").
+//      Siempre con unidad — sin unidad no surfaceamos (evita falsos positivos
+//      tipo ratios "1x1" o tamaños de imagen).
+//   2. KEYWORDS de categoría grande (hogar / almacenamiento / mueble / textil)
+//      → forzamos "furniture-scale, no handheld".
+//
+// Devuelve un string de instrucción (en inglés, igual que el prompt de imagen)
+// o null si no hay señal — en ese caso no agregamos ruido al prompt.
+function inferRealWorldScale(producto) {
+  const haystack = [
+    producto?.nombre || '',
+    producto?.descripcion || '',
+    String(producto?.research || producto?.docs?.research || '').slice(0, 4000),
+  ].join(' ');
+  const low = haystack.toLowerCase();
+
+  // 1. Medidas explícitas con unidad (las que vinieron de la landing).
+  const dims = [];
+  const reBox = /\d{1,3}\s*[x×]\s*\d{1,3}(?:\s*[x×]\s*\d{1,3})?\s*(?:cm|cms|cent[íi]metros|mm|mts?|metros|m)\b/gi;
+  const reLin = /\b\d{1,3}(?:[.,]\d+)?\s*(?:cm|cms|cent[íi]metros|mm|metros|mts|m)\b/gi;
+  const reVol = /\b\d{1,3}(?:[.,]\d+)?\s*(?:l|lts?|litros?|kg|kilos?)\b/gi;
+  for (const re of [reBox, reLin, reVol]) {
+    let m;
+    while ((m = re.exec(haystack)) && dims.length < 8) dims.push(m[0].trim());
+  }
+  const dimsTxt = [...new Set(dims)].slice(0, 6).join(', ');
+
+  // 2. Keywords de productos GRANDES (no handheld).
+  const largeRe = /\b(organizador(?:es)?|placard|ropero|c[óo]moda|mueble|mesa|mesada|silla|sill[óo]n|sof[áa]|estante(?:r[íi]a)?|repisa|caj[óo]n|cajonera|cesto|canasto|contenedor|bandeja|caja organizadora|bols[óo]n|bolso|mochila|valija|alfombra|tapete|colch[óo]n|almohad[óo]n|almohada|manta|frazada|acolchado|edred[óo]n|cortina|l[áa]mpara|espejo|perchero|zapatero|maceta|plegable)\b/;
+  const isLarge = largeRe.test(low);
+
+  // Medidas que claramente exceden lo handheld (≥25 cm, o cualquier metro).
+  const numCm = [...haystack.matchAll(/\b(\d{1,3}(?:[.,]\d+)?)\s*(?:cm|cms|cent[íi]metros)\b/gi)]
+    .map(x => parseFloat(x[1].replace(',', '.')));
+  const hasMeters = /\b\d+(?:[.,]\d+)?\s*(?:mts?|metros|m)\b/i.test(haystack);
+  const bigByDims = numCm.some(n => n >= 25) || hasMeters;
+
+  if (isLarge || bigByDims) {
+    let out = 'This is a LARGE physical product (home / storage / furniture / textile category — e.g. a foldable closet organizer, drawer bin, shelf box). It is FURNITURE-SCALE: roughly the size of a drawer / shelf bin / tabletop object, NOT a tiny handheld item, and NEVER a capsule, jar, bottle or palm-sized package.';
+    out += ' When a person, hand, shelf, closet, drawer or furniture appears in the scene, scale the product realistically against them — it should fill a shelf/drawer or be carried with BOTH hands. Do NOT shrink it to the reference product\'s footprint.';
+    if (dimsTxt) out += ` Stated real dimensions from the product page: ${dimsTxt} — respect these proportions.`;
+    return out;
+  }
+
+  // Solo medidas (sin keyword grande): puede ser un frasco chico — surfaceamos
+  // los números sin forzar "grande", para que el modelo respete la proporción.
+  if (dimsTxt) {
+    return `Stated real dimensions from the product page: ${dimsTxt}. Scale the product realistically against any person/hand/surface in the scene to match these proportions — do not shrink it to the reference product's footprint.`;
+  }
+  return null;
+}
+
 // Equivalente singular/contable del formato — para overlays tipo
 // "1 cápsula antes de dormir" → "1 gomita antes de dormir".
 function singularFormato(formato) {
@@ -422,9 +482,13 @@ async function planStrategyAndVariations({ apiKey, refImgBuf, refMime, producto,
   // (en vez de removerlas como cuando está vacío). Esto evita que el creativo
   // diga "$29" del competidor cuando nuestro precio es otro.
   const ofertasReales = dedupOfertas((producto?.ofertasReales || producto?.offerBrief || producto?.docs?.offerBrief || '').toString().trim());
+  // Escala real del producto extraída de la landing/research — para que el
+  // plan dimensione bien el productPlacement.scale y no salga "como cápsula".
+  const scaleHint = inferRealWorldScale(producto);
   const productCtx = [
     `Producto: ${producto?.nombre || 'N/A'}`,
     producto?.descripcion ? `Descripción: ${producto.descripcion.slice(0, 400)}` : '',
+    scaleHint ? `**TAMAÑO REAL DEL PRODUCTO** (CRÍTICO para que la imagen no lo dibuje chiquito): ${scaleHint}` : '',
     research ? `Research / audiencia / pain points:\n${research}` : '',
     ofertasReales
       ? `**OFERTAS / PRECIOS / CLAIMS REALES DEL USUARIO** (estos son los ÚNICOS que podés mencionar — si el ad ref menciona algo distinto, REEMPLAZALO por esto):\n${ofertasReales.slice(0, 1500)}`
@@ -438,6 +502,7 @@ NO inventes ángulos nuevos — el competidor ya validó este ángulo con su pla
 1. Leer EXACTAMENTE qué hace el ad ganador (visual + estrategia).
 2. Adaptar sus badges/claims a contenido VÁLIDO para nuestro producto (sin inventar regulaciones que no tengamos).
 3. Planear N ejecuciones distintas de la MISMA fórmula (cambia modelo/edad/ángulo cámara/prop secundario/momento del día — NO cambia el concepto).
+4. TAMAÑO REAL: deducir el tamaño físico real del producto y llenar "realWorldScale". Buscá en la descripción/research CUALQUIER referencia a medidas (cm, dimensiones, litros, kg) o comparaciones de tamaño y usalas. Es CRÍTICO: el ad ref puede tener un producto chico (frasco, cápsula) y el nuestro ser grande (un organizador/mueble) — si no lo aclarás, la imagen lo dibuja diminuto.
 
 Pensá como un media buyer experimentado de Meta — qué hace este ad funcionar, y cómo lo replicaría con cambios mínimos para testear ejecuciones.`;
 
@@ -456,6 +521,7 @@ Analizá la imagen del ad ganador adjunto y devolvé EXACTAMENTE este JSON (sin 
       "scale": "dominante | equilibrado | pequeño",
       "rotation": "frontal | 3/4 izq | 3/4 der | levemente tilted"
     },
+    "realWorldScale": "tamaño físico REAL del producto + cómo escalarlo vs humanos/entorno. Si la descripción/research menciona medidas (cm, dimensiones, litros, kg) o comparaciones de tamaño, repetilas TEXTUALES acá. Ej: 'organizador de placard plegable, ~40×30 cm, va en un estante o se sostiene con dos manos — NO es un objeto de palma de mano ni una cápsula/frasco'. Si es chico (frasco, crema), decilo igual.",
     "background": "ej: pared sólida de hojas verdes naturales con DOF difuminado",
     "lighting": "ej: luz suave frontal con leve key desde arriba-izquierda, sin sombras duras",
     "palette": ["#hex1", "#hex2", "#hex3", "#hex4"],
@@ -611,9 +677,11 @@ async function extractSkeletonHaiku({ apiKey, refImgBuf, refMime, producto }) {
     producto?.avatar || producto?.docs?.avatar,
     producto?.research,
   );
+  const scaleHintV = inferRealWorldScale(producto);
   const productoCtx = [
     `Nombre: ${producto?.nombre || 'N/A'}`,
     productoForm ? `**FORMATO FÍSICO: ${productoForm.toUpperCase()}** (este producto viene en ${productoForm} — NO es otro formato).` : '',
+    scaleHintV ? `**TAMAÑO REAL** (no lo dibujes chiquito): ${scaleHintV}` : '',
     producto?.descripcion ? `Descripción: ${producto.descripcion.slice(0, 500)}` : '',
     ofertasReales
       ? `**OFERTAS / PRECIOS / CLAIMS REALES DEL USUARIO** (estos son los ÚNICOS que podés mencionar — si el ad ref menciona algo distinto, REEMPLAZALO por esto, NO lo dejes literal):\n${ofertasReales.slice(0, 1500)}`
@@ -857,6 +925,11 @@ function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentCol
     }
   }
   if (descripcion) parts.push(`  • Description: ${descripcion.slice(0, 600)}`);
+  // Escala real (CRÍTICO): preferimos lo que dedujo el plan (lee research +
+  // descripción de la landing); si no vino, caemos a la heurística. Sin esto
+  // un producto grande sale del tamaño del producto chico de la referencia.
+  const realScale = (plan?.visual?.realWorldScale || '').toString().trim() || inferRealWorldScale(producto);
+  if (realScale) parts.push(`  • **REAL-WORLD SCALE (CRITICAL — size the product correctly)**: ${realScale}`);
   // Merge avatar + research evitando duplicación si el research ya tiene
   // el avatar embebido. Audit LOW.
   const fullContext = mergeAvatarResearch(
@@ -911,7 +984,7 @@ function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentCol
 
   parts.push('');
   parts.push('CRITICAL RULES:');
-  parts.push('  • Replace original product in IMAGE 1 with IMAGE 2 product — same scene, same composition, but new product at same spot/scale/rotation.');
+  parts.push('  • Replace original product in IMAGE 1 with IMAGE 2 product — keep IMAGE 1\'s scene, composition and the product\'s POSITION/rotation, but SIZE the new product to its TRUE real-world scale (see REAL-WORLD SCALE above) relative to hands/people/furniture/shelves. If IMAGE 1\'s product was smaller than ours, ENLARGE accordingly — do NOT cram our product into the reference product\'s footprint.');
   parts.push('  • Keep IMAGE 2 packaging PIXEL-FAITHFUL. Do not redraw labels or invent text on packaging.');
   parts.push('  • Photorealistic, premium DTC, ready for Meta Ads.');
   parts.push('  • Render Spanish text overlays EXACTLY as written above.');
@@ -1007,6 +1080,10 @@ function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio
     }
   }
   if (descripcion) parts.push(`  - Description: ${descripcion.slice(0, 600)}`);
+  // Escala real (CRÍTICO) — en el path v2 no hay plan, así que va directo de
+  // la heurística sobre nombre/descripción/research de la landing.
+  const realScale2 = inferRealWorldScale(producto);
+  if (realScale2) parts.push(`  - **REAL-WORLD SCALE (CRITICAL — size the product correctly)**: ${realScale2}`);
   // Merge avatar + research evitando duplicación (audit LOW).
   const fullContext2 = mergeAvatarResearch(
     producto?.avatar || producto?.docs?.avatar,
@@ -1056,7 +1133,7 @@ function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio
 
   parts.push('');
   parts.push('CRITICAL RULES:');
-  parts.push('  • Replace the original product in IMAGE 1 with the product from IMAGE 2 — same scene, same lighting, same composition, but the new product takes its exact spot at the same scale and rotation.');
+  parts.push('  • Replace the original product in IMAGE 1 with the product from IMAGE 2 — keep IMAGE 1\'s scene, lighting, composition and the product\'s POSITION/rotation, but SIZE the new product to its TRUE real-world scale (see REAL-WORLD SCALE above) relative to hands/people/furniture/shelves. If IMAGE 1\'s product was smaller than ours, ENLARGE accordingly — do NOT cram our product into the reference product\'s footprint.');
   parts.push('  • Keep the packaging artwork of IMAGE 2 PIXEL-FAITHFUL. Do not redraw labels. Do NOT invent new text on the PRODUCT PACKAGING ITSELF.');
   parts.push('  • Generated image should be photorealistic, premium DTC, ready for Meta Ads.');
   parts.push('  • TEXT OVERLAYS on the canvas (stickers, headlines, captions): render the Spanish texts listed above EXACTLY as written. Keep their original visual style (sticker, pill, handwritten note, bold sans, etc). gpt-image-2 renders Spanish text reasonably well — prioritize legibility over perfect typography.');

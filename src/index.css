@@ -66,6 +66,14 @@ body {
   33%      { transform: translate(2%, -3%) scale(1.05); }
   66%      { transform: translate(-2%, 2%) scale(0.97); }
 }
+/* Mobile/reduce-motion: mesh sin animación + blur más fuerte (compensa
+   la falta de drift) y sin filter (más barato de compositar). Audit MED. */
+@media (max-width: 768px), (prefers-reduced-motion: reduce) {
+  .app-mesh-bg::before {
+    animation: none;
+    filter: blur(60px);
+  }
+}
 
 /* ===== Glassmorphism — cards y headers con vidrio esmerilado ===========
    `glass` para superficies primarias (sticky headers, modals).
@@ -89,6 +97,15 @@ body {
 .dark .glass-card {
   background: rgba(31, 41, 55, 0.55);
   border-color: rgba(255, 255, 255, 0.06);
+}
+/* Fallback para browsers sin backdrop-filter (Firefox <103 con flag
+   desactivada, navegadores viejos). Sin esto las cards quedan con
+   contraste ~2:1 sobre el mesh-gradient pastel. Audit MED. */
+@supports not (backdrop-filter: blur(1px)) {
+  .glass { background: rgba(255, 255, 255, 0.96); }
+  .dark .glass { background: rgba(17, 24, 39, 0.96); }
+  .glass-card { background: rgba(255, 255, 255, 0.94); }
+  .dark .glass-card { background: rgba(31, 41, 55, 0.94); }
 }
 
 /* ===== Acento fluorescente — CTAs primarios con glow brand ============

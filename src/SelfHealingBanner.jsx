@@ -112,10 +112,23 @@ export default function SelfHealingBanner() {
   const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
-    // Re-evaluamos cada 60s + cuando cambia la quota queue.
-    const id = setInterval(() => setIssues(detectIssues()), 60000);
-    const unsub = subscribeQuotaQueue(() => setIssues(detectIssues()));
-    return () => { clearInterval(id); unsub(); };
+    // Re-evaluamos solo cuando cambia algo (event-driven). Antes era un
+    // setInterval 60s que leía localStorage cada vez — chance de read en
+    // medio de un write debounced de Arranque, devolviendo data parcial.
+    // Audit HIGH #2.
+    const refresh = () => setIssues(detectIssues());
+    const unsubQuota = subscribeQuotaQueue(refresh);
+    window.addEventListener('viora:marketing-storage-changed', refresh);
+    window.addEventListener('focus', refresh);
+    // También revisamos cada 5min como red de seguridad (timestamps de
+    // cron-stale dependen del paso del tiempo, no de events).
+    const id = setInterval(refresh, 5 * 60 * 1000);
+    return () => {
+      clearInterval(id);
+      unsubQuota();
+      window.removeEventListener('viora:marketing-storage-changed', refresh);
+      window.removeEventListener('focus', refresh);
+    };
   }, []);
 
   const visible = issues.filter(i => !dismissed.has(i.id));

@@ -38,6 +38,7 @@ import ExecutionsTray from './ExecutionsTray.jsx';
 import SelfHealingBanner from './SelfHealingBanner.jsx';
 import ClaudeProactivoSidebar from './ClaudeProactivoSidebar.jsx';
 import MarketingDashboard from './MarketingDashboard.jsx';
+import CopyGeneratorSection from './CopyGeneratorSection.jsx';
 import BulkProgressBarGlobal from './BulkProgressBarGlobal.jsx';
 import BalanceBar from './BalanceBar.jsx';
 import ActivityBell from './ActivityBell.jsx';
@@ -1428,7 +1429,7 @@ function AppShell({ onExit }) {
       const saved = localStorage.getItem('adslab-last-section');
       // Si tenía una sección de Viora/Senydrop/MetaAds, defaulteamos a la
       // de Marketing. Lista de secciones válidas en las plataformas activas:
-      const validSections = ['mk-home', 'mk-arranque', 'mk-bandeja', 'mk-auto-ig',
+      const validSections = ['mk-home', 'mk-arranque', 'mk-bandeja', 'mk-auto-ig', 'mk-copy',
         'mk-inspiracion', 'mk-inspiracion-global', 'mk-winners', 'mk-boards', 'mk-gastos', 'mk-docs', 'con-acta'];
       return validSections.includes(saved) ? saved : 'mk-home';
     } catch { return 'mk-home'; }
@@ -2227,6 +2228,7 @@ function AppShell({ onExit }) {
                 <NavItem icon={Sparkles} label="Inspiración" section="mk-inspiracion-global" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                 <NavItem icon={Trophy} label="Winners" section="mk-winners" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                 <NavItem icon={Bookmark} label="Colecciones" section="mk-boards" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                <NavItem icon={FileText} label="Copy AI" section="mk-copy" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               </NavSection>
               <NavSection title="Automatización" sectionKey="mk-auto" sidebarOpen={sidebarOpen} defaultOpen={false}>
                 <NavItem icon={Instagram} label="Automatización IG" section="mk-auto-ig" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
@@ -2326,6 +2328,7 @@ function AppShell({ onExit }) {
               ÚNICA puerta global (ver checkpoint arriba). Si llegamos acá,
               ya hay supabaseUser. */}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-home' && <MarketingDashboard onNavigate={(s) => setCurrentSection(s)} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-copy' && <CopyGeneratorSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-arranque' && <ArranqueSection addToast={addToast} onGoToSection={setCurrentSection} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-bandeja' && <BandejaSection addToast={addToast} />}
           {/* mk-competencia (sidebar legacy) está redirigido por el effect
@@ -8195,6 +8198,7 @@ function getSectionTitle(user, section) {
     'meta-config': 'Meta Ads · Conexión',
     'mk-home': 'Marketing · Home',
     'mk-arranque': 'Marketing · Arranque',
+    'mk-copy': 'Marketing · Generador de copy',
     'mk-bandeja': 'Marketing · Bandeja de ideas',
     'mk-docs': 'Marketing · Documentación de producto',
     'mk-auto-ig': 'Marketing · Automatización IG',

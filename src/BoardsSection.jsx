@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import {
   listBoards, createBoard, updateBoard, deleteBoard,
-  listBoardItems, removeItemFromBoard,
+  listBoardItems, removeItemFromBoard, addItemsToBoard,
 } from './marketingBoardsApi.js';
 import { getCachedAdImageUrl } from './adImagesStore.js';
 
@@ -341,7 +341,14 @@ function BoardDetail({ board: initialBoard, onBack, addToast }) {
       {items && items.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
           {items.map(it => (
-            <BoardItemCard key={it.ad_id} item={it} onRemove={() => handleRemove(it.ad_id)} />
+            <BoardItemCard
+              key={it.ad_id}
+              item={it}
+              onRemove={() => handleRemove(it.ad_id)}
+              currentBoardId={board.id}
+              onMoved={() => reload()}
+              addToast={addToast}
+            />
           ))}
         </div>
       )}
@@ -352,7 +359,36 @@ function BoardDetail({ board: initialBoard, onBack, addToast }) {
 // Card individual de un ad guardado — IntersectionObserver para el cache de
 // IDB (mismo patrón que AdThumb). Las URLs de Meta expiran en ~24h; el cache
 // local sobrevive eso. content-visibility skipea render off-screen.
-function BoardItemCard({ item, onRemove }) {
+function BoardItemCard({ item, onRemove, currentBoardId, onMoved, addToast }) {
+  const [showMove, setShowMove] = useState(false);
+  const [otherBoards, setOtherBoards] = useState(null);
+  const [moving, setMoving] = useState(false);
+  useEffect(() => {
+    if (!showMove) return;
+    listBoards().then(bs => {
+      setOtherBoards(bs.filter(b => b.id !== currentBoardId));
+    }).catch(() => setOtherBoards([]));
+  }, [showMove, currentBoardId]);
+  const moveTo = async (targetBoardId) => {
+    if (moving) return;
+    setMoving(true);
+    try {
+      await addItemsToBoard(targetBoardId, [{
+        producto_id: item.producto_id,
+        competidor_id: item.competidor_id,
+        ad_id: item.ad_id,
+      }]);
+      await removeItemFromBoard(currentBoardId, item.ad_id);
+      addToast?.({ type: 'success', message: 'Movido a la otra colección.' });
+      setShowMove(false);
+      onMoved?.();
+    } catch (err) {
+      addToast?.({ type: 'error', message: `No pude mover: ${err.message}` });
+    } finally {
+      setMoving(false);
+    }
+  };
+
   const ad = item.ad;
   const cdnThumb = ad?.image_url;
   const fbUrl = ad?.snapshot_url;
@@ -406,6 +442,30 @@ function BoardItemCard({ item, onRemove }) {
         >
           <Trash2 size={11} />
         </button>
+        <button
+          onClick={(e) => { e.stopPropagation(); setShowMove(v => !v); }}
+          className="absolute top-1 right-8 p-1 rounded bg-black/60 text-white opacity-0 group-hover:opacity-100 max-md:opacity-100 hover:bg-brand-600 transition"
+          title="Mover a otra colección"
+        >
+          <Bookmark size={11} />
+        </button>
+        {showMove && (
+          <div onClick={e => e.stopPropagation()} className="absolute inset-x-1 top-9 z-20 glass-card border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-1 max-h-40 overflow-y-auto animate-fade-in-down">
+            <p className="text-[9px] font-bold uppercase tracking-wider text-gray-400 px-1.5 py-1">Mover a:</p>
+            {otherBoards == null ? (
+              <p className="text-[10px] text-gray-400 px-1.5 py-2">Cargando…</p>
+            ) : otherBoards.length === 0 ? (
+              <p className="text-[10px] text-gray-400 px-1.5 py-2">Sin otras colecciones</p>
+            ) : (
+              otherBoards.map(b => (
+                <button key={b.id} onClick={() => moveTo(b.id)} disabled={moving}
+                  className="w-full text-left text-[11px] px-1.5 py-1 rounded hover:bg-brand-50 dark:hover:bg-brand-900/30 disabled:opacity-50 truncate">
+                  {b.nombre}
+                </button>
+              ))
+            )}
+          </div>
+        )}
         {cachedUrl && (
           <div className="absolute top-1 left-1 w-1.5 h-1.5 rounded-full bg-emerald-400/80" title="Imagen cacheada localmente" />
         )}

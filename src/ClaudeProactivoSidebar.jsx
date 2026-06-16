@@ -106,10 +106,19 @@ export default function ClaudeProactivoSidebar({ onNavigate }) {
   const [open, setOpen] = useState(false);
   const [suggestions, setSuggestions] = useState(() => detectSuggestions());
 
-  // Re-detect al abrir + cada 2min en background.
+  // Re-detect event-driven (no parsing localStorage cada 2min en vano si
+  // nada cambió). Audit LOW: antes parsing eager incluso con sidebar cerrado.
   useEffect(() => {
-    const id = setInterval(() => setSuggestions(detectSuggestions()), 120000);
-    return () => clearInterval(id);
+    const refresh = () => setSuggestions(detectSuggestions());
+    window.addEventListener('viora:marketing-storage-changed', refresh);
+    window.addEventListener('focus', refresh);
+    // Net de seguridad cada 10 min para los timestamps (>7d sin scrape).
+    const id = setInterval(refresh, 10 * 60 * 1000);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener('viora:marketing-storage-changed', refresh);
+      window.removeEventListener('focus', refresh);
+    };
   }, []);
   useEffect(() => {
     if (open) setSuggestions(detectSuggestions());

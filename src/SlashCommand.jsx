@@ -30,6 +30,26 @@ function isTypingTarget(target) {
   return false;
 }
 
+// Detecta si HAY un modal abierto en la página. Si lo hay, NO interceptamos
+// "/" para no abrir el SlashCommand encima del modal del user. Heurística:
+// busca elementos con role="dialog" o clases típicas de modal overlay
+// (fixed inset-0 + bg-black/black-overlay) que estén montados ahora mismo.
+// Audit HIGH #1: el listener era window-level y abría SlashCommand encima
+// de cualquier modal con z-[60], destruyendo el contexto.
+function isModalOpen() {
+  if (typeof document === 'undefined') return false;
+  // Cualquier dialog accesible.
+  if (document.querySelector('[role="dialog"]')) return true;
+  // Heurística para modales legacy sin role: overlay fixed inset-0 con bg.
+  const overlays = document.querySelectorAll('.fixed.inset-0');
+  for (const el of overlays) {
+    // Skip el propio overlay del SlashCommand (lo identificamos por data-attr).
+    if (el.dataset.slashRoot === '1') continue;
+    if (el.offsetParent !== null || el.getBoundingClientRect().width > 0) return true;
+  }
+  return false;
+}
+
 export default function SlashCommand({ onNavigate, currentSection }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -40,7 +60,7 @@ export default function SlashCommand({ onNavigate, currentSection }) {
   // está tipeando en un input/textarea/contentEditable.
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key === '/' && !isTypingTarget(e.target) && !open) {
+      if (e.key === '/' && !isTypingTarget(e.target) && !open && !isModalOpen()) {
         e.preventDefault();
         setOpen(true);
         setQuery('');
@@ -100,6 +120,8 @@ export default function SlashCommand({ onNavigate, currentSection }) {
 
   return (
     <div
+      data-slash-root="1"
+      role="dialog"
       className="fixed inset-0 z-[60] flex items-start justify-center pt-[15vh] px-4 animate-fade-in"
       onClick={() => setOpen(false)}
     >

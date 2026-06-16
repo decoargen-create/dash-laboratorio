@@ -21,15 +21,17 @@ function loadProductos() {
 }
 
 // Trae winners de IDB+cloud para el producto. Lazy import para no bloquear.
+// Si falla, devuelve {winners: [], error: msg} en vez de array vacío silencioso.
+// Audit MED — antes el user no se enteraba si el chunk de galería no descargaba.
 async function loadWinnersForProducto(productoId) {
-  if (!productoId) return [];
+  if (!productoId) return { winners: [], error: null };
   try {
     const mod = await import('./galeriaReferenciales.js');
     const refs = await mod.getReferencialesByProducto(productoId, { includeArchived: false });
-    return refs.filter(r => r.winner);
+    return { winners: refs.filter(r => r.winner), error: null };
   } catch (err) {
     console.warn('No pude cargar winners:', err);
-    return [];
+    return { winners: [], error: err.message || 'error desconocido' };
   }
 }
 
@@ -51,11 +53,15 @@ export default function CopyGeneratorSection({ addToast }) {
   useEffect(() => {
     if (!productoId) { setWinners([]); return; }
     let cancelled = false;
-    loadWinnersForProducto(productoId).then(ws => {
-      if (!cancelled) setWinners(ws);
+    loadWinnersForProducto(productoId).then(({ winners: ws, error: e }) => {
+      if (cancelled) return;
+      setWinners(ws);
+      if (e) {
+        addToast?.({ type: 'warning', message: `No pude cargar los winners (${e}). El copy se generará sin esa pista — probá recargar.` });
+      }
     });
     return () => { cancelled = true; };
-  }, [productoId]);
+  }, [productoId, addToast]);
 
   const generar = async () => {
     if (!producto) {

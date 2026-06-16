@@ -3,15 +3,15 @@
 
 import React from 'react';
 
-// Skeleton genérico — cualquier shape via className.
+// Skeleton genérico — cualquier shape via className. Usa la clase
+// global `shimmer-skeleton` (definida en index.css) que tiene un
+// gradient diagonal en loop infinito — más rico que el sweep simple.
 export function Skeleton({ className = '', style }) {
   return (
     <div
-      className={`relative overflow-hidden bg-gray-200 dark:bg-gray-800 rounded ${className}`}
+      className={`shimmer-skeleton rounded ${className}`}
       style={style}
-    >
-      <div className="absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-white/40 dark:via-white/10 to-transparent" />
-    </div>
+    />
   );
 }
 

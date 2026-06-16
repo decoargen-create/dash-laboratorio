@@ -61,6 +61,24 @@ export default {
           '0%, 100%': { boxShadow: '0 0 0 0 rgba(195, 152, 102, 0.4)' },
           '50%': { boxShadow: '0 0 16px 4px rgba(195, 152, 102, 0.1)' },
         },
+        // Mesh gradient drift — el fondo decorativo "respira" lentamente.
+        // 30s para que sea casi imperceptible pero le da sensación de vida.
+        'mesh-drift': {
+          '0%, 100%': { transform: 'translate(0, 0) scale(1)' },
+          '33%': { transform: 'translate(2%, -3%) scale(1.05)' },
+          '66%': { transform: 'translate(-2%, 2%) scale(0.97)' },
+        },
+        // Counter pop — para los contadores animados al cargar.
+        'counter-pop': {
+          '0%': { opacity: '0', transform: 'translateY(8px) scale(0.92)' },
+          '60%': { opacity: '1', transform: 'translateY(-2px) scale(1.04)' },
+          '100%': { opacity: '1', transform: 'translateY(0) scale(1)' },
+        },
+        // Section enter — page transition al cambiar de sección.
+        'section-enter': {
+          '0%': { opacity: '0', transform: 'translateY(8px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
       },
       animation: {
         'fade-in': 'fade-in 0.3s ease-out',
@@ -71,6 +89,17 @@ export default {
         'shimmer': 'shimmer 2.5s linear infinite',
         'pulse-ring': 'pulse-ring 2.5s ease-in-out infinite',
         'glow': 'glow 3s ease-in-out infinite',
+        'mesh-drift': 'mesh-drift 30s ease-in-out infinite',
+        'counter-pop': 'counter-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)',
+        'section-enter': 'section-enter 0.35s cubic-bezier(0.22, 1, 0.36, 1)',
+      },
+      backdropBlur: {
+        xs: '2px',
+      },
+      boxShadow: {
+        // Glow del brand para CTAs (acento fluorescente sutil).
+        'brand-glow': '0 0 0 1px rgb(var(--brand-500) / 0.4), 0 8px 24px -4px rgb(var(--brand-500) / 0.35)',
+        'brand-glow-lg': '0 0 0 1px rgb(var(--brand-500) / 0.5), 0 12px 40px -8px rgb(var(--brand-500) / 0.5)',
       },
     },
   },

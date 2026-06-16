@@ -39,6 +39,7 @@ import SelfHealingBanner from './SelfHealingBanner.jsx';
 import ClaudeProactivoSidebar from './ClaudeProactivoSidebar.jsx';
 import MarketingDashboard from './MarketingDashboard.jsx';
 import CopyGeneratorSection from './CopyGeneratorSection.jsx';
+import SlashCommand from './SlashCommand.jsx';
 import BulkProgressBarGlobal from './BulkProgressBarGlobal.jsx';
 import BalanceBar from './BalanceBar.jsx';
 import ActivityBell from './ActivityBell.jsx';
@@ -2370,6 +2371,15 @@ function AppShell({ onExit }) {
             }
             setCurrentSection(section);
           }}
+        />
+      )}
+
+      {/* Slash command — atajo "/" para navegar y disparar acciones desde
+          cualquier lugar de la app (estilo Notion/Linear). */}
+      {currentPlatform === 'marketing' && (
+        <SlashCommand
+          onNavigate={(section) => setCurrentSection(section)}
+          currentSection={currentSection}
         />
       )}
 

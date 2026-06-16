@@ -21,7 +21,7 @@ import React, { useState, useEffect, useRef, useMemo, Fragment } from 'react';
 import {
   Package, Target, Play, Check, Loader2, AlertTriangle, ChevronRight, ChevronDown,
   Plus, X, Sparkles, Link2, Search, Clock, Inbox, Trash2, Upload, Download, Activity,
-  LayoutGrid, List as ListIcon, BarChart3, Copy, Pencil, Music, MoreHorizontal,
+  LayoutGrid, List as ListIcon, BarChart3, Copy, Pencil, MoreHorizontal,
 } from 'lucide-react';
 import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGeneradorHoy, updateIdea, formatoDeAd } from './bandejaStore.js';
 import { deleteProducto as deleteProductoFromCloud } from './marketingSync.js';
@@ -1135,7 +1135,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
   // Wizard competitors
   const [showCompForm, setShowCompForm] = useState(false);
-  const [compDraft, setCompDraft] = useState({ nombre: '', landingUrl: '', adLibraryUrl: '', tiktokKeywords: '' });
+  const [compDraft, setCompDraft] = useState({ nombre: '', landingUrl: '', adLibraryUrl: '' });
 
   // Meta ad account picker
   const [metaConnected, setMetaConnected] = useState(null); // null = unknown, bool = checked
@@ -1511,17 +1511,13 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       // searchKeyword al scrapear — si la pegó, sabe qué quiere ver.
       adLibraryUrl: adLibraryUrl || '',
       fbPageUrl: '',
-      // tiktokKeywords: lista CSV de términos para scraping de TikTok ads.
-      // El user puede pegar "femprobiotics, prebiotico, gut health" y vamos
-      // a buscar esos en TikTok Creative Center.
-      tiktokKeywords: compDraft.tiktokKeywords?.trim() || '',
       notas: '',
       ads: [],
       lastAdsCheck: null,
       createdAt: new Date().toISOString(),
     };
     setCompetidores(prev => [nuevo, ...prev]);
-    setCompDraft({ nombre: '', landingUrl: '', adLibraryUrl: '', tiktokKeywords: '' });
+    setCompDraft({ nombre: '', landingUrl: '', adLibraryUrl: '' });
     setShowCompForm(false);
     addToast?.({ type: 'success', message: `Competidor "${nombre}" sumado` });
 
@@ -1552,54 +1548,6 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       }
     } catch {
       // Silencioso — si no pudimos resolver, el user puede cargarla manual.
-    }
-  };
-
-  // Set de comp IDs cuyo scrape TikTok está en curso.
-  const [tiktokScrapingIds, setTiktokScrapingIds] = useState(() => new Set());
-
-  // Dispara el scrape TikTok manual para un competidor. Si no tiene keywords
-  // configurados, prompt para que los agregue al toque.
-  const handleScrapeTiktok = async (c) => {
-    let keywords = (c.tiktokKeywords || '').trim();
-    if (!keywords) {
-      const promptVal = window.prompt(
-        `Términos TikTok para "${c.nombre}" (separados por coma):`,
-        c.nombre
-      );
-      if (!promptVal) return;
-      keywords = promptVal.trim();
-      // Persistir en el competidor.
-      setCompetidores(prev => prev.map(x =>
-        x.id === c.id ? { ...x, tiktokKeywords: keywords } : x
-      ));
-    }
-    setTiktokScrapingIds(prev => { const n = new Set(prev); n.add(c.id); return n; });
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const headers = { 'Content-Type': 'application/json' };
-      if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`;
-      const resp = await fetch('/api/marketing/scrape-tiktok', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          keywords: keywords.split(',').map(s => s.trim()).filter(Boolean),
-          country: 'AR',
-          limit: 100,
-          productoId: producto?.id,
-          competidorId: c.id,
-        }),
-      });
-      const data = await resp.json().catch(() => ({}));
-      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-      addToast?.({
-        type: 'success',
-        message: `TikTok ${c.nombre}: ${data.total || 0} ads (${data.winners || 0} ganadores)`,
-      });
-    } catch (err) {
-      addToast?.({ type: 'error', message: `TikTok ${c.nombre}: ${err.message}` });
-    } finally {
-      setTiktokScrapingIds(prev => { const n = new Set(prev); n.delete(c.id); return n; });
     }
   };
 
@@ -3713,18 +3661,8 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 Si pegás la URL exacta de la biblioteca de anuncios (con filtros, sort por impressions, etc), la usamos directo en vez de adivinar la FB page. Recomendado para marcas con muchos ads.
               </p>
             </div>
-            {/* TikTok keywords — opcional. Términos coma-separados para
-                buscar en TikTok Creative Center (en el momento del scrape). */}
-            <div className="flex flex-col gap-1">
-              <input type="text" value={compDraft.tiktokKeywords} onChange={e => setCompDraft({ ...compDraft, tiktokKeywords: e.target.value })}
-                placeholder="TikTok keywords (opcional): femprobiotics, gut health, prebiotico"
-                className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
-              <p className="text-[10px] text-gray-500 dark:text-gray-400 italic px-1">
-                Términos para buscar en TikTok Creative Center. Si lo dejás vacío, no scrapeamos TikTok para este competidor.
-              </p>
-            </div>
             <div className="flex gap-1 justify-end">
-              <button onClick={() => { setShowCompForm(false); setCompDraft({ nombre: '', landingUrl: '', adLibraryUrl: '', tiktokKeywords: '' }); }}
+              <button onClick={() => { setShowCompForm(false); setCompDraft({ nombre: '', landingUrl: '', adLibraryUrl: '' }); }}
                 className="px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 transition">
                 Cancelar
               </button>
@@ -3830,29 +3768,6 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                       {winners > 0 && <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">{winners} ganadores 🏆</p>}
                     </div>
                   )}
-                  {/* Botón TikTok scrape manual — solo aparece si el comp
-                      tiene tiktokKeywords (o el user lo dispara y los pone
-                      al toque via prompt). */}
-                  <button
-                    onClick={() => handleScrapeTiktok(c)}
-                    disabled={tiktokScrapingIds.has(c.id)}
-                    className={`p-1.5 rounded transition shrink-0 ${
-                      tiktokScrapingIds.has(c.id)
-                        ? 'text-pink-500 bg-pink-50 dark:bg-pink-900/30 cursor-wait'
-                        : c.tiktokKeywords
-                          ? 'text-pink-600 dark:text-pink-400 hover:bg-pink-50 dark:hover:bg-pink-900/20'
-                          : 'text-gray-300 hover:text-pink-500 hover:bg-pink-50 dark:hover:bg-pink-900/20'
-                    }`}
-                    title={tiktokScrapingIds.has(c.id)
-                      ? 'Scrapeando TikTok…'
-                      : c.tiktokKeywords
-                        ? `Scrapear TikTok ahora — keywords: ${c.tiktokKeywords}`
-                        : 'Scrapear TikTok (te pregunto los keywords)'}
-                  >
-                    {tiktokScrapingIds.has(c.id)
-                      ? <Loader2 size={14} className="animate-spin" />
-                      : <Music size={14} />}
-                  </button>
                   {/* Toggle "auto-refresh diario" — opt-in. Si activado, el
                       cron de las 6 AM scrapea este competidor diariamente. */}
                   <button

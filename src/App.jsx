@@ -1465,7 +1465,6 @@ function AppShell({ onExit }) {
   const [showNewProductModal, setShowNewProductModal] = useState(false);
   const [filterMentor, setFilterMentor] = useState('');
   const [filterMonth, setFilterMonth] = useState('');
-  const [cmdOpen, setCmdOpen] = useState(false);
   const [toasts, setToasts] = useState([]);
 
   // useCallback con [] para que sea estable a lo largo de la sesión.
@@ -1683,19 +1682,6 @@ function AppShell({ onExit }) {
       localStorage.setItem('dash-accent-vars', JSON.stringify(vars));
     } catch {}
   }, [accentColor]);
-
-  // Atajo global Cmd+K / Ctrl+K para abrir la command palette
-  useEffect(() => {
-    const onKey = (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        setCmdOpen(prev => !prev);
-      }
-      if (e.key === 'Escape') setCmdOpen(false);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
 
   // CROSS-TAB LOGOUT SYNC: si el user hace logout en tab A, tab B sigue
   // mostrando la UI logueada (con data del user!) hasta que recargue. El
@@ -2284,7 +2270,6 @@ function AppShell({ onExit }) {
           setUiFont={setUiFont}
           accentColor={accentColor}
           setAccentColor={setAccentColor}
-          onOpenCommand={() => setCmdOpen(true)}
           onOpenMobileMenu={() => setMobileMenuOpen(true)}
         />
 
@@ -2333,26 +2318,6 @@ function AppShell({ onExit }) {
           {currentUser.role === 'mentor' && currentSection === 'mis-clientes' && <MentorClientesSection currentUser={currentUser} state={state} />}
         </div>
       </main>
-
-      {/* Command palette global */}
-      {cmdOpen && (
-        <CommandPalette
-          state={state}
-          currentUser={currentUser}
-          onClose={() => setCmdOpen(false)}
-          onNavigate={(section) => {
-            if (section.startsWith('mk-')) setCurrentPlatform('marketing');
-            else if (section.startsWith('con-')) setCurrentPlatform('consultoria');
-            setCurrentSection(section);
-            setCmdOpen(false);
-          }}
-          onNewSale={() => { setCurrentSection('ventas'); setShowNewSaleModal(true); setCmdOpen(false); }}
-          onNewClient={() => { setCurrentSection('clientes'); setShowNewClientModal(true); setCmdOpen(false); }}
-          onNewProduct={() => { setCurrentSection('productos'); setShowNewProductModal(true); setCmdOpen(false); }}
-          onToggleTheme={() => { toggleDarkMode(); setCmdOpen(false); }}
-          onLogout={() => { handleLogout(); setCmdOpen(false); }}
-        />
-      )}
 
       {/* Toast container */}
       <ToastContainer toasts={toasts} />
@@ -8544,7 +8509,7 @@ function AppearanceMenu({ textSize, setTextSize, uiFont, setUiFont, accentColor,
   );
 }
 
-function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, textSize, setTextSize, uiFont, setUiFont, accentColor, setAccentColor, onOpenCommand, onOpenMobileMenu, bgTasks = [] }) {
+function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, textSize, setTextSize, uiFont, setUiFont, accentColor, setAccentColor, onOpenMobileMenu, bgTasks = [] }) {
   const [scrolled, setScrolled] = useState(false);
   const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform);
 
@@ -8586,24 +8551,6 @@ function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, textSize, set
         <SyncStatusBadge />
         <ActivityBell />
         <BalanceBar />
-        <button
-          onClick={onOpenCommand}
-          className="hidden sm:inline-flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700 hover:border-pink-300 dark:hover:border-pink-600 hover:text-gray-900 dark:hover:text-gray-100 transition-all duration-200 hover:shadow group"
-          title="Abrir command palette"
-        >
-          <Search size={13} className="group-hover:scale-110 transition-transform" />
-          <span>Buscar…</span>
-          <kbd className="hidden md:inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-mono rounded bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400">
-            {isMac ? '⌘' : 'Ctrl'} K
-          </kbd>
-        </button>
-        <button
-          onClick={onOpenCommand}
-          className="sm:hidden p-2 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 transition shrink-0"
-          aria-label="Buscar"
-        >
-          <Search size={18} />
-        </button>
         {bgTasks.length > 0 && (
           <div
             className="hidden sm:inline-flex items-center gap-2 px-3 py-1.5 text-[11px] rounded-lg bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800/50 text-amber-800 dark:text-amber-200 animate-pulse"
@@ -8662,126 +8609,6 @@ export function useCountUp(target, duration = 800) {
   }, [target, duration]);
 
   return value;
-}
-
-// Command palette estilo spotlight/raycast. Filtra comandos por texto y
-// permite navegación con flechas + Enter para ejecutar.
-function CommandPalette({ state, currentUser, onClose, onNavigate, onNewSale, onNewClient, onNewProduct, onToggleTheme, onLogout }) {
-  const [query, setQuery] = useState('');
-  const [cursor, setCursor] = useState(0);
-  const inputRef = useRef(null);
-
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
-
-  // Comandos disponibles. Solo navegación de AdsLab (Marketing + Consultoría)
-  // + preferencias/sesión. Las acciones viejas de Viora (ventas, clientes,
-  // productos) se sacaron porque esa plataforma no está activa.
-  const baseCmds = [];
-  if (currentUser?.role === 'admin') {
-    baseCmds.push(
-      { id: 'go-marketing', group: 'Ir a', label: 'Marketing', icon: Play, shortcut: 'G M', run: () => onNavigate('mk-arranque') },
-      { id: 'go-autoig', group: 'Ir a', label: 'Automatización IG', icon: Instagram, run: () => onNavigate('mk-auto-ig') },
-      { id: 'go-gastos', group: 'Ir a', label: 'Gastos del stack', icon: DollarSign, run: () => onNavigate('mk-gastos') },
-      { id: 'go-consultoria', group: 'Ir a', label: 'Consultoría · Acta', icon: FileText, run: () => onNavigate('con-acta') },
-    );
-  }
-  baseCmds.push(
-    { id: 'toggle-theme', group: 'Preferencias', label: 'Alternar modo claro/oscuro', icon: Moon, run: onToggleTheme },
-    { id: 'logout', group: 'Sesión', label: 'Cerrar sesión', icon: LogOut, run: onLogout },
-  );
-
-  const q = query.trim().toLowerCase();
-  const allCmds = baseCmds;
-  const filtered = q
-    ? allCmds.filter(c => c.label.toLowerCase().includes(q) || c.group.toLowerCase().includes(q))
-    : allCmds;
-
-  useEffect(() => { setCursor(0); }, [query]);
-
-  const handleKey = (e) => {
-    if (e.key === 'ArrowDown') { e.preventDefault(); setCursor(c => Math.min(filtered.length - 1, c + 1)); }
-    if (e.key === 'ArrowUp') { e.preventDefault(); setCursor(c => Math.max(0, c - 1)); }
-    if (e.key === 'Enter') { e.preventDefault(); filtered[cursor]?.run?.(); }
-  };
-
-  // Agrupamos por "group" manteniendo el orden de aparición
-  const groups = [];
-  const byGroup = new Map();
-  filtered.forEach((cmd, idx) => {
-    if (!byGroup.has(cmd.group)) { byGroup.set(cmd.group, []); groups.push(cmd.group); }
-    byGroup.get(cmd.group).push({ ...cmd, _globalIdx: idx });
-  });
-
-  return (
-    <div
-      className="fixed inset-0 z-[100] flex items-start justify-center pt-[12vh] px-4 animate-fade-in"
-      onClick={onClose}
-    >
-      <div aria-hidden="true" className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="relative w-full max-w-xl bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden animate-scale-in"
-      >
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 dark:border-gray-800">
-          <Search size={18} className="text-gray-400" />
-          <input
-            ref={inputRef}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={handleKey}
-            placeholder="Buscar comandos, clientes, productos..."
-            className="flex-1 bg-transparent outline-none text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
-          />
-          <kbd className="hidden sm:inline-flex px-1.5 py-0.5 text-[10px] font-mono rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400">ESC</kbd>
-        </div>
-        <div className="max-h-[50vh] overflow-y-auto p-2">
-          {filtered.length === 0 ? (
-            <div className="text-center text-sm text-gray-400 dark:text-gray-500 py-10">
-              Sin resultados para "<span className="font-semibold">{query}</span>"
-            </div>
-          ) : (
-            groups.map(g => (
-              <div key={g} className="mb-1">
-                <div className="px-3 py-1 text-[10px] uppercase tracking-wider text-gray-400 dark:text-gray-500 font-semibold">{g}</div>
-                {byGroup.get(g).map((cmd) => {
-                  const Icon = cmd.icon;
-                  const isActive = cmd._globalIdx === cursor;
-                  return (
-                    <button
-                      key={cmd.id}
-                      onClick={() => cmd.run?.()}
-                      onMouseEnter={() => setCursor(cmd._globalIdx)}
-                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors duration-100 ${
-                        isActive
-                          ? 'bg-pink-50 dark:bg-pink-900/30 text-pink-900 dark:text-pink-100'
-                          : 'text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800'
-                      }`}
-                    >
-                      {Icon && <Icon size={16} className={isActive ? 'text-pink-600 dark:text-pink-300' : 'text-gray-400 dark:text-gray-500'} />}
-                      <span className="flex-1 text-sm font-medium">{cmd.label}</span>
-                      {cmd.meta && <span className="text-xs text-gray-400 dark:text-gray-500">{cmd.meta}</span>}
-                      {cmd.shortcut && !cmd.meta && (
-                        <kbd className="hidden sm:inline-flex px-1.5 py-0.5 text-[10px] font-mono rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400">{cmd.shortcut}</kbd>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            ))
-          )}
-        </div>
-        <div className="flex items-center justify-between px-4 py-2 border-t border-gray-100 dark:border-gray-800 text-[10px] text-gray-400 dark:text-gray-500">
-          <div className="flex items-center gap-3">
-            <span className="inline-flex items-center gap-1"><kbd className="font-mono">↑↓</kbd> navegar</span>
-            <span className="inline-flex items-center gap-1"><kbd className="font-mono">↵</kbd> ejecutar</span>
-          </div>
-          <span>AdsLab</span>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 // Container de toasts fijado abajo a la derecha. Cada toast desliza desde

@@ -9,6 +9,7 @@
     "api/marketing/apify-ingest.js":    { "maxDuration": 300 },
     "api/marketing/deep-analyze.js":    { "maxDuration": 240 },
     "api/marketing/generate-ideas.js":  { "maxDuration": 300 },
+    "api/marketing/generate-copy.js":   { "maxDuration": 120 },
     "api/marketing/generate-creative.js": { "maxDuration": 180 },
     "api/marketing/crear-creativo-referencial.js": { "maxDuration": 300 },
     "api/marketing/crear-imagen-desde-idea.js":    { "maxDuration": 300 },

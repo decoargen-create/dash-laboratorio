@@ -16,7 +16,7 @@ const PRIVATE_IP_RE = /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|169
 //   - imgur.com (UGC sin moderación → riesgo SVG payload)
 //   - amazonaws-com-ssl (typo del PR original, no es dominio válido)
 //   - getcellu.store (hardcoded customer — debería ser env var si hace falta)
-const ALLOWED_REMOTE_HOST_RE = /(?:^|\.)(?:fbcdn\.net|cdninstagram\.com|fbsbx\.com|facebook\.com|instagram\.com|amazonaws\.com|cloudfront\.net|googleusercontent\.com|googleapis\.com|apify\.com|apifyusercontent\.com|supabase\.co|supabase\.in|tiktokcdn\.com|tiktok\.com|youtu\.be|youtube\.com|ggpht\.com|shopify\.com|shopifycdn\.com|squarespace\.com|sqspcdn\.com|wixstatic\.com|wix\.com|sirv\.com|imgix\.net|cloudinary\.com|unsplash\.com|pexels\.com|pixabay\.com|gstatic\.com|akamaized\.net|fastly\.net|jsdelivr\.net|bunnycdn\.com|b-cdn\.net|tiendanube\.com|tcdn\.com\.br|mlstatic\.com)$/i;
+const ALLOWED_REMOTE_HOST_RE = /(?:^|\.)(?:fbcdn\.net|cdninstagram\.com|fbsbx\.com|facebook\.com|instagram\.com|amazonaws\.com|cloudfront\.net|googleusercontent\.com|googleapis\.com|apify\.com|apifyusercontent\.com|supabase\.co|supabase\.in|youtu\.be|youtube\.com|ggpht\.com|shopify\.com|shopifycdn\.com|squarespace\.com|sqspcdn\.com|wixstatic\.com|wix\.com|sirv\.com|imgix\.net|cloudinary\.com|unsplash\.com|pexels\.com|pixabay\.com|gstatic\.com|akamaized\.net|fastly\.net|jsdelivr\.net|bunnycdn\.com|b-cdn\.net|tiendanube\.com|tcdn\.com\.br|mlstatic\.com)$/i;
 
 export function isAllowedRemoteHost(urlStr) {
   if (!urlStr || typeof urlStr !== 'string') return false;

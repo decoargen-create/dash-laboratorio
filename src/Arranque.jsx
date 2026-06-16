@@ -21,7 +21,7 @@ import React, { useState, useEffect, useRef, useMemo, Fragment } from 'react';
 import {
   Package, Target, Play, Check, Loader2, AlertTriangle, ChevronRight, ChevronDown,
   Plus, X, Sparkles, Link2, Search, Clock, Inbox, Trash2, Upload, Download, Activity,
-  LayoutGrid, List as ListIcon, BarChart3, Copy, Pencil, Music,
+  LayoutGrid, List as ListIcon, BarChart3, Copy, Pencil, Music, MoreHorizontal,
 } from 'lucide-react';
 import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGeneradorHoy, updateIdea, formatoDeAd } from './bandejaStore.js';
 import { deleteProducto as deleteProductoFromCloud } from './marketingSync.js';
@@ -44,6 +44,7 @@ import { getProductoImagen } from './productoImagen.js';
 import { setCompAds, getCompAds, hydrateCompetidoresAds, removeCompAds } from './competidorAdsIDB.js';
 import { stringifyApiError } from './apiHelpers.js';
 import { trackQuotaFailure, isQuotaError, removeFromQuotaQueue } from './quotaRetryStore.js';
+import AnimatedCounter from './AnimatedCounter.jsx';
 
 // Avatar del producto: muestra el pote (foto cargada en Setup) y cae al
 // gradiente con la inicial si todavía no hay foto. getProductoImagen resuelve
@@ -641,7 +642,43 @@ function ProductTabs({ activeTab, onChange }) {
 // Métrica limpia (número grande + label chico, sin caja) para las cards de
 // producto. Estilo dashboard pro (Linear/Vercel): jerarquía por tipografía,
 // no por bordes.
-function ProductMetric({ label, value, tone = 'default' }) {
+// Menú de acciones secundarias del header de la lista de productos
+// (Diagnóstico, Importar). Antes vivían como 2 botones que saturaban
+// el header. Ahora colapsadas detrás de un "•••" — accionables pero
+// fuera del primer scroll.
+function ProductosOverflowMenu({ onDiagnostico, onImportar }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => { if (!ref.current?.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+  return (
+    <div ref={ref} className="relative">
+      <button onClick={() => setOpen(v => !v)}
+        className="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 hover:border-brand-300 dark:hover:border-brand-700 transition"
+        title="Más opciones">
+        <MoreHorizontal size={16} />
+      </button>
+      {open && (
+        <div className="absolute right-0 mt-1 z-30 w-44 glass-card border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg py-1 animate-fade-in-down">
+          <button onClick={() => { onImportar?.(); setOpen(false); }}
+            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 dark:text-gray-200 hover:bg-brand-50 dark:hover:bg-brand-900/30 transition text-left">
+            <Upload size={13} /> Importar producto
+          </button>
+          <button onClick={() => { onDiagnostico?.(); setOpen(false); }}
+            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition text-left">
+            <Activity size={13} /> Diagnóstico cloud
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProductMetric({ label, value, tone = 'default', animate = true }) {
   const tones = {
     default: 'text-gray-900 dark:text-gray-100',
     brand: 'text-brand-600 dark:text-brand-400',
@@ -649,9 +686,16 @@ function ProductMetric({ label, value, tone = 'default' }) {
     emerald: 'text-emerald-600 dark:text-emerald-400',
     muted: 'text-gray-300 dark:text-gray-600',
   };
+  // Si value es número y queremos animar, usamos AnimatedCounter. Si ya
+  // viene formateado (ej. "1,234") lo mostramos tal cual.
+  const numericValue = typeof value === 'number' ? value : null;
   return (
     <div className="min-w-0">
-      <p className={`text-lg font-bold tabular-nums leading-none ${tones[tone] || tones.default}`}>{value}</p>
+      <p className={`text-lg font-bold tabular-nums leading-none ${tones[tone] || tones.default}`}>
+        {animate && numericValue !== null
+          ? <AnimatedCounter value={numericValue} />
+          : value}
+      </p>
       <p className="text-[9px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 mt-1 truncate">{label}</p>
     </div>
   );
@@ -2761,18 +2805,15 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 </button>
               </div>
             )}
-            <button onClick={() => setShowDiagnostico(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-2.5 text-sm font-semibold text-amber-700 dark:text-amber-300 bg-white dark:bg-gray-800 border border-amber-300 dark:border-amber-700 rounded-lg hover:bg-amber-50 dark:hover:bg-amber-900/20 transition"
-              title="Ver qué hay realmente en el cloud para tu cuenta">
-              <Activity size={16} /> Diagnóstico
-            </button>
-            <button onClick={() => importFileInputRef.current?.click()}
-              className="inline-flex items-center gap-1.5 px-3 py-2.5 text-sm font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-gray-800 border border-brand-300 dark:border-brand-700 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/20 transition"
-              title="Importar producto desde JSON exportado">
-              <Upload size={16} /> Importar
-            </button>
+            {/* Diagnóstico + Importar quedaron movidos al menú "..." (overflow
+                menu) para liberar el header de la lista de productos. Eran
+                acciones poco frecuentes que saturaban el primer scroll. */}
+            <ProductosOverflowMenu
+              onDiagnostico={() => setShowDiagnostico(true)}
+              onImportar={() => importFileInputRef.current?.click()}
+            />
             <button onClick={() => setShowProdForm(true)}
-              className="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-bold text-white bg-gradient-to-br from-brand-500 to-brand-700 rounded-lg hover:from-brand-600 hover:to-brand-800 shadow-sm transition">
+              className="btn-fluo inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-bold text-white bg-gradient-to-br from-brand-500 to-brand-700 rounded-lg hover:from-brand-600 hover:to-brand-800 shadow-sm">
               <Plus size={16} /> Nuevo producto
             </button>
           </div>
@@ -2991,7 +3032,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               if (vista === 'list') {
                 return (
                   <div key={p.id} onClick={open}
-                    className="group flex items-center gap-3 bg-white dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/80 rounded-xl px-3 py-2.5 cursor-pointer hover:border-brand-300 dark:hover:border-brand-700 hover:shadow-md transition">
+                    className="group glass-card card-hover flex items-center gap-3 border border-gray-200 dark:border-gray-700/80 rounded-xl px-3 py-2.5 cursor-pointer animate-fade-in-up">
                     <ProductAvatar id={p.id} nombre={p.nombre} producto={p} sizeClass="w-10 h-10" extra="text-base shrink-0" />
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{p.nombre}</p>
@@ -3005,14 +3046,18 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                         )}
                       </div>
                     </div>
-                    {/* 2 números fuertes (ideas, ads) + detalle secundario sutil. */}
+                    {/* 2 números fuertes (ideas, ads) — animados al cargar. */}
                     <div className="hidden md:flex items-center gap-5 shrink-0 px-2 text-xs">
                       <div className="text-right leading-none">
-                        <div className={`text-base font-bold ${ideasCount > 0 ? 'text-brand-600 dark:text-brand-400' : 'text-gray-300 dark:text-gray-600'}`}>{ideasCount}</div>
+                        <div className={`text-base font-bold ${ideasCount > 0 ? 'text-brand-600 dark:text-brand-400' : 'text-gray-300 dark:text-gray-600'}`}>
+                          <AnimatedCounter value={ideasCount} />
+                        </div>
                         <div className="text-[9px] text-gray-400 mt-0.5">ideas</div>
                       </div>
                       <div className="text-right leading-none">
-                        <div className={`text-base font-bold ${adsScrapeados > 0 ? 'text-gray-900 dark:text-gray-100' : 'text-gray-300 dark:text-gray-600'}`}>{adsScrapeados.toLocaleString('es-AR')}</div>
+                        <div className={`text-base font-bold ${adsScrapeados > 0 ? 'text-gray-900 dark:text-gray-100' : 'text-gray-300 dark:text-gray-600'}`}>
+                          <AnimatedCounter value={adsScrapeados} />
+                        </div>
                         <div className="text-[9px] text-gray-400 mt-0.5">ads</div>
                       </div>
                       <div className="hidden lg:block w-28 text-[10px] text-gray-400 dark:text-gray-500 leading-tight">
@@ -3031,7 +3076,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               // -------- VISTA GRILLA (tarjeta) --------
               return (
                 <div key={p.id} onClick={open}
-                  className="group relative bg-white dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/80 rounded-2xl p-4 cursor-pointer hover:border-brand-300 dark:hover:border-brand-700 hover:shadow-lg hover:shadow-brand-500/[0.04] transition-all">
+                  className="group glass-card card-hover relative border border-gray-200 dark:border-gray-700/80 rounded-2xl p-4 cursor-pointer animate-fade-in-up">
                   {/* Acciones (hover) */}
                   <div className="absolute top-3 right-3 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition" onClick={e => e.stopPropagation()}>
                     {actions}
@@ -3056,7 +3101,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                     <ProductMetric label="Ideas" value={ideasCount} tone={ideasCount > 0 ? 'brand' : 'muted'} />
                     <ProductMetric label="Pendientes" value={ideasByEstado.pendiente || 0} tone={(ideasByEstado.pendiente || 0) > 0 ? 'amber' : 'muted'} />
                     <ProductMetric label="Competidores" value={comps.length} tone={comps.length > 0 ? 'default' : 'muted'} />
-                    <ProductMetric label="Ads" value={adsScrapeados.toLocaleString('es-AR')} tone={adsScrapeados > 0 ? 'default' : 'muted'} />
+                    <ProductMetric label="Ads" value={adsScrapeados} tone={adsScrapeados > 0 ? 'default' : 'muted'} />
                   </div>
                   {/* Footer */}
                   <div className="flex items-center gap-2 mt-3 text-[10px] text-gray-500 dark:text-gray-400 flex-wrap">

@@ -428,12 +428,12 @@ function IdeaCard({
   const usada = idea.estado === 'usada' || idea.estado === 'archivada';
 
   return (
-    <div className={`bg-white dark:bg-gray-800 border rounded-xl overflow-hidden shadow-sm transition ${
+    <div className={`glass-card border rounded-xl overflow-hidden transition ${
       isSelected
-        ? 'border-brand-400 dark:border-brand-600 ring-2 ring-brand-200 dark:ring-brand-900/40'
+        ? 'border-brand-400 dark:border-brand-600 ring-2 ring-brand-200 dark:ring-brand-900/40 shadow-md'
         : usada
           ? 'border-gray-200 dark:border-gray-700 opacity-70'
-          : 'border-gray-200 dark:border-gray-700 hover:border-brand-300 dark:hover:border-brand-700'
+          : 'border-gray-200 dark:border-gray-700 card-hover'
     }`}>
       {/* Header siempre visible */}
       <div className="px-4 py-3 flex items-start gap-3">
@@ -456,7 +456,10 @@ function IdeaCard({
         )}
 
         <div className="flex-1 min-w-0">
-          {/* Badges */}
+          {/* Badges — solo lo crítico visible siempre. Resto (ángulo,
+              tipoCampaña, variableDeTesteo, creencia, competidor origen)
+              se ve al expandir + en el Mapa de Ánzuelos. Antes había 9+
+              chips por card → ilegible. */}
           <div className="flex items-center gap-1.5 flex-wrap mb-1">
             <span className={`inline-flex items-center px-1.5 py-0.5 text-[10px] font-bold rounded border ${tipo.color}`}>
               {tipo.emoji} {tipo.label}
@@ -464,35 +467,7 @@ function IdeaCard({
             <span className={`text-[10px] font-semibold ${estado.color}`}>
               {estado.icon} {estado.label}
             </span>
-            {idea.origen?.competidorNombre && (
-              <span className="text-[10px] text-gray-500 dark:text-gray-400">
-                · de {idea.origen.competidorNombre}
-                {idea.origen.daysRunning ? ` · ${idea.origen.daysRunning}d corriendo` : ''}
-              </span>
-            )}
-            {idea.tipo === 'iteracion' && idea.origen?.adNombre && (
-              <span className="text-[10px] text-gray-500 dark:text-gray-400">
-                · itera: <span className="font-semibold text-gray-700 dark:text-gray-300">{idea.origen.adNombre}</span>
-              </span>
-            )}
-            {idea.anguloCategoria && ANGULO_META[idea.anguloCategoria] && (
-              <span className={`inline-flex items-center px-1.5 py-0.5 text-[9px] font-bold rounded ${ANGULO_META[idea.anguloCategoria].color}`}
-                title={`Ángulo estratégico ${idea.anguloCategoria}: ${ANGULO_META[idea.anguloCategoria].label}`}>
-                {ANGULO_META[idea.anguloCategoria].emoji} {idea.anguloCategoria}
-              </span>
-            )}
-            {idea.tipoCampaña && CAMPAÑA_META[idea.tipoCampaña] && (
-              <span className={`inline-flex items-center text-[9px] font-semibold ${CAMPAÑA_META[idea.tipoCampaña].color}`}
-                title={CAMPAÑA_META[idea.tipoCampaña].label}>
-                {CAMPAÑA_META[idea.tipoCampaña].emoji} {idea.tipoCampaña}
-              </span>
-            )}
-            {idea.variableDeTesteo && VARIABLE_META[idea.variableDeTesteo] && (
-              <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-semibold bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 rounded"
-                title={`Variable a testear: ${VARIABLE_META[idea.variableDeTesteo].descripcion}`}>
-                {VARIABLE_META[idea.variableDeTesteo].emoji} testea: {VARIABLE_META[idea.variableDeTesteo].label}
-              </span>
-            )}
+            {/* Warnings críticos — siempre visibles porque accionan decisión. */}
             {idea.metaRiesgo?.tieneRiesgo && (
               <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-bold bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 rounded"
                 title={`Palabras gatillo de Meta: ${(idea.metaRiesgo.palabras || []).join(', ')}${idea.metaRiesgo.sugerencia ? ' · ' + idea.metaRiesgo.sugerencia : ''}`}>
@@ -505,9 +480,7 @@ function IdeaCard({
                 ⚠ hook similar
               </span>
             )}
-            {/* Score del hook (1-10) — Haiku puntúa cada hook después de
-                generarlo. Las <6 quedan marcadas como flojas: el user las
-                puede archivar de un click. Las >=8 son las "fuertes". */}
+            {/* Score del hook (1-10) — priorización rápida. */}
             {typeof idea.scoreValue === 'number' && (
               <span className={`inline-flex items-center px-1.5 py-0.5 text-[9px] font-bold rounded ${
                 idea.lowScore
@@ -520,21 +493,28 @@ function IdeaCard({
                 {idea.lowScore ? '🟥' : idea.scoreValue >= 8 ? '🟩' : '⬜'} {idea.scoreValue}/10
               </span>
             )}
-            {/* Creencia apalancada — qué creencia del prospect instala/derriba
-                esta pieza. Útil para chequear que la bandeja cubra todas las
-                creencias sin sobre-representar una sola. */}
-            {idea.creenciaApalancada && (
-              <span className="inline-flex items-center max-w-[260px] truncate px-1.5 py-0.5 text-[9px] font-semibold bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 rounded"
-                title={`Creencia que apalanca: ${idea.creenciaApalancada}`}>
-                💭 {idea.creenciaApalancada}
-              </span>
-            )}
+            {/* Formato siempre va al final, alineado a la derecha. */}
             {idea.formato && (
               <span className="text-[10px] text-gray-400 ml-auto">
                 {idea.formato === 'video' ? '🎬' : idea.formato === 'static' ? '🖼️' : '📑'} {idea.formato}
               </span>
             )}
           </div>
+          {/* Línea secundaria sutil con origen + ángulo — texto plano,
+              no chips, para que no compita visualmente. */}
+          {(idea.origen?.competidorNombre || idea.anguloCategoria || idea.tipoCampaña) && (
+            <div className="text-[10px] text-gray-500 dark:text-gray-400 flex items-center gap-1.5 flex-wrap mb-1">
+              {idea.origen?.competidorNombre && (
+                <span>de <span className="font-semibold text-gray-700 dark:text-gray-300">{idea.origen.competidorNombre}</span></span>
+              )}
+              {idea.anguloCategoria && ANGULO_META[idea.anguloCategoria] && (
+                <span>· {ANGULO_META[idea.anguloCategoria].emoji} {idea.anguloCategoria}</span>
+              )}
+              {idea.tipoCampaña && CAMPAÑA_META[idea.tipoCampaña] && (
+                <span>· {CAMPAÑA_META[idea.tipoCampaña].emoji} {idea.tipoCampaña}</span>
+              )}
+            </div>
+          )}
 
           {idea.hook ? (
             <>

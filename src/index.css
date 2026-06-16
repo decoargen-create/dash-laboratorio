@@ -28,7 +28,128 @@ html.dark {
 }
 
 body {
-  @apply bg-gray-50 text-gray-900 dark:bg-gray-900 dark:text-gray-100;
+  @apply bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-gray-100;
+  /* En dark mode subimos a gray-950 (más profundo) para que el mesh gradient
+     decorativo abajo respire con más contraste. */
+}
+
+/* ===== Mesh gradient decorativo del shell de la app =====================
+   Fondo "respirante" con 3 orbs de color en posiciones diferentes que
+   drift-an lentamente. Usá la clase `.app-mesh-bg` en el contenedor root
+   de cada platform (marketing/etc). Posiciones absolutas + pointer-events
+   none para no interferir con clicks. */
+.app-mesh-bg {
+  position: relative;
+  isolation: isolate;
+}
+.app-mesh-bg::before {
+  content: '';
+  position: fixed;
+  inset: -20%;
+  pointer-events: none;
+  z-index: -1;
+  background:
+    radial-gradient(60% 50% at 15% 20%, rgb(var(--brand-500) / 0.18) 0%, transparent 60%),
+    radial-gradient(50% 45% at 85% 25%, rgb(99 102 241 / 0.12) 0%, transparent 60%),
+    radial-gradient(70% 60% at 50% 95%, rgb(var(--brand-300) / 0.10) 0%, transparent 65%);
+  animation: mesh-drift 30s ease-in-out infinite;
+  filter: blur(40px);
+}
+.dark .app-mesh-bg::before {
+  background:
+    radial-gradient(60% 50% at 15% 20%, rgb(var(--brand-500) / 0.14) 0%, transparent 60%),
+    radial-gradient(50% 45% at 85% 25%, rgb(139 92 246 / 0.10) 0%, transparent 60%),
+    radial-gradient(70% 60% at 50% 95%, rgb(20 184 166 / 0.08) 0%, transparent 65%);
+}
+@keyframes mesh-drift {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33%      { transform: translate(2%, -3%) scale(1.05); }
+  66%      { transform: translate(-2%, 2%) scale(0.97); }
+}
+
+/* ===== Glassmorphism — cards y headers con vidrio esmerilado ===========
+   `glass` para superficies primarias (sticky headers, modals).
+   `glass-card` para cards de contenido que necesitan ese feel premium. */
+.glass {
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(12px) saturate(180%);
+  -webkit-backdrop-filter: blur(12px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+}
+.dark .glass {
+  background: rgba(17, 24, 39, 0.62);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+.glass-card {
+  background: rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(8px) saturate(160%);
+  -webkit-backdrop-filter: blur(8px) saturate(160%);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+.dark .glass-card {
+  background: rgba(31, 41, 55, 0.55);
+  border-color: rgba(255, 255, 255, 0.06);
+}
+
+/* ===== Acento fluorescente — CTAs primarios con glow brand ============
+   Sutil pero perceptible, no kitsch. Solo en hover/focus. */
+.btn-fluo {
+  position: relative;
+  transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1),
+              box-shadow 200ms ease;
+}
+.btn-fluo:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 0 0 1px rgb(var(--brand-500) / 0.4),
+              0 8px 24px -4px rgb(var(--brand-500) / 0.45);
+}
+.dark .btn-fluo:hover {
+  box-shadow: 0 0 0 1px rgb(var(--brand-400) / 0.55),
+              0 12px 32px -6px rgb(var(--brand-400) / 0.40);
+}
+
+/* ===== Card con hover scale + glow del acento ==========================
+   Para listados de productos, ideas, winners. */
+.card-hover {
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+              box-shadow 220ms ease,
+              border-color 220ms ease;
+}
+.card-hover:hover {
+  transform: translateY(-2px);
+  border-color: rgb(var(--brand-400) / 0.6) !important;
+  box-shadow: 0 12px 28px -10px rgb(var(--brand-500) / 0.20);
+}
+.dark .card-hover:hover {
+  box-shadow: 0 12px 28px -10px rgb(var(--brand-400) / 0.25);
+}
+
+/* ===== Shimmer skeleton enhancement ===================================
+   El componente Skeleton lo aplica como className. Banda diagonal en
+   movimiento para que el loading se sienta "vivo" en vez de plano. */
+.shimmer-skeleton {
+  background: linear-gradient(
+    110deg,
+    rgba(229, 231, 235, 0.6) 0%,
+    rgba(229, 231, 235, 0.6) 40%,
+    rgba(249, 250, 251, 0.95) 50%,
+    rgba(229, 231, 235, 0.6) 60%,
+    rgba(229, 231, 235, 0.6) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.8s linear infinite;
+}
+.dark .shimmer-skeleton {
+  background: linear-gradient(
+    110deg,
+    rgba(55, 65, 81, 0.6) 0%,
+    rgba(55, 65, 81, 0.6) 40%,
+    rgba(75, 85, 99, 0.85) 50%,
+    rgba(55, 65, 81, 0.6) 60%,
+    rgba(55, 65, 81, 0.6) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.8s linear infinite;
 }
 
 /* Marquee infinito de la landing — mueve el track al -50% para loopear

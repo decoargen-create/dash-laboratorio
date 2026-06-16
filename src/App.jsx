@@ -2248,7 +2248,7 @@ function AppShell({ onExit }) {
           - scroll-pt-20 compensa los ~80px del StickyHeader sticky en
             smooth-scroll y anchor-jumps para que el anchor no quede tapado.
           - scroll-pb-32 simétrico para anchors al pie. */}
-      <main className="flex-1 overflow-auto relative pb-32 scroll-pt-20 scroll-pb-32">
+      <main className="flex-1 overflow-auto relative pb-32 scroll-pt-20 scroll-pb-32 app-mesh-bg">
         {/* Pill flotante del análisis en bg: visible desde cualquier sección
             cuando hay un análisis en curso. Click "Ver" → te lleva a Marketing. */}
         {bgAnalysis && (
@@ -2273,7 +2273,7 @@ function AppShell({ onExit }) {
           onOpenMobileMenu={() => setMobileMenuOpen(true)}
         />
 
-        <div key={currentSection} className="p-4 md:p-8 animate-fade-in-up">
+        <div key={currentSection} className="p-4 md:p-8 animate-section-enter">
           {/* Admin Views */}
           {currentUser.role === 'admin' && currentPlatform === 'viora' && currentSection === 'inicio' && <InicioSection state={state} dispatch={dispatch} onAddSale={handleAddSale} onQuickAddClient={createClient} onQuickAddProduct={createProduct} addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'viora' && currentSection === 'productos' && <ProductosSection state={state} onAddProduct={handleAddProduct} showModal={showNewProductModal} setShowModal={setShowNewProductModal} calculateMargin={calculateMargin} />}

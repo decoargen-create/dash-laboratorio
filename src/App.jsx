@@ -7,7 +7,7 @@ import {
   Menu, LogOut, Home, ShoppingCart, Package, Users, AlertCircle, CreditCard,
   UserCheck, TrendingUp, Plus, Filter, Eye, Edit2, Trash2, Calendar, DollarSign,
   Moon, Sun, ChevronDown, ChevronRight, Search, X, Command, Check, Bell,
-  AlignJustify, LayoutGrid, Columns3, Sparkles, Bot, Zap, Activity, FileText, Settings, Loader2, Calculator, Copy, Save, RotateCcw, Target, Play, Inbox, BarChart3, Instagram, SlidersHorizontal, ClipboardList, AlertTriangle, Trophy, Bookmark
+  AlignJustify, LayoutGrid, LayoutGrid as LayoutGridIcon, Columns3, Sparkles, Bot, Zap, Activity, FileText, Settings, Loader2, Calculator, Copy, Save, RotateCcw, Target, Play, Inbox, BarChart3, Instagram, SlidersHorizontal, ClipboardList, AlertTriangle, Trophy, Bookmark
 } from 'lucide-react';
 import { VioraLogo, VioraMark, AdsLabLogo, AdsLabMark } from './logo.jsx';
 import { installDebugLog, exportDebugLog } from './debugLog.js';
@@ -35,6 +35,9 @@ import ConsultoriaSection from './Consultoria.jsx';
 import { PipelineRunProvider } from './PipelineRunContext.jsx';
 import PipelineRunOverlay from './PipelineRunOverlay.jsx';
 import ExecutionsTray from './ExecutionsTray.jsx';
+import SelfHealingBanner from './SelfHealingBanner.jsx';
+import ClaudeProactivoSidebar from './ClaudeProactivoSidebar.jsx';
+import MarketingDashboard from './MarketingDashboard.jsx';
 import BulkProgressBarGlobal from './BulkProgressBarGlobal.jsx';
 import BalanceBar from './BalanceBar.jsx';
 import ActivityBell from './ActivityBell.jsx';
@@ -619,7 +622,7 @@ const PLATFORMS = [
     sidebarGradient: 'from-purple-900 via-purple-700 to-violet-800',
     badgeBg: 'bg-gradient-to-br from-purple-600 to-violet-500',
     badgeText: 'text-white',
-    defaultSection: 'mk-arranque',
+    defaultSection: 'mk-home',
   },
   {
     id: 'consultoria',
@@ -1425,10 +1428,10 @@ function AppShell({ onExit }) {
       const saved = localStorage.getItem('adslab-last-section');
       // Si tenía una sección de Viora/Senydrop/MetaAds, defaulteamos a la
       // de Marketing. Lista de secciones válidas en las plataformas activas:
-      const validSections = ['mk-arranque', 'mk-bandeja', 'mk-auto-ig',
+      const validSections = ['mk-home', 'mk-arranque', 'mk-bandeja', 'mk-auto-ig',
         'mk-inspiracion', 'mk-inspiracion-global', 'mk-winners', 'mk-boards', 'mk-gastos', 'mk-docs', 'con-acta'];
-      return validSections.includes(saved) ? saved : 'mk-arranque';
-    } catch { return 'mk-arranque'; }
+      return validSections.includes(saved) ? saved : 'mk-home';
+    } catch { return 'mk-home'; }
   });
   useEffect(() => {
     try { localStorage.setItem('adslab-last-section', currentSection); } catch {}
@@ -1668,8 +1671,39 @@ function AppShell({ onExit }) {
   // re-tematiza toda la app (paleta `brand`) y el menú lateral. También
   // guarda las variables resueltas para que el script inline las aplique
   // antes del render (sin flash).
+  //
+  // TINTE POR PRODUCTO ACTIVO: si el user tiene un producto activo en
+  // Marketing Y ese producto tiene su propio accentColor, el preset del
+  // producto pisa el accent global. Te orientás visualmente sin texto —
+  // distintos productos = distinta paleta a tu alrededor.
+  // El productAccentRef lo lee un MutationObserver más abajo (storage event).
+  const [activeProductAccent, setActiveProductAccent] = useState(null);
   useEffect(() => {
-    const preset = ACCENT_PRESETS[accentColor] || ACCENT_PRESETS.dorado;
+    const updateFromStorage = () => {
+      try {
+        const aid = localStorage.getItem('adslab-marketing-active-product');
+        if (!aid || currentPlatform !== 'marketing') {
+          setActiveProductAccent(null);
+          return;
+        }
+        const productos = JSON.parse(localStorage.getItem('adslab-marketing-productos-v1') || '[]');
+        const p = productos.find(x => String(x.id) === String(aid));
+        const slug = p?.accentColor;
+        setActiveProductAccent(slug && ACCENT_PRESETS[slug] ? slug : null);
+      } catch { setActiveProductAccent(null); }
+    };
+    updateFromStorage();
+    const onChange = () => updateFromStorage();
+    window.addEventListener('viora:marketing-storage-changed', onChange);
+    window.addEventListener('storage', onChange);
+    return () => {
+      window.removeEventListener('viora:marketing-storage-changed', onChange);
+      window.removeEventListener('storage', onChange);
+    };
+  }, [currentPlatform]);
+  useEffect(() => {
+    const effectiveAccent = activeProductAccent || accentColor;
+    const preset = ACCENT_PRESETS[effectiveAccent] || ACCENT_PRESETS.dorado;
     const de = document.documentElement;
     const vars = {};
     for (const [stop, rgb] of Object.entries(preset.ramp)) {
@@ -1681,7 +1715,7 @@ function AppShell({ onExit }) {
       localStorage.setItem('dash-accent-color', accentColor);
       localStorage.setItem('dash-accent-vars', JSON.stringify(vars));
     } catch {}
-  }, [accentColor]);
+  }, [accentColor, activeProductAccent]);
 
   // CROSS-TAB LOGOUT SYNC: si el user hace logout en tab A, tab B sigue
   // mostrando la UI logueada (con data del user!) hasta que recargue. El
@@ -2188,7 +2222,8 @@ function AppShell({ onExit }) {
                   Competencia y Creativos viven como tabs adentro de cada
                   producto en Arranque. */}
               <NavSection title="Operación" sectionKey="mk-op" sidebarOpen={sidebarOpen}>
-                <NavItem icon={Play} label="Marketing" section="mk-arranque" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                <NavItem icon={LayoutGridIcon} label="Home" section="mk-home" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                <NavItem icon={Play} label="Productos" section="mk-arranque" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                 <NavItem icon={Sparkles} label="Inspiración" section="mk-inspiracion-global" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                 <NavItem icon={Trophy} label="Winners" section="mk-winners" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                 <NavItem icon={Bookmark} label="Colecciones" section="mk-boards" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
@@ -2273,6 +2308,8 @@ function AppShell({ onExit }) {
           onOpenMobileMenu={() => setMobileMenuOpen(true)}
         />
 
+        <SelfHealingBanner />
+
         <div key={currentSection} className="p-4 md:p-8 animate-section-enter">
           {/* Admin Views */}
           {currentUser.role === 'admin' && currentPlatform === 'viora' && currentSection === 'inicio' && <InicioSection state={state} dispatch={dispatch} onAddSale={handleAddSale} onQuickAddClient={createClient} onQuickAddProduct={createProduct} addToast={addToast} />}
@@ -2288,6 +2325,7 @@ function AppShell({ onExit }) {
           {/* Gate doble de Supabase removido — ahora la auth Supabase es la
               ÚNICA puerta global (ver checkpoint arriba). Si llegamos acá,
               ya hay supabaseUser. */}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-home' && <MarketingDashboard onNavigate={(s) => setCurrentSection(s)} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-arranque' && <ArranqueSection addToast={addToast} onGoToSection={setCurrentSection} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-bandeja' && <BandejaSection addToast={addToast} />}
           {/* mk-competencia (sidebar legacy) está redirigido por el effect
@@ -2318,6 +2356,19 @@ function AppShell({ onExit }) {
           {currentUser.role === 'mentor' && currentSection === 'mis-clientes' && <MentorClientesSection currentUser={currentUser} state={state} />}
         </div>
       </main>
+
+      {/* Copiloto proactivo — botón flotante con sugerencias contextuales
+          basadas en heurísticas del state local. Solo en marketing platform. */}
+      {currentPlatform === 'marketing' && (
+        <ClaudeProactivoSidebar
+          onNavigate={(section, productoId) => {
+            if (productoId) {
+              try { localStorage.setItem('adslab-marketing-active-product', productoId); } catch {}
+            }
+            setCurrentSection(section);
+          }}
+        />
+      )}
 
       {/* Toast container */}
       <ToastContainer toasts={toasts} />
@@ -8142,6 +8193,7 @@ function getSectionTitle(user, section) {
     'meta-campanas': 'Meta Ads · Campañas',
     'meta-metricas': 'Meta Ads · Métricas',
     'meta-config': 'Meta Ads · Conexión',
+    'mk-home': 'Marketing · Home',
     'mk-arranque': 'Marketing · Arranque',
     'mk-bandeja': 'Marketing · Bandeja de ideas',
     'mk-docs': 'Marketing · Documentación de producto',

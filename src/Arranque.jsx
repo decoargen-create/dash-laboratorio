@@ -929,7 +929,9 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // que al entrar a Marketing tenga que elegir el producto, NO que lo
   // auto-meta en el último que abrió. El click en una card del listado lo
   // setea. El back button del workspace lo limpia.
-  const [activeProductoId, setActiveProductoId] = useState(null);
+  const [activeProductoId, setActiveProductoId] = useState(() => {
+    try { return localStorage.getItem('adslab-marketing-active-product') || null; } catch { return null; }
+  });
   useEffect(() => {
     try {
       if (activeProductoId) localStorage.setItem('adslab-marketing-active-product', activeProductoId);
@@ -941,6 +943,23 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       }));
     } catch {}
   }, [activeProductoId]);
+  // Re-hidratamos si OTRO componente (ej: Copiloto) cambió el producto activo.
+  // El evento custom se dispara en la MISMA tab; el 'storage' nativo solo en
+  // otras tabs. Cubrimos ambos.
+  useEffect(() => {
+    const sync = () => {
+      try {
+        const fresh = localStorage.getItem('adslab-marketing-active-product') || null;
+        setActiveProductoId(prev => prev === fresh ? prev : fresh);
+      } catch {}
+    };
+    window.addEventListener('viora:marketing-storage-changed', sync);
+    window.addEventListener('storage', sync);
+    return () => {
+      window.removeEventListener('viora:marketing-storage-changed', sync);
+      window.removeEventListener('storage', sync);
+    };
+  }, []);
 
   // Tab activo dentro del workspace del producto (Setup / Bandeja / Inspiración / Creativos).
   // Se persiste por producto para que volver al mismo producto te lleve al

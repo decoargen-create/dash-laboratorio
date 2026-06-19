@@ -20,7 +20,7 @@ import {
 } from 'recharts';
 import {
   RefreshCw, TrendingUp, TrendingDown, ShoppingCart, Package, DollarSign,
-  Percent, AlertTriangle, Search, Users, Loader2,
+  Percent, AlertTriangle, Search, Users, Loader2, Landmark, Calendar, Settings,
 } from 'lucide-react';
 
 // Pestañas conocidas del sheet. La primera es la default. Agregá más sumando
@@ -31,6 +31,18 @@ const TABS = [
 
 const REFRESH_MS = 60_000; // refetch automático cada 60s
 const SENY = '#FFD33D';    // amarillo marca Senydrop
+
+// Config de impuestos y costos fijos (no viven en la pestaña de órdenes, los
+// carga el usuario). Se persiste en localStorage. Las tasas son % sobre la
+// facturación; sueldos/gastos son importes fijos del período.
+const FIN_KEY = 'seny-dash-fin-v1';
+const FIN_DEFAULTS = { iibbPct: 3, ivaPct: 0, sueldos: 0, gastos: 0 };
+
+// Número para los inputs de config (type="number" → string con punto decimal).
+const num = (v) => {
+  const n = typeof v === 'number' ? v : parseFloat(v);
+  return Number.isFinite(n) ? n : 0;
+};
 
 // ---------------------------------------------------------------------------
 // Parsing
@@ -100,6 +112,11 @@ function mapColumns(headers) {
     else if (idx.cant == null && n.includes('cant') && n.includes('venta')) idx.cant = i;
     else if (idx.fecha == null && n === 'fecha') idx.fecha = i;
     else if (idx.margen == null && n.includes('margen')) idx.margen = i;
+    else if (idx.limpio == null && n === 'limpio') idx.limpio = i;
+    else if (idx.costoStock == null && n.includes('costo') && n.includes('stock')) idx.costoStock = i;
+    else if (idx.costoEnvio == null && n.includes('costo') && n.includes('envio')) idx.costoEnvio = i;
+    else if (idx.ganProducto == null && n.includes('ganancia') && n.includes('producto')) idx.ganProducto = i;
+    else if (idx.ganEnvio == null && n.includes('ganancia') && n.includes('envio')) idx.ganEnvio = i;
     else if (n === 'ganancia total') idx.ganancia = i; // última gana (la real)
     else if (idx.estado == null && n.includes('estado real')) idx.estado = i;
   });
@@ -134,12 +151,18 @@ function buildModel(rows) {
     if (!Number.isFinite(monto)) continue;
     const ganancia = col.ganancia != null ? parseAR(r[col.ganancia]) : NaN;
     const fecha = col.fecha != null ? parseFecha(r[col.fecha]) : null;
+    const num = (k) => (col[k] != null ? (parseAR(r[col[k]]) || 0) : 0);
     orders.push({
       cliente,
       monto,
-      cant: col.cant != null ? (parseAR(r[col.cant]) || 0) : 0,
+      cant: num('cant'),
       ganancia: Number.isFinite(ganancia) ? ganancia : 0,
       margen: col.margen != null ? parseAR(r[col.margen]) : NaN,
+      limpio: num('limpio'),
+      costoStock: num('costoStock'),
+      costoEnvio: num('costoEnvio'),
+      ganProducto: num('ganProducto'), // "Seny Full" (margen del producto)
+      ganEnvio: num('ganEnvio'),        // "Senyship" (margen del envío)
       estado: col.estado != null ? String(r[col.estado] ?? '').trim() : '',
       fechaLabel: fecha?.label || '',
       fechaSort: fecha?.sortKey || 0,
@@ -191,6 +214,59 @@ function ChartCard({ title, children, right }) {
         {right}
       </div>
       {children}
+    </div>
+  );
+}
+
+// Tarjeta de una línea de negocio con su % del total.
+function LineaCard({ label, hint, value, total, color }) {
+  const pct = total ? (value / total) * 100 : 0;
+  return (
+    <div className="rounded-xl border border-gray-100 dark:border-gray-700 bg-gray-50/60 dark:bg-gray-900/40 p-3">
+      <div className="flex items-center gap-2">
+        <span className="w-2.5 h-2.5 rounded-full" style={{ background: color }} />
+        <span className="text-xs font-semibold text-gray-700 dark:text-gray-200">{label}</span>
+      </div>
+      <div className={`mt-1 text-xl font-bold tabular-nums ${value >= 0 ? 'text-gray-900 dark:text-white' : 'text-red-600 dark:text-red-400'}`}>
+        {fmtMoney(value)}
+      </div>
+      <div className="text-[11px] text-gray-400">{hint} · {fmtPct(pct)} del total</div>
+      <div className="mt-2 h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+        <div className="h-full rounded-full" style={{ width: `${Math.max(0, Math.min(100, pct))}%`, background: color }} />
+      </div>
+    </div>
+  );
+}
+
+// Input numérico para la config financiera, con el monto calculado al lado.
+function FinInput({ label, value, onChange, prefix, suffix, calc }) {
+  return (
+    <div>
+      <label className="block text-[11px] font-semibold text-gray-500 dark:text-gray-400 mb-1">{label}</label>
+      <div className="flex items-center rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 focus-within:border-gray-400">
+        {prefix && <span className="text-gray-400 text-sm">{prefix}</span>}
+        <input
+          type="number" inputMode="decimal" min="0" step="any"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-full bg-transparent py-1.5 px-1 text-sm text-gray-800 dark:text-gray-100 outline-none tabular-nums"
+        />
+        {suffix && <span className="text-gray-400 text-sm">{suffix}</span>}
+      </div>
+      {calc != null && <div className="mt-1 text-[11px] text-gray-400 tabular-nums">= {calc}</div>}
+    </div>
+  );
+}
+
+// Fila clave/valor para el resumen de egresos.
+function RowKV({ k, v, strong, muted, tone }) {
+  const toneCls = tone === 'good' ? 'text-emerald-600 dark:text-emerald-400'
+    : tone === 'bad' ? 'text-red-600 dark:text-red-400'
+    : 'text-gray-900 dark:text-white';
+  return (
+    <div className="flex items-center justify-between">
+      <span className={`${muted ? 'text-gray-500 dark:text-gray-400' : 'text-gray-600 dark:text-gray-300'} ${strong ? 'font-semibold' : ''}`}>{k}</span>
+      <span className={`tabular-nums ${strong ? 'font-bold text-base ' + toneCls : 'text-gray-700 dark:text-gray-200'}`}>{v}</span>
     </div>
   );
 }
@@ -273,15 +349,51 @@ export default function DashboardSeny({ addToast }) {
   // ----- Agregados / KPIs -----
   const kpis = useMemo(() => {
     let ventas = 0, ganancia = 0, unidades = 0, perdidas = 0;
+    let senyFull = 0, senyship = 0, costo = 0;
+    const dias = new Set();
     for (const o of orders) {
       ventas += o.monto;
       ganancia += o.ganancia;
       unidades += o.cant;
+      senyFull += o.ganProducto;
+      senyship += o.ganEnvio;
+      costo += o.costoStock + o.costoEnvio;
+      if (o.fechaSort) dias.add(o.fechaSort);
       if (o.ganancia < 0) perdidas++;
     }
+    const ordenes = orders.length;
+    const nDias = dias.size || 1;
     const margen = ventas > 0 ? (ganancia / ventas) * 100 : NaN;
-    return { ventas, ganancia, unidades, perdidas, ordenes: orders.length, margen };
+    return {
+      ventas, ganancia, unidades, perdidas, ordenes, margen,
+      senyFull, senyship, costo,
+      nDias,
+      ventasDia: ventas / nDias,
+      profitDia: ganancia / nDias,
+      profitOrden: ordenes ? ganancia / ordenes : 0,
+      costoOrden: ordenes ? costo / ordenes : 0,
+    };
   }, [orders]);
+
+  // ----- Impuestos y costos fijos (configurable, persistido) -----
+  const [fin, setFin] = useState(() => {
+    try { return { ...FIN_DEFAULTS, ...JSON.parse(localStorage.getItem(FIN_KEY) || '{}') }; }
+    catch { return { ...FIN_DEFAULTS }; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(FIN_KEY, JSON.stringify(fin)); } catch {}
+  }, [fin]);
+  const setFinField = (k, v) => setFin((s) => ({ ...s, [k]: v }));
+
+  const neto = useMemo(() => {
+    const iibb = kpis.ventas * (num(fin.iibbPct) / 100);
+    const iva = kpis.ventas * (num(fin.ivaPct) / 100);
+    const sueldos = num(fin.sueldos);
+    const gastos = num(fin.gastos);
+    const totalEgresos = iibb + iva + sueldos + gastos;
+    const profitNeto = kpis.ganancia - totalEgresos;
+    return { iibb, iva, sueldos, gastos, totalEgresos, profitNeto };
+  }, [kpis.ventas, kpis.ganancia, fin]);
 
   // ----- Serie diaria -----
   const serie = useMemo(() => {
@@ -393,22 +505,69 @@ export default function DashboardSeny({ addToast }) {
         <GenericTable headers={model.headers} rows={model.rawRows} />
       ) : (
         <>
-          {/* KPIs */}
-          <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 mb-6">
-            <KpiCard icon={DollarSign} label="Ventas" value={fmtMoney(kpis.ventas)} sub={`${fmtInt(kpis.ordenes)} órdenes`} />
+          {/* KPIs principales */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+            <KpiCard icon={DollarSign} label="Facturación total" value={fmtMoney(kpis.ventas)} sub={`${fmtInt(kpis.ordenes)} órdenes · ${kpis.nDias} días`} />
             <KpiCard
               icon={kpis.ganancia >= 0 ? TrendingUp : TrendingDown}
-              label="Ganancia total" value={fmtMoney(kpis.ganancia)}
+              label="Profit total" value={fmtMoney(kpis.ganancia)}
               tone={kpis.ganancia >= 0 ? 'good' : 'bad'}
             />
-            <KpiCard icon={Percent} label="Margen prom." value={fmtPct(kpis.margen)} tone={kpis.margen >= 0 ? 'good' : 'bad'} />
-            <KpiCard icon={ShoppingCart} label="Órdenes" value={fmtInt(kpis.ordenes)} />
-            <KpiCard icon={Package} label="Unidades" value={fmtInt(kpis.unidades)} />
+            <KpiCard icon={Percent} label="Margen" value={fmtPct(kpis.margen)} tone={kpis.margen >= 0 ? 'good' : 'bad'} />
+            <KpiCard
+              icon={Landmark} label="Profit neto" value={fmtMoney(neto.profitNeto)}
+              sub="después de impuestos y costos"
+              tone={neto.profitNeto >= 0 ? 'good' : 'bad'}
+            />
+          </div>
+
+          {/* Operación */}
+          <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 mb-4">
+            <KpiCard icon={Calendar} label="Facturación/día" value={fmtMoney(kpis.ventasDia)} />
+            <KpiCard icon={Calendar} label="Profit/día" value={fmtMoney(kpis.profitDia)} tone={kpis.profitDia >= 0 ? 'good' : 'bad'} />
+            <KpiCard icon={ShoppingCart} label="Profit/orden" value={fmtMoney(kpis.profitOrden)} tone={kpis.profitOrden >= 0 ? 'good' : 'bad'} />
+            <KpiCard icon={Package} label="Costo prom./orden" value={fmtMoney(kpis.costoOrden)} />
+            <KpiCard icon={Package} label="Unidades" value={fmtInt(kpis.unidades)} sub={`${fmtInt(kpis.ordenes)} órdenes`} />
             <KpiCard
               icon={AlertTriangle} label="Con pérdida" value={fmtInt(kpis.perdidas)}
               sub={kpis.ordenes ? fmtPct((kpis.perdidas / kpis.ordenes) * 100) + ' del total' : ''}
               tone={kpis.perdidas > 0 ? 'bad' : 'good'}
             />
+          </div>
+
+          {/* Líneas de negocio + Impuestos y costos fijos */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+            {/* Seny Full vs Senyship */}
+            <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 shadow-sm">
+              <h3 className="text-sm font-bold text-gray-800 dark:text-gray-100 mb-3">Profit por línea de negocio</h3>
+              <div className="grid grid-cols-2 gap-3">
+                <LineaCard label="Seny Full" hint="Ganancia producto" value={kpis.senyFull} total={kpis.senyFull + kpis.senyship} color={SENY} />
+                <LineaCard label="Senyship" hint="Ganancia envío" value={kpis.senyship} total={kpis.senyFull + kpis.senyship} color="#10b981" />
+              </div>
+              <p className="mt-3 text-[11px] text-gray-400">
+                Seny Full = suma de “Ganancia Producto”. Senyship = suma de “Ganancia Envío”. Si el mapeo no es el correcto, avisame y lo ajusto.
+              </p>
+            </div>
+
+            {/* Impuestos y costos fijos (editable) */}
+            <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 shadow-sm">
+              <div className="flex items-center gap-2 mb-3">
+                <Settings className="w-4 h-4 text-gray-400" />
+                <h3 className="text-sm font-bold text-gray-800 dark:text-gray-100">Impuestos y costos fijos</h3>
+                <span className="text-[11px] text-gray-400">editable</span>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <FinInput label="IIBB %" value={fin.iibbPct} onChange={(v) => setFinField('iibbPct', v)} suffix="%" calc={fmtMoney(neto.iibb)} />
+                <FinInput label="IVA %" value={fin.ivaPct} onChange={(v) => setFinField('ivaPct', v)} suffix="%" calc={fmtMoney(neto.iva)} />
+                <FinInput label="Sueldos" value={fin.sueldos} onChange={(v) => setFinField('sueldos', v)} prefix="$" />
+                <FinInput label="Costos / gastos" value={fin.gastos} onChange={(v) => setFinField('gastos', v)} prefix="$" />
+              </div>
+              <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700 space-y-1.5 text-sm">
+                <RowKV k="Total egresos" v={fmtMoney(neto.totalEgresos)} muted />
+                <RowKV k="Profit neto" v={fmtMoney(neto.profitNeto)} strong tone={neto.profitNeto >= 0 ? 'good' : 'bad'} />
+              </div>
+              <p className="mt-2 text-[11px] text-gray-400">IIBB e IVA se calculan como % sobre la facturación del período mostrado.</p>
+            </div>
           </div>
 
           {/* Charts */}

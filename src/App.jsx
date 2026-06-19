@@ -32,6 +32,7 @@ import WinnersGlobalSection from './WinnersGlobalSection.jsx';
 import InspiracionGlobalSection from './InspiracionGlobalSection.jsx';
 import BoardsSection from './BoardsSection.jsx';
 import ConsultoriaSection from './Consultoria.jsx';
+import DashboardSeny from './DashboardSeny.jsx';
 import { PipelineRunProvider } from './PipelineRunContext.jsx';
 import PipelineRunOverlay from './PipelineRunOverlay.jsx';
 import ExecutionsTray from './ExecutionsTray.jsx';
@@ -635,6 +636,16 @@ const PLATFORMS = [
     badgeBg: 'bg-gradient-to-br from-[#2F4A3A] to-[#3E6B4F]',
     badgeText: 'text-white',
     defaultSection: 'con-acta',
+  },
+  {
+    id: 'dashboard-seny',
+    name: 'Dashboard Seny',
+    shortName: 'Dash Seny',
+    initials: 'DS',
+    sidebarGradient: 'from-gray-900 via-gray-800 to-black',
+    badgeBg: 'bg-[#FFD33D]',
+    badgeText: 'text-gray-900',
+    defaultSection: 'seny-dash',
   },
 ];
 
@@ -1431,7 +1442,7 @@ function AppShell({ onExit }) {
       // Si tenía una sección de Viora/Senydrop/MetaAds, defaulteamos a la
       // de Marketing. Lista de secciones válidas en las plataformas activas:
       const validSections = ['mk-home', 'mk-arranque', 'mk-bandeja', 'mk-auto-ig', 'mk-copy',
-        'mk-inspiracion', 'mk-inspiracion-global', 'mk-winners', 'mk-boards', 'mk-gastos', 'mk-docs', 'con-acta'];
+        'mk-inspiracion', 'mk-inspiracion-global', 'mk-winners', 'mk-boards', 'mk-gastos', 'mk-docs', 'con-acta', 'seny-dash'];
       return validSections.includes(saved) ? saved : 'mk-home';
     } catch { return 'mk-home'; }
   });
@@ -2244,6 +2255,11 @@ function AppShell({ onExit }) {
               <NavItem icon={ClipboardList} label="Acta de reunión" section="con-acta" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
             </>
           )}
+          {currentUser.role === 'admin' && currentPlatform === 'dashboard-seny' && (
+            <>
+              <NavItem icon={BarChart3} label="Dashboard" section="seny-dash" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+            </>
+          )}
           {currentUser.role !== 'admin' && (
             <>
               <NavItem icon={Home} label="Inicio" section="inicio" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
@@ -2352,6 +2368,8 @@ function AppShell({ onExit }) {
 
           {/* Consultoría */}
           {currentUser.role === 'admin' && currentPlatform === 'consultoria' && currentSection === 'con-acta' && <ConsultoriaSection addToast={addToast} />}
+
+          {currentUser.role === 'admin' && currentPlatform === 'dashboard-seny' && currentSection === 'seny-dash' && <DashboardSeny addToast={addToast} />}
 
           {/* Mentor Views */}
           {currentUser.role === 'mentor' && currentSection === 'inicio' && <EquipoInicioSection currentUser={currentUser} state={state} />}
@@ -8216,6 +8234,7 @@ function getSectionTitle(user, section) {
     'mk-winners': 'Marketing · Winners',
     'mk-gastos': 'Marketing · Gastos del stack',
     'con-acta': 'Consultoría · Acta de reunión',
+    'seny-dash': 'Dashboard Seny',
   };
   const mentor = {
     inicio: 'Inicio',

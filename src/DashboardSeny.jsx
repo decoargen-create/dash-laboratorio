@@ -161,6 +161,22 @@ function mapColumns(headers) {
   return idx;
 }
 
+// Mapea headers de una pestaña de RESUMEN diario (Pedidos / Ganancias por día).
+function mapResumen(headers) {
+  const idx = {};
+  headers.forEach((h, i) => {
+    const n = norm(h);
+    if (idx.fecha == null && n === 'fecha') idx.fecha = i;
+    else if (idx.pedidos == null && n.includes('pedidos')) idx.pedidos = i;
+    else if (idx.facturacion == null && (n.includes('facturacion') || n === 'sum de total')) idx.facturacion = i;
+    else if (idx.ganFF == null && n.includes('ganancia') && (n.includes('ff') || n.includes('fullfilment') || n.includes('producto'))) idx.ganFF = i;
+    else if (idx.ganEnvio == null && n.includes('ganancia') && n.includes('envio')) idx.ganEnvio = i;
+    else if (idx.senyships == null && n.includes('senyship')) idx.senyships = i;
+    else if (n.includes('ganancia') && n.includes('total')) idx.profit = i; // última gana = total general
+  });
+  return idx;
+}
+
 // Convierte el CSV crudo en filas de órdenes normalizadas + detecta esquema.
 function buildModel(rows) {
   if (!rows.length) return { ok: false, headers: [], orders: [], rawRows: [] };
@@ -173,6 +189,27 @@ function buildModel(rows) {
 
   const isTransactions = col.cliente != null && col.monto != null;
   if (!isTransactions) {
+    // ¿Es una pestaña de RESUMEN diario? (Fecha + Pedidos/Ganancias por día)
+    const rc = mapResumen(headers);
+    const isResumen = rc.fecha != null && (rc.pedidos != null || rc.profit != null || rc.ganFF != null);
+    if (isResumen) {
+      const dias = [];
+      for (const r of body) {
+        const fecha = parseFecha(r[rc.fecha]);
+        if (!fecha) continue; // saltar filas sin fecha (incluye "Suma total")
+        const n = (k) => (rc[k] != null ? (parseAR(r[rc[k]]) || 0) : 0);
+        const ganFF = n('ganFF'), ganEnvio = n('ganEnvio'), senyships = n('senyships');
+        const profit = rc.profit != null ? n('profit') : (ganFF + ganEnvio + senyships);
+        dias.push({
+          fechaLabel: fecha.label, fechaSort: fecha.sortKey,
+          pedidos: n('pedidos'),
+          facturacion: n('facturacion'),
+          ganFF, ganEnvio, senyships, profit,
+          hasFact: rc.facturacion != null,
+        });
+      }
+      return { ok: true, kind: 'resumen', headers, dias, has: rc, rawRows: body };
+    }
     return { ok: true, isTransactions: false, headers, orders: [], rawRows: body };
   }
 
@@ -217,6 +254,10 @@ const fmtMoneyShort = (n) => {
 };
 const fmtPct = (n) => (Number.isFinite(n) ? n.toFixed(1).replace('.', ',') + '%' : '—');
 const fmtInt = (n) => Math.round(n || 0).toLocaleString('es-AR');
+
+// % de variación cur vs prev. null si no hay base comparable.
+const pctChange = (cur, prev) => (prev == null || !Number.isFinite(prev) || prev === 0)
+  ? null : ((cur - prev) / Math.abs(prev)) * 100;
 
 // ---------------------------------------------------------------------------
 // UI atoms
@@ -404,6 +445,200 @@ function TooltipBox({ active, payload, label, unit = 'money' }) {
         </div>
       ))}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Vista RESUMEN — para pestañas de agregados diarios (Pedidos + Ganancias).
+// No tiene detalle por orden ni facturación/costos completos, así que muestra
+// otros KPIs: pedidos, profit y el split Seny Full / Envío / Senyships.
+// ---------------------------------------------------------------------------
+function ResumenView({ dias, has }) {
+  const [rangeFrom, setRangeFrom] = useState('');
+  const [rangeTo, setRangeTo] = useState('');
+  const [preset, setPreset] = useState('todo');
+
+  const dataRange = useMemo(() => {
+    let min = Infinity, max = -Infinity;
+    for (const d of dias) {
+      if (!d.fechaSort) continue;
+      if (d.fechaSort < min) min = d.fechaSort;
+      if (d.fechaSort > max) max = d.fechaSort;
+    }
+    if (min === Infinity) return null;
+    return { minISO: sortKeyToISO(min), maxISO: sortKeyToISO(max) };
+  }, [dias]);
+  useEffect(() => { if (dataRange) { setRangeFrom(dataRange.minISO); setRangeTo(dataRange.maxISO); } }, [dataRange]);
+
+  const applyPreset = (kind) => {
+    if (!dataRange) return;
+    const maxD = sortKeyToDate(isoToSortKey(dataRange.maxISO));
+    let from = dataRange.minISO, to = dataRange.maxISO;
+    if (kind === '7') from = dateToISO(addDays(maxD, -6));
+    else if (kind === '30') from = dateToISO(addDays(maxD, -29));
+    else if (kind === 'mes') from = dateToISO(new Date(maxD.getFullYear(), maxD.getMonth(), 1));
+    else if (kind === 'mesant') {
+      from = dateToISO(new Date(maxD.getFullYear(), maxD.getMonth() - 1, 1));
+      to = dateToISO(new Date(maxD.getFullYear(), maxD.getMonth(), 0));
+    }
+    if (isoToSortKey(from) < isoToSortKey(dataRange.minISO)) from = dataRange.minISO;
+    setRangeFrom(from); setRangeTo(to); setPreset(kind);
+  };
+  const onRangeEdit = (which, val) => { setPreset('custom'); which === 'from' ? setRangeFrom(val) : setRangeTo(val); };
+
+  const view = useMemo(() => {
+    const f = isoToSortKey(rangeFrom), t = isoToSortKey(rangeTo);
+    return dias.filter((d) => {
+      if (!d.fechaSort) return true;
+      if (f && d.fechaSort < f) return false;
+      if (t && d.fechaSort > t) return false;
+      return true;
+    });
+  }, [dias, rangeFrom, rangeTo]);
+
+  const k = useMemo(() => {
+    let pedidos = 0, profit = 0, ff = 0, envio = 0, seny = 0, fact = 0;
+    const days = new Set();
+    for (const d of view) {
+      pedidos += d.pedidos; profit += d.profit; ff += d.ganFF; envio += d.ganEnvio; seny += d.senyships; fact += d.facturacion;
+      if (d.fechaSort) days.add(d.fechaSort);
+    }
+    const nd = days.size || 1;
+    return { pedidos, profit, ff, envio, seny, fact, nDias: nd, pedidosDia: pedidos / nd, profitDia: profit / nd };
+  }, [view]);
+
+  const prev = useMemo(() => {
+    const from = isoToSortKey(rangeFrom), to = isoToSortKey(rangeTo);
+    if (!from || !to) return null;
+    const len = daysBetween(from, to);
+    const prevToDate = addDays(sortKeyToDate(from), -1);
+    const pf = isoToSortKey(dateToISO(addDays(prevToDate, -(len - 1)))), pt = isoToSortKey(dateToISO(prevToDate));
+    let pedidos = 0, profit = 0;
+    for (const d of dias) {
+      if (!d.fechaSort || d.fechaSort < pf || d.fechaSort > pt) continue;
+      pedidos += d.pedidos; profit += d.profit;
+    }
+    return { pedidos, profit };
+  }, [dias, rangeFrom, rangeTo]);
+
+  const donut = useMemo(() => [
+    { name: 'Seny Full', value: Math.max(0, k.ff), color: SENY },
+    { name: 'Envío', value: Math.max(0, k.envio), color: '#3b82f6' },
+    { name: 'Senyships', value: Math.max(0, k.seny), color: '#10b981' },
+  ].filter((s) => s.value > 0), [k]);
+
+  const serie = useMemo(() => [...view].sort((a, b) => a.fechaSort - b.fechaSort)
+    .map((d) => ({ fecha: d.fechaLabel, profit: d.profit, pedidos: d.pedidos, facturacion: d.facturacion })), [view]);
+
+  const serieOpts = [
+    { value: 'profit', label: 'Profit' },
+    { value: 'pedidos', label: 'Pedidos' },
+    ...(has.facturacion != null ? [{ value: 'facturacion', label: 'Facturación' }] : []),
+  ];
+  const [sv, setSv] = useState('profit');
+
+  return (
+    <>
+      {/* Filtros de período */}
+      <div className="mb-5 p-3 rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm flex flex-wrap items-center gap-3">
+        <div className="inline-flex rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-900 p-0.5">
+          {PRESETS.map((p) => (
+            <button key={p.value} onClick={() => applyPreset(p.value)}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${preset === p.value ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}`}>
+              {p.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <Calendar className="w-4 h-4 text-gray-400" />
+          <input type="date" value={rangeFrom} max={rangeTo || undefined} onChange={(e) => onRangeEdit('from', e.target.value)}
+            className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm px-2 py-1.5 text-gray-700 dark:text-gray-200" />
+          <span className="text-gray-400 text-sm">→</span>
+          <input type="date" value={rangeTo} min={rangeFrom || undefined} onChange={(e) => onRangeEdit('to', e.target.value)}
+            className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm px-2 py-1.5 text-gray-700 dark:text-gray-200" />
+        </div>
+        <div className="ml-auto text-xs text-gray-400">
+          Mostrando: <span className="font-semibold text-gray-600 dark:text-gray-300">{PRESETS.find((p) => p.value === preset)?.label || 'Personalizado'}</span>
+        </div>
+      </div>
+
+      <SectionLabel>Pulso del negocio</SectionLabel>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+        <KpiCard icon={ShoppingCart} label="Pedidos" value={fmtInt(k.pedidos)} sub={`${k.nDias} días`} delta={pctChange(k.pedidos, prev?.pedidos)} />
+        <KpiCard icon={k.profit >= 0 ? TrendingUp : TrendingDown} label="Profit total" value={fmtMoney(k.profit)} tone={k.profit >= 0 ? 'good' : 'bad'} delta={pctChange(k.profit, prev?.profit)} />
+        <KpiCard icon={Package} label="Pedidos/día" value={fmtInt(k.pedidosDia)} />
+        <KpiCard icon={Calendar} label="Profit/día" value={fmtMoney(k.profitDia)} tone={k.profitDia >= 0 ? 'good' : 'bad'} />
+      </div>
+
+      <SectionLabel>Por línea de negocio</SectionLabel>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+        <KpiCard icon={DollarSign} label="Seny Full (FF)" value={fmtMoney(k.ff)} tone={k.ff >= 0 ? 'good' : 'bad'} />
+        <KpiCard icon={DollarSign} label="Ganancia envío" value={fmtMoney(k.envio)} tone={k.envio >= 0 ? 'good' : 'bad'} />
+        <KpiCard icon={DollarSign} label="Senyships" value={fmtMoney(k.seny)} tone={k.seny >= 0 ? 'good' : 'bad'} />
+        {has.facturacion != null
+          ? <KpiCard icon={DollarSign} label="Facturación" value={fmtMoney(k.fact)} />
+          : <KpiCard icon={Percent} label="Margen s/profit" value={fmtPct(k.profit && k.pedidos ? (k.profit / k.pedidos) : NaN)} sub="profit por pedido" />}
+      </div>
+
+      <SectionLabel>Análisis visual</SectionLabel>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-5">
+        <DonutCard title="Composición del profit" data={donut} unit="money" />
+        <div className="lg:col-span-2">
+          <ChartCard title={`Evolución diaria · ${serieOpts.find((s) => s.value === sv)?.label}`} right={<Segmented value={sv} onChange={setSv} options={serieOpts} />}>
+            {serie.length ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <AreaChart data={serie} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="senyFillR" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={SENY} stopOpacity={0.5} />
+                      <stop offset="95%" stopColor={SENY} stopOpacity={0.04} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#88888822" />
+                  <XAxis dataKey="fecha" tick={{ fontSize: 11, fill: '#9ca3af' }} />
+                  <YAxis tickFormatter={sv === 'pedidos' ? fmtInt : fmtMoneyShort} tick={{ fontSize: 11, fill: '#9ca3af' }} width={48} />
+                  <Tooltip content={<TooltipBox unit={sv === 'pedidos' ? 'count' : 'money'} />} />
+                  <Area type="monotone" dataKey={sv} name={serieOpts.find((s) => s.value === sv)?.label} stroke={SENY} strokeWidth={2.5} fill="url(#senyFillR)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : <EmptyMini text="Sin fechas para graficar" />}
+          </ChartCard>
+        </div>
+      </div>
+
+      <SectionLabel>Detalle diario</SectionLabel>
+      <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm overflow-hidden">
+        <div className="overflow-x-auto max-h-[520px] overflow-y-auto">
+          <table className="w-full text-sm">
+            <thead className="sticky top-0 bg-gray-50 dark:bg-gray-900 text-gray-500 dark:text-gray-400">
+              <tr className="text-left">
+                <th className="py-2 px-3 font-semibold">Fecha</th>
+                <th className="py-2 px-3 font-semibold text-right">Pedidos</th>
+                {has.facturacion != null && <th className="py-2 px-3 font-semibold text-right">Facturación</th>}
+                <th className="py-2 px-3 font-semibold text-right">Seny Full</th>
+                <th className="py-2 px-3 font-semibold text-right">Envío</th>
+                <th className="py-2 px-3 font-semibold text-right">Senyships</th>
+                <th className="py-2 px-3 font-semibold text-right">Profit</th>
+              </tr>
+            </thead>
+            <tbody>
+              {serie.length === 0 && <tr><td colSpan={7} className="py-10 text-center text-gray-400">Sin datos en el rango.</td></tr>}
+              {[...view].sort((a, b) => b.fechaSort - a.fechaSort).map((d, i) => (
+                <tr key={i} className="border-t border-gray-100 dark:border-gray-700/60 hover:bg-gray-50 dark:hover:bg-gray-700/40">
+                  <td className="py-2 px-3 text-gray-500 dark:text-gray-400 tabular-nums whitespace-nowrap">{d.fechaLabel}</td>
+                  <td className="py-2 px-3 text-right tabular-nums text-gray-700 dark:text-gray-200">{fmtInt(d.pedidos)}</td>
+                  {has.facturacion != null && <td className="py-2 px-3 text-right tabular-nums text-gray-700 dark:text-gray-200">{fmtMoney(d.facturacion)}</td>}
+                  <td className="py-2 px-3 text-right tabular-nums text-gray-600 dark:text-gray-300">{fmtMoney(d.ganFF)}</td>
+                  <td className="py-2 px-3 text-right tabular-nums text-gray-600 dark:text-gray-300">{fmtMoney(d.ganEnvio)}</td>
+                  <td className="py-2 px-3 text-right tabular-nums text-gray-600 dark:text-gray-300">{fmtMoney(d.senyships)}</td>
+                  <td className={`py-2 px-3 text-right tabular-nums font-semibold ${d.profit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>{fmtMoney(d.profit)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -705,7 +940,8 @@ export default function DashboardSeny({ addToast }) {
     );
   }
 
-  const noTransactions = model && model.isTransactions === false;
+  const isResumen = model && model.kind === 'resumen';
+  const noTransactions = model && model.kind !== 'resumen' && model.isTransactions === false;
 
   return (
     <div className="max-w-7xl mx-auto pb-12">
@@ -744,7 +980,9 @@ export default function DashboardSeny({ addToast }) {
         </div>
       </div>
 
-      {noTransactions ? (
+      {isResumen ? (
+        <ResumenView dias={model.dias} has={model.has} />
+      ) : noTransactions ? (
         <GenericTable headers={model.headers} rows={model.rawRows} />
       ) : (
         <>

@@ -15,8 +15,8 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ResponsiveContainer, ComposedChart, BarChart, Bar, Line,
-  XAxis, YAxis, CartesianGrid, Tooltip, Cell,
+  ResponsiveContainer, BarChart, Bar, Area, AreaChart,
+  PieChart, Pie, XAxis, YAxis, CartesianGrid, Tooltip, Cell,
 } from 'recharts';
 import {
   RefreshCw, TrendingUp, TrendingDown, ShoppingCart, Package, DollarSign,
@@ -37,6 +37,22 @@ const SENY = '#FFD33D';    // amarillo marca Senydrop
 // facturación; sueldos/gastos son importes fijos del período.
 const FIN_KEY = 'seny-dash-fin-v1';
 const FIN_DEFAULTS = { iibbPct: 3, ivaPct: 0, sueldos: 0, gastos: 0 };
+
+// Variables seleccionables del gráfico de evolución diaria.
+const SERIE_OPTS = [
+  { value: 'profit', label: 'Profit' },
+  { value: 'ventas', label: 'Facturación' },
+  { value: 'ordenes', label: 'Órdenes' },
+];
+
+// Presets de período. Anclados a la última fecha con datos (ver applyPreset).
+const PRESETS = [
+  { value: 'todo', label: 'Todo' },
+  { value: '7', label: '7 días' },
+  { value: '30', label: '30 días' },
+  { value: 'mes', label: 'Este mes' },
+  { value: 'mesant', label: 'Mes anterior' },
+];
 
 // Número para los inputs de config (type="number" → string con punto decimal).
 const num = (v) => {
@@ -98,6 +114,23 @@ function parseFecha(v) {
   if (y < 100) y += 2000;
   return { label: `${d}/${mo}`, sortKey: y * 10000 + mo * 100 + d };
 }
+
+// sortKey (yyyymmdd) <-> ISO 'yyyy-mm-dd', para los date pickers del rango.
+const sortKeyToISO = (k) => {
+  const s = String(k).padStart(8, '0');
+  return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
+};
+const isoToSortKey = (iso) => {
+  const m = /(\d{4})-(\d{2})-(\d{2})/.exec(iso || '');
+  return m ? (+m[1]) * 10000 + (+m[2]) * 100 + (+m[3]) : 0;
+};
+const sortKeyToDate = (k) => {
+  const s = String(k).padStart(8, '0');
+  return new Date(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8));
+};
+const dateToISO = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+const daysBetween = (a, b) => Math.round((sortKeyToDate(b) - sortKeyToDate(a)) / 86400000) + 1;
 
 const norm = (s) => String(s || '')
   .toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
@@ -188,7 +221,7 @@ const fmtInt = (n) => Math.round(n || 0).toLocaleString('es-AR');
 // ---------------------------------------------------------------------------
 // UI atoms
 // ---------------------------------------------------------------------------
-function KpiCard({ icon: Icon, label, value, sub, tone = 'default' }) {
+function KpiCard({ icon: Icon, label, value, sub, tone = 'default', delta = null }) {
   const toneRing = {
     default: 'text-gray-900 dark:text-white',
     good: 'text-emerald-600 dark:text-emerald-400',
@@ -201,6 +234,12 @@ function KpiCard({ icon: Icon, label, value, sub, tone = 'default' }) {
         <span className="text-[11px] font-semibold uppercase tracking-wider">{label}</span>
       </div>
       <div className={`mt-2 text-2xl font-bold tabular-nums ${toneRing}`}>{value}</div>
+      {delta != null && (
+        <div className={`mt-0.5 text-xs font-semibold flex items-center gap-1 ${delta >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+          {delta >= 0 ? '▲' : '▼'} {fmtPct(Math.abs(delta))}
+          <span className="font-normal text-gray-400">vs período anterior</span>
+        </div>
+      )}
       {sub && <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{sub}</div>}
     </div>
   );
@@ -271,8 +310,89 @@ function RowKV({ k, v, strong, muted, tone }) {
   );
 }
 
-function TooltipBox({ active, payload, label }) {
+// Encabezado de sección con el tick amarillo (estilo "Resumen ejecutivo").
+function SectionLabel({ children }) {
+  return (
+    <div className="flex items-center gap-2 mb-2.5 mt-1">
+      <span className="w-1 h-4 rounded-full" style={{ background: SENY }} />
+      <h2 className="text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">{children}</h2>
+    </div>
+  );
+}
+
+// Control segmentado (pills) para elegir una opción.
+function Segmented({ value, onChange, options }) {
+  return (
+    <div className="inline-flex rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-900 p-0.5">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          onClick={() => onChange(o.value)}
+          className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${
+            value === o.value
+              ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+              : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// Tarjeta con donut + leyenda lateral. `unit` = 'money' | 'count'.
+function DonutCard({ title, data, unit = 'money' }) {
+  const total = data.reduce((a, d) => a + d.value, 0);
+  const fmtVal = unit === 'money' ? fmtMoney : fmtInt;
+  return (
+    <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 shadow-sm">
+      <h3 className="text-sm font-bold text-gray-800 dark:text-gray-100 mb-3">{title}</h3>
+      {data.length ? (
+        <div className="flex items-center gap-4">
+          <ResponsiveContainer width={140} height={140}>
+            <PieChart>
+              <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={42} outerRadius={64} paddingAngle={2} strokeWidth={0}>
+                {data.map((d, i) => <Cell key={i} fill={d.color} />)}
+              </Pie>
+              <Tooltip content={<DonutTip total={total} fmtVal={fmtVal} />} />
+            </PieChart>
+          </ResponsiveContainer>
+          <div className="flex-1 min-w-0 space-y-1.5">
+            {data.map((d, i) => (
+              <div key={i} className="flex items-center gap-2 text-xs">
+                <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: d.color }} />
+                <span className="text-gray-600 dark:text-gray-300 truncate flex-1">{d.name}</span>
+                <span className="tabular-nums font-semibold text-gray-800 dark:text-gray-100">{fmtVal(d.value)}</span>
+                <span className="tabular-nums text-gray-400 w-10 text-right">{total ? fmtPct((d.value / total) * 100) : '—'}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : <EmptyMini text="Sin datos" />}
+    </div>
+  );
+}
+
+function DonutTip({ active, payload, total, fmtVal }) {
   if (!active || !payload?.length) return null;
+  const p = payload[0];
+  return (
+    <div className="rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-2 shadow-lg text-xs">
+      <div className="flex items-center gap-2">
+        <span className="w-2 h-2 rounded-full" style={{ background: p.payload.color }} />
+        <span className="font-semibold text-gray-700 dark:text-gray-200">{p.name}</span>
+      </div>
+      <div className="tabular-nums text-gray-600 dark:text-gray-300 mt-0.5">
+        {fmtVal(p.value)} · {total ? fmtPct((p.value / total) * 100) : '—'}
+      </div>
+    </div>
+  );
+}
+
+function TooltipBox({ active, payload, label, unit = 'money' }) {
+  if (!active || !payload?.length) return null;
+  const fmt = unit === 'count' ? fmtInt : fmtMoney;
   return (
     <div className="rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-2 shadow-lg text-xs">
       <div className="font-semibold text-gray-700 dark:text-gray-200 mb-1">{label}</div>
@@ -280,7 +400,7 @@ function TooltipBox({ active, payload, label }) {
         <div key={i} className="flex items-center gap-2 tabular-nums">
           <span className="w-2 h-2 rounded-full" style={{ background: p.color || p.fill }} />
           <span className="text-gray-500 dark:text-gray-400">{p.name}:</span>
-          <span className="font-semibold text-gray-800 dark:text-gray-100">{fmtMoney(p.value)}</span>
+          <span className="font-semibold text-gray-800 dark:text-gray-100">{fmt(p.value)}</span>
         </div>
       ))}
     </div>
@@ -346,22 +466,111 @@ export default function DashboardSeny({ addToast }) {
 
   const orders = model?.orders || [];
 
+  // ----- Filtros: línea de negocio + rango de fechas -----
+  const [linea, setLinea] = useState('ambos'); // ambos | full | ship
+  const [rangeFrom, setRangeFrom] = useState('');
+  const [rangeTo, setRangeTo] = useState('');
+
+  // Rango real de los datos (min/max fecha). Sirve de default de los pickers.
+  const dataRange = useMemo(() => {
+    let min = Infinity, max = -Infinity;
+    for (const o of orders) {
+      if (!o.fechaSort) continue;
+      if (o.fechaSort < min) min = o.fechaSort;
+      if (o.fechaSort > max) max = o.fechaSort;
+    }
+    if (min === Infinity) return null;
+    return { minISO: sortKeyToISO(min), maxISO: sortKeyToISO(max) };
+  }, [orders]);
+
+  // Al cambiar de pestaña / cargar datos, resetea el rango al total de los datos.
+  useEffect(() => {
+    if (dataRange) { setRangeFrom(dataRange.minISO); setRangeTo(dataRange.maxISO); }
+  }, [dataRange]);
+
+  // Ganancia efectiva por orden según la línea elegida.
+  const gOf = useCallback((o) => (
+    linea === 'full' ? o.ganProducto : linea === 'ship' ? o.ganEnvio : o.ganancia
+  ), [linea]);
+
+  // Vista = órdenes dentro del rango (la línea se aplica vía gOf en cada cálculo).
+  const view = useMemo(() => {
+    const from = isoToSortKey(rangeFrom);
+    const to = isoToSortKey(rangeTo);
+    return orders.filter((o) => {
+      if (!o.fechaSort) return true; // sin fecha: no la filtramos por rango
+      if (from && o.fechaSort < from) return false;
+      if (to && o.fechaSort > to) return false;
+      return true;
+    });
+  }, [orders, rangeFrom, rangeTo]);
+
+  const resetRange = () => {
+    if (dataRange) { setRangeFrom(dataRange.minISO); setRangeTo(dataRange.maxISO); setPreset('todo'); }
+  };
+
+  // Presets de período, anclados a la última fecha con datos (no al calendario
+  // real, para que sirvan sea cual sea el mes que tenga la pestaña).
+  const [preset, setPreset] = useState('todo');
+  const applyPreset = (kind) => {
+    if (!dataRange) return;
+    const maxD = sortKeyToDate(isoToSortKey(dataRange.maxISO));
+    let from = dataRange.minISO, to = dataRange.maxISO;
+    if (kind === '7') from = dateToISO(addDays(maxD, -6));
+    else if (kind === '30') from = dateToISO(addDays(maxD, -29));
+    else if (kind === 'mes') from = dateToISO(new Date(maxD.getFullYear(), maxD.getMonth(), 1));
+    else if (kind === 'mesant') {
+      from = dateToISO(new Date(maxD.getFullYear(), maxD.getMonth() - 1, 1));
+      to = dateToISO(new Date(maxD.getFullYear(), maxD.getMonth(), 0));
+    }
+    if (isoToSortKey(from) < isoToSortKey(dataRange.minISO)) from = dataRange.minISO;
+    setRangeFrom(from); setRangeTo(to); setPreset(kind);
+  };
+  const onRangeEdit = (which, val) => {
+    setPreset('custom');
+    if (which === 'from') setRangeFrom(val); else setRangeTo(val);
+  };
+
+  // Agregado del período inmediatamente anterior (misma cantidad de días) para
+  // los deltas "vs período anterior".
+  const prevAgg = useMemo(() => {
+    const from = isoToSortKey(rangeFrom), to = isoToSortKey(rangeTo);
+    if (!from || !to) return null;
+    const len = daysBetween(from, to);
+    const prevToDate = addDays(sortKeyToDate(from), -1);
+    const pf = isoToSortKey(dateToISO(addDays(prevToDate, -(len - 1))));
+    const pt = isoToSortKey(dateToISO(prevToDate));
+    let ventas = 0, profit = 0, ordenes = 0;
+    for (const o of orders) {
+      if (!o.fechaSort || o.fechaSort < pf || o.fechaSort > pt) continue;
+      ventas += o.monto; profit += gOf(o); ordenes++;
+    }
+    return { ventas, profit, ordenes };
+  }, [orders, rangeFrom, rangeTo, gOf]);
+
+  // % de variación vs período anterior. null si no hay base comparable.
+  const delta = (cur, prev) => {
+    if (prev == null || !Number.isFinite(prev) || prev === 0) return null;
+    return ((cur - prev) / Math.abs(prev)) * 100;
+  };
+
   // ----- Agregados / KPIs -----
   const kpis = useMemo(() => {
     let ventas = 0, ganancia = 0, unidades = 0, perdidas = 0;
     let senyFull = 0, senyship = 0, costo = 0;
     const dias = new Set();
-    for (const o of orders) {
+    for (const o of view) {
+      const g = gOf(o);
       ventas += o.monto;
-      ganancia += o.ganancia;
+      ganancia += g;
       unidades += o.cant;
       senyFull += o.ganProducto;
       senyship += o.ganEnvio;
       costo += o.costoStock + o.costoEnvio;
       if (o.fechaSort) dias.add(o.fechaSort);
-      if (o.ganancia < 0) perdidas++;
+      if (g < 0) perdidas++;
     }
-    const ordenes = orders.length;
+    const ordenes = view.length;
     const nDias = dias.size || 1;
     const margen = ventas > 0 ? (ganancia / ventas) * 100 : NaN;
     return {
@@ -373,7 +582,7 @@ export default function DashboardSeny({ addToast }) {
       profitOrden: ordenes ? ganancia / ordenes : 0,
       costoOrden: ordenes ? costo / ordenes : 0,
     };
-  }, [orders]);
+  }, [view, gOf]);
 
   // ----- Impuestos y costos fijos (configurable, persistido) -----
   const [fin, setFin] = useState(() => {
@@ -398,43 +607,77 @@ export default function DashboardSeny({ addToast }) {
   // ----- Serie diaria -----
   const serie = useMemo(() => {
     const byDay = new Map();
-    for (const o of orders) {
+    for (const o of view) {
       if (!o.fechaSort) continue;
       const k = o.fechaSort;
-      const cur = byDay.get(k) || { sort: k, fecha: o.fechaLabel, ventas: 0, ganancia: 0 };
+      const cur = byDay.get(k) || { sort: k, fecha: o.fechaLabel, ventas: 0, profit: 0, ordenes: 0 };
       cur.ventas += o.monto;
-      cur.ganancia += o.ganancia;
+      cur.profit += gOf(o);
+      cur.ordenes += 1;
       byDay.set(k, cur);
     }
     return [...byDay.values()].sort((a, b) => a.sort - b.sort);
-  }, [orders]);
+  }, [view, gOf]);
 
-  // ----- Top clientes por ganancia -----
+  // ----- Top clientes por profit -----
   const topClientes = useMemo(() => {
     const by = new Map();
-    for (const o of orders) {
+    for (const o of view) {
       const cur = by.get(o.cliente) || { cliente: o.cliente, ganancia: 0, ventas: 0, ordenes: 0 };
-      cur.ganancia += o.ganancia;
+      cur.ganancia += gOf(o);
       cur.ventas += o.monto;
       cur.ordenes++;
       by.set(o.cliente, cur);
     }
     return [...by.values()].sort((a, b) => b.ganancia - a.ganancia).slice(0, 8);
-  }, [orders]);
+  }, [view, gOf]);
 
   const estados = useMemo(() => {
     const set = new Set();
-    orders.forEach((o) => o.estado && set.add(o.estado));
+    view.forEach((o) => o.estado && set.add(o.estado));
     return [...set];
-  }, [orders]);
+  }, [view]);
+
+  // ----- Donut: estructura de la facturación (a dónde va cada peso) -----
+  const estructura = useMemo(() => {
+    const fees = Math.max(0, kpis.ventas - kpis.costo - kpis.ganancia);
+    return [
+      { name: 'Profit', value: Math.max(0, kpis.ganancia), color: '#10b981' },
+      { name: 'Costo producto', value: view.reduce((a, o) => a + Math.max(0, o.costoStock), 0), color: '#f59e0b' },
+      { name: 'Costo envío', value: view.reduce((a, o) => a + Math.max(0, o.costoEnvio), 0), color: '#3b82f6' },
+      { name: 'Comisiones', value: fees, color: '#a855f7' },
+    ].filter((s) => s.value > 0);
+  }, [view, kpis]);
+
+  // ----- Donut: profit por línea de negocio -----
+  const lineas = useMemo(() => [
+    { name: 'Seny Full', value: Math.max(0, kpis.senyFull), color: SENY },
+    { name: 'Senyship', value: Math.max(0, kpis.senyship), color: '#10b981' },
+  ].filter((s) => s.value > 0), [kpis]);
+
+  // ----- Donut: órdenes por estado -----
+  const porEstado = useMemo(() => {
+    const by = new Map();
+    for (const o of view) {
+      const k = o.estado || 'Sin estado';
+      by.set(k, (by.get(k) || 0) + 1);
+    }
+    const palette = ['#10b981', '#f59e0b', '#3b82f6', '#a855f7', '#ef4444', '#14b8a6', '#ec4899', '#64748b'];
+    return [...by.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, value], i) => ({ name, value, color: palette[i % palette.length] }));
+  }, [view]);
+
+  // ----- Variable activa de la serie diaria -----
+  const [serieVar, setSerieVar] = useState('profit'); // ventas | profit | ordenes
 
   // ----- Tabla filtrada -----
   const tablaRows = useMemo(() => {
     const q = norm(query);
-    return orders
+    return view
       .filter((o) => (!q || norm(o.cliente).includes(q)) && (!estadoFilter || o.estado === estadoFilter))
       .sort((a, b) => b.fechaSort - a.fechaSort);
-  }, [orders, query, estadoFilter]);
+  }, [view, query, estadoFilter]);
 
   // ---------------------------------------------------------------------------
   if (status === 'loading' && !model) {
@@ -505,13 +748,69 @@ export default function DashboardSeny({ addToast }) {
         <GenericTable headers={model.headers} rows={model.rawRows} />
       ) : (
         <>
+          {/* Barra de filtros: presets + rango custom + línea de negocio */}
+          <div className="mb-5 p-3 rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm space-y-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="inline-flex rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-900 p-0.5">
+                {PRESETS.map((p) => (
+                  <button
+                    key={p.value}
+                    onClick={() => applyPreset(p.value)}
+                    className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${
+                      preset === p.value
+                        ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                        : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-gray-400" />
+                <input
+                  type="date" value={rangeFrom} max={rangeTo || undefined}
+                  onChange={(e) => onRangeEdit('from', e.target.value)}
+                  className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm px-2 py-1.5 text-gray-700 dark:text-gray-200"
+                />
+                <span className="text-gray-400 text-sm">→</span>
+                <input
+                  type="date" value={rangeTo} min={rangeFrom || undefined}
+                  onChange={(e) => onRangeEdit('to', e.target.value)}
+                  className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm px-2 py-1.5 text-gray-700 dark:text-gray-200"
+                />
+              </div>
+              <div className="ml-auto text-xs text-gray-400">
+                Mostrando: <span className="font-semibold text-gray-600 dark:text-gray-300">{PRESETS.find((p) => p.value === preset)?.label || 'Personalizado'}</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Línea</span>
+              <Segmented
+                value={linea}
+                onChange={setLinea}
+                options={[
+                  { value: 'ambos', label: 'Ambos' },
+                  { value: 'full', label: 'Seny Full' },
+                  { value: 'ship', label: 'Senyship' },
+                ]}
+              />
+            </div>
+          </div>
+
           {/* KPIs principales */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-            <KpiCard icon={DollarSign} label="Facturación total" value={fmtMoney(kpis.ventas)} sub={`${fmtInt(kpis.ordenes)} órdenes · ${kpis.nDias} días`} />
+          <SectionLabel>Pulso del negocio</SectionLabel>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+            <KpiCard
+              icon={DollarSign} label="Facturación total" value={fmtMoney(kpis.ventas)}
+              sub={`${fmtInt(kpis.ordenes)} órdenes · ${kpis.nDias} días`}
+              delta={delta(kpis.ventas, prevAgg?.ventas)}
+            />
             <KpiCard
               icon={kpis.ganancia >= 0 ? TrendingUp : TrendingDown}
               label="Profit total" value={fmtMoney(kpis.ganancia)}
               tone={kpis.ganancia >= 0 ? 'good' : 'bad'}
+              delta={delta(kpis.ganancia, prevAgg?.profit)}
             />
             <KpiCard icon={Percent} label="Margen" value={fmtPct(kpis.margen)} tone={kpis.margen >= 0 ? 'good' : 'bad'} />
             <KpiCard
@@ -522,7 +821,8 @@ export default function DashboardSeny({ addToast }) {
           </div>
 
           {/* Operación */}
-          <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 mb-4">
+          <SectionLabel>Operación</SectionLabel>
+          <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 mb-5">
             <KpiCard icon={Calendar} label="Facturación/día" value={fmtMoney(kpis.ventasDia)} />
             <KpiCard icon={Calendar} label="Profit/día" value={fmtMoney(kpis.profitDia)} tone={kpis.profitDia >= 0 ? 'good' : 'bad'} />
             <KpiCard icon={ShoppingCart} label="Profit/orden" value={fmtMoney(kpis.profitOrden)} tone={kpis.profitOrden >= 0 ? 'good' : 'bad'} />
@@ -536,6 +836,7 @@ export default function DashboardSeny({ addToast }) {
           </div>
 
           {/* Líneas de negocio + Impuestos y costos fijos */}
+          <SectionLabel>Rentabilidad y costos</SectionLabel>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
             {/* Seny Full vs Senyship */}
             <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 shadow-sm">
@@ -570,20 +871,43 @@ export default function DashboardSeny({ addToast }) {
             </div>
           </div>
 
+          {/* Donas: composición y variables */}
+          <SectionLabel>Análisis visual</SectionLabel>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <DonutCard title="Estructura de la facturación" data={estructura} unit="money" />
+            <DonutCard title="Profit por línea" data={lineas} unit="money" />
+            <DonutCard title="Órdenes por estado" data={porEstado} unit="count" />
+          </div>
+
           {/* Charts */}
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-6">
             <div className="xl:col-span-2">
-              <ChartCard title="Ventas y ganancia por día">
+              <ChartCard
+                title={`Evolución diaria · ${SERIE_OPTS.find((s) => s.value === serieVar)?.label}`}
+                right={<Segmented value={serieVar} onChange={setSerieVar} options={SERIE_OPTS} />}
+              >
                 {serie.length ? (
                   <ResponsiveContainer width="100%" height={300}>
-                    <ComposedChart data={serie} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
+                    <AreaChart data={serie} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="senyFill" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={SENY} stopOpacity={0.5} />
+                          <stop offset="95%" stopColor={SENY} stopOpacity={0.04} />
+                        </linearGradient>
+                      </defs>
                       <CartesianGrid strokeDasharray="3 3" stroke="#88888822" />
                       <XAxis dataKey="fecha" tick={{ fontSize: 11, fill: '#9ca3af' }} />
-                      <YAxis tickFormatter={fmtMoneyShort} tick={{ fontSize: 11, fill: '#9ca3af' }} width={48} />
-                      <Tooltip content={<TooltipBox />} />
-                      <Bar dataKey="ventas" name="Ventas" fill={SENY} radius={[4, 4, 0, 0]} maxBarSize={28} />
-                      <Line dataKey="ganancia" name="Ganancia" stroke="#10b981" strokeWidth={2.5} dot={false} />
-                    </ComposedChart>
+                      <YAxis
+                        tickFormatter={serieVar === 'ordenes' ? fmtInt : fmtMoneyShort}
+                        tick={{ fontSize: 11, fill: '#9ca3af' }} width={48}
+                      />
+                      <Tooltip content={<TooltipBox unit={serieVar === 'ordenes' ? 'count' : 'money'} />} />
+                      <Area
+                        type="monotone" dataKey={serieVar}
+                        name={SERIE_OPTS.find((s) => s.value === serieVar)?.label}
+                        stroke={SENY} strokeWidth={2.5} fill="url(#senyFill)"
+                      />
+                    </AreaChart>
                   </ResponsiveContainer>
                 ) : <EmptyMini text="Sin fechas para graficar" />}
               </ChartCard>
@@ -609,6 +933,7 @@ export default function DashboardSeny({ addToast }) {
           </div>
 
           {/* Tabla de órdenes */}
+          <SectionLabel>Detalle de órdenes</SectionLabel>
           <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm overflow-hidden">
             <div className="flex flex-wrap items-center gap-3 p-4 border-b border-gray-100 dark:border-gray-700">
               <div className="flex items-center gap-2 text-gray-800 dark:text-gray-100 font-bold text-sm mr-auto">

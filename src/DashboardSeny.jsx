@@ -23,11 +23,11 @@ import {
   Percent, AlertTriangle, Search, Users, Loader2, Landmark, Calendar, Settings,
 } from 'lucide-react';
 
-// Pestañas conocidas del sheet. La primera es la default. Agregá más sumando
-// { gid, label } — el gid sale de la URL del sheet (#gid=<numero>).
-const TABS = [
-  { gid: '718012315', label: 'Órdenes (Marzo)' },
-];
+// Pestaña por defecto (Resumen maestro) si todavía no se descubrieron las del
+// sheet vía /api/seny-sheet?list=1.
+const DEFAULT_GID = '718012315';
+const FALLBACK_TABS = [{ gid: DEFAULT_GID, name: 'Resumen' }];
+const TAB_KEY = 'seny-dash-tab-v1';
 
 const REFRESH_MS = 60_000; // refetch automático cada 60s
 const SENY = '#FFD33D';    // amarillo marca Senydrop
@@ -646,7 +646,10 @@ function ResumenView({ dias, has }) {
 // Componente principal
 // ---------------------------------------------------------------------------
 export default function DashboardSeny({ addToast }) {
-  const [tabGid, setTabGid] = useState(TABS[0].gid);
+  const [tabs, setTabs] = useState(FALLBACK_TABS);
+  const [tabGid, setTabGid] = useState(() => {
+    try { return localStorage.getItem(TAB_KEY) || DEFAULT_GID; } catch { return DEFAULT_GID; }
+  });
   const [model, setModel] = useState(null);
   const [status, setStatus] = useState('loading'); // loading | ok | error
   const [error, setError] = useState('');
@@ -687,6 +690,19 @@ export default function DashboardSeny({ addToast }) {
       if (id === reqId.current) setRefreshing(false);
     }
   }, [addToast]);
+
+  // Descubre todas las pestañas del sheet (una vez, al montar).
+  useEffect(() => {
+    let cancel = false;
+    fetch('/api/seny-sheet?list=1', { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((d) => { if (!cancel && Array.isArray(d.tabs) && d.tabs.length) setTabs(d.tabs); })
+      .catch(() => {});
+    return () => { cancel = true; };
+  }, []);
+
+  // Persistí la pestaña elegida.
+  useEffect(() => { try { localStorage.setItem(TAB_KEY, tabGid); } catch {} }, [tabGid]);
 
   // Carga inicial + cuando cambia de pestaña.
   useEffect(() => { load(tabGid); }, [tabGid, load]);
@@ -960,13 +976,14 @@ export default function DashboardSeny({ addToast }) {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {TABS.length > 1 && (
+          {tabs.length > 1 && (
             <select
               value={tabGid}
               onChange={(e) => setTabGid(e.target.value)}
-              className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm px-3 py-2 text-gray-700 dark:text-gray-200"
+              className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm px-3 py-2 text-gray-700 dark:text-gray-200 max-w-[200px]"
+              title="Elegí la pestaña del sheet"
             >
-              {TABS.map((t) => <option key={t.gid} value={t.gid}>{t.label}</option>)}
+              {tabs.map((t) => <option key={t.gid} value={t.gid}>{t.name}</option>)}
             </select>
           )}
           <button

@@ -1731,14 +1731,32 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   };
 
   // Cambia el link de la landing del producto activo. updated_at fuerza el
-  // sync a la nube. No regenera research solo — el user puede regenerarlo
-  // aparte si la nueva landing es de otro producto.
+  // sync a la nube. Si ya hay research cargado y el link cambió, avisamos:
+  // puede que la landing nueva sea de OTRO producto y el research/avatar haya
+  // quedado desactualizado → ofrecemos regenerarlo (mismo patrón que rename).
   const handleEditLandingUrl = (landingUrl) => {
+    const tieneResearch = !!(producto?.docs?.research);
+    const cambioReal = landingUrl !== (producto?.landingUrl || '');
+    let regen = false;
+    if (tieneResearch && cambioReal) {
+      regen = window.confirm(
+        `Cambiaste el link de la landing.\n\nSi es de OTRO producto, el research + avatar actuales quedaron desactualizados (fueron generados desde la landing anterior).\n\n¿Regenerarlos desde la landing nueva? Borra research + avatar + offer brief + creencias + stage y los vuelve a generar (~3-4 min).\n\nSi es la MISMA landing (otra variante/URL), cancelá: el link se guarda igual y no se toca nada.`
+      );
+    }
     setProductos(prev => prev.map(p =>
       String(p.id) === String(producto.id)
-        ? { ...p, landingUrl, updated_at: new Date().toISOString() }
+        ? {
+            ...p,
+            landingUrl,
+            updated_at: new Date().toISOString(),
+            ...(regen ? {
+              docs: {}, resumenEjecutivo: '', docsGeneratedAt: null,
+              stage: null, stageReason: '', searchKeywords: [],
+            } : {}),
+          }
         : p
     ));
+    if (regen) setPendingRegen(String(producto.id));
   };
 
   // Dispara la regeneración una vez que el producto activo quedó con docs

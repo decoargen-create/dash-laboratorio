@@ -113,6 +113,15 @@ async function callOpenAIImage({ apiKey, rawPrompt, size, quality, startAggressi
     let data;
     try { data = JSON.parse(raw); }
     catch {
+      // OpenAI a veces devuelve HTML de error (Cloudflare 520/502/503/504) en
+      // vez de JSON cuando su upstream está caído. Es transitorio: reintentamos
+      // una vez con una espera corta antes de fallar.
+      const transient = resp.status >= 500 || resp.status === 429 || resp.status === 408;
+      if (transient && attempt < 1) {
+        console.warn(`Non-JSON ${resp.status} (probable Cloudflare). Retry tras 4s.`);
+        await new Promise(r => setTimeout(r, 4000));
+        continue;
+      }
       throw new Error(`OpenAI devolvió respuesta no-JSON (HTTP ${resp.status}). Reintentá en unos segundos.`);
     }
     if (resp.ok) {

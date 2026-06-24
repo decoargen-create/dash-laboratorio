@@ -1295,7 +1295,24 @@ async function callGptImage2Edit(params) {
     const raw = await resp.text();
     let data;
     try { data = JSON.parse(raw); } catch {
-      throw new Error(`OpenAI no devolvió JSON (HTTP ${resp.status}): ${raw.slice(0, 200)}`);
+      // OpenAI a veces devuelve una página HTML de error (Cloudflare 520/502/
+      // 503/504) en vez de JSON cuando su upstream está caído. Es TRANSITORIO:
+      // antes esto lanzaba duro acá y el retry de 5xx de abajo nunca corría
+      // (porque depende de que el body parsee como JSON). Lo tratamos como
+      // 5xx y reintentamos con backoff, igual que un rate limit.
+      const transient = resp.status >= 500 || resp.status === 429 || resp.status === 408;
+      lastErr = new Error(`OpenAI no devolvió JSON (HTTP ${resp.status})${transient ? ' — upstream caído (Cloudflare/5xx)' : `: ${raw.slice(0, 150)}`}.`);
+      lastErr.status = resp.status;
+      if (transient && attempt < RETRY_DELAYS.length) {
+        const delay = RETRY_DELAYS[attempt];
+        const elapsedNow = Date.now() - budgetStartedAt;
+        if (elapsedNow + delay + 130000 <= HANDLER_TIMEOUT_MS) {
+          console.warn(`Non-JSON ${resp.status} (probable Cloudflare). Retry ${attempt + 1}/${RETRY_DELAYS.length} en ${delay}ms`);
+          await new Promise(r => setTimeout(r, delay));
+          continue;
+        }
+      }
+      throw lastErr;
     }
     if (resp.ok) {
       const imagenes = (data?.data || []).map(d => d.b64_json).filter(Boolean);

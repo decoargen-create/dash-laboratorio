@@ -749,6 +749,69 @@ function ProductoNombreEditable({ producto, onRename }) {
   );
 }
 
+// Link de la landing editable inline — mismo patrón que ProductoNombreEditable.
+// El user puede cambiar la URL cuando el producto pasa a otra landing/variante.
+// Normaliza: trim + prepende https:// si falta el esquema.
+function ProductoLandingEditable({ producto, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(producto.landingUrl || '');
+
+  const guardar = () => {
+    let url = val.trim();
+    if (url && !/^https?:\/\//i.test(url)) url = 'https://' + url;
+    if (url === (producto.landingUrl || '')) { setEditing(false); setVal(producto.landingUrl || ''); return; }
+    onSave(url);
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <div className="flex items-center gap-1.5">
+        <input
+          autoFocus
+          type="url"
+          value={val}
+          onChange={e => setVal(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') guardar(); if (e.key === 'Escape') { setEditing(false); setVal(producto.landingUrl || ''); } }}
+          onBlur={guardar}
+          placeholder="https://tutienda.com/products/..."
+          className="px-2 py-0.5 text-xs bg-white dark:bg-gray-700 border border-brand-400 dark:border-brand-600 rounded focus:outline-none focus:ring-2 focus:ring-brand-500 min-w-0 flex-1 max-w-[420px]"
+        />
+        <button onMouseDown={e => e.preventDefault()} onClick={guardar}
+          title="Guardar" className="text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 shrink-0">
+          <Check size={13} />
+        </button>
+      </div>
+    );
+  }
+
+  if (!producto.landingUrl) {
+    return (
+      <button
+        onClick={() => { setVal(''); setEditing(true); }}
+        className="inline-flex items-center gap-1 text-gray-400 hover:text-brand-600 dark:hover:text-brand-400"
+      >
+        <Link2 size={11} /> Agregar link de la landing
+      </button>
+    );
+  }
+
+  return (
+    <p className="flex items-center gap-1.5 group/url">
+      <a href={producto.landingUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-brand-600 hover:underline min-w-0">
+        <Link2 size={11} className="shrink-0" /> <span className="truncate max-w-[420px]">{producto.landingUrl}</span>
+      </a>
+      <button
+        onClick={() => { setVal(producto.landingUrl || ''); setEditing(true); }}
+        title="Cambiar link de la landing"
+        className="opacity-0 group-hover/url:opacity-100 transition text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 shrink-0"
+      >
+        <Pencil size={11} />
+      </button>
+    </p>
+  );
+}
+
 function WizardCard({ num, title, done, disabled = false, badge, children }) {
   return (
     <div className={`bg-white dark:bg-gray-800 border rounded-xl p-5 shadow-sm transition ${
@@ -1665,6 +1728,17 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         : p
     ));
     if (regen) setPendingRegen(String(producto.id));
+  };
+
+  // Cambia el link de la landing del producto activo. updated_at fuerza el
+  // sync a la nube. No regenera research solo — el user puede regenerarlo
+  // aparte si la nueva landing es de otro producto.
+  const handleEditLandingUrl = (landingUrl) => {
+    setProductos(prev => prev.map(p =>
+      String(p.id) === String(producto.id)
+        ? { ...p, landingUrl, updated_at: new Date().toISOString() }
+        : p
+    ));
   };
 
   // Dispara la regeneración una vez que el producto activo quedó con docs
@@ -3226,11 +3300,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         {prodReady ? (
           <div className="text-xs text-gray-700 dark:text-gray-300 space-y-1">
             <ProductoNombreEditable producto={producto} onRename={handleRenameProducto} />
-            {producto.landingUrl && (
-              <a href={producto.landingUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-brand-600 hover:underline">
-                <Link2 size={11} /> {producto.landingUrl}
-              </a>
-            )}
+            <ProductoLandingEditable producto={producto} onSave={handleEditLandingUrl} />
             {producto.descripcion && <p className="text-gray-600 dark:text-gray-400">{producto.descripcion}</p>}
             {/* Stage — solo visible si ya se infirió en el pipeline.
                 Editable por si el user quiere override el juicio de la IA. */}

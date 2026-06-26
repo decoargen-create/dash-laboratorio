@@ -27,6 +27,7 @@ import { iterateFromWinner, generateFromWinner } from './winnerIterate.js';
 import { BarChart3 } from 'lucide-react';
 import { SkeletonGrid } from './Skeleton.jsx';
 import EmptyState from './EmptyState.jsx';
+import { getCachedCreativoUrl } from './creativoImgCache.js';
 
 function fmtDate(iso) {
   if (!iso) return '';
@@ -44,7 +45,11 @@ function base64ToBlob(b64, mimeType = 'image/png') {
 
 // Hook: convierte los items en URLs renderizables.
 // - Items IDB legacy (con imageBase64) → blob URL (revoca al unmount).
-// - Items cloud (con imageUrl del bucket) → la URL directa.
+// - Items cloud (con imageUrl del bucket) → se sirven desde el cache local
+//   (IndexedDB por storagePath) para NO re-descargar el PNG full cada vez que
+//   la signed URL se re-firma → corta el egress repetido de Supabase. Mientras
+//   el cache resuelve (o si falla) se usa la signed URL directa como fallback,
+//   así el grid pinta al toque y nunca queda en blanco.
 // Usar blob URLs en vez de `data:image/png;base64,...` evita que Chrome
 // decodifique cada PNG en RAM como pixel buffer separado. Con 50+ imágenes
 // 2048x2048 quality=high (5-15MB cada una), las data URIs hacen crashear
@@ -52,24 +57,62 @@ function base64ToBlob(b64, mimeType = 'image/png') {
 // dejan los bytes en un solo Blob compartido y el browser los decodifica
 // on-demand cuando el <img> es visible.
 function useBlobUrls(items) {
-  return useMemo(() => {
-    const map = new Map();
+  const [map, setMap] = useState(() => new Map());
+
+  useEffect(() => {
+    let cancelled = false;
+    const createdUrls = [];   // objectURLs creados acá → revocar al cleanup
+    const next = new Map();
+
+    // 1. Pintado SÍNCRONO: base64 legacy → blob URL; cloud → signed URL directa
+    //    (fallback inmediato). Se renderiza ya, sin esperar al cache.
     for (const it of items) {
       if (it?.imageBase64) {
         try {
           const blob = base64ToBlob(it.imageBase64, it.mimeType || 'image/png');
-          map.set(it.id, URL.createObjectURL(blob));
+          const u = URL.createObjectURL(blob);
+          createdUrls.push(u);
+          next.set(it.id, u);
         } catch {
-          // base64 corrupto — caer al imageUrl del cloud si existe.
-          if (it.imageUrl) map.set(it.id, it.imageUrl);
+          if (it.imageUrl) next.set(it.id, it.imageUrl);
         }
       } else if (it?.imageUrl) {
-        // Item cloud — usar la URL pública del bucket directo.
-        map.set(it.id, it.imageUrl);
+        next.set(it.id, it.imageUrl);
       }
     }
-    return map;
+    setMap(new Map(next));
+
+    // 2. Resolución ASÍNCRONA del cache para items cloud: si la imagen ya está
+    //    en IndexedDB la servimos local (0 egress); si no, se baja una vez y se
+    //    cachea. Reemplaza el fallback directo cuando el blob está listo.
+    const cloudItems = items.filter(it => it?.storagePath && it?.imageUrl && !it?.imageBase64);
+    if (cloudItems.length) {
+      (async () => {
+        const results = await Promise.all(cloudItems.map(async (it) => {
+          try {
+            const url = await getCachedCreativoUrl(it.storagePath, it.imageUrl);
+            return url ? [it.id, url] : null;
+          } catch { return null; }
+        }));
+        if (cancelled) {
+          results.forEach(r => { if (r) { try { URL.revokeObjectURL(r[1]); } catch {} } });
+          return;
+        }
+        let changed = false;
+        for (const r of results) {
+          if (r) { next.set(r[0], r[1]); createdUrls.push(r[1]); changed = true; }
+        }
+        if (changed) setMap(new Map(next));
+      })();
+    }
+
+    return () => {
+      cancelled = true;
+      for (const u of createdUrls) { try { URL.revokeObjectURL(u); } catch {} }
+    };
   }, [items]);
+
+  return map;
 }
 
 function slugify(s) {

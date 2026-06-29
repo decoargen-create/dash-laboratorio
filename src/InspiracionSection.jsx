@@ -1843,14 +1843,28 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       const comps = p.competidores || [];
       const host = (b.landingUrl || '').replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
       const brandNombre = (b.nombre || '').toLowerCase().trim();
+      const removedIds = [];
       const next = comps.filter(c => {
-        if (b.fromCompetidorId && String(c.id) === String(b.fromCompetidorId)) return false;
+        let keep = true;
+        if (b.fromCompetidorId && String(c.id) === String(b.fromCompetidorId)) keep = false;
         const cHost = (c.landingUrl || '').replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
-        if (host && cHost === host) return false;
-        if (brandNombre && (c.nombre || '').toLowerCase().trim() === brandNombre) return false;
-        return true;
+        if (host && cHost === host) keep = false;
+        if (brandNombre && (c.nombre || '').toLowerCase().trim() === brandNombre) keep = false;
+        if (!keep) removedIds.push(String(c.id));
+        return keep;
       });
-      return { ...p, competidores: next };
+      if (removedIds.length === 0) return { ...p, competidores: next };
+      // TOMBSTONE de los competidores borrados en cascada + bump de updated_at.
+      // Sin esto el merge del cloud los resucita (ver marketingSync).
+      const tomb = Array.isArray(p.competidoresEliminados) ? p.competidoresEliminados : [];
+      const have = new Set(tomb.map(t => String(t?.id)));
+      const addTomb = removedIds.filter(rid => !have.has(rid)).map(rid => ({ id: rid, at: new Date().toISOString() }));
+      return {
+        ...p,
+        competidores: next,
+        competidoresEliminados: addTomb.length ? [...tomb, ...addTomb].slice(-300) : tomb,
+        updated_at: new Date().toISOString(),
+      };
     });
     try {
       localStorage.setItem(PRODUCTOS_KEY, JSON.stringify(updated));

@@ -271,7 +271,18 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
   };
 
   const removeCompetidor = (id) => {
-    onUpdateProduct({ competidores: competidores.filter(c => c.id !== id) });
+    // TOMBSTONE + bump de updated_at: sin esto el merge del cloud resucita al
+    // competidor borrado (el cron diario bumpea el updated_at del cloud). Ver
+    // marketingSync.pullMarketingFromCloud.
+    const tomb = Array.isArray(p.competidoresEliminados) ? p.competidoresEliminados : [];
+    const nextTomb = tomb.some(t => String(t?.id) === String(id))
+      ? tomb
+      : [...tomb, { id: String(id), at: new Date().toISOString() }].slice(-300);
+    onUpdateProduct({
+      competidores: competidores.filter(c => c.id !== id),
+      competidoresEliminados: nextTomb,
+      updated_at: new Date().toISOString(),
+    });
   };
 
   const checkCompetitorAds = async (comp) => {

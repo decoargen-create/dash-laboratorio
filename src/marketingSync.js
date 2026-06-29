@@ -154,6 +154,28 @@ export async function pullMarketingFromCloud() {
         if (soloLocal.length) merged.competidores = [...cloudComps, ...soloLocal];
       }
     }
+    // TOMBSTONES de competidores borrados — gana SIEMPRE sobre cualquier
+    // resurrección. Síntoma reportado: "me sigue apareciendo competencia que yo
+    // no le puse al producto". Causa: al borrar un competidor no se dejaba
+    // rastro del borrado y el cron diario (cron-competidor-refresh) bumpea el
+    // updated_at del cloud → en el próximo pull el cloud "gana" y resucita al
+    // competidor borrado. Acá unimos los tombstones de local + cloud (para que
+    // el borrado se propague entre PCs/usuarios) y filtramos esos ids de la
+    // lista final, pase lo que pase con los timestamps.
+    {
+      const cloudTomb = Array.isArray(merged.competidoresEliminados) ? merged.competidoresEliminados : [];
+      const localTomb = Array.isArray(localP.competidoresEliminados) ? localP.competidoresEliminados : [];
+      if (cloudTomb.length || localTomb.length) {
+        const tombById = new Map();
+        for (const t of [...cloudTomb, ...localTomb]) {
+          if (t && t.id != null) tombById.set(String(t.id), t);
+        }
+        merged.competidoresEliminados = [...tombById.values()].slice(-300);
+        if (Array.isArray(merged.competidores)) {
+          merged.competidores = merged.competidores.filter(c => c && !tombById.has(String(c.id)));
+        }
+      }
+    }
     if ((!merged.bandejaIdeas || merged.bandejaIdeas.length === 0) && localP.bandejaIdeas?.length) {
       merged.bandejaIdeas = localP.bandejaIdeas;
     }

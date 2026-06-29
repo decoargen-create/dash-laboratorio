@@ -1616,7 +1616,24 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
   const handleRemoveCompetidor = async (id) => {
     if (!window.confirm('¿Sacar a este competidor de la lista?')) return;
-    setCompetidores(prev => prev.filter(c => c.id !== id));
+    // Borrado con TOMBSTONE: además de sacarlo de la lista, registramos su id
+    // en competidoresEliminados y bumpeamos updated_at. Sin esto el merge del
+    // cloud lo resucitaba (el cron diario bumpea el updated_at del cloud y
+    // hacía "ganar" al cloud que todavía tenía el competidor borrado). Ver
+    // marketingSync.pullMarketingFromCloud.
+    setProductos(prev => prev.map(p => {
+      if (String(p.id) !== String(activeProductoId)) return p;
+      const tomb = Array.isArray(p.competidoresEliminados) ? p.competidoresEliminados : [];
+      const nextTomb = tomb.some(t => String(t?.id) === String(id))
+        ? tomb
+        : [...tomb, { id: String(id), at: new Date().toISOString() }].slice(-300);
+      return {
+        ...p,
+        competidores: (p.competidores || []).filter(c => String(c.id) !== String(id)),
+        competidoresEliminados: nextTomb,
+        updated_at: new Date().toISOString(),
+      };
+    }));
     // Limpiar el brand "auto-sincronizado" en Inspiración (fromCompetidorId)
     // → sin esto quedaba una marca huérfana en la galería de inspiración
     // apuntando a un competidor que ya no existe.

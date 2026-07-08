@@ -275,6 +275,53 @@ function inferCategoryFromText(producto) {
   return null;
 }
 
+// Detecta el CASO DE USO / ZONA DEL CUERPO real cuando la heurística de
+// categoría lo clasificaría mal. Caso que lo motivó: "Aceite Natural para
+// Pies" (antihongos) matcheaba `aceite` → categoría skincare FACIAL → los
+// creativos hablaban de cara/piel/cabello en vez de PIES y HONGOS. Este
+// override fuerza la zona + el problema reales y le gana a la categoría
+// genérica. Devuelve { directive, scene, avoid } (en inglés, como el prompt)
+// o null si no hay una zona/nicho específico a corregir (→ se usa la
+// categoría de siempre, no cambia el comportamiento de skincare normal).
+function inferUseCase(producto) {
+  const haystack = [
+    producto?.nombre || '',
+    producto?.descripcion || '',
+    String(producto?.research || producto?.docs?.research || '').slice(0, 3000),
+    String(producto?.avatar || producto?.docs?.avatar || '').slice(0, 1500),
+  ].join(' ').toLowerCase();
+
+  const hasFeet = /\b(pies?|pie|talones?|tal[óo]n|planta del pie|pedicur|podolog)\b/.test(haystack);
+  const hasNails = /\b(u[ñn]as?|onicomicosis|nail)\b/.test(haystack);
+  const hasFungus = /\b(hongos?|antimic[óo]tico|antif[úu]ngico|antihongos|micosis|onicomicosis|pie de atleta|athlete'?s? foot|fungal|fungus)\b/.test(haystack);
+
+  // Antihongos de pies/uñas — el caso reportado.
+  if (hasFungus && (hasFeet || hasNails)) {
+    return {
+      directive: 'This is an ANTI-FUNGAL product for the FEET / TOENAILS (athlete\'s foot, nail fungus, cracked heels). Every scene, hand, body part, testimonial and claim MUST be about FEET and toenails and the fungus / cracked-heel problem. NEVER show or mention the face, facial skin, dark facial spots, wrinkles, anti-aging or hair. If IMAGE 1 uses a face/skin/hair angle, REDIRECT it entirely to feet.',
+      scene: 'feet-care context: clean bare feet or toenails, a foot resting on a towel, hands applying oil/drops to toes or heels, bathroom or bedroom floor, soft natural light — NO face, NO vanity mirror with a face',
+      avoid: 'faces, facial close-ups, applying product to the face/cheeks, wrinkles/anti-aging cues, hair/scalp, dark facial spots',
+    };
+  }
+  // Antihongos sin zona explícita — igual evitamos el drift a cara.
+  if (hasFungus) {
+    return {
+      directive: 'This is an ANTI-FUNGAL product. Scenes, testimonials and claims MUST be about the fungal problem it solves (skin/nails/feet per the landing) — NEVER drift to facial skincare, wrinkles, anti-aging or hair unless the landing explicitly says so.',
+      scene: 'the real affected area per the landing (feet, nails or skin folds) in a realistic, clinical-but-warm home setting',
+      avoid: 'facial anti-aging, wrinkles, hair/scalp, face close-ups (unless the product is explicitly facial)',
+    };
+  }
+  // Cuidado de pies genérico (sin hongos).
+  if (hasFeet) {
+    return {
+      directive: 'This is a FOOT-CARE product. Scenes, hands, testimonials and claims MUST be about the FEET / heels / toenails — never the face or hair.',
+      scene: 'feet-care context: bare feet, heels, toes, a foot resting on a towel, hands applying to feet',
+      avoid: 'faces, facial skincare, wrinkles, hair',
+    };
+  }
+  return null;
+}
+
 // Merge avatar + research evitando duplicación. Si el avatar ya está
 // embebido en el research (caso común: el research doc fue generado
 // arriba del avatar), skipeamos el bloque de avatar para no gastar
@@ -485,9 +532,15 @@ async function planStrategyAndVariations({ apiKey, refImgBuf, refMime, producto,
   // Escala real del producto extraída de la landing/research — para que el
   // plan dimensione bien el productPlacement.scale y no salga "como cápsula".
   const scaleHint = inferRealWorldScale(producto);
+  // Caso de uso / zona real — para que los testimonios y claims ADAPTADOS no
+  // se desvíen al problema del ad ref (ej: ref skincare facial → producto es
+  // antihongos de pies). Sin esto, "manchitas de la cara se aclararon" salía
+  // literal en un producto de pies.
+  const useCaseHint = inferUseCase(producto);
   const productCtx = [
     `Producto: ${producto?.nombre || 'N/A'}`,
     producto?.descripcion ? `Descripción: ${producto.descripcion.slice(0, 400)}` : '',
+    useCaseHint ? `**CASO DE USO REAL DEL PRODUCTO** (CRÍTICO — los textos/testimonios/claims adaptados DEBEN ser sobre esto, NO sobre el problema del ad ref): ${useCaseHint.directive}` : '',
     scaleHint ? `**TAMAÑO REAL DEL PRODUCTO** (CRÍTICO para que la imagen no lo dibuje chiquito): ${scaleHint}` : '',
     research ? `Research / audiencia / pain points:\n${research}` : '',
     ofertasReales
@@ -678,9 +731,11 @@ async function extractSkeletonHaiku({ apiKey, refImgBuf, refMime, producto }) {
     producto?.research,
   );
   const scaleHintV = inferRealWorldScale(producto);
+  const useCaseHintV = inferUseCase(producto);
   const productoCtx = [
     `Nombre: ${producto?.nombre || 'N/A'}`,
     productoForm ? `**FORMATO FÍSICO: ${productoForm.toUpperCase()}** (este producto viene en ${productoForm} — NO es otro formato).` : '',
+    useCaseHintV ? `**CASO DE USO REAL** (CRÍTICO — los textos adaptados deben ser sobre esto, NO sobre el problema del ad ref): ${useCaseHintV.directive}` : '',
     scaleHintV ? `**TAMAÑO REAL** (no lo dibujes chiquito): ${scaleHintV}` : '',
     producto?.descripcion ? `Descripción: ${producto.descripcion.slice(0, 500)}` : '',
     ofertasReales
@@ -905,8 +960,18 @@ function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentCol
       // tipo cepillo-en-bowl → variación generada con cápsulas en jar.
       parts.push(`  • **CLOSED PACKAGING ONLY**: This product is ${effectiveForm} — NEVER show its contents spilled, displayed, or visible outside the package. Render the jar/bottle/tube CLOSED with its cap/lid on. Even if IMAGE 1 (the reference) shows an OPEN container with content visible (capsules in a bowl, powder in a glass, pills on a hand, etc.), you MUST show ONLY the CLOSED PACKAGE from IMAGE 2 in our generation. Do NOT invent capsules, pills, granules, or any "content" inside or beside the package. The whole point is that this is a finished cosmetic/skincare product sold as a sealed unit.`);
     }
+    // USE-CASE override: si el producto tiene una zona/nicho específico
+    // (ej: antihongos para PIES) que la categoría genérica clasificaría mal
+    // (aceite → skincare facial), forzamos la zona y el problema reales. Le
+    // GANA a la categoría: sin esto, "Aceite para Pies" salía con escenas de
+    // cara/piel/cabello.
+    const useCase = inferUseCase(producto);
     const category = inferProductCategory(effectiveForm);
-    if (category) {
+    if (useCase) {
+      parts.push(`  • **PRODUCT USE-CASE (CRITICAL — this OVERRIDES any generic skincare/face default below)**: ${useCase.directive}`);
+      parts.push(`  • **SCENE ADAPTATION (precedence)**: PRESERVE from IMAGE 1 the composition, framing, palette, lighting mood, overlay positions and sticker styles. TRANSLATE the SETTING to the use-case: ${useCase.scene}. AVOID: ${useCase.avoid}.`);
+    }
+    if (category && !useCase) {
       // ADAPT SCENE: si el winner es de otra categoría (ej: suplemento en
       // warehouse + cápsulas) y el target es skincare, los props de IMAGE 1
       // (cajas de warehouse, mortero, cápsulas, etc.) no tienen sentido
@@ -1072,8 +1137,15 @@ function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio
       // largo en buildPromptFromPlan — mismo bug.
       parts.push(`  - **CLOSED PACKAGING ONLY**: This product is ${effectiveForm} — never show its contents (no capsules, no pills, no granules, no powder, no liquid spilled). Render the jar/bottle/tube CLOSED with cap on. Even if IMAGE 1 shows an open container, you MUST keep IMAGE 2's package sealed.`);
     }
+    // USE-CASE override — ver buildPromptFromPlan. Le gana a la categoría
+    // genérica para evitar el drift a cara/piel en productos de pies/antihongos.
+    const useCase = inferUseCase(producto);
     const category = inferProductCategory(effectiveForm);
-    if (category) {
+    if (useCase) {
+      parts.push(`  - **PRODUCT USE-CASE (CRITICAL — OVERRIDES any generic skincare/face default)**: ${useCase.directive}`);
+      parts.push(`  - **SCENE ADAPTATION (precedence)**: PRESERVE IMAGE 1's composition/palette/mood/overlay positions/sticker styles. TRANSLATE the SETTING to: ${useCase.scene}. AVOID: ${useCase.avoid}.`);
+    }
+    if (category && !useCase) {
       // ADAPT SCENE con precedence rules (audit HIGH #1) — ver buildPromptFromPlan.
       parts.push(`  - **PRODUCT CATEGORY**: ${category.label}. Natural setting: ${category.context}.`);
       parts.push(`  - **SCENE ADAPTATION (precedence)**: PRESERVE IMAGE 1's composition/palette/mood/overlay positions/sticker styles. TRANSLATE ONLY background + category-specific props. KEEP category-neutral props (fabric, plants, generic surfaces). AVOID props from other categories: ${category.avoidContext}.`);

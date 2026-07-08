@@ -556,6 +556,7 @@ NO inventes ángulos nuevos — el competidor ya validó este ángulo con su pla
 2. Adaptar sus badges/claims a contenido VÁLIDO para nuestro producto (sin inventar regulaciones que no tengamos).
 3. Planear N ejecuciones distintas de la MISMA fórmula (cambia modelo/edad/ángulo cámara/prop secundario/momento del día — NO cambia el concepto).
 4. TAMAÑO REAL: deducir el tamaño físico real del producto y llenar "realWorldScale". Buscá en la descripción/research CUALQUIER referencia a medidas (cm, dimensiones, litros, kg) o comparaciones de tamaño y usalas. Es CRÍTICO: el ad ref puede tener un producto chico (frasco, cápsula) y el nuestro ser grande (un organizador/mueble) — si no lo aclarás, la imagen lo dibuja diminuto.
+5. CASO DE USO REAL: deducir de la descripción/research QUÉ problema resuelve el producto y EN QUÉ zona del cuerpo / lugar se usa, y llenar "productUseCase". Es CRÍTICO: el ad ref puede ser de OTRO nicho (ej: ref de skincare facial, nuestro producto es antihongos de PIES) — si no lo aclarás, los creativos heredan el problema del ad ref (caras, arrugas, cabello) en vez del problema REAL del producto. NUNCA derives el caso de uso del ad ref: SOLO de la descripción/research del producto del usuario.
 
 Pensá como un media buyer experimentado de Meta — qué hace este ad funcionar, y cómo lo replicaría con cambios mínimos para testear ejecuciones.`;
 
@@ -592,6 +593,12 @@ Analizá la imagen del ad ganador adjunto y devolvé EXACTAMENTE este JSON (sin 
     "hook_type": "curiosity | authority | urgency | fear | desire | proof | novelty",
     "target_avatar": "ej: mujer 35-50, preocupada por envejecimiento de piel, busca solución natural premium",
     "value_prop_implicit": "ej: ingrediente activo único respaldado por estudios + entrega rápida"
+  },
+  "productUseCase": {
+    "zone": "zona del cuerpo / lugar donde se usa el producto del USUARIO, derivado SOLO de su descripción/research (ej: 'pies y uñas', 'cuero cabelludo', 'placard del dormitorio'). NO lo derives del ad ref",
+    "problem": "el problema REAL que resuelve (ej: 'hongos en uñas y pie de atleta', 'frizz y puntas quebradas', 'desorden de ropa'). Si el ad ref ataca OTRO problema, acá va el NUESTRO igual",
+    "sceneDirective": "cómo debe ser la escena/manos/gestos para ESTE caso de uso (ej: 'pies descalzos sobre toalla, manos aplicando gotas en los dedos del pie — nunca cara ni espejo de vanity')",
+    "avoid": "qué NO mostrar ni mencionar porque pertenece a otro nicho (ej: 'cara, arrugas, anti-age, cabello')"
   },
   "badges_adapted": [
     {
@@ -778,7 +785,13 @@ Analizá la imagen del ad ganador y devolvé EXACTAMENTE este JSON (sin markdown
   "ctaElements": [],
   "mood": "",
   "style": "",
-  "aspectRatio": ""
+  "aspectRatio": "",
+  "productUseCase": {
+    "zone": "zona del cuerpo / lugar donde se usa el producto del USUARIO (derivado de su descripción/research, NO del ad ref)",
+    "problem": "el problema REAL que resuelve el producto del usuario",
+    "sceneDirective": "cómo debe ser la escena para ESTE caso de uso",
+    "avoid": "qué NO mostrar/mencionar porque es de otro nicho"
+  }
 }
 
 Reglas estrictas para content_adapted:
@@ -789,6 +802,7 @@ Reglas estrictas para content_adapted:
 - Si el original menciona un brand/producto ajeno, reemplazar por el nombre del producto del usuario o algo neutro.
 - Si menciona TV/programas/hashtags virales específicos, sustituir por trigger genérico que funcione para LA AUDIENCIA del producto.
 - Si la pieza tiene pain point implícito y NO matchea con los pain points del research, ajustalo al pain del research.
+- **CRÍTICO — CASO DE USO / ZONA DEL CUERPO**: Los textos adaptados deben hablar del problema y la zona REALES del producto del usuario (según su descripción/research), NO del problema del ad ref. Ej: ad ref habla de "manchas en la cara" pero nuestro producto es antihongos de pies → content_adapted habla de hongos/uñas/pies, JAMÁS de la cara. Llenar también "productUseCase" con lo deducido.
 - **CRÍTICO — FORMATO FÍSICO**: Si el texto original menciona un formato de producto (cápsulas, pastillas, polvo, gotas, crema, etc.) y NO COINCIDE con el formato del producto del usuario${productoForm ? ` (${productoForm})` : ''}, REEMPLAZÁ por el formato correcto. Ejemplo: si el ad ref dice "60 cápsulas veganas" y nuestro producto son gomitas, en content_adapted debe decir "60 gomitas veganas". Nunca dejar mención de un formato equivocado — confunde al consumidor.
 
 - **CRÍTICO — OFERTAS Y CLAIMS — REEMPLAZO vs REMOCIÓN**:
@@ -960,12 +974,21 @@ function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentCol
       // tipo cepillo-en-bowl → variación generada con cápsulas en jar.
       parts.push(`  • **CLOSED PACKAGING ONLY**: This product is ${effectiveForm} — NEVER show its contents spilled, displayed, or visible outside the package. Render the jar/bottle/tube CLOSED with its cap/lid on. Even if IMAGE 1 (the reference) shows an OPEN container with content visible (capsules in a bowl, powder in a glass, pills on a hand, etc.), you MUST show ONLY the CLOSED PACKAGE from IMAGE 2 in our generation. Do NOT invent capsules, pills, granules, or any "content" inside or beside the package. The whole point is that this is a finished cosmetic/skincare product sold as a sealed unit.`);
     }
-    // USE-CASE override: si el producto tiene una zona/nicho específico
-    // (ej: antihongos para PIES) que la categoría genérica clasificaría mal
-    // (aceite → skincare facial), forzamos la zona y el problema reales. Le
-    // GANA a la categoría: sin esto, "Aceite para Pies" salía con escenas de
-    // cara/piel/cabello.
-    const useCase = inferUseCase(producto);
+    // USE-CASE override — GENERAL para todos los productos. Preferimos el
+    // que derivó el PLAN (Sonnet leyó la descripción/research de la landing
+    // y escribió zona + problema + escena específicos de ESTE producto, sea
+    // el nicho que sea). Fallback: heurística regex (pies/antihongos) para
+    // planes viejos cacheados o si Sonnet no llenó el campo. Le GANA a la
+    // categoría genérica: sin esto, "Aceite para Pies" salía con escenas de
+    // cara/piel/cabello porque `aceite` matcheaba skincare facial.
+    const planUC = plan?.productUseCase;
+    const useCase = (planUC && (planUC.problem || planUC.sceneDirective))
+      ? {
+          directive: `${planUC.problem ? `Problem this product solves: ${planUC.problem}.` : ''}${planUC.zone ? ` Where it is used / body zone: ${planUC.zone}.` : ''} Every scene, hand gesture, body part, testimonial and claim MUST be about THIS problem/zone — NEVER inherit the problem, body zone or niche of the reference ad if it differs.`,
+          scene: planUC.sceneDirective || 'the real habitat of this use case per the product research',
+          avoid: planUC.avoid || 'scenes, props or claims that belong to a different niche/body zone than stated above',
+        }
+      : inferUseCase(producto);
     const category = inferProductCategory(effectiveForm);
     if (useCase) {
       parts.push(`  • **PRODUCT USE-CASE (CRITICAL — this OVERRIDES any generic skincare/face default below)**: ${useCase.directive}`);
@@ -1137,9 +1160,16 @@ function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio
       // largo en buildPromptFromPlan — mismo bug.
       parts.push(`  - **CLOSED PACKAGING ONLY**: This product is ${effectiveForm} — never show its contents (no capsules, no pills, no granules, no powder, no liquid spilled). Render the jar/bottle/tube CLOSED with cap on. Even if IMAGE 1 shows an open container, you MUST keep IMAGE 2's package sealed.`);
     }
-    // USE-CASE override — ver buildPromptFromPlan. Le gana a la categoría
-    // genérica para evitar el drift a cara/piel en productos de pies/antihongos.
-    const useCase = inferUseCase(producto);
+    // USE-CASE override — ver buildPromptFromPlan. General: preferimos el
+    // que derivó Vision del research (cualquier nicho); fallback regex.
+    const skelUC = skeleton?.productUseCase;
+    const useCase = (skelUC && (skelUC.problem || skelUC.sceneDirective))
+      ? {
+          directive: `${skelUC.problem ? `Problem this product solves: ${skelUC.problem}.` : ''}${skelUC.zone ? ` Where it is used / body zone: ${skelUC.zone}.` : ''} Every scene, testimonial and claim MUST be about THIS problem/zone — NEVER inherit the reference ad's niche if it differs.`,
+          scene: skelUC.sceneDirective || 'the real habitat of this use case per the product research',
+          avoid: skelUC.avoid || 'scenes, props or claims from a different niche/body zone',
+        }
+      : inferUseCase(producto);
     const category = inferProductCategory(effectiveForm);
     if (useCase) {
       parts.push(`  - **PRODUCT USE-CASE (CRITICAL — OVERRIDES any generic skincare/face default)**: ${useCase.directive}`);

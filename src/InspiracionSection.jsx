@@ -2308,6 +2308,9 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     let totalCost = 0;
     // adaptAdToIdeas es silencioso — sin toasts ni executions individuales.
     // Solo el bulk muestra UN execution + UN toast final agregado.
+    // try/finally alrededor del disparo + await → el lock se libera aunque algo
+    // tire error, para no dejar pegado el "Ya hay un bulk adapt corriendo".
+    try {
     const promises = adsAGenerar.map(({ brandNombre, ad }) =>
       adaptAdToIdeas(brandNombre, ad)
         .then(result => {
@@ -2323,7 +2326,9 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         })
     );
     await Promise.all(promises);
-    bulkAdaptingRef.current = false;
+    } finally {
+      bulkAdaptingRef.current = false;
+    }
     const msg = failed === 0
       ? `${ok} ads → ${totalIdeas || 'N'} ideas en Bandeja`
       : `${ok}/${adsAGenerar.length} OK (${failed} fallaron) — ${totalIdeas} ideas`;
@@ -2349,7 +2354,6 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       addToast?.({ type: 'error', message: 'Cargá la foto del producto en Setup primero.' });
       return;
     }
-    bulkRunningRef.current = true;
     // Costo: $0.18/imagen (high) × 2 variantes + ~$0.005 vision (Haiku) por ad
     // que NO esté ya en cache. n=2 fijo.
     const costoPorImagen = costPerImage(genOpts.quality, genOpts.size);
@@ -2361,6 +2365,12 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     const cacheNote = visionAds < seleccionados.size ? ` (${seleccionados.size - visionAds} con skeleton cacheado)` : '';
     if (!window.confirm(`Generar ${nVarBulk} variante${nVarBulk !== 1 ? 's' : ''} ${sizeLabel} por cada uno de los ${seleccionados.size} ads${cacheNote} → ${total} imágenes total, ~$${costoEstimado.toFixed(2)}. Las requests se disparan TODAS en paralelo y el cloud-save funciona aunque cierres la pestaña. ETA: ~${Math.max(120, 75 * 2)}s. ¿Seguir?`)) return;
 
+    // Recién acá tomamos el lock — DESPUÉS del confirm (si cancelás no queda
+    // trabado) y con try/finally alrededor de TODO el cuerpo async. Si algo
+    // tira error, o la app se pausa/cuelga a mitad, el finally igual libera el
+    // lock y no queda pegado el "Ya hay un bulk corriendo".
+    bulkRunningRef.current = true;
+    try {
     // Buscar los ad objects desde adsByBrand + de los competidores.
     // POST-REFACTOR IDB: c.ads inline está stripped — usar compAdsByCompId
     // (hidratado desde IDB). Sin esto el bulk-create fallaba silencioso
@@ -2424,9 +2434,10 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       })
     );
 
-    try {
       await Promise.all(promises);
     } finally {
+      // Cierra el try abierto arriba (post-confirm) → libera el lock pase lo
+      // que pase (éxito, error, o cuelgue de red server-side).
       bulkRunningRef.current = false;
     }
 

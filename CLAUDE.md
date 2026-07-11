@@ -42,7 +42,7 @@ Contexto para Claude Code. Este documento resume la arquitectura, decisiones y p
 - RLS v1: todo abierto a anon salvo `fact_tiendas`. **Deuda técnica: agregar Supabase Auth antes de compartir fuera del equipo.**
 
 ### Edge Functions (deployadas)
-- `facturar` (verify_jwt on): recibe `{pedido_id, empresa_id?}` o manual `{empresa_id, total}`. Llama Afip SDK: POST /api/v1/afip/auth → FECompUltimoAutorizado → FECAESolicitar. Guarda factura y actualiza pedido. Secrets que usa: `AFIP_SDK_TOKEN`, `AFIP_ENV` (default 'dev')
+- `facturar` (verify_jwt on): recibe `{pedido_id, empresa_id?}` o manual `{empresa_id, total}`. Llama Afip SDK: POST /api/v1/afip/auth → FECompUltimoAutorizado → FECAESolicitar. Guarda factura y actualiza pedido. Secrets que usa: `AFIP_SDK_TOKEN`, `AFIP_ENV` (default 'dev'). **El token de Afip SDK vive en Supabase Vault** (secret `AFIP_SDK_TOKEN`): la función lo lee vía RPC `public.get_afip_token()` (security definer, execute solo para service_role) como fallback si el env var no está seteado. Probada OK en dev el 2026-07-11: Factura C y B aprobadas con CAE (ver `fact_facturas` environment='dev'). La extensión `pg_net` está habilitada (sirve para invocar functions desde SQL).
 - `tn-webhook` (verify_jwt off): recibe `{store_id, event, id}` de Tienda Nube, busca el pedido por API de TN (header `Authentication: bearer TOKEN` + User-Agent obligatorio) usando el token de `fact_tiendas`, upsertea en la cola solo si payment_status = paid
 - `shopify-webhook` (verify_jwt off): recibe el pedido completo (topic orders/paid), identifica tienda por header `x-shopify-shop-domain`, valida HMAC si existe el secret `SHOPIFY_WEBHOOK_SECRET`
 
@@ -56,7 +56,7 @@ Basado en el panel interno Senyfull: fondo #F6F7F8, tarjetas blancas borde #E7E9
 
 ## Pendientes (roadmap acordado)
 1. **Setup deploy automático**: repo GitHub + Netlify conectado (hoy es drag & drop manual del dist/)
-2. SenyFactura: configurar `AFIP_SDK_TOKEN` (Lucas), probar factura dev, luego `AFIP_ENV=prod`
+2. ~~SenyFactura: configurar `AFIP_SDK_TOKEN`, probar factura dev~~ ✅ hecho (2026-07-11, token en Vault). Falta: rotar el token antes de prod y setear `AFIP_ENV=prod`
 3. Webhooks: registrar en TN (evento order/paid → https://qlnfgjsjibwrkzgmwdgl.supabase.co/functions/v1/tn-webhook) y Shopify (orders/paid → .../shopify-webhook); cargar tokens en `fact_tiendas`
 4. PDF de factura con QR de ARCA + envío por mail al cliente
 5. Notas de crédito (devoluciones), reporte mensual de IVA/ventas

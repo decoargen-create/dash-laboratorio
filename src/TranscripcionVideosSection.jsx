@@ -17,7 +17,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
   Clapperboard, Upload, Loader2, Check, X, Copy, Trash2, RefreshCw,
   ChevronDown, AlertTriangle, FileText, Languages, Wand2, Lightbulb,
-  ScrollText, Film, CheckSquare, Square, FileArchive, BadgeCheck, Undo2,
+  ScrollText, Film, CheckSquare, Square, BadgeCheck, Undo2,
 } from 'lucide-react';
 import { supabase, getCurrentUser } from './supabase.js';
 import { notifyMarketingChange } from './useMarketingSync.js';
@@ -370,26 +370,81 @@ export default function TranscripcionVideosSection({ addToast, forcedProductoId,
     }
   }, [itemsSel, producto, addToast]);
 
-  // ZIP con un .md por guion — para repartir entre editores a volumen.
-  const descargarZip = useCallback(async () => {
+  // Word (.docx) formateado — un guion por página, con títulos y jerarquía.
+  // Mucho más cómodo que texto plano para leer, imprimir y repartir entre
+  // editores. Import dinámico de `docx` para no engordar el bundle inicial.
+  const descargarDocx = useCallback(async () => {
     if (itemsSel.length === 0) return;
     try {
-      const { default: JSZip } = await import('jszip');
-      const zip = new JSZip();
-      const prodSlug = slugFile(producto?.nombre);
+      const { Document, Packer, Paragraph, TextRun, HeadingLevel, PageBreak } = await import('docx');
+      const MUTED = '6B7280', BRAND = '7C3AED', DARK = '111827', ACCENT = 'DB2777';
+      const children = [];
       itemsSel.forEach((it, i) => {
-        zip.file(`${String(i + 1).padStart(2, '0')} - ${slugFile(it.nombre)}.md`, guionToMd(it, producto?.nombre || ''));
+        if (i > 0) children.push(new Paragraph({ children: [new PageBreak()] }));
+        // Título del guion
+        children.push(new Paragraph({
+          heading: HeadingLevel.HEADING_1,
+          spacing: { after: 80 },
+          children: [new TextRun({ text: `Guion ${i + 1} — ${producto?.nombre || ''}`, bold: true, color: BRAND, size: 36 })],
+        }));
+        // Metadata
+        const meta = [`Fuente: ${it.nombre}`, it.durationSec ? `${Math.round(it.durationSec)}s` : '', it.idioma ? `original en ${it.idioma}` : ''].filter(Boolean).join(' · ');
+        children.push(new Paragraph({ spacing: { after: 40 }, children: [new TextRun({ text: meta, italics: true, color: MUTED, size: 18 })] }));
+        if (it.estructuraDetectada) {
+          children.push(new Paragraph({ spacing: { after: 160 }, children: [new TextRun({ text: `Fórmula: ${it.estructuraDetectada}`, italics: true, color: MUTED, size: 18 })] }));
+        }
+        // GUION — el cuerpo principal, tipografía cómoda de leer en voz alta
+        children.push(new Paragraph({
+          heading: HeadingLevel.HEADING_2, spacing: { before: 200, after: 120 },
+          children: [new TextRun({ text: '🎙 GUION (leer en voz alta)', bold: true, color: DARK, size: 26 })],
+        }));
+        String(it.guion || '').split(/\n+/).filter(Boolean).forEach(parr => {
+          children.push(new Paragraph({
+            spacing: { after: 140, line: 320 },
+            children: [new TextRun({ text: parr, size: 24, color: DARK })],
+          }));
+        });
+        // Hooks alternativos
+        if (Array.isArray(it.hooksAlternativos) && it.hooksAlternativos.length) {
+          children.push(new Paragraph({
+            heading: HeadingLevel.HEADING_2, spacing: { before: 240, after: 120 },
+            children: [new TextRun({ text: '🎣 Hooks alternativos (para testear)', bold: true, color: ACCENT, size: 26 })],
+          }));
+          it.hooksAlternativos.forEach((h, j) => {
+            children.push(new Paragraph({
+              spacing: { after: 100 },
+              children: [
+                new TextRun({ text: `${j + 1}.  `, bold: true, color: ACCENT, size: 22 }),
+                new TextRun({ text: h, size: 22, color: DARK }),
+              ],
+            }));
+          });
+        }
+        // Notas para el editor
+        if (it.notasEditor) {
+          children.push(new Paragraph({
+            heading: HeadingLevel.HEADING_2, spacing: { before: 240, after: 120 },
+            children: [new TextRun({ text: '🎬 Notas para el editor', bold: true, color: DARK, size: 26 })],
+          }));
+          String(it.notasEditor).split(/\n+/).filter(Boolean).forEach(linea => {
+            children.push(new Paragraph({
+              spacing: { after: 80 },
+              children: [new TextRun({ text: linea, size: 20, color: MUTED })],
+            }));
+          });
+        }
       });
-      const blob = await zip.generateAsync({ type: 'blob' });
+      const doc = new Document({ sections: [{ children }] });
+      const blob = await Packer.toBlob(doc);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `guiones-${prodSlug}-${new Date().toISOString().slice(0, 10)}.zip`;
+      a.download = `guiones-${slugFile(producto?.nombre)}-${new Date().toISOString().slice(0, 10)}.docx`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-      addToast?.({ type: 'success', message: `ZIP con ${itemsSel.length} guion${itemsSel.length > 1 ? 'es' : ''} descargado` });
+      addToast?.({ type: 'success', message: `Word con ${itemsSel.length} guion${itemsSel.length > 1 ? 'es' : ''} descargado (uno por página)` });
     } catch (err) {
-      addToast?.({ type: 'error', message: `ZIP falló: ${err.message}` });
+      addToast?.({ type: 'error', message: `Word falló: ${err.message}` });
     }
   }, [itemsSel, producto, addToast]);
 
@@ -481,9 +536,10 @@ export default function TranscripcionVideosSection({ addToast, forcedProductoId,
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition">
                 <Copy size={11} /> Copiar {itemsSel.length}
               </button>
-              <button onClick={descargarZip}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold rounded-lg bg-gray-800 dark:bg-gray-700 hover:bg-gray-900 dark:hover:bg-gray-600 text-white transition">
-                <FileArchive size={11} /> Descargar ZIP
+              <button onClick={descargarDocx}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition"
+                title="Un Word formateado con un guion por página — cómodo para leer, imprimir y repartir">
+                <FileText size={11} /> Descargar Word
               </button>
               <button onClick={() => marcarUsados(itemsSel.map(i => i.id), true)}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition">

@@ -318,9 +318,13 @@ export async function pullMarketingFromCloud() {
       .select('active_producto_id, gen_opts')
       .maybeSingle()
   );
-  if (prefs?.active_producto_id) {
-    try { localStorage.setItem(KEYS.active, prefs.active_producto_id); } catch {}
-  }
+  // NOTA: prefs.active_producto_id ya NO se aplica al pull. Restaurarlo
+  // metía al user directo adentro del workspace del último producto al
+  // loguearse (bug reportado: "cuando me logeo me entra al producto en vez
+  // de a la home") y, en pulls a mitad de sesión, podía "teletransportarlo"
+  // al producto activo de otra PC. El producto activo es estado de LA SESIÓN
+  // (se setea al hacer clic en una card); seguimos pusheándolo por si se
+  // quiere re-activar cross-device en el futuro.
   if (prefs?.gen_opts) {
     try { localStorage.setItem(KEYS.genOpts, JSON.stringify(prefs.gen_opts)); } catch {}
   }

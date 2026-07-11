@@ -1,22 +1,26 @@
 import { useEffect, useState } from 'react'
-import { LayoutDashboard, FileText, Receipt, Building2, Store, LogOut } from 'lucide-react'
+import { Inbox, FileText, Receipt, Building2, Store, Settings, LogOut } from 'lucide-react'
 import { supabase } from './supabase.js'
 import Auth from './Auth.jsx'
+import Ventas from './pages/Ventas.jsx'
 import Facturar from './pages/Facturar.jsx'
 import Facturas from './pages/Facturas.jsx'
 import Empresas from './pages/Empresas.jsx'
 import Tiendas from './pages/Tiendas.jsx'
+import Configuracion from './pages/Configuracion.jsx'
 
 const NAV = [
-  { key: 'facturar', label: 'Facturar', icon: FileText },
+  { key: 'ventas', label: 'Ventas a facturar', icon: Inbox },
+  { key: 'facturar', label: 'Facturar manual', icon: FileText },
   { key: 'facturas', label: 'Comprobantes', icon: Receipt },
   { key: 'empresas', label: 'Mis empresas', icon: Building2 },
   { key: 'tiendas', label: 'Tiendas', icon: Store },
+  { key: 'config', label: 'Configuración', icon: Settings },
 ]
 
 export default function App() {
   const [session, setSession] = useState(undefined) // undefined = cargando
-  const [page, setPage] = useState('facturar')
+  const [page, setPage] = useState('ventas')
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session))
@@ -56,10 +60,12 @@ export default function App() {
       </aside>
 
       <main className="main">
+        {page === 'ventas' && <Ventas session={session} />}
         {page === 'facturar' && <Facturar session={session} onDone={() => setPage('facturas')} />}
         {page === 'facturas' && <Facturas session={session} />}
         {page === 'empresas' && <Empresas session={session} />}
         {page === 'tiendas' && <Tiendas session={session} />}
+        {page === 'config' && <Configuracion session={session} />}
       </main>
     </div>
   )

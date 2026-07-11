@@ -36,14 +36,35 @@ Los `access_token` de las tiendas nunca se exponen al cliente: se leen solo desd
 edge functions (service role). El front usa la vista `fact_tiendas_pub` (sin token, con
 flag `conectada`).
 
-## Estado (fase 1 — cimientos)
+## Estado
+Fase 1 (cimientos):
 - [x] Auth (registro / login) con aislamiento RLS por cliente
 - [x] Alta de empresas (CUIT, régimen, punto de venta)
 - [x] Facturación manual (A / B / C) con CAE, contra la edge function `facturar`
 - [x] Listado de comprobantes emitidos
+
+Fase 2 (facturación masiva automática — verificada 2026-07-11):
+- [x] Cola `fact_pedidos` + bandeja "Ventas a facturar" con botón de facturación en lote
+- [x] Motor `procesar-cola`: agarra pendientes, resuelve empresa, factura con freno y reintentos
+- [x] Config por cliente (`fact_config`): modo **automático** vs **lote**, empresa/IVA por defecto
+- [x] Cron cada 5 min (pg_cron) que factura solo a los clientes en modo automático
 - [ ] Onboarding de tiendas por OAuth (TN / Shopify / Mercado Libre) — fase 3
-- [ ] Certificado ARCA por cliente para pasar a producción — fase 2
-- [ ] PDF con QR de ARCA + envío por mail — fase 4
+- [ ] Certificado ARCA por cliente para pasar a producción
+- [ ] PDF con QR de ARCA + envío por mail
+
+## Motor de facturación masiva
+
+```
+Venta pagada → (webhook) → fact_pedidos [pendiente] → procesar-cola → facturar → CAE → [facturado]
+```
+
+`procesar-cola` (edge function, verify_jwt off) se invoca de dos formas:
+- **Cron** (header `x-cron-secret`, secreto en Vault): factura los pendientes de los clientes en modo `auto`.
+- **App** (`Authorization` con el JWT del usuario): factura los pendientes de ESE cliente (botón "Facturar N pendientes").
+
+Procesa de a `LOTE=50` con `PAUSA_MS=400` entre facturas (freno para ARCA) y hasta `MAX_INTENTOS=5`.
+Resuelve la empresa de cada pedido así: `pedido.empresa_id` → tienda (plataforma+store_id) → `fact_config.empresa_default_id`.
+Corre con service role; `facturar` confía en las llamadas con la service key (saltea el chequeo de dueño, que sí aplica a usuarios).
 
 ## Pendiente para producción
 Hoy factura en **entorno de prueba de ARCA** (CUIT de test, `AFIP_ENV=dev`). Para real,

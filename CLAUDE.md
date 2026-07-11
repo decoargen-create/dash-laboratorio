@@ -1,6 +1,8 @@
 # CLAUDE.md — Ecosistema Senyfull (SenyCalc + SenyFactura)
 
 > **Nota sobre este repo**: este repositorio es `dash-laboratorio` (panel interno de marketing/laboratorio, ver README.md). Las apps SenyCalc y SenyFactura descriptas abajo NO viven acá — se deployan aparte en Netlify — pero comparten el mismo proyecto de Supabase. Desde acá lo relacionado es `src/DashboardSeny.jsx` y `api/seny-sheet.js`. En el Supabase compartido: las tablas de este repo son `marketing_*` / `profiles`; las de Senyfull son `senycalc_*` y `fact_*`. No cruzar.
+>
+> **SaaS SenyFactura (en construcción)**: la carpeta `senyfactura/` de este repo es el nuevo portal multi-cliente (Vite+React) donde cada cliente conecta sus tiendas + CUIT y factura sus ventas. Es un producto aparte del panel de marketing; se puede separar a su propio repo cuando se conecte a deploy. Ver `senyfactura/README.md`. Fase 1 (Auth + RLS por cliente + facturación manual A/B/C) hecha y verificada el 2026-07-11.
 
 Contexto para Claude Code. Este documento resume la arquitectura, decisiones y pendientes de dos apps desarrolladas con Claude en claude.ai. El dueño es Lucas (Senydrop, Buenos Aires). Hablarle en español rioplatense informal.
 
@@ -39,7 +41,7 @@ Contexto para Claude Code. Este documento resume la arquitectura, decisiones y p
 - `fact_tiendas`: empresa_id, plataforma ('tiendanube'|'shopify'), store_id, access_token — **SIN política RLS para anon** (los tokens solo los leen las edge functions con service role). Los tokens se cargan a mano desde el panel de Supabase.
 - `fact_pedidos`: cola. unique(plataforma, store_id, pedido_num). estado: pendiente|facturado|omitido|error
 - `fact_facturas`: cbte_tipo, punto_venta, cbte_nro, cae, cae_vto, imp_neto, imp_iva, environment ('dev'|'prod'), respuesta jsonb
-- RLS v1: todo abierto a anon salvo `fact_tiendas`. **Deuda técnica: agregar Supabase Auth antes de compartir fuera del equipo.**
+- RLS: **multi-cliente desde 2026-07-11**. Cada tabla `fact_*` tiene `owner_id uuid → auth.users`. Políticas: permisivas para `anon` (app vieja single-tenant sigue viva con la clave pública) + scopeadas por `owner_id = auth.uid()` para `authenticated` (el SaaS nuevo). Verificado: aislamiento entre clientes + with_check contra suplantación. `fact_tiendas` sigue server-only (tokens); el front lee la vista `fact_tiendas_pub` (sin token, con flag `conectada`).
 
 ### Edge Functions (deployadas)
 - `facturar` (verify_jwt on): recibe `{pedido_id, empresa_id?}` o manual `{empresa_id, total}`. Llama Afip SDK: POST /api/v1/afip/auth → FECompUltimoAutorizado → FECAESolicitar. Guarda factura y actualiza pedido. Secrets que usa: `AFIP_SDK_TOKEN`, `AFIP_ENV` (default 'dev'). **El token de Afip SDK vive en Supabase Vault** (secret `AFIP_SDK_TOKEN`): la función lo lee vía RPC `public.get_afip_token()` (security definer, execute solo para service_role) como fallback si el env var no está seteado. Probada OK en dev el 2026-07-11: Factura C y B aprobadas con CAE (ver `fact_facturas` environment='dev'). La extensión `pg_net` está habilitada (sirve para invocar functions desde SQL).

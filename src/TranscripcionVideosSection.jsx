@@ -13,11 +13,11 @@
 // productos existente — localStorage + push a marketing_productos). Los
 // videos quedan en el bucket; acá solo guardamos texto + storagePath.
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Clapperboard, Upload, Loader2, Check, X, Copy, Trash2, RefreshCw,
   ChevronDown, AlertTriangle, FileText, Languages, Wand2, Lightbulb,
-  ScrollText, Film,
+  ScrollText, Film, CheckSquare, Square, FileArchive, BadgeCheck, Undo2,
 } from 'lucide-react';
 import { supabase, getCurrentUser } from './supabase.js';
 import { notifyMarketingChange } from './useMarketingSync.js';
@@ -48,6 +48,35 @@ function buildProductoCtx(p) {
     stage: p?.stage || '',
     ofertasReales: (p?.ofertasReales || p?.offerBrief || p?.docs?.offerBrief || '').toString(),
   };
+}
+
+// Serializa un guion listo a Markdown — el "paquete" que recibe el editor:
+// guion + hooks alternativos + notas de producción. La transcripción cruda
+// NO va (al editor no le sirve y mete ruido).
+function guionToMd(item, productoNombre) {
+  const lines = [];
+  lines.push(`# Guion — ${productoNombre}`);
+  lines.push(`Fuente: ${item.nombre}${item.durationSec ? ` · ${Math.round(item.durationSec)}s` : ''}${item.idioma ? ` · original en ${item.idioma}` : ''}`);
+  if (item.estructuraDetectada) lines.push(`Fórmula: ${item.estructuraDetectada}`);
+  lines.push('');
+  lines.push('## GUION (rioplatense — leer en voz alta)');
+  lines.push(item.guion || '');
+  if (Array.isArray(item.hooksAlternativos) && item.hooksAlternativos.length) {
+    lines.push('');
+    lines.push('## HOOKS ALTERNATIVOS (para testear — reemplazan solo la apertura)');
+    item.hooksAlternativos.forEach((h, i) => lines.push(`${i + 1}. ${h}`));
+  }
+  if (item.notasEditor) {
+    lines.push('');
+    lines.push('## NOTAS PARA EL EDITOR');
+    lines.push(item.notasEditor);
+  }
+  return lines.join('\n');
+}
+
+function slugFile(s) {
+  return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/\.[a-z0-9]+$/i, '').replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 50) || 'guion';
 }
 
 const STATUS_LABEL = {
@@ -99,6 +128,10 @@ export default function TranscripcionVideosSection({ addToast, forcedProductoId,
   const [items, setItems] = useState(() => producto?.transcripcionesVideos || []);
   const [expandedId, setExpandedId] = useState(null);
   const [dragOver, setDragOver] = useState(false);
+  // Selección múltiple para acciones masivas (copiar / ZIP / marcar usados).
+  const [seleccionados, setSeleccionados] = useState(() => new Set());
+  // Filtro de vista: cuál se usó ya y cuál no (para no pisarse en el equipo).
+  const [filtroUso, setFiltroUso] = useState('todos'); // 'todos' | 'sin-usar' | 'usados'
   const fileInputRef = useRef(null);
   const mountedRef = useRef(true);
   useEffect(() => () => { mountedRef.current = false; }, []);
@@ -305,6 +338,80 @@ export default function TranscripcionVideosSection({ addToast, forcedProductoId,
     persistItems(curr => curr.filter(i => i.id !== item.id));
   }, [persistItems]);
 
+  // ---- Acciones masivas ----
+  const listos = useMemo(() => items.filter(i => i.status === 'listo' && i.guion), [items]);
+  const itemsSel = useMemo(() => listos.filter(i => seleccionados.has(i.id)), [listos, seleccionados]);
+
+  const toggleSel = useCallback((id) => {
+    setSeleccionados(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const toggleSelTodos = useCallback(() => {
+    setSeleccionados(prev => prev.size === listos.length && listos.length > 0
+      ? new Set()
+      : new Set(listos.map(i => i.id)));
+  }, [listos]);
+
+  // Copiar N guiones al portapapeles, separados con encabezados claros.
+  const copiarSeleccionados = useCallback(async () => {
+    if (itemsSel.length === 0) return;
+    const texto = itemsSel
+      .map((it, i) => `${'='.repeat(60)}\nGUION ${i + 1} de ${itemsSel.length}\n${'='.repeat(60)}\n\n${guionToMd(it, producto?.nombre || '')}`)
+      .join('\n\n\n');
+    try {
+      await navigator.clipboard.writeText(texto);
+      addToast?.({ type: 'success', message: `${itemsSel.length} guion${itemsSel.length > 1 ? 'es' : ''} copiado${itemsSel.length > 1 ? 's' : ''} al portapapeles` });
+    } catch {
+      addToast?.({ type: 'error', message: 'No pude copiar — probá con la descarga ZIP' });
+    }
+  }, [itemsSel, producto, addToast]);
+
+  // ZIP con un .md por guion — para repartir entre editores a volumen.
+  const descargarZip = useCallback(async () => {
+    if (itemsSel.length === 0) return;
+    try {
+      const { default: JSZip } = await import('jszip');
+      const zip = new JSZip();
+      const prodSlug = slugFile(producto?.nombre);
+      itemsSel.forEach((it, i) => {
+        zip.file(`${String(i + 1).padStart(2, '0')} - ${slugFile(it.nombre)}.md`, guionToMd(it, producto?.nombre || ''));
+      });
+      const blob = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `guiones-${prodSlug}-${new Date().toISOString().slice(0, 10)}.zip`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      addToast?.({ type: 'success', message: `ZIP con ${itemsSel.length} guion${itemsSel.length > 1 ? 'es' : ''} descargado` });
+    } catch (err) {
+      addToast?.({ type: 'error', message: `ZIP falló: ${err.message}` });
+    }
+  }, [itemsSel, producto, addToast]);
+
+  // Marca de uso — persiste, así el equipo ve qué guion ya se produjo y no
+  // se pisan reutilizando el mismo.
+  const marcarUsados = useCallback((ids, usado) => {
+    const idSet = new Set(ids);
+    persistItems(curr => curr.map(i => idSet.has(i.id)
+      ? { ...i, usado, usadoAt: usado ? new Date().toISOString() : null }
+      : i));
+    if (usado) setSeleccionados(new Set());
+    addToast?.({ type: 'success', message: `${ids.length} guion${ids.length > 1 ? 'es' : ''} marcado${ids.length > 1 ? 's' : ''} como ${usado ? 'usado' : 'sin usar'}` });
+  }, [persistItems, addToast]);
+
+  const itemsVisibles = useMemo(() => {
+    if (filtroUso === 'sin-usar') return items.filter(i => !i.usado);
+    if (filtroUso === 'usados') return items.filter(i => i.usado);
+    return items;
+  }, [items, filtroUso]);
+
+  const countUsados = items.filter(i => i.usado).length;
+
   const hasResearch = !!(producto?.research || producto?.docs?.research);
 
   if (!producto) {
@@ -357,6 +464,49 @@ export default function TranscripcionVideosSection({ addToast, forcedProductoId,
         <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1">Costo aprox: $0.006/min de Whisper + ~$0.02 de adaptación por video</p>
       </div>
 
+      {/* Barra de acciones masivas — aparece cuando hay guiones listos.
+          Flujo editor: tildá los que van a producción → Copiar o ZIP →
+          Marcar usados para que el equipo no repita. */}
+      {listos.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 p-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl">
+          <button onClick={toggleSelTodos}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-semibold rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition">
+            {seleccionados.size === listos.length ? <CheckSquare size={13} className="text-brand-600" /> : <Square size={13} />}
+            {seleccionados.size === listos.length ? 'Deseleccionar' : `Seleccionar todos (${listos.length})`}
+          </button>
+          {itemsSel.length > 0 && (
+            <>
+              <span className="text-[11px] font-bold text-brand-600 dark:text-brand-400">{itemsSel.length} seleccionado{itemsSel.length > 1 ? 's' : ''}</span>
+              <button onClick={copiarSeleccionados}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition">
+                <Copy size={11} /> Copiar {itemsSel.length}
+              </button>
+              <button onClick={descargarZip}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold rounded-lg bg-gray-800 dark:bg-gray-700 hover:bg-gray-900 dark:hover:bg-gray-600 text-white transition">
+                <FileArchive size={11} /> Descargar ZIP
+              </button>
+              <button onClick={() => marcarUsados(itemsSel.map(i => i.id), true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition">
+                <BadgeCheck size={11} /> Marcar usados
+              </button>
+            </>
+          )}
+          {/* Filtro de uso */}
+          <div className="ml-auto flex items-center gap-1">
+            {[['todos', `Todos (${items.length})`], ['sin-usar', `Sin usar (${items.length - countUsados})`], ['usados', `Usados (${countUsados})`]].map(([v, label]) => (
+              <button key={v} onClick={() => setFiltroUso(v)}
+                className={`px-2.5 py-1 text-[10px] font-bold rounded-full transition ${
+                  filtroUso === v
+                    ? 'bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300'
+                    : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                }`}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Lista */}
       {items.length === 0 ? (
         <div className="text-center py-8 text-xs text-gray-400 dark:text-gray-500 italic">
@@ -364,16 +514,32 @@ export default function TranscripcionVideosSection({ addToast, forcedProductoId,
         </div>
       ) : (
         <div className="space-y-2">
-          {items.map(item => {
+          {itemsVisibles.map(item => {
             const abierto = expandedId === item.id;
+            const seleccionable = item.status === 'listo' && !!item.guion;
             return (
-              <div key={item.id} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
+              <div key={item.id} className={`bg-white dark:bg-gray-800 border rounded-xl overflow-hidden transition ${
+                seleccionados.has(item.id) ? 'border-brand-400 dark:border-brand-600 ring-1 ring-brand-200 dark:ring-brand-900/50' : 'border-gray-200 dark:border-gray-700'
+              } ${item.usado ? 'opacity-60' : ''}`}>
                 {/* Fila */}
                 <div className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/40 transition"
                   onClick={() => setExpandedId(abierto ? null : item.id)}>
+                  {seleccionable && (
+                    <button onClick={e => { e.stopPropagation(); toggleSel(item.id); }}
+                      className="shrink-0 text-gray-400 hover:text-brand-600 transition" title="Seleccionar para acción masiva">
+                      {seleccionados.has(item.id) ? <CheckSquare size={16} className="text-brand-600" /> : <Square size={16} />}
+                    </button>
+                  )}
                   <Film size={16} className="text-gray-400 shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-bold text-gray-900 dark:text-gray-100 truncate">{item.nombre}</p>
+                    <p className="text-xs font-bold text-gray-900 dark:text-gray-100 truncate">
+                      {item.nombre}
+                      {item.usado && (
+                        <span className="ml-2 inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[9px] font-bold rounded-full bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 align-middle" title={item.usadoAt ? `Usado el ${new Date(item.usadoAt).toLocaleDateString()}` : ''}>
+                          <BadgeCheck size={9} /> USADO
+                        </span>
+                      )}
+                    </p>
                     <p className="text-[10px] text-gray-500 dark:text-gray-400">
                       {item.durationSec ? `${Math.round(item.durationSec)}s · ` : ''}
                       {item.idioma ? `idioma: ${item.idioma} · ` : ''}
@@ -420,6 +586,16 @@ export default function TranscripcionVideosSection({ addToast, forcedProductoId,
 
                     {/* Acciones */}
                     <div className="flex items-center gap-2 pt-1">
+                      {item.status === 'listo' && item.guion && (
+                        <button onClick={() => marcarUsados([item.id], !item.usado)}
+                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold rounded-lg transition ${
+                            item.usado
+                              ? 'text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600'
+                              : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                          }`}>
+                          {item.usado ? <><Undo2 size={11} /> Marcar sin usar</> : <><BadgeCheck size={11} /> Marcar como usado</>}
+                        </button>
+                      )}
                       {(item.status === 'listo' || (item.status === 'error' && item.transcript)) && (
                         <button onClick={() => readaptar(item)}
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition">

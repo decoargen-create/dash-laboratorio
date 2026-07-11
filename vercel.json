@@ -26,6 +26,8 @@
     "api/marketing/cron-competidor-refresh.js": { "maxDuration": 300 },
     "api/marketing/ocr-ad.js": { "maxDuration": 180 },
     "api/marketing/transcribe-ad.js": { "maxDuration": 240 },
+    "api/marketing/transcribir-video.js": { "maxDuration": 240 },
+    "api/marketing/adaptar-guion-video.js": { "maxDuration": 120 },
     "api/marketing/search-ads.js": { "maxDuration": 30 },
     "api/marketing/boards.js": { "maxDuration": 30 },
     "api/meta/[action].js": { "maxDuration": 60 },

@@ -23,8 +23,8 @@ Contexto para Claude Code. Este documento resume la arquitectura, decisiones y p
 - **Deploy**: https://unrivaled-paletas-8a7fa5.netlify.app (Netlify Drop, manual)
 - **Fuente**: carpeta `senyfactura/` (mismo stack)
 - Flujo: pedidos pagados de Tienda Nube/Shopify entran por webhook a una cola → se facturan con un click (o manual) → CAE de ARCA vía **Afip SDK** (https://docs.afipsdk.com)
-- Regla de comprobante: empresa RI → Factura B (cbte_tipo 6, IVA 21% discriminado, neto = total/1.21); empresa MONO → Factura C (cbte_tipo 11, todo neto, sin array Iva)
-- `CondicionIVAReceptorId: 5` (consumidor final) por defecto; DocTipo 96 (DNI) si TN trae identificación, sino 99
+- Regla de comprobante: empresa RI → Factura B (cbte_tipo 6, IVA 21% discriminado, neto = total/1.21) o **Factura A (cbte_tipo 1) si el receptor es RI** (body con `receptor_cond_iva: 1` + `doc_tipo: 80` + `doc_nro` = CUIT del receptor, validado 11 dígitos); empresa MONO → Factura C (cbte_tipo 11, todo neto, sin array Iva) siempre, nunca A/B
+- `CondicionIVAReceptorId` sale de `receptor_cond_iva` (default 5, consumidor final); DocTipo 96 (DNI) si TN trae identificación, sino 99. Las 3 (A, B y C) probadas OK en dev con CAE el 2026-07-11
 - **Modo actual: `dev`** (entorno de prueba de ARCA, usa CUIT de prueba 20409378472 y PtoVta 1). Pasa a real configurando el secret `AFIP_ENV=prod`
 
 ## Backend compartido (Supabase)

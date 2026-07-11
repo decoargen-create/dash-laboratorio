@@ -1438,6 +1438,18 @@ function AppShell({ onExit }) {
   }, [currentPlatform]);
   const [currentSection, setCurrentSection] = useState(() => {
     try {
+      // ARRANQUE NUEVO vs REFRESH: sessionStorage sobrevive al F5 de la misma
+      // tab pero NO a una tab/ventana nueva ni a reabrir el browser. En un
+      // arranque nuevo (login, volver a la app) SIEMPRE aterrizamos en Home y
+      // limpiamos el producto activo — antes se restauraba la última sección +
+      // el último producto y el user caía directo adentro de un workspace.
+      // En un refresh a mitad de trabajo, seguimos restaurando donde estaba.
+      const esRefresh = !!sessionStorage.getItem('adslab-tab-alive');
+      sessionStorage.setItem('adslab-tab-alive', '1');
+      if (!esRefresh) {
+        try { localStorage.removeItem('adslab-marketing-active-product'); } catch {}
+        return 'mk-home';
+      }
       const saved = localStorage.getItem('adslab-last-section');
       // Si tenía una sección de Viora/Senydrop/MetaAds, defaulteamos a la
       // de Marketing. Lista de secciones válidas en las plataformas activas:

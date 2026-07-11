@@ -45,7 +45,8 @@ export async function fetchProductos() {
     return [];
   }
   // Stripear campos pesados legacy (mismo que pullMarketingFromCloud)
-  return (data || []).map(row => {
+  // + filtrar tombstones (productos borrados — ver deleteProductoCloud).
+  return (data || []).filter(row => !row.data?._deleted).map(row => {
     const p = row.data || {};
     const { creativos, ...slim } = p;
     if (!slim.resumenEjecutivo && slim.docs?.resumenEjecutivo) {
@@ -87,9 +88,17 @@ export async function deleteProductoCloud(productoId) {
   // Ideas de la bandeja
   await supabase.from('marketing_ideas')
     .delete().eq('user_id', user.id).eq('producto_id', idStr);
-  // Producto
+  // Producto — TOMBSTONE en vez de delete duro (mismo esquema que
+  // marketingSync.deleteProducto): si borráramos la fila, otra sesión con
+  // copia local re-pushearía el producto y reaparecería en todos lados.
+  const nowIso = new Date().toISOString();
   await supabase.from('marketing_productos')
-    .delete().eq('user_id', user.id).eq('id', idStr);
+    .upsert({
+      id: idStr,
+      user_id: user.id,
+      data: { id: idStr, _deleted: true, deleted_at: nowIso, updated_at: nowIso },
+      updated_at: nowIso,
+    }, { onConflict: 'user_id,id' });
 }
 
 // ============================================================

@@ -83,7 +83,11 @@ export async function pullMarketingFromCloud() {
   try { localArr = JSON.parse(localStorage.getItem(KEYS.productos) || '[]'); } catch {}
   const localById = new Map(localArr.map(p => [String(p.id), p]));
 
-  const productosArr = (productos || []).map(row => {
+  // TOMBSTONES: filas con data._deleted son productos borrados. NO entran a
+  // la lista (así el setItem de local los elimina también en esta sesión),
+  // pero SÍ quedan en cloudIds más abajo → el gate de "local-only" no los
+  // resucita aunque esta PC tenga una copia local vieja.
+  const productosArr = (productos || []).filter(row => !row.data?._deleted).map(row => {
     const cloudP = row.data || {};
     const { creativos, ...slim } = cloudP;
     // DEFENSIVE SHAPE VALIDATION: data corrupta en cloud (campo `competidores`
@@ -439,6 +443,7 @@ export async function pushAllProductos(productos) {
   // próximo pull la traiga de vuelta a local.
   let cloudSizes = new Map();
   let cloudUpdatedAt = new Map();
+  let cloudDeletedAt = new Map(); // tombstones: id → ts del borrado
   try {
     const { data: cloudCurrent } = await supabase
       .from('marketing_productos')
@@ -446,6 +451,10 @@ export async function pushAllProductos(productos) {
       .eq('user_id', user.id)
       .in('id', productos.map(p => String(p.id)));
     for (const row of cloudCurrent || []) {
+      if (row.data?._deleted) {
+        cloudDeletedAt.set(String(row.id), Date.parse(row.data.deleted_at || row.updated_at || 0) || 0);
+        continue;
+      }
       const size = JSON.stringify(row.data || {}).length;
       cloudSizes.set(String(row.id), size);
       // Para LWW comparamos contra el timestamp del propio producto (data),
@@ -462,6 +471,17 @@ export async function pushAllProductos(productos) {
   const skipped = [];
   for (const p of productos) {
     const stripped = stripIdeas(p);
+    // TOMBSTONE: el producto fue borrado en otra sesión. NO lo re-pusheamos
+    // (eso lo resucitaría para todos) — salvo que lo hayan editado DESPUÉS
+    // del borrado, lo que leemos como recreación intencional y gana.
+    const deletedTs = cloudDeletedAt.get(String(p.id)) || 0;
+    if (deletedTs > 0) {
+      const editTs = Date.parse(stripped.updated_at || stripped.updatedAt || 0) || 0;
+      if (editTs <= deletedTs) {
+        console.warn(`[sync] producto ${p.id} ("${p.nombre}") tiene tombstone en cloud — skip push (borrado en otra sesión). El próximo pull lo elimina de local.`);
+        continue;
+      }
+    }
     const localSize = JSON.stringify(stripped).length;
     const cloudSize = cloudSizes.get(String(p.id)) || 0;
     const localTs = Date.parse(stripped.updated_at || stripped.updatedAt || 0) || 0;
@@ -540,12 +560,23 @@ export async function deleteProducto(productoId) {
     .delete()
     .eq('user_id', user.id)
     .eq('producto_id', idStr);
-  // Producto al final.
+  // Producto al final — TOMBSTONE en vez de delete duro. Si elimináramos la
+  // fila, cualquier otra sesión/PC que todavía tenga el producto en su
+  // localStorage lo re-pushearía al cloud (o el gate de "local-only nuevo"
+  // del pull lo resucitaría) y el producto reaparecía. Bug reportado:
+  // "cuando borro el producto y entro de otra sesión vuelven a aparecer".
+  // Con la lápida: el pull la ve y BORRA la copia local en todas las
+  // sesiones; el push la ve y skipea el producto (salvo que lo hayan
+  // editado DESPUÉS del borrado — recreación intencional, que gana).
+  const nowIso = new Date().toISOString();
   await supabase
     .from('marketing_productos')
-    .delete()
-    .eq('id', idStr)
-    .eq('user_id', user.id);
+    .upsert({
+      id: idStr,
+      user_id: user.id,
+      data: { id: idStr, _deleted: true, deleted_at: nowIso, updated_at: nowIso },
+      updated_at: nowIso,
+    }, { onConflict: 'user_id,id' });
   // Limpiar la key local de brands para que el próximo pull no la
   // re-popule. Y notificar al sync para que el otro state se entere.
   try {

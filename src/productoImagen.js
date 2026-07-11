@@ -115,6 +115,10 @@ async function patchProductoCloudFallback(id, patch) {
     console.warn(`[productoImagen] cloud fallback: producto ${id} tampoco está en cloud`);
     return;
   }
+  if (row.data._deleted) {
+    console.warn(`[productoImagen] producto ${id} está borrado (tombstone) — no patcheo`);
+    return;
+  }
   const merged = { ...row.data, ...patch, updated_at: new Date().toISOString() };
   const { error: upErr } = await supabase
     .from('marketing_productos')

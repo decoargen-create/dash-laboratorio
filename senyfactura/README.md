@@ -48,9 +48,33 @@ Fase 2 (facturación masiva automática — verificada 2026-07-11):
 - [x] Motor `procesar-cola`: agarra pendientes, resuelve empresa, factura con freno y reintentos
 - [x] Config por cliente (`fact_config`): modo **automático** vs **lote**, empresa/IVA por defecto
 - [x] Cron cada 5 min (pg_cron) que factura solo a los clientes en modo automático
-- [ ] Onboarding de tiendas por OAuth (TN / Shopify / Mercado Libre) — fase 3
+
+Fase 3 (integración Mercado Libre — código listo, falta configurar la app de ML):
+- [x] Conexión por OAuth (`ml-connect` → ML → `ml-callback`), tokens guardados por cliente
+- [x] Webhook `ml-webhook`: recibe la venta, refresca token si venció, y si está paga la mete en la cola
+- [x] Botón "Conectar" en la pantalla Tiendas
+- [ ] **Pendiente Lucas**: crear la app en Mercado Libre y cargar credenciales (ver abajo)
+- [ ] Tienda Nube / Shopify: onboarding OAuth (hoy los webhooks existen pero cargan tokens a mano)
 - [ ] Certificado ARCA por cliente para pasar a producción
 - [ ] PDF con QR de ARCA + envío por mail
+
+## Conectar Mercado Libre (setup, una sola vez)
+
+1. Entrar a https://developers.mercadolibre.com.ar/ → **Crear aplicación**.
+2. En **Redirect URI** poner exactamente:
+   `https://qlnfgjsjibwrkzgmwdgl.supabase.co/functions/v1/ml-callback`
+3. En **Notificaciones/Webhooks**, callback URL:
+   `https://qlnfgjsjibwrkzgmwdgl.supabase.co/functions/v1/ml-webhook`
+   y suscribir el topic **`orders_v2`**.
+4. Copiar el **App ID (Client ID)** y el **Secret Key (Client Secret)** y guardarlos en Vault:
+   ```sql
+   select vault.create_secret('EL_CLIENT_ID', 'ML_CLIENT_ID');
+   select vault.create_secret('EL_CLIENT_SECRET', 'ML_CLIENT_SECRET');
+   ```
+   (La edge function los lee vía la RPC `get_ml_creds()`, solo para service_role.)
+
+Listo eso, el cliente entra a **Tiendas → Conectar** y autoriza su cuenta. Las ventas pagadas
+caen solas en **Ventas a facturar**.
 
 ## Motor de facturación masiva
 

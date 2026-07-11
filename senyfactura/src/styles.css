@@ -12,6 +12,8 @@
   --amber-ink: #8a6d1a;
   --red-bg: #fbe9e9;
   --red-ink: #b42318;
+  --panel: #f2f3f5;
+  --gray-bg: #eff1f3;
   --radius: 13px;
   --shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.06);
 }
@@ -118,6 +120,7 @@ td.num, th.num { text-align: right; }
 .msg-ok { background: var(--green-bg); color: var(--green-ink); }
 
 .empty { text-align: center; color: var(--ink-soft); padding: 44px 20px; }
+.note { padding: 10px 12px; border-radius: 9px; font-size: 13px; background: var(--panel); color: var(--ink-soft); }
 .muted { color: var(--ink-soft); }
 .right { text-align: right; }
 .row-between { display: flex; align-items: center; justify-content: space-between; gap: 12px; }

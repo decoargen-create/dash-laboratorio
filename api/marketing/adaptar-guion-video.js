@@ -35,12 +35,13 @@ Devolvés EXACTAMENTE este JSON (sin markdown, sin texto extra):
 {
   "traduccion": "traducción FIEL de la transcripción al español neutro. Traducís lo que dice, sin adaptar nada. Si ya está en español, copiala prolijada (sin muletillas de transcripción).",
   "estructuraDetectada": "1-2 líneas: qué mecánica usa el ad (ej: 'hook de curiosidad + testimonio en primera persona + demo + urgencia de oferta'). Es el PATRÓN que vas a preservar.",
-  "guion": "el guion NUEVO completo, listo para grabar/locutar.",
+  "guion": "el guion NUEVO completo, listo para grabar/locutar. SOLO el texto hablado, corrido de principio a fin — SIN timecodes, SIN 'Segundos X a Y:', SIN títulos de sección, SIN indicaciones de escena. Saltos de línea para separar ideas, nada más.",
   "hooksAlternativos": ["hook alternativo 1", "hook alternativo 2", "hook alternativo 3"],
   "notasEditor": "indicaciones de producción para el editor: tono de voz, ritmo, dónde van los cortes/beats respecto del original, qué mostrar en cámara en cada tramo, textos en pantalla sugeridos. Concreto y accionable, en bullets con \\n."
 }
 
 REGLAS DEL GUION (las más importantes):
+- SOLO TEXTO HABLADO: el guion es únicamente lo que se dice en voz alta, corrido. PROHIBIDO meter timecodes ("Segundos 0 a 5:"), numeración de beats, títulos de sección o indicaciones visuales dentro del guion — todo eso va EXCLUSIVAMENTE en notasEditor.
 - Castellano RIOPLATENSE 100%. Voseo. Modismos porteños naturales ("posta", "mirá", "te juro", "de una", "me re pasaba"). JAMÁS español neutro ni de España ni mexicanismos.
 - Escrito como habla una persona real en una historia de IG — cercano, imperfecto, con ritmo hablado. NO locutor profesional, NO lenguaje publicitario acartonado.
 - PRESERVÁ la estructura del original: mismo tipo de hook, mismo orden de beats, mismo mecanismo de persuasión, duración hablada similar. Eso es lo validado. Lo que CAMBIA es el contenido: producto, problema, avatar, país, oferta.

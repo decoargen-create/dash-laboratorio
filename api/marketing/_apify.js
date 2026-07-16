@@ -413,7 +413,12 @@ export const WINNER_CRITERIA = {
 // impressions agarra primero los winners reales (los que la marca está
 // escalando). Sin sort, Apify devuelve por orden de scrape (random
 // efectivo) y los top winners pueden quedar fuera del cap.
-export function buildAdLibraryUrl({ keyword, country = 'ALL' }) {
+export function buildAdLibraryUrl({ keyword, country = 'ALL', activeStatus = 'active' }) {
   const q = encodeURIComponent(keyword);
-  return `https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=${country}&is_targeted_country=false&q=${q}&search_type=keyword_unordered&media_type=all&sort_data[mode]=total_impressions&sort_data[direction]=desc`;
+  // active_status: 'active' = solo ads corriendo ahora. 'all' = incluye el
+  // histórico de ads inactivos (los que ya pararon). Para inspiración el
+  // histórico es valioso — ads que corrieron mucho tiempo = ganadores
+  // probados aunque ya no estén activos.
+  const status = activeStatus === 'all' ? 'all' : (activeStatus === 'inactive' ? 'inactive' : 'active');
+  return `https://www.facebook.com/ads/library/?active_status=${status}&ad_type=all&country=${country}&is_targeted_country=false&q=${q}&search_type=keyword_unordered&media_type=all&sort_data[mode]=total_impressions&sort_data[direction]=desc`;
 }

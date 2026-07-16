@@ -656,6 +656,22 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
 }
 
 
+// Fallback de carga de imagen: los thumbnails de Meta CDN (fbcdn.net) tienen
+// protección de hotlink/referrer — un <img src> directo desde el browser suele
+// dar 403 y quedar en negro. Al fallar, reintentamos vía el proxy-image
+// (fetch server-side, sin referrer del browser). Si el proxy TAMBIÉN falla
+// (URL genuinamente expirada), recién ahí escondemos. Sin esto las miniaturas
+// de ads viejos/inactivos salían todas negras.
+function handleAdImgError(e, cdnUrl) {
+  const img = e.currentTarget;
+  if (!img.dataset.proxied && cdnUrl) {
+    img.dataset.proxied = '1';
+    img.src = `/api/marketing/proxy-image?url=${encodeURIComponent(cdnUrl)}`;
+  } else {
+    img.style.display = 'none';
+  }
+}
+
 function AdThumb({ ad, brandNombre, brandId = null, isCompetidor = false, fresh = false, adapting = false, creando = false, selected = false, selectionIndex = null, used = false, onAdapt, onCrearReferencial, onToggleSelect, onSaveToBoard = null, progress = null, onClearProgress = null }) {
   const cdnThumb = ad.imageUrls?.[0];
   const fbUrl = ad.snapshotUrl;
@@ -728,7 +744,7 @@ function AdThumb({ ad, brandNombre, brandId = null, isCompetidor = false, fresh 
       {thumb ? (
         <img src={thumb} alt="" className="w-full h-full object-cover"
           loading="lazy" decoding="async"
-          onError={(e) => { e.target.style.display = 'none'; }} />
+          onError={(e) => handleAdImgError(e, cachedUrl ? cdnThumb : thumb)} />
       ) : (
         <div className="w-full h-full flex items-center justify-center">
           <ImageIcon size={20} className="text-gray-300" />
@@ -1190,7 +1206,7 @@ function TopListView({ items, seleccionados, selectedOrder, adaptingAdIds, crean
             }`}>{idx + 1}</div>
             {/* Thumb chiquito */}
             <div className="w-12 h-12 rounded bg-gray-100 dark:bg-gray-900 overflow-hidden shrink-0 border border-gray-200 dark:border-gray-700">
-              {thumb && <img src={thumb} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" onError={e => { e.target.style.display = 'none'; }} />}
+              {thumb && <img src={thumb} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" onError={e => handleAdImgError(e, thumb)} />}
             </div>
             {/* Info */}
             <div className="flex-1 min-w-0">
@@ -1294,7 +1310,7 @@ function TopTableView({ items, seleccionados, selectedOrder, adaptingAdIds, crea
                 <td className="py-1.5 px-2">
                   <div className="flex items-center gap-2">
                     <div className="w-8 h-8 rounded bg-gray-100 dark:bg-gray-900 overflow-hidden shrink-0 border border-gray-200 dark:border-gray-700">
-                      {thumb && <img src={thumb} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" onError={e => { e.target.style.display = 'none'; }} />}
+                      {thumb && <img src={thumb} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" onError={e => handleAdImgError(e, thumb)} />}
                     </div>
                     <span className="text-[10px] text-gray-700 dark:text-gray-300 truncate max-w-[200px]">{ad.headline || ad.body?.slice(0, 50) || '—'}</span>
                   </div>
@@ -1384,6 +1400,21 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   useEffect(() => {
     return subscribeQuotaQueue(setQuotaQueue);
   }, []);
+  // "Solo probados (≥5 días)": el user quiere ver ÚNICAMENTE ads ACTIVOS que
+  // llevan al menos 5 días corriendo. Los ads con <5 días suelen ser tests
+  // que el advertiser todavía no validó — filtrarlos deja la librería con los
+  // que ya probaron que valen. Default ON. El scrape en sí trae TODOS los
+  // activos (límite alto); este toggle filtra el display por daysRunning.
+  const [soloProbados, setSoloProbados] = useState(() => {
+    try {
+      const v = localStorage.getItem('adslab-inspiracion-solo-probados');
+      return v === null ? true : v === '1'; // default ON
+    } catch { return true; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('adslab-inspiracion-solo-probados', soloProbados ? '1' : '0'); } catch {}
+  }, [soloProbados]);
+  const MIN_DAYS_PROBADO = 5;
   // Re-sync productos cuando otra parte del código (Arranque, useMarketingSync,
   // otro tab) modifica localStorage. Sin esto el state de InspiracionSection
   // queda stale después de un pull o un cambio en Setup. Comparación deep por
@@ -2619,7 +2650,10 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       estimatedMs: 60000,
     });
     try {
-      const payload = { country: 'ALL', limit: 100 };
+      // Límite 500 (era 100) para traer TODOS los activos de la biblioteca,
+      // no solo los primeros 100. Apify devuelve hasta 500 pero solo cobra
+      // por los que existan — si el comp tiene 60, devuelve 60.
+      const payload = { country: 'ALL', limit: 500, activeStatus: 'active' };
       if (brand.fbPageUrl) {
         payload.fbPageUrl = brand.fbPageUrl.startsWith('http') ? brand.fbPageUrl : `https://www.facebook.com/${brand.fbPageUrl}`;
       } else if (brand.landingUrl) {
@@ -2762,7 +2796,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       estimatedMs: 60000,
     });
     try {
-      const payload = { country: 'ALL', limit: 100 };
+      const payload = { country: 'ALL', limit: 500, activeStatus: 'active' };
       // adLibraryUrl > fbPageUrl > landingUrl→resolve > keyword.
       const directUrl = comp.adLibraryUrl || comp.fbPageUrl;
       if (directUrl) {
@@ -3242,7 +3276,13 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           // Ads ahora viven en IDB; compAdsByCompId los hidrata. Fallback a c.ads
           // inline para items legacy aún no migrados.
           const allAds = compAdsByCompId[c.id] || c.ads || [];
-          const staticAds = allAds.filter(a => (a.imageUrls?.length || 0) > 0 && (a.videoUrls?.length || 0) === 0);
+          // Statics (sin video) + filtro "solo probados" (≥5 días corriendo)
+          // si el toggle está ON. daysRunning null = lo mostramos (no ocultar
+          // ads sin dato de fecha).
+          const staticAds = allAds.filter(a =>
+            (a.imageUrls?.length || 0) > 0 && (a.videoUrls?.length || 0) === 0
+            && (!soloProbados || a.daysRunning == null || a.daysRunning >= MIN_DAYS_PROBADO)
+          );
           return {
             id: `comp-${c.id}`,
             nombre: c.nombre,
@@ -3261,7 +3301,9 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         const customUnif = brands.map(b => ({
           ...b,
           isCompetidor: false,
-          __ads: adsByBrand[b.id] || [],
+          __ads: (adsByBrand[b.id] || []).filter(a =>
+            !soloProbados || a.daysRunning == null || a.daysRunning >= MIN_DAYS_PROBADO
+          ),
         }));
         // Dedup competidor vs brand-from-comp: si una brand vino del competidor
         // (fromCompetidorId), o su host/nombre coincide con un competidor,
@@ -3568,6 +3610,20 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
 
                 return (
                   <>
+                    {/* Toggle: solo ads "probados" (≥5 días corriendo). Los
+                        ads con <5 días suelen ser tests sin validar. Filtra el
+                        display; el scrape igual trae todos los activos. */}
+                    <button
+                      onClick={() => setSoloProbados(v => !v)}
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded border transition ${
+                        soloProbados
+                          ? 'text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/20 border-emerald-300 dark:border-emerald-700'
+                          : 'text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-700 hover:border-emerald-300 dark:hover:border-emerald-700'
+                      }`}
+                      title="Solo muestra ads ACTIVOS con al menos 5 días corriendo (los que el advertiser ya validó). Apagá para ver también los tests recién lanzados."
+                    >
+                      {soloProbados ? '✓ ' : ''}≥5 días
+                    </button>
                     <button
                       disabled={scrapingBrandIds.size > 0 || smartEligibles.length === 0}
                       onClick={onSmart}

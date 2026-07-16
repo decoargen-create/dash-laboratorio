@@ -50,7 +50,10 @@ export default async function handler(req, res) {
   }
 
   const body = await readBody(req);
-  const { fbPageUrl, searchKeyword, country = 'AR', limit = 50 } = body || {};
+  const { fbPageUrl, searchKeyword, country = 'AR', limit = 50, activeStatus: rawStatus = 'active' } = body || {};
+  // 'active' (default) = solo ads corriendo ahora. 'all' = suma el histórico
+  // de ads inactivos → mucho más pool para inspiración. Sanitizado.
+  const activeStatus = ['active', 'all', 'inactive'].includes(rawStatus) ? rawStatus : 'active';
 
   if (!fbPageUrl && !searchKeyword) {
     return respondJSON(res, 400, {
@@ -80,7 +83,7 @@ export default async function handler(req, res) {
       return respondJSON(res, 400, { error: 'fbPageUrl no es URL válida' });
     }
   } else {
-    startUrl = buildAdLibraryUrl({ keyword: searchKeyword, country });
+    startUrl = buildAdLibraryUrl({ keyword: searchKeyword, country, activeStatus });
   }
 
   const actorId = process.env.APIFY_ACTOR_ID || DEFAULT_ACTOR;
@@ -102,7 +105,10 @@ export default async function handler(req, res) {
     resultsLimit: cappedLimit,
     maxItems: cappedLimit,        // field nuevo requerido por la API actualizada
     maxResults: cappedLimit,      // alias por si el actor lo lee con otro nombre
-    activeStatus: 'active',
+    // activeStatus del input del actor — para el caso fbPageUrl (page directa)
+    // donde la URL no lleva active_status. Para keyword URLs, buildAdLibraryUrl
+    // ya lo pone en la query. Mandamos ambos por las dudas.
+    activeStatus,
     isDetailsPerAd: true,
     includeAboutPage: false,
     onlyTotal: false,

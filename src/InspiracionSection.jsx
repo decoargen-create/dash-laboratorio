@@ -34,6 +34,7 @@ import { getProductoImagen, getAccentColor } from './productoImagen.js';
 import { saveReferencial, getUsedAdIdsForProducto } from './galeriaReferenciales.js';
 import { startBulk, patchBulk, reportAdFinished, finishBulk, clearBulk, subscribeBulk } from './bulkProgressStore.js';
 import { cacheAdImagesBatch, getCachedAdImageUrl } from './adImagesStore.js';
+import { checkAdProductMismatch } from './adDomainCheck.js';
 import { startExecution, updateExecution, finishExecution } from './executionsStore.js';
 import { trackQuotaFailure, isQuotaError, removeFromQuotaQueue, getQuotaQueue, clearQuotaQueue, subscribeQuotaQueue } from './quotaRetryStore.js';
 import { playDoneChime, playBulkDoneChime, playErrorTone } from './sounds.js';
@@ -2048,8 +2049,23 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   //   • Falla 1 → las otras 3 siguen funcionando.
   //   • Progreso real (1/4, 2/4, ...).
   //   • Mismo costo de Sonnet ($0.04 una vez) gracias al cache.
-  const crearReferencialDeAd = async (brandNombre, ad) => {
+  const crearReferencialDeAd = async (brandNombre, ad, { skipCategoryWarn = false } = {}) => {
     if (!producto) return false;
+    // RED DE SEGURIDAD (bug Femflora): si el ad de referencia parece de otra
+    // categoría (pies/uñas/cara) que el producto (íntimo/etc.), avisamos ANTES
+    // de gastar tokens. En el path single mostramos confirm; el bulk pasa
+    // skipCategoryWarn y hace su propio chequeo agregado.
+    if (!skipCategoryWarn && typeof window !== 'undefined') {
+      const { mismatch, productDomain, adDomain } = checkAdProductMismatch(producto, ad);
+      if (mismatch) {
+        const ok = window.confirm(
+          `⚠ Este ad parece ser de "${adDomain.label}", pero tu producto "${producto.nombre}" es de "${productDomain.label}".\n\n` +
+          `El creativo se va a re-anclar a tu producto, pero la inspiración visual va a ser de otra categoría (y puede salir raro).\n\n` +
+          `¿Generar igual?`
+        );
+        if (!ok) return false;
+      }
+    }
     // Pasamos producto como fallback — cross-device, localStorage puede no
     // tener producto.fotoUrl todavía pero el cloud sí.
     const prodImg = await getProductoImagen(producto.id, producto);
@@ -2449,7 +2465,24 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     const total = seleccionados.size * nVarBulk;
     const sizeLabel = genOpts.size === '1024x1536' ? '1024×1536 portrait' : genOpts.size === '1024x1024' ? '1024×1024 1:1' : '2048×2048 1:1';
     const cacheNote = visionAds < seleccionados.size ? ` (${seleccionados.size - visionAds} con skeleton cacheado)` : '';
-    if (!window.confirm(`Generar ${nVarBulk} variante${nVarBulk !== 1 ? 's' : ''} ${sizeLabel} por cada uno de los ${seleccionados.size} ads${cacheNote} → ${total} imágenes total, ~$${costoEstimado.toFixed(2)}. Las requests se disparan TODAS en paralelo y el cloud-save funciona aunque cierres la pestaña. ETA: ~${Math.max(120, 75 * 2)}s. ¿Seguir?`)) return;
+    // Chequeo agregado de cruce de categoría (bug Femflora): cuántos de los
+    // ads seleccionados parecen de otra categoría que el producto. Un solo
+    // aviso, no N confirms.
+    let bulkMismatchNote = '';
+    try {
+      const selAds = [];
+      for (const c of (producto.competidores || [])) {
+        for (const a of (compAdsByCompId[c.id] || c.ads || [])) if (seleccionados.has(a.id)) selAds.push(a);
+      }
+      for (const lista of Object.values(adsByBrand)) {
+        for (const a of (lista || [])) if (seleccionados.has(a.id)) selAds.push(a);
+      }
+      const mism = selAds.filter(a => checkAdProductMismatch(producto, a).mismatch).length;
+      if (mism > 0) {
+        bulkMismatchNote = `\n\n⚠ ${mism} de los ${selAds.length} ads parecen de otra categoría que "${producto.nombre}". El creativo se re-ancla al producto pero la inspiración visual puede salir rara.`;
+      }
+    } catch {}
+    if (!window.confirm(`Generar ${nVarBulk} variante${nVarBulk !== 1 ? 's' : ''} ${sizeLabel} por cada uno de los ${seleccionados.size} ads${cacheNote} → ${total} imágenes total, ~$${costoEstimado.toFixed(2)}. Las requests se disparan TODAS en paralelo y el cloud-save funciona aunque cierres la pestaña. ETA: ~${Math.max(120, 75 * 2)}s.${bulkMismatchNote} ¿Seguir?`)) return;
 
     // Recién acá tomamos el lock — DESPUÉS del confirm (si cancelás no queda
     // trabado) y con try/finally alrededor de TODO el cuerpo async. Si algo
@@ -2513,8 +2546,11 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       message: `${adsAGenerar.length} ads disparados en paralelo. En ~80s todas las variantes estarán generándose server-side — podés cerrar la pestaña y volver: el cloud save sigue.`,
     });
 
+    // skipCategoryWarn: el chequeo por-ad mostraría N confirms en el bulk.
+    // El aviso agregado ya se mostró antes del startBulk (más abajo en el
+    // código, computado como bulkMismatchCount).
     const promises = adsAGenerar.map(({ brandNombre, ad }, i) =>
-      crearReferencialDeAd(brandNombre, ad).then(ok => {
+      crearReferencialDeAd(brandNombre, ad, { skipCategoryWarn: true }).then(ok => {
         reportAdFinished(i, { ok, errorBrand: ok ? null : brandNombre });
         return ok;
       })

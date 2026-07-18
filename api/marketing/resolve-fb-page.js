@@ -89,12 +89,39 @@ async function fetchLandingHTML(url, { timeoutMs = 8000 } = {}) {
   }
 }
 
-// Extrae todos los handles de FB del HTML y devuelve el más frecuente
-// (suele ser el real de la marca, porque aparece en nav + footer + social bar).
-function extractFbHandle(html) {
+// Token distintivo del dominio de la landing (ej: femflorabrand.com →
+// "femflorabrand"). Lo usamos para preferir el handle de FB que pertenece a
+// LA MARCA, no a un plugin/fanbox/agencia embebido que gane por frecuencia.
+function domainBrandToken(landingUrl) {
+  try {
+    const host = new URL(/^https?:\/\//i.test(landingUrl) ? landingUrl : `https://${landingUrl}`).hostname;
+    // Sacamos www + TLD, nos quedamos con el label principal.
+    const parts = host.replace(/^www\./, '').split('.');
+    return (parts[0] || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  } catch { return ''; }
+}
+
+// ¿El handle comparte señal con el token de marca del dominio? Match laxo:
+// uno contiene al otro, o comparten un prefijo de ≥5 chars. Sin esto,
+// femflorabrand vs footclinic no matchean (correcto → sospechoso).
+function handleMatchesBrand(handle, brandToken) {
+  if (!handle || !brandToken || brandToken.length < 3) return false;
+  const h = handle.replace(/[^a-z0-9]/g, '');
+  if (h.includes(brandToken) || brandToken.includes(h)) return true;
+  // Prefijo común largo (femflora... vs femflorabrand).
+  const common = Math.min(h.length, brandToken.length);
+  let i = 0;
+  while (i < common && h[i] === brandToken[i]) i++;
+  return i >= 5;
+}
+
+// Extrae handles de FB del HTML. Devuelve { handle, confidence, matchesBrand }.
+// PRIORIDAD (audit del bug Femflora→pies): el handle que matchea el dominio de
+// la marca gana sobre el más frecuente. Antes solo ganaba el más frecuente, y
+// un plugin/fanbox/link de agencia embebido en la landing podía resolver a la
+// FB page EQUIVOCADA (otro anunciante), trayendo ads de otro producto.
+function extractFbHandle(html, landingUrl = '') {
   if (!html) return null;
-  // Match facebook.com/<handle> (con o sin "pg/", con o sin subdomain www/m/web).
-  // Captura cualquier handle válido de Facebook: letras, números, puntos, guiones.
   const re = /(?:https?:)?\/\/(?:www\.|m\.|web\.|es-la\.|business\.)?facebook\.com\/(?:pg\/|pages\/[^/]+\/)?([a-zA-Z0-9.\-_]+)(?=[\/"'?#\s&]|$)/gi;
   const counts = new Map();
   let m;
@@ -102,22 +129,27 @@ function extractFbHandle(html) {
     const raw = m[1];
     if (!raw) continue;
     const handle = raw.toLowerCase();
-    // Descartar blacklist + paths con extensión (.php, .html, etc.)
     if (HANDLE_BLACKLIST.has(handle)) continue;
     if (/\.(php|html|htm|aspx?)$/i.test(handle)) continue;
-    // Handles muy cortos son sospechosos (probablemente truncados)
     if (handle.length < 2) continue;
-    // Handles muy largos también (probablemente IDs de tracking pixels)
     if (handle.length > 64) continue;
     counts.set(handle, (counts.get(handle) || 0) + 1);
   }
   if (counts.size === 0) return null;
-  // El más repetido gana. En empate, el primero alfabético.
-  const sorted = [...counts.entries()].sort((a, b) => {
-    if (b[1] !== a[1]) return b[1] - a[1];
-    return a[0].localeCompare(b[0]);
-  });
-  return sorted[0][0];
+
+  const brandToken = domainBrandToken(landingUrl);
+  const entries = [...counts.entries()];
+  // 1. Si hay handle(s) que matchean la marca del dominio, gana el más
+  //    frecuente ENTRE ESOS. Es el caso confiable.
+  const branded = entries.filter(([h]) => handleMatchesBrand(h, brandToken));
+  if (branded.length > 0) {
+    branded.sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0]));
+    return { handle: branded[0][0], confidence: 'high', matchesBrand: true };
+  }
+  // 2. Sin match de marca: devolvemos el más frecuente pero con confidence
+  //    baja para que el caller pueda advertir al user.
+  entries.sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0]));
+  return { handle: entries[0][0], confidence: brandToken ? 'low' : 'unknown', matchesBrand: false };
 }
 
 export default async function handler(req, res) {
@@ -135,8 +167,8 @@ export default async function handler(req, res) {
 
   try {
     const html = await fetchLandingHTML(landingUrl);
-    const handle = extractFbHandle(html);
-    if (!handle) {
+    const result = extractFbHandle(html, landingUrl);
+    if (!result || !result.handle) {
       return respondJSON(res, 200, {
         pageUrl: null,
         handle: null,
@@ -145,9 +177,14 @@ export default async function handler(req, res) {
       });
     }
     return respondJSON(res, 200, {
-      pageUrl: `https://www.facebook.com/${handle}`,
-      handle,
+      pageUrl: `https://www.facebook.com/${result.handle}`,
+      handle: result.handle,
       source: 'html',
+      // confidence: 'high' = el handle matchea el dominio de la marca.
+      // 'low' = no matchea (posible plugin/agencia embebida → puede ser otro
+      // anunciante). El caller advierte al user cuando es low. Ver bug Femflora.
+      confidence: result.confidence,
+      matchesBrand: result.matchesBrand,
     });
   } catch (err) {
     // Antes devolvíamos 200 con error en body — frontend no podía

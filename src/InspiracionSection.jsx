@@ -116,6 +116,56 @@ function landingToKeyword(url) {
   }
 }
 
+// Normaliza a tokens alfanuméricos en minúscula para comparar marca vs
+// pageName scrapeado.
+function normToken(s) {
+  return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+// Valida que los ads scrapeados pertenezcan a la marca esperada. Bug Femflora:
+// resolve-fb-page resolvió el dominio a una FB page EQUIVOCADA (otro anunciante
+// de pies) y el scrape trajo SUS ads bajo el nombre "Femflora" — sin que nadie
+// validara que el pageName real coincidiera. Resultado: creativos de pies para
+// un producto íntimo. Este helper compara el pageName DOMINANTE de los ads
+// contra la marca esperada (nombre + dominio de la landing) y devuelve un
+// mensaje de warning si no hay overlap. No bloquea — solo advierte.
+function detectPageMismatch(ads, { nombre, landingUrl }) {
+  if (!Array.isArray(ads) || ads.length === 0) return null;
+  // pageName dominante entre los ads scrapeados.
+  const counts = new Map();
+  for (const a of ads) {
+    const pn = (a.pageName || '').trim();
+    if (pn) counts.set(pn, (counts.get(pn) || 0) + 1);
+  }
+  if (counts.size === 0) return null; // sin pageName no podemos validar
+  const [dominantName] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+  const pageTok = normToken(dominantName);
+  if (!pageTok) return null;
+  // Tokens esperados: nombre del competidor + label del dominio de la landing.
+  const brandTok = normToken(nombre);
+  let domainTok = '';
+  try {
+    const host = new URL(landingUrl?.startsWith('http') ? landingUrl : `https://${landingUrl}`).hostname;
+    domainTok = normToken(host.replace(/^www\./, '').split('.')[0]);
+  } catch {}
+  // Match laxo: contención en cualquier dirección o prefijo común ≥5.
+  const overlaps = (a, b) => {
+    if (!a || !b || a.length < 3 || b.length < 3) return false;
+    if (a.includes(b) || b.includes(a)) return true;
+    let i = 0; const n = Math.min(a.length, b.length);
+    while (i < n && a[i] === b[i]) i++;
+    return i >= 5;
+  };
+  const matches = overlaps(pageTok, brandTok) || overlaps(pageTok, domainTok);
+  if (matches) return null;
+  // No hay overlap → el anunciante scrapeado NO parece ser la marca esperada.
+  return {
+    scrapedPage: dominantName,
+    expected: nombre,
+    message: `⚠ Los ads scrapeados son de "${dominantName}", pero esperabas "${nombre}". La FB page de este competidor podría estar mal resuelta — revisá su URL en Setup y cargá el Facebook Page URL correcto a mano.`,
+  };
+}
+
 // Valida que el keyword sea utilizable. Refuse si es muy corto o solo
 // dígitos — para no caer en el bug de scrapear con nombre="1" y traer
 // phone cases / cuchillos / random.
@@ -1598,6 +1648,11 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       return raw ? JSON.parse(raw) : {};
     } catch { return {}; }
   });
+  // Key del cache namespaced por producto. Bug latente (audit): el skeleton/
+  // plan se adapta al PRODUCTO, así que cachear solo por ad.id hacía que el
+  // mismo ad usado en 2 productos reusara el plan del otro (texto del producto
+  // equivocado). Prefijamos con el producto activo.
+  const skelKey = (adId) => `${activeProductoId || 'global'}:${adId}`;
   const upsertSkeleton = (adId, skel) => {
     if (!adId || !skel) return;
     setSkeletonCache(prev => {
@@ -2008,7 +2063,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       [ad.id]: { startedAt: Date.now(), stage: 'preparando' },
     }));
     const costoPorImg = costPerImage(genOpts.quality, genOpts.size);
-    const visionCost = skeletonCache[ad.id] ? 0 : 0.04; // Sonnet Strategist
+    const visionCost = skeletonCache[skelKey(ad.id)] ? 0 : 0.04; // Sonnet Strategist
     const nVar = Math.max(1, Math.min(10, genOpts.n || 2));
     const estimatedCost = nVar * costoPorImg + visionCost;
     const execId = startExecution({
@@ -2175,7 +2230,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       updateExecution(execId, { stage: `Generando 1/${nVar}…` });
 
       // CALL #1 — solo, para obtener el plan y poblar el cache.
-      let cachedPlan = skeletonCache[ad.id] || null;
+      let cachedPlan = skeletonCache[skelKey(ad.id)] || null;
       const firstData = await doCall(0, cachedPlan);
       const totalCostAccum = { openai: 0, anthropic: 0 };
       const c1 = logCostsFromResponse(firstData, `crear-creativo-referencial · ${brandNombre} · 1/${nVar}`);
@@ -2184,10 +2239,10 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
 
       const newPlan = firstData.plan || cachedPlan;
       if (newPlan && !firstData.skeletonFromCache) {
-        upsertSkeleton(ad.id, newPlan);
+        upsertSkeleton(skelKey(ad.id), newPlan);
         cachedPlan = newPlan;
       } else if (cachedPlan == null && firstData.skeleton) {
-        upsertSkeleton(ad.id, firstData.skeleton);
+        upsertSkeleton(skelKey(ad.id), firstData.skeleton);
       }
 
       await saveOne(firstData, 0, newPlan);
@@ -2388,7 +2443,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     // Costo: $0.18/imagen (high) × 2 variantes + ~$0.005 vision (Haiku) por ad
     // que NO esté ya en cache. n=2 fijo.
     const costoPorImagen = costPerImage(genOpts.quality, genOpts.size);
-    const visionAds = Array.from(seleccionados).filter(adId => !skeletonCache[adId]).length;
+    const visionAds = Array.from(seleccionados).filter(adId => !skeletonCache[skelKey(adId)]).length;
     const nVarBulk = Math.max(1, Math.min(10, genOpts.n || 2));
     const costoEstimado = seleccionados.size * nVarBulk * costoPorImagen + visionAds * 0.005;
     const total = seleccionados.size * nVarBulk;
@@ -2710,6 +2765,11 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       const scrapeCost = logCostsFromResponse(data, `inspiracion · ${brand.nombre}`);
 
       const allAds = data.ads || [];
+      // VALIDACIÓN DE MARCA (bug Femflora) — ver detectPageMismatch.
+      const mismatchB = detectPageMismatch(allAds, { nombre: brand.nombre, landingUrl: brand.landingUrl });
+      if (mismatchB) {
+        addToast?.({ type: 'warning', message: mismatchB.message, duration: 12000 });
+      }
       // Solo statics (sin video) — para Inspiración nos interesan los estáticos.
       const staticAds = allAds.filter(a => (a.imageUrls?.length || 0) > 0 && (a.videoUrls?.length || 0) === 0);
 
@@ -2851,6 +2911,13 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       const scrapeCost = logCostsFromResponse(data, `inspiracion · ${comp.nombre}`);
 
       const ads = data.ads || [];
+      // VALIDACIÓN DE MARCA (bug Femflora): avisar si el anunciante scrapeado
+      // no coincide con el competidor esperado — probablemente FB page mal
+      // resuelta trayendo ads de otro producto.
+      const mismatch = detectPageMismatch(ads, { nombre: comp.nombre, landingUrl: comp.landingUrl });
+      if (mismatch) {
+        addToast?.({ type: 'warning', message: mismatch.message, duration: 12000 });
+      }
       const prevIds = new Set((comp.ads || []).map(a => a.id));
       const newAds = ads.filter(a => !prevIds.has(a.id));
 

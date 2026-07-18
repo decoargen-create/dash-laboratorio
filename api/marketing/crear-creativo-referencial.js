@@ -543,6 +543,13 @@ async function planStrategyAndVariations({ apiKey, refImgBuf, refMime, producto,
   // (en vez de removerlas como cuando está vacío). Esto evita que el creativo
   // diga "$29" del competidor cuando nuestro precio es otro.
   const ofertasReales = dedupOfertas((producto?.ofertasReales || producto?.offerBrief || producto?.docs?.offerBrief || '').toString().trim());
+  // Offer Brief doc — el documento estratégico generado (big idea, oferta
+  // única, mecanismo, prueba, urgencia). Distinto de ofertasReales (que son
+  // precios/promos concretos). Lo pasamos aparte para que el ÁNGULO del
+  // creativo se apoye en la big idea/mecanismo/prueba de la landing, no solo
+  // en el precio. Solo si es distinto de ofertasReales (evitar duplicar).
+  const offerBriefDoc = (producto?.docs?.offerBrief || '').toString().trim();
+  const offerBriefDistinto = offerBriefDoc && offerBriefDoc.slice(0, 200) !== (ofertasReales || '').slice(0, 200);
   // Escala real del producto extraída de la landing/research — para que el
   // plan dimensione bien el productPlacement.scale y no salga "como cápsula".
   const scaleHint = inferRealWorldScale(producto);
@@ -556,14 +563,17 @@ async function planStrategyAndVariations({ apiKey, refImgBuf, refMime, producto,
   // (ej: probiótico íntimo) heredaba el tema del ad de referencia (pies/uñas)
   // porque el modelo no tenía ninguna orden de re-anclar el dominio. Este
   // bloque fuerza a derivar el caso de uso SOLO del producto del usuario.
-  const domainLock = `**DOMAIN LOCK (CRÍTICO, SIEMPRE)**: El producto del usuario es "${producto?.nombre || 'N/A'}". Derivá SU dominio/problema/zona de uso ÚNICAMENTE del nombre + descripción + research de ABAJO. El ad de referencia (IMAGE 1) puede ser de un producto o problema COMPLETAMENTE DISTINTO (ej: ref de pies/uñas y nuestro producto es íntimo/vaginal). DEBÉS ABANDONAR por completo el tema del ad de referencia y reescribir CADA headline, testimonio y claim para que hable del dominio REAL de nuestro producto. Nunca dejes filtrar el tema del ad ref (pies, uñas, cara, pelo, etc.) salvo que genuinamente coincida con nuestro producto.`;
+  const domainLock = `**DOMAIN LOCK (CRÍTICO, SIEMPRE)**: El producto del usuario es "${producto?.nombre || 'N/A'}". La FUENTE DE VERDAD del creativo es el foco de la LANDING de este producto (ver research abajo, derivado de su landing) + sus DOCUMENTOS DE OFERTA (ver ofertas/precios/claims abajo). Todo el ángulo, pain points, beneficios y claims salen de AHÍ — no del ad de referencia. El ad de referencia (IMAGE 1) puede ser de un producto o problema COMPLETAMENTE DISTINTO (ej: ref de pies/uñas y nuestro producto es íntimo/vaginal): copiá su FÓRMULA VISUAL (composición, layout, mood) pero ABANDONÁ su tema y reescribí CADA headline, testimonio y claim para que hable del dominio REAL de nuestro producto según su landing + oferta. Nunca dejes filtrar el tema del ad ref (pies, uñas, cara, pelo, etc.) salvo que genuinamente coincida con nuestro producto.`;
   const productCtx = [
     `Producto: ${producto?.nombre || 'N/A'}`,
     producto?.descripcion ? `Descripción: ${producto.descripcion.slice(0, 400)}` : '',
     domainLock,
     useCaseHint ? `**CASO DE USO REAL DEL PRODUCTO** (CRÍTICO — los textos/testimonios/claims adaptados DEBEN ser sobre esto, NO sobre el problema del ad ref): ${useCaseHint.directive}` : '',
     scaleHint ? `**TAMAÑO REAL DEL PRODUCTO** (CRÍTICO para que la imagen no lo dibuje chiquito): ${scaleHint}` : '',
-    research ? `Research / audiencia / pain points:\n${research}` : '',
+    research ? `Research / audiencia / pain points (foco de la landing):\n${research}` : '',
+    offerBriefDistinto
+      ? `**OFFER BRIEF (documento de oferta — big idea, oferta única, mecanismo, prueba, urgencia)**. Usá esto para el ÁNGULO y la propuesta de valor del creativo:\n${offerBriefDoc.slice(0, 1500)}`
+      : '',
     ofertasReales
       ? `**OFERTAS / PRECIOS / CLAIMS REALES DEL USUARIO** (estos son los ÚNICOS que podés mencionar — si el ad ref menciona algo distinto, REEMPLAZALO por esto):\n${ofertasReales.slice(0, 1500)}`
       : '**SIN OFERTAS DECLARADAS** — si el ad ref menciona promos/precios/claims regulatorios, REMOVELOS (no los inventes).',
@@ -750,6 +760,8 @@ async function extractSkeletonHaiku({ apiKey, refImgBuf, refMime, producto }) {
   // sobre offerBrief — es el campo focalizado que el user llena en Setup
   // con su precio/promo real (ej: "USD 49 + envío gratis").
   const ofertasReales = dedupOfertas((producto?.ofertasReales || producto?.offerBrief || producto?.docs?.offerBrief || '').toString().trim());
+  const offerBriefDocV = (producto?.docs?.offerBrief || '').toString().trim();
+  const offerBriefDistintoV = offerBriefDocV && offerBriefDocV.slice(0, 200) !== (ofertasReales || '').slice(0, 200);
   // Avatar + research mergeados para que Vision tenga TODO el contexto del
   // target al adaptar textos: tipo de producto, pain points, valores,
   // objeciones, demografía. Antes solo iba research (1500 chars) y los
@@ -761,7 +773,7 @@ async function extractSkeletonHaiku({ apiKey, refImgBuf, refMime, producto }) {
   const scaleHintV = inferRealWorldScale(producto);
   const useCaseHintV = inferUseCase(producto);
   // DOMAIN LOCK genérico — ver comentario en planStrategyAndVariations.
-  const domainLockV = `**DOMAIN LOCK (CRÍTICO, SIEMPRE)**: El producto es "${producto?.nombre || 'N/A'}". Derivá su dominio/problema/zona SOLO del nombre + descripción + research de abajo. El ad de referencia puede ser de OTRO nicho — ABANDONÁ su tema y reescribí cada texto para el dominio REAL de nuestro producto. Nunca dejes filtrar pies/uñas/cara/pelo del ad ref salvo que coincida de verdad.`;
+  const domainLockV = `**DOMAIN LOCK (CRÍTICO, SIEMPRE)**: El producto es "${producto?.nombre || 'N/A'}". La FUENTE DE VERDAD son el foco de la LANDING (research abajo) + los DOCUMENTOS DE OFERTA (ofertas abajo). Derivá ángulo, problema y claims SOLO de ahí, no del ad ref. El ad de referencia puede ser de OTRO nicho — copiá su fórmula visual pero ABANDONÁ su tema y reescribí cada texto para el dominio REAL de nuestro producto según su landing + oferta. Nunca dejes filtrar pies/uñas/cara/pelo del ad ref salvo que coincida de verdad.`;
   const productoCtx = [
     `Nombre: ${producto?.nombre || 'N/A'}`,
     productoForm ? `**FORMATO FÍSICO: ${productoForm.toUpperCase()}** (este producto viene en ${productoForm} — NO es otro formato).` : '',
@@ -769,10 +781,13 @@ async function extractSkeletonHaiku({ apiKey, refImgBuf, refMime, producto }) {
     useCaseHintV ? `**CASO DE USO REAL** (CRÍTICO — los textos adaptados deben ser sobre esto, NO sobre el problema del ad ref): ${useCaseHintV.directive}` : '',
     scaleHintV ? `**TAMAÑO REAL** (no lo dibujes chiquito): ${scaleHintV}` : '',
     producto?.descripcion ? `Descripción: ${producto.descripcion.slice(0, 500)}` : '',
+    offerBriefDistintoV
+      ? `**OFFER BRIEF (documento de oferta — big idea, oferta única, mecanismo, prueba, urgencia)**. Usá esto para el ÁNGULO del creativo:\n${offerBriefDocV.slice(0, 1200)}`
+      : '',
     ofertasReales
       ? `**OFERTAS / PRECIOS / CLAIMS REALES DEL USUARIO** (estos son los ÚNICOS que podés mencionar — si el ad ref menciona algo distinto, REEMPLAZALO por esto, NO lo dejes literal):\n${ofertasReales.slice(0, 1500)}`
       : '**SIN OFERTAS NI CLAIMS DECLARADOS** — NO inventes descuentos, % off, "comprá 3 y ahorrá", FDA, ANMAT, ni claims médicos.',
-    fullContextV ? `**AVATAR + RESEARCH** (USAR para entender al target, sus pain points, objeciones, valores — y reescribir los textos para que LE HABLEN específicamente):\n${fullContextV.slice(0, 3000)}` : '',
+    fullContextV ? `**AVATAR + RESEARCH (foco de la landing)** (USAR para entender al target, sus pain points, objeciones, valores — y reescribir los textos para que LE HABLEN específicamente):\n${fullContextV.slice(0, 3000)}` : '',
   ].filter(Boolean).join('\n');
 
   const system = `Sos analista visual + copywriter de DTC argentino. Tu trabajo es leer un ad ganador y devolver:

@@ -1201,6 +1201,32 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // Wizard competitors
   const [showCompForm, setShowCompForm] = useState(false);
   const [compDraft, setCompDraft] = useState({ nombre: '', landingUrl: '', adLibraryUrl: '' });
+  // Edición inline de los links de un competidor (landing / FB page / ad
+  // library URL). Clave para arreglar una FB page mal resuelta sin borrar y
+  // recargar el competidor (que perdería sus ads/análisis).
+  const [editCompId, setEditCompId] = useState(null);
+  const [editCompDraft, setEditCompDraft] = useState({ nombre: '', landingUrl: '', fbPageUrl: '', adLibraryUrl: '' });
+  const startEditComp = (c) => {
+    setEditCompId(c.id);
+    setEditCompDraft({
+      nombre: c.nombre || '',
+      landingUrl: c.landingUrl || '',
+      fbPageUrl: c.fbPageUrl || '',
+      adLibraryUrl: c.adLibraryUrl || '',
+    });
+  };
+  const saveEditComp = () => {
+    if (!editCompId) return;
+    setCompetidores(prev => prev.map(x => x.id === editCompId ? {
+      ...x,
+      nombre: editCompDraft.nombre.trim() || x.nombre,
+      landingUrl: editCompDraft.landingUrl.trim(),
+      fbPageUrl: editCompDraft.fbPageUrl.trim(),
+      adLibraryUrl: editCompDraft.adLibraryUrl.trim(),
+    } : x));
+    setEditCompId(null);
+    addToast?.({ type: 'success', message: 'Links actualizados. Re-scrapeá para traer los ads correctos.' });
+  };
 
   // Meta ad account picker
   const [metaConnected, setMetaConnected] = useState(null); // null = unknown, bool = checked
@@ -3820,6 +3846,44 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               const winners = c.winnersCount || 0;
               const analizado = !!c.lastAdsCheck;
               const favHost = hostnameOf(c.landingUrl);
+              // Modo edición de links — reemplaza la card por un form inline.
+              if (editCompId === c.id) {
+                return (
+                  <div key={c.id} className="bg-white dark:bg-gray-800 border-2 border-brand-300 dark:border-brand-700 rounded-xl p-3 space-y-2 animate-fade-in">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-brand-600 dark:text-brand-400">Editar links de {c.nombre}</p>
+                    <div className="space-y-1.5">
+                      <label className="block text-[9px] font-semibold text-gray-500 dark:text-gray-400">Nombre</label>
+                      <input type="text" value={editCompDraft.nombre} onChange={e => setEditCompDraft(d => ({ ...d, nombre: e.target.value }))}
+                        className="w-full px-2 py-1 text-xs bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                      <label className="block text-[9px] font-semibold text-gray-500 dark:text-gray-400">Landing URL</label>
+                      <input type="url" value={editCompDraft.landingUrl} onChange={e => setEditCompDraft(d => ({ ...d, landingUrl: e.target.value }))}
+                        placeholder="https://marca.com"
+                        className="w-full px-2 py-1 text-xs bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                      <label className="block text-[9px] font-semibold text-gray-500 dark:text-gray-400">Facebook Page URL <span className="text-brand-500">(el que arregla el scrape de la marca correcta)</span></label>
+                      <input type="url" value={editCompDraft.fbPageUrl} onChange={e => setEditCompDraft(d => ({ ...d, fbPageUrl: e.target.value }))}
+                        placeholder="https://www.facebook.com/lamarca"
+                        className="w-full px-2 py-1 text-xs bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                      <label className="block text-[9px] font-semibold text-gray-500 dark:text-gray-400">Ad Library URL (opcional — búsqueda armada a mano)</label>
+                      <input type="url" value={editCompDraft.adLibraryUrl} onChange={e => setEditCompDraft(d => ({ ...d, adLibraryUrl: e.target.value }))}
+                        placeholder="https://www.facebook.com/ads/library/?..."
+                        className="w-full px-2 py-1 text-xs bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                    </div>
+                    <p className="text-[9px] text-gray-500 dark:text-gray-400 leading-tight">
+                      Prioridad de scrape: Ad Library URL &gt; Facebook Page URL &gt; Landing (auto-resuelve la FB page). Si los ads te salieron de otra marca, cargá el Facebook Page URL correcto acá.
+                    </p>
+                    <div className="flex gap-1.5 justify-end">
+                      <button onClick={() => setEditCompId(null)}
+                        className="px-2.5 py-1 text-[10px] font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 transition">
+                        Cancelar
+                      </button>
+                      <button onClick={saveEditComp}
+                        className="px-2.5 py-1 text-[10px] font-bold text-white bg-brand-600 rounded hover:bg-brand-700 transition">
+                        Guardar
+                      </button>
+                    </div>
+                  </div>
+                );
+              }
               return (
                 <div key={c.id} className="bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-gray-700 rounded-xl p-3 flex items-start gap-3">
                   <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-brand-400 to-red-400 flex items-center justify-center text-white font-bold text-sm shrink-0 relative overflow-hidden">
@@ -3878,6 +3942,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                       : 'Activar auto-refresh diario — Santi va a scrapear este competidor todas las noches a las 3 AM sin que tengas que pedirlo.'}
                   >
                     <Clock size={14} />
+                  </button>
+                  <button onClick={() => startEditComp(c)}
+                    className="p-1.5 text-gray-300 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/20 rounded transition shrink-0"
+                    title="Editar links (landing / FB page / ad library)">
+                    <Pencil size={14} />
                   </button>
                   <button onClick={() => handleRemoveCompetidor(c.id)}
                     className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition shrink-0"

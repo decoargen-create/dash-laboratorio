@@ -294,6 +294,20 @@ function inferUseCase(producto) {
   const hasFeet = /\b(pies?|pie|talones?|tal[óo]n|planta del pie|pedicur|podolog)\b/.test(haystack);
   const hasNails = /\b(u[ñn]as?|onicomicosis|nail)\b/.test(haystack);
   const hasFungus = /\b(hongos?|antimic[óo]tico|antif[úu]ngico|antihongos|micosis|onicomicosis|pie de atleta|athlete'?s? foot|fungal|fungus)\b/.test(haystack);
+  // Salud íntima / vaginal — probióticos íntimos, flora vaginal, pH íntimo.
+  const hasIntimate = /\b([íi]ntim[oa]s?|vaginal(es)?|flora [íi]ntima|flora vaginal|ph [íi]ntimo|ph vaginal|candidiasis|c[áa]ndida|flujo vaginal|zona [íi]ntima|higiene [íi]ntima|probi[óo]tico [íi]ntimo|vulvar|feminine|intimate wellness)\b/.test(haystack);
+
+  // Salud íntima femenina — probióticos íntimos, flora vaginal. Chequeado
+  // ANTES que pies/uñas porque un ad de referencia de otro nicho (pies, cara)
+  // no debe arrastrar su tema. El producto íntimo se comunica con confianza
+  // femenina, frescura y bienestar — NUNCA con anatomía explícita.
+  if (hasIntimate) {
+    return {
+      directive: 'This is an INTIMATE / FEMININE WELLNESS product (vaginal probiotic, intimate flora / pH balance). Every headline, testimonial and claim MUST be about intimate feminine wellbeing: freshness, confidence, comfort, balance, ending discomfort/odor/imbalance. NEVER show or mention feet, toenails, nail fungus, facial skin, wrinkles, anti-aging or hair. If IMAGE 1 is about feet/nails/face/any other body zone, ABANDON that topic completely and rewrite everything to intimate feminine wellness.',
+      scene: 'tasteful feminine-wellness context: a confident woman relaxed at home, soft neutral fabrics, a flower or delicate plant, warm clean light, pastel/clean palette, spa-like calm — NO explicit anatomy, NO feet, NO nails, NO clinical closeups of body parts',
+      avoid: 'feet, toenails, nail fungus, cracked heels, faces with wrinkles, anti-aging cues, hair/scalp, any body zone that is not intimate/feminine-wellness framing',
+    };
+  }
 
   // Antihongos de pies/uñas — el caso reportado.
   if (hasFungus && (hasFeet || hasNails)) {
@@ -537,9 +551,16 @@ async function planStrategyAndVariations({ apiKey, refImgBuf, refMime, producto,
   // antihongos de pies). Sin esto, "manchitas de la cara se aclararon" salía
   // literal en un producto de pies.
   const useCaseHint = inferUseCase(producto);
+  // DOMAIN LOCK genérico — SIEMPRE presente, incluso si inferUseCase no matchea
+  // ninguna categoría conocida. Sin esto, un producto de nicho desconocido
+  // (ej: probiótico íntimo) heredaba el tema del ad de referencia (pies/uñas)
+  // porque el modelo no tenía ninguna orden de re-anclar el dominio. Este
+  // bloque fuerza a derivar el caso de uso SOLO del producto del usuario.
+  const domainLock = `**DOMAIN LOCK (CRÍTICO, SIEMPRE)**: El producto del usuario es "${producto?.nombre || 'N/A'}". Derivá SU dominio/problema/zona de uso ÚNICAMENTE del nombre + descripción + research de ABAJO. El ad de referencia (IMAGE 1) puede ser de un producto o problema COMPLETAMENTE DISTINTO (ej: ref de pies/uñas y nuestro producto es íntimo/vaginal). DEBÉS ABANDONAR por completo el tema del ad de referencia y reescribir CADA headline, testimonio y claim para que hable del dominio REAL de nuestro producto. Nunca dejes filtrar el tema del ad ref (pies, uñas, cara, pelo, etc.) salvo que genuinamente coincida con nuestro producto.`;
   const productCtx = [
     `Producto: ${producto?.nombre || 'N/A'}`,
     producto?.descripcion ? `Descripción: ${producto.descripcion.slice(0, 400)}` : '',
+    domainLock,
     useCaseHint ? `**CASO DE USO REAL DEL PRODUCTO** (CRÍTICO — los textos/testimonios/claims adaptados DEBEN ser sobre esto, NO sobre el problema del ad ref): ${useCaseHint.directive}` : '',
     scaleHint ? `**TAMAÑO REAL DEL PRODUCTO** (CRÍTICO para que la imagen no lo dibuje chiquito): ${scaleHint}` : '',
     research ? `Research / audiencia / pain points:\n${research}` : '',
@@ -739,9 +760,12 @@ async function extractSkeletonHaiku({ apiKey, refImgBuf, refMime, producto }) {
   );
   const scaleHintV = inferRealWorldScale(producto);
   const useCaseHintV = inferUseCase(producto);
+  // DOMAIN LOCK genérico — ver comentario en planStrategyAndVariations.
+  const domainLockV = `**DOMAIN LOCK (CRÍTICO, SIEMPRE)**: El producto es "${producto?.nombre || 'N/A'}". Derivá su dominio/problema/zona SOLO del nombre + descripción + research de abajo. El ad de referencia puede ser de OTRO nicho — ABANDONÁ su tema y reescribí cada texto para el dominio REAL de nuestro producto. Nunca dejes filtrar pies/uñas/cara/pelo del ad ref salvo que coincida de verdad.`;
   const productoCtx = [
     `Nombre: ${producto?.nombre || 'N/A'}`,
     productoForm ? `**FORMATO FÍSICO: ${productoForm.toUpperCase()}** (este producto viene en ${productoForm} — NO es otro formato).` : '',
+    domainLockV,
     useCaseHintV ? `**CASO DE USO REAL** (CRÍTICO — los textos adaptados deben ser sobre esto, NO sobre el problema del ad ref): ${useCaseHintV.directive}` : '',
     scaleHintV ? `**TAMAÑO REAL** (no lo dibujes chiquito): ${scaleHintV}` : '',
     producto?.descripcion ? `Descripción: ${producto.descripcion.slice(0, 500)}` : '',

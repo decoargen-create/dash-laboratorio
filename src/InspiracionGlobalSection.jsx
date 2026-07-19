@@ -228,7 +228,7 @@ export default function InspiracionGlobalSection({ addToast }) {
       });
       const data = await parseJsonOrThrow(resp, 'crear-creativo-referencial');
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-      const costo = logCostsFromResponse(data, `inspiracion-global → ${producto.nombre}`);
+      const costo = logCostsFromResponse(data, `inspiracion-global → ${producto.nombre}`, { productoId: producto?.id });
 
       // Si server-saved al cloud, listo. Sino fallback IDB.
       const cloudOk = Array.isArray(data.cloudCreativos) && data.cloudCreativos.length > 0;

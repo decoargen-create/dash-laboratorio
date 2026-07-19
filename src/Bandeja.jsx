@@ -1453,7 +1453,7 @@ function IdeaImageGenerator({ idea, addToast }) {
       } finally {
         clearTimeout(timer);
       }
-      const costo = logCostsFromResponse(data, `crear-imagen-desde-idea · ${idea.hook?.slice(0, 40) || 'idea'}`);
+      const costo = logCostsFromResponse(data, `crear-imagen-desde-idea · ${idea.hook?.slice(0, 40) || 'idea'}`, { productoId: idea.productoId });
 
       // Si el backend ya guardó al cloud (cloudCreativos), solo refrescamos
       // la galería. Si no, fallback IDB local + toast warning.
@@ -1662,7 +1662,7 @@ function VideoBriefPanel({ idea }) {
       });
       const data = await parseJsonOrThrow(resp, 'adapt-guion');
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-      logCostsFromResponse(data, `adapt-guion · ${(idea.titulo || '').slice(0, 50)}`);
+      logCostsFromResponse(data, `adapt-guion · ${(idea.titulo || '').slice(0, 50)}`, { productoId: idea.productoId });
       // updateIdea persiste igual aunque el panel se haya desmontado — el
       // guión queda guardado en la idea. Solo el setState es condicional.
       // Si data.guion es vacío lo tratamos como error (sino re-disparaba

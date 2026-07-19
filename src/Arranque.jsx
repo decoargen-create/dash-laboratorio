@@ -28,7 +28,7 @@ import { deleteProducto as deleteProductoFromCloud } from './marketingSync.js';
 import { supabase } from './supabase.js';
 import { downloadProductoExport, importProductoFromFile } from './productoExport.js';
 import DiagnosticoSyncModal from './DiagnosticoSyncModal.jsx';
-import { logCostsFromResponse } from './costsStore.js';
+import { logCostsFromResponse, spendAllProductos } from './costsStore.js';
 // Static imports — lazy() causaba TDZ en prod por chunking inconsistente.
 import BandejaSection from './Bandeja.jsx';
 import InspiracionSection from './InspiracionSection.jsx';
@@ -46,6 +46,7 @@ import { setCompAds, getCompAds, hydrateCompetidoresAds, removeCompAds } from '.
 import { stringifyApiError } from './apiHelpers.js';
 import { trackQuotaFailure, isQuotaError, removeFromQuotaQueue } from './quotaRetryStore.js';
 import AnimatedCounter from './AnimatedCounter.jsx';
+import ProductoCostsModal from './ProductoCostsModal.jsx';
 
 // Avatar del producto: muestra el pote (foto cargada en Setup) y cae al
 // gradiente con la inicial si todavía no hay foto. getProductoImagen resuelve
@@ -1189,6 +1190,15 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // Wizard product form
   const [showProdForm, setShowProdForm] = useState(false);
   const [showDiagnostico, setShowDiagnostico] = useState(false);
+  // Modal de costos per-product + mapa de totales para el chip "$X" de cada
+  // card. Se recomputa al abrir la lista y cuando se loguea un costo nuevo.
+  const [costsModalProducto, setCostsModalProducto] = useState(null);
+  const [productSpendMap, setProductSpendMap] = useState(() => spendAllProductos());
+  useEffect(() => {
+    const refresh = () => setProductSpendMap(spendAllProductos());
+    window.addEventListener('viora:cost-logged', refresh);
+    return () => window.removeEventListener('viora:cost-logged', refresh);
+  }, []);
   // Vista de la lista de productos: 'grid' (tarjetas) | 'list' (filas compactas).
   const [vista, setVista] = useState(() => {
     try { return localStorage.getItem('adslab-productos-vista') || 'grid'; } catch { return 'grid'; }
@@ -1507,7 +1517,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-      logCostsFromResponse(data, `match-product-ads · ${metaAccount.ads.length} ads`);
+      logCostsFromResponse(data, `match-product-ads · ${metaAccount.ads.length} ads`, { productoId: producto?.id });
 
       // Enriquecemos los ads con el confidence match.
       const matchMap = new Map(data.matches.map(m => [m.adId, m]));
@@ -1686,7 +1696,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-      logCostsFromResponse(data, `suggest-competitors · "${keyword}"`);
+      logCostsFromResponse(data, `suggest-competitors · "${keyword}"`, { productoId: producto?.id });
       // Filtramos los que ya están agregados (por pageName).
       const existentes = new Set(competidores.map(c => (c.nombre || '').toLowerCase()));
       const nuevas = (data.suggestions || []).filter(s => !existentes.has((s.pageName || '').toLowerCase()));
@@ -1845,9 +1855,10 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     const insertedIdeasForScoring = [];
 
     // Wrapper sobre logCostsFromResponse que también suma al runCost (display
-    // en vivo) y al acumulado local (persistencia final).
+    // en vivo) y al acumulado local (persistencia final). Atribuye TODO el
+    // gasto del pipeline al producto activo (resumen per-product).
     const trackCost = (data, descripcion) => {
-      const added = logCostsFromResponse(data, descripcion);
+      const added = logCostsFromResponse(data, descripcion, { productoId: producto?.id });
       if (added?.total > 0) {
         setRunCost(prev => ({
           anthropic: prev.anthropic + added.anthropic,
@@ -2998,9 +3009,15 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               const deepAnalyses = comps.reduce((sum, c) => sum + Object.keys(c.adsAnalysis || {}).length, 0);
               const runsDelProducto = runHistory.filter(r => String(r.productoId || '') === String(p.id));
               const ultimoRun = runsDelProducto[0];
-              const costoTotal = runsDelProducto.reduce((sum, r) => sum + (r.cost?.total || 0), 0);
+              // Gasto total atribuido al producto (todo lo externo: Apify /
+              // Claude / OpenAI / Meta). Fallback al viejo costo de pipeline
+              // (runHistory) para productos con corridas previas a la
+              // atribución per-product.
+              const costoRuns = runsDelProducto.reduce((sum, r) => sum + (r.cost?.total || 0), 0);
+              const costoTotal = Math.max(productSpendMap[String(p.id)] || 0, costoRuns);
 
               const open = () => setActiveProductoId(String(p.id));
+              const openCosts = (e) => { e.stopPropagation(); setCostsModalProducto(p); };
 
               // Pills compartidas entre grilla y lista.
               const researchPill = (
@@ -3147,6 +3164,14 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                         </div>
                         <div className="text-[9px] text-gray-400 mt-0.5">ads</div>
                       </div>
+                      {costoTotal > 0 && (
+                        <button onClick={openCosts} className="text-right leading-none group/cost" title="Ver resumen de costos de este producto">
+                          <div className="text-base font-bold font-mono text-brand-600 dark:text-brand-400 group-hover/cost:underline">
+                            ${costoTotal.toFixed(2)}
+                          </div>
+                          <div className="text-[9px] text-gray-400 mt-0.5">gastado</div>
+                        </button>
+                      )}
                       <div className="hidden lg:block w-28 text-[10px] text-gray-400 dark:text-gray-500 leading-tight">
                         {(ideasByEstado.pendiente || 0)} pend{comps.length > 0 ? ` · ${comps.length} comp` : ''}{deepAnalyses > 0 ? ` · ${deepAnalyses} IA` : ''}
                       </div>
@@ -3195,7 +3220,13 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                     {metaPill}
                     {deepAnalyses > 0 && <span>· 🤖 {deepAnalyses} análisis</span>}
                     {ultimoRun && <span>· {new Date(ultimoRun.startedAt).toLocaleDateString('es-AR')}</span>}
-                    {costoTotal > 0 && <span className="font-mono text-brand-600 dark:text-brand-400">· ${costoTotal.toFixed(2)}</span>}
+                    {costoTotal > 0 && (
+                      <button onClick={openCosts}
+                        className="font-mono text-brand-600 dark:text-brand-400 hover:underline hover:text-brand-700 dark:hover:text-brand-300 transition"
+                        title="Ver resumen de costos de este producto (scrapes + IA + todo lo externo)">
+                        · ${costoTotal.toFixed(2)} 💸
+                      </button>
+                    )}
                   </div>
                 </div>
               );
@@ -3203,6 +3234,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           </div>
         )}
         {showDiagnostico && <DiagnosticoSyncModal onClose={() => setShowDiagnostico(false)} />}
+        {costsModalProducto && <ProductoCostsModal producto={costsModalProducto} onClose={() => setCostsModalProducto(null)} />}
       </div>
     );
   }

@@ -1970,7 +1970,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     });
     const data = await parseJsonOrThrow(resp, 'adapt-inspiracion');
     if (!resp.ok) throw new Error(stringifyApiError(data.error) || `HTTP ${resp.status}`);
-    const adaptCost = logCostsFromResponse(data, `adapt-inspiracion · ${brandNombre}`);
+    const adaptCost = logCostsFromResponse(data, `adapt-inspiracion · ${brandNombre}`, { productoId: producto?.id });
     const ideas = (data.ideas || []).map(i => ({
       ...i,
       tipo: 'replica',
@@ -2249,7 +2249,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       let cachedPlan = skeletonCache[skelKey(ad.id)] || null;
       const firstData = await doCall(0, cachedPlan);
       const totalCostAccum = { openai: 0, anthropic: 0 };
-      const c1 = logCostsFromResponse(firstData, `crear-creativo-referencial · ${brandNombre} · 1/${nVar}`);
+      const c1 = logCostsFromResponse(firstData, `crear-creativo-referencial · ${brandNombre} · 1/${nVar}`, { productoId: producto?.id });
       totalCostAccum.openai += c1?.openai || 0;
       totalCostAccum.anthropic += c1?.anthropic || 0;
 
@@ -2289,7 +2289,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           return doCall(idx, cachedPlan)
             .then(async data => {
               await saveOne(data, idx, cachedPlan);
-              const c = logCostsFromResponse(data, `crear-creativo-referencial · ${brandNombre} · ${idx + 1}/${nVar}`);
+              const c = logCostsFromResponse(data, `crear-creativo-referencial · ${brandNombre} · ${idx + 1}/${nVar}`, { productoId: producto?.id });
               totalCostAccum.openai += c?.openai || 0;
               totalCostAccum.anthropic += c?.anthropic || 0;
               if (data.imagenes) data.imagenes.length = 0;
@@ -2601,7 +2601,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       });
       const data = await parseJsonOrThrow(resp, `Whisper de ${brand.nombre}`);
       if (!resp.ok) throw new Error(stringifyApiError(data.error) || `HTTP ${resp.status}`);
-      logCostsFromResponse(data, `whisper · ${brand.nombre}`);
+      logCostsFromResponse(data, `whisper · ${brand.nombre}`, { productoId: producto?.id });
       const transcriptById = new Map((data.results || []).map(r => [r.id, r.transcript || '']));
       const patchAd = (a) => transcriptById.has(a.id) ? { ...a, transcript: transcriptById.get(a.id) } : a;
       if (brand.isCompetidor) {
@@ -2674,7 +2674,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       });
       const data = await parseJsonOrThrow(resp, `OCR de ${brand.nombre}`);
       if (!resp.ok) throw new Error(stringifyApiError(data.error) || `HTTP ${resp.status}`);
-      logCostsFromResponse(data, `ocr · ${brand.nombre}`);
+      logCostsFromResponse(data, `ocr · ${brand.nombre}`, { productoId: producto?.id });
       // Patchear ads en el state local con el ocrText devuelto.
       const ocrById = new Map((data.results || []).map(r => [r.id, r.ocrText || '']));
       if (brand.isCompetidor) {
@@ -2798,7 +2798,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                   : data.sugerencia ? JSON.stringify(data.sugerencia) : '';
         throw new Error(sug ? `${base} — ${sug}` : base);
       }
-      const scrapeCost = logCostsFromResponse(data, `inspiracion · ${brand.nombre}`);
+      const scrapeCost = logCostsFromResponse(data, `inspiracion · ${brand.nombre}`, { productoId: producto?.id });
 
       const allAds = data.ads || [];
       // VALIDACIÓN DE MARCA (bug Femflora) — ver detectPageMismatch.
@@ -2944,7 +2944,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                   : data.sugerencia ? JSON.stringify(data.sugerencia) : '';
         throw new Error(sug ? `${base} — ${sug}` : base);
       }
-      const scrapeCost = logCostsFromResponse(data, `inspiracion · ${comp.nombre}`);
+      const scrapeCost = logCostsFromResponse(data, `inspiracion · ${comp.nombre}`, { productoId: producto?.id });
 
       const ads = data.ads || [];
       // VALIDACIÓN DE MARCA (bug Femflora): avisar si el anunciante scrapeado

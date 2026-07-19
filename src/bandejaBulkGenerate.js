@@ -164,7 +164,7 @@ export async function bulkGenerateFromIdeas({
   const promises = ideas.map(idea =>
     fireIdea({ idea, producto, prodImg, accentColor, n, quality, size, authToken })
       .then(async data => {
-        const costo = logCostsFromResponse(data, `bulk-bandeja · ${(idea.hook || idea.titulo || '').slice(0, 40)}`);
+        const costo = logCostsFromResponse(data, `bulk-bandeja · ${(idea.hook || idea.titulo || '').slice(0, 40)}`, { productoId: producto?.id });
         const result = await processResponse(data, idea, producto, quality);
         // Marcar la idea como "usada" — sin esto se queda en la columna
         // "Pendientes" del kanban aunque ya generaste imágenes desde ella.

@@ -31,8 +31,32 @@ function genId() {
   return `cost-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+// Mapea el prefijo de la descripcion a una categoría de gasto legible.
+// Así el caller no tiene que pasar `kind` a mano — la descripcion ya lo
+// codifica ('apify-ingest · Marca' → scrape, 'deep-analyze · ...' → análisis).
+const KIND_PATTERNS = [
+  { kind: 'scrape',     re: /^(apify-ingest|inspiracion(?!-global)|scrape)/i },
+  { kind: 'análisis',   re: /^(deep-analyze|ocr|whisper|post-research-analysis|match-product-ads|score-hooks|suggest-competitors)/i },
+  { kind: 'ideas',      re: /^(generate-ideas|generador rápido|bulk-bandeja|adapt-inspiracion|adapt-guion)/i },
+  { kind: 'creativos',  re: /^(crear-creativo-referencial|crear-imagen-desde-idea|creativos|winners|inspiracion-global)/i },
+  { kind: 'research',   re: /^(research|docs|generate\b)/i },
+  { kind: 'copy',       re: /^(generate-copy|copy)/i },
+  { kind: 'copilot',    re: /^copilot/i },
+];
+
+function inferKind(descripcion) {
+  const d = String(descripcion || '');
+  for (const p of KIND_PATTERNS) {
+    if (p.re.test(d)) return p.kind;
+  }
+  return 'otros';
+}
+
 // Agrega un log. amount en USD. autoTipo = categoría del servicio.
-export function logCost({ autoTipo, amount, descripcion }) {
+// productoId (opcional): atribuye el gasto a un producto — habilita el
+// resumen de costos por producto. kind (opcional): categoría de la
+// operación; si no viene, se infiere de la descripcion.
+export function logCost({ autoTipo, amount, descripcion, productoId = null, kind = null }) {
   if (!autoTipo || !(amount > 0)) return;
   const logs = loadLogs();
   const nuevo = {
@@ -41,6 +65,8 @@ export function logCost({ autoTipo, amount, descripcion }) {
     autoTipo,
     amount: Math.round(amount * 10000) / 10000, // 4 decimales (centavos del centavo)
     descripcion: String(descripcion || '').slice(0, 200),
+    productoId: productoId != null ? String(productoId) : null,
+    kind: kind || inferKind(descripcion),
   };
   // Capamos a últimos 5000 logs para no explotar localStorage.
   const next = [nuevo, ...logs].slice(0, 5000);
@@ -68,14 +94,16 @@ export function spendSince(autoTipo, sinceIso) {
 // Helper: loguea de una sola los costs que vinieron en una response del backend.
 // Devuelve el breakdown + total, para que el caller pueda acumular el gasto
 // de la corrida actual en vivo (además de quedar persistido en el store).
-export function logCostsFromResponse(respData, descripcion) {
+// opts.productoId: atribuye el gasto al producto (para el resumen per-product).
+export function logCostsFromResponse(respData, descripcion, opts = {}) {
   const zero = { anthropic: 0, openai: 0, apify: 0, meta: 0, total: 0 };
   if (!respData?.cost) return zero;
   const { anthropic = 0, openai = 0, apify = 0, meta = 0 } = respData.cost;
-  if (anthropic > 0) logCost({ autoTipo: 'anthropic', amount: anthropic, descripcion });
-  if (openai > 0) logCost({ autoTipo: 'openai', amount: openai, descripcion });
-  if (apify > 0) logCost({ autoTipo: 'apify', amount: apify, descripcion });
-  if (meta > 0) logCost({ autoTipo: 'meta', amount: meta, descripcion });
+  const { productoId = null, kind = null } = opts;
+  if (anthropic > 0) logCost({ autoTipo: 'anthropic', amount: anthropic, descripcion, productoId, kind });
+  if (openai > 0) logCost({ autoTipo: 'openai', amount: openai, descripcion, productoId, kind });
+  if (apify > 0) logCost({ autoTipo: 'apify', amount: apify, descripcion, productoId, kind });
+  if (meta > 0) logCost({ autoTipo: 'meta', amount: meta, descripcion, productoId, kind });
   return {
     anthropic: anthropic || 0,
     openai: openai || 0,
@@ -83,6 +111,44 @@ export function logCostsFromResponse(respData, descripcion) {
     meta: meta || 0,
     total: (anthropic || 0) + (openai || 0) + (apify || 0) + (meta || 0),
   };
+}
+
+// Resumen de gasto de UN producto: total + breakdown por servicio (autoTipo)
+// + breakdown por tipo de operación (kind) + últimos N logs. La base para el
+// panel "cuánto gasté en este producto".
+export function spendByProducto(productoId, { sinceIso = null, recentN = 30 } = {}) {
+  const pid = String(productoId || '');
+  if (!pid) return { total: 0, byService: {}, byKind: {}, recent: [], count: 0 };
+  const sinceMs = sinceIso ? new Date(sinceIso).getTime() : null;
+  const logs = loadLogs().filter(l => {
+    if (l.productoId !== pid) return false;
+    if (sinceMs != null) {
+      const t = new Date(l.ts).getTime();
+      if (isNaN(t) || t < sinceMs) return false;
+    }
+    return true;
+  });
+  const byService = {};
+  const byKind = {};
+  let total = 0;
+  for (const l of logs) {
+    total += l.amount || 0;
+    byService[l.autoTipo] = (byService[l.autoTipo] || 0) + (l.amount || 0);
+    const k = l.kind || 'otros';
+    byKind[k] = (byKind[k] || 0) + (l.amount || 0);
+  }
+  return { total, byService, byKind, recent: logs.slice(0, recentN), count: logs.length };
+}
+
+// Totales por producto para TODOS los productos con gasto — para mostrar el
+// chip "$X" en cada card de la lista sin computar N veces.
+export function spendAllProductos() {
+  const map = {};
+  for (const l of loadLogs()) {
+    if (!l.productoId) continue;
+    map[l.productoId] = (map[l.productoId] || 0) + (l.amount || 0);
+  }
+  return map;
 }
 
 // Devuelve el gasto acumulado de un autoTipo dado en el mes actual

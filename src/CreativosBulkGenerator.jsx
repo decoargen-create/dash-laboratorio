@@ -210,7 +210,7 @@ export default function CreativosBulkGenerator({ producto, addToast }) {
         });
         const data = await resp.json();
         if (!resp.ok) throw new Error((data && (data.error?.message || data.error)) || `HTTP ${resp.status}`);
-        costoUSD += logCostsFromResponse(data, `creativos bulk · ${idea.hook?.slice(0, 40) || 'idea'}`)?.total || 0;
+        costoUSD += logCostsFromResponse(data, `creativos bulk · ${idea.hook?.slice(0, 40) || 'idea'}`, { productoId: producto?.id })?.total || 0;
         return Array.isArray(data.cloudCreativos) ? data.cloudCreativos.map(c => c?.imageUrl).filter(Boolean) : [];
       } finally { clearTimeout(timer); }
     };

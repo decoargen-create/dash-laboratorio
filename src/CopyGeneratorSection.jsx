@@ -13,6 +13,7 @@
 import React, { useState, useEffect } from 'react';
 import { Sparkles, Copy, Check, Loader2, RefreshCw, FileText, Trophy, Package } from 'lucide-react';
 import { loadIdeas } from './bandejaStore.js';
+import { logCostsFromResponse } from './costsStore.js';
 import AnimatedCounter from './AnimatedCounter.jsx';
 
 function loadProductos() {
@@ -121,6 +122,9 @@ export default function CopyGeneratorSection({ addToast }) {
       if (!final || !Array.isArray(final.copies)) {
         throw new Error('El generador devolvió un response vacío.');
       }
+      // Loguear el costo real (el endpoint lo devuelve en el complete) con
+      // atribución al producto — entra en el resumen de gastos per-product.
+      logCostsFromResponse(final, `generate-copy · ${producto.nombre}`, { productoId: producto.id });
       setCopies(final.copies);
       addToast?.({ type: 'success', message: `${final.copies.length} copies generados.` });
     } catch (err) {

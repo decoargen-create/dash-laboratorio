@@ -150,7 +150,7 @@ export default function WinnersGlobalSection({ addToast, onGoToSection }) {
         });
         const data = await resp.json();
         if (!resp.ok) throw new Error((data && (data.error?.message || data.error)) || `HTTP ${resp.status}`);
-        costoUSD += logCostsFromResponse(data, `winners → ${target.nombre}`)?.total || 0;
+        costoUSD += logCostsFromResponse(data, `winners → ${target.nombre}`, { productoId: target?.id })?.total || 0;
         // URLs de los creativos recién subidos al cloud (para el preview).
         const urls = Array.isArray(data.cloudCreativos)
           ? data.cloudCreativos.map(c => c?.imageUrl).filter(Boolean)

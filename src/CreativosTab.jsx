@@ -373,7 +373,7 @@ export default function CreativosTab({ producto, onUpdateProducto, addToast }) {
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-      logCostsFromResponse(data, `creativos/hooks · ${producto.nombre}`);
+      logCostsFromResponse(data, `creativos/hooks · ${producto.nombre}`, { productoId: producto?.id });
 
       const nuevosCreativos = {
         ...(creativos || {}),

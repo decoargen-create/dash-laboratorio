@@ -218,7 +218,7 @@ export async function runGeneradorRapido({ producto, formato, cantidad, formatoM
                 stage: `${totalGeneradas}/${cantidad} ideas · ${insertadasNow} en Bandeja`,
               });
             } else if (ev.type === 'complete') {
-              const costo = logCostsFromResponse(ev, `generador rápido · ${producto?.nombre || ''}`);
+              const costo = logCostsFromResponse(ev, `generador rápido · ${producto?.nombre || ''}`, { productoId: producto?.id });
               costoUSD += costo?.total || 0;
             } else if (ev.type === 'error') {
               streamErr = new Error(ev.error || 'Error del generador');

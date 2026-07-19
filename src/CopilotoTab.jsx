@@ -160,7 +160,7 @@ export default function CopilotoTab({ producto, addToast }) {
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-      logCostsFromResponse(data, `copilot · ${producto?.nombre || ''}`);
+      logCostsFromResponse(data, `copilot · ${producto?.nombre || ''}`, { productoId: producto?.id });
       const finalMsgs = [...conMensaje, { role: 'assistant', content: data.reply }];
       setMessages(finalMsgs);
       saveCopilotChatToCloud(producto?.id, finalMsgs);

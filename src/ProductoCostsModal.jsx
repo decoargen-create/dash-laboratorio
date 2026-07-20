@@ -8,9 +8,10 @@
 // Logs viejos (previos a la atribución per-product) no tienen productoId y
 // no aparecen acá; siguen contando en GastosStack global.
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { X, DollarSign, Server, Layers, Clock } from 'lucide-react';
-import { spendByProducto, AUTO_TIPO_LABELS } from './costsStore.js';
+import { logsForProducto, AUTO_TIPO_LABELS } from './costsStore.js';
+import { supabase } from './supabase.js';
 import AnimatedCounter from './AnimatedCounter.jsx';
 
 const KIND_LABELS = {
@@ -59,10 +60,61 @@ function BreakdownRow({ label, amount, max }) {
 
 export default function ProductoCostsModal({ producto, onClose }) {
   const [periodo, setPeriodo] = useState('all');
-  const summary = useMemo(
-    () => spendByProducto(producto?.id, { sinceIso: sinceForPeriodo(periodo), recentN: 25 }),
-    [producto?.id, periodo]
-  );
+  // Costos del CRON (server-side, tabla marketing_costs). El cron scrapea a
+  // las 6AM sin browser — su gasto solo existe en esta tabla. RLS: el user
+  // solo ve sus propias filas.
+  const [cloudLogs, setCloudLogs] = useState([]);
+  useEffect(() => {
+    if (!producto?.id || !supabase) { setCloudLogs([]); return; }
+    let cancelled = false;
+    supabase
+      .from('marketing_costs')
+      .select('id, auto_tipo, amount, descripcion, kind, source, created_at')
+      .eq('producto_id', String(producto.id))
+      .order('created_at', { ascending: false })
+      .limit(500)
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          // Migration 0017 no aplicada o red caída — degradar sin romper.
+          console.warn('[costos] fetch marketing_costs falló:', error.message);
+          setCloudLogs([]);
+          return;
+        }
+        setCloudLogs((data || []).map(r => ({
+          id: `cloud-${r.id}`,
+          ts: r.created_at,
+          autoTipo: r.auto_tipo,
+          amount: Number(r.amount) || 0,
+          descripcion: r.descripcion || '',
+          kind: r.kind || 'scrape',
+          source: r.source || 'cron',
+        })));
+      });
+    return () => { cancelled = true; };
+  }, [producto?.id]);
+
+  const summary = useMemo(() => {
+    const sinceIso = sinceForPeriodo(periodo);
+    const sinceMs = sinceIso ? new Date(sinceIso).getTime() : null;
+    const all = [...logsForProducto(producto?.id), ...cloudLogs]
+      .filter(l => {
+        if (sinceMs == null) return true;
+        const t = new Date(l.ts).getTime();
+        return !isNaN(t) && t >= sinceMs;
+      })
+      .sort((a, b) => new Date(b.ts) - new Date(a.ts));
+    const byService = {};
+    const byKind = {};
+    let total = 0;
+    for (const l of all) {
+      total += l.amount || 0;
+      byService[l.autoTipo] = (byService[l.autoTipo] || 0) + (l.amount || 0);
+      const k = l.kind || 'otros';
+      byKind[k] = (byKind[k] || 0) + (l.amount || 0);
+    }
+    return { total, byService, byKind, recent: all.slice(0, 25), count: all.length };
+  }, [producto?.id, periodo, cloudLogs]);
   if (!producto) return null;
 
   const services = Object.entries(summary.byService).sort((a, b) => b[1] - a[1]);
@@ -158,6 +210,11 @@ export default function ProductoCostsModal({ producto, onClose }) {
                         {new Date(l.ts).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })}
                       </span>
                       <span className="flex-1 text-gray-600 dark:text-gray-300 truncate">{l.descripcion}</span>
+                      {l.source === 'cron' && (
+                        <span className="shrink-0 px-1 py-0.5 text-[8px] font-bold rounded bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300" title="Gasto del scrape automático nocturno">
+                          cron
+                        </span>
+                      )}
                       <Money v={l.amount} className="font-semibold text-gray-800 dark:text-gray-100 shrink-0" />
                     </div>
                   ))}

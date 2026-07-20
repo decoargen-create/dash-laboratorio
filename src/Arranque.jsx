@@ -28,7 +28,7 @@ import { deleteProducto as deleteProductoFromCloud } from './marketingSync.js';
 import { supabase } from './supabase.js';
 import { downloadProductoExport, importProductoFromFile } from './productoExport.js';
 import DiagnosticoSyncModal from './DiagnosticoSyncModal.jsx';
-import { logCostsFromResponse, spendAllProductos } from './costsStore.js';
+import { logCostsFromResponse, spendAllProductos, backfillProductoIds, normalizeCostName } from './costsStore.js';
 // Static imports — lazy() causaba TDZ en prod por chunking inconsistente.
 import BandejaSection from './Bandeja.jsx';
 import InspiracionSection from './InspiracionSection.jsx';
@@ -1194,11 +1194,68 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // card. Se recomputa al abrir la lista y cuando se loguea un costo nuevo.
   const [costsModalProducto, setCostsModalProducto] = useState(null);
   const [productSpendMap, setProductSpendMap] = useState(() => spendAllProductos());
+  // Totales cloud (gasto del cron, tabla marketing_costs) por producto —
+  // se suman a los locales para el chip "$X gastado".
+  const [cloudSpendMap, setCloudSpendMap] = useState({});
   useEffect(() => {
     const refresh = () => setProductSpendMap(spendAllProductos());
     window.addEventListener('viora:cost-logged', refresh);
     return () => window.removeEventListener('viora:cost-logged', refresh);
   }, []);
+  useEffect(() => {
+    if (!supabase) return;
+    let cancelled = false;
+    supabase
+      .from('marketing_costs')
+      .select('producto_id, amount')
+      .limit(5000)
+      .then(({ data, error }) => {
+        if (cancelled || error || !Array.isArray(data)) return;
+        const map = {};
+        for (const r of data) {
+          if (!r.producto_id) continue;
+          map[r.producto_id] = (map[r.producto_id] || 0) + (Number(r.amount) || 0);
+        }
+        setCloudSpendMap(map);
+      });
+    return () => { cancelled = true; };
+  }, []);
+  // BACKFILL de gastos históricos (una sola vez): los logs previos a la
+  // atribución per-product no tienen productoId, pero su descripcion codifica
+  // el nombre ('apify-ingest · Femflorabrand'). Construimos el mapa
+  // {nombre → productoId} con productos + competidores + brands de
+  // Inspiración, descartamos nombres ambiguos, y matcheamos.
+  useEffect(() => {
+    try {
+      if (localStorage.getItem('adslab-costs-backfill-v1') === 'done') return;
+      if (!productos || productos.length === 0) return; // esperar hidratación
+      const AMB = '__ambiguo__';
+      const map = {};
+      const add = (name, pid) => {
+        const k = normalizeCostName(name);
+        if (!k || k.length < 3) return;
+        if (map[k] && map[k] !== String(pid)) map[k] = AMB;
+        else map[k] = String(pid);
+      };
+      for (const p of productos) {
+        add(p.nombre, p.id);
+        for (const c of (p.competidores || [])) add(c.nombre, p.id);
+        try {
+          const brands = JSON.parse(localStorage.getItem(`adslab-marketing-inspiracion-brands-${p.id}`) || '[]');
+          for (const b of brands) add(b.nombre, p.id);
+        } catch {}
+      }
+      const clean = Object.fromEntries(Object.entries(map).filter(([, v]) => v !== AMB));
+      const n = backfillProductoIds(clean);
+      localStorage.setItem('adslab-costs-backfill-v1', 'done');
+      if (n > 0) {
+        setProductSpendMap(spendAllProductos());
+        addToast?.({ type: 'success', message: `Gastos históricos atribuidos: ${n} movimientos asignados a sus productos.` });
+      }
+    } catch (err) {
+      console.warn('[costs] backfill falló:', err.message);
+    }
+  }, [productos.length]);
   // Vista de la lista de productos: 'grid' (tarjetas) | 'list' (filas compactas).
   const [vista, setVista] = useState(() => {
     try { return localStorage.getItem('adslab-productos-vista') || 'grid'; } catch { return 'grid'; }
@@ -3014,7 +3071,8 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               // (runHistory) para productos con corridas previas a la
               // atribución per-product.
               const costoRuns = runsDelProducto.reduce((sum, r) => sum + (r.cost?.total || 0), 0);
-              const costoTotal = Math.max(productSpendMap[String(p.id)] || 0, costoRuns);
+              const costoAtribuido = (productSpendMap[String(p.id)] || 0) + (cloudSpendMap[String(p.id)] || 0);
+              const costoTotal = Math.max(costoAtribuido, costoRuns);
 
               const open = () => setActiveProductoId(String(p.id));
               const openCosts = (e) => { e.stopPropagation(); setCostsModalProducto(p); };

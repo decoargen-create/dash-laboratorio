@@ -175,6 +175,24 @@ export default async function handler(req, res) {
         console.warn('[cron] upsertAdsToIndex falló:', idxErr.message);
       }
 
+      // Registrar el costo del scrape en marketing_costs (best-effort).
+      // El cliente lo mergea con su log local para el resumen per-product —
+      // sin esto, el gasto del cron era invisible en la plataforma.
+      try {
+        await supabase.from('marketing_costs').insert({
+          user_id: row.user_id,
+          producto_id: String(row.id),
+          competidor_id: String(comp.id),
+          auto_tipo: 'apify',
+          amount: Math.round(costAdded * 10000) / 10000,
+          descripcion: `cron-scrape · ${comp.nombre || comp.id} · ${items.length} ads`,
+          kind: 'scrape',
+          source: 'cron',
+        });
+      } catch (costErr) {
+        console.warn('[cron] insert marketing_costs falló (¿migration 0017 aplicada?):', costErr.message);
+      }
+
       return {
         compId: comp.id,
         status: 'ok',

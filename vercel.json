@@ -23,7 +23,6 @@
     "api/marketing/adapt-inspiracion.js": { "maxDuration": 120 },
     "api/marketing/resolve-fb-page.js": { "maxDuration": 30 },
     "api/marketing/proxy-image.js": { "maxDuration": 30 },
-    "api/marketing/cron-competidor-refresh.js": { "maxDuration": 300 },
     "api/marketing/ocr-ad.js": { "maxDuration": 180 },
     "api/marketing/transcribe-ad.js": { "maxDuration": 240 },
     "api/marketing/transcribir-video.js": { "maxDuration": 240 },
@@ -37,8 +36,7 @@
   },
   "crons": [
     { "path": "/api/meta/cron-creative-refresh", "schedule": "0 12 * * *" },
-    { "path": "/api/actas/sync", "schedule": "0 9 * * *" },
-    { "path": "/api/marketing/cron-competidor-refresh", "schedule": "0 6 * * *" }
+    { "path": "/api/actas/sync", "schedule": "0 9 * * *" }
   ],
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/index.html" }

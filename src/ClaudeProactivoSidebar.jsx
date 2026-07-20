@@ -61,7 +61,7 @@ function detectSuggestions() {
         id: `stale-comps-${p.id}`,
         priority: 2,
         title: `${compsActivosViejos.length} comp${compsActivosViejos.length !== 1 ? 's' : ''} de ${p.nombre} sin scrapear hace >7d`,
-        sub: 'El cron diario debería pegarles. Si llevan tiempo así, scrapeá manual.',
+        sub: 'Scrapealos para tener su biblioteca al día — sin scrape reciente la inspiración se pone vieja.',
         action: { label: 'Ver competencia', section: 'mk-inspiracion', productoId: String(p.id) },
       });
     }

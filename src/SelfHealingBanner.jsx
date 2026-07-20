@@ -78,30 +78,9 @@ function detectIssues() {
     }
   } catch {}
 
-  // 4. Cron diario que parece haber dejado de correr.
-  // Heurística suave: si hay competidores con master switch ON y la última
-  // entry de adsHistory es >36h, el cron probablemente no corrió.
-  try {
-    const productos = JSON.parse(localStorage.getItem('adslab-marketing-productos-v1') || '[]');
-    let activeComps = 0;
-    let staleComps = 0;
-    for (const p of productos) {
-      for (const c of (p.competidores || [])) {
-        if (c.smartScrapeEnabled === false) continue;
-        activeComps++;
-        const lastTs = c.lastAdsCheck ? new Date(c.lastAdsCheck).getTime() : 0;
-        if (Date.now() - lastTs > 36 * 60 * 60 * 1000) staleComps++;
-      }
-    }
-    if (activeComps >= 3 && staleComps === activeComps) {
-      issues.push({
-        id: 'cron-stale',
-        severity: 'warning',
-        title: 'El cron diario parece no estar corriendo',
-        hint: `Ninguno de tus ${activeComps} competidores activos se scrapeó en las últimas 36h. Chequeá CRON_SECRET en Vercel.`,
-      });
-    }
-  } catch {}
+  // NOTA: la detección "cron diario no corre" se removió junto con el cron
+  // de scrapeo automático (decisión del user: solo scrape manual). Sin cron,
+  // el warning dispararía falso positivo permanente.
 
   return issues;
 }

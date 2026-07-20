@@ -151,6 +151,50 @@ export function spendAllProductos() {
   return map;
 }
 
+// Logs crudos de un producto (para que el modal pueda mergear con los
+// costos cloud del cron y computar los agregados él mismo).
+export function logsForProducto(productoId) {
+  const pid = String(productoId || '');
+  if (!pid) return [];
+  return loadLogs().filter(l => l.productoId === pid);
+}
+
+// ============================================================
+// BACKFILL — atribuir logs HISTÓRICOS (sin productoId) por nombre.
+// Las descripciones viejas codifican el nombre del producto, competidor
+// o brand ('apify-ingest · Femflorabrand', 'generate-ideas · Tiva',
+// 'crear-creativo-referencial · MarcaX · 1/4'). El caller construye el
+// mapa {nombreNormalizado → productoId} desde su lista de productos +
+// competidores + brands, descartando nombres ambiguos (mismo nombre en
+// 2 productos). Corre una vez (el caller guarda el flag done).
+// ============================================================
+export function normalizeCostName(s) {
+  return String(s || '').toLowerCase().trim().replace(/\s+/g, ' ');
+}
+
+export function backfillProductoIds(nameToProductoId) {
+  if (!nameToProductoId || Object.keys(nameToProductoId).length === 0) return 0;
+  const logs = loadLogs();
+  let changed = 0;
+  for (const l of logs) {
+    if (l.productoId) continue;
+    // Segmentos de la descripcion: 'op · nombre · resto' o 'op → nombre'.
+    const segs = String(l.descripcion || '').split(/[·→]/).map(s => s.trim()).filter(Boolean);
+    // Probamos cada segmento DESPUÉS del primero (el primero es la operación).
+    for (let i = 1; i < segs.length; i++) {
+      const pid = nameToProductoId[normalizeCostName(segs[i])];
+      if (pid) {
+        l.productoId = String(pid);
+        if (!l.kind) l.kind = inferKind(l.descripcion);
+        changed++;
+        break;
+      }
+    }
+  }
+  if (changed > 0) saveLogs(logs);
+  return changed;
+}
+
 // Devuelve el gasto acumulado de un autoTipo dado en el mes actual
 // (según horario Argentina) o en un rango custom.
 export function spendThisMonth(autoTipo) {

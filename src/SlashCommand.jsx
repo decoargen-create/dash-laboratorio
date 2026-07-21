@@ -16,9 +16,8 @@ const SECTION_ACTIONS = [
   { id: 'go-home', label: 'Ir al Home', section: 'mk-home', icon: LayoutGrid, keywords: ['home', 'dashboard', 'inicio'] },
   { id: 'go-arranque', label: 'Ir a Productos (Arranque)', section: 'mk-arranque', icon: Package, keywords: ['productos', 'arranque', 'lista'] },
   { id: 'go-bandeja', label: 'Ir a Bandeja de ideas', section: 'mk-bandeja', icon: Inbox, keywords: ['bandeja', 'ideas', 'inbox'] },
-  { id: 'go-inspiracion', label: 'Ir a Inspiración', section: 'mk-inspiracion-global', icon: Sparkles, keywords: ['inspiracion', 'ads', 'competencia'] },
   { id: 'go-winners', label: 'Ir a Winners', section: 'mk-winners', icon: Trophy, keywords: ['winners', 'ganadores'] },
-  { id: 'go-boards', label: 'Ir a Colecciones', section: 'mk-boards', icon: Bookmark, keywords: ['boards', 'colecciones'] },
+  { id: 'go-meta', label: 'Ir a Meta Ads', section: 'mk-meta', icon: Sparkles, keywords: ['meta', 'campañas', 'insights', 'facebook'] },
   { id: 'go-copy', label: 'Generador de copy', section: 'mk-copy', icon: FileText, keywords: ['copy', 'generador', 'texto', 'meta ads'] },
 ];
 

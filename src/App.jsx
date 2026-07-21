@@ -33,6 +33,7 @@ import InspiracionGlobalSection from './InspiracionGlobalSection.jsx';
 import BoardsSection from './BoardsSection.jsx';
 import ConsultoriaSection from './Consultoria.jsx';
 import DashboardSeny from './DashboardSeny.jsx';
+import CampanasTracker from './CampanasTracker.jsx';
 import { PipelineRunProvider } from './PipelineRunContext.jsx';
 import PipelineRunOverlay from './PipelineRunOverlay.jsx';
 import ExecutionsTray from './ExecutionsTray.jsx';
@@ -637,22 +638,14 @@ const PLATFORMS = [
     badgeText: 'text-white',
     defaultSection: 'con-acta',
   },
-  {
-    id: 'dashboard-seny',
-    name: 'Dashboard Seny',
-    shortName: 'Dash Seny',
-    initials: 'DS',
-    sidebarGradient: 'from-gray-900 via-gray-800 to-black',
-    badgeBg: 'bg-[#FFD33D]',
-    badgeText: 'text-gray-900',
-    defaultSection: 'seny-dash',
-  },
 ];
 
 // Plataformas ocultas — el código de Viora/Senydrop/MetaAds quedó por si
 // necesitás re-habilitarlas. Para hacerlo, moverlas de acá a PLATFORMS arriba.
 const HIDDEN_PLATFORMS = [
   { id: 'viora',    name: 'Laboratorio Viora', shortName: 'Viora',    initials: 'LV', sidebarGradient: 'from-[#4a0f22] via-pink-900 to-[#3f0c1e]', badgeBg: 'bg-gradient-to-br from-pink-600 to-rose-500', badgeText: 'text-white', defaultSection: 'inicio' },
+  // Dashboard Seny migrado a otra plataforma (pedido del user) — oculto.
+  { id: 'dashboard-seny', name: 'Dashboard Seny', shortName: 'Dash Seny', initials: 'DS', sidebarGradient: 'from-gray-900 via-gray-800 to-black', badgeBg: 'bg-[#FFD33D]', badgeText: 'text-gray-900', defaultSection: 'seny-dash' },
   { id: 'senydrop', name: 'Senydrop',          shortName: 'Senydrop', initials: 'SD', sidebarGradient: 'from-gray-900 via-gray-800 to-black',     badgeBg: 'bg-[#FFD33D]',                                badgeText: 'text-gray-900', defaultSection: 'seny-productos' },
   { id: 'metaads',  name: 'Meta Ads',          shortName: 'Meta Ads', initials: 'MA', sidebarGradient: 'from-[#0668E1] via-[#1877F2] to-[#0053A0]', badgeBg: 'bg-gradient-to-br from-[#0668E1] to-[#1877F2]', badgeText: 'text-white', defaultSection: 'meta-inicio' },
 ];
@@ -1453,8 +1446,8 @@ function AppShell({ onExit }) {
       const saved = localStorage.getItem('adslab-last-section');
       // Si tenía una sección de Viora/Senydrop/MetaAds, defaulteamos a la
       // de Marketing. Lista de secciones válidas en las plataformas activas:
-      const validSections = ['mk-home', 'mk-arranque', 'mk-bandeja', 'mk-auto-ig', 'mk-copy',
-        'mk-inspiracion', 'mk-inspiracion-global', 'mk-winners', 'mk-boards', 'mk-gastos', 'mk-docs', 'con-acta', 'seny-dash'];
+      const validSections = ['mk-home', 'mk-arranque', 'mk-bandeja', 'mk-copy', 'mk-meta',
+        'mk-inspiracion', 'mk-winners', 'mk-gastos', 'mk-docs', 'con-acta'];
       return validSections.includes(saved) ? saved : 'mk-home';
     } catch { return 'mk-home'; }
   });
@@ -2249,13 +2242,9 @@ function AppShell({ onExit }) {
               <NavSection title="Operación" sectionKey="mk-op" sidebarOpen={sidebarOpen}>
                 <NavItem icon={LayoutGridIcon} label="Home" section="mk-home" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                 <NavItem icon={Play} label="Productos" section="mk-arranque" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                <NavItem icon={Sparkles} label="Inspiración" section="mk-inspiracion-global" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                 <NavItem icon={Trophy} label="Winners" section="mk-winners" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                <NavItem icon={Bookmark} label="Colecciones" section="mk-boards" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                 <NavItem icon={FileText} label="Copy AI" section="mk-copy" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              </NavSection>
-              <NavSection title="Automatización" sectionKey="mk-auto" sidebarOpen={sidebarOpen} defaultOpen={false}>
-                <NavItem icon={Instagram} label="Automatización IG" section="mk-auto-ig" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                <NavItem icon={BarChart3} label="Meta Ads" section="mk-meta" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               </NavSection>
               <NavSection title="Finanzas" sectionKey="mk-fin" sidebarOpen={sidebarOpen}>
                 <NavItem icon={DollarSign} label="Gastos del stack" section="mk-gastos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
@@ -2364,6 +2353,7 @@ function AppShell({ onExit }) {
               de arriba a mk-arranque — no necesita su propio render. */}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-auto-ig' && <AutoIGSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-inspiracion' && <InspiracionSection addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-meta' && <CampanasTracker addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-inspiracion-global' && <InspiracionGlobalSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-winners' && <WinnersGlobalSection addToast={addToast} onGoToSection={setCurrentSection} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-boards' && <BoardsSection addToast={addToast} />}
@@ -8242,6 +8232,7 @@ function getSectionTitle(user, section) {
     'mk-bandeja': 'Marketing · Bandeja de ideas',
     'mk-docs': 'Marketing · Documentación de producto',
     'mk-auto-ig': 'Marketing · Automatización IG',
+    'mk-meta': 'Marketing · Meta Ads',
     'mk-inspiracion': 'Marketing · Inspiración',
     'mk-winners': 'Marketing · Winners',
     'mk-gastos': 'Marketing · Gastos del stack',

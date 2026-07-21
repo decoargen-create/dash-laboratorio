@@ -90,6 +90,61 @@ async function fetchMe(accessToken) {
 
 // --- handlers (idénticos a los originales, inline) ---
 
+// Variante API del connect para el flujo MULTI-USUARIO: el cliente llama
+// con su JWT de Supabase (Authorization header), embebemos su userId en el
+// state firmado, y el callback guarda la conexión en meta_connections a
+// nombre de ESE user. Así colegas/clientes conectan cada uno su Meta.
+// (handleConnect legacy queda para el modo cookie single-user.)
+async function handleConnectUrl(req, res) {
+  if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
+  const origin = getOrigin(req);
+  const appId = process.env.META_APP_ID;
+  const secret = process.env.AUTH_SECRET;
+  if (!appId) return respondJSON(res, 500, { error: 'META_APP_ID no configurada. Falta crear la app de Meta y cargar sus credenciales en Vercel.' });
+  if (!secret) return respondJSON(res, 500, { error: 'AUTH_SECRET no configurada' });
+
+  // userId de AdsLab — requerido en este flujo (multi-usuario = DB).
+  const userId = isSupabaseConfigured() ? await getUserIdFromAuth(req) : null;
+  if (!userId) return respondJSON(res, 401, { error: 'Iniciá sesión en AdsLab antes de conectar Meta.' });
+
+  let body = {};
+  try {
+    if (req.body && typeof req.body === 'object') body = req.body;
+    else {
+      const chunks = [];
+      for await (const ch of req) chunks.push(ch);
+      body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+    }
+  } catch {}
+  let returnTo = typeof body.returnTo === 'string' ? body.returnTo : '/';
+  if (!returnTo.startsWith('/')) returnTo = '/';
+
+  const redirectUri = `${origin}/api/meta/callback`;
+  const state = signState({
+    nonce: crypto.randomBytes(16).toString('hex'),
+    ts: Date.now(),
+    returnTo,
+    userId, // ← el callback lo usa para guardar en meta_connections
+    label: typeof body.label === 'string' ? body.label.slice(0, 80) : null,
+  }, secret);
+
+  const authUrl = new URL(`https://www.facebook.com/${META_API_VERSION}/dialog/oauth`);
+  authUrl.searchParams.set('client_id', appId);
+  authUrl.searchParams.set('redirect_uri', redirectUri);
+  authUrl.searchParams.set('state', state);
+  authUrl.searchParams.set('scope', META_SCOPES);
+  authUrl.searchParams.set('response_type', 'code');
+  return respondJSON(res, 200, { url: authUrl.toString() });
+}
+
+// Info de configuración del OAuth — el frontend decide si muestra el botón
+// "Conectar con Facebook" (solo tiene sentido con la app de Meta creada).
+function handleOauthConfig(req, res) {
+  return respondJSON(res, 200, {
+    configured: !!(process.env.META_APP_ID && process.env.META_APP_SECRET && process.env.AUTH_SECRET),
+  });
+}
+
 function handleConnect(req, res) {
   if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
 
@@ -164,6 +219,28 @@ async function handleCallback(req, res) {
   } catch (err) {
     console.error('meta/callback exchange error:', err);
     return redirectWithError(res, origin, returnTo, `Intercambio de token falló: ${err.message}`);
+  }
+
+  // MULTI-USUARIO: si el connect se inició logueado en AdsLab (connect-url),
+  // el state trae el userId → guardamos la conexión en meta_connections a su
+  // nombre. Cada colega/cliente conecta su propio Meta. Fallback a cookie
+  // (legacy single-user) si no hay userId o falla el insert.
+  if (state.userId && isSupabaseConfigured()) {
+    try {
+      await insertMetaConnection(state.userId, {
+        label: state.label || me?.name || 'Meta',
+        metaUserId: me?.id || null,
+        metaUserName: me?.name || null,
+        accessToken: longToken,
+      });
+      res.statusCode = 302;
+      res.setHeader('Location', `${returnTo}?meta=connected`);
+      res.end();
+      return;
+    } catch (err) {
+      console.error('meta/callback insertMetaConnection error:', err);
+      // seguimos al fallback cookie para no perder el login del user
+    }
   }
 
   const cookiePayload = {
@@ -1473,6 +1550,8 @@ async function handleCampaignsInsights(req, res) {
 
 const actions = {
   connect: handleConnect,
+  'connect-url': handleConnectUrl,
+  'oauth-config': handleOauthConfig,
   callback: handleCallback,
   'connect-token': handleConnectToken,
   connections: handleConnections,

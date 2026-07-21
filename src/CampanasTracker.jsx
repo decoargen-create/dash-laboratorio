@@ -95,6 +95,68 @@ function StatusBadge({ status }) {
 }
 
 // ========================================================================
+// Botón "Conectar con Facebook" (OAuth) — el flujo estilo Ads Uploader.
+// Solo aparece si la app de Meta está configurada en el server
+// (META_APP_ID + META_APP_SECRET). Cada user de AdsLab que lo usa conecta
+// SU Meta: el callback guarda la conexión a su nombre en meta_connections.
+// Mientras la app no pase App Review, solo cuentas con rol en la app pueden
+// usarlo; post-review, cualquier colega/cliente.
+// ========================================================================
+function OAuthConnectButton() {
+  const [configured, setConfigured] = useState(null); // null = cargando
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/meta/oauth-config')
+      .then(r => r.json())
+      .then(d => { if (!cancelled) setConfigured(!!d.configured); })
+      .catch(() => { if (!cancelled) setConfigured(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const start = async () => {
+    setStarting(true); setError(null);
+    try {
+      const resp = await fetch('/api/meta/connect-url', {
+        method: 'POST',
+        headers: await authHeaders(true),
+        body: JSON.stringify({ returnTo: '/' }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.url) throw new Error(data.error || `HTTP ${resp.status}`);
+      window.location.href = data.url; // → consent screen de Meta
+    } catch (err) {
+      setError(err.message);
+      setStarting(false);
+    }
+  };
+
+  if (configured === false || configured === null) return null; // sin app → solo token
+
+  return (
+    <div className="mb-4">
+      <button
+        type="button" onClick={start} disabled={starting}
+        className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-bold text-white bg-[#1877F2] rounded-lg hover:bg-[#0f6ae0] shadow-sm transition disabled:opacity-50"
+      >
+        {starting ? <Loader2 size={15} className="animate-spin" /> : <Zap size={15} />}
+        Conectar con Facebook
+      </button>
+      {error && (
+        <p className="mt-2 text-[11px] text-red-600 dark:text-red-400">{error}</p>
+      )}
+      <div className="flex items-center gap-3 mt-4">
+        <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
+        <span className="text-[10px] text-gray-400 uppercase tracking-wider">o pegá un token</span>
+        <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
+      </div>
+    </div>
+  );
+}
+
+// ========================================================================
 // Form de conexión por token
 // ========================================================================
 function ConnectTokenForm({ onConnect, onCancel, canCancel }) {
@@ -137,6 +199,8 @@ function ConnectTokenForm({ onConnect, onCancel, canCancel }) {
           </button>
         )}
       </div>
+
+      <OAuthConnectButton />
 
       <form onSubmit={submit} className="space-y-3">
         <div>

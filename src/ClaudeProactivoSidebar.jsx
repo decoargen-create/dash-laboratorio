@@ -62,7 +62,7 @@ function detectSuggestions() {
         priority: 2,
         title: `${compsActivosViejos.length} comp${compsActivosViejos.length !== 1 ? 's' : ''} de ${p.nombre} sin scrapear hace >7d`,
         sub: 'Scrapealos para tener su biblioteca al día — sin scrape reciente la inspiración se pone vieja.',
-        action: { label: 'Ver competencia', section: 'mk-inspiracion', productoId: String(p.id) },
+        action: { label: 'Abrir producto', section: 'mk-arranque', productoId: String(p.id) },
       });
     }
     // 3. Sin cuenta Meta conectada.
@@ -72,7 +72,7 @@ function detectSuggestions() {
         priority: 3,
         title: `${p.nombre || 'Producto'} sin Meta conectada`,
         sub: 'Conectá Meta para traer las campañas reales del producto.',
-        action: { label: 'Configurar Meta', section: 'mk-campanas', productoId: String(p.id) },
+        action: { label: 'Configurar Meta', section: 'mk-meta', productoId: String(p.id) },
       });
     }
   }

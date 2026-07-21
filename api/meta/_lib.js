@@ -28,18 +28,20 @@ export const META_COOKIE_MAX_AGE = 60 * 60 * 24 * 55; // 55 días (el long-lived
 // en la Meta Developer app (pero los scopes se piden en la URL del OAuth, no
 // están hardcodeados en el dashboard de Meta — salvo los que requieren review).
 //
-// Para la automatización de renovación de creativos leemos el feed de IG
-// Business y `like_count` de posts vía Page Access Token (hereda permisos
-// de la Page sin necesitar el scope `instagram_basic`). Ese scope requería
-// agregar el producto "Instagram" a la app Meta y habilitarlo en la consent
-// screen, y Meta rechaza el OAuth con "Invalid Scopes" si no está aprobado.
-// `pages_show_list` + `pages_read_engagement` alcanzan.
+// MÍNIMO VIABLE PARA APP REVIEW (plataforma pública): pedimos SOLO ads_read.
+// AdsLab v1 para terceros es lectura (campañas + métricas + insights) — no
+// crea ni edita ads en nombre del user. Cada scope extra multiplica la
+// fricción del App Review de Meta:
+//   - ads_management (write) exige justificar creación de ads → v2, review
+//     separado cuando exista la feature de upload para terceros.
+//   - business_management casi nunca se aprueba para apps chicas y no lo
+//     necesitamos (me/adaccounts funciona con ads_read).
+//   - pages_show_list/pages_read_engagement eran para la Automatización IG,
+//     removida de la plataforma.
+// El flujo por TOKEN pegado no pasa por acá — un system user token puede
+// tener los permisos que quieras (para tus cuentas propias).
 export const META_SCOPES = [
   'ads_read',
-  'ads_management',
-  'business_management',
-  'pages_show_list',
-  'pages_read_engagement',
 ].join(',');
 
 function b64url(input) {

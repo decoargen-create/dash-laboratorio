@@ -21,7 +21,7 @@ import React, { useState, useEffect, useRef, useMemo, Fragment } from 'react';
 import {
   Package, Target, Play, Check, Loader2, AlertTriangle, ChevronRight, ChevronDown,
   Plus, X, Sparkles, Link2, Search, Clock, Inbox, Trash2, Upload, Download, Activity,
-  LayoutGrid, List as ListIcon, BarChart3, Copy, Pencil, MoreHorizontal, Users,
+  LayoutGrid, List as ListIcon, BarChart3, Copy, Pencil, MoreHorizontal, Users, History,
 } from 'lucide-react';
 import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGeneradorHoy, updateIdea, formatoDeAd } from './bandejaStore.js';
 import { deleteProducto as deleteProductoFromCloud } from './marketingSync.js';
@@ -47,6 +47,7 @@ import { stringifyApiError } from './apiHelpers.js';
 import { trackQuotaFailure, isQuotaError, removeFromQuotaQueue } from './quotaRetryStore.js';
 import AnimatedCounter from './AnimatedCounter.jsx';
 import ProductoCostsModal from './ProductoCostsModal.jsx';
+import ProductoHistorialModal from './ProductoHistorialModal.jsx';
 
 // Avatar del producto: muestra el pote (foto cargada en Setup) y cae al
 // gradiente con la inicial si todavía no hay foto. getProductoImagen resuelve
@@ -1193,6 +1194,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // Modal de costos per-product + mapa de totales para el chip "$X" de cada
   // card. Se recomputa al abrir la lista y cuando se loguea un costo nuevo.
   const [costsModalProducto, setCostsModalProducto] = useState(null);
+  const [historialProducto, setHistorialProducto] = useState(null);
   // Asignación de responsable por producto — para agrupar la lista por
   // persona y ver cuánto gastó cada una. asignandoId = producto en edición.
   const [asignandoId, setAsignandoId] = useState(null);
@@ -3132,6 +3134,13 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                     <Users size={14} />
                   </button>
                   <button
+                    onClick={(e) => { e.stopPropagation(); setHistorialProducto(p); }}
+                    className="p-1.5 rounded-md text-gray-400 hover:text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition"
+                    title="Historial de actividad — qué se le hizo y cuándo"
+                  >
+                    <History size={14} />
+                  </button>
+                  <button
                     onClick={(e) => {
                       e.stopPropagation();
                       try {
@@ -3409,6 +3418,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         )}
         {showDiagnostico && <DiagnosticoSyncModal onClose={() => setShowDiagnostico(false)} />}
         {costsModalProducto && <ProductoCostsModal producto={costsModalProducto} onClose={() => setCostsModalProducto(null)} />}
+        {historialProducto && <ProductoHistorialModal producto={historialProducto} onClose={() => setHistorialProducto(null)} />}
       </div>
     );
   }

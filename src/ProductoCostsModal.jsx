@@ -106,14 +106,29 @@ export default function ProductoCostsModal({ producto, onClose }) {
       .sort((a, b) => new Date(b.ts) - new Date(a.ts));
     const byService = {};
     const byKind = {};
+    // Desglose POR DÍA (huso Argentina) — el user quiere ver "capaz un día
+    // gasté más, un día menos". Key YYYY-MM-DD para ordenar; label corto
+    // para mostrar.
+    const byDay = new Map();
+    const dayFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
     let total = 0;
     for (const l of all) {
       total += l.amount || 0;
       byService[l.autoTipo] = (byService[l.autoTipo] || 0) + (l.amount || 0);
       const k = l.kind || 'otros';
       byKind[k] = (byKind[k] || 0) + (l.amount || 0);
+      try {
+        const dayKey = dayFmt.format(new Date(l.ts)); // YYYY-MM-DD
+        const prev = byDay.get(dayKey) || { total: 0, count: 0 };
+        byDay.set(dayKey, { total: prev.total + (l.amount || 0), count: prev.count + 1 });
+      } catch {}
     }
-    return { total, byService, byKind, recent: all.slice(0, 25), count: all.length };
+    // Días ordenados del más reciente al más viejo, cap 21 (3 semanas).
+    const days = [...byDay.entries()]
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .slice(0, 21)
+      .map(([day, v]) => ({ day, ...v }));
+    return { total, byService, byKind, days, recent: all.slice(0, 25), count: all.length };
   }, [producto?.id, periodo, cloudLogs]);
   if (!producto) return null;
 
@@ -121,6 +136,18 @@ export default function ProductoCostsModal({ producto, onClose }) {
   const kinds = Object.entries(summary.byKind).sort((a, b) => b[1] - a[1]);
   const maxService = services[0]?.[1] || 0;
   const maxKind = kinds[0]?.[1] || 0;
+  const maxDay = summary.days?.reduce((m, d) => Math.max(m, d.total), 0) || 0;
+  // Label legible del día: "hoy", "ayer", o "mié 15/07".
+  const dayLabel = (dayKey) => {
+    try {
+      const hoy = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(new Date());
+      const ayer = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(new Date(Date.now() - 24 * 3600 * 1000));
+      if (dayKey === hoy) return 'Hoy';
+      if (dayKey === ayer) return 'Ayer';
+      const d = new Date(`${dayKey}T12:00:00`);
+      return d.toLocaleDateString('es-AR', { weekday: 'short', day: '2-digit', month: '2-digit' });
+    } catch { return dayKey; }
+  };
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" onClick={onClose} role="dialog">
@@ -196,6 +223,32 @@ export default function ProductoCostsModal({ producto, onClose }) {
                   ))}
                 </div>
               </div>
+
+              {/* Por día — para ver picos: "un día gasté más, un día menos". */}
+              {summary.days?.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <Clock size={12} className="text-gray-400" />
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                      Por día <span className="normal-case font-normal">(últimos {summary.days.length} con gasto)</span>
+                    </p>
+                  </div>
+                  <div className="space-y-1.5">
+                    {summary.days.map(d => (
+                      <div key={d.day} className="flex items-center gap-2" title={`${d.count} operaci${d.count === 1 ? 'ón' : 'ones'}`}>
+                        <span className="text-[11px] text-gray-600 dark:text-gray-300 w-32 shrink-0 truncate capitalize">
+                          {dayLabel(d.day)}
+                        </span>
+                        <div className="flex-1 h-3.5 bg-gray-100 dark:bg-gray-700/60 rounded-full overflow-hidden">
+                          <div className="h-full rounded-full bg-brand-400 transition-all" style={{ width: `${maxDay > 0 ? Math.round((d.total / maxDay) * 100) : 0}%` }} />
+                        </div>
+                        <Money v={d.total} className="text-[11px] font-bold text-gray-800 dark:text-gray-100 w-16 text-right shrink-0" />
+                        <span className="text-[9px] text-gray-400 w-8 text-right shrink-0 tabular-nums">×{d.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Últimos movimientos */}
               <div>

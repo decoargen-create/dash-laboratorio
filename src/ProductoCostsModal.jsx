@@ -69,7 +69,7 @@ export default function ProductoCostsModal({ producto, onClose }) {
     let cancelled = false;
     supabase
       .from('marketing_costs')
-      .select('id, auto_tipo, amount, descripcion, kind, source, created_at')
+      .select('id, auto_tipo, amount, descripcion, kind, source, created_at, client_id')
       .eq('producto_id', String(producto.id))
       .order('created_at', { ascending: false })
       .limit(500)
@@ -83,6 +83,7 @@ export default function ProductoCostsModal({ producto, onClose }) {
         }
         setCloudLogs((data || []).map(r => ({
           id: `cloud-${r.id}`,
+          clientId: r.client_id || null,
           ts: r.created_at,
           autoTipo: r.auto_tipo,
           amount: Number(r.amount) || 0,
@@ -97,7 +98,13 @@ export default function ProductoCostsModal({ producto, onClose }) {
   const summary = useMemo(() => {
     const sinceIso = sinceForPeriodo(periodo);
     const sinceMs = sinceIso ? new Date(sinceIso).getTime() : null;
-    const all = [...logsForProducto(producto?.id), ...cloudLogs]
+    // DEDUPE cross-device: una operación puede existir local (este device
+    // la corrió) Y en cloud (dual-write). El cloud row lleva client_id =
+    // id del log local → si ese log está acá, descartamos el row cloud.
+    const localList = logsForProducto(producto?.id);
+    const localIds = new Set(localList.map(l => l.id));
+    const cloudSinDupes = cloudLogs.filter(cl => !cl.clientId || !localIds.has(cl.clientId));
+    const all = [...localList, ...cloudSinDupes]
       .filter(l => {
         if (sinceMs == null) return true;
         const t = new Date(l.ts).getTime();

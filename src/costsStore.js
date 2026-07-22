@@ -14,7 +14,23 @@
 //     amount (USD), descripcion: 'deep-analyze · ad abc' ...
 //   }
 
+import { supabase } from './supabase.js';
+
 const STORAGE_KEY = 'adslab-costs-log-v1';
+
+// Ids de logs que YA estaban sincronizados al cloud cuando cargó el módulo.
+// Esos se excluyen de los totales LOCALES (los cuenta el fetch cloud). Los
+// que se sincronizan DURANTE la sesión siguen contando local — el fetch
+// cloud de Arranque corre al mount y no los incluye, así no se duplica.
+let SYNCED_AT_LOAD = new Set();
+try {
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (raw) {
+    for (const l of JSON.parse(raw)) {
+      if (l?.synced && l?.id) SYNCED_AT_LOAD.add(l.id);
+    }
+  }
+} catch {}
 
 function loadLogs() {
   try {
@@ -43,6 +59,42 @@ const KIND_PATTERNS = [
   { kind: 'copy',       re: /^(generate-copy|copy)/i },
   { kind: 'copilot',    re: /^copilot/i },
 ];
+
+// Dual-write al cloud (marketing_costs) — best effort, fire and forget.
+// Requiere sesión Supabase + migration 0018 (insert policy + client_id).
+// Si falla (offline, sin sesión, migration pendiente), el log queda local
+// como siempre — cero regresión.
+async function syncLogToCloud(log) {
+  if (!supabase || !log?.productoId) return false;
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user?.id) return false;
+    const { error } = await supabase.from('marketing_costs').upsert({
+      user_id: user.id,
+      producto_id: String(log.productoId),
+      auto_tipo: log.autoTipo,
+      amount: log.amount,
+      descripcion: log.descripcion,
+      kind: log.kind || null,
+      source: 'client',
+      client_id: log.id,
+      created_at: log.ts,
+    }, { onConflict: 'user_id,client_id', ignoreDuplicates: true });
+    if (error) {
+      console.warn('[costs] cloud sync falló (¿migration 0018?):', error.message);
+      return false;
+    }
+    return true;
+  } catch { return false; }
+}
+
+function markSynced(id) {
+  try {
+    const logs = loadLogs();
+    const l = logs.find(x => x.id === id);
+    if (l) { l.synced = true; saveLogs(logs); }
+  } catch {}
+}
 
 function inferKind(descripcion) {
   const d = String(descripcion || '');
@@ -75,7 +127,25 @@ export function logCost({ autoTipo, amount, descripcion, productoId = null, kind
   if (typeof window !== 'undefined') {
     try { window.dispatchEvent(new CustomEvent('viora:cost-logged', { detail: nuevo })); } catch {}
   }
+  // Dual-write cloud (cross-device). Fire and forget.
+  syncLogToCloud(nuevo).then(ok => { if (ok) markSynced(nuevo.id); });
   return nuevo;
+}
+
+// Empuja al cloud los logs locales con productoId que aún no se sincronizaron
+// (histórico previo a la migration 0018 + fallos de red). Idempotente por
+// (user_id, client_id). Llamar una vez por sesión desde la UI.
+export async function pushUnsyncedCostsToCloud({ max = 300 } = {}) {
+  if (!supabase) return 0;
+  const pendientes = loadLogs().filter(l => l.productoId && !l.synced).slice(0, max);
+  if (pendientes.length === 0) return 0;
+  let ok = 0;
+  // Secuencial en chunks chicos para no saturar; upsert ignora duplicados.
+  for (const l of pendientes) {
+    if (await syncLogToCloud(l)) { markSynced(l.id); ok++; }
+    else break; // primer fallo (sin sesión / sin migration) → cortar, no insistir
+  }
+  return ok;
 }
 
 // Total gastado para un autoTipo DESDE un timestamp ISO.
@@ -146,6 +216,10 @@ export function spendAllProductos() {
   const map = {};
   for (const l of loadLogs()) {
     if (!l.productoId) continue;
+    // Sincronizados ANTES de esta carga → los cuenta el fetch cloud de
+    // Arranque; excluirlos acá evita el doble conteo. Los sincronizados
+    // durante la sesión siguen contando local (el fetch cloud fue al mount).
+    if (SYNCED_AT_LOAD.has(l.id)) continue;
     map[l.productoId] = (map[l.productoId] || 0) + (l.amount || 0);
   }
   return map;

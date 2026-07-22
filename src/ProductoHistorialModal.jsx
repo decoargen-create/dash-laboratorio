@@ -31,9 +31,16 @@ const FILTROS = [
 
 function timeAgo(iso) {
   if (!iso) return '';
-  const diff = Date.now() - new Date(iso).getTime();
-  const d = Math.floor(diff / (24 * 3600 * 1000));
-  if (d === 0) return 'hoy';
+  // Días CALENDARIO en huso Argentina (no buckets de 24h) — sin esto, algo
+  // creado ayer 21:00 decía "hoy" mientras el timeline lo agrupaba en "Ayer".
+  let d;
+  try {
+    const fmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
+    d = Math.round((new Date(fmt.format(new Date())) - new Date(fmt.format(new Date(iso)))) / (24 * 3600 * 1000));
+  } catch {
+    d = Math.floor((Date.now() - new Date(iso).getTime()) / (24 * 3600 * 1000));
+  }
+  if (d <= 0) return 'hoy';
   if (d === 1) return 'ayer';
   if (d < 30) return `hace ${d} días`;
   const m = Math.floor(d / 30);
@@ -172,6 +179,7 @@ export default function ProductoHistorialModal({ producto, onClose }) {
       supabase.from('marketing_costs')
         .select('created_at, descripcion, amount')
         .eq('producto_id', pid)
+        .neq('source', 'client')
         .order('created_at', { ascending: false })
         .limit(500),
     ]).then(([creativosRes, costsRes]) => {

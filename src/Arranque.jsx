@@ -28,7 +28,7 @@ import { deleteProducto as deleteProductoFromCloud } from './marketingSync.js';
 import { supabase } from './supabase.js';
 import { downloadProductoExport, importProductoFromFile } from './productoExport.js';
 import DiagnosticoSyncModal from './DiagnosticoSyncModal.jsx';
-import { logCostsFromResponse, spendAllProductos, backfillProductoIds, normalizeCostName } from './costsStore.js';
+import { logCostsFromResponse, spendAllProductos, backfillProductoIds, normalizeCostName, pushUnsyncedCostsToCloud } from './costsStore.js';
 // Static imports — lazy() causaba TDZ en prod por chunking inconsistente.
 import BandejaSection from './Bandeja.jsx';
 import InspiracionSection from './InspiracionSection.jsx';
@@ -1231,6 +1231,12 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           map[r.producto_id] = (map[r.producto_id] || 0) + (Number(r.amount) || 0);
         }
         setCloudSpendMap(map);
+      })
+      .then(() => {
+        // Con el snapshot cloud ya tomado, subimos el backlog local no
+        // sincronizado (cross-device fix): los logs de ESTE device pasan
+        // al cloud y los otros devices los van a ver. Idempotente.
+        if (!cancelled) pushUnsyncedCostsToCloud().catch(() => {});
       });
     return () => { cancelled = true; };
   }, []);

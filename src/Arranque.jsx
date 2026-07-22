@@ -21,7 +21,7 @@ import React, { useState, useEffect, useRef, useMemo, Fragment } from 'react';
 import {
   Package, Target, Play, Check, Loader2, AlertTriangle, ChevronRight, ChevronDown,
   Plus, X, Sparkles, Link2, Search, Clock, Inbox, Trash2, Upload, Download, Activity,
-  LayoutGrid, List as ListIcon, BarChart3, Copy, Pencil, MoreHorizontal,
+  LayoutGrid, List as ListIcon, BarChart3, Copy, Pencil, MoreHorizontal, Users,
 } from 'lucide-react';
 import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGeneradorHoy, updateIdea, formatoDeAd } from './bandejaStore.js';
 import { deleteProducto as deleteProductoFromCloud } from './marketingSync.js';
@@ -1193,6 +1193,18 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // Modal de costos per-product + mapa de totales para el chip "$X" de cada
   // card. Se recomputa al abrir la lista y cuando se loguea un costo nuevo.
   const [costsModalProducto, setCostsModalProducto] = useState(null);
+  // Asignación de responsable por producto — para agrupar la lista por
+  // persona y ver cuánto gastó cada una. asignandoId = producto en edición.
+  const [asignandoId, setAsignandoId] = useState(null);
+  const [respDraft, setRespDraft] = useState('');
+  const asignarResponsable = (pid, nombre) => {
+    setProductos(prev => prev.map(p =>
+      String(p.id) === String(pid)
+        ? { ...p, responsable: (nombre || '').trim() || null, updated_at: new Date().toISOString() }
+        : p
+    ));
+    setAsignandoId(null);
+  };
   const [productSpendMap, setProductSpendMap] = useState(() => spendAllProductos());
   // Totales cloud (gasto del cron, tabla marketing_costs) por producto —
   // se suman a los locales para el chip "$X gastado".
@@ -3049,8 +3061,14 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             </div>
           </div>
         ) : (
-          <div className={vista === 'grid' ? 'grid grid-cols-1 lg:grid-cols-2 gap-3' : 'space-y-2'}>
-            {productos.map(p => {
+          (() => {
+            const contClass = vista === 'grid' ? 'grid grid-cols-1 lg:grid-cols-2 gap-3' : 'space-y-2';
+            // Gasto total de un producto (misma fórmula que el chip del card).
+            const costoDe = (p) => {
+              const runs = runHistory.filter(r => String(r.productoId || '') === String(p.id)).reduce((s, r) => s + (r.cost?.total || 0), 0);
+              return Math.max((productSpendMap[String(p.id)] || 0) + (cloudSpendMap[String(p.id)] || 0), runs);
+            };
+            const renderProductoCard = (p) => {
               const comps = p.competidores || [];
               const hasResearch = !!(p.docs?.research);
               const ideasDelProducto = loadIdeas().filter(i => String(i.productoId || '') === String(p.id));
@@ -3102,6 +3120,17 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               // Botones de acción (sync / export / borrar) — aparecen en hover.
               const actions = (
                 <>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setAsignandoId(String(p.id));
+                      setRespDraft(p.responsable || '');
+                    }}
+                    className={`p-1.5 rounded-md transition ${p.responsable ? 'text-brand-500 hover:text-brand-600' : 'text-gray-400 hover:text-brand-600'} hover:bg-brand-50 dark:hover:bg-brand-900/20`}
+                    title={p.responsable ? `Responsable: ${p.responsable} — click para cambiar` : 'Asignar responsable (agrupa la lista por persona)'}
+                  >
+                    <Users size={14} />
+                  </button>
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -3189,6 +3218,53 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                   </button>
                 </>
               );
+
+              // -------- MODO ASIGNAR RESPONSABLE (mini form inline) --------
+              if (asignandoId === String(p.id)) {
+                const nombresExistentes = [...new Set(productos.map(x => (x.responsable || '').trim()).filter(Boolean))]
+                  .filter(n => n !== (respDraft || '').trim());
+                return (
+                  <div key={p.id} className="bg-white dark:bg-gray-800 border-2 border-brand-300 dark:border-brand-700 rounded-xl p-3 space-y-2 animate-fade-in">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-brand-600 dark:text-brand-400">
+                      ¿Quién maneja {p.nombre}?
+                    </p>
+                    <input
+                      type="text" autoFocus value={respDraft}
+                      onChange={e => setRespDraft(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') asignarResponsable(p.id, respDraft); if (e.key === 'Escape') setAsignandoId(null); }}
+                      placeholder="Nombre de la persona (vacío = sin asignar)"
+                      className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    />
+                    {nombresExistentes.length > 0 && (
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[9px] text-gray-400 uppercase tracking-wider">Rápido:</span>
+                        {nombresExistentes.map(n => (
+                          <button key={n} onClick={() => asignarResponsable(p.id, n)}
+                            className="px-2 py-0.5 text-[10px] font-semibold bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300 rounded-full hover:bg-brand-100 dark:hover:bg-brand-900/50 transition">
+                            {n}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex gap-1.5 justify-end">
+                      {p.responsable && (
+                        <button onClick={() => asignarResponsable(p.id, '')}
+                          className="px-2.5 py-1 text-[10px] font-semibold text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition">
+                          Quitar
+                        </button>
+                      )}
+                      <button onClick={() => setAsignandoId(null)}
+                        className="px-2.5 py-1 text-[10px] font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 transition">
+                        Cancelar
+                      </button>
+                      <button onClick={() => asignarResponsable(p.id, respDraft)}
+                        className="px-2.5 py-1 text-[10px] font-bold text-white bg-brand-600 rounded hover:bg-brand-700 transition">
+                        Guardar
+                      </button>
+                    </div>
+                  </div>
+                );
+              }
 
               // -------- VISTA LISTA (fila compacta) --------
               if (vista === 'list') {
@@ -3288,8 +3364,48 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                   </div>
                 </div>
               );
-            })}
-          </div>
+            };
+
+            // AGRUPACIÓN POR RESPONSABLE: si al menos un producto tiene
+            // persona asignada, la lista se divide en grupos con header
+            // (👤 nombre · N productos · $gastado). Sin asignaciones, la
+            // lista queda plana como siempre.
+            const conResp = productos.filter(p => (p.responsable || '').trim());
+            if (conResp.length === 0) {
+              return <div className={contClass}>{productos.map(renderProductoCard)}</div>;
+            }
+            const nombres = [...new Set(conResp.map(p => p.responsable.trim()))].sort((a, b) => a.localeCompare(b, 'es'));
+            const grupos = [
+              ...nombres.map(n => ({ label: n, items: productos.filter(p => (p.responsable || '').trim() === n) })),
+              { label: null, items: productos.filter(p => !(p.responsable || '').trim()) },
+            ].filter(g => g.items.length > 0);
+            return (
+              <div className="space-y-6">
+                {grupos.map(g => {
+                  const gastoGrupo = g.items.reduce((s, p) => s + costoDe(p), 0);
+                  return (
+                    <div key={g.label || '__sin__'}>
+                      <div className="flex items-center gap-2 mb-2 px-1">
+                        <Users size={14} className={g.label ? 'text-brand-500' : 'text-gray-400'} />
+                        <h3 className={`text-sm font-bold ${g.label ? 'text-gray-900 dark:text-gray-100' : 'text-gray-400 dark:text-gray-500'}`}>
+                          {g.label || 'Sin asignar'}
+                        </h3>
+                        <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                          · {g.items.length} producto{g.items.length !== 1 ? 's' : ''}
+                        </span>
+                        {gastoGrupo > 0 && (
+                          <span className="ml-auto text-xs font-bold font-mono text-brand-600 dark:text-brand-400 tabular-nums">
+                            ${gastoGrupo.toFixed(2)} gastado
+                          </span>
+                        )}
+                      </div>
+                      <div className={contClass}>{g.items.map(renderProductoCard)}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()
         )}
         {showDiagnostico && <DiagnosticoSyncModal onClose={() => setShowDiagnostico(false)} />}
         {costsModalProducto && <ProductoCostsModal producto={costsModalProducto} onClose={() => setCostsModalProducto(null)} />}

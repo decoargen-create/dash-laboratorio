@@ -28,7 +28,7 @@ import { deleteProducto as deleteProductoFromCloud } from './marketingSync.js';
 import { supabase } from './supabase.js';
 import { downloadProductoExport, importProductoFromFile } from './productoExport.js';
 import DiagnosticoSyncModal from './DiagnosticoSyncModal.jsx';
-import { logCostsFromResponse, spendAllProductos, backfillProductoIds, normalizeCostName, pushUnsyncedCostsToCloud } from './costsStore.js';
+import { logCostsFromResponse, spendAllProductos, backfillProductoIds, normalizeCostName, pushUnsyncedCostsToCloud, promoteSyncedCosts } from './costsStore.js';
 // Static imports — lazy() causaba TDZ en prod por chunking inconsistente.
 import BandejaSection from './Bandeja.jsx';
 import InspiracionSection from './InspiracionSection.jsx';
@@ -1233,10 +1233,15 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         setCloudSpendMap(map);
       })
       .then(() => {
-        // Con el snapshot cloud ya tomado, subimos el backlog local no
-        // sincronizado (cross-device fix): los logs de ESTE device pasan
-        // al cloud y los otros devices los van a ver. Idempotente.
-        if (!cancelled) pushUnsyncedCostsToCloud().catch(() => {});
+        if (cancelled) return;
+        // ORDEN CRÍTICO anti doble-conteo:
+        // 1) promote: lo que el fetch de recién ya cuenta (synced) deja de
+        //    contar local.
+        // 2) push: el backlog se sube DESPUÉS — queda synced pero sigue
+        //    contando local hasta el próximo refetch (que lo promoverá).
+        promoteSyncedCosts();
+        setProductSpendMap(spendAllProductos());
+        pushUnsyncedCostsToCloud().catch(() => {});
       });
     return () => { cancelled = true; };
   }, []);
@@ -1247,7 +1252,6 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // Inspiración, descartamos nombres ambiguos, y matcheamos.
   useEffect(() => {
     try {
-      if (localStorage.getItem('adslab-costs-backfill-v1') === 'done') return;
       if (!productos || productos.length === 0) return; // esperar hidratación
       const AMB = '__ambiguo__';
       const map = {};
@@ -1266,8 +1270,14 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         } catch {}
       }
       const clean = Object.fromEntries(Object.entries(map).filter(([, v]) => v !== AMB));
+      // Flag por HASH de nombres (no 'done' una sola vez): si mañana se
+      // agrega un producto/comp cuyo nombre matchea logs viejos sin
+      // atribuir, el backfill re-corre. Idempotente: los logs ya
+      // atribuidos se saltean adentro.
+      const hash = Object.keys(clean).sort().join('|');
+      if (localStorage.getItem('adslab-costs-backfill-v1') === hash) return;
       const n = backfillProductoIds(clean);
-      localStorage.setItem('adslab-costs-backfill-v1', 'done');
+      localStorage.setItem('adslab-costs-backfill-v1', hash);
       if (n > 0) {
         setProductSpendMap(spendAllProductos());
         addToast?.({ type: 'success', message: `Gastos históricos atribuidos: ${n} movimientos asignados a sus productos.` });

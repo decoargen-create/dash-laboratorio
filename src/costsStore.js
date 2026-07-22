@@ -88,6 +88,20 @@ async function syncLogToCloud(log) {
   } catch { return false; }
 }
 
+// Recomputa el set de exclusión con TODOS los logs ya sincronizados.
+// El caller (Arranque) lo llama justo DESPUÉS de refetchear los totales
+// cloud y ANTES de empujar el backlog: así lo que el fetch ya cuenta se
+// deja de contar local, y lo que se sincronice después del fetch sigue
+// contando local hasta el próximo refetch. Sin esto, navegar fuera y
+// volver a Productos duplicaba lo sincronizado durante la sesión.
+export function promoteSyncedCosts() {
+  const s = new Set();
+  for (const l of loadLogs()) {
+    if (l?.synced && l?.id) s.add(l.id);
+  }
+  SYNCED_AT_LOAD = s;
+}
+
 function markSynced(id) {
   try {
     const logs = loadLogs();
@@ -192,6 +206,7 @@ export function spendByProducto(productoId, { sinceIso = null, recentN = 30 } = 
   const sinceMs = sinceIso ? new Date(sinceIso).getTime() : null;
   const logs = loadLogs().filter(l => {
     if (l.productoId !== pid) return false;
+    if (SYNCED_AT_LOAD.has(l.id)) return false; // los cuenta el cloud fetch
     if (sinceMs != null) {
       const t = new Date(l.ts).getTime();
       if (isNaN(t) || t < sinceMs) return false;

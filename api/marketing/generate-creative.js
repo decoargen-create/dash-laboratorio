@@ -15,6 +15,7 @@
 import {
   sanitizePromptForSafety,
   isHighRiskText,
+  fungalTermsAreBenign,
   isSafetyError,
   friendlyOpenAIError,
 } from './_safety.js';
@@ -96,11 +97,11 @@ function buildPrompt(idea) {
 // 2 intentos máximo (el primero con sanitización normal, el segundo con
 // agresiva). Si llega start=true desde detector de high-risk, ambos van
 // agresivos.
-async function callOpenAIImage({ apiKey, rawPrompt, size, quality, startAggressive = false }) {
+async function callOpenAIImage({ apiKey, rawPrompt, size, quality, startAggressive = false, keepFungalTerms = false }) {
   let aggressive = startAggressive;
   let lastErr = null;
   for (let attempt = 0; attempt < 2; attempt++) {
-    const prompt = sanitizePromptForSafety(rawPrompt, aggressive);
+    const prompt = sanitizePromptForSafety(rawPrompt, aggressive, { keepFungalTerms });
     const resp = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST',
       headers: {
@@ -170,13 +171,19 @@ export default async function handler(req, res) {
 
   // Auto-detección: si el texto de la idea tiene triggers wellness/íntimo,
   // arrancamos agresivo desde el primer call (ahorra 1 round-trip).
-  const startAggressive = isHighRiskText(
-    [idea.hook, idea.titulo, idea.descripcionImagen, idea.textoEnImagen, idea.copyPostMeta]
-      .filter(Boolean).join(' ')
-  );
+  const ideaText = [idea.hook, idea.titulo, idea.descripcionImagen, idea.textoEnImagen, idea.copyPostMeta]
+    .filter(Boolean).join(' ');
+  const startAggressive = isHighRiskText(ideaText);
+  // Producto dermatológico (pies/uñas/piel): preservamos "hongos/picazón" en
+  // vez de swapearlos a "desequilibrio". Derivamos el contexto del texto de la
+  // idea + el producto (si vino en el body).
+  const keepFungalTerms = fungalTermsAreBenign({
+    nombre: body?.producto?.nombre || '',
+    descripcion: [ideaText, body?.producto?.descripcion || ''].join(' '),
+  });
 
   try {
-    const result = await callOpenAIImage({ apiKey, rawPrompt, size, quality, startAggressive });
+    const result = await callOpenAIImage({ apiKey, rawPrompt, size, quality, startAggressive, keepFungalTerms });
 
     // Background save al cloud (Storage + DB) si el user mandó auth válido
     // y el body trae productoId. Eso permite cerrar la pestaña sin perder.

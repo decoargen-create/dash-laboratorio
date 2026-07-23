@@ -34,6 +34,11 @@ import {
   insertCreativoRow,
   createSignedUrlsForCreativos,
 } from './_supabase-server.js';
+import {
+  sanitizePromptForSafety,
+  isHighRiskCategory,
+  fungalTermsAreBenign,
+} from './_safety.js';
 
 const MODEL_IMAGE = 'gpt-image-2';
 const MODEL_STRATEGIST = 'claude-sonnet-4-6';
@@ -315,6 +320,7 @@ function inferUseCase(producto) {
       directive: 'This is an ANTI-FUNGAL product for the FEET / TOENAILS (athlete\'s foot, nail fungus, cracked heels). Every scene, hand, body part, testimonial and claim MUST be about FEET and toenails and the fungus / cracked-heel problem. NEVER show or mention the face, facial skin, dark facial spots, wrinkles, anti-aging or hair. If IMAGE 1 uses a face/skin/hair angle, REDIRECT it entirely to feet.',
       scene: 'feet-care context: clean bare feet or toenails, a foot resting on a towel, hands applying oil/drops to toes or heels, bathroom or bedroom floor, soft natural light — NO face, NO vanity mirror with a face',
       avoid: 'faces, facial close-ups, applying product to the face/cheeks, wrinkles/anti-aging cues, hair/scalp, dark facial spots',
+      copyTone: 'Write every headline/testimonial/claim in plain, benefit-first Spanish that a real customer instantly understands. GOOD (use these patterns): "Mejora los hongos de tus uñas", "Alivia la picazón", "Repará tus uñas", "Adiós al mal olor", "Uñas sanas otra vez". AVOID hard clinical/cure framing like "anti-hongos"/"elimina/cura definitiva" (Meta flags disease-cure claims). NEVER use vague words like "desequilibrio" — the real problem is HONGOS / PICAZÓN / uñas dañadas, name it clearly.',
     };
   }
   // Antihongos sin zona explícita — igual evitamos el drift a cara.
@@ -323,6 +329,7 @@ function inferUseCase(producto) {
       directive: 'This is an ANTI-FUNGAL product. Scenes, testimonials and claims MUST be about the fungal problem it solves (skin/nails/feet per the landing) — NEVER drift to facial skincare, wrinkles, anti-aging or hair unless the landing explicitly says so.',
       scene: 'the real affected area per the landing (feet, nails or skin folds) in a realistic, clinical-but-warm home setting',
       avoid: 'facial anti-aging, wrinkles, hair/scalp, face close-ups (unless the product is explicitly facial)',
+      copyTone: 'Write headlines/claims in plain, benefit-first Spanish the customer understands: "Mejora los hongos", "Alivia la picazón", "Repará tu piel/uñas". AVOID hard "anti-hongos/cura definitiva" clinical framing (Meta flags it) and NEVER use vague words like "desequilibrio" — name the real problem (hongos, picazón).',
     };
   }
   // Cuidado de pies genérico (sin hongos).
@@ -569,6 +576,7 @@ async function planStrategyAndVariations({ apiKey, refImgBuf, refMime, producto,
     producto?.descripcion ? `Descripción: ${producto.descripcion.slice(0, 400)}` : '',
     domainLock,
     useCaseHint ? `**CASO DE USO REAL DEL PRODUCTO** (CRÍTICO — los textos/testimonios/claims adaptados DEBEN ser sobre esto, NO sobre el problema del ad ref): ${useCaseHint.directive}` : '',
+    useCaseHint?.copyTone ? `**TONO / REDACCIÓN DEL COPY** (CRÍTICO — cómo redactar los headlines y claims): ${useCaseHint.copyTone}` : '',
     scaleHint ? `**TAMAÑO REAL DEL PRODUCTO** (CRÍTICO para que la imagen no lo dibuje chiquito): ${scaleHint}` : '',
     research ? `Research / audiencia / pain points (foco de la landing):\n${research}` : '',
     offerBriefDistinto
@@ -779,6 +787,7 @@ async function extractSkeletonHaiku({ apiKey, refImgBuf, refMime, producto }) {
     productoForm ? `**FORMATO FÍSICO: ${productoForm.toUpperCase()}** (este producto viene en ${productoForm} — NO es otro formato).` : '',
     domainLockV,
     useCaseHintV ? `**CASO DE USO REAL** (CRÍTICO — los textos adaptados deben ser sobre esto, NO sobre el problema del ad ref): ${useCaseHintV.directive}` : '',
+    useCaseHintV?.copyTone ? `**TONO / REDACCIÓN DEL COPY** (CRÍTICO — cómo redactar headlines y claims): ${useCaseHintV.copyTone}` : '',
     scaleHintV ? `**TAMAÑO REAL** (no lo dibujes chiquito): ${scaleHintV}` : '',
     producto?.descripcion ? `Descripción: ${producto.descripcion.slice(0, 500)}` : '',
     offerBriefDistintoV
@@ -1029,9 +1038,16 @@ function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentCol
         }
       : inferUseCase(producto);
     const category = inferProductCategory(effectiveForm);
+    // copyTone puede venir de inferUseCase (ej: antihongos) aunque el useCase
+    // efectivo salga del plan del estratega — lo tomamos igual para guiar la
+    // redacción del texto renderizado en la imagen.
+    const copyTone = useCase?.copyTone || inferUseCase(producto)?.copyTone;
     if (useCase) {
       parts.push(`  • **PRODUCT USE-CASE (CRITICAL — this OVERRIDES any generic skincare/face default below)**: ${useCase.directive}`);
       parts.push(`  • **SCENE ADAPTATION (precedence)**: PRESERVE from IMAGE 1 the composition, framing, palette, lighting mood, overlay positions and sticker styles. TRANSLATE the SETTING to the use-case: ${useCase.scene}. AVOID: ${useCase.avoid}.`);
+    }
+    if (copyTone) {
+      parts.push(`  • **COPY WORDING (CRITICAL — how to phrase any text rendered in the image)**: ${copyTone}`);
     }
     if (category && !useCase) {
       // ADAPT SCENE: si el winner es de otra categoría (ej: suplemento en
@@ -1210,9 +1226,13 @@ function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio
         }
       : inferUseCase(producto);
     const category = inferProductCategory(effectiveForm);
+    const copyTone = useCase?.copyTone || inferUseCase(producto)?.copyTone;
     if (useCase) {
       parts.push(`  - **PRODUCT USE-CASE (CRITICAL — OVERRIDES any generic skincare/face default)**: ${useCase.directive}`);
       parts.push(`  - **SCENE ADAPTATION (precedence)**: PRESERVE IMAGE 1's composition/palette/mood/overlay positions/sticker styles. TRANSLATE the SETTING to: ${useCase.scene}. AVOID: ${useCase.avoid}.`);
+    }
+    if (copyTone) {
+      parts.push(`  - **COPY WORDING (CRITICAL — how to phrase any text rendered in the image)**: ${copyTone}`);
     }
     if (category && !useCase) {
       // ADAPT SCENE con precedence rules (audit HIGH #1) — ver buildPromptFromPlan.
@@ -1291,88 +1311,15 @@ function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio
 // Nota: OpenAI NO permite desactivar el safety filter por completo —
 // 'moderation: low' es el setting más permisivo. Esto es la capa extra para
 // minimizar rechazos.
-// Heurística: si el producto tiene palabras gatillo de wellness/cuidado
-// íntimo, arrancamos directo en modo agresivo de sanitización. Evita el
-// reject del primer call (que cuesta el mismo tiempo que un OK) y resta
-// 1 round-trip a OpenAI.
-function isHighRiskCategory(producto) {
-  const haystack = [
-    producto?.nombre || '',
-    producto?.descripcion || '',
-    String(producto?.research || producto?.docs?.research || ''),
-  ].join(' ').toLowerCase();
-  const triggers = [
-    /íntim[oa]/, /intimate/, /vagina/, /vulva/, /menstru/, /period/,
-    /flora/, /probioti/, /candidi/, /fem(in)?(a|e)/, /mujer/, /woman/,
-    /antibio/, /infecci/, /sangra/, /bleed/, /pee/, /pis/, /orina/,
-    /sex/, /sexual/, /erecci/, /testoster/,
-  ];
-  return triggers.some(re => re.test(haystack));
-}
-
-function sanitizePromptForSafety(text, aggressive = false) {
-  if (!text) return text;
-  const swaps = [
-    // Anatomía clínica → genérica
-    [/\bvaginales?\b/gi, 'íntimo'],
-    [/\bvagina\b/gi, 'zona íntima'],
-    [/\bvulvas?\b/gi, 'zona íntima'],
-    [/\bgenitales?\b/gi, 'íntimo'],
-    [/\bsexuales?\b/gi, 'íntimo'],
-    [/\bpechos?\b/gi, 'busto'],
-    [/\bsenos?\b/gi, 'busto'],
-    // Procesos clínicos → suaves
-    [/\bmenstruales?\b/gi, 'mensual'],
-    [/\bmenstruaci[óo]n\b/gi, 'ciclo'],
-    [/\bsangrado\b/gi, 'flujo'],
-    [/\binfeccion(es)?\b/gi, 'molestia$1'],
-    [/\bhongos?\b/gi, 'desequilibrio'],
-    [/\bcandidiasis\b/gi, 'desequilibrio'],
-    [/\bbacterian?a?s?\b/gi, 'microbiota'],
-    [/\bantibioticos?\b/gi, 'fórmula natural'],
-    [/\bclamidia\b/gi, 'desequilibrio'],
-    [/\bcistitis\b/gi, 'molestia'],
-    // Claims médicos fuertes → genéricos
-    [/\bcura(n|r|do|s)?\b/gi, 'mejor$1'],
-    [/\btrata(n|r|do|miento)?\b/gi, 'cuid$1'],
-    [/\bdolor(es)?\b/gi, 'molestia$1'],
-    [/\bsangre\b/gi, 'flujo'],
-    [/\benferma|enferme(dad|s)\b/gi, 'condición'],
-    // Inglés
-    [/\bvagina(l)?\b/gi, 'intimate$1'],
-    [/\bvulva\b/gi, 'intimate area'],
-    [/\bgenital\b/gi, 'intimate'],
-    [/\bbreasts?\b/gi, 'bust'],
-    [/\bnaked\b/gi, ''],
-    [/\bnude\b/gi, ''],
-    [/\binfection(s)?\b/gi, 'discomfort$1'],
-    [/\byeast\b/gi, 'imbalance'],
-    [/\bantibiotics?\b/gi, 'natural formula'],
-    [/\bbleed(ing)?\b/gi, 'flow$1'],
-  ];
-  // En modo agresivo (retry tras rejection) sumamos swaps adicionales que
-  // pueden cambiar más el tono pero evitan más triggers conocidos.
-  if (aggressive) {
-    swaps.push(
-      [/\b(antes|despu[ée]s)\s+y\s+despu[ée]s\b/gi, 'transformación'],
-      [/\bbefore\s*(\/|and|\&)\s*after\b/gi, 'transformation'],
-      [/\bíntim[oa]s?\b/gi, 'personal'],
-      [/\bintimate\b/gi, 'personal'],
-      [/\bzona personal\b/gi, 'cuidado personal'],
-      [/\b(sin|sin más)\s+olor\b/gi, 'fresca'],
-      [/\bodor\b/gi, 'freshness'],
-    );
-  }
-  let out = text;
-  for (const [re, rep] of swaps) out = out.replace(re, rep);
-  return out;
-}
+// isHighRiskCategory, sanitizePromptForSafety y fungalTermsAreBenign viven en
+// ./_safety.js (única fuente de verdad, compartida entre todos los endpoints
+// de imágenes). Antes había una copia duplicada acá que quedaba desincronizada.
 
 // Construye la FormData para gpt-image-2 — extraído para reusar en retries.
-function buildEditForm({ prompt, refImgBuf, refMime, prodImgBuf, prodMime, size, quality, n, aggressiveSanitization = false }) {
+function buildEditForm({ prompt, refImgBuf, refMime, prodImgBuf, prodMime, size, quality, n, aggressiveSanitization = false, keepFungalTerms = false }) {
   const form = new FormData();
   form.append('model', MODEL_IMAGE);
-  form.append('prompt', sanitizePromptForSafety(prompt, aggressiveSanitization));
+  form.append('prompt', sanitizePromptForSafety(prompt, aggressiveSanitization, { keepFungalTerms }));
   form.append('size', size);
   form.append('quality', quality);
   form.append('n', String(Math.min(10, Math.max(1, n || 2))));
@@ -1691,6 +1638,9 @@ export default async function handler(req, res) {
     let qualityFallback = false;
 
     const isHighRisk = isHighRiskCategory(producto);
+    // Producto dermatológico (pies/uñas/piel): preservamos "hongos/picazón"
+    // en vez de swapearlos a "desequilibrio" (que no se entiende).
+    const keepFungalTerms = fungalTermsAreBenign(producto);
     const runCalls = async (useSize, useQuality = quality) => {
       // MODO STRATEGIST: N llamadas paralelas, una por cada plan.variation.
       if (prompts && prompts.length > 0) {
@@ -1701,6 +1651,7 @@ export default async function handler(req, res) {
             size: useSize, quality: useQuality, n: 1,
             budgetStartedAt,
             initialAggressive: isHighRisk,
+            keepFungalTerms,
           })
         ));
         return {
@@ -1717,13 +1668,13 @@ export default async function handler(req, res) {
             apiKey, prompt: __legacyPromptRef,
             refImgBuf, refMime, prodImgBuf: prodBuf, prodMime,
             size: useSize, quality: useQuality, n: nRef,
-            budgetStartedAt, initialAggressive: isHighRisk,
+            budgetStartedAt, initialAggressive: isHighRisk, keepFungalTerms,
           }),
           callGptImage2Edit({
             apiKey, prompt: __legacyPromptRebrand,
             refImgBuf, refMime, prodImgBuf: prodBuf, prodMime,
             size: useSize, quality: useQuality, n: nReb,
-            budgetStartedAt, initialAggressive: isHighRisk,
+            budgetStartedAt, initialAggressive: isHighRisk, keepFungalTerms,
           }),
         ]);
         return {
@@ -1736,7 +1687,7 @@ export default async function handler(req, res) {
         apiKey, prompt: __legacyPromptRef,
         refImgBuf, refMime, prodImgBuf: prodBuf, prodMime,
         size: useSize, quality: useQuality, n,
-        budgetStartedAt, initialAggressive: isHighRisk,
+        budgetStartedAt, initialAggressive: isHighRisk, keepFungalTerms,
       });
       return { imagenes: imgs, variantStyles: imgs.map(() => 'reference') };
     };

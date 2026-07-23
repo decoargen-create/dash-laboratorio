@@ -36,8 +36,35 @@ export function isHighRiskText(text) {
   return triggers.some(re => re.test(haystack));
 }
 
-export function sanitizePromptForSafety(text, aggressive = false) {
+// "hongos", "infección", "candidiasis", "yeast" son safety-risk para el
+// filtro de imágenes SOLO en contexto íntimo/genital (candidiasis vaginal).
+// En un producto DERMATOLÓGICO (pies, uñas, piel, cuero cabelludo) son
+// términos benignos y legítimos — swapearlos rompe el copy del creativo:
+// "hongos en las uñas" salía como "desequilibrio en las uñas" (bug del Kit
+// Inicial VYA / antihongos de uñas). Este helper decide si el contexto es
+// benigno (dermatológico y NO íntimo) → en ese caso se preservan esos términos.
+export function fungalTermsAreBenign(producto) {
+  const haystack = [
+    producto?.nombre || '',
+    producto?.descripcion || '',
+    String(producto?.research || producto?.docs?.research || ''),
+  ].join(' ').toLowerCase();
+  // Íntimo/genital gana: ahí "hongos" = candidiasis y SÍ hay que sanitizar.
+  if (/\b([íi]ntim[oa]|vaginal|vulva|genital|candidiasis|c[áa]ndida|flujo vaginal|higiene [íi]ntima|feminine wellness|zona [íi]ntima|flora [íi]ntima|flora vaginal)\b/.test(haystack)) {
+    return false;
+  }
+  // Dermatológico: pies, uñas, piel, cuero cabelludo → término benigno.
+  return /\b(pies?|pie|u[ñn]as?|talones?|tal[óo]n|onicomicosis|pie de atleta|athlete'?s?\s*foot|dermat|piel|cutis|cuero cabelludo|scalp|caspa|nail|toe|foot|feet)\b/.test(haystack);
+}
+
+export function sanitizePromptForSafety(text, aggressive = false, opts = {}) {
   if (!text) return text;
+  // keepFungalTerms=true (producto dermatológico) → NO tocamos hongos/
+  // infección/candidiasis/yeast; en un antihongos de uñas/pies son legítimos.
+  const keepFungalTerms = opts.keepFungalTerms === true;
+
+  // Swaps universales — riesgo de safety en CUALQUIER contexto (anatomía
+  // explícita, desnudez, claims médicos fuertes). Siempre se aplican.
   const swaps = [
     // Anatomía clínica → genérica
     [/\bvaginales?\b/gi, 'íntimo'],
@@ -51,13 +78,7 @@ export function sanitizePromptForSafety(text, aggressive = false) {
     [/\bmenstruales?\b/gi, 'mensual'],
     [/\bmenstruaci[óo]n\b/gi, 'ciclo'],
     [/\bsangrado\b/gi, 'flujo'],
-    [/\binfeccion(es)?\b/gi, 'molestia$1'],
-    [/\bhongos?\b/gi, 'desequilibrio'],
-    [/\bcandidiasis\b/gi, 'desequilibrio'],
-    [/\bbacterian?a?s?\b/gi, 'microbiota'],
     [/\bantibioticos?\b/gi, 'fórmula natural'],
-    [/\bclamidia\b/gi, 'desequilibrio'],
-    [/\bcistitis\b/gi, 'molestia'],
     // Claims médicos fuertes → genéricos
     [/\bcura(n|r|do|s)?\b/gi, 'mejor$1'],
     [/\btrata(n|r|do|miento)?\b/gi, 'cuid$1'],
@@ -71,11 +92,25 @@ export function sanitizePromptForSafety(text, aggressive = false) {
     [/\bbreasts?\b/gi, 'bust'],
     [/\bnaked\b/gi, ''],
     [/\bnude\b/gi, ''],
-    [/\binfection(s)?\b/gi, 'discomfort$1'],
-    [/\byeast\b/gi, 'imbalance'],
     [/\bantibiotics?\b/gi, 'natural formula'],
     [/\bbleed(ing)?\b/gi, 'flow$1'],
   ];
+
+  // Swaps SOLO-íntimo: en dermatológico (pies/uñas/piel) estos términos son
+  // legítimos, así que se preservan cuando keepFungalTerms.
+  if (!keepFungalTerms) {
+    swaps.push(
+      [/\binfeccion(es)?\b/gi, 'molestia$1'],
+      [/\bhongos?\b/gi, 'desequilibrio'],
+      [/\bcandidiasis\b/gi, 'desequilibrio'],
+      [/\bbacterian?a?s?\b/gi, 'microbiota'],
+      [/\bclamidia\b/gi, 'desequilibrio'],
+      [/\bcistitis\b/gi, 'molestia'],
+      [/\binfection(s)?\b/gi, 'discomfort$1'],
+      [/\byeast\b/gi, 'imbalance'],
+    );
+  }
+
   if (aggressive) {
     swaps.push(
       [/\b(antes|despu[ée]s)\s+y\s+despu[ée]s\b/gi, 'transformación'],

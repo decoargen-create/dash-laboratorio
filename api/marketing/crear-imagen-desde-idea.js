@@ -24,6 +24,7 @@ import {
 import {
   sanitizePromptForSafety,
   isHighRiskCategory,
+  fungalTermsAreBenign,
   isSafetyError,
 } from './_safety.js';
 
@@ -275,7 +276,7 @@ const PER_CALL_TIMEOUT_MS = 275000;
 // un error limpio en vez de morir mid-fetch (lo que deja al cliente colgado).
 const HANDLER_TIMEOUT_MS = 290000;
 
-async function callGptImage2Edit({ apiKey, prompt, prodImgBuf, prodMime, size, quality, n, budgetStartedAt = Date.now(), initialAggressive = false }) {
+async function callGptImage2Edit({ apiKey, prompt, prodImgBuf, prodMime, size, quality, n, budgetStartedAt = Date.now(), initialAggressive = false, keepFungalTerms = false }) {
   const RETRY_DELAYS = [15000, 30000];
   let lastErr = null;
   // aggressiveSanitization se activa tras un safety reject, O desde el inicio
@@ -285,7 +286,7 @@ async function callGptImage2Edit({ apiKey, prompt, prodImgBuf, prodMime, size, q
   for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
     const form = new FormData();
     form.append('model', MODEL);
-    form.append('prompt', sanitizePromptForSafety(prompt, aggressiveSanitization));
+    form.append('prompt', sanitizePromptForSafety(prompt, aggressiveSanitization, { keepFungalTerms }));
     form.append('size', size);
     form.append('quality', quality);
     form.append('n', String(Math.min(10, Math.max(1, n || 1))));
@@ -419,6 +420,7 @@ export default async function handler(req, res) {
     let sizeFallback = false;
 
     const isHighRisk = isHighRiskCategory(producto);
+    const keepFungalTerms = fungalTermsAreBenign(producto);
     const runAll = async (useSize) => {
       const results = await Promise.all(prompts.map(p =>
         callGptImage2Edit({
@@ -427,6 +429,7 @@ export default async function handler(req, res) {
           size: useSize, quality, n: 1,
           budgetStartedAt,
           initialAggressive: isHighRisk,
+          keepFungalTerms,
         })
       ));
       return results.flat();

@@ -27,6 +27,17 @@ html.dark {
   --brand-950: 43 29 18;
 }
 
+/* Foco de teclado visible GLOBAL (fallback de accesibilidad). Muchos controles
+   usan focus:ring de Tailwind, pero los que se olvidaron quedaban sin ningún
+   indicador al navegar con Tab. Esta regla los cubre. No dobla el ring en los
+   que ya usan focus:outline-none (esa clase tiene mayor especificidad y gana),
+   así que solo aparece donde de verdad faltaba. */
+:focus-visible {
+  outline: 2px solid rgb(var(--brand-500));
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
 body {
   @apply bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-gray-100;
   /* En dark mode subimos a gray-950 (más profundo) para que el mesh gradient

@@ -8703,7 +8703,10 @@ export function useCountUp(target, duration = 800) {
 // la derecha con animación y se auto-destruye.
 function ToastContainer({ toasts }) {
   return (
-    <div className="fixed bottom-6 right-6 z-[200] flex flex-col gap-2 pointer-events-none">
+    // aria-live: los lectores de pantalla anuncian los toasts (antes eran
+    // invisibles para accesibilidad). polite = no interrumpe; suficiente para
+    // avisos de éxito/warning (los errores igual quedan visibles en rojo).
+    <div className="fixed bottom-6 right-6 z-[200] flex flex-col gap-2 pointer-events-none" role="status" aria-live="polite" aria-atomic="false">
       {toasts.map(t => (
         <div
           key={t.id}
@@ -8712,13 +8715,15 @@ function ToastContainer({ toasts }) {
               ? 'bg-emerald-50/95 dark:bg-emerald-900/70 border-emerald-200 dark:border-emerald-700 text-emerald-900 dark:text-emerald-100'
               : t.type === 'error'
                 ? 'bg-red-50/95 dark:bg-red-900/70 border-red-200 dark:border-red-700 text-red-900 dark:text-red-100'
-                : 'bg-white/95 dark:bg-gray-800/95 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100'
+                : t.type === 'warning'
+                  ? 'bg-amber-50/95 dark:bg-amber-900/70 border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-100'
+                  : 'bg-white/95 dark:bg-gray-800/95 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100'
           }`}
         >
           <div className={`shrink-0 rounded-full p-1 ${
-            t.type === 'success' ? 'bg-emerald-200/60 dark:bg-emerald-800/60' : t.type === 'error' ? 'bg-red-200/60 dark:bg-red-800/60' : 'bg-gray-200/60 dark:bg-gray-700/60'
+            t.type === 'success' ? 'bg-emerald-200/60 dark:bg-emerald-800/60' : t.type === 'error' ? 'bg-red-200/60 dark:bg-red-800/60' : t.type === 'warning' ? 'bg-amber-200/70 dark:bg-amber-800/60' : 'bg-gray-200/60 dark:bg-gray-700/60'
           }`}>
-            {t.type === 'success' ? <Check size={14} /> : t.type === 'error' ? <X size={14} /> : <Bell size={14} />}
+            {t.type === 'success' ? <Check size={14} /> : t.type === 'error' ? <X size={14} /> : t.type === 'warning' ? <AlertTriangle size={14} /> : <Bell size={14} />}
           </div>
           <div className="flex-1 text-sm font-medium">{t.message}</div>
         </div>

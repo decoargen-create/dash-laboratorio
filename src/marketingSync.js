@@ -239,7 +239,22 @@ export async function pullMarketingFromCloud() {
       productosArr.forEach((p, idx) => {
         const fromTable = byProducto.get(String(p.id));
         if (fromTable) {
-          productosArr[idx] = { ...p, bandejaIdeas: fromTable };
+          // MERGE acotado (no reemplazo ciego): el reemplazo directo perdía
+          // ideas locales cuyo dual-write al cloud falló (blip de red) → en el
+          // próximo pull desaparecían. Preservamos SOLO las locales que no están
+          // en la tabla Y son RECIENTES (<15 min): esas son creaciones no
+          // sincronizadas. Las viejas NO se preservan, para no resucitar ideas
+          // borradas en otro device (el reemplazo propaga bien los deletes).
+          const cloudIds = new Set(fromTable.map(i => String(i.id)));
+          const cutoff = Date.now() - 15 * 60 * 1000;
+          const localOnlyRecientes = Array.isArray(p.bandejaIdeas)
+            ? p.bandejaIdeas.filter(i => {
+                if (!i || cloudIds.has(String(i.id))) return false;
+                const t = i.createdAt ? Date.parse(i.createdAt) : NaN;
+                return Number.isFinite(t) && t >= cutoff;
+              })
+            : [];
+          productosArr[idx] = { ...p, bandejaIdeas: [...fromTable, ...localOnlyRecientes] };
         }
       });
       // Sweep de orphans: cualquier idea que ya esté en marketing_ideas se

@@ -166,17 +166,20 @@ export async function bulkGenerateFromIdeas({
   // que estén en flight (browser network stack) antes de que el user pueda
   // cerrar la pestaña. El browser limita ~6 simultáneas; el resto encola
   // localmente y se manda apenas se libera una conexión.
-  const promises = ideas.map(idea =>
-    fireIdea({ idea, producto, prodImg, accentColor, n, quality, size, authToken })
+  const promises = ideas.map(idea => {
+    // Marcamos en_uso ANTES de disparar (optimista) para cerrar la ventana de
+    // DOBLE-DISPARO: el guard de la Bandeja saltea las ideas en_uso, así que si
+    // el user re-selecciona la misma idea durante los ~80s que tarda la
+    // generación, ya no se re-dispara (y no se paga dos veces). Antes recién se
+    // marcaba usada al TERMINAR, y durante toda la ventana seguía "pendiente".
+    updateIdea(idea.id, { estado: 'en_uso' }).catch(() => {});
+    return fireIdea({ idea, producto, prodImg, accentColor, n, quality, size, authToken })
       .then(async data => {
         const costo = logCostsFromResponse(data, `bulk-bandeja · ${(idea.hook || idea.titulo || '').slice(0, 40)}`, { productoId: producto?.id });
         const result = await processResponse(data, idea, producto, quality);
-        // Marcar la idea como "usada" — sin esto se queda en la columna
-        // "Pendientes" del kanban aunque ya generaste imágenes desde ella.
-        // El user tenía que moverlas a mano: con 20 ideas era insostenible.
-        // PERO solo si SÍ se generó algo: antes se marcaba usada aunque
-        // salieran 0 imágenes (HTTP 200 con cloud vacío) → la idea quedaba
-        // "usada" sin ningún creativo y el user creía que había producido.
+        // Marcar "usada" solo si SÍ se generó algo: antes se marcaba usada
+        // aunque salieran 0 imágenes → la idea quedaba "usada" sin ningún
+        // creativo y el user creía que había producido.
         if ((result.saved || 0) > 0) {
           try {
             await updateIdea(idea.id, {
@@ -187,14 +190,19 @@ export async function bulkGenerateFromIdeas({
           } catch (err) {
             console.warn(`[bulk] no pude marcar idea ${idea.id} como usada:`, err.message);
           }
+        } else {
+          // No se generó nada → revertir el en_uso a pendiente para no dejarla trabada.
+          updateIdea(idea.id, { estado: 'pendiente' }).catch(() => {});
         }
         return { ok: true, idea, cost: costo?.total || 0, ...result };
       })
       .catch(err => {
         console.warn(`[bulk] idea ${idea.id} falló:`, err.message);
+        // Revertir el en_uso para que la idea vuelva a estar disponible.
+        updateIdea(idea.id, { estado: 'pendiente' }).catch(() => {});
         return { ok: false, idea, error: err.message, saved: 0 };
-      })
-  );
+      });
+  });
 
   // Reporter de progreso en vivo — cuenta cuántas terminaron.
   let completed = 0;

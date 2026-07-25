@@ -116,6 +116,23 @@ export default defineConfig(({ mode }) => {
       // muestre la línea original del código fuente en lugar de variables
       // minificadas como 'q' o 'U'.
       sourcemap: true,
+      rollupOptions: {
+        output: {
+          // Separamos los vendors pesados e INDEPENDIENTES (hojas del grafo:
+          // la app los importa, ellos no importan a la app) en chunks propios.
+          // Cambian rara vez → quedan cacheados entre deploys en vez de
+          // re-descargarse dentro del chunk index de 2.2MB cada vez. NO tocamos
+          // el code-splitting de la app (eso es lo que daba TDZ); esto es solo
+          // vendor-splitting, que Rollup ordena bien por los imports.
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return;
+            if (id.includes('recharts') || id.includes('/d3-') || id.includes('/victory-')) return 'vendor-charts';
+            if (id.includes('@supabase')) return 'vendor-supabase';
+            if (id.includes('lucide-react')) return 'vendor-icons';
+            if (id.includes('/react-dom/') || id.includes('/scheduler/') || /\/react\//.test(id)) return 'vendor-react';
+          },
+        },
+      },
     },
     plugins: [
       react(),

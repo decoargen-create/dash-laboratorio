@@ -11,6 +11,8 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { anthropicCost } from './_costs.js';
+import { getUserIdFromAuth } from './_supabase-server.js';
+import { requireAuth } from './_security.js';
 
 const MODEL = 'claude-sonnet-4-6';
 export const maxDuration = 120;
@@ -118,6 +120,8 @@ Devolvés el array completo de copies con la tool submit_copies. Cada copy pivot
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return respond(res, 405, { error: 'Method not allowed' });
+  const userId = await requireAuth(req, res, getUserIdFromAuth);
+  if (!userId) return; // endpoint pago → requiere sesión (anti cost-abuse)
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
   if (!anthropicKey) return respond(res, 500, { error: 'ANTHROPIC_API_KEY missing' });
 

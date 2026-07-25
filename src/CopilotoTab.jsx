@@ -16,6 +16,7 @@ import { Loader2, Send, Sparkles, Trash2 } from 'lucide-react';
 import { loadIdeas } from './bandejaStore.js';
 import { logCostsFromResponse } from './costsStore.js';
 import { supabase, getCurrentUser } from './supabase.js';
+import { authHeaders } from './authFetch.js';
 
 const CHAT_KEY_PREFIX = 'adslab-marketing-copilot-';
 const CHAT_CAP = 40; // mensajes guardados por producto
@@ -155,7 +156,7 @@ export default function CopilotoTab({ producto, addToast }) {
     try {
       const resp = await fetch('/api/marketing/copilot', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders(),
         body: JSON.stringify({ messages: conMensaje, productoContext: buildContext() }),
       });
       const data = await resp.json();

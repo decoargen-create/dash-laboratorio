@@ -14,6 +14,8 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { anthropicCost } from './_costs.js';
+import { getUserIdFromAuth } from './_supabase-server.js';
+import { requireAuth } from './_security.js';
 
 const MODEL = 'claude-haiku-4-5-20251001';
 
@@ -85,6 +87,8 @@ function respondJSON(res, status, payload) {
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
+  const userId = await requireAuth(req, res, getUserIdFromAuth);
+  if (!userId) return; // endpoint pago → requiere sesión (anti cost-abuse)
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return respondJSON(res, 500, { error: 'ANTHROPIC_API_KEY no configurada' });

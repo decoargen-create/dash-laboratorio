@@ -329,6 +329,13 @@ export default async function handler(req, res) {
 
   // ============ GENERAR INVITE LINK PARA MENTOR ============
   if (action === 'create_invite') {
+    // SEGURIDAD: antes esta acción no verificaba NINGUNA sesión → un POST
+    // anónimo minteaba un token válido de 1 año con role 'mentor' y bypasseaba
+    // el allowlist AUTH_USERS. Ahora exige una sesión de admin autenticada.
+    const adminSess = verifyToken((body || {}).session, secret);
+    if (!adminSess || adminSess.purpose !== 'session' || adminSess.role !== 'admin') {
+      return respondJSON(res, 401, { error: 'Solo un admin autenticado puede generar invites' });
+    }
     const { mentorId, mentorName, pin } = body || {};
     if (mentorId == null || !mentorName) {
       return respondJSON(res, 400, { error: 'Faltan mentorId o mentorName' });

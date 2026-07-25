@@ -16,6 +16,7 @@
 
 import { addGeneratedIdeas, loadIdeas, formatoDeAd } from './bandejaStore.js';
 import { logCostsFromResponse } from './costsStore.js';
+import { authHeaders } from './authFetch.js';
 import { startExecution, updateExecution, finishExecution } from './executionsStore.js';
 import { hydrateCompetidoresAds } from './competidorAdsIDB.js';
 
@@ -164,7 +165,7 @@ export async function runGeneradorRapido({ producto, formato, cantidad, formatoM
     const runChunk = async (chunkTarget) => {
       const resp = await fetch('/api/marketing/generate-ideas', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders(),
         signal: ctrl.signal,
         body: JSON.stringify({
           producto,

@@ -52,11 +52,13 @@ export default async function handler(req, res) {
   let maxGenerate = 5;
 
   if (req.method === 'GET') {
-    // Camino del cron.
+    // Camino del cron. SEGURIDAD: el secreto ahora es OBLIGATORIO — antes, si
+    // CRON_SECRET no estaba seteado, se salteaba el check y cualquiera podía
+    // disparar el cron (que gasta API). Sin secreto → 401.
     const cronSecret = process.env.CRON_SECRET;
-    if (cronSecret) {
-      const auth = req.headers.authorization || '';
-      if (auth !== `Bearer ${cronSecret}`) return respondJSON(res, 401, { error: 'No autorizado' });
+    const auth = req.headers.authorization || '';
+    if (!cronSecret || auth !== `Bearer ${cronSecret}`) {
+      return respondJSON(res, 401, { error: 'No autorizado' });
     }
     maxGenerate = 4;
   } else if (req.method === 'POST') {

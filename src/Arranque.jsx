@@ -26,6 +26,7 @@ import {
 import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGeneradorHoy, updateIdea, formatoDeAd } from './bandejaStore.js';
 import { deleteProducto as deleteProductoFromCloud } from './marketingSync.js';
 import { supabase } from './supabase.js';
+import { authHeaders } from './authFetch.js';
 import { downloadProductoExport, importProductoFromFile } from './productoExport.js';
 import DiagnosticoSyncModal from './DiagnosticoSyncModal.jsx';
 import { logCostsFromResponse, spendAllProductos, backfillProductoIds, normalizeCostName, pushUnsyncedCostsToCloud, promoteSyncedCosts } from './costsStore.js';
@@ -1793,7 +1794,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     try {
       const resp = await fetch('/api/marketing/suggest-competitors', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders(),
         body: JSON.stringify({ searchKeyword: keyword, country: 'ALL', limit: 30 }),
       });
       const data = await resp.json();
@@ -2445,7 +2446,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           const resp = await fetch('/api/marketing/deep-analyze', {
             method: 'POST',
             signal: pipelineSignal,
-            headers: { 'Content-Type': 'application/json' },
+            headers: await authHeaders(),
             body: JSON.stringify({
               ad: {
                 id: ad.id, body: ad.body, headline: ad.headline,
@@ -2625,7 +2626,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           const resp = await fetch('/api/marketing/generate-ideas', {
             method: 'POST',
             signal: pipelineSignal,
-            headers: { 'Content-Type': 'application/json' },
+            headers: await authHeaders(),
             body: JSON.stringify({
               producto: productoActualizado || producto || { nombre: 'Producto sin definir' },
               competidoresAnalisis: compAnalisis,
@@ -2775,7 +2776,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       try {
         const scoreResp = await fetch('/api/marketing/score-hooks', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: await authHeaders(),
           body: JSON.stringify({ ideas: insertedIdeasForScoring }),
         });
         const scoreData = await parseJsonResponse(scoreResp, 'Scoring de hooks');

@@ -26,6 +26,8 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { anthropicCost } from './_costs.js';
+import { getUserIdFromAuth } from './_supabase-server.js';
+import { requireAuth } from './_security.js';
 
 // Vercel: darle el máximo de tiempo (300s en Pro). Aun así el cap de ads de
 // arriba es lo que evita el timeout — esto es defensivo.
@@ -722,6 +724,8 @@ function sanitizeIdea(i) {
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
+  const userId = await requireAuth(req, res, getUserIdFromAuth);
+  if (!userId) return; // endpoint pago → requiere sesión (anti cost-abuse)
 
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
   if (!anthropicKey) {

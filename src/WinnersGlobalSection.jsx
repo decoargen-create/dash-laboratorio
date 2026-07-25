@@ -13,6 +13,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Trophy, Sparkles, Loader2, Check, ImageOff, Package, ArrowRight } from 'lucide-react';
 import { listAllWinners } from './galeriaReferenciales.js';
 import { refreshSignedUrls } from './galeriaReferencialesCloud.js';
+import { SkeletonGrid } from './Skeleton.jsx';
 import { getProductoImagen, getAccentColor } from './productoImagen.js';
 import { startExecution, updateExecution, finishExecution } from './executionsStore.js';
 import { logCostsFromResponse } from './costsStore.js';
@@ -298,9 +299,7 @@ export default function WinnersGlobalSection({ addToast, onGoToSection }) {
 
       {/* Grilla de winners */}
       {loading ? (
-        <div className="flex items-center justify-center py-20 text-gray-400 gap-2">
-          <Loader2 size={18} className="animate-spin" /> Cargando winners…
-        </div>
+        <SkeletonGrid count={8} />
       ) : winners.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center gap-3">
           <div className="w-14 h-14 rounded-2xl bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">

@@ -2682,7 +2682,15 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       // Límite 500 (era 100) para traer TODOS los activos de la biblioteca,
       // no solo los primeros 100. Apify devuelve hasta 500 pero solo cobra
       // por los que existan — si el comp tiene 60, devuelve 60.
-      const payload = { country: 'ALL', limit: 500, activeStatus: 'active' };
+      // limit 1000 (era 500): trae más del histórico de marcas grandes. Apify
+      // solo cobra por los ads que existan, así que subir el cap no encarece a
+      // marcas chicas. productoId/competidorId + auth → llena el índice de
+      // búsqueda server-side (antes la lupa quedaba vacía para lo scrapeado acá).
+      const payload = {
+        country: 'ALL', limit: 1000, activeStatus: 'active',
+        productoId: activeProductoId ? String(activeProductoId) : undefined,
+        competidorId: `brand-${brand.id}`,
+      };
       if (brand.fbPageUrl) {
         payload.fbPageUrl = brand.fbPageUrl.startsWith('http') ? brand.fbPageUrl : `https://www.facebook.com/${brand.fbPageUrl}`;
       } else if (brand.landingUrl) {
@@ -2731,7 +2739,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
 
       updateExecution(execId, { stage: `Scrapeando ${payload.fbPageUrl ? 'desde FB page' : `keyword "${payload.searchKeyword}"`}…` });
       const resp = await fetchWithTimeout('/api/marketing/apify-ingest', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: await authHeaders(),
         body: JSON.stringify(payload),
       });
       const data = await parseJsonOrThrow(resp, 'apify-ingest');
@@ -2839,7 +2847,11 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       estimatedMs: 60000,
     });
     try {
-      const payload = { country: 'ALL', limit: 500, activeStatus: 'active' };
+      const payload = {
+        country: 'ALL', limit: 1000, activeStatus: 'active',
+        productoId: producto?.id ? String(producto.id) : undefined,
+        competidorId: comp.id,
+      };
       // adLibraryUrl > fbPageUrl > landingUrl→resolve > keyword.
       const directUrl = comp.adLibraryUrl || comp.fbPageUrl;
       if (directUrl) {
@@ -2884,7 +2896,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
 
       updateExecution(execId, { stage: `Scrapeando ${payload.fbPageUrl ? 'desde FB page' : `keyword "${payload.searchKeyword}"`}…` });
       const resp = await fetchWithTimeout('/api/marketing/apify-ingest', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: await authHeaders(),
         body: JSON.stringify(payload),
       });
       const data = await parseJsonOrThrow(resp, 'apify-ingest');

@@ -26,13 +26,9 @@ import ArranqueSection from './Arranque.jsx';
 // garantizar estabilidad. Cuando tengamos tiempo, podemos volver a lazy
 // pero con manualChunks configurado explícitamente en vite.config.js.
 import BandejaSection from './Bandeja.jsx';
-import AutoIGSection from './AutoIG.jsx';
 import InspiracionSection from './InspiracionSection.jsx';
 import WinnersGlobalSection from './WinnersGlobalSection.jsx';
-import InspiracionGlobalSection from './InspiracionGlobalSection.jsx';
-import BoardsSection from './BoardsSection.jsx';
 import ConsultoriaSection from './Consultoria.jsx';
-import DashboardSeny from './DashboardSeny.jsx';
 import CampanasTracker from './CampanasTracker.jsx';
 import { PipelineRunProvider } from './PipelineRunContext.jsx';
 import PipelineRunOverlay from './PipelineRunOverlay.jsx';
@@ -645,7 +641,6 @@ const PLATFORMS = [
 const HIDDEN_PLATFORMS = [
   { id: 'viora',    name: 'Laboratorio Viora', shortName: 'Viora',    initials: 'LV', sidebarGradient: 'from-[#4a0f22] via-pink-900 to-[#3f0c1e]', badgeBg: 'bg-gradient-to-br from-pink-600 to-rose-500', badgeText: 'text-white', defaultSection: 'inicio' },
   // Dashboard Seny migrado a otra plataforma (pedido del user) — oculto.
-  { id: 'dashboard-seny', name: 'Dashboard Seny', shortName: 'Dash Seny', initials: 'DS', sidebarGradient: 'from-gray-900 via-gray-800 to-black', badgeBg: 'bg-[#FFD33D]', badgeText: 'text-gray-900', defaultSection: 'seny-dash' },
   { id: 'senydrop', name: 'Senydrop',          shortName: 'Senydrop', initials: 'SD', sidebarGradient: 'from-gray-900 via-gray-800 to-black',     badgeBg: 'bg-[#FFD33D]',                                badgeText: 'text-gray-900', defaultSection: 'seny-productos' },
   { id: 'metaads',  name: 'Meta Ads',          shortName: 'Meta Ads', initials: 'MA', sidebarGradient: 'from-[#0668E1] via-[#1877F2] to-[#0053A0]', badgeBg: 'bg-gradient-to-br from-[#0668E1] to-[#1877F2]', badgeText: 'text-white', defaultSection: 'meta-inicio' },
 ];
@@ -2256,11 +2251,6 @@ function AppShell({ onExit }) {
               <NavItem icon={ClipboardList} label="Acta de reunión" section="con-acta" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
             </>
           )}
-          {currentUser.role === 'admin' && currentPlatform === 'dashboard-seny' && (
-            <>
-              <NavItem icon={BarChart3} label="Dashboard" section="seny-dash" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-            </>
-          )}
           {currentUser.role !== 'admin' && (
             <>
               <NavItem icon={Home} label="Inicio" section="inicio" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
@@ -2351,12 +2341,9 @@ function AppShell({ onExit }) {
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-bandeja' && <BandejaSection addToast={addToast} />}
           {/* mk-competencia (sidebar legacy) está redirigido por el effect
               de arriba a mk-arranque — no necesita su propio render. */}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-auto-ig' && <AutoIGSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-inspiracion' && <InspiracionSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-meta' && <CampanasTracker addToast={addToast} />}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-inspiracion-global' && <InspiracionGlobalSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-winners' && <WinnersGlobalSection addToast={addToast} onGoToSection={setCurrentSection} />}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-boards' && <BoardsSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-gastos' && <GastosStackSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-docs' && (
             <MarketingSection
@@ -2371,7 +2358,6 @@ function AppShell({ onExit }) {
           {/* Consultoría */}
           {currentUser.role === 'admin' && currentPlatform === 'consultoria' && currentSection === 'con-acta' && <ConsultoriaSection addToast={addToast} />}
 
-          {currentUser.role === 'admin' && currentPlatform === 'dashboard-seny' && currentSection === 'seny-dash' && <DashboardSeny addToast={addToast} />}
 
           {/* Mentor Views */}
           {currentUser.role === 'mentor' && currentSection === 'inicio' && <EquipoInicioSection currentUser={currentUser} state={state} />}
@@ -8231,13 +8217,11 @@ function getSectionTitle(user, section) {
     'mk-copy': 'Marketing · Generador de copy',
     'mk-bandeja': 'Marketing · Bandeja de ideas',
     'mk-docs': 'Marketing · Documentación de producto',
-    'mk-auto-ig': 'Marketing · Automatización IG',
     'mk-meta': 'Marketing · Meta Ads',
     'mk-inspiracion': 'Marketing · Inspiración',
     'mk-winners': 'Marketing · Winners',
     'mk-gastos': 'Marketing · Gastos del stack',
     'con-acta': 'Consultoría · Acta de reunión',
-    'seny-dash': 'Dashboard Seny',
   };
   const mentor = {
     inicio: 'Inicio',

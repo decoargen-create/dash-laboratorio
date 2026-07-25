@@ -85,7 +85,9 @@ export async function cacheAdImage({ adId, sourceUrl, productoId, brandId }) {
     const resp = await fetch(proxyUrl);
     if (!resp.ok) return { skipped: `http_${resp.status}` };
     const blob = await resp.blob();
-    if (blob.size === 0) return { skipped: 'empty' };
+    // Piso mínimo (no solo ==0): un placeholder gris de fbcdn (~90 bytes) no es
+    // una imagen usable. Evita cachear miniaturas rotas como si fueran válidas.
+    if (blob.size < 512) return { skipped: 'too_small' };
 
     const db = await openDB();
     await new Promise((resolve, reject) => {

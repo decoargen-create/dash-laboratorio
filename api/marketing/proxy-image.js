@@ -82,6 +82,14 @@ export default async function handler(req, res) {
       res.statusCode = 413;
       return res.end(`Upstream too large: ${buf.length} bytes`);
     }
+    // Piso mínimo: fbcdn, cuando el asset expiró o está bloqueado por hotlink,
+    // devuelve un placeholder minúsculo (1px gris, ~90 bytes) con 200 OK e
+    // image/*. Sin este check se cacheaba como "imagen válida" → miniaturas
+    // grises en la galería que nunca disparaban el fallback (cargaban "bien").
+    if (buf.length < 512) {
+      res.statusCode = 422;
+      return res.end(`Upstream image too small (${buf.length} bytes) — placeholder roto`);
+    }
 
     res.setHeader('Content-Type', mime || 'image/jpeg');
     res.setHeader('Cache-Control', 'public, max-age=86400, immutable');

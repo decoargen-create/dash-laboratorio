@@ -492,7 +492,9 @@ export default async function handler(req, res) {
       const userId = await getUserIdFromAuth(req);
       const productoId = producto?.id != null ? String(producto.id) : null;
       const hasAuthHeader = !!(req.headers?.authorization || req.headers?.Authorization);
-      const hasSupabaseEnv = !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY);
+      // Acepta SUPABASE_SERVICE_KEY o SUPABASE_SERVICE_ROLE_KEY (igual que
+      // _supabase-server.js) — antes solo la primera, y reportaba falso negativo.
+      const hasSupabaseEnv = !!(process.env.SUPABASE_URL && (process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY));
       console.info('[cloud save bandeja] pre-check', {
         hasAuthHeader, hasSupabaseEnv,
         userId: userId ? `${String(userId).slice(0, 8)}...` : null,

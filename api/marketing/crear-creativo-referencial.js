@@ -1747,7 +1747,11 @@ export default async function handler(req, res) {
       // tienen que decir por qué. Antes esto era un silent skip y no
       // sabíamos si era auth, productoId, o env vars faltando.
       const hasAuthHeader = !!(req.headers?.authorization || req.headers?.Authorization);
-      const hasSupabaseEnv = !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY);
+      // Acepta las dos convenciones de nombre (SUPABASE_SERVICE_KEY o
+      // SUPABASE_SERVICE_ROLE_KEY) — igual que _supabase-server.js. Antes solo
+      // miraba la primera → reportaba "cloud save no disponible" aunque el
+      // cliente real sí funcionara con la otra var.
+      const hasSupabaseEnv = !!(process.env.SUPABASE_URL && (process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY));
       console.info('[cloud save] pre-check', {
         hasAuthHeader,
         hasSupabaseEnv,

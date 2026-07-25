@@ -3352,7 +3352,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                       </div>
                     </div>
                     <div className="hidden xl:block text-[10px] shrink-0 w-40 truncate">{metaPill}</div>
-                    <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition" onClick={e => e.stopPropagation()}>
+                    <div className="flex items-center gap-0.5 shrink-0 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition" onClick={e => e.stopPropagation()}>
                       {actions}
                     </div>
                     <ChevronRight size={16} className="text-gray-300 group-hover:text-brand-500 transition shrink-0" />
@@ -3365,7 +3365,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 <div key={p.id} onClick={open}
                   className="group glass-card card-hover relative border border-gray-200 dark:border-gray-700/80 rounded-2xl p-4 cursor-pointer animate-fade-in-up">
                   {/* Acciones (hover) */}
-                  <div className="absolute top-3 right-3 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition" onClick={e => e.stopPropagation()}>
+                  <div className="absolute top-3 right-3 flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition" onClick={e => e.stopPropagation()}>
                     {actions}
                   </div>
                   {/* Header */}

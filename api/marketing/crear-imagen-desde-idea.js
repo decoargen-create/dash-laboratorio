@@ -435,28 +435,35 @@ export default async function handler(req, res) {
           keepFungalTerms,
         })
       ));
-      const imgs = [];
-      const styles = [];
+      // Devolvemos ITEMS compactados que llevan su metadata junto a la imagen.
+      // Clave tras el allSettled: al compactar (descartar las que fallaron),
+      // el índice ya NO corresponde a variations[i]/prompts[i] originales, así
+      // que style/prompt/variation viajan pegados a cada imagen que sí salió.
+      const items = [];
       const errors = [];
       settled.forEach((res2, i) => {
         if (res2.status === 'fulfilled') {
           for (const im of (res2.value || [])) {
-            imgs.push(im);
-            styles.push(prompts[i]?.variation?.divergence_level);
+            items.push({
+              b64: im,
+              style: prompts[i]?.variation?.divergence_level || 'tight',
+              prompt: prompts[i]?.prompt || null,
+              variation: prompts[i]?.variation || null,
+            });
           }
         } else {
           errors.push(res2.reason);
         }
       });
-      return { imagenes: imgs, styles, errors };
+      return { items, errors };
     };
 
     let genErrors = [];
-    let genStyles = [];
+    let genItems = [];
     let r = await runAll(sizeUsed);
     // El error de tamaño es determinista para el size, así que solo reintentamos
     // con el fallback cuando NADA salió y el error parece de dimensiones.
-    if (r.imagenes.length === 0 && sizeUsed !== FALLBACK_SIZE) {
+    if (r.items.length === 0 && sizeUsed !== FALLBACK_SIZE) {
       const anySizeErr = r.errors.some(e => {
         const m = (e?.message || '').toLowerCase();
         return m.includes('size') || m.includes('dimension') || /unsupported/.test(m);
@@ -467,9 +474,9 @@ export default async function handler(req, res) {
         r = await runAll(sizeUsed);
       }
     }
-    imagenes = r.imagenes;
+    genItems = r.items;
     genErrors = r.errors;
-    genStyles = r.styles;
+    imagenes = genItems.map(it => it.b64); // array de b64 alineado a genItems
     // Solo fallamos si NO salió NINGUNA imagen (propagamos el primer error real).
     if (imagenes.length === 0) {
       throw (genErrors[0] || new Error('No se generó ninguna imagen'));
@@ -502,7 +509,9 @@ export default async function handler(req, res) {
           // Suffix random para evitar colisión entre flow single + bulk
           // disparados en la misma ms (raro pero posible con double-click).
           const refId = `idea_${ts}_${sourceIdeaId}_${i}_${Math.random().toString(36).slice(2, 8)}`;
-          const variantStyle = variations[i]?.divergence_level || 'tight';
+          // genItems está alineado a imagenes (ambos compactados), así que la
+          // metadata acá SÍ corresponde a la imagen i tras fallos parciales.
+          const variantStyle = genItems[i]?.style || 'tight';
           try {
             const { storagePath, imageUrl } = await uploadCreativoToBucket(userId, refId, b64);
             const row = await insertCreativoRow({
@@ -516,7 +525,7 @@ export default async function handler(req, res) {
               source_type: 'bandeja-idea',
               variant_index: i,
               variant_style: variantStyle,
-              prompt: prompts[i]?.prompt || null,
+              prompt: genItems[i]?.prompt || null,
               skeleton: null,
               model: MODEL,
               vision_model: null,
@@ -568,7 +577,7 @@ export default async function handler(req, res) {
       imagenes: cloudCreativos ? [] : imagenes, // ahorra payload si ya subió
       cloudCreativos,
       cloudSaveError,
-      variantStyles: genStyles,
+      variantStyles: genItems.map(it => it.style),
       partialFailures: genErrors.length, // cuántas variantes rebotaron (0 = todas OK)
       mimeType: 'image/png',
       size: sizeUsed,
@@ -580,7 +589,9 @@ export default async function handler(req, res) {
       model: MODEL,
       sourceType: 'bandeja-idea',
       sourceIdeaId: idea.id,
-      prompts: prompts.map(p => ({ variantStyle: p.variation.divergence_level, variation: p.variation, prompt: p.prompt })),
+      // Alineado a imagenes/variantStyles (compactado): un entry por imagen
+      // que realmente salió, no por variación pedida.
+      prompts: genItems.map(it => ({ variantStyle: it.style, variation: it.variation, prompt: it.prompt })),
       generatedAt: new Date().toISOString(),
       cost: { openai: (COST_ESTIMATE[quality] ?? 0.18) * imagenes.length },
     });

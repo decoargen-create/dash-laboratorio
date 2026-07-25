@@ -132,8 +132,12 @@ export async function generateFromWinner(creativo, producto, opts = {}) {
     }
 
     // Cachear plan después del primer call para evitar re-correr Strategist.
+    // Antes tomaba solo data.plan → si el backend devolvía data.skeleton (modo
+    // fallback Vision), cachedPlan quedaba null y se re-planificaba en CADA
+    // iteración (5× costo + cluster incoherente). El endpoint acepta ambos
+    // shapes vía skeletonCached, así que cacheamos el que haya venido.
     if (i === 0 && (data.plan || data.skeleton)) {
-      cachedPlan = data.plan || cachedPlan;
+      cachedPlan = data.plan || data.skeleton || cachedPlan;
     }
 
     // Si el backend ya guardó al cloud, no re-subimos.

@@ -216,7 +216,11 @@ export function addIdea(idea) {
         && String(i.productoId || '') === String(idea.productoId || '');
     }
     if (!i.origen?.adId && !idea.origen?.adId) {
-      return (i.titulo || '').trim().toLowerCase() === normTitulo && normTitulo.length > 0;
+      // Dedup por título SOLO dentro del mismo producto. Antes era global entre
+      // productos: un título genérico ("Antes y después") generado para el
+      // producto B se descartaba por existir en el A, perdiendo una idea válida.
+      return (i.titulo || '').trim().toLowerCase() === normTitulo && normTitulo.length > 0
+        && String(i.productoId || '') === String(idea.productoId || '');
     }
     return false;
   });

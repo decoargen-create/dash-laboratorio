@@ -1223,6 +1223,10 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     supabase
       .from('marketing_costs')
       .select('producto_id, amount')
+      // order antes del limit: sin esto, cuando hay >5000 filas Postgres devuelve
+      // un subconjunto ARBITRARIO → el total del chip fluctuaba entre reloads.
+      // Con order al menos es determinista (las 5000 más nuevas).
+      .order('created_at', { ascending: false })
       .limit(5000)
       .then(({ data, error }) => {
         if (cancelled || error || !Array.isArray(data)) return;

@@ -12,6 +12,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Trophy, Sparkles, Loader2, Check, ImageOff, Package, ArrowRight } from 'lucide-react';
 import { listAllWinners } from './galeriaReferenciales.js';
+import { refreshSignedUrls } from './galeriaReferencialesCloud.js';
 import { getProductoImagen, getAccentColor } from './productoImagen.js';
 import { startExecution, updateExecution, finishExecution } from './executionsStore.js';
 import { logCostsFromResponse } from './costsStore.js';
@@ -53,22 +54,30 @@ export default function WinnersGlobalSection({ addToast, onGoToSection }) {
   // Cargar winners del cloud + mantener productos sincronizados con localStorage.
   useEffect(() => {
     let active = true;
-    (async () => {
+    const loadWinners = async () => {
       setLoading(true);
       try {
         const w = await listAllWinners();
         if (active) setWinners(w);
       } catch { if (active) setWinners([]); }
       finally { if (active) setLoading(false); }
-    })();
+    };
+    loadWinners();
     const reload = () => setProductos(loadProductos());
     reload();
+    // Antes solo se recargaban los productos: marcar/desmarcar un winner desde
+    // la galería de un producto (evento referencial-saved) NO refrescaba esta
+    // lista global → el winner nuevo no aparecía (ni desaparecía el desmarcado)
+    // hasta recargar la página. Ahora recargamos también los winners.
+    const onReferencialSaved = () => { loadWinners(); };
     window.addEventListener('viora:marketing-pulled', reload);
     window.addEventListener('viora:marketing-storage-changed', reload);
+    window.addEventListener('viora:referencial-saved', onReferencialSaved);
     return () => {
       active = false;
       window.removeEventListener('viora:marketing-pulled', reload);
       window.removeEventListener('viora:marketing-storage-changed', reload);
+      window.removeEventListener('viora:referencial-saved', onReferencialSaved);
     };
   }, []);
 
@@ -105,8 +114,13 @@ export default function WinnersGlobalSection({ addToast, onGoToSection }) {
     let authToken = '';
     try { const { data: { session } } = await supabase.auth.getSession(); authToken = session?.access_token || ''; } catch {}
 
-    const sel = winners.filter(w => selected.has(w.id) && w.imageUrl);
-    if (sel.length === 0) { addToast?.({ type: 'error', message: 'Los winners seleccionados no tienen imagen utilizable.' }); return; }
+    const selRaw = winners.filter(w => selected.has(w.id) && w.imageUrl);
+    if (selRaw.length === 0) { addToast?.({ type: 'error', message: 'Los winners seleccionados no tienen imagen utilizable.' }); return; }
+    // Las signed URLs del winner (imageUrl, bucket privado) expiran a la hora.
+    // Si la pestaña quedó abierta >1h, la URL está muerta y el backend no puede
+    // bajar la imagen de referencia → la generación falla o sale sin la ref.
+    // Refrescamos ANTES de generar.
+    const sel = await refreshSignedUrls(selRaw);
 
     setGenerating(true);
     const execId = startExecution({

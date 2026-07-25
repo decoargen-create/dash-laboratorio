@@ -421,8 +421,11 @@ export default async function handler(req, res) {
 
     const isHighRisk = isHighRiskCategory(producto);
     const keepFungalTerms = fungalTermsAreBenign(producto);
+    // allSettled (no all): si una variante rebota (safety, rate-limit sin
+    // budget), NO perdemos las hermanas que ya salieron bien. Antes un solo
+    // fallo tiraba toda la grilla y se descartaban imágenes ya pagadas.
     const runAll = async (useSize) => {
-      const results = await Promise.all(prompts.map(p =>
+      const settled = await Promise.allSettled(prompts.map(p =>
         callGptImage2Edit({
           apiKey, prompt: p.prompt,
           prodImgBuf: prodBuf, prodMime,
@@ -432,21 +435,44 @@ export default async function handler(req, res) {
           keepFungalTerms,
         })
       ));
-      return results.flat();
+      const imgs = [];
+      const styles = [];
+      const errors = [];
+      settled.forEach((res2, i) => {
+        if (res2.status === 'fulfilled') {
+          for (const im of (res2.value || [])) {
+            imgs.push(im);
+            styles.push(prompts[i]?.variation?.divergence_level);
+          }
+        } else {
+          errors.push(res2.reason);
+        }
+      });
+      return { imagenes: imgs, styles, errors };
     };
 
-    try {
-      imagenes = await runAll(sizeUsed);
-    } catch (err) {
-      const msg = (err?.message || '').toLowerCase();
-      const isSizeErr = msg.includes('size') || msg.includes('dimension') || /unsupported/.test(msg);
-      if (isSizeErr && sizeUsed !== FALLBACK_SIZE) {
+    let genErrors = [];
+    let genStyles = [];
+    let r = await runAll(sizeUsed);
+    // El error de tamaño es determinista para el size, así que solo reintentamos
+    // con el fallback cuando NADA salió y el error parece de dimensiones.
+    if (r.imagenes.length === 0 && sizeUsed !== FALLBACK_SIZE) {
+      const anySizeErr = r.errors.some(e => {
+        const m = (e?.message || '').toLowerCase();
+        return m.includes('size') || m.includes('dimension') || /unsupported/.test(m);
+      });
+      if (anySizeErr) {
         sizeUsed = FALLBACK_SIZE;
         sizeFallback = true;
-        imagenes = await runAll(sizeUsed);
-      } else {
-        throw err;
+        r = await runAll(sizeUsed);
       }
+    }
+    imagenes = r.imagenes;
+    genErrors = r.errors;
+    genStyles = r.styles;
+    // Solo fallamos si NO salió NINGUNA imagen (propagamos el primer error real).
+    if (imagenes.length === 0) {
+      throw (genErrors[0] || new Error('No se generó ninguna imagen'));
     }
 
     // Background save al cloud — mismo patrón que crear-creativo-referencial.
@@ -542,7 +568,8 @@ export default async function handler(req, res) {
       imagenes: cloudCreativos ? [] : imagenes, // ahorra payload si ya subió
       cloudCreativos,
       cloudSaveError,
-      variantStyles: variations.map(v => v.divergence_level),
+      variantStyles: genStyles,
+      partialFailures: genErrors.length, // cuántas variantes rebotaron (0 = todas OK)
       mimeType: 'image/png',
       size: sizeUsed,
       sizeRequested: size,

@@ -699,7 +699,12 @@ REGLAS:
   try {
     const resp = await client.messages.create({
       model: MODEL_STRATEGIST,
-      max_tokens: 4000,
+      // Los tokens de thinking (2000) cuentan DENTRO de max_tokens, así que con
+      // 4000 fijo quedaban <2000 para el JSON visible. Con N variaciones (cada
+      // una con execution_diff + scene_notes) el JSON superaba ese techo, se
+      // cortaba, parseJSON tiraba y el flujo caía al fallback Haiku (perdiendo
+      // estrategia + badges). Escalamos con n para dejar margen real.
+      max_tokens: Math.min(16000, 6000 + n * 700),
       thinking: { type: 'enabled', budget_tokens: 2000 },
       system,
       messages: [{
@@ -1131,6 +1136,7 @@ function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentCol
   parts.push('  • Keep IMAGE 2 packaging PIXEL-FAITHFUL. Do not redraw labels or invent text on packaging.');
   parts.push('  • Photorealistic, premium DTC, ready for Meta Ads.');
   parts.push('  • Render Spanish text overlays EXACTLY as written above.');
+  parts.push('  • FIDELITY — render ONLY the text overlays and badges explicitly listed above. Do NOT invent or add ANY extra headline, sticker, seal, ribbon, price tag, bullet list, feature icons or benefit callouts that were not listed. MATCH the reference\'s AMOUNT of text: if the reference is a clean packshot with little or no text, keep it minimal. Adding text/badges the reference does not have is a defect, not an improvement.');
   parts.push(`  • Output aspect ratio: ${aspectRatio || '1:1'}. High resolution.`);
   parts.push('  • This variation differs from siblings in EXECUTION (model demographic/camera/prop/light) but the FORMULA stays identical.');
 
@@ -1299,6 +1305,7 @@ function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio
   parts.push('  • Generated image should be photorealistic, premium DTC, ready for Meta Ads.');
   parts.push('  • TEXT OVERLAYS on the canvas (stickers, headlines, captions): render the Spanish texts listed above EXACTLY as written. Keep their original visual style (sticker, pill, handwritten note, bold sans, etc). gpt-image-2 renders Spanish text reasonably well — prioritize legibility over perfect typography.');
   parts.push('  • Badges/seals from IMAGE 1: replicate as graphic shapes with their adapted content (or empty if no content was provided).');
+  parts.push('  • FIDELITY — render ONLY the text overlays and badges explicitly listed above. Do NOT invent or add ANY extra headline, sticker, seal, ribbon, price tag, bullet list, feature icons or benefit callouts that were not listed. MATCH the reference\'s AMOUNT of text: if the reference is a clean packshot with little or no text, keep it minimal. Adding text/badges the reference does not have is a defect, not an improvement.');
   parts.push(`  • Output aspect ratio: ${aspectRatio || '1:1'}. High resolution.`);
 
   return parts.join('\n');

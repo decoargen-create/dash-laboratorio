@@ -79,14 +79,32 @@ export function sanitizePromptForSafety(text, aggressive = false, opts = {}) {
     [/\bmenstruaci[óo]n\b/gi, 'ciclo'],
     [/\bsangrado\b/gi, 'flujo'],
     [/\bantibioticos?\b/gi, 'fórmula natural'],
-    // Claims médicos fuertes → genéricos
-    [/\bcura(n|r|do|s)?\b/gi, 'mejor$1'],
-    [/\btrata(n|r|do|miento)?\b/gi, 'cuid$1'],
-    [/\bdolor(es)?\b/gi, 'molestia$1'],
+    // Claims médicos fuertes → genéricos. Mapeo por FORMA COMPLETA: reinyectar
+    // la terminación con $1 sobre otra raíz rompía la palabra
+    // (curar→"mejorr", tratamiento→"cuidmiento", dolores→"molestiaes").
+    // Orden de más largo a más corto para que "tratamiento" matchee antes que
+    // "trata" (si no, "trata" comería el prefijo y dejaría "miento").
+    [/\btratamientos\b/gi, 'cuidados'],
+    [/\btratamiento\b/gi, 'cuidado'],
+    [/\btratando\b/gi, 'cuidando'],
+    [/\btratados\b/gi, 'cuidados'],
+    [/\btratado\b/gi, 'cuidado'],
+    [/\btratan\b/gi, 'cuidan'],
+    [/\btratar\b/gi, 'cuidar'],
+    [/\btrata\b/gi, 'cuida'],
+    [/\bcurados\b/gi, 'mejorados'],
+    [/\bcurado\b/gi, 'mejorado'],
+    [/\bcurando\b/gi, 'mejorando'],
+    [/\bcuran\b/gi, 'mejoran'],
+    [/\bcurar\b/gi, 'mejorar'],
+    [/\bcuras\b/gi, 'mejoras'],
+    [/\bcura\b/gi, 'mejora'],
+    [/\bdolores\b/gi, 'molestias'],
+    [/\bdolor\b/gi, 'molestia'],
     [/\bsangre\b/gi, 'flujo'],
-    [/\benferma|enferme(dad|s)\b/gi, 'condición'],
+    [/\benferm(?:a|o|as|os|edad|edades)\b/gi, 'condición'],
     // Inglés
-    [/\bvagina(l)?\b/gi, 'intimate$1'],
+    [/\bvaginal\b/gi, 'intimate'],
     [/\bvulva\b/gi, 'intimate area'],
     [/\bgenital\b/gi, 'intimate'],
     [/\bbreasts?\b/gi, 'bust'],

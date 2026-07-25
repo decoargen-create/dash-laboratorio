@@ -1729,10 +1729,25 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       });
       const data = await resp.json();
       if (data.pageUrl) {
+        // confidence 'high' = el handle matchea el dominio de la marca (confiable).
+        // low/unknown = puede ser un plugin/agencia embebida → OTRO anunciante.
+        // Antes se guardaba igual con toast verde de éxito, y ese handle
+        // equivocado contaminaba todo el scrapeo (raíz del bug del tema
+        // equivocado en el onboarding). Ahora lo marcamos y avisamos.
+        const confiable = data.confidence === 'high' && data.matchesBrand !== false;
         setCompetidores(prev => prev.map(x =>
-          x.id === competidorId ? { ...x, fbPageUrl: data.pageUrl } : x
+          x.id === competidorId
+            ? { ...x, fbPageUrl: data.pageUrl, fbPageLowConfidence: !confiable }
+            : x
         ));
-        addToast?.({ type: 'success', message: `FB page de ${competidorNombre} detectada: @${data.handle}` });
+        if (confiable) {
+          addToast?.({ type: 'success', message: `FB page de ${competidorNombre} detectada: @${data.handle}` });
+        } else {
+          addToast?.({
+            type: 'warning',
+            message: `Detecté @${data.handle} para ${competidorNombre}, pero no coincide con el dominio de la marca — verificá que sea la página correcta antes de scrapear (podría ser otro anunciante).`,
+          });
+        }
       }
     } catch {
       // Silencioso — si no pudimos resolver, el user puede cargarla manual.

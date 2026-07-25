@@ -72,6 +72,21 @@ const BULK_CONCURRENCY = 1;
 // real pero acotado: cuando una termina, arranca la siguiente.
 const SCRAPE_CONCURRENCY = 3;
 
+// fetch con timeout duro. Sin esto, si Vercel corta la conexión sin responder
+// (o un proxy cuelga más de 300s) la promesa del fetch no resuelve NI rechaza:
+// el `finally` que limpia el estado "scrapeando" nunca corre y la card queda
+// pegada en ~92% para siempre, sin poder re-disparar. 310s = un poco más que
+// el techo de la function serverless (300s) para no cortar respuestas válidas.
+async function fetchWithTimeout(url, opts = {}, ms = 310000) {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), ms);
+  try {
+    return await fetch(url, { ...opts, signal: ac.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // Corre `worker(item)` sobre `items` con un límite de concurrencia: arranca
 // hasta `limit` workers y, a medida que cada uno termina, toma el próximo de
 // la cola. Devuelve cuando se procesaron todos. Los errores de un item no
@@ -2757,7 +2772,16 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           const d = await r.json();
           if (d.pageUrl) {
             payload.fbPageUrl = d.pageUrl;
-            setBrands(prev => prev.map(x => x.id === brand.id ? { ...x, fbPageUrl: d.pageUrl } : x));
+            const confiable = d.confidence === 'high' && d.matchesBrand !== false;
+            setBrands(prev => prev.map(x => x.id === brand.id ? { ...x, fbPageUrl: d.pageUrl, fbPageLowConfidence: !confiable } : x));
+            // Si el handle no matchea la marca, puede ser OTRO anunciante
+            // (plugin/agencia embebida) → contaminaría la galería. Avisamos.
+            if (!confiable) {
+              addToast?.({
+                type: 'warning',
+                message: `Ojo: @${d.handle} no coincide con el dominio de ${brand.nombre} — puede ser otro anunciante. Verificá la FB page en Setup si los ads no matchean.`,
+              });
+            }
           } else {
             payload.searchKeyword = landingToKeyword(brand.landingUrl);
             // Avisamos al user que cayó a keyword — es común que el FB page
@@ -2783,7 +2807,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       }
 
       updateExecution(execId, { stage: `Scrapeando ${payload.fbPageUrl ? 'desde FB page' : `keyword "${payload.searchKeyword}"`}…` });
-      const resp = await fetch('/api/marketing/apify-ingest', {
+      const resp = await fetchWithTimeout('/api/marketing/apify-ingest', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
@@ -2907,6 +2931,13 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           const d = await r.json();
           if (d.pageUrl) {
             payload.fbPageUrl = d.pageUrl;
+            const confiable = d.confidence === 'high' && d.matchesBrand !== false;
+            if (!confiable) {
+              addToast?.({
+                type: 'warning',
+                message: `Ojo: @${d.handle} no coincide con el dominio de ${comp.nombre} — puede ser otro anunciante. Verificá la FB page en Setup si los ads no matchean.`,
+              });
+            }
           } else {
             payload.searchKeyword = landingToKeyword(comp.landingUrl);
             if (d.error) {
@@ -2929,7 +2960,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       }
 
       updateExecution(execId, { stage: `Scrapeando ${payload.fbPageUrl ? 'desde FB page' : `keyword "${payload.searchKeyword}"`}…` });
-      const resp = await fetch('/api/marketing/apify-ingest', {
+      const resp = await fetchWithTimeout('/api/marketing/apify-ingest', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });

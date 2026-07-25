@@ -25,7 +25,8 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { anthropicCost } from './_costs.js';
-import { safeFetch } from './_security.js';
+import { safeFetch, requireAuth } from './_security.js';
+import { getUserIdFromAuth } from './_supabase-server.js';
 
 const MODEL = 'claude-sonnet-4-6';
 
@@ -94,6 +95,8 @@ function detectImageType(buf) {
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
+  const userId = await requireAuth(req, res, getUserIdFromAuth);
+  if (!userId) return; // endpoint pago (Claude) → requiere sesión
   // NOTA SECURITY: el frontend NO está mandando auth en los fetch a este
   // endpoint todavía → habilitarlo rompería la app. Pendiente: agregar
   // authedFetch helper en frontend y después requireAuth acá. Por ahora

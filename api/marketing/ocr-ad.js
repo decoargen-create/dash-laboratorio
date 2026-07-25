@@ -14,7 +14,8 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { anthropicCost } from './_costs.js';
-import { safeFetch } from './_security.js';
+import { safeFetch, requireAuth } from './_security.js';
+import { getUserIdFromAuth } from './_supabase-server.js';
 
 const MODEL = 'claude-haiku-4-5';
 const PROMPT = `Sos Santi. Extraé EXACTAMENTE el texto visible en esta imagen de un ad de Meta. Devuelve SOLO el texto literal (claims, headlines, botones, precios, descuentos, etiquetas, watermarks, etc), preservando saltos de línea. Sin parafrasear, sin agregar comentarios. Si no hay texto visible, devolvé exactamente "(sin texto)".`;
@@ -83,6 +84,8 @@ export const maxDuration = 180;
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
+  const userId = await requireAuth(req, res, getUserIdFromAuth);
+  if (!userId) return; // endpoint pago (OCR/Claude) → requiere sesión
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return respondJSON(res, 500, { error: 'ANTHROPIC_API_KEY no configurada' });

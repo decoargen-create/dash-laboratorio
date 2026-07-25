@@ -29,6 +29,7 @@ import {
   Inbox, Bookmark,
 } from 'lucide-react';
 import { logCostsFromResponse } from './costsStore.js';
+import { authHeaders } from './authFetch.js';
 import { addGeneratedIdeas } from './bandejaStore.js';
 import { getProductoImagen, getAccentColor } from './productoImagen.js';
 import { saveReferencial, getUsedAdIdsForProducto } from './galeriaReferenciales.js';
@@ -1892,7 +1893,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   const adaptAdToIdeas = async (brandNombre, ad) => {
     if (!producto) throw new Error('Sin producto activo');
     const resp = await fetch('/api/marketing/adapt-inspiracion', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: await authHeaders(),
       body: JSON.stringify({
         producto: {
           nombre: producto.nombre,
@@ -2533,7 +2534,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     try {
       const resp = await fetch('/api/marketing/transcribe-ad', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders(),
         body: JSON.stringify({ ads: adsForTranscribe }),
       });
       const data = await parseJsonOrThrow(resp, `Whisper de ${brand.nombre}`);
@@ -2606,7 +2607,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     try {
       const resp = await fetch('/api/marketing/ocr-ad', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders(),
         body: JSON.stringify({ ads: adsForOcr }),
       });
       const data = await parseJsonOrThrow(resp, `OCR de ${brand.nombre}`);

@@ -10,6 +10,8 @@
 //   batch:  { results: [{id, transcript, durationSec, error}], costUSD }
 
 import { whisperCost } from './_costs.js';
+import { getUserIdFromAuth } from './_supabase-server.js';
+import { requireAuth } from './_security.js';
 
 const WHISPER_MAX_MB = 24; // Whisper 25MB, tomamos 24 como buffer
 const VIDEO_TIMEOUT_MS = 60000;
@@ -110,6 +112,8 @@ export const maxDuration = 240;
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
+  const userId = await requireAuth(req, res, getUserIdFromAuth);
+  if (!userId) return; // endpoint pago (Whisper) → requiere sesión
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return respondJSON(res, 500, { error: 'OPENAI_API_KEY no configurada' });

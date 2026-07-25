@@ -1,6 +1,7 @@
 // Helper para adjuntar el token de Supabase a los fetch de endpoints que ahora
 // requieren auth (endpoints de IA pagos: generate-ideas, copilot, deep-analyze,
-// generate-copy, suggest-competitors, score-hooks, transcribe-ad, ocr-ad).
+// generate-copy, suggest-competitors, score-hooks, transcribe-ad, ocr-ad,
+// adapt-inspiracion).
 //
 // Toda la app está detrás del login de Supabase (App.jsx gatea con
 // SupabaseAuthScreen), así que siempre hay sesión disponible. Si por algún

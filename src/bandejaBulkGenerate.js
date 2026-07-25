@@ -35,7 +35,7 @@ async function processResponse(data, idea, producto, quality) {
         detail: { productoId: String(producto.id), cloud: true },
       }));
     } catch {}
-    return { saved: data.cloudCreativos.length, cloud: true };
+    return { saved: data.cloudCreativos.length, cloud: true, partialFailures: data.partialFailures || 0 };
   }
   if (data.cloudSaveError) {
     console.warn(`[bulk] idea ${idea.id} cloudSaveError:`, data.cloudSaveError);
@@ -67,7 +67,7 @@ async function processResponse(data, idea, producto, quality) {
     });
   }
   if (data.imagenes) data.imagenes.length = 0;
-  return { saved: imagenes.length, cloud: false };
+  return { saved: imagenes.length, cloud: false, partialFailures: data.partialFailures || 0 };
 }
 
 // Lanza UNA idea — devuelve la promesa del fetch + processResponse.
@@ -113,7 +113,12 @@ function fireIdea({ idea, producto, prodImg, accentColor, n, quality, size, auth
     }),
   }).then(async resp => {
     const data = await resp.json();
-    if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+    if (!resp.ok) {
+      // data.error puede venir como objeto → "[object Object]" en el toast.
+      const msg = typeof data?.error === 'string' ? data.error
+        : (data?.error?.message || data?.message || `HTTP ${resp.status}`);
+      throw new Error(msg);
+    }
     return data;
   });
 }
@@ -169,14 +174,19 @@ export async function bulkGenerateFromIdeas({
         // Marcar la idea como "usada" — sin esto se queda en la columna
         // "Pendientes" del kanban aunque ya generaste imágenes desde ella.
         // El user tenía que moverlas a mano: con 20 ideas era insostenible.
-        try {
-          await updateIdea(idea.id, {
-            estado: 'usada',
-            usadaAt: new Date().toISOString(),
-            creativosGenerados: (idea.creativosGenerados || 0) + (result.saved || 0),
-          });
-        } catch (err) {
-          console.warn(`[bulk] no pude marcar idea ${idea.id} como usada:`, err.message);
+        // PERO solo si SÍ se generó algo: antes se marcaba usada aunque
+        // salieran 0 imágenes (HTTP 200 con cloud vacío) → la idea quedaba
+        // "usada" sin ningún creativo y el user creía que había producido.
+        if ((result.saved || 0) > 0) {
+          try {
+            await updateIdea(idea.id, {
+              estado: 'usada',
+              usadaAt: new Date().toISOString(),
+              creativosGenerados: (idea.creativosGenerados || 0) + result.saved,
+            });
+          } catch (err) {
+            console.warn(`[bulk] no pude marcar idea ${idea.id} como usada:`, err.message);
+          }
         }
         return { ok: true, idea, cost: costo?.total || 0, ...result };
       })
@@ -207,15 +217,19 @@ export async function bulkGenerateFromIdeas({
   const failed = results.length - ok;
   const totalImages = results.reduce((acc, r) => acc + (r.saved || 0), 0);
   const costoUSD = results.reduce((acc, r) => acc + (r.cost || 0), 0);
+  // Variantes que rebotaron por-idea (safety/rate-limit) pero no tiraron la idea
+  // entera. Antes se generaban en silencio menos imágenes de las pedidas.
+  const partialFailures = results.reduce((acc, r) => acc + (r.partialFailures || 0), 0);
+  const partialNote = partialFailures > 0 ? ` · ${partialFailures} variante${partialFailures !== 1 ? 's' : ''} rebotó` : '';
 
-  const message = failed === 0
+  const message = (failed === 0
     ? `${ok} ideas listas — ${totalImages} imágenes en Galería`
-    : `${ok}/${ideas.length} OK (${failed} fallaron) — ${totalImages} imágenes en Galería`;
+    : `${ok}/${ideas.length} OK (${failed} fallaron) — ${totalImages} imágenes en Galería`) + partialNote;
   finishExecution(execId, { ok: failed === 0, message, cost: costoUSD });
 
   if (ok > 0) {
     if (ok >= 2) playBulkDoneChime(); else playDoneChime();
-    addToast?.({ type: failed === 0 ? 'success' : 'warning', message });
+    addToast?.({ type: (failed === 0 && partialFailures === 0) ? 'success' : 'warning', message });
   } else {
     playErrorTone();
   }

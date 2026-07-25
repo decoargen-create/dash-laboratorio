@@ -26,6 +26,8 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { anthropicCost, whisperCost } from './_costs.js';
+import { getUserIdFromAuth } from './_supabase-server.js';
+import { requireAuth } from './_security.js';
 
 const MODEL = 'claude-sonnet-4-6';
 const WHISPER_MAX_MB = 25;
@@ -208,6 +210,8 @@ async function analyzeAd(ad, transcript, client) {
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
+  const userId = await requireAuth(req, res, getUserIdFromAuth);
+  if (!userId) return; // endpoint pago → requiere sesión (anti cost-abuse)
 
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
   if (!anthropicKey) {

@@ -910,10 +910,13 @@ async function handleRunCreativeRefresh(req, res) {
   // disparar el cron desde un scheduler externo. En modo cron usamos
   // META_SYSTEM_ACCESS_TOKEN (long-lived, idealmente System User de Business
   // Manager — no expira).
-  const cronAuth =
-    req.headers['x-vercel-cron'] === '1' ||
-    (process.env.IG_REFRESH_CRON_SECRET &&
-      req.headers.authorization === `Bearer ${process.env.IG_REFRESH_CRON_SECRET}`);
+  // SEGURIDAD: `x-vercel-cron` es un header informativo que cualquier request
+  // externo puede falsificar → no es un límite de seguridad. Exigimos el Bearer
+  // secret (Vercel Cron lo envía automáticamente cuando CRON_SECRET está seteado
+  // en el proyecto). Sin secreto configurado, cronAuth es false (default seguro).
+  const cronSecret = process.env.IG_REFRESH_CRON_SECRET || process.env.CRON_SECRET;
+  const cronAuth = !!cronSecret &&
+    req.headers.authorization === `Bearer ${cronSecret}`;
 
   let accessToken;
   if (cronAuth) {
@@ -1172,10 +1175,13 @@ async function handleCronCreativeRefresh(req, res) {
   }
 
   // Autorización: header Vercel Cron o Bearer secret.
-  const cronAuth =
-    req.headers['x-vercel-cron'] === '1' ||
-    (process.env.IG_REFRESH_CRON_SECRET &&
-      req.headers.authorization === `Bearer ${process.env.IG_REFRESH_CRON_SECRET}`);
+  // SEGURIDAD: `x-vercel-cron` es un header informativo que cualquier request
+  // externo puede falsificar → no es un límite de seguridad. Exigimos el Bearer
+  // secret (Vercel Cron lo envía automáticamente cuando CRON_SECRET está seteado
+  // en el proyecto). Sin secreto configurado, cronAuth es false (default seguro).
+  const cronSecret = process.env.IG_REFRESH_CRON_SECRET || process.env.CRON_SECRET;
+  const cronAuth = !!cronSecret &&
+    req.headers.authorization === `Bearer ${cronSecret}`;
   if (!cronAuth) return respondJSON(res, 401, { error: 'Cron no autorizado' });
 
   // Config desde env var.

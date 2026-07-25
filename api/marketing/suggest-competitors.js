@@ -18,6 +18,8 @@
 // }
 
 import { runActorSync, normalizeAd, buildAdLibraryUrl } from './_apify.js';
+import { getUserIdFromAuth } from './_supabase-server.js';
+import { requireAuth } from './_security.js';
 
 const DEFAULT_ACTOR = 'apify/facebook-ads-scraper';
 
@@ -42,6 +44,8 @@ function respondJSON(res, status, payload) {
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
+  const userId = await requireAuth(req, res, getUserIdFromAuth);
+  if (!userId) return; // endpoint pago (Apify+Claude) → requiere sesión
 
   const token = process.env.APIFY_TOKEN;
   if (!token) return respondJSON(res, 500, { error: 'APIFY_TOKEN no configurada' });

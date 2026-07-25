@@ -14,6 +14,7 @@ import React, { useState, useEffect } from 'react';
 import { Sparkles, Copy, Check, Loader2, RefreshCw, FileText, Trophy, Package } from 'lucide-react';
 import { loadIdeas } from './bandejaStore.js';
 import { logCostsFromResponse } from './costsStore.js';
+import { authHeaders } from './authFetch.js';
 import AnimatedCounter from './AnimatedCounter.jsx';
 
 function loadProductos() {
@@ -81,7 +82,7 @@ export default function CopyGeneratorSection({ addToast }) {
       }));
       const resp = await fetch('/api/marketing/generate-copy', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders(),
         body: JSON.stringify({
           producto: {
             nombre: producto.nombre,

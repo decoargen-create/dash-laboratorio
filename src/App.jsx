@@ -5412,7 +5412,7 @@ function ComisionesSection({ state, dispatch, onUpdateMentor, onAddMentor, onRem
       const resp = await fetch('/api/auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'create_invite', mentorId: mentor.id, mentorName: mentor.nombre }),
+        body: JSON.stringify({ action: 'create_invite', mentorId: mentor.id, mentorName: mentor.nombre, session: localStorage.getItem('adslab-session') }),
       });
       const data = await resp.json().catch(() => ({}));
       if (data?.ok && data.link) {

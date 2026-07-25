@@ -82,25 +82,39 @@ export function sanitizePromptForSafety(text, aggressive = false, opts = {}) {
     // Claims médicos fuertes → genéricos. Mapeo por FORMA COMPLETA: reinyectar
     // la terminación con $1 sobre otra raíz rompía la palabra
     // (curar→"mejorr", tratamiento→"cuidmiento", dolores→"molestiaes").
-    // Orden de más largo a más corto para que "tratamiento" matchee antes que
-    // "trata" (si no, "trata" comería el prefijo y dejaría "miento").
+    // Se listan por forma completa. El orden NO importa para corrección: todos
+    // llevan \b en ambos extremos, así que "\btrata\b" nunca matchea dentro de
+    // "tratamiento" (la 'm' invalida el boundary). Incluye voseo/imperativos
+    // (curá, tratá, curás) y participios femeninos, comunes en copy LATAM.
     [/\btratamientos\b/gi, 'cuidados'],
     [/\btratamiento\b/gi, 'cuidado'],
     [/\btratando\b/gi, 'cuidando'],
     [/\btratados\b/gi, 'cuidados'],
     [/\btratado\b/gi, 'cuidado'],
+    [/\btratadas\b/gi, 'cuidadas'],
+    [/\btratada\b/gi, 'cuidada'],
     [/\btratan\b/gi, 'cuidan'],
     [/\btratar\b/gi, 'cuidar'],
+    [/\btrat[aá]s\b/gi, 'cuidás'],
+    // \b no cierra tras vocal acentuada (la 'á' no es \w) → lookahead negativo.
+    [/\btratá(?![a-záéíóúñ])/gi, 'cuidá'],
     [/\btrata\b/gi, 'cuida'],
     [/\bcurados\b/gi, 'mejorados'],
     [/\bcurado\b/gi, 'mejorado'],
+    [/\bcuradas\b/gi, 'mejoradas'],
+    [/\bcurada\b/gi, 'mejorada'],
     [/\bcurando\b/gi, 'mejorando'],
     [/\bcuran\b/gi, 'mejoran'],
     [/\bcurar\b/gi, 'mejorar'],
-    [/\bcuras\b/gi, 'mejoras'],
+    [/\bcur[aá]s\b/gi, 'mejorás'],
+    [/\bcurá(?![a-záéíóúñ])/gi, 'mejorá'],
     [/\bcura\b/gi, 'mejora'],
     [/\bdolores\b/gi, 'molestias'],
     [/\bdolor\b/gi, 'molestia'],
+    [/\bsangrando\b/gi, 'fluyendo'],
+    [/\bsangrar\b/gi, 'fluir'],
+    [/\bsangr[aá]s\b/gi, 'fluís'],
+    [/\bsangra\b/gi, 'fluye'],
     [/\bsangre\b/gi, 'flujo'],
     [/\benferm(?:a|o|as|os|edad|edades)\b/gi, 'condición'],
     // Inglés
@@ -118,7 +132,8 @@ export function sanitizePromptForSafety(text, aggressive = false, opts = {}) {
   // legítimos, así que se preservan cuando keepFungalTerms.
   if (!keepFungalTerms) {
     swaps.push(
-      [/\binfeccion(es)?\b/gi, 'molestia$1'],
+      [/\binfecciones\b/gi, 'molestias'],
+      [/\binfecci[oó]n\b/gi, 'molestia'], // contempla la tilde ("infección") y evita "molestiaes"
       [/\bhongos?\b/gi, 'desequilibrio'],
       [/\bcandidiasis\b/gi, 'desequilibrio'],
       [/\bbacterian?a?s?\b/gi, 'microbiota'],

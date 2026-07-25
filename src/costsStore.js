@@ -32,6 +32,13 @@ try {
   }
 } catch {}
 
+// Fuente de verdad EN MEMORIA de los ids sincronizados al cloud durante esta
+// sesión. Es independiente de localStorage: si markSynced falla al persistir el
+// flag `synced` (QuotaExceededError con el storage lleno — escenario real), el
+// id igual queda acá. Sin esto, tras un refetch el log contaba LOCAL (flag no
+// persistido) Y en la nube → doble conteo PERMANENTE que sobrevive reloads.
+const SYNCED_THIS_SESSION = new Set();
+
 function loadLogs() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -95,7 +102,9 @@ async function syncLogToCloud(log) {
 // contando local hasta el próximo refetch. Sin esto, navegar fuera y
 // volver a Productos duplicaba lo sincronizado durante la sesión.
 export function promoteSyncedCosts() {
-  const s = new Set();
+  // Semilla con lo sincronizado en memoria esta sesión (robusto ante quota),
+  // más lo que sí quedó marcado en localStorage.
+  const s = new Set(SYNCED_THIS_SESSION);
   for (const l of loadLogs()) {
     if (l?.synced && l?.id) s.add(l.id);
   }
@@ -103,6 +112,9 @@ export function promoteSyncedCosts() {
 }
 
 function markSynced(id) {
+  // Registrar SIEMPRE en memoria primero: aunque el setItem de abajo falle por
+  // quota, el dedupe (promoteSyncedCosts) ya sabe que este id está en la nube.
+  SYNCED_THIS_SESSION.add(id);
   try {
     const logs = loadLogs();
     const l = logs.find(x => x.id === id);
@@ -288,15 +300,17 @@ export function backfillProductoIds(nameToProductoId) {
 // (según horario Argentina) o en un rango custom.
 export function spendThisMonth(autoTipo) {
   const logs = loadLogs();
-  const now = new Date();
-  const yyyymm = now.toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).slice(0, 7);
+  // Solo horario Argentina. Antes había un OR con una rama "UTC" (l.ts.slice(0,10)
+  // era la fecha UTC; .toLocaleString() sobre un string es no-op) que, como UTC
+  // va 3h adelantado, metía la cola del mes anterior en el total del mes actual.
+  const yyyymm = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).slice(0, 7);
   return logs
     .filter(l => l.autoTipo === autoTipo)
-    .filter(l => l.ts.slice(0, 10).toLocaleString().startsWith(yyyymm) || (() => {
+    .filter(l => {
       try {
         return new Date(l.ts).toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).startsWith(yyyymm);
       } catch { return false; }
-    })())
+    })
     .reduce((sum, l) => sum + (l.amount || 0), 0);
 }
 

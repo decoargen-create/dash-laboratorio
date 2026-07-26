@@ -374,6 +374,36 @@ export function avgByKind(productoIds = null) {
     .sort((a, b) => b.total - a.total);
 }
 
+// KPIs globales de costo para el Home (todo el histórico de este dispositivo).
+// - avgCreativo: cuánto sale en promedio cada estático generado.
+// - avgPorProducto: costo total / cantidad de productos = cuánto sale armar un
+//   producto en promedio (todas las pruebas: scrape + análisis + ideas + creativos).
+// - avgScrape: costo promedio de cada scrapeo.
+export function globalCostKPIs() {
+  const logs = loadLogs();
+  let total = 0;
+  const productos = new Set();
+  const creativos = { count: 0, total: 0 };
+  const scrapes = { count: 0, total: 0 };
+  for (const l of logs) {
+    const amt = l.amount || 0;
+    total += amt;
+    if (l.productoId) productos.add(String(l.productoId));
+    const k = l.kind || '';
+    if (k === 'creativo' || k === 'creativos') { creativos.count++; creativos.total += amt; }
+    else if (k === 'scrape' || k === 'scrapeo' || k === 'apify' || k === 'apify-ingest') { scrapes.count++; scrapes.total += amt; }
+  }
+  return {
+    total,
+    productosCount: productos.size,
+    avgPorProducto: productos.size ? total / productos.size : 0,
+    creativosCount: creativos.count,
+    avgCreativo: creativos.count ? creativos.total / creativos.count : 0,
+    scrapesCount: scrapes.count,
+    avgScrape: scrapes.count ? scrapes.total / scrapes.count : 0,
+  };
+}
+
 // Borra todos los logs (útil para reset mensual manual).
 export function clearLogs() {
   saveLogs([]);

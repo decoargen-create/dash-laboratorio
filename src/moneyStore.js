@@ -63,22 +63,47 @@ export function fmtMoney(usd, opts = {}) {
   return 'US$' + new Intl.NumberFormat('es-AR', { minimumFractionDigits: dec, maximumFractionDigits: dec }).format(usd);
 }
 
-// ---- saldo cargado por persona ----
-// Guardamos { amount, currency, setAt } con el monto ORIGINAL que transfirió
-// (en pesos o USD) para no perder el valor exacto que puso.
-export function getPersonLoaded(name) {
-  return read(PEOPLE_KEY, {})[normalize(name)] || null;
+// ---- LEDGER de cargas por persona ----
+// Guardamos un ARRAY de entradas { amount, currency, ts } por persona: cada
+// transferencia se ACUMULA (no se pisa). Así llevás el historial de ingresos y
+// el "cargó" total es la suma. Cada entrada conserva su moneda original (pueden
+// cargar pesos un día y dólares otro).
+function readPeople() {
+  const raw = read(PEOPLE_KEY, {});
+  const out = {};
+  for (const [k, v] of Object.entries(raw || {})) {
+    if (Array.isArray(v)) out[k] = v;
+    // Migración del formato viejo (single { amount, currency, setAt }) → 1 entrada.
+    else if (v && typeof v === 'object' && v.amount != null) {
+      out[k] = [{ amount: v.amount, currency: v.currency || 'ARS', ts: v.setAt || new Date().toISOString() }];
+    }
+  }
+  return out;
 }
-export function setPersonLoaded(name, amount, currency) {
-  const all = read(PEOPLE_KEY, {});
+
+// Todas las cargas de una persona (array de { amount, currency, ts }).
+export function getPersonLoads(name) {
+  return readPeople()[normalize(name)] || [];
+}
+// Agrega UNA carga (se acumula sobre las anteriores).
+export function addPersonLoad(name, amount, currency) {
   const key = normalize(name);
-  if (!key) return;
-  if (!(Number(amount) > 0)) delete all[key];
-  else all[key] = { amount: Number(amount), currency: currency === 'ARS' ? 'ARS' : 'USD', setAt: new Date().toISOString() };
+  if (!key || !(Number(amount) > 0)) return;
+  const all = readPeople();
+  const entry = { amount: Number(amount), currency: currency === 'ARS' ? 'ARS' : 'USD', ts: new Date().toISOString() };
+  all[key] = [...(all[key] || []), entry];
   write(PEOPLE_KEY, all);
 }
-// Lo que cargó la persona, expresado en USD (base) para restarle el gasto.
+// Borra una carga puntual por su timestamp.
+export function removePersonLoad(name, ts) {
+  const key = normalize(name);
+  const all = readPeople();
+  if (!all[key]) return;
+  all[key] = all[key].filter(e => e.ts !== ts);
+  if (all[key].length === 0) delete all[key];
+  write(PEOPLE_KEY, all);
+}
+// Total cargado por la persona, en USD (base) para restarle el gasto.
 export function getPersonLoadedUSD(name) {
-  const e = getPersonLoaded(name);
-  return e ? toUSD(e.amount, e.currency) : 0;
+  return getPersonLoads(name).reduce((s, e) => s + toUSD(e.amount, e.currency), 0);
 }

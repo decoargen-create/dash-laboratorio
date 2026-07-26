@@ -23,14 +23,81 @@ import {
   Plus, X, Sparkles, Link2, Search, Clock, Inbox, Trash2, Upload, Download, Activity,
   LayoutGrid, List as ListIcon, BarChart3, Copy, Pencil, MoreHorizontal, Users, History,
 } from 'lucide-react';
+
+// Etiquetas legibles para los "kind" de gasto.
+const KIND_LABELS = {
+  creativo: 'Creativos', creativos: 'Creativos', creativo_ref: 'Creativos referenciales',
+  scrape: 'Scrapes', scrapeo: 'Scrapes', apify: 'Scrapes', 'apify-ingest': 'Scrapes',
+  analisis: 'Análisis', 'deep-analyze': 'Análisis', deep_analyze: 'Análisis',
+  ideas: 'Ideas', copy: 'Copy', transcribe: 'Transcripción', transcripcion: 'Transcripción',
+  ocr: 'OCR', inspiracion: 'Inspiración', hooks: 'Score hooks', otros: 'Otros',
+};
+function kindLabel(k) { return KIND_LABELS[k] || (k ? k.charAt(0).toUpperCase() + k.slice(1) : 'Otros'); }
+function fmtDayLabel(day) {
+  const tz = { timeZone: 'America/Argentina/Buenos_Aires' };
+  const today = new Date().toLocaleDateString('en-CA', tz);
+  const ayer = new Date(Date.now() - 86400000).toLocaleDateString('en-CA', tz);
+  if (day === today) return 'Hoy';
+  if (day === ayer) return 'Ayer';
+  const [, M, D] = day.split('-');
+  return `${D}/${M}`;
+}
+
+// Panel: gasto por día (con detalle de en qué) + promedio por tipo de operación.
+// Los detalles salen de los logs LOCALES de este dispositivo (que llevan la
+// descripción); el total del grupo arriba puede incluir además gasto del cron.
+function DailyRegisterPanel({ productoIds }) {
+  const dias = dailyExpenseLog(productoIds, { days: 21 });
+  const avgs = avgByKind(productoIds);
+  if (dias.length === 0) {
+    return (
+      <div className="mb-3 mx-1 p-3 rounded-lg bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 text-[11px] text-gray-500">
+        Sin gastos con detalle en este dispositivo todavía (los de otra compu no traen el desglose).
+      </div>
+    );
+  }
+  return (
+    <div className="mb-3 mx-1 p-3 rounded-lg bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700">
+      {avgs.length > 0 && (
+        <div className="flex flex-wrap gap-x-4 gap-y-1 mb-3 text-[11px]">
+          <span className="font-bold text-gray-700 dark:text-gray-200">Promedio por operación:</span>
+          {avgs.map(a => (
+            <span key={a.kind} className="text-gray-500 dark:text-gray-400 font-mono">
+              {kindLabel(a.kind)}: <b className="text-gray-800 dark:text-gray-100">{fmtMoney(a.avg)}</b> <span className="opacity-60">×{a.count}</span>
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="space-y-2">
+        {dias.map(d => (
+          <div key={d.day} className="border-t border-gray-200 dark:border-gray-700 pt-2 first:border-t-0 first:pt-0">
+            <div className="flex items-center justify-between text-[11px] font-bold mb-1">
+              <span className="text-gray-700 dark:text-gray-200">{fmtDayLabel(d.day)}</span>
+              <span className="font-mono text-brand-600 dark:text-brand-400 tabular-nums">{fmtMoney(d.total)}</span>
+            </div>
+            <div className="space-y-0.5">
+              {d.items.slice(0, 12).map((it, i) => (
+                <div key={i} className="flex items-center justify-between text-[10px] text-gray-500 dark:text-gray-400 font-mono gap-2">
+                  <span className="truncate">{it.desc || kindLabel(it.kind)}</span>
+                  <span className="tabular-nums shrink-0">{fmtMoney(it.amount)}</span>
+                </div>
+              ))}
+              {d.items.length > 12 && <div className="text-[10px] text-gray-400">+{d.items.length - 12} más…</div>}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGeneradorHoy, updateIdea, formatoDeAd } from './bandejaStore.js';
 import { deleteProducto as deleteProductoFromCloud } from './marketingSync.js';
 import { supabase } from './supabase.js';
 import { authHeaders } from './authFetch.js';
 import { downloadProductoExport, importProductoFromFile } from './productoExport.js';
 import DiagnosticoSyncModal from './DiagnosticoSyncModal.jsx';
-import { logCostsFromResponse, spendAllProductos, backfillProductoIds, normalizeCostName, pushUnsyncedCostsToCloud, promoteSyncedCosts } from './costsStore.js';
-import { fmtMoney, getPersonLoaded, setPersonLoaded, getPersonLoadedUSD, subscribeMoney } from './moneyStore.js';
+import { logCostsFromResponse, spendAllProductos, backfillProductoIds, normalizeCostName, pushUnsyncedCostsToCloud, promoteSyncedCosts, dailyExpenseLog, avgByKind } from './costsStore.js';
+import { fmtMoney, getPersonLoads, addPersonLoad, removePersonLoad, getPersonLoadedUSD, subscribeMoney, getCurrency } from './moneyStore.js';
 // Static imports — lazy() causaba TDZ en prod por chunking inconsistente.
 import BandejaSection from './Bandeja.jsx';
 import InspiracionSection from './InspiracionSection.jsx';
@@ -1205,6 +1272,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   const [cargoEditPerson, setCargoEditPerson] = useState(null);
   const [cargoDraft, setCargoDraft] = useState('');
   const [cargoDraftCur, setCargoDraftCur] = useState('ARS');
+  const [dailyOpenPerson, setDailyOpenPerson] = useState(null); // registro por día abierto
   const [, forceMoney] = useState(0); // re-render al cambiar moneda / tipo de cambio
   const asignarResponsable = (pid, nombre) => {
     setProductos(prev => prev.map(p =>
@@ -1216,14 +1284,16 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   };
   useEffect(() => subscribeMoney(() => forceMoney(x => x + 1)), []);
   const abrirCargoEditor = (person) => {
-    const cur = getPersonLoaded(person);
-    setCargoDraft(cur ? String(cur.amount) : '');
-    setCargoDraftCur(cur ? cur.currency : 'ARS');
+    // Abrimos para AGREGAR una carga nueva (se acumula). El draft arranca vacío.
+    setCargoDraft('');
+    setCargoDraftCur(getCurrency() === 'USD' ? 'USD' : 'ARS');
     setCargoEditPerson(person);
   };
-  const guardarCargo = () => {
-    setPersonLoaded(cargoEditPerson, Number(cargoDraft) || 0, cargoDraftCur);
-    setCargoEditPerson(null);
+  const agregarCargo = () => {
+    if (!(Number(cargoDraft) > 0)) return;
+    addPersonLoad(cargoEditPerson, Number(cargoDraft), cargoDraftCur);
+    setCargoDraft(''); // limpiamos para poder sumar otra sin cerrar
+    forceMoney(x => x + 1);
   };
   const [productSpendMap, setProductSpendMap] = useState(() => spendAllProductos());
   // Totales cloud (gasto del cron, tabla marketing_costs) por producto —
@@ -3445,9 +3515,14 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               <div className="space-y-6">
                 {grupos.map(g => {
                   const gastoGrupo = g.items.reduce((s, p) => s + costoDe(p), 0);
-                  const loadedEntry = g.label ? getPersonLoaded(g.label) : null;
+                  const loads = g.label ? getPersonLoads(g.label) : [];
+                  const hasLoads = loads.length > 0;
+                  const gkey = g.label || '__sin__';
                   const loadedUSD = g.label ? getPersonLoadedUSD(g.label) : 0;
                   const saldoUSD = loadedUSD - gastoGrupo;
+                  const fmtEntry = (e) => e.currency === 'ARS'
+                    ? '$' + new Intl.NumberFormat('es-AR').format(e.amount)
+                    : 'US$' + new Intl.NumberFormat('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(e.amount);
                   return (
                     <div key={g.label || '__sin__'}>
                       <div className="flex items-center gap-2 mb-2 px-1 flex-wrap">
@@ -3459,51 +3534,78 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                           · {g.items.length} producto{g.items.length !== 1 ? 's' : ''}
                         </span>
                         <div className="ml-auto flex items-center gap-3 text-[11px] font-mono tabular-nums">
-                          {loadedEntry && (
+                          {hasLoads && (
                             <span className="text-gray-500 dark:text-gray-400">cargó <b className="text-gray-800 dark:text-gray-100">{fmtMoney(loadedUSD)}</b></span>
                           )}
                           {gastoGrupo > 0 && (
                             <span className="text-gray-500 dark:text-gray-400">gastó <b className="text-brand-600 dark:text-brand-400">{fmtMoney(gastoGrupo)}</b></span>
                           )}
-                          {loadedEntry && (
+                          {hasLoads && (
                             <span className={saldoUSD >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}>
                               saldo <b>{fmtMoney(saldoUSD)}</b>
                             </span>
                           )}
                           {g.label && (
                             <button
-                              onClick={() => abrirCargoEditor(g.label)}
+                              onClick={() => (cargoEditPerson === g.label ? setCargoEditPerson(null) : abrirCargoEditor(g.label))}
                               className="px-2 py-0.5 rounded-md border border-gray-200 dark:border-gray-700 text-gray-500 hover:text-brand-600 hover:border-brand-300 transition font-sans font-semibold"
-                              title={`Registrar cuánto cargó ${g.label}`}
+                              title={`Registrar un ingreso de ${g.label}`}
                             >
-                              {loadedEntry ? '✏️ cargó' : '＋ cargó'}
+                              ＋ cargar saldo
+                            </button>
+                          )}
+                          {gastoGrupo > 0 && (
+                            <button
+                              onClick={() => setDailyOpenPerson(dailyOpenPerson === gkey ? null : gkey)}
+                              className="px-2 py-0.5 rounded-md border border-gray-200 dark:border-gray-700 text-gray-500 hover:text-brand-600 hover:border-brand-300 transition font-sans font-semibold"
+                              title="Ver el gasto por día y en qué se gastó"
+                            >
+                              {dailyOpenPerson === gkey ? '▲ por día' : '📅 por día'}
                             </button>
                           )}
                         </div>
                       </div>
+                      {dailyOpenPerson === gkey && (
+                        <DailyRegisterPanel productoIds={g.items.map(p => p.id)} />
+                      )}
                       {cargoEditPerson === g.label && g.label && (
-                        <div className="mb-3 mx-1 p-2.5 rounded-lg bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 flex items-center gap-2 flex-wrap">
-                          <span className="text-[11px] font-semibold text-gray-700 dark:text-gray-200">Cuánto cargó {g.label}:</span>
-                          <div className="inline-flex rounded-md overflow-hidden border border-gray-300 dark:border-gray-600 text-[11px] font-bold">
-                            {['ARS', 'USD'].map(c => (
-                              <button key={c} onClick={() => setCargoDraftCur(c)}
-                                className={`px-2 py-1 ${cargoDraftCur === c ? 'bg-brand-600 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-500'}`}>
-                                {c === 'ARS' ? '$ ARS' : 'US$'}
-                              </button>
-                            ))}
-                          </div>
-                          <input
-                            type="number" min="0" step={cargoDraftCur === 'ARS' ? '1000' : '1'} value={cargoDraft} autoFocus
-                            onChange={e => setCargoDraft(e.target.value)}
-                            onKeyDown={e => { if (e.key === 'Enter') guardarCargo(); if (e.key === 'Escape') setCargoEditPerson(null); }}
-                            placeholder={cargoDraftCur === 'ARS' ? '90000' : '65'}
-                            className="w-28 px-2 py-1 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-brand-500 tabular-nums"
-                          />
-                          <button onClick={guardarCargo} className="px-3 py-1 text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded transition">Guardar</button>
-                          <button onClick={() => setCargoEditPerson(null)} className="text-[11px] text-gray-400 hover:text-gray-600">cancelar</button>
-                          {loadedEntry && (
-                            <button onClick={() => { setPersonLoaded(g.label, 0); setCargoEditPerson(null); }} className="ml-auto text-[10px] text-red-400 hover:text-red-600">borrar registro</button>
+                        <div className="mb-3 mx-1 p-3 rounded-lg bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800">
+                          {/* Historial de ingresos acumulados */}
+                          {hasLoads && (
+                            <div className="mb-2.5 space-y-1">
+                              {[...loads].reverse().map(e => (
+                                <div key={e.ts} className="flex items-center gap-2 text-[11px] text-gray-600 dark:text-gray-300 font-mono tabular-nums">
+                                  <span className="text-gray-400">{new Date(e.ts).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit' })}</span>
+                                  <span className="font-bold text-gray-800 dark:text-gray-100">{fmtEntry(e)}</span>
+                                  <button onClick={() => { removePersonLoad(g.label, e.ts); forceMoney(x => x + 1); }} className="text-gray-300 hover:text-red-500" title="Borrar este ingreso"><X size={11} /></button>
+                                </div>
+                              ))}
+                              <div className="text-[11px] pt-1 border-t border-brand-200/60 dark:border-brand-800/60 text-gray-500">
+                                total cargado: <b className="text-gray-800 dark:text-gray-100 font-mono">{fmtMoney(loadedUSD)}</b>
+                              </div>
+                            </div>
                           )}
+                          {/* Form para agregar un ingreso nuevo */}
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-[11px] font-semibold text-gray-700 dark:text-gray-200">Nuevo ingreso de {g.label}:</span>
+                            <div className="inline-flex rounded-md overflow-hidden border border-gray-300 dark:border-gray-600 text-[11px] font-bold">
+                              {['ARS', 'USD'].map(c => (
+                                <button key={c} onClick={() => setCargoDraftCur(c)}
+                                  className={`px-2 py-1 ${cargoDraftCur === c ? 'bg-brand-600 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-500'}`}>
+                                  {c === 'ARS' ? '$ ARS' : 'US$'}
+                                </button>
+                              ))}
+                            </div>
+                            <input
+                              type="number" min="0" step={cargoDraftCur === 'ARS' ? '1000' : '1'} value={cargoDraft} autoFocus
+                              onChange={e => setCargoDraft(e.target.value)}
+                              onKeyDown={e => { if (e.key === 'Enter') agregarCargo(); if (e.key === 'Escape') setCargoEditPerson(null); }}
+                              placeholder={cargoDraftCur === 'ARS' ? '90000' : '65'}
+                              className="w-28 px-2 py-1 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-brand-500 tabular-nums"
+                            />
+                            <button onClick={agregarCargo} className="px-3 py-1 text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded transition">Agregar</button>
+                            <button onClick={() => setCargoEditPerson(null)} className="text-[11px] text-gray-400 hover:text-gray-600">cerrar</button>
+                          </div>
                         </div>
                       )}
                       <div className={contClass}>{g.items.map(renderProductoCard)}</div>

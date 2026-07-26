@@ -332,6 +332,48 @@ export function recentLogs(n = 100) {
   return loadLogs().slice(0, n);
 }
 
+// Día calendario (AR) de un timestamp ISO → 'YYYY-MM-DD'.
+function argDayOf(ts) {
+  try { return new Date(ts).toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }); }
+  catch { return ''; }
+}
+
+// Registro de gastos por DÍA para un set de productos (logs locales, que llevan
+// la descripción de EN QUÉ se gastó). Devuelve los últimos `days` días con
+// actividad: [{ day, total, items: [{ desc, kind, amount, ts }] }].
+export function dailyExpenseLog(productoIds, { days = 14 } = {}) {
+  const set = new Set((productoIds || []).map(String));
+  const byDay = new Map();
+  for (const l of loadLogs()) {
+    if (!l.productoId || !set.has(String(l.productoId))) continue;
+    const day = argDayOf(l.ts);
+    if (!day) continue;
+    if (!byDay.has(day)) byDay.set(day, { day, total: 0, items: [] });
+    const g = byDay.get(day);
+    g.total += (l.amount || 0);
+    g.items.push({ desc: l.descripcion || '', kind: l.kind || 'otros', amount: l.amount || 0, ts: l.ts });
+  }
+  return [...byDay.values()].sort((a, b) => b.day.localeCompare(a.day)).slice(0, days);
+}
+
+// Promedio y cantidad de gasto por KIND (creativo, scrape, análisis, ideas…)
+// para un set de productos, o global si productoIds es null. Sirve para estimar
+// "cuánto sale en promedio cada creación de estático / cada scrape".
+export function avgByKind(productoIds = null) {
+  const set = productoIds ? new Set(productoIds.map(String)) : null;
+  const acc = {};
+  for (const l of loadLogs()) {
+    if (set && (!l.productoId || !set.has(String(l.productoId)))) continue;
+    const k = l.kind || 'otros';
+    if (!acc[k]) acc[k] = { kind: k, count: 0, total: 0 };
+    acc[k].count++;
+    acc[k].total += (l.amount || 0);
+  }
+  return Object.values(acc)
+    .map(x => ({ ...x, avg: x.count ? x.total / x.count : 0 }))
+    .sort((a, b) => b.total - a.total);
+}
+
 // Borra todos los logs (útil para reset mensual manual).
 export function clearLogs() {
   saveLogs([]);

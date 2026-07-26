@@ -30,6 +30,7 @@ import { authHeaders } from './authFetch.js';
 import { downloadProductoExport, importProductoFromFile } from './productoExport.js';
 import DiagnosticoSyncModal from './DiagnosticoSyncModal.jsx';
 import { logCostsFromResponse, spendAllProductos, backfillProductoIds, normalizeCostName, pushUnsyncedCostsToCloud, promoteSyncedCosts } from './costsStore.js';
+import { fmtMoney, getPersonLoaded, setPersonLoaded, getPersonLoadedUSD, subscribeMoney } from './moneyStore.js';
 // Static imports — lazy() causaba TDZ en prod por chunking inconsistente.
 import BandejaSection from './Bandeja.jsx';
 import InspiracionSection from './InspiracionSection.jsx';
@@ -1200,6 +1201,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // persona y ver cuánto gastó cada una. asignandoId = producto en edición.
   const [asignandoId, setAsignandoId] = useState(null);
   const [respDraft, setRespDraft] = useState('');
+  // Editor de saldo cargado por persona (Vito transfirió $90.000, etc.).
+  const [cargoEditPerson, setCargoEditPerson] = useState(null);
+  const [cargoDraft, setCargoDraft] = useState('');
+  const [cargoDraftCur, setCargoDraftCur] = useState('ARS');
+  const [, forceMoney] = useState(0); // re-render al cambiar moneda / tipo de cambio
   const asignarResponsable = (pid, nombre) => {
     setProductos(prev => prev.map(p =>
       String(p.id) === String(pid)
@@ -1207,6 +1213,17 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         : p
     ));
     setAsignandoId(null);
+  };
+  useEffect(() => subscribeMoney(() => forceMoney(x => x + 1)), []);
+  const abrirCargoEditor = (person) => {
+    const cur = getPersonLoaded(person);
+    setCargoDraft(cur ? String(cur.amount) : '');
+    setCargoDraftCur(cur ? cur.currency : 'ARS');
+    setCargoEditPerson(person);
+  };
+  const guardarCargo = () => {
+    setPersonLoaded(cargoEditPerson, Number(cargoDraft) || 0, cargoDraftCur);
+    setCargoEditPerson(null);
   };
   const [productSpendMap, setProductSpendMap] = useState(() => spendAllProductos());
   // Totales cloud (gasto del cron, tabla marketing_costs) por producto —
@@ -3346,7 +3363,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                       {costoTotal > 0 && (
                         <button onClick={openCosts} className="text-right leading-none group/cost" title="Ver resumen de costos de este producto">
                           <div className="text-base font-bold font-mono text-brand-600 dark:text-brand-400 group-hover/cost:underline">
-                            ${costoTotal.toFixed(2)}
+                            {fmtMoney(costoTotal)}
                           </div>
                           <div className="text-[9px] text-gray-400 mt-0.5">gastado</div>
                         </button>
@@ -3403,7 +3420,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                       <button onClick={openCosts}
                         className="font-mono text-brand-600 dark:text-brand-400 hover:underline hover:text-brand-700 dark:hover:text-brand-300 transition"
                         title="Ver resumen de costos de este producto (scrapes + IA + todo lo externo)">
-                        · ${costoTotal.toFixed(2)} 💸
+                        · {fmtMoney(costoTotal)} 💸
                       </button>
                     )}
                   </div>
@@ -3428,9 +3445,12 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               <div className="space-y-6">
                 {grupos.map(g => {
                   const gastoGrupo = g.items.reduce((s, p) => s + costoDe(p), 0);
+                  const loadedEntry = g.label ? getPersonLoaded(g.label) : null;
+                  const loadedUSD = g.label ? getPersonLoadedUSD(g.label) : 0;
+                  const saldoUSD = loadedUSD - gastoGrupo;
                   return (
                     <div key={g.label || '__sin__'}>
-                      <div className="flex items-center gap-2 mb-2 px-1">
+                      <div className="flex items-center gap-2 mb-2 px-1 flex-wrap">
                         <Users size={14} className={g.label ? 'text-brand-500' : 'text-gray-400'} />
                         <h3 className={`text-sm font-bold ${g.label ? 'text-gray-900 dark:text-gray-100' : 'text-gray-400 dark:text-gray-500'}`}>
                           {g.label || 'Sin asignar'}
@@ -3438,12 +3458,54 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                         <span className="text-[11px] text-gray-500 dark:text-gray-400">
                           · {g.items.length} producto{g.items.length !== 1 ? 's' : ''}
                         </span>
-                        {gastoGrupo > 0 && (
-                          <span className="ml-auto text-xs font-bold font-mono text-brand-600 dark:text-brand-400 tabular-nums">
-                            ${gastoGrupo.toFixed(2)} gastado
-                          </span>
-                        )}
+                        <div className="ml-auto flex items-center gap-3 text-[11px] font-mono tabular-nums">
+                          {loadedEntry && (
+                            <span className="text-gray-500 dark:text-gray-400">cargó <b className="text-gray-800 dark:text-gray-100">{fmtMoney(loadedUSD)}</b></span>
+                          )}
+                          {gastoGrupo > 0 && (
+                            <span className="text-gray-500 dark:text-gray-400">gastó <b className="text-brand-600 dark:text-brand-400">{fmtMoney(gastoGrupo)}</b></span>
+                          )}
+                          {loadedEntry && (
+                            <span className={saldoUSD >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}>
+                              saldo <b>{fmtMoney(saldoUSD)}</b>
+                            </span>
+                          )}
+                          {g.label && (
+                            <button
+                              onClick={() => abrirCargoEditor(g.label)}
+                              className="px-2 py-0.5 rounded-md border border-gray-200 dark:border-gray-700 text-gray-500 hover:text-brand-600 hover:border-brand-300 transition font-sans font-semibold"
+                              title={`Registrar cuánto cargó ${g.label}`}
+                            >
+                              {loadedEntry ? '✏️ cargó' : '＋ cargó'}
+                            </button>
+                          )}
+                        </div>
                       </div>
+                      {cargoEditPerson === g.label && g.label && (
+                        <div className="mb-3 mx-1 p-2.5 rounded-lg bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 flex items-center gap-2 flex-wrap">
+                          <span className="text-[11px] font-semibold text-gray-700 dark:text-gray-200">Cuánto cargó {g.label}:</span>
+                          <div className="inline-flex rounded-md overflow-hidden border border-gray-300 dark:border-gray-600 text-[11px] font-bold">
+                            {['ARS', 'USD'].map(c => (
+                              <button key={c} onClick={() => setCargoDraftCur(c)}
+                                className={`px-2 py-1 ${cargoDraftCur === c ? 'bg-brand-600 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-500'}`}>
+                                {c === 'ARS' ? '$ ARS' : 'US$'}
+                              </button>
+                            ))}
+                          </div>
+                          <input
+                            type="number" min="0" step={cargoDraftCur === 'ARS' ? '1000' : '1'} value={cargoDraft} autoFocus
+                            onChange={e => setCargoDraft(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') guardarCargo(); if (e.key === 'Escape') setCargoEditPerson(null); }}
+                            placeholder={cargoDraftCur === 'ARS' ? '90000' : '65'}
+                            className="w-28 px-2 py-1 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-brand-500 tabular-nums"
+                          />
+                          <button onClick={guardarCargo} className="px-3 py-1 text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded transition">Guardar</button>
+                          <button onClick={() => setCargoEditPerson(null)} className="text-[11px] text-gray-400 hover:text-gray-600">cancelar</button>
+                          {loadedEntry && (
+                            <button onClick={() => { setPersonLoaded(g.label, 0); setCargoEditPerson(null); }} className="ml-auto text-[10px] text-red-400 hover:text-red-600">borrar registro</button>
+                          )}
+                        </div>
+                      )}
                       <div className={contClass}>{g.items.map(renderProductoCard)}</div>
                     </div>
                   );

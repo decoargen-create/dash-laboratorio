@@ -12,10 +12,12 @@
 import React, { useEffect, useState } from 'react';
 import {
   Sparkles, TrendingUp, Package, Inbox, Trophy, Activity, ArrowRight,
-  Clock, CheckCircle2,
+  Clock, CheckCircle2, Wallet, Image as ImageIcon, Search,
 } from 'lucide-react';
 import AnimatedCounter from './AnimatedCounter.jsx';
 import { loadIdeas } from './bandejaStore.js';
+import { globalCostKPIs } from './costsStore.js';
+import { fmtMoney, subscribeMoney } from './moneyStore.js';
 
 function readProductos() {
   try { return JSON.parse(localStorage.getItem('adslab-marketing-productos-v1') || '[]'); }
@@ -28,6 +30,8 @@ export default function MarketingDashboard({ onNavigate }) {
     try { return loadIdeas(); } catch { return []; }
   });
 
+  const [, forceMoney] = useState(0);
+
   // Re-fetch al focus (vuelve a esta tab) — los counts cambian mientras
   // navegás otras secciones.
   useEffect(() => {
@@ -37,11 +41,18 @@ export default function MarketingDashboard({ onNavigate }) {
     };
     window.addEventListener('focus', refresh);
     window.addEventListener('viora:marketing-storage-changed', refresh);
+    window.addEventListener('viora:cost-logged', refresh);
+    const unMoney = subscribeMoney(() => forceMoney(x => x + 1));
     return () => {
       window.removeEventListener('focus', refresh);
       window.removeEventListener('viora:marketing-storage-changed', refresh);
+      window.removeEventListener('viora:cost-logged', refresh);
+      unMoney();
     };
   }, []);
+
+  // KPIs de costo (histórico de este dispositivo).
+  const kpis = globalCostKPIs();
 
   // Stats agregados
   const totalProductos = productos.length;
@@ -151,6 +162,25 @@ export default function MarketingDashboard({ onNavigate }) {
         />
       </div>
 
+      {/* KPIs de costos — promedios sobre todo el histórico */}
+      {kpis.total > 0 && (
+        <div className="glass-card border border-gray-200 dark:border-gray-700 rounded-xl p-4 md:p-5">
+          <div className="flex items-center gap-2 mb-3 flex-wrap">
+            <Wallet size={14} className="text-brand-500" />
+            <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Costos</h3>
+            <span className="text-[11px] text-gray-400 dark:text-gray-500">
+              · promedios sobre {kpis.productosCount} producto{kpis.productosCount !== 1 ? 's' : ''} y {kpis.creativosCount} estáticos generados
+            </span>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <CostKpi icon={<ImageIcon size={13} />} label="Costo por estático" value={fmtMoney(kpis.avgCreativo)} sub={`promedio · ${kpis.creativosCount} hechos`} tone="brand" />
+            <CostKpi icon={<Package size={13} />} label="Costo por producto" value={fmtMoney(kpis.avgPorProducto)} sub="armado completo (prom)" tone="emerald" />
+            <CostKpi icon={<Search size={13} />} label="Costo por scrapeo" value={fmtMoney(kpis.avgScrape)} sub={`promedio · ${kpis.scrapesCount} scrapes`} />
+            <CostKpi icon={<Wallet size={13} />} label="Gasto total" value={fmtMoney(kpis.total)} sub="registrado" />
+          </div>
+        </div>
+      )}
+
       {/* Top productos por actividad reciente */}
       {productosRanked.length > 0 && (
         <div className="glass-card border border-gray-200 dark:border-gray-700 rounded-xl p-4 md:p-5">
@@ -209,6 +239,23 @@ export default function MarketingDashboard({ onNavigate }) {
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+// KPI de costo: valor ya formateado (string, respeta ARS/USD), sin counter.
+function CostKpi({ icon, label, value, sub, tone = 'default' }) {
+  const toneCls = tone === 'brand' ? 'text-brand-600 dark:text-brand-400'
+    : tone === 'emerald' ? 'text-emerald-600 dark:text-emerald-400'
+    : 'text-gray-900 dark:text-gray-100';
+  return (
+    <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white/60 dark:bg-gray-800/40 p-3">
+      <div className="flex items-center gap-1.5 text-gray-400 dark:text-gray-500 mb-1.5">
+        {icon}
+        <span className="text-[10px] font-bold uppercase tracking-wide leading-tight">{label}</span>
+      </div>
+      <div className={`text-xl md:text-2xl font-bold font-mono tabular-nums ${toneCls}`}>{value}</div>
+      {sub && <div className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">{sub}</div>}
     </div>
   );
 }

@@ -40,6 +40,7 @@ import CopyGeneratorSection from './CopyGeneratorSection.jsx';
 import SlashCommand from './SlashCommand.jsx';
 import BulkProgressBarGlobal from './BulkProgressBarGlobal.jsx';
 import BalanceBar from './BalanceBar.jsx';
+import CurrencyToggle from './CurrencyToggle.jsx';
 import ActivityBell from './ActivityBell.jsx';
 import SyncStatusBadge from './SyncStatusBadge.jsx';
 import { getRemaining, subscribeBalance } from './balanceStore.js';
@@ -1493,6 +1494,15 @@ function AppShell({ onExit }) {
     setToasts(prev => [...prev, { id, ...toast }]);
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), toast.duration || 3500);
   }, []);
+
+  // Puente global de toasts: componentes que no reciben addToast por prop (ej.
+  // BalanceBar en el header) pueden disparar un toast con
+  // window.dispatchEvent(new CustomEvent('viora:toast', { detail: {...} })).
+  useEffect(() => {
+    const onToast = (e) => { if (e?.detail) addToast(e.detail); };
+    window.addEventListener('viora:toast', onToast);
+    return () => window.removeEventListener('viora:toast', onToast);
+  }, [addToast]);
 
   // Activá el sync de Marketing con Supabase. Pull on mount/login, push
   // debounced en cambios. Si el user NO está logueado, el hook noopea hasta
@@ -8623,6 +8633,7 @@ function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, textSize, set
         <SyncStatusBadge />
         <ActivityBell />
         <BalanceBar />
+        <CurrencyToggle />
         {bgTasks.length > 0 && (
           <div
             className="hidden sm:inline-flex items-center gap-2 px-3 py-1.5 text-[11px] rounded-lg bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800/50 text-amber-800 dark:text-amber-200 animate-pulse"

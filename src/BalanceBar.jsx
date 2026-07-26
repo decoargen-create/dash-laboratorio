@@ -8,6 +8,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Wallet, Check, X, ChevronDown } from 'lucide-react';
 import { getBalance, setBalance, getRemaining, subscribeBalance } from './balanceStore.js';
+import { fmtMoney, subscribeMoney } from './moneyStore.js';
 
 const PROVIDERS = [
   { key: 'anthropic', label: 'Anthropic',  rechargeUrl: 'https://console.anthropic.com/settings/billing' },
@@ -15,10 +16,12 @@ const PROVIDERS = [
   { key: 'apify',     label: 'Apify',      rechargeUrl: 'https://console.apify.com/billing/subscription' },
 ];
 
-function fmtUsd(v) {
-  if (v == null) return '—';
-  return `$${Number(v).toFixed(2)}`;
-}
+// Umbral de "saldo bajo": por debajo de esto avisamos con un toast. Los saldos
+// están en USD; fmtMoney los muestra en la moneda elegida.
+const LOW_USD = 2;
+
+// Formatea un saldo (USD) en la moneda elegida; '—' si no está seteado.
+function fmtBal(v) { return v == null ? '—' : fmtMoney(v); }
 
 export default function BalanceBar() {
   const [tick, setTick] = useState(0);
@@ -28,8 +31,35 @@ export default function BalanceBar() {
   // Click → expande las 3 pills individuales (cada una editable como antes).
   const [showAll, setShowAll] = useState(false);
   const popoverRef = useRef(null);
+  // Recordamos a quién ya le avisamos que está bajo, para no spamear en cada
+  // costo. Se re-arma cuando el saldo vuelve a subir (recarga).
+  const alertedRef = useRef({});
 
-  useEffect(() => subscribeBalance(() => setTick(x => x + 1)), []);
+  useEffect(() => {
+    const check = () => {
+      setTick(x => x + 1);
+      for (const p of PROVIDERS) {
+        const r = getRemaining(p.key);
+        if (r == null) continue;
+        if (r < LOW_USD && !alertedRef.current[p.key]) {
+          alertedRef.current[p.key] = true;
+          try {
+            window.dispatchEvent(new CustomEvent('viora:toast', { detail: {
+              type: 'warning',
+              message: `${p.label} casi sin saldo — queda ${fmtMoney(r)}. Recargá para no cortar las operaciones.`,
+              duration: 9000,
+            } }));
+          } catch {}
+        } else if (r >= LOW_USD && alertedRef.current[p.key]) {
+          alertedRef.current[p.key] = false; // se recargó → rearmamos el aviso
+        }
+      }
+    };
+    const un1 = subscribeBalance(check);
+    const un2 = subscribeMoney(() => setTick(x => x + 1));
+    check(); // chequeo inicial al montar
+    return () => { un1(); un2(); };
+  }, []);
 
   // Cierra popover de edición + colapsa cuando el user clickea afuera.
   useEffect(() => {
@@ -83,7 +113,7 @@ export default function BalanceBar() {
         >
           <Wallet size={11} />
           <span className="opacity-70">Costos</span>
-          <span className="tabular-nums">{anyConfigured ? fmtUsd(total) : 'set'}</span>
+          <span className="tabular-nums">{anyConfigured ? fmtBal(total) : 'set'}</span>
           <ChevronDown size={10} className="opacity-60" />
         </button>
       ) : (
@@ -103,12 +133,12 @@ export default function BalanceBar() {
                   : 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/50'
             }`}
             title={balance
-              ? `${p.label}: queda ${fmtUsd(remaining)} (cargaste ${fmtUsd(balance.saldo)} el ${new Date(balance.setAt).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' })}). Click para actualizar.`
+              ? `${p.label}: queda ${fmtBal(remaining)} (cargaste ${fmtBal(balance.saldo)} el ${new Date(balance.setAt).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' })}). Click para actualizar.`
               : `${p.label}: cargá tu saldo actual para ver lo que te queda`}
           >
             <Wallet size={10} />
             <span className="opacity-70">{p.label.slice(0, 4)}</span>
-            <span className="tabular-nums">{balance ? fmtUsd(remaining) : 'set'}</span>
+            <span className="tabular-nums">{balance ? fmtBal(remaining) : 'set'}</span>
           </button>
         );
       }))}
@@ -132,9 +162,9 @@ export default function BalanceBar() {
                 </div>
                 {current && (
                   <p className="text-[10px] text-gray-600 dark:text-gray-400 mb-2">
-                    Saldo cargado: <strong>{fmtUsd(current.saldo)}</strong> el {new Date(current.setAt).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' })}<br />
-                    Gastado desde entonces: <strong>{fmtUsd(current.saldo - remaining)}</strong><br />
-                    <span className="text-emerald-600 dark:text-emerald-400 font-bold">Restante estimado: {fmtUsd(remaining)}</span>
+                    Saldo cargado: <strong>{fmtBal(current.saldo)}</strong> el {new Date(current.setAt).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' })}<br />
+                    Gastado desde entonces: <strong>{fmtBal(current.saldo - remaining)}</strong><br />
+                    <span className="text-emerald-600 dark:text-emerald-400 font-bold">Restante estimado: {fmtBal(remaining)}</span>
                   </p>
                 )}
                 <label className="block text-[10px] font-bold uppercase text-gray-600 dark:text-gray-300 mb-1">

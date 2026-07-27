@@ -145,7 +145,7 @@ export default function ProduccionSection({ addToast }) {
               </div>
               <div className="space-y-2 min-h-[60px]">
                 {cards.map(a => (
-                  <KanbanCard key={a.id} a={a} personas={personas}
+                  <KanbanCard key={a.id} a={a} personas={personas} addToast={addToast}
                     onOpen={() => setDetailId(a.id)}
                     onAssign={(p) => assignPersona(a.id, p)} />
                 ))}
@@ -171,11 +171,24 @@ export default function ProduccionSection({ addToast }) {
   );
 }
 
-function KanbanCard({ a, personas, onOpen, onAssign }) {
+function KanbanCard({ a, personas, onOpen, onAssign, addToast }) {
   const [menu, setMenu] = useState(false);
+  const [prog, setProg] = useState(null); // { i, total } mientras sube
+  const fileRef = useRef(null);
   const nFiles = a.archivos?.length || 0;
+  const folderLink = (a.archivos || []).find(f => f.folderLink)?.folderLink;
+
+  const onPick = async (fileList) => {
+    setProg({ i: 0, total: 0 });
+    await subirParaTarjeta(a, fileList, {
+      addToast,
+      onProgress: ({ i, total }) => setProg({ i, total }),
+    });
+    setProg(null);
+  };
+
   return (
-    <div draggable
+    <div draggable={!prog}
       onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/prod-id', a.id); }}
       onClick={() => onOpen()}
       className="group bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-2.5 shadow-sm hover:shadow-md hover:border-brand-300 dark:hover:border-brand-600 transition cursor-pointer">
@@ -191,6 +204,10 @@ function KanbanCard({ a, personas, onOpen, onAssign }) {
           <span className="inline-flex items-center gap-0.5 text-[10px] text-gray-500 dark:text-gray-400" title={`${nFiles} creativos subidos`}>
             <Film size={11} className="text-emerald-500" />{nFiles}
           </span>
+        )}
+        {folderLink && (
+          <a href={folderLink} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
+            className="text-brand-500 hover:text-brand-600" title="Abrir carpeta en Drive"><ExternalLink size={11} /></a>
         )}
         {a.brief?.trim() && <FileText size={11} className="text-gray-400" title="Tiene brief" />}
         <span className="ml-auto text-[10px] font-mono text-gray-400 tabular-nums">{a.videosAprobados}/{a.videosTotal}</span>
@@ -208,6 +225,23 @@ function KanbanCard({ a, personas, onOpen, onAssign }) {
             )}
           </div>
         )}
+      </div>
+
+      {/* Subir directo, sin abrir la tarjeta. Al subir pasa solo a "En revisión". */}
+      <div className="mt-2 pl-4">
+        {prog ? (
+          <div className="flex items-center gap-1.5 text-[11px] text-brand-600 dark:text-brand-400">
+            <Loader2 size={12} className="animate-spin" /> Subiendo {prog.total ? `${prog.i + 1}/${prog.total}` : ''}…
+          </div>
+        ) : (
+          <button onClick={e => { e.stopPropagation(); fileRef.current?.click(); }}
+            className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 transition">
+            <UploadCloud size={12} /> Subir creativos
+          </button>
+        )}
+        <input ref={fileRef} type="file" accept="video/*" multiple hidden
+          onClick={e => e.stopPropagation()}
+          onChange={e => { const fl = e.target.files; e.target.value = ''; onPick(fl); }} />
       </div>
     </div>
   );
@@ -397,6 +431,27 @@ async function uploadOne(file, ctx) {
   return await uploadToSupabase(file, user, ext);
 }
 
+// Sube una tanda de videos a una tarjeta y, si estaba en "Por hacer", la manda
+// sola a "En revisión" (así el equipo sube y de una queda para revisar).
+async function subirParaTarjeta(a, fileList, { onProgress, addToast } = {}) {
+  const files = Array.from(fileList || []).filter(f => VIDEO_EXT.test(f.name) || (f.type || '').startsWith('video/'));
+  if (files.length === 0) { addToast?.({ type: 'warning', message: 'Elegí videos (.mp4, .mov…).' }); return { ok: 0 }; }
+  const user = await getCurrentUser();
+  if (!user) { addToast?.({ type: 'error', message: 'Iniciá sesión de nuevo.' }); return { ok: 0 }; }
+  const token = await getAuthToken();
+  const ctx = { user, token, weekKey: a.weekKey, productoNombre: a.productoNombre, persona: a.persona || 'Equipo' };
+  const eraPorHacer = a.estado === 'porhacer';
+  let ok = 0, dest = null;
+  for (let i = 0; i < files.length; i++) {
+    onProgress?.({ i, total: files.length, name: files[i].name });
+    try { const archivo = await uploadOne(files[i], ctx); addArchivos(a.id, [archivo]); ok++; dest = archivo.destino; }
+    catch (err) { addToast?.({ type: 'error', message: `"${files[i].name}": ${err.message}` }); }
+  }
+  if (ok > 0 && eraPorHacer) updateAssignment(a.id, { estado: 'revision' });
+  if (ok > 0) addToast?.({ type: 'success', message: `${ok} video${ok > 1 ? 's' : ''} → ${dest === 'drive' ? 'Google Drive' : 'AdsLab'}${eraPorHacer ? ' · pasó a En revisión' : ''}` });
+  return { ok };
+}
+
 function CreativosSection({ a, addToast }) {
   const [files, setFiles] = useState([]); // { file, id, status, destino?, msg? }
   const [busy, setBusy] = useState(false);
@@ -419,6 +474,7 @@ function CreativosSection({ a, addToast }) {
     if (!user) { setBusy(false); addToast?.({ type: 'error', message: 'Iniciá sesión de nuevo.' }); return; }
     const token = await getAuthToken();
     const ctx = { user, token, weekKey: a.weekKey, productoNombre: a.productoNombre, persona: a.persona || 'Equipo' };
+    const eraPorHacer = a.estado === 'porhacer';
     let ok = 0, dest = null;
     for (const item of files) {
       if (item.status === 'ok') continue;
@@ -432,8 +488,9 @@ function CreativosSection({ a, addToast }) {
         setFiles(prev => prev.map(f => f.id === item.id ? { ...f, status: 'error', msg: err.message } : f));
       }
     }
+    if (ok > 0 && eraPorHacer) updateAssignment(a.id, { estado: 'revision' });
     setBusy(false);
-    if (ok > 0) addToast?.({ type: 'success', message: `${ok} video${ok > 1 ? 's' : ''} → ${dest === 'drive' ? 'Google Drive' : 'AdsLab'}` });
+    if (ok > 0) addToast?.({ type: 'success', message: `${ok} video${ok > 1 ? 's' : ''} → ${dest === 'drive' ? 'Google Drive' : 'AdsLab'}${eraPorHacer ? ' · pasó a En revisión' : ''}` });
     setFiles(prev => prev.filter(f => f.status !== 'ok'));
   };
 

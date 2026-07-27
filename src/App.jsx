@@ -8487,6 +8487,16 @@ function UserMenu({ currentUser, sidebarOpen, state, onLogout }) {
             </button>
           </div>
 
+          {/* Volver al panel del grupo (nexocom.app) — parte de la suite */}
+          <a
+            href="https://nexocom.app"
+            className="w-full flex items-center gap-2 px-4 py-3 border-t border-white/10 text-white/70 hover:bg-white/10 hover:text-white transition text-sm font-medium"
+            title="Ir al panel del grupo (finanzas, RRHH, facturación)"
+          >
+            <Home size={14} />
+            Volver al panel
+          </a>
+
           {/* Logout */}
           <button
             onClick={() => { onLogout(); setOpen(false); }}

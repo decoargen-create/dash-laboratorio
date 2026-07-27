@@ -18,7 +18,24 @@ import { supabase, getCurrentUser } from './supabase.js';
 import { addArchivos, removeArchivo, updateAssignment } from './produccionStore.js';
 
 const BUCKET = 'creativos';
-export const VIDEO_EXT = /\.(mp4|mov|m4v|webm|avi|mkv|hevc)$/i;
+
+// Aceptamos cualquier formato de video razonable. Lista amplia de extensiones
+// + el chequeo de MIME 'video/*' (aceptaVideo abajo) cubren prácticamente todo
+// lo que exportan celus, cámaras y editores. La lista y el `accept` del input
+// se derivan de acá para no desincronizarse.
+const VIDEO_EXTS = [
+  'mp4', 'm4v', 'mov', 'qt', 'webm', 'mkv', 'avi', 'wmv', 'flv', 'f4v',
+  'mpg', 'mpeg', 'm2v', 'mpe', 'm1v', 'mts', 'm2ts', 'ts', '3gp', '3g2',
+  'ogv', 'ogg', 'mxf', 'vob', 'dv', 'hevc', 'h264', 'h265', 'asf', 'divx',
+  'avchd', 'insv', 'mod', 'tod', 'rm', 'rmvb',
+];
+export const VIDEO_EXT = new RegExp(`\\.(${VIDEO_EXTS.join('|')})$`, 'i');
+export const VIDEO_ACCEPT = ['video/*', ...VIDEO_EXTS.map(e => `.${e}`)].join(',');
+
+// ¿Es un video? Vale si el navegador lo marca como video/* O si la extensión
+// está en la lista amplia (para formatos que el SO no clasifica por MIME).
+export const aceptaVideo = (f) => (f?.type || '').startsWith('video/') || VIDEO_EXT.test(f?.name || '');
+
 export const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
 async function getAuthToken() {
@@ -65,8 +82,8 @@ async function uploadOne(file, ctx) {
 // Sube una tanda de videos a una tarjeta y, si estaba en "Por hacer", la manda
 // sola a "En revisión" (así el equipo sube y de una queda para revisar).
 export async function subirParaTarjeta(a, fileList, { onProgress, addToast } = {}) {
-  const files = Array.from(fileList || []).filter(f => VIDEO_EXT.test(f.name) || (f.type || '').startsWith('video/'));
-  if (files.length === 0) { addToast?.({ type: 'warning', message: 'Elegí videos (.mp4, .mov…).' }); return { ok: 0 }; }
+  const files = Array.from(fileList || []).filter(aceptaVideo);
+  if (files.length === 0) { addToast?.({ type: 'warning', message: 'Elegí un archivo de video.' }); return { ok: 0 }; }
   const user = await getCurrentUser();
   if (!user) { addToast?.({ type: 'error', message: 'Iniciá sesión de nuevo.' }); return { ok: 0 }; }
   const token = await getAuthToken();
@@ -95,9 +112,9 @@ export function CreativosSection({ a, addToast, canDelete = true }) {
 
   const addFiles = (list) => {
     const nuevos = Array.from(list || [])
-      .filter(f => VIDEO_EXT.test(f.name) || (f.type || '').startsWith('video/'))
+      .filter(aceptaVideo)
       .map(f => ({ file: f, id: uid(), status: 'espera' }));
-    if (nuevos.length === 0) { addToast?.({ type: 'warning', message: 'Arrastrá videos (.mp4, .mov, …).' }); return; }
+    if (nuevos.length === 0) { addToast?.({ type: 'warning', message: 'Arrastrá archivos de video.' }); return; }
     setFiles(prev => [...prev, ...nuevos]);
   };
 
@@ -164,7 +181,7 @@ export function CreativosSection({ a, addToast, canDelete = true }) {
         className={`rounded-lg border-2 border-dashed p-4 text-center cursor-pointer transition ${drag ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20' : 'border-gray-300 dark:border-gray-700 hover:border-emerald-400'}`}>
         <UploadCloud size={20} className="mx-auto mb-1 text-gray-400" />
         <p className="text-xs text-gray-500 dark:text-gray-400">Arrastrá los videos o <span className="text-emerald-600 font-semibold">buscalos</span></p>
-        <input ref={inputRef} type="file" accept="video/*" multiple hidden onChange={e => { addFiles(e.target.files); e.target.value = ''; }} />
+        <input ref={inputRef} type="file" accept={VIDEO_ACCEPT} multiple hidden onChange={e => { addFiles(e.target.files); e.target.value = ''; }} />
       </div>
 
       {/* Cola de subida */}

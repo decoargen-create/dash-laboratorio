@@ -200,3 +200,87 @@ export function paymentSummary(weekKey) {
     return { ...x, montoProductos, bonus, totalArs: montoProductos + bonus };
   }).sort((a, b) => a.persona.localeCompare(b.persona, 'es'));
 }
+
+// =========================================================================
+// PAGOS + RESUMEN MENSUAL (para el dashboard de Área creativa)
+// =========================================================================
+// El pago se salda por (semana × persona) — es la unidad natural porque el
+// bonus por objetivo es semanal. Guardamos el estado "pagado" aparte de las
+// asignaciones así no ensucia el tablero operativo.
+
+const PAGOS_KEY = 'adslab-produccion-pagos-v1';
+const pagoKey = (weekKey, persona) => `${weekKey}|${persona}`;
+
+function readPagos() {
+  try { const r = localStorage.getItem(PAGOS_KEY); return r ? JSON.parse(r) : {}; }
+  catch { return {}; }
+}
+function writePagos(obj) {
+  try { localStorage.setItem(PAGOS_KEY, JSON.stringify(obj)); } catch {}
+  listeners.forEach(fn => { try { fn(); } catch {} });
+  if (typeof window !== 'undefined') {
+    try { window.dispatchEvent(new CustomEvent('viora:produccion-changed')); } catch {}
+  }
+}
+
+export function isWeekPaid(weekKey, persona) {
+  return !!readPagos()[pagoKey(weekKey, persona)]?.paid;
+}
+export function setWeekPaid(weekKey, persona, paid = true) {
+  const p = readPagos();
+  const k = pagoKey(weekKey, persona);
+  if (paid) p[k] = { paid: true, paidAt: new Date().toISOString() };
+  else delete p[k];
+  writePagos(p);
+}
+
+// Mes (horario AR) → 'YYYY-MM'. Una semana pertenece al mes de su lunes.
+export function monthKeyOf(date = new Date()) {
+  const s = date.toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
+  return s.slice(0, 7);
+}
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+export function monthLabel(monthKey) {
+  if (!monthKey) return '';
+  const [y, m] = monthKey.split('-').map(Number);
+  return `${MESES[m - 1]} ${y}`;
+}
+export function allMonthKeys() {
+  const set = new Set(read().map(a => (a.weekKey || '').slice(0, 7)).filter(Boolean));
+  return [...set].sort().reverse();
+}
+export function weeksInMonth(monthKey) {
+  return [...new Set(read().filter(a => (a.weekKey || '').slice(0, 7) === monthKey).map(a => a.weekKey))].sort();
+}
+
+// Resumen del mes por persona: total a pagar, pagado, pendiente, y el detalle
+// semana por semana (con su estado de pago). Solo incluye a quien tiene algo
+// para cobrar (productos completos/aprobados).
+export function monthlySummary(monthKey) {
+  const weeks = weeksInMonth(monthKey);
+  const byPersona = {};
+  for (const wk of weeks) {
+    for (const r of paymentSummary(wk)) {
+      if (r.totalArs <= 0) continue; // sin nada aprobado esa semana
+      if (!byPersona[r.persona]) {
+        byPersona[r.persona] = { persona: r.persona, completados: 0, montoProductos: 0, bonus: 0, total: 0, pagado: 0, pendiente: 0, semanas: [] };
+      }
+      const p = byPersona[r.persona];
+      const paid = isWeekPaid(wk, r.persona);
+      p.completados += r.completados;
+      p.montoProductos += r.montoProductos;
+      p.bonus += r.bonus;
+      p.total += r.totalArs;
+      if (paid) p.pagado += r.totalArs; else p.pendiente += r.totalArs;
+      p.semanas.push({ weekKey: wk, completados: r.completados, montoProductos: r.montoProductos, bonus: r.bonus, total: r.totalArs, paid });
+    }
+  }
+  const personas = Object.values(byPersona)
+    .map(p => ({ ...p, semanas: p.semanas.sort((a, b) => a.weekKey.localeCompare(b.weekKey)) }))
+    .sort((a, b) => a.persona.localeCompare(b.persona, 'es'));
+  const totals = personas.reduce((t, p) => ({
+    total: t.total + p.total, pagado: t.pagado + p.pagado, pendiente: t.pendiente + p.pendiente,
+    completados: t.completados + p.completados,
+  }), { total: 0, pagado: 0, pendiente: 0, completados: 0 });
+  return { personas, totals, weeks };
+}

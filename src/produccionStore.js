@@ -14,11 +14,14 @@
 const KEY = 'adslab-produccion-v1';
 const listeners = new Set();
 
-export const ESTADOS = ['asignado', 'subido', 'revision', 'aprobado', 'publicado'];
+// Columnas del kanban (como las listas de Trello del equipo).
+export const ESTADOS = ['porhacer', 'revision', 'aprobado', 'publicado'];
 export const ESTADO_LABELS = {
-  asignado: 'Asignado', subido: 'Subido', revision: 'En revisión',
-  aprobado: 'Aprobado', publicado: 'Publicado',
+  porhacer: 'Por hacer', revision: 'En revisión', aprobado: 'Aprobado', publicado: 'Publicado',
 };
+// Estados viejos → nuevos (antes había 'asignado' y 'subido').
+const ESTADO_MIGRACION = { asignado: 'porhacer', subido: 'porhacer' };
+function normEstado(e) { return ESTADO_MIGRACION[e] || e || 'porhacer'; }
 export const VIDEOS_POR_PRODUCTO = 9;
 export const PAGO_POR_PRODUCTO = 42000; // ARS por producto completo y aprobado.
 
@@ -36,8 +39,12 @@ const COMPLETO = new Set(['aprobado', 'publicado']);
 export function esCompleto(estado) { return COMPLETO.has(estado); }
 
 function read() {
-  try { const r = localStorage.getItem(KEY); return r ? JSON.parse(r) : []; }
-  catch { return []; }
+  try {
+    const r = localStorage.getItem(KEY);
+    const arr = r ? JSON.parse(r) : [];
+    // Normaliza estados legacy al vuelo (se persiste en el próximo write).
+    return arr.map(a => ({ ...a, estado: normEstado(a.estado) }));
+  } catch { return []; }
 }
 function write(arr) {
   try { localStorage.setItem(KEY, JSON.stringify(arr)); } catch {}
@@ -83,10 +90,10 @@ export function allWeekKeys() {
   return [...new Set(read().map(a => a.weekKey))].sort().reverse();
 }
 
-export function addAssignment({ weekKey, productoId, productoNombre, persona, tipo = 'renovado' }) {
+export function addAssignment({ weekKey, productoId, productoNombre, persona, tipo = 'renovado', brief = '' }) {
   const per = (persona || '').trim();
-  // persona es opcional: sin persona el producto queda "por distribuir"
-  // (Fran todavía no lo repartió a ningún agente).
+  // persona es opcional: una tarjeta puede quedar "sin asignar" hasta que se le
+  // cuelgue la persona (como en Trello, agregás el label después).
   if (!weekKey) return null;
   const arr = read();
   const nueva = {
@@ -96,9 +103,10 @@ export function addAssignment({ weekKey, productoId, productoNombre, persona, ti
     productoNombre: productoNombre || '',
     persona: per,
     tipo: tipo === 'testeo' ? 'testeo' : 'renovado',
-    estado: 'asignado',
+    estado: 'porhacer',
     videosTotal: VIDEOS_POR_PRODUCTO,
     videosAprobados: 0,
+    brief: brief || '',
     nota: '',
     pagado: false,
     createdAt: new Date().toISOString(),
@@ -156,20 +164,16 @@ export function findOrCreateAssignment({ weekKey, productoId, productoNombre, pe
   return addAssignment({ weekKey, productoId, productoNombre, persona: per, tipo });
 }
 
-// Registra archivos subidos en una asignación. Cada archivo:
+// Registra archivos subidos en una tarjeta. Cada archivo:
 // { name, driveId?, link?, destino:'drive'|'adslab', storagePath?, sizeMB?, ts }.
-// Al subir el primer archivo, si estaba 'asignado' pasa a 'subido'.
+// NO cambia la columna: el estado se mueve arrastrando la tarjeta (Trello-like).
 export function addArchivos(id, archivos) {
   if (!Array.isArray(archivos) || archivos.length === 0) return;
   const arr = read();
   const i = arr.findIndex(a => a.id === id);
   if (i === -1) return;
   const prev = arr[i].archivos || [];
-  const nextArchivos = [...prev, ...archivos];
-  const patch = { archivos: nextArchivos };
-  // Primer material subido → mover de 'asignado' a 'subido'.
-  if (arr[i].estado === 'asignado') patch.estado = 'subido';
-  arr[i] = { ...arr[i], ...patch, updatedAt: new Date().toISOString() };
+  arr[i] = { ...arr[i], archivos: [...prev, ...archivos], updatedAt: new Date().toISOString() };
   write(arr);
   return arr[i];
 }

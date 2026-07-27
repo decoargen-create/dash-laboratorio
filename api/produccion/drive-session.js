@@ -39,14 +39,13 @@ function clean(s, fallback = '') {
   return t || fallback;
 }
 
-// Nomenclatura del archivo final: "<Producto> - <Persona> - <tipo> - <fecha> - <original>".
-function buildName({ productoNombre, persona, tipo, weekKey, filename }) {
+// Nomenclatura del archivo final: "<Producto> - <Persona> - <fecha> - <original>".
+function buildName({ productoNombre, persona, weekKey, filename }) {
   const ext = (String(filename).split('.').pop() || 'mp4').toLowerCase().slice(0, 5);
   const base = clean(String(filename).replace(/\.[^.]+$/, ''), 'video').slice(0, 60);
   const parts = [
     clean(productoNombre, 'Producto'),
     clean(persona, 'Equipo'),
-    clean(tipo, 'renovado'),
     clean(weekKey),
     base,
   ].filter(Boolean);
@@ -69,7 +68,7 @@ export default async function handler(req, res) {
   if (typeof body === 'string') { try { body = JSON.parse(body); } catch { body = {}; } }
   body = body || {};
 
-  const { productoNombre, persona, tipo, weekKey, filename, mimeType, size } = body;
+  const { productoNombre, persona, weekKey, filename, mimeType, size } = body;
   if (!filename) return respondJSON(res, 400, { error: 'Falta el nombre del archivo.' });
 
   // Drive no configurado → el browser guarda en AdsLab (Supabase). No es error.
@@ -87,7 +86,7 @@ export default async function handler(req, res) {
     const prodFolder = await driveEnsureFolder(token, prodRoot, clean(productoNombre, 'Producto'));
     const personaFolder = await driveEnsureFolder(token, prodFolder, clean(persona, 'Equipo'));
 
-    const finalName = buildName({ productoNombre, persona, tipo, weekKey, filename });
+    const finalName = buildName({ productoNombre, persona, weekKey, filename });
     const contentType = mimeType || 'video/mp4';
 
     // Abrir la resumable session. Google devuelve la session URI en Location.

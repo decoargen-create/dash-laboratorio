@@ -187,7 +187,6 @@ function KanbanCard({ a, personas, onOpen, onAssign }) {
         <span onClick={e => { e.stopPropagation(); setMenu(v => !v); }}>
           <PersonaChip persona={a.persona} small onClick={() => {}} />
         </span>
-        <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${a.tipo === 'testeo' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' : 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300'}`}>{a.tipo}</span>
         {nFiles > 0 && (
           <span className="inline-flex items-center gap-0.5 text-[10px] text-gray-500 dark:text-gray-400" title={`${nFiles} creativos subidos`}>
             <Film size={11} className="text-emerald-500" />{nFiles}
@@ -218,14 +217,13 @@ function KanbanCard({ a, personas, onOpen, onAssign }) {
 function AgregarProductoModal({ productos, personas, asigs, weekKey, onClose, addToast }) {
   const [prodId, setProdId] = useState('');
   const [persona, setPersona] = useState('');
-  const [tipo, setTipo] = useState('renovado');
 
   const yaEnSemana = useMemo(() => new Set(asigs.map(a => String(a.productoId))), [asigs]);
   const prod = productos.find(p => String(p.id) === String(prodId));
 
   const crear = () => {
     if (!prod) { addToast?.({ type: 'warning', message: 'Elegí un producto.' }); return; }
-    addAssignment({ weekKey, productoId: prod.id, productoNombre: prod.nombre, persona, tipo });
+    addAssignment({ weekKey, productoId: prod.id, productoNombre: prod.nombre, persona });
     addToast?.({ type: 'success', message: `${prod.nombre} agregado${persona ? ` para ${persona}` : ''}` });
     onClose();
   };
@@ -255,15 +253,6 @@ function AgregarProductoModal({ productos, personas, asigs, weekKey, onClose, ad
               {personas.map(p => (
                 <button key={p} onClick={() => setPersona(persona === p ? '' : p)}
                   className={`text-[11px] font-bold px-2.5 py-1 rounded-md transition ${persona === p ? CHIP_CLS[personaColor(p)] : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200'}`}>{p}</button>
-              ))}
-            </div>
-          </div>
-          <div>
-            <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Tipo</span>
-            <div className="inline-flex rounded-md overflow-hidden border border-gray-300 dark:border-gray-600 text-xs font-bold">
-              {['renovado', 'testeo'].map(t => (
-                <button key={t} onClick={() => setTipo(t)}
-                  className={`px-3 py-1.5 capitalize ${tipo === t ? 'bg-brand-600 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-500'}`}>{t}</button>
               ))}
             </div>
           </div>
@@ -297,7 +286,6 @@ function CardDetailModal({ a, personas, onClose, addToast }) {
             <h3 className="text-base font-bold text-gray-900 dark:text-gray-100">{a.productoNombre || 'Producto'}</h3>
             <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
               <PersonaChip persona={a.persona} />
-              <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${a.tipo === 'testeo' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' : 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300'}`}>{a.tipo}</span>
               <span className="text-[10px] text-gray-400">{ESTADO_LABELS[a.estado]}</span>
             </div>
           </div>
@@ -383,14 +371,14 @@ async function uploadToSupabase(file, user, ext) {
 }
 
 async function uploadOne(file, ctx) {
-  const { user, token, weekKey, productoNombre, persona, tipo } = ctx;
+  const { user, token, weekKey, productoNombre, persona } = ctx;
   const ext = (file.name.split('.').pop() || 'mp4').toLowerCase();
   let sess = null;
   try {
     const r = await fetch('/api/produccion/drive-session', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      body: JSON.stringify({ productoNombre, persona, tipo, weekKey, filename: file.name, mimeType: file.type || 'video/mp4', size: file.size }),
+      body: JSON.stringify({ productoNombre, persona, weekKey, filename: file.name, mimeType: file.type || 'video/mp4', size: file.size }),
     });
     sess = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(sess.error || `HTTP ${r.status}`);
@@ -430,7 +418,7 @@ function CreativosSection({ a, addToast }) {
     const user = await getCurrentUser();
     if (!user) { setBusy(false); addToast?.({ type: 'error', message: 'Iniciá sesión de nuevo.' }); return; }
     const token = await getAuthToken();
-    const ctx = { user, token, weekKey: a.weekKey, productoNombre: a.productoNombre, persona: a.persona || 'Equipo', tipo: a.tipo };
+    const ctx = { user, token, weekKey: a.weekKey, productoNombre: a.productoNombre, persona: a.persona || 'Equipo' };
     let ok = 0, dest = null;
     for (const item of files) {
       if (item.status === 'ok') continue;

@@ -11,16 +11,17 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Film, Plus, X, Trash2, ChevronDown, UploadCloud, Loader2, CheckCircle2,
-  AlertTriangle, ExternalLink, FileText, GripVertical,
+  AlertTriangle, ExternalLink, FileText, GripVertical, Users,
 } from 'lucide-react';
 import {
   ESTADOS, ESTADO_LABELS, VIDEOS_POR_PRODUCTO, weekKeyOf, weekLabel, allWeekKeys,
   listAssignments, addAssignment, updateAssignment, removeAssignment, assignPersona,
-  addArchivos, removeArchivo, subscribeProduccion, esCompleto,
+  assignCreator, subscribeProduccion, esCompleto,
 } from './produccionStore.js';
-import { supabase, getCurrentUser } from './supabase.js';
+import { CreativosSection, subirParaTarjeta } from './produccionUpload.jsx';
+import { listTeam } from './produccionTeam.js';
+import TeamModal from './TeamModal.jsx';
 
-const BUCKET = 'creativos';
 const EQUIPO_DEFAULT = ['Fran', 'Wanda', 'Flor'];
 
 const COLS = [
@@ -51,10 +52,6 @@ const PersonaChip = ({ persona, onClick, small }) => (
   </button>
 );
 
-async function getAuthToken() {
-  try { const { data: { session } } = await supabase.auth.getSession(); return session?.access_token || ''; }
-  catch { return ''; }
-}
 function readProductos() {
   try { return JSON.parse(localStorage.getItem('adslab-marketing-productos-v1') || '[]'); }
   catch { return []; }
@@ -65,6 +62,8 @@ export default function ProduccionSection({ addToast }) {
   const [productos] = useState(() => readProductos());
   const [weekKey, setWeekKey] = useState(() => weekKeyOf());
   const [showAdd, setShowAdd] = useState(false);
+  const [showTeam, setShowTeam] = useState(false);
+  const [team, setTeam] = useState([]);
   const [detailId, setDetailId] = useState(null);
   const [dragOver, setDragOver] = useState(null);
 
@@ -72,6 +71,10 @@ export default function ProduccionSection({ addToast }) {
     const un = subscribeProduccion(() => force(x => x + 1));
     return un;
   }, []);
+
+  // Cargamos el equipo (creators) para poder asignar tarjetas a una cuenta.
+  const reloadTeam = () => { listTeam().then(setTeam).catch(() => {}); };
+  useEffect(reloadTeam, []);
 
   const semanas = useMemo(() => {
     const keys = new Set(allWeekKeys());
@@ -121,6 +124,10 @@ export default function ProduccionSection({ addToast }) {
             </select>
             <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
           </div>
+          <button onClick={() => setShowTeam(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition shadow-sm">
+            <Users size={14} /> Equipo
+          </button>
           <button onClick={() => setShowAdd(true)}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-brand-700 rounded-lg hover:from-brand-600 hover:to-brand-800 transition shadow-sm">
             <Plus size={14} /> Agregar producto
@@ -165,7 +172,10 @@ export default function ProduccionSection({ addToast }) {
           onClose={() => setShowAdd(false)} addToast={addToast} />
       )}
       {detail && (
-        <CardDetailModal a={detail} personas={personas} onClose={() => setDetailId(null)} addToast={addToast} />
+        <CardDetailModal a={detail} personas={personas} team={team} onClose={() => setDetailId(null)} addToast={addToast} />
+      )}
+      {showTeam && (
+        <TeamModal onClose={() => { setShowTeam(false); reloadTeam(); }} addToast={addToast} />
       )}
     </div>
   );
@@ -304,9 +314,17 @@ function AgregarProductoModal({ productos, personas, asigs, weekKey, onClose, ad
 
 // ── Detalle de la tarjeta (estilo Trello): persona, tipo, estado, brief a mano,
 // creativos (subida a Drive), y contador de videos aprobados.
-function CardDetailModal({ a, personas, onClose, addToast }) {
+function CardDetailModal({ a, personas, team = [], onClose, addToast }) {
   const [brief, setBrief] = useState(a.brief || '');
   const nFiles = a.archivos?.length || 0;
+
+  // Asignar la tarjeta a una CUENTA del equipo: setea creator_id (lo que la RLS
+  // usa para que ese chico vea la tarjeta) y la persona con su nombre.
+  const onAssignCuenta = (cid) => {
+    const m = team.find(t => t.id === cid);
+    assignCreator(a.id, { creatorId: cid || null, persona: m ? (m.display_name || m.email) : a.persona });
+    if (m) addToast?.({ type: 'success', message: `Tarjeta asignada a ${m.display_name || m.email}` });
+  };
 
   const saveBrief = () => { if (brief !== (a.brief || '')) updateAssignment(a.id, { brief }); };
 
@@ -327,6 +345,24 @@ function CardDetailModal({ a, personas, onClose, addToast }) {
         </div>
 
         <div className="p-5 space-y-5 max-h-[70vh] overflow-y-auto">
+          {/* Asignar a una cuenta del equipo (login del creator) */}
+          <div>
+            <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Asignar a (cuenta)</span>
+            <div className="relative">
+              <select value={a.creatorId || ''} onChange={e => onAssignCuenta(e.target.value)}
+                className="appearance-none w-full pl-3 pr-8 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500">
+                <option value="">— sin cuenta asignada —</option>
+                {team.map(m => <option key={m.id} value={m.id}>{m.display_name || m.email}</option>)}
+              </select>
+              <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+            </div>
+            <p className="text-[10px] text-gray-400 mt-1">
+              {team.length === 0
+                ? 'No hay cuentas del equipo todavía. Creá una en "Equipo".'
+                : 'El chico asignado va a ver esta tarjeta en su tablero y va a poder subir los creativos.'}
+            </p>
+          </div>
+
           {/* Persona + estado */}
           <div className="grid sm:grid-cols-2 gap-4">
             <div>
@@ -387,173 +423,6 @@ function CardDetailModal({ a, personas, onClose, addToast }) {
           <button onClick={() => { saveBrief(); onClose(); }} className="ml-auto px-4 py-2 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition">Listo</button>
         </div>
       </div>
-    </div>
-  );
-}
-
-// ── Sección de creativos dentro de la tarjeta: subir + lista de archivos.
-const VIDEO_EXT = /\.(mp4|mov|m4v|webm|avi|mkv|hevc)$/i;
-const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-
-async function uploadToSupabase(file, user, ext) {
-  const path = `${user.id}/produccion/pv-${uid()}.${ext}`;
-  const { error } = await supabase.storage.from(BUCKET).upload(path, file, {
-    contentType: file.type || 'video/mp4', upsert: true,
-  });
-  if (error) throw new Error(`Subida falló: ${error.message}`);
-  return { name: file.name, storagePath: path, destino: 'adslab', sizeMB: +(file.size / 1024 / 1024).toFixed(1), ts: uid() };
-}
-
-async function uploadOne(file, ctx) {
-  const { user, token, weekKey, productoNombre, persona } = ctx;
-  const ext = (file.name.split('.').pop() || 'mp4').toLowerCase();
-  let sess = null;
-  try {
-    const r = await fetch('/api/produccion/drive-session', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      body: JSON.stringify({ productoNombre, persona, weekKey, filename: file.name, mimeType: file.type || 'video/mp4', size: file.size }),
-    });
-    sess = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(sess.error || `HTTP ${r.status}`);
-  } catch { sess = { configured: false }; }
-
-  if (sess.configured && sess.sessionUri) {
-    try {
-      const put = await fetch(sess.sessionUri, { method: 'PUT', headers: { 'Content-Type': sess.contentType || file.type || 'video/mp4' }, body: file });
-      if (put.ok) {
-        const meta = await put.json().catch(() => ({}));
-        const link = meta.webViewLink || (meta.id ? `https://drive.google.com/file/d/${meta.id}/view` : sess.folderLink) || null;
-        return { name: sess.finalName || file.name, driveId: meta.id || null, link, folderLink: sess.folderLink || null, destino: 'drive', sizeMB: +(file.size / 1024 / 1024).toFixed(1), ts: uid() };
-      }
-    } catch { /* fallback abajo */ }
-  }
-  return await uploadToSupabase(file, user, ext);
-}
-
-// Sube una tanda de videos a una tarjeta y, si estaba en "Por hacer", la manda
-// sola a "En revisión" (así el equipo sube y de una queda para revisar).
-async function subirParaTarjeta(a, fileList, { onProgress, addToast } = {}) {
-  const files = Array.from(fileList || []).filter(f => VIDEO_EXT.test(f.name) || (f.type || '').startsWith('video/'));
-  if (files.length === 0) { addToast?.({ type: 'warning', message: 'Elegí videos (.mp4, .mov…).' }); return { ok: 0 }; }
-  const user = await getCurrentUser();
-  if (!user) { addToast?.({ type: 'error', message: 'Iniciá sesión de nuevo.' }); return { ok: 0 }; }
-  const token = await getAuthToken();
-  const ctx = { user, token, weekKey: a.weekKey, productoNombre: a.productoNombre, persona: a.persona || 'Equipo' };
-  const eraPorHacer = a.estado === 'porhacer';
-  let ok = 0, dest = null;
-  for (let i = 0; i < files.length; i++) {
-    onProgress?.({ i, total: files.length, name: files[i].name });
-    try { const archivo = await uploadOne(files[i], ctx); addArchivos(a.id, [archivo]); ok++; dest = archivo.destino; }
-    catch (err) { addToast?.({ type: 'error', message: `"${files[i].name}": ${err.message}` }); }
-  }
-  if (ok > 0 && eraPorHacer) updateAssignment(a.id, { estado: 'revision' });
-  if (ok > 0) addToast?.({ type: 'success', message: `${ok} video${ok > 1 ? 's' : ''} → ${dest === 'drive' ? 'Google Drive' : 'AdsLab'}${eraPorHacer ? ' · pasó a En revisión' : ''}` });
-  return { ok };
-}
-
-function CreativosSection({ a, addToast }) {
-  const [files, setFiles] = useState([]); // { file, id, status, destino?, msg? }
-  const [busy, setBusy] = useState(false);
-  const [drag, setDrag] = useState(false);
-  const inputRef = useRef(null);
-  const folderLink = (a.archivos || []).find(f => f.folderLink)?.folderLink;
-
-  const addFiles = (list) => {
-    const nuevos = Array.from(list || [])
-      .filter(f => VIDEO_EXT.test(f.name) || (f.type || '').startsWith('video/'))
-      .map(f => ({ file: f, id: uid(), status: 'espera' }));
-    if (nuevos.length === 0) { addToast?.({ type: 'warning', message: 'Arrastrá videos (.mp4, .mov, …).' }); return; }
-    setFiles(prev => [...prev, ...nuevos]);
-  };
-
-  const subir = async () => {
-    if (files.length === 0) return;
-    setBusy(true);
-    const user = await getCurrentUser();
-    if (!user) { setBusy(false); addToast?.({ type: 'error', message: 'Iniciá sesión de nuevo.' }); return; }
-    const token = await getAuthToken();
-    const ctx = { user, token, weekKey: a.weekKey, productoNombre: a.productoNombre, persona: a.persona || 'Equipo' };
-    const eraPorHacer = a.estado === 'porhacer';
-    let ok = 0, dest = null;
-    for (const item of files) {
-      if (item.status === 'ok') continue;
-      setFiles(prev => prev.map(f => f.id === item.id ? { ...f, status: 'subiendo' } : f));
-      try {
-        const archivo = await uploadOne(item.file, ctx);
-        addArchivos(a.id, [archivo]);
-        ok++; dest = archivo.destino;
-        setFiles(prev => prev.map(f => f.id === item.id ? { ...f, status: 'ok', destino: archivo.destino } : f));
-      } catch (err) {
-        setFiles(prev => prev.map(f => f.id === item.id ? { ...f, status: 'error', msg: err.message } : f));
-      }
-    }
-    if (ok > 0 && eraPorHacer) updateAssignment(a.id, { estado: 'revision' });
-    setBusy(false);
-    if (ok > 0) addToast?.({ type: 'success', message: `${ok} video${ok > 1 ? 's' : ''} → ${dest === 'drive' ? 'Google Drive' : 'AdsLab'}${eraPorHacer ? ' · pasó a En revisión' : ''}` });
-    setFiles(prev => prev.filter(f => f.status !== 'ok'));
-  };
-
-  return (
-    <div>
-      <div className="flex items-center gap-1.5 mb-1.5">
-        <UploadCloud size={13} className="text-gray-400" />
-        <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400">Creativos</span>
-        {folderLink && (
-          <a href={folderLink} target="_blank" rel="noopener noreferrer" className="text-[10px] text-brand-500 hover:text-brand-600 inline-flex items-center gap-0.5 ml-1">
-            carpeta de Drive <ExternalLink size={10} />
-          </a>
-        )}
-      </div>
-
-      {/* Archivos ya subidos */}
-      {(a.archivos?.length > 0) && (
-        <div className="space-y-1 mb-2">
-          {a.archivos.map(f => (
-            <div key={f.ts} className="flex items-center gap-2 text-xs bg-gray-50 dark:bg-gray-800 rounded px-2.5 py-1.5">
-              <Film size={12} className="text-emerald-500 flex-shrink-0" />
-              <span className="truncate flex-1 text-gray-700 dark:text-gray-200" title={f.name}>{f.name}</span>
-              <span className="text-[9px] uppercase font-bold text-gray-400">{f.destino === 'drive' ? 'Drive' : 'AdsLab'}</span>
-              {f.link && <a href={f.link} target="_blank" rel="noopener noreferrer" className="text-brand-500 hover:text-brand-600"><ExternalLink size={11} /></a>}
-              <button onClick={() => removeArchivo(a.id, f.ts)} className="text-gray-300 hover:text-red-500"><X size={12} /></button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Dropzone */}
-      <div
-        onDragOver={e => { e.preventDefault(); setDrag(true); }}
-        onDragLeave={() => setDrag(false)}
-        onDrop={e => { e.preventDefault(); setDrag(false); if (!busy) addFiles(e.dataTransfer.files); }}
-        onClick={() => !busy && inputRef.current?.click()}
-        className={`rounded-lg border-2 border-dashed p-4 text-center cursor-pointer transition ${drag ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20' : 'border-gray-300 dark:border-gray-700 hover:border-emerald-400'}`}>
-        <UploadCloud size={20} className="mx-auto mb-1 text-gray-400" />
-        <p className="text-xs text-gray-500 dark:text-gray-400">Arrastrá los videos o <span className="text-emerald-600 font-semibold">buscalos</span></p>
-        <input ref={inputRef} type="file" accept="video/*" multiple hidden onChange={e => { addFiles(e.target.files); e.target.value = ''; }} />
-      </div>
-
-      {/* Cola de subida */}
-      {files.length > 0 && (
-        <div className="mt-2 space-y-1">
-          {files.map(f => (
-            <div key={f.id} className="flex items-center gap-2 text-xs bg-gray-50 dark:bg-gray-800 rounded px-2.5 py-1.5">
-              <span className="flex-shrink-0">
-                {f.status === 'error' ? <AlertTriangle size={12} className="text-red-500" />
-                  : f.status === 'subiendo' ? <Loader2 size={12} className="text-brand-500 animate-spin" />
-                    : <Film size={12} className="text-gray-400" />}
-              </span>
-              <span className="truncate flex-1 text-gray-600 dark:text-gray-300">{f.file.name}</span>
-              {f.status === 'error' && <span className="text-[10px] text-red-500 truncate max-w-[110px]" title={f.msg}>{f.msg}</span>}
-              {!busy && <button onClick={() => setFiles(prev => prev.filter(x => x.id !== f.id))} className="text-gray-300 hover:text-red-500"><X size={12} /></button>}
-            </div>
-          ))}
-          <button onClick={subir} disabled={busy}
-            className="w-full mt-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition disabled:opacity-50">
-            {busy ? <><Loader2 size={14} className="animate-spin" /> Subiendo…</> : <><UploadCloud size={14} /> Subir {files.length} video{files.length > 1 ? 's' : ''}</>}
-          </button>
-        </div>
-      )}
     </div>
   );
 }

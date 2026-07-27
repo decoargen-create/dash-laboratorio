@@ -6,8 +6,10 @@
 // pago del equipo. Se integra con los productos que YA existen (productoId de
 // marketing_productos), no crea un catálogo aparte.
 //
-// Local por ahora (mismo patrón que costsStore/moneyStore). El login del equipo
-// y el push a Drive son Fase 2.
+// El control (asignaciones/estados/pago) es local (mismo patrón que
+// costsStore/moneyStore). Los videos se suben directo a Google Drive desde
+// "Subir creativos" (con fallback al bucket de AdsLab). El login del equipo
+// es Fase 2.
 
 const KEY = 'adslab-produccion-v1';
 const listeners = new Set();
@@ -83,7 +85,9 @@ export function allWeekKeys() {
 
 export function addAssignment({ weekKey, productoId, productoNombre, persona, tipo = 'renovado' }) {
   const per = (persona || '').trim();
-  if (!weekKey || !per) return null;
+  // persona es opcional: sin persona el producto queda "por distribuir"
+  // (Fran todavía no lo repartió a ningún agente).
+  if (!weekKey) return null;
   const arr = read();
   const nueva = {
     id: genId(),
@@ -105,6 +109,24 @@ export function addAssignment({ weekKey, productoId, productoNombre, persona, ti
   return nueva;
 }
 
+// Paso 1 — el admin le pasa a Fran los productos de la semana (cuáles y
+// cuántos). Quedan SIN persona ("por distribuir"). Evita duplicar un producto
+// que ya está en la semana.
+export function addProductoSemana({ weekKey, productoId, productoNombre, tipo = 'renovado' }) {
+  if (!weekKey) return null;
+  const pid = productoId != null ? String(productoId) : null;
+  const arr = read();
+  const dup = arr.find(a => a.weekKey === weekKey &&
+    (pid != null ? String(a.productoId) === pid : (a.productoNombre || '') === (productoNombre || '')));
+  if (dup) return dup; // ya está en la semana
+  return addAssignment({ weekKey, productoId, productoNombre, persona: '', tipo });
+}
+
+// Paso 2 — Fran reparte: le pone (o le cambia) el agente a un producto.
+export function assignPersona(id, persona) {
+  updateAssignment(id, { persona: (persona || '').trim() });
+}
+
 export function updateAssignment(id, patch) {
   const arr = read();
   const i = arr.findIndex(a => a.id === id);
@@ -116,12 +138,57 @@ export function removeAssignment(id) {
   write(read().filter(a => a.id !== id));
 }
 
+// Busca la asignación (semana × producto × persona); si no existe, la crea.
+// Es lo que usa "Subir creativos": el equipo elige producto y sube, sin tener
+// que armar la asignación a mano. `key` de producto: id si hay, si no el nombre.
+export function findOrCreateAssignment({ weekKey, productoId, productoNombre, persona, tipo = 'renovado' }) {
+  const per = (persona || '').trim();
+  if (!weekKey || !per) return null;
+  const pid = productoId != null ? String(productoId) : null;
+  const arr = read();
+  const found = arr.find(a =>
+    a.weekKey === weekKey &&
+    a.persona === per &&
+    (pid != null
+      ? String(a.productoId) === pid
+      : (a.productoNombre || '') === (productoNombre || '')));
+  if (found) return found;
+  return addAssignment({ weekKey, productoId, productoNombre, persona: per, tipo });
+}
+
+// Registra archivos subidos en una asignación. Cada archivo:
+// { name, driveId?, link?, destino:'drive'|'adslab', storagePath?, sizeMB?, ts }.
+// Al subir el primer archivo, si estaba 'asignado' pasa a 'subido'.
+export function addArchivos(id, archivos) {
+  if (!Array.isArray(archivos) || archivos.length === 0) return;
+  const arr = read();
+  const i = arr.findIndex(a => a.id === id);
+  if (i === -1) return;
+  const prev = arr[i].archivos || [];
+  const nextArchivos = [...prev, ...archivos];
+  const patch = { archivos: nextArchivos };
+  // Primer material subido → mover de 'asignado' a 'subido'.
+  if (arr[i].estado === 'asignado') patch.estado = 'subido';
+  arr[i] = { ...arr[i], ...patch, updatedAt: new Date().toISOString() };
+  write(arr);
+  return arr[i];
+}
+
+export function removeArchivo(id, ts) {
+  const arr = read();
+  const i = arr.findIndex(a => a.id === id);
+  if (i === -1) return;
+  arr[i] = { ...arr[i], archivos: (arr[i].archivos || []).filter(f => f.ts !== ts), updatedAt: new Date().toISOString() };
+  write(arr);
+}
+
 // Resumen de pago por persona para una semana. Montos en ARS (así paga el user).
 export function paymentSummary(weekKey) {
   const asigs = listAssignments(weekKey);
   const byPersona = {};
   for (const a of asigs) {
     const p = a.persona;
+    if (!p) continue; // "por distribuir" no cuenta para el pago todavía
     if (!byPersona[p]) byPersona[p] = { persona: p, asignados: 0, completados: 0, pagados: 0 };
     byPersona[p].asignados++;
     if (esCompleto(a.estado)) byPersona[p].completados++;

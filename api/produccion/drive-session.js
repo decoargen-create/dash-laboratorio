@@ -39,17 +39,17 @@ function clean(s, fallback = '') {
   return t || fallback;
 }
 
-// Nomenclatura del archivo final: "<Producto> - <Persona> - <fecha> - <original>".
-function buildName({ productoNombre, persona, weekKey, filename }) {
+// El archivo conserva su nombre original (la carpeta ya da todo el contexto:
+// Producto / Persona - fecha).
+function finalFileName(filename) {
   const ext = (String(filename).split('.').pop() || 'mp4').toLowerCase().slice(0, 5);
-  const base = clean(String(filename).replace(/\.[^.]+$/, ''), 'video').slice(0, 60);
-  const parts = [
-    clean(productoNombre, 'Producto'),
-    clean(persona, 'Equipo'),
-    clean(weekKey),
-    base,
-  ].filter(Boolean);
-  return `${parts.join(' - ')}.${ext}`;
+  const base = clean(String(filename).replace(/\.[^.]+$/, ''), 'video').slice(0, 80);
+  return `${base}.${ext}`;
+}
+
+// Fecha de hoy (horario AR) → 'YYYY-MM-DD', para nombrar la carpeta de la subida.
+function hoyAR() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
 }
 
 function respondJSON(res, status, obj) {
@@ -68,7 +68,7 @@ export default async function handler(req, res) {
   if (typeof body === 'string') { try { body = JSON.parse(body); } catch { body = {}; } }
   body = body || {};
 
-  const { productoNombre, persona, weekKey, filename, mimeType, size } = body;
+  const { productoNombre, persona, filename, mimeType, size } = body;
   if (!filename) return respondJSON(res, 400, { error: 'Falta el nombre del archivo.' });
 
   // Drive no configurado → el browser guarda en AdsLab (Supabase). No es error.
@@ -78,15 +78,18 @@ export default async function handler(req, res) {
 
   try {
     const token = await getAccessToken();
-    const rootId = creativosRootId();
 
-    // Carpeta: [raíz]/Producción/<Producto>/<Persona>
-    // (si la raíz ya es la carpeta de creativos, igual queda ordenado adentro).
-    const prodRoot = await driveEnsureFolder(token, rootId, 'Producción');
-    const prodFolder = await driveEnsureFolder(token, prodRoot, clean(productoNombre, 'Producto'));
-    const personaFolder = await driveEnsureFolder(token, prodFolder, clean(persona, 'Equipo'));
+    // Raíz: si hay carpeta dedicada de creativos, va directo ahí. Si caemos a la
+    // de transcripciones, metemos todo bajo "Creativos" para no mezclar con actas.
+    let rootId = process.env.DRIVE_CREATIVOS_FOLDER_ID;
+    if (!rootId) rootId = await driveEnsureFolder(token, process.env.DRIVE_TRANSCRIPTS_FOLDER_ID, 'Creativos');
 
-    const finalName = buildName({ productoNombre, persona, weekKey, filename });
+    // Estructura: <raíz>/<Producto>/<Persona> - <fecha>/
+    // Cada producto su carpeta; adentro, una carpeta por persona+día de subida.
+    const prodFolder = await driveEnsureFolder(token, rootId, clean(productoNombre, 'Producto'));
+    const subFolder = await driveEnsureFolder(token, prodFolder, `${clean(persona, 'Equipo')} - ${hoyAR()}`);
+
+    const finalName = finalFileName(filename);
     const contentType = mimeType || 'video/mp4';
 
     // Abrir la resumable session. Google devuelve la session URI en Location.
@@ -98,7 +101,7 @@ export default async function handler(req, res) {
         'X-Upload-Content-Type': contentType,
         ...(size ? { 'X-Upload-Content-Length': String(size) } : {}),
       },
-      body: JSON.stringify({ name: finalName, parents: [personaFolder] }),
+      body: JSON.stringify({ name: finalName, parents: [subFolder] }),
     });
 
     if (!initResp.ok) {
@@ -110,8 +113,8 @@ export default async function handler(req, res) {
       return respondJSON(res, 502, { error: 'Drive no devolvió la URL de subida.' });
     }
 
-    const folderLink = `https://drive.google.com/drive/folders/${personaFolder}`;
-    return respondJSON(res, 200, { configured: true, sessionUri, finalName, folderId: personaFolder, folderLink, contentType });
+    const folderLink = `https://drive.google.com/drive/folders/${subFolder}`;
+    return respondJSON(res, 200, { configured: true, sessionUri, finalName, folderId: subFolder, folderLink, contentType });
   } catch (err) {
     return respondJSON(res, 500, { error: `Error abriendo la subida a Drive: ${err.message}` });
   }

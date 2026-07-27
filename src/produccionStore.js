@@ -85,7 +85,9 @@ export function allWeekKeys() {
 
 export function addAssignment({ weekKey, productoId, productoNombre, persona, tipo = 'renovado' }) {
   const per = (persona || '').trim();
-  if (!weekKey || !per) return null;
+  // persona es opcional: sin persona el producto queda "por distribuir"
+  // (Fran todavía no lo repartió a ningún agente).
+  if (!weekKey) return null;
   const arr = read();
   const nueva = {
     id: genId(),
@@ -105,6 +107,24 @@ export function addAssignment({ weekKey, productoId, productoNombre, persona, ti
   arr.push(nueva);
   write(arr);
   return nueva;
+}
+
+// Paso 1 — el admin le pasa a Fran los productos de la semana (cuáles y
+// cuántos). Quedan SIN persona ("por distribuir"). Evita duplicar un producto
+// que ya está en la semana.
+export function addProductoSemana({ weekKey, productoId, productoNombre, tipo = 'renovado' }) {
+  if (!weekKey) return null;
+  const pid = productoId != null ? String(productoId) : null;
+  const arr = read();
+  const dup = arr.find(a => a.weekKey === weekKey &&
+    (pid != null ? String(a.productoId) === pid : (a.productoNombre || '') === (productoNombre || '')));
+  if (dup) return dup; // ya está en la semana
+  return addAssignment({ weekKey, productoId, productoNombre, persona: '', tipo });
+}
+
+// Paso 2 — Fran reparte: le pone (o le cambia) el agente a un producto.
+export function assignPersona(id, persona) {
+  updateAssignment(id, { persona: (persona || '').trim() });
 }
 
 export function updateAssignment(id, patch) {
@@ -168,6 +188,7 @@ export function paymentSummary(weekKey) {
   const byPersona = {};
   for (const a of asigs) {
     const p = a.persona;
+    if (!p) continue; // "por distribuir" no cuenta para el pago todavía
     if (!byPersona[p]) byPersona[p] = { persona: p, asignados: 0, completados: 0, pagados: 0 };
     byPersona[p].asignados++;
     if (esCompleto(a.estado)) byPersona[p].completados++;

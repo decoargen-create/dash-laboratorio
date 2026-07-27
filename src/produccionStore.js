@@ -6,8 +6,10 @@
 // pago del equipo. Se integra con los productos que YA existen (productoId de
 // marketing_productos), no crea un catálogo aparte.
 //
-// Local por ahora (mismo patrón que costsStore/moneyStore). El login del equipo
-// y el push a Drive son Fase 2.
+// El control (asignaciones/estados/pago) es local (mismo patrón que
+// costsStore/moneyStore). Los videos se suben directo a Google Drive desde
+// "Subir creativos" (con fallback al bucket de AdsLab). El login del equipo
+// es Fase 2.
 
 const KEY = 'adslab-produccion-v1';
 const listeners = new Set();
@@ -114,6 +116,50 @@ export function updateAssignment(id, patch) {
 }
 export function removeAssignment(id) {
   write(read().filter(a => a.id !== id));
+}
+
+// Busca la asignación (semana × producto × persona); si no existe, la crea.
+// Es lo que usa "Subir creativos": el equipo elige producto y sube, sin tener
+// que armar la asignación a mano. `key` de producto: id si hay, si no el nombre.
+export function findOrCreateAssignment({ weekKey, productoId, productoNombre, persona, tipo = 'renovado' }) {
+  const per = (persona || '').trim();
+  if (!weekKey || !per) return null;
+  const pid = productoId != null ? String(productoId) : null;
+  const arr = read();
+  const found = arr.find(a =>
+    a.weekKey === weekKey &&
+    a.persona === per &&
+    (pid != null
+      ? String(a.productoId) === pid
+      : (a.productoNombre || '') === (productoNombre || '')));
+  if (found) return found;
+  return addAssignment({ weekKey, productoId, productoNombre, persona: per, tipo });
+}
+
+// Registra archivos subidos en una asignación. Cada archivo:
+// { name, driveId?, link?, destino:'drive'|'adslab', storagePath?, sizeMB?, ts }.
+// Al subir el primer archivo, si estaba 'asignado' pasa a 'subido'.
+export function addArchivos(id, archivos) {
+  if (!Array.isArray(archivos) || archivos.length === 0) return;
+  const arr = read();
+  const i = arr.findIndex(a => a.id === id);
+  if (i === -1) return;
+  const prev = arr[i].archivos || [];
+  const nextArchivos = [...prev, ...archivos];
+  const patch = { archivos: nextArchivos };
+  // Primer material subido → mover de 'asignado' a 'subido'.
+  if (arr[i].estado === 'asignado') patch.estado = 'subido';
+  arr[i] = { ...arr[i], ...patch, updatedAt: new Date().toISOString() };
+  write(arr);
+  return arr[i];
+}
+
+export function removeArchivo(id, ts) {
+  const arr = read();
+  const i = arr.findIndex(a => a.id === id);
+  if (i === -1) return;
+  arr[i] = { ...arr[i], archivos: (arr[i].archivos || []).filter(f => f.ts !== ts), updatedAt: new Date().toISOString() };
+  write(arr);
 }
 
 // Resumen de pago por persona para una semana. Montos en ARS (así paga el user).

@@ -18,7 +18,7 @@ import {
   listAssignments, addAssignment, updateAssignment, removeAssignment, assignPersona,
   assignCreator, subscribeProduccion, esCompleto,
 } from './produccionStore.js';
-import { CreativosSection, subirParaTarjeta } from './produccionUpload.jsx';
+import { CreativosSection, subirParaTarjeta, VIDEO_ACCEPT } from './produccionUpload.jsx';
 import { listTeam } from './produccionTeam.js';
 import TeamModal from './TeamModal.jsx';
 
@@ -249,7 +249,7 @@ function KanbanCard({ a, personas, onOpen, onAssign, addToast }) {
             <UploadCloud size={12} /> Subir creativos
           </button>
         )}
-        <input ref={fileRef} type="file" accept="video/*" multiple hidden
+        <input ref={fileRef} type="file" accept={VIDEO_ACCEPT} multiple hidden
           onClick={e => e.stopPropagation()}
           onChange={e => { const fl = e.target.files; e.target.value = ''; onPick(fl); }} />
       </div>

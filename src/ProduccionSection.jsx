@@ -11,7 +11,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Film, Plus, X, Trash2, ChevronDown, UploadCloud, Loader2, CheckCircle2,
-  AlertTriangle, ExternalLink, FileText, GripVertical, Users, History, Search,
+  AlertTriangle, ExternalLink, FileText, GripVertical, Users, History, Search, ArrowLeftRight,
 } from 'lucide-react';
 import {
   ESTADOS, ESTADO_LABELS, VIDEOS_POR_PRODUCTO, weekKeyOf, weekLabel, weekRange, allWeekKeys,
@@ -75,7 +75,7 @@ function fmtDur(ms) {
 // Panel VERTICAL por persona: una fila por creativo con asignados, por hacer,
 // en revisión y objetivo (aprobados/asignados) + su ritmo (tiempo prom).
 // Las clases grid-cols van LITERALES (Tailwind no genera clases interpoladas).
-function ResumenSemana({ asigs }) {
+function ResumenSemana({ asigs, filtroSinAsignar = false, onToggleSinAsignar }) {
   const { rows, sinAsignar, total, totals } = useMemo(() => {
     const now = Date.now();
     const by = {};
@@ -147,9 +147,11 @@ function ResumenSemana({ asigs }) {
             </span>
           ))}
           {sinAsignar > 0 && (
-            <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-bold bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+            <button onClick={onToggleSinAsignar}
+              title={filtroSinAsignar ? 'Quitar el filtro' : 'Ver solo las tarjetas sin asignar'}
+              className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-bold transition ${filtroSinAsignar ? 'bg-amber-500 text-white ring-2 ring-amber-300 dark:ring-amber-700' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-900/60'}`}>
               <AlertTriangle size={10} /> {sinAsignar} sin asignar
-            </span>
+            </button>
           )}
         </div>
         <button onClick={togglePlegado} title={plegado ? 'Mostrar el detalle por persona' : 'Plegar'}
@@ -242,9 +244,13 @@ export default function ProduccionSection({ addToast }) {
   const [weekKey, setWeekKey] = useState(() => weekKeyOf());
   const [showAdd, setShowAdd] = useState(false);
   const [showTeam, setShowTeam] = useState(false);
+  const [showReasignar, setShowReasignar] = useState(false);
   const [team, setTeam] = useState([]);
   const [detailId, setDetailId] = useState(null);
   const [dragOver, setDragOver] = useState(null);
+  // Filtro rápido: mostrar solo las tarjetas sin repartir (click en el chip
+  // "N sin asignar" del resumen).
+  const [soloSinAsignar, setSoloSinAsignar] = useState(false);
 
   useEffect(() => {
     const un = subscribeProduccion(() => force(x => x + 1));
@@ -272,11 +278,15 @@ export default function ProduccionSection({ addToast }) {
     return [...set];
   }, [weekKey, productos]); // eslint-disable-line
 
+  const asigsBoard = useMemo(
+    () => soloSinAsignar ? asigs.filter(a => !(a.persona || '').trim() && !a.creatorId) : asigs,
+    [asigs, soloSinAsignar],
+  );
   const byCol = useMemo(() => {
     const m = { porhacer: [], revision: [], aprobado: [], publicado: [] };
-    for (const a of asigs) (m[a.estado] || m.porhacer).push(a);
+    for (const a of asigsBoard) (m[a.estado] || m.porhacer).push(a);
     return m;
-  }, [asigs]);
+  }, [asigsBoard]);
 
   const onDrop = (e, colKey) => {
     e.preventDefault();
@@ -308,6 +318,10 @@ export default function ProduccionSection({ addToast }) {
             </select>
             <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
           </div>
+          <button onClick={() => setShowReasignar(true)} title="Mover todas las tarjetas de una persona a otra"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition shadow-sm">
+            <ArrowLeftRight size={14} /> Reasignar
+          </button>
           <button onClick={() => setShowTeam(true)}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition shadow-sm">
             <Users size={14} /> Equipo
@@ -320,7 +334,18 @@ export default function ProduccionSection({ addToast }) {
       </div>
 
       {/* Resumen de la semana: carga por persona + objetivo */}
-      <ResumenSemana asigs={asigs} />
+      <ResumenSemana asigs={asigs} filtroSinAsignar={soloSinAsignar}
+        onToggleSinAsignar={() => setSoloSinAsignar(v => !v)} />
+
+      {/* Aviso de filtro activo */}
+      {soloSinAsignar && (
+        <div className="flex items-center gap-2 text-[11px] font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-1.5">
+          <AlertTriangle size={12} /> Mostrando solo lo sin asignar
+          <button onClick={() => setSoloSinAsignar(false)} className="ml-auto inline-flex items-center gap-1 hover:underline">
+            <X size={12} /> quitar filtro
+          </button>
+        </div>
+      )}
 
       {/* Tablero */}
       <div className="flex gap-3 overflow-x-auto pb-2">
@@ -365,12 +390,17 @@ export default function ProduccionSection({ addToast }) {
       {showTeam && (
         <TeamModal onClose={() => { setShowTeam(false); reloadTeam(); }} addToast={addToast} />
       )}
+      {showReasignar && (
+        <ReasignarModal asigs={asigs} team={team} weekKey={weekKey}
+          onClose={() => setShowReasignar(false)} addToast={addToast} />
+      )}
     </div>
   );
 }
 
 function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
   const [menu, setMenu] = useState(false);
+  const [menuQ, setMenuQ] = useState('');
   const [moveMenu, setMoveMenu] = useState(false);
   const [prog, setProg] = useState(null); // { i, total } mientras sube
   const fileRef = useRef(null);
@@ -452,12 +482,20 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
           <div className="absolute top-8 left-4 z-10 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl p-1 flex flex-col gap-0.5 min-w-[140px]"
             onClick={e => e.stopPropagation()}>
             {team.length > 0 ? (
-              team.map(m => (
-                <button key={m.id} onClick={() => { assignCreator(a.id, { creatorId: m.id, persona: m.display_name || m.email }); setMenu(false); }}
-                  className={`text-left text-[11px] font-semibold px-2 py-1 rounded hover:bg-brand-50 dark:hover:bg-brand-900/30 whitespace-nowrap ${a.creatorId === m.id ? 'text-brand-600 dark:text-brand-300' : 'text-gray-700 dark:text-gray-200'}`}>
-                  {a.creatorId === m.id ? '✓ ' : ''}{m.display_name || m.email}
-                </button>
-              ))
+              <>
+                {team.length > 5 && (
+                  <input autoFocus value={menuQ} onChange={e => setMenuQ(e.target.value)} placeholder="Buscar…"
+                    className="mb-0.5 px-2 py-1 text-[11px] bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded focus:outline-none focus:ring-1 focus:ring-brand-500" />
+                )}
+                {team
+                  .filter(m => !menuQ.trim() || `${m.display_name || ''} ${m.email || ''}`.toLowerCase().includes(menuQ.trim().toLowerCase()))
+                  .map(m => (
+                    <button key={m.id} onClick={() => { assignCreator(a.id, { creatorId: m.id, persona: m.display_name || m.email }); setMenu(false); setMenuQ(''); }}
+                      className={`text-left text-[11px] font-semibold px-2 py-1 rounded hover:bg-brand-50 dark:hover:bg-brand-900/30 whitespace-nowrap ${a.creatorId === m.id ? 'text-brand-600 dark:text-brand-300' : 'text-gray-700 dark:text-gray-200'}`}>
+                      {a.creatorId === m.id ? '✓ ' : ''}{m.display_name || m.email}
+                    </button>
+                  ))}
+              </>
             ) : (
               <>
                 {personas.map(p => (
@@ -646,6 +684,93 @@ function AgregarProductoModal({ productos, personas, team = [], asigs, weekKey, 
           <button onClick={crear} disabled={selected.size === 0}
             className="ml-auto inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed">
             <Plus size={15} /> Crear {selected.size > 0 ? `${selected.size} ` : ''}tarjeta{selected.size === 1 ? '' : 's'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Reasignar en bloque: mueve TODAS las tarjetas de la semana de una persona
+// (o las sin asignar) a una cuenta del equipo. Para cubrir vacaciones/bajas o
+// repartir lo que quedó suelto, sin ir tarjeta por tarjeta.
+function ReasignarModal({ asigs, team, weekKey, onClose, addToast }) {
+  const [from, setFrom] = useState('');
+  const [toId, setToId] = useState('');
+
+  // Orígenes: cada persona/cuenta con tarjetas en la semana + "Sin asignar".
+  const origenes = useMemo(() => {
+    const map = new Map();
+    asigs.forEach(a => {
+      const per = (a.persona || '').trim();
+      const key = a.creatorId || (per ? `p:${per}` : 'sin');
+      const label = per || 'Sin asignar';
+      if (!map.has(key)) map.set(key, { key, label, n: 0 });
+      map.get(key).n++;
+    });
+    return [...map.values()].sort((x, y) => y.n - x.n);
+  }, [asigs]);
+
+  const sel = origenes.find(o => o.key === from);
+  const destino = team.find(m => m.id === toId);
+
+  const mover = () => {
+    if (!sel || !destino) { addToast?.({ type: 'warning', message: 'Elegí de quién y a quién.' }); return; }
+    let n = 0;
+    asigs.forEach(a => {
+      const per = (a.persona || '').trim();
+      const key = a.creatorId || (per ? `p:${per}` : 'sin');
+      if (key !== sel.key) return;
+      assignCreator(a.id, { creatorId: destino.id, persona: destino.display_name || destino.email });
+      n++;
+    });
+    addToast?.({ type: 'success', message: `💪 ${n} tarjeta${n === 1 ? '' : 's'} de ${weekLabel(weekKey)} → ${destino.display_name || destino.email}` });
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-sm bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center gap-2 px-5 py-3.5 border-b border-gray-100 dark:border-gray-800">
+          <ArrowLeftRight size={16} className="text-brand-500" />
+          <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Reasignar la semana</h3>
+          <button onClick={onClose} className="ml-auto text-gray-400 hover:text-gray-600"><X size={18} /></button>
+        </div>
+        <div className="p-5 space-y-4">
+          {team.length === 0 ? (
+            <p className="text-sm text-gray-400">Primero creá cuentas del equipo (botón "Equipo").</p>
+          ) : origenes.length === 0 ? (
+            <p className="text-sm text-gray-400">No hay tarjetas en esta semana.</p>
+          ) : (
+            <>
+              <label className="flex flex-col gap-1">
+                <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400">Mover las tarjetas de…</span>
+                <select value={from} onChange={e => setFrom(e.target.value)}
+                  className="px-2.5 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500">
+                  <option value="">Elegí…</option>
+                  {origenes.map(o => <option key={o.key} value={o.key}>{o.label} ({o.n})</option>)}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400">…a la cuenta de</span>
+                <select value={toId} onChange={e => setToId(e.target.value)}
+                  className="px-2.5 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500">
+                  <option value="">Elegí…</option>
+                  {team.map(m => <option key={m.id} value={m.id}>{m.display_name || m.email}</option>)}
+                </select>
+              </label>
+              {sel && destino && (
+                <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                  Se mueven <b>{sel.n}</b> tarjeta{sel.n === 1 ? '' : 's'} de <b>{sel.label}</b> a <b>{destino.display_name || destino.email}</b> (va a verlas en su tablero).
+                </p>
+              )}
+            </>
+          )}
+        </div>
+        <div className="flex items-center gap-2 px-5 py-3.5 border-t border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
+          <button onClick={mover} disabled={!sel || !destino}
+            className="ml-auto inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed">
+            <ArrowLeftRight size={14} /> Mover{sel ? ` ${sel.n}` : ''}
           </button>
         </div>
       </div>

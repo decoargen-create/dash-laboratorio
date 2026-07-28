@@ -6,7 +6,7 @@
 // tarjeta, lo asignás desde "Asignar a (cuenta)".
 
 import React, { useEffect, useState } from 'react';
-import { X, UserPlus, Loader2, Trash2, KeyRound, Users, Mail, Copy, Check } from 'lucide-react';
+import { X, UserPlus, Loader2, Trash2, KeyRound, Users, Mail, Copy, Check, Search } from 'lucide-react';
 import { listTeam, createMember, resetPassword, removeMember } from './produccionTeam.js';
 
 // Genera una contraseña simple pero decente para pasarle al chico.
@@ -19,6 +19,7 @@ function suggestPassword() {
 
 export default function TeamModal({ onClose, addToast }) {
   const [team, setTeam] = useState([]);
+  const [q, setQ] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState('');
@@ -147,13 +148,20 @@ export default function TeamModal({ onClose, addToast }) {
             <div className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 mb-2">
               En el equipo {team.length > 0 && `(${team.length})`}
             </div>
+            {team.length > 3 && (
+              <div className="relative mb-2">
+                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                <input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar por nombre o email…"
+                  className="w-full pl-8 pr-3 py-1.5 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+              </div>
+            )}
             {loading ? (
               <div className="flex items-center gap-2 text-sm text-gray-400 py-4"><Loader2 size={15} className="animate-spin" /> Cargando…</div>
             ) : team.length === 0 ? (
               <p className="text-sm text-gray-400 py-2">Todavía no hay cuentas del equipo. Creá la primera arriba.</p>
             ) : (
               <div className="space-y-2">
-                {team.map(m => (
+                {team.filter(m => !q.trim() || `${m.display_name || ''} ${m.email || ''}`.toLowerCase().includes(q.trim().toLowerCase())).map(m => (
                   <div key={m.id} className="flex items-center gap-3 rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2.5">
                     <div className="w-8 h-8 rounded-full bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 flex items-center justify-center text-sm font-bold uppercase shrink-0">
                       {(m.display_name || m.email || '?').charAt(0)}

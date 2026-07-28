@@ -347,8 +347,9 @@ export default function ProduccionSection({ addToast }) {
         </div>
       )}
 
-      {/* Tablero */}
-      <div className="flex gap-3 overflow-x-auto pb-2">
+      {/* Tablero: en desktop, 4 columnas EXACTAMENTE iguales (grid); en
+          pantallas chicas cae a scroll horizontal. */}
+      <div className="flex gap-3 overflow-x-auto pb-2 lg:grid lg:grid-cols-4 lg:overflow-visible">
         {COLS.map(col => {
           const cards = byCol[col.key] || [];
           return (
@@ -356,7 +357,7 @@ export default function ProduccionSection({ addToast }) {
               onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDragOver(col.key); }}
               onDragLeave={() => setDragOver(d => d === col.key ? null : d)}
               onDrop={e => onDrop(e, col.key)}
-              className={`flex-1 min-w-[240px] rounded-xl p-2.5 transition ${dragOver === col.key ? 'bg-brand-50 dark:bg-brand-900/20 ring-2 ring-brand-300 dark:ring-brand-700' : 'bg-gray-50 dark:bg-gray-800/40'}`}>
+              className={`flex-1 min-w-[240px] lg:min-w-0 rounded-xl p-2.5 transition ${dragOver === col.key ? 'bg-brand-50 dark:bg-brand-900/20 ring-2 ring-brand-300 dark:ring-brand-700' : 'bg-gray-50 dark:bg-gray-800/40'}`}>
               {/* Cabecera tintada con el color del estado: se reconoce por zona */}
               <div className={`flex items-center gap-2 px-2.5 py-1.5 mb-2 rounded-lg ${col.hdr}`}>
                 <span className="text-sm leading-none">{col.emoji}</span>

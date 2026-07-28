@@ -12,7 +12,7 @@
 // Los writes al store (addArchivos/updateAssignment) ya son role-aware: para un
 // creator van por la RPC produccion_creator_update; para un admin, directo.
 
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Film, X, UploadCloud, Loader2, AlertTriangle, ExternalLink } from 'lucide-react';
 import { supabase, getCurrentUser } from './supabase.js';
 import { addArchivos, removeArchivo, updateAssignment } from './produccionStore.js';
@@ -113,8 +113,29 @@ export function CreativosSection({ a, addToast, canDelete = true }) {
   const [drag, setDrag] = useState(false);
   const inputRef = useRef(null);
   const folderLink = (a.archivos || []).find(f => f.folderLink)?.folderLink;
-  // ¿Todos los archivos cayeron a AdsLab? → Drive no está conectado.
+  // ¿Todos los archivos cayeron a AdsLab? (pueden ser de ANTES de conectar Drive)
   const soloAdslab = (a.archivos?.length > 0) && !folderLink && a.archivos.every(f => f.destino !== 'drive');
+
+  // Sondeo real al server: ¿Drive está conectado HOY? Así el cartel no miente
+  // cuando la tarjeta solo tiene videos viejos de AdsLab.
+  const [driveOk, setDriveOk] = useState(null); // null = todavía no sabemos
+  useEffect(() => {
+    if (!soloAdslab) return; // solo hace falta para decidir el cartel
+    let dead = false;
+    (async () => {
+      try {
+        const token = await getAuthToken();
+        const r = await fetch('/api/produccion/drive-session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+          body: JSON.stringify({ probe: true }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!dead) setDriveOk(!!d.configured);
+      } catch { /* dejamos null: no afirmamos nada */ }
+    })();
+    return () => { dead = true; };
+  }, [soloAdslab]);
 
   // Ver un video guardado en AdsLab: el bucket es privado, así que generamos
   // un link firmado (1h) al momento del click.
@@ -173,8 +194,14 @@ export function CreativosSection({ a, addToast, canDelete = true }) {
             carpeta de Drive <ExternalLink size={10} />
           </a>
         )}
-        {soloAdslab && (
-          <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 ml-1 cursor-help"
+        {soloAdslab && driveOk === true && (
+          <span className="text-[11px] font-semibold text-gray-400 ml-1 cursor-help"
+            title="Estos videos se subieron antes de conectar Drive y quedaron en AdsLab (se ven con el ícono de cada archivo). Los videos NUEVOS van a la carpeta de Drive.">
+            ℹ estos son de antes (AdsLab) — los nuevos van a Drive ✓
+          </span>
+        )}
+        {soloAdslab && driveOk === false && (
+          <span className="text-[11px] font-bold text-amber-600 dark:text-amber-400 ml-1 cursor-help"
             title="Google Drive no está conectado, así que los videos se guardan en AdsLab (podés verlos con el ícono de cada archivo). Para que vayan a una carpeta de Drive: configurar DRIVE_CREATIVOS_FOLDER_ID en Vercel.">
             ⚠ Drive no conectado — se guardan en AdsLab
           </span>

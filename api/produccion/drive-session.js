@@ -68,6 +68,12 @@ export default async function handler(req, res) {
   if (typeof body === 'string') { try { body = JSON.parse(body); } catch { body = {}; } }
   body = body || {};
 
+  // Sondeo liviano del front (sin efectos): ¿Drive está configurado?
+  // Lo usa el cartel de la tarjeta para no decir "no conectado" cuando sí lo está.
+  if (body.probe) {
+    return respondJSON(res, 200, { configured: driveReady() });
+  }
+
   const { productoNombre, persona, filename, mimeType, size } = body;
   if (!filename) return respondJSON(res, 400, { error: 'Falta el nombre del archivo.' });
 

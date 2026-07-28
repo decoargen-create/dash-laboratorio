@@ -105,6 +105,38 @@ export default function handler(req, res) {
         ? 'Debería empezar con "sk-" — ¿pegaste la correcta?'
         : 'OK (Whisper habilitado)',
     },
+    // Google Drive (subida de creativos de Producción + actas). Mostramos el
+    // client_email de la service account (no es secreto y hace falta saberlo
+    // para compartirle la carpeta) pero NUNCA la private key.
+    GOOGLE_DRIVE: (() => {
+      const raw = env.GOOGLE_SERVICE_ACCOUNT_JSON;
+      let creds = null;
+      if (raw) {
+        try { creds = JSON.parse(raw); }
+        catch { try { creds = JSON.parse(Buffer.from(raw, 'base64').toString('utf-8')); } catch { creds = null; } }
+      }
+      const clientEmail = creds?.client_email || null;
+      const tieneKey = !!creds?.private_key;
+      const carpetaCreativos = env.DRIVE_CREATIVOS_FOLDER_ID || '';
+      const carpetaTranscripts = env.DRIVE_TRANSCRIPTS_FOLDER_ID || '';
+      const credsOk = !!(clientEmail && tieneKey);
+      const carpetaOk = !!(carpetaCreativos || carpetaTranscripts);
+      return {
+        service_account_configured: !!raw,
+        service_account_valida: credsOk,
+        client_email: clientEmail, // compartí la carpeta de Drive con este mail (Editor)
+        DRIVE_CREATIVOS_FOLDER_ID: { configured: !!carpetaCreativos, length: carpetaCreativos.length },
+        DRIVE_TRANSCRIPTS_FOLDER_ID: { configured: !!carpetaTranscripts, length: carpetaTranscripts.length },
+        ok: credsOk && carpetaOk,
+        hint: !raw
+          ? 'Falta GOOGLE_SERVICE_ACCOUNT_JSON (el JSON de la service account de Google). Sin esto los videos van al almacenamiento AdsLab.'
+          : !credsOk
+          ? 'GOOGLE_SERVICE_ACCOUNT_JSON existe pero no parsea o le faltan client_email/private_key.'
+          : !carpetaOk
+          ? 'Credenciales OK pero falta DRIVE_CREATIVOS_FOLDER_ID (el ID de la carpeta de Drive, compartida con el client_email como Editor).'
+          : 'OK — los creativos van a Drive.',
+      };
+    })(),
     deployment: {
       timestamp: new Date().toISOString(),
       vercel: !!env.VERCEL,

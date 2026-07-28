@@ -109,6 +109,20 @@ export function CreativosSection({ a, addToast, canDelete = true }) {
   const [drag, setDrag] = useState(false);
   const inputRef = useRef(null);
   const folderLink = (a.archivos || []).find(f => f.folderLink)?.folderLink;
+  // ¿Todos los archivos cayeron a AdsLab? → Drive no está conectado.
+  const soloAdslab = (a.archivos?.length > 0) && !folderLink && a.archivos.every(f => f.destino !== 'drive');
+
+  // Ver un video guardado en AdsLab: el bucket es privado, así que generamos
+  // un link firmado (1h) al momento del click.
+  const verVideo = async (f) => {
+    try {
+      const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(f.storagePath, 3600);
+      if (error || !data?.signedUrl) throw new Error(error?.message || 'no se pudo firmar el link');
+      window.open(data.signedUrl, '_blank', 'noopener');
+    } catch (err) {
+      addToast?.({ type: 'error', message: `No pude abrir "${f.name}": ${err.message}` });
+    }
+  };
 
   const addFiles = (list) => {
     const nuevos = Array.from(list || [])
@@ -155,6 +169,12 @@ export function CreativosSection({ a, addToast, canDelete = true }) {
             carpeta de Drive <ExternalLink size={10} />
           </a>
         )}
+        {soloAdslab && (
+          <span className="text-[9px] font-bold text-amber-600 dark:text-amber-400 ml-1 cursor-help"
+            title="Google Drive no está conectado, así que los videos se guardan en AdsLab (podés verlos con el ícono de cada archivo). Para que vayan a una carpeta de Drive: configurar DRIVE_CREATIVOS_FOLDER_ID en Vercel.">
+            ⚠ Drive no conectado — se guardan en AdsLab
+          </span>
+        )}
       </div>
 
       {/* Archivos ya subidos */}
@@ -165,7 +185,10 @@ export function CreativosSection({ a, addToast, canDelete = true }) {
               <Film size={12} className="text-emerald-500 flex-shrink-0" />
               <span className="truncate flex-1 text-gray-700 dark:text-gray-200" title={f.name}>{f.name}</span>
               <span className="text-[9px] uppercase font-bold text-gray-400">{f.destino === 'drive' ? 'Drive' : 'AdsLab'}</span>
-              {f.link && <a href={f.link} target="_blank" rel="noopener noreferrer" className="text-brand-500 hover:text-brand-600"><ExternalLink size={11} /></a>}
+              {f.link && <a href={f.link} target="_blank" rel="noopener noreferrer" title="Ver en Drive" className="text-brand-500 hover:text-brand-600"><ExternalLink size={11} /></a>}
+              {!f.link && f.storagePath && (
+                <button onClick={() => verVideo(f)} title="Ver el video (AdsLab)" className="text-brand-500 hover:text-brand-600"><ExternalLink size={11} /></button>
+              )}
               {canDelete && <button onClick={() => removeArchivo(a.id, f.ts)} className="text-gray-300 hover:text-red-500"><X size={12} /></button>}
             </div>
           ))}

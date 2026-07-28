@@ -25,10 +25,10 @@ import TeamModal from './TeamModal.jsx';
 const EQUIPO_DEFAULT = ['Fran', 'Wanda', 'Flor'];
 
 const COLS = [
-  { key: 'porhacer', dot: 'bg-slate-400', text: 'text-slate-500 dark:text-slate-400', hdr: 'bg-slate-200/60 dark:bg-slate-700/30' },
-  { key: 'revision', dot: 'bg-amber-400', text: 'text-amber-600 dark:text-amber-400', hdr: 'bg-amber-100/70 dark:bg-amber-900/20' },
-  { key: 'aprobado', dot: 'bg-emerald-500', text: 'text-emerald-600 dark:text-emerald-400', hdr: 'bg-emerald-100/70 dark:bg-emerald-900/20' },
-  { key: 'publicado', dot: 'bg-violet-500', text: 'text-violet-600 dark:text-violet-400', hdr: 'bg-violet-100/70 dark:bg-violet-900/20' },
+  { key: 'porhacer', emoji: '🎬', dot: 'bg-slate-400', text: 'text-slate-500 dark:text-slate-400', hdr: 'bg-slate-200/60 dark:bg-slate-700/30', empty: '🎬 Agregá productos y ¡acción!' },
+  { key: 'revision', emoji: '👀', dot: 'bg-amber-400', text: 'text-amber-600 dark:text-amber-400', hdr: 'bg-amber-100/70 dark:bg-amber-900/20', empty: '👀 Nada en revisión — todo al día' },
+  { key: 'aprobado', emoji: '✅', dot: 'bg-emerald-500', text: 'text-emerald-600 dark:text-emerald-400', hdr: 'bg-emerald-100/70 dark:bg-emerald-900/20', empty: '✅ Acá caen los aprobados' },
+  { key: 'publicado', emoji: '🚀', dot: 'bg-violet-500', text: 'text-violet-600 dark:text-violet-400', hdr: 'bg-violet-100/70 dark:bg-violet-900/20', empty: '🚀 Listos para despegar' },
 ];
 
 const PERSONA_PALETTE = ['amber', 'violet', 'sky', 'emerald', 'rose', 'indigo', 'teal'];
@@ -117,6 +117,16 @@ function ResumenSemana({ asigs }) {
     return { rows, sinAsignar: sin, total: asigs.length, totals };
   }, [asigs]);
 
+  // Plegable (se acuerda de tu preferencia entre sesiones).
+  const [plegado, setPlegado] = useState(() => {
+    try { return localStorage.getItem('adslab-prod-resumen-plegado') === '1'; } catch { return false; }
+  });
+  const togglePlegado = () => setPlegado(v => {
+    const n = !v;
+    try { localStorage.setItem('adslab-prod-resumen-plegado', n ? '1' : '0'); } catch {}
+    return n;
+  });
+
   if (total === 0) return null;
 
   return (
@@ -142,24 +152,40 @@ function ResumenSemana({ asigs }) {
             </span>
           )}
         </div>
+        <button onClick={togglePlegado} title={plegado ? 'Mostrar el detalle por persona' : 'Plegar'}
+          className="p-1 rounded-md text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition">
+          <ChevronDown size={14} className={`transition-transform ${plegado ? '-rotate-90' : ''}`} />
+        </button>
       </div>
 
-      {/* Tarjeta por persona (anillo de objetivo + estados + ritmo) */}
-      {rows.length === 0 ? (
+      {/* Tarjeta por persona — piel "Estudio creativo": degradé de marca, anillo
+          grande con gradiente, celdas de estado, MVP 👑 al que más aprobó. */}
+      {!plegado && (rows.length === 0 ? (
         <p className="text-xs text-gray-400 px-4 py-3">Asigná tarjetas a cada uno para ver su avance.</p>
       ) : (
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 p-3">
-          {rows.map(s => {
+        <div className="flex gap-3 p-3 overflow-x-auto">
+          {rows.map((s, idx) => {
             const pct = s.asignados ? Math.round((s.completos / s.asignados) * 100) : 0;
             const faltaBonus = Math.max(0, 3 - s.completos);
+            const esMVP = idx === 0 && s.completos > 0;
+            const copyPct = pct >= 100 ? 'objetivo cumplido ✨'
+              : pct >= 80 ? `¡a un paso! (${pct}%)`
+              : pct === 0 ? 'arrancando la semana'
+              : `${pct}% del objetivo`;
             return (
-              <div key={s.persona} className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-900/40 p-3 flex flex-col gap-2.5">
+              <div key={s.persona}
+                className="relative min-w-[218px] max-w-[270px] flex-1 rounded-2xl border border-pink-200/50 dark:border-white/10 bg-gradient-to-br from-pink-500/10 via-violet-500/5 to-transparent p-3 flex flex-col gap-2.5 transition hover:-translate-y-0.5 hover:shadow-lg hover:shadow-pink-900/10">
+                {esMVP && (
+                  <span className="absolute -top-2 right-3 text-[9px] font-black uppercase tracking-wide bg-gradient-to-r from-amber-400 to-yellow-500 text-amber-950 rounded-full px-2 py-0.5 shadow" title="La persona con más aprobados de la semana">
+                    👑 MVP
+                  </span>
+                )}
                 <div className="flex items-center gap-3">
-                  {/* Anillo de objetivo (conic-gradient) */}
-                  <div className="w-12 h-12 rounded-full grid place-items-center shrink-0"
-                    style={{ background: `conic-gradient(#10b981 ${pct}%, rgba(127,140,170,.25) 0)` }}
+                  {/* Anillo grande con gradiente de marca */}
+                  <div className="w-14 h-14 rounded-full grid place-items-center shrink-0"
+                    style={{ background: `conic-gradient(#ec4899, #f43f5e ${pct}%, rgba(127,140,170,.25) 0)` }}
                     title={`${pct}% de su objetivo aprobado`}>
-                    <div className="w-9 h-9 rounded-full bg-white dark:bg-gray-800 grid place-items-center text-[10px] font-extrabold tabular-nums text-gray-700 dark:text-gray-100">
+                    <div className="w-10 h-10 rounded-full bg-white dark:bg-gray-800 grid place-items-center text-[13px] font-extrabold tabular-nums text-gray-800 dark:text-gray-100">
                       {s.completos}/{s.asignados}
                     </div>
                   </div>
@@ -168,22 +194,29 @@ function ResumenSemana({ asigs }) {
                       <span className="w-4 h-4 rounded-full bg-black/20 flex items-center justify-center text-[9px] font-black">{s.persona.charAt(0).toUpperCase()}</span>
                       {s.persona}
                     </span>
-                    <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-1 tabular-nums">{pct}% del objetivo aprobado</div>
+                    <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-1">{copyPct}</div>
                   </div>
                 </div>
 
-                {/* Estados en pills */}
-                <div className="flex gap-1.5 flex-wrap">
-                  <span className="rounded-md px-2 py-0.5 text-[10px] font-bold tabular-nums bg-slate-200/70 dark:bg-slate-700/60 text-slate-600 dark:text-slate-300">{s.porhacer} por hacer</span>
-                  <span className="rounded-md px-2 py-0.5 text-[10px] font-bold tabular-nums bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300">{s.revision} en revisión</span>
-                  <span className="rounded-md px-2 py-0.5 text-[10px] font-bold tabular-nums bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300">{s.completos} aprob.</span>
+                {/* Estados como celdas (número grande + micro-etiqueta) */}
+                <div className="flex gap-1.5 text-center">
+                  {[
+                    ['por hacer', s.porhacer, 'bg-slate-200/60 dark:bg-slate-700/50 text-slate-600 dark:text-slate-300'],
+                    ['revisión', s.revision, 'bg-amber-100/80 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300'],
+                    ['aprob.', s.completos, 'bg-emerald-100/80 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300'],
+                  ].map(([lab, val, cls]) => (
+                    <div key={lab} className={`flex-1 rounded-lg py-1 ${cls}`} title={`${val} ${lab}`}>
+                      <div className="text-sm font-extrabold tabular-nums leading-none">{val}</div>
+                      <div className="text-[8px] uppercase tracking-wide opacity-80 mt-0.5">{lab}</div>
+                    </div>
+                  ))}
                 </div>
 
                 {/* Pie: bonus + ritmo */}
-                <div className="flex items-center justify-between border-t border-gray-200/70 dark:border-gray-700/60 pt-2 text-[10px]">
+                <div className="flex items-center justify-between border-t border-gray-200/60 dark:border-white/10 pt-2 text-[10px]">
                   {s.bonus > 0
                     ? <span className="font-extrabold text-emerald-600 dark:text-emerald-400">🎯 ¡Bonus!</span>
-                    : <span className="text-gray-400">falta{faltaBonus === 1 ? '' : 'n'} {faltaBonus} p/ bonus</span>}
+                    : <span className="text-gray-400">{faltaBonus} más y hay bonus 🎯</span>}
                   <span className="flex items-center gap-2 text-gray-400 tabular-nums">
                     {s.avg != null && <span title="Tiempo prom. a aprobado">⏱ {fmtDur(s.avg)}</span>}
                     {s.trabadas > 0 && <span className="text-amber-600 dark:text-amber-400 font-bold" title="Trabadas +24h en revisión">🐢 {s.trabadas}</span>}
@@ -193,7 +226,7 @@ function ResumenSemana({ asigs }) {
             );
           })}
         </div>
-      )}
+      ))}
     </div>
   );
 }
@@ -230,6 +263,7 @@ export default function ProduccionSection({ addToast }) {
 
   const asigs = listAssignments(weekKey);
   const detail = asigs.find(a => a.id === detailId) || null;
+  const nAprobSemana = asigs.filter(a => esCompleto(a.estado)).length;
 
   const personas = useMemo(() => {
     const set = new Set(EQUIPO_DEFAULT);
@@ -260,7 +294,11 @@ export default function ProduccionSection({ addToast }) {
         </div>
         <div>
           <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Producción</h2>
-          <p className="text-xs text-gray-500 dark:text-gray-400">Cada tarjeta es un producto. Arrastrala entre columnas para cambiar el estado.</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            {asigs.length === 0
+              ? 'Armá la semana: agregá productos y repartilos 🎬'
+              : <>{asigs.length} en juego · <b className="text-emerald-600 dark:text-emerald-400">{nAprobSemana} aprobado{nAprobSemana === 1 ? '' : 's'}</b> esta semana {nAprobSemana > 0 ? '🔥' : '🎬'}</>}
+          </p>
         </div>
         <div className="ml-auto flex items-center gap-2 flex-wrap">
           <div className="relative">
@@ -296,7 +334,7 @@ export default function ProduccionSection({ addToast }) {
               className={`flex-1 min-w-[240px] rounded-xl p-2.5 transition ${dragOver === col.key ? 'bg-brand-50 dark:bg-brand-900/20 ring-2 ring-brand-300 dark:ring-brand-700' : 'bg-gray-50 dark:bg-gray-800/40'}`}>
               {/* Cabecera tintada con el color del estado: se reconoce por zona */}
               <div className={`flex items-center gap-2 px-2.5 py-1.5 mb-2 rounded-lg ${col.hdr}`}>
-                <span className={`w-2 h-2 rounded-full ${col.dot}`} />
+                <span className="text-sm leading-none">{col.emoji}</span>
                 <span className={`text-xs font-bold uppercase tracking-wide ${col.text}`}>{ESTADO_LABELS[col.key]}</span>
                 <span className="ml-auto text-[11px] font-mono text-gray-400 tabular-nums">{cards.length}</span>
               </div>
@@ -308,7 +346,7 @@ export default function ProduccionSection({ addToast }) {
                 ))}
                 {cards.length === 0 && (
                   <div className="text-center text-[11px] text-gray-300 dark:text-gray-600 py-4 select-none">
-                    {col.key === 'porhacer' ? 'Agregá productos acá' : 'Arrastrá tarjetas acá'}
+                    {col.empty}
                   </div>
                 )}
               </div>
@@ -360,29 +398,30 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
   const aprobarTodos = (e) => {
     e.stopPropagation();
     updateAssignment(a.id, { videosAprobados: subidos, estado: 'aprobado' });
-    addToast?.({ type: 'success', message: `${a.productoNombre} · aprobado (${subidos}/${subidos}) — listo para publicar` });
+    addToast?.({ type: 'success', message: `🎉 ¡${a.productoNombre} aprobado! (${subidos}/${subidos}) — listo para despegar` });
   };
   const publicar = (e) => {
     e.stopPropagation();
     updateAssignment(a.id, { estado: 'publicado' });
-    addToast?.({ type: 'success', message: `${a.productoNombre} · publicado 🚀` });
+    addToast?.({ type: 'success', message: `🚀 ${a.productoNombre} publicado — ¡a volar!` });
   };
 
   return (
     <div draggable={!prog}
       onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/prod-id', a.id); }}
       onClick={() => onOpen()}
-      className={`group bg-white dark:bg-gray-800 border rounded-xl p-3 shadow-sm hover:shadow-md transition cursor-pointer ${trabada ? 'border-amber-400/80 dark:border-amber-500/60 hover:border-amber-500' : 'border-gray-200 dark:border-gray-700 hover:border-brand-300 dark:hover:border-brand-600'}`}>
+      className={`group bg-white dark:bg-gray-800 border rounded-xl p-2.5 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition cursor-pointer ${trabada ? 'border-amber-400/80 dark:border-amber-500/60 hover:border-amber-500' : 'border-gray-200 dark:border-gray-700 hover:border-brand-300 dark:hover:border-brand-600'}`}>
       <div className="flex items-start gap-1.5">
         <GripVertical size={14} className="text-gray-300 dark:text-gray-600 mt-0.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition" />
         <span className="text-sm font-bold text-gray-900 dark:text-gray-100 leading-tight flex-1">{a.productoNombre || 'Producto'}</span>
         {/* Pill de estado clickeable → mover de columna (útil en celular, sin drag) */}
         <div className="relative shrink-0" onClick={e => e.stopPropagation()}>
-          <button onClick={() => setMoveMenu(v => !v)}
-            className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-md bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition">
+          {/* Compacto: la columna ya dice el estado; acá solo el punto de color
+              + chevron para abrir "Mover a" (clave en celular). */}
+          <button onClick={() => setMoveMenu(v => !v)} title={`${ESTADO_LABELS[a.estado]} — mover a…`}
+            className="inline-flex items-center gap-1 px-1.5 py-1 rounded-md bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition">
             <span className={`w-1.5 h-1.5 rounded-full ${(COLS.find(c => c.key === a.estado) || COLS[0]).dot}`} />
-            {ESTADO_LABELS[a.estado]}
-            <ChevronDown size={9} />
+            <ChevronDown size={10} />
           </button>
           {moveMenu && (
             <div className="absolute right-0 top-6 z-20 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl p-1 flex flex-col gap-0.5 min-w-[120px]">
@@ -403,10 +442,10 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
         <span onClick={e => { e.stopPropagation(); setMenu(v => !v); }} className="cursor-pointer">
           <PersonaBadge persona={a.persona} />
         </span>
-        {/* Aviso: tiene etiqueta pero ninguna cuenta la ve en su tablero */}
+        {/* Aviso compacto: etiqueta sin cuenta → nadie la ve en su tablero */}
         {a.persona && !a.creatorId && (
-          <span className="inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9px] font-bold bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" title="Esta tarjeta tiene etiqueta pero no está asignada a una cuenta, así que ningún creativo la ve. Elegí una cuenta del equipo.">
-            <AlertTriangle size={9} /> sin cuenta
+          <span className="text-amber-500 cursor-help" title="Sin cuenta asignada: ningún creativo la ve en su tablero. Tocá el nombre y elegí una cuenta del equipo.">
+            <AlertTriangle size={13} />
           </span>
         )}
         {menu && (
@@ -617,6 +656,7 @@ function AgregarProductoModal({ productos, personas, team = [], asigs, weekKey, 
 // ── Historial de la tarjeta: creación + cada cambio de estado (quién y cuándo).
 // Base para medir tiempos de entrega / eficiencia del equipo.
 function HistorialTarjeta({ a }) {
+  const [abierto, setAbierto] = useState(false);
   const eventos = a.historial || [];
   if (eventos.length === 0) return null;
   const fmt = (ts) => {
@@ -629,21 +669,30 @@ function HistorialTarjeta({ a }) {
     if (ev.tipo === 'subida') return `Subió ${ev.n ? `${ev.n} ` : ''}video(s)`;
     return ev.tipo;
   };
+  const ultimo = eventos[eventos.length - 1];
   return (
     <div>
-      <div className="flex items-center gap-1.5 mb-2">
+      {/* Cabecera desplegable: cerrada muestra solo el último movimiento */}
+      <button onClick={() => setAbierto(o => !o)} className="w-full flex items-center gap-1.5 text-left group">
         <History size={13} className="text-gray-400" />
         <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400">Historial</span>
-      </div>
-      <ol className="space-y-2 border-l border-gray-200 dark:border-gray-700 pl-3.5 ml-1">
-        {[...eventos].reverse().map((ev, i) => (
-          <li key={i} className="relative text-[11px] leading-tight">
-            <span className="absolute -left-[17px] top-1 w-2 h-2 rounded-full bg-brand-400 ring-2 ring-white dark:ring-gray-900" />
-            <span className="font-semibold text-gray-700 dark:text-gray-200">{label(ev)}</span>
-            <div className="text-gray-400">{ev.byName || 'Alguien'} · {fmt(ev.ts)}</div>
-          </li>
-        ))}
-      </ol>
+        <span className="text-[10px] text-gray-400 tabular-nums">({eventos.length})</span>
+        {!abierto && ultimo && (
+          <span className="text-[10px] text-gray-400 truncate">· último: {label(ultimo)} — {fmt(ultimo.ts)}</span>
+        )}
+        <ChevronDown size={13} className={`ml-auto shrink-0 text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-200 transition-transform ${abierto ? 'rotate-180' : ''}`} />
+      </button>
+      {abierto && (
+        <ol className="mt-2 space-y-2 border-l border-gray-200 dark:border-gray-700 pl-3.5 ml-1 max-h-44 overflow-y-auto">
+          {[...eventos].reverse().map((ev, i) => (
+            <li key={i} className="relative text-[11px] leading-tight">
+              <span className="absolute -left-[17px] top-1 w-2 h-2 rounded-full bg-brand-400 ring-2 ring-white dark:ring-gray-900" />
+              <span className="font-semibold text-gray-700 dark:text-gray-200">{label(ev)}</span>
+              <div className="text-gray-400">{ev.byName || 'Alguien'} · {fmt(ev.ts)}</div>
+            </li>
+          ))}
+        </ol>
+      )}
     </div>
   );
 }

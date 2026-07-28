@@ -64,6 +64,14 @@ const PersonaBadge = ({ persona }) => (
 
 // Resumen de la semana: cuántas tarjetas tiene cada persona + progreso hacia el
 // objetivo (productos aprobados) con el bonus semanal.
+// Formatea una duración en ms → "6 h" / "1.5 d".
+function fmtDur(ms) {
+  if (ms == null) return '—';
+  const h = ms / 3600000;
+  if (h < 48) return `${h < 10 ? h.toFixed(1) : Math.round(h)} h`;
+  return `${(h / 24).toFixed(1)} d`;
+}
+
 function ResumenSemana({ asigs }) {
   const { porPersona, sinAsignar, total, aprobados } = useMemo(() => {
     const map = {};
@@ -77,6 +85,31 @@ function ResumenSemana({ asigs }) {
       porPersona: Object.entries(map).sort((x, y) => y[1] - x[1]),
       sinAsignar: sin, total: asigs.length, aprobados: apr,
     };
+  }, [asigs]);
+
+  // KPIs de tiempos (del historial): promedio creada→aprobada y tarjetas
+  // "trabadas" (más de 24h en revisión). Se llena a medida que hay historial.
+  const kpi = useMemo(() => {
+    const now = Date.now();
+    const tiempos = [];
+    let trabadas = 0;
+    asigs.forEach(a => {
+      const hist = a.historial || [];
+      const creadaTs = a.createdAt ? Date.parse(a.createdAt)
+        : (hist.find(e => e.tipo === 'creacion')?.ts ? Date.parse(hist.find(e => e.tipo === 'creacion').ts) : NaN);
+      const aprobEv = [...hist].reverse().find(e => e.tipo === 'estado' && e.to === 'aprobado');
+      if (!Number.isNaN(creadaTs) && aprobEv?.ts) {
+        const d = Date.parse(aprobEv.ts) - creadaTs;
+        if (d > 0) tiempos.push(d);
+      }
+      if (a.estado === 'revision') {
+        const revEv = [...hist].reverse().find(e => e.tipo === 'estado' && e.to === 'revision');
+        const t = revEv?.ts ? Date.parse(revEv.ts) : (a.updatedAt ? Date.parse(a.updatedAt) : NaN);
+        if (!Number.isNaN(t) && (now - t) > 24 * 3600 * 1000) trabadas++;
+      }
+    });
+    const avg = tiempos.length ? tiempos.reduce((s, x) => s + x, 0) / tiempos.length : null;
+    return { avg, n: tiempos.length, trabadas };
   }, [asigs]);
 
   if (total === 0) return null;
@@ -114,6 +147,24 @@ function ResumenSemana({ asigs }) {
           <span className="text-[11px] font-extrabold text-emerald-600 dark:text-emerald-400 whitespace-nowrap">🎯 bonus</span>
         )}
       </div>
+
+      {/* KPIs de tiempos (eficiencia del equipo) */}
+      {(kpi.n > 0 || kpi.trabadas > 0) && (
+        <div className="w-full flex items-center gap-4 flex-wrap pt-2 mt-1 border-t border-gray-100 dark:border-gray-700/60 text-[11px]">
+          {kpi.n > 0 && (
+            <span className="inline-flex items-center gap-1 text-gray-500 dark:text-gray-400">
+              <History size={12} className="text-brand-400" /> Prom. a aprobado:
+              <b className="text-gray-700 dark:text-gray-200">{fmtDur(kpi.avg)}</b>
+              <span className="text-gray-400">(n={kpi.n})</span>
+            </span>
+          )}
+          {kpi.trabadas > 0 && (
+            <span className="inline-flex items-center gap-1 font-semibold text-amber-600 dark:text-amber-400">
+              <AlertTriangle size={12} /> {kpi.trabadas} trabada{kpi.trabadas === 1 ? '' : 's'} (+24h en revisión)
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -252,6 +303,7 @@ export default function ProduccionSection({ addToast }) {
 
 function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
   const [menu, setMenu] = useState(false);
+  const [moveMenu, setMoveMenu] = useState(false);
   const [prog, setProg] = useState(null); // { i, total } mientras sube
   const fileRef = useRef(null);
   const subidos = a.archivos?.length || 0;
@@ -286,6 +338,26 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
       <div className="flex items-start gap-1.5">
         <GripVertical size={14} className="text-gray-300 dark:text-gray-600 mt-0.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition" />
         <span className="text-sm font-bold text-gray-900 dark:text-gray-100 leading-tight flex-1">{a.productoNombre || 'Producto'}</span>
+        {/* Pill de estado clickeable → mover de columna (útil en celular, sin drag) */}
+        <div className="relative shrink-0" onClick={e => e.stopPropagation()}>
+          <button onClick={() => setMoveMenu(v => !v)}
+            className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-md bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition">
+            <span className={`w-1.5 h-1.5 rounded-full ${(COLS.find(c => c.key === a.estado) || COLS[0]).dot}`} />
+            {ESTADO_LABELS[a.estado]}
+            <ChevronDown size={9} />
+          </button>
+          {moveMenu && (
+            <div className="absolute right-0 top-6 z-20 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl p-1 flex flex-col gap-0.5 min-w-[120px]">
+              <span className="text-[8px] font-bold uppercase text-gray-400 px-2 pt-1">Mover a</span>
+              {ESTADOS.map(e => (
+                <button key={e} onClick={() => { updateAssignment(a.id, { estado: e }); setMoveMenu(false); }}
+                  className={`text-left text-[11px] font-semibold px-2 py-1 rounded whitespace-nowrap ${a.estado === e ? 'bg-brand-50 dark:bg-brand-900/30 text-brand-600 dark:text-brand-300' : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200'}`}>
+                  {a.estado === e ? '✓ ' : ''}{ESTADO_LABELS[e]}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Persona (badge grande) + menú de asignación por CUENTA del equipo */}
@@ -386,21 +458,35 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
   );
 }
 
-// ── Agregar producto (crea una tarjeta en "Por hacer").
+// ── Agregar productos (crea tarjetas en "Por hacer"). Multi-selección: podés
+// tildar varios productos y crearlos todos juntos con una sola vuelta.
 function AgregarProductoModal({ productos, personas, team = [], asigs, weekKey, onClose, addToast }) {
-  const [prodId, setProdId] = useState('');
+  const [selected, setSelected] = useState(() => new Set());
   const [creatorId, setCreatorId] = useState('');
   const [persona, setPersona] = useState('');
 
   const yaEnSemana = useMemo(() => new Set(asigs.map(a => String(a.productoId))), [asigs]);
-  const prod = productos.find(p => String(p.id) === String(prodId));
+
+  const toggle = (id) => setSelected(prev => {
+    const n = new Set(prev);
+    const k = String(id);
+    if (n.has(k)) n.delete(k); else n.add(k);
+    return n;
+  });
 
   const crear = () => {
-    if (!prod) { addToast?.({ type: 'warning', message: 'Elegí un producto.' }); return; }
+    const ids = [...selected];
+    if (ids.length === 0) { addToast?.({ type: 'warning', message: 'Elegí al menos un producto.' }); return; }
     const m = team.find(t => t.id === creatorId);
     const per = m ? (m.display_name || m.email) : persona;
-    addAssignment({ weekKey, productoId: prod.id, productoNombre: prod.nombre, persona: per, creatorId: m ? m.id : null });
-    addToast?.({ type: 'success', message: `${prod.nombre} agregado${per ? ` para ${per}` : ''}` });
+    let n = 0;
+    ids.forEach(id => {
+      const prod = productos.find(p => String(p.id) === id);
+      if (!prod) return;
+      addAssignment({ weekKey, productoId: prod.id, productoNombre: prod.nombre, persona: per, creatorId: m ? m.id : null });
+      n++;
+    });
+    addToast?.({ type: 'success', message: `${n} producto${n === 1 ? '' : 's'} agregado${n === 1 ? '' : 's'}${per ? ` para ${per}` : ''}` });
     onClose();
   };
 
@@ -409,20 +495,29 @@ function AgregarProductoModal({ productos, personas, team = [], asigs, weekKey, 
       <div className="w-full max-w-md bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="flex items-center gap-2 px-5 py-3.5 border-b border-gray-100 dark:border-gray-800">
           <Plus size={16} className="text-brand-500" />
-          <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Agregar producto a la semana</h3>
+          <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Agregar productos a la semana</h3>
           <button onClick={onClose} className="ml-auto text-gray-400 hover:text-gray-600"><X size={18} /></button>
         </div>
         <div className="p-5 space-y-4">
-          <label className="flex flex-col gap-1">
-            <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400">Producto</span>
-            <select value={prodId} onChange={e => setProdId(e.target.value)}
-              className="px-2.5 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500">
-              <option value="">Elegí un producto…</option>
-              {productos.map(p => <option key={p.id} value={p.id} disabled={yaEnSemana.has(String(p.id))}>
-                {p.nombre}{yaEnSemana.has(String(p.id)) ? ' (ya está)' : ''}
-              </option>)}
-            </select>
-          </label>
+          <div>
+            <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">
+              Productos {selected.size > 0 && <span className="text-brand-500">· {selected.size} elegido{selected.size === 1 ? '' : 's'}</span>}
+            </span>
+            <div className="max-h-56 overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-100 dark:divide-gray-800">
+              {productos.length === 0 && <p className="text-xs text-gray-400 p-3">No hay productos cargados.</p>}
+              {productos.map(p => {
+                const ya = yaEnSemana.has(String(p.id));
+                const sel = selected.has(String(p.id));
+                return (
+                  <label key={p.id} className={`flex items-center gap-2.5 px-3 py-2 text-sm ${ya ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800'}`}>
+                    <input type="checkbox" checked={sel} disabled={ya} onChange={() => toggle(p.id)} className="w-4 h-4 accent-brand-600" />
+                    <span className="flex-1 text-gray-800 dark:text-gray-100 truncate">{p.nombre}</span>
+                    {ya && <span className="text-[10px] text-gray-400">ya está</span>}
+                  </label>
+                );
+              })}
+            </div>
+          </div>
           <div>
             <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">¿Para quién? (opcional)</span>
             {team.length > 0 ? (
@@ -450,9 +545,9 @@ function AgregarProductoModal({ productos, personas, team = [], asigs, weekKey, 
           </div>
         </div>
         <div className="flex items-center gap-2 px-5 py-3.5 border-t border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
-          <button onClick={crear} disabled={!prod}
+          <button onClick={crear} disabled={selected.size === 0}
             className="ml-auto inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed">
-            <Plus size={15} /> Crear tarjeta
+            <Plus size={15} /> Crear {selected.size > 0 ? `${selected.size} ` : ''}tarjeta{selected.size === 1 ? '' : 's'}
           </button>
         </div>
       </div>

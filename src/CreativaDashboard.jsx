@@ -7,11 +7,13 @@
 // vista de plata/resumen.
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Wallet, ChevronDown, Check, Clock, CheckCircle2, Users, Film, TrendingUp } from 'lucide-react';
+import { Wallet, ChevronDown, Check, Clock, CheckCircle2, Users, Film, TrendingUp, Rocket, ExternalLink, Table2 } from 'lucide-react';
 import {
   monthKeyOf, monthLabel, allMonthKeys, monthlySummary, setWeekPaid,
-  weekLabel, subscribeProduccion,
+  weekLabel, subscribeProduccion, weeksInMonth, listAssignments, paymentSummary,
+  weekNumber, weekRange, esCompleto,
 } from './produccionStore.js';
+import { probeDrive } from './produccionUpload.jsx';
 import { fmtMoney, toUSD, subscribeMoney } from './moneyStore.js';
 
 const fmtPago = (ars) => fmtMoney(toUSD(ars, 'ARS'));
@@ -35,6 +37,55 @@ export default function CreativaDashboard({ addToast }) {
 
   const { personas, totals } = monthlySummary(monthKey);
   const conPendiente = personas.filter(p => p.pendiente > 0);
+
+  // ── Grilla semanal tipo Excel: filas = personas, columnas = Semana N ──
+  const [gridMode, setGridMode] = useState('money'); // 'money' | 'videos'
+  const grid = useMemo(() => {
+    const weeks = weeksInMonth(monthKey); // weekKeys del mes con asignaciones
+    const porSemana = weeks.map(wk => ({ wk, rows: paymentSummary(wk) }));
+    const set = new Set();
+    porSemana.forEach(w => w.rows.forEach(r => set.add(r.persona)));
+    const filas = [...set].sort((a, b) => a.localeCompare(b, 'es')).map(persona => {
+      const cel = {}; let money = 0, comp = 0;
+      weeks.forEach(wk => {
+        const r = (porSemana.find(w => w.wk === wk)?.rows || []).find(x => x.persona === persona);
+        cel[wk] = { money: r?.totalArs || 0, comp: r?.completados || 0 };
+        money += cel[wk].money; comp += cel[wk].comp;
+      });
+      return { persona, cel, money, comp };
+    });
+    const colTot = {};
+    weeks.forEach(wk => { colTot[wk] = filas.reduce((s, f) => ({ money: s.money + f.cel[wk].money, comp: s.comp + f.cel[wk].comp }), { money: 0, comp: 0 }); });
+    return { weeks, filas, colTot };
+  }, [monthKey]); // eslint-disable-line
+
+  // ── KPIs de producción del mes (aprobados / publicados / en curso) ──
+  const prodKpis = useMemo(() => {
+    const asigs = weeksInMonth(monthKey).flatMap(wk => listAssignments(wk));
+    return {
+      aprobados: asigs.filter(a => esCompleto(a.estado)).length,
+      publicados: asigs.filter(a => a.estado === 'publicado').length,
+      enCurso: asigs.filter(a => a.estado === 'porhacer' || a.estado === 'revision').length,
+      videos: asigs.reduce((n, a) => n + (a.archivos?.length || 0), 0),
+    };
+  }, [monthKey]); // eslint-disable-line
+
+  // ── Links de Drive por producto del mes ──
+  const [driveRoot, setDriveRoot] = useState(null);
+  useEffect(() => { let dead = false; probeDrive().then(d => { if (!dead && d?.configured) setDriveRoot(d.rootLink); }); return () => { dead = true; }; }, []);
+  const productosDrive = useMemo(() => {
+    const asigs = weeksInMonth(monthKey).flatMap(wk => listAssignments(wk));
+    const byProd = new Map();
+    asigs.forEach(a => {
+      const nombre = a.productoNombre || 'Producto';
+      const folder = (a.archivos || []).find(f => f.folderLink)?.folderLink;
+      const cur = byProd.get(nombre) || { nombre, folder: null, subidos: 0 };
+      cur.subidos += (a.archivos?.length || 0);
+      if (folder && !cur.folder) cur.folder = folder;
+      byProd.set(nombre, cur);
+    });
+    return [...byProd.values()].filter(p => p.subidos > 0).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+  }, [monthKey]); // eslint-disable-line
 
   const pagarSemana = (weekKey, persona, paid) => {
     setWeekPaid(weekKey, persona, paid);
@@ -72,6 +123,96 @@ export default function CreativaDashboard({ addToast }) {
         <KpiCard icon={CheckCircle2} label="Pagado" value={fmtPago(totals.pagado)} tone="emerald" />
         <KpiCard icon={Film} label="Productos completos" value={String(totals.completados)} tone="gray" />
       </div>
+
+      {/* KPIs de PRODUCCIÓN del mes */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <KpiCard icon={CheckCircle2} label="Aprobados (mes)" value={String(prodKpis.aprobados)} tone="emerald" />
+        <KpiCard icon={Rocket} label="Publicados (mes)" value={String(prodKpis.publicados)} tone="brand" />
+        <KpiCard icon={Clock} label="En curso" value={String(prodKpis.enCurso)} tone={prodKpis.enCurso > 0 ? 'amber' : 'gray'} />
+        <KpiCard icon={Film} label="Videos subidos" value={String(prodKpis.videos)} tone="gray" />
+      </div>
+
+      {/* GRILLA SEMANAL tipo Excel: personas × Semana 1..N + Total */}
+      {grid.filas.length > 0 && (
+        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-100 dark:border-gray-700/60">
+            <Table2 size={15} className="text-brand-500" />
+            <span className="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Grilla del mes · por persona y semana</span>
+            <div className="ml-auto inline-flex rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden text-[11px] font-bold">
+              <button onClick={() => setGridMode('money')} className={`px-2.5 py-1 ${gridMode === 'money' ? 'bg-brand-600 text-white' : 'text-gray-500 dark:text-gray-300'}`}>$</button>
+              <button onClick={() => setGridMode('videos')} className={`px-2.5 py-1 ${gridMode === 'videos' ? 'bg-brand-600 text-white' : 'text-gray-500 dark:text-gray-300'}`}>videos</button>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-[11px] font-bold uppercase tracking-wide text-gray-400 dark:text-gray-500 border-b border-gray-200 dark:border-gray-700">
+                  <th className="text-left px-4 py-2.5 sticky left-0 bg-white dark:bg-gray-800">Persona</th>
+                  {grid.weeks.map(wk => (
+                    <th key={wk} className="text-right px-3 py-2.5 whitespace-nowrap" title={weekRange(wk)}>Sem {weekNumber(wk)}</th>
+                  ))}
+                  <th className="text-right px-4 py-2.5">Total</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-700/60">
+                {grid.filas.map(f => (
+                  <tr key={f.persona} className="hover:bg-gray-50 dark:hover:bg-gray-700/30">
+                    <td className="px-4 py-2 font-semibold text-gray-800 dark:text-gray-100 sticky left-0 bg-white dark:bg-gray-800">{f.persona}</td>
+                    {grid.weeks.map(wk => {
+                      const c = f.cel[wk];
+                      const v = gridMode === 'money' ? c.money : c.comp;
+                      return <td key={wk} className={`text-right px-3 py-2 tabular-nums ${v > 0 ? 'text-gray-700 dark:text-gray-200' : 'text-gray-300 dark:text-gray-600'}`}>{v > 0 ? (gridMode === 'money' ? fmtPago(c.money) : c.comp) : '·'}</td>;
+                    })}
+                    <td className="text-right px-4 py-2 font-mono tabular-nums font-bold text-gray-900 dark:text-white">{gridMode === 'money' ? fmtPago(f.money) : f.comp}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t border-gray-200 dark:border-gray-700 bg-gray-50/60 dark:bg-gray-900/30 font-bold">
+                  <td className="px-4 py-2.5 text-[11px] uppercase tracking-wide text-gray-400 sticky left-0 bg-gray-50 dark:bg-gray-900/60">Total</td>
+                  {grid.weeks.map(wk => {
+                    const c = grid.colTot[wk];
+                    return <td key={wk} className="text-right px-3 py-2.5 font-mono tabular-nums text-gray-700 dark:text-gray-200">{gridMode === 'money' ? fmtPago(c.money) : c.comp}</td>;
+                  })}
+                  <td className="text-right px-4 py-2.5 font-mono tabular-nums text-brand-600 dark:text-brand-400">{gridMode === 'money' ? fmtPago(totals.total) : totals.completados}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* LINKS de Drive de los productos del mes */}
+      {(productosDrive.length > 0 || driveRoot) && (
+        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Film size={15} className="text-brand-500" />
+            <span className="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Creativos en Drive</span>
+            {driveRoot && (
+              <a href={driveRoot} target="_blank" rel="noopener noreferrer"
+                className="ml-auto inline-flex items-center gap-1 text-xs font-bold text-brand-600 dark:text-brand-300 hover:underline">
+                <ExternalLink size={13} /> Abrir Drive
+              </a>
+            )}
+          </div>
+          {productosDrive.length === 0 ? (
+            <p className="text-xs text-gray-400">Todavía no hay creativos subidos este mes.</p>
+          ) : (
+            <div className="grid sm:grid-cols-2 gap-2">
+              {productosDrive.map(p => (
+                <div key={p.nombre} className="flex items-center gap-2 rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2 text-sm">
+                  <Film size={14} className="text-emerald-500 shrink-0" />
+                  <span className="flex-1 truncate text-gray-800 dark:text-gray-100" title={p.nombre}>{p.nombre}</span>
+                  <span className="text-[11px] tabular-nums text-gray-400">{p.subidos}</span>
+                  {p.folder
+                    ? <a href={p.folder} target="_blank" rel="noopener noreferrer" title="Carpeta en Drive" className="text-brand-500 hover:text-brand-600"><ExternalLink size={14} /></a>
+                    : <span className="text-[10px] text-gray-400" title="Se subió a AdsLab (antes de conectar Drive)">AdsLab</span>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {personas.length === 0 ? (
         <div className="border border-dashed border-gray-300 dark:border-gray-700 rounded-xl p-10 text-center text-gray-400 dark:text-gray-500">

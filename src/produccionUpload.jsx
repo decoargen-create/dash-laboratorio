@@ -163,14 +163,14 @@ export function CreativosSection({ a, addToast, canDelete = true }) {
     <div>
       <div className="flex items-center gap-1.5 mb-1.5">
         <UploadCloud size={13} className="text-gray-400" />
-        <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400">Creativos</span>
+        <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400">Creativos</span>
         {folderLink && (
-          <a href={folderLink} target="_blank" rel="noopener noreferrer" className="text-[10px] text-brand-500 hover:text-brand-600 inline-flex items-center gap-0.5 ml-1">
+          <a href={folderLink} target="_blank" rel="noopener noreferrer" className="text-[11px] text-brand-500 hover:text-brand-600 inline-flex items-center gap-0.5 ml-1">
             carpeta de Drive <ExternalLink size={10} />
           </a>
         )}
         {soloAdslab && (
-          <span className="text-[9px] font-bold text-amber-600 dark:text-amber-400 ml-1 cursor-help"
+          <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 ml-1 cursor-help"
             title="Google Drive no está conectado, así que los videos se guardan en AdsLab (podés verlos con el ícono de cada archivo). Para que vayan a una carpeta de Drive: configurar DRIVE_CREATIVOS_FOLDER_ID en Vercel.">
             ⚠ Drive no conectado — se guardan en AdsLab
           </span>
@@ -184,7 +184,7 @@ export function CreativosSection({ a, addToast, canDelete = true }) {
             <div key={f.ts} className="flex items-center gap-2 text-xs bg-gray-50 dark:bg-gray-800 rounded px-2.5 py-1.5">
               <Film size={12} className="text-emerald-500 flex-shrink-0" />
               <span className="truncate flex-1 text-gray-700 dark:text-gray-200" title={f.name}>{f.name}</span>
-              <span className="text-[9px] uppercase font-bold text-gray-400">{f.destino === 'drive' ? 'Drive' : 'AdsLab'}</span>
+              <span className="text-[10px] uppercase font-bold text-gray-400">{f.destino === 'drive' ? 'Drive' : 'AdsLab'}</span>
               {f.link && <a href={f.link} target="_blank" rel="noopener noreferrer" title="Ver en Drive" className="text-brand-500 hover:text-brand-600"><ExternalLink size={11} /></a>}
               {!f.link && f.storagePath && (
                 <button onClick={() => verVideo(f)} title="Ver el video (AdsLab)" className="text-brand-500 hover:text-brand-600"><ExternalLink size={11} /></button>
@@ -218,7 +218,7 @@ export function CreativosSection({ a, addToast, canDelete = true }) {
                     : <Film size={12} className="text-gray-400" />}
               </span>
               <span className="truncate flex-1 text-gray-600 dark:text-gray-300">{f.file.name}</span>
-              {f.status === 'error' && <span className="text-[10px] text-red-500 truncate max-w-[110px]" title={f.msg}>{f.msg}</span>}
+              {f.status === 'error' && <span className="text-[11px] text-red-500 truncate max-w-[110px]" title={f.msg}>{f.msg}</span>}
               {!busy && <button onClick={() => setFiles(prev => prev.filter(x => x.id !== f.id))} className="text-gray-300 hover:text-red-500"><X size={12} /></button>}
             </div>
           ))}

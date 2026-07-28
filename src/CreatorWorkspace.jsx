@@ -28,7 +28,7 @@ const ESTADO_BADGE = {
 
 function EstadoBadge({ estado }) {
   return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-bold ${ESTADO_BADGE[estado] || ESTADO_BADGE.porhacer}`}>
+    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-bold ${ESTADO_BADGE[estado] || ESTADO_BADGE.porhacer}`}>
       {ESTADO_LABELS[estado] || estado}
     </span>
   );
@@ -57,7 +57,7 @@ function CreatorCard({ a, addToast }) {
         <div className="flex items-start justify-between gap-3 mb-2">
           <div className="min-w-0">
             <h3 className="font-bold text-gray-900 dark:text-white truncate">{a.productoNombre || 'Producto'}</h3>
-            <div className="mt-1 flex items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">
+            <div className="mt-1 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
               <span className="uppercase font-semibold tracking-wide">{a.tipo === 'testeo' ? 'Testeo' : 'Renovado'}</span>
               <span>·</span>
               <span>{weekLabel(a.weekKey)}</span>
@@ -69,13 +69,13 @@ function CreatorCard({ a, addToast }) {
         {/* Cambios pedidos por el equipo — bien visible */}
         {(a.nota || '').trim() && (
           <div className="mb-3 rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-3 py-2">
-            <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase text-amber-700 dark:text-amber-300 mb-0.5"><AlertTriangle size={11} /> Hay que corregir</div>
+            <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase text-amber-700 dark:text-amber-300 mb-0.5"><AlertTriangle size={11} /> Hay que corregir</div>
             <p className="text-xs text-amber-800 dark:text-amber-200 whitespace-pre-wrap">{a.nota}</p>
           </div>
         )}
 
         {/* Meta: subidos + aprobados + link a Drive */}
-        <div className="flex items-center gap-3 text-[11px] text-gray-500 dark:text-gray-400 mb-3 flex-wrap">
+        <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400 mb-3 flex-wrap">
           <span className="inline-flex items-center gap-1">
             <Film size={12} className="text-emerald-500" />
             <b className="text-gray-700 dark:text-gray-200">{nSubidos}</b> subido{nSubidos === 1 ? '' : 's'}
@@ -99,7 +99,7 @@ function CreatorCard({ a, addToast }) {
           <div className="mb-3">
             <button
               onClick={() => setOpenBrief(o => !o)}
-              className="inline-flex items-center gap-1 text-[11px] font-semibold text-brand-600 dark:text-brand-400 hover:underline">
+              className="inline-flex items-center gap-1 text-xs font-semibold text-brand-600 dark:text-brand-400 hover:underline">
               {openBrief ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
               Consigna / guiones
             </button>
@@ -128,7 +128,7 @@ function CreatorCard({ a, addToast }) {
             {enRevision ? <><Clock size={14} /> Volver a "Por hacer"</> : <><CheckCircle2 size={14} /> Marcar "En revisión"</>}
           </button>
         ) : (
-          <p className="text-center text-[11px] text-gray-400 dark:text-gray-500 py-1">
+          <p className="text-center text-xs text-gray-400 dark:text-gray-500 py-1">
             {a.estado === 'aprobado' ? '✓ Aprobado por el equipo' : '✓ Publicado'}
           </p>
         )}
@@ -180,7 +180,7 @@ export default function CreatorWorkspace({ user, onLogout, addToast, darkMode, t
             </div>
             <div className="min-w-0">
               <h1 className="font-bold text-gray-900 dark:text-white leading-tight truncate">Producción</h1>
-              <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate">Hola, {user?.name || 'equipo'} 👋</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 truncate">Hola, {user?.name || 'equipo'} 👋</p>
             </div>
           </div>
           <div className="flex items-center gap-1">
@@ -231,7 +231,7 @@ export default function CreatorWorkspace({ user, onLogout, addToast, darkMode, t
                 {[['Asignados', asignadosSemana], ['Por hacer', porHacerSemana], ['Revisión', revisionSemana], ['Aprob.', aprobadosSemana]].map(([lab, val]) => (
                   <div key={lab} className="rounded-lg bg-white/15 px-2.5 py-1 min-w-[52px]">
                     <div className="text-base font-extrabold tabular-nums leading-none">{val}</div>
-                    <div className="text-[9px] uppercase tracking-wide text-white/75 mt-0.5">{lab}</div>
+                    <div className="text-[10px] uppercase tracking-wide text-white/75 mt-0.5">{lab}</div>
                   </div>
                 ))}
               </div>
@@ -242,11 +242,11 @@ export default function CreatorWorkspace({ user, onLogout, addToast, darkMode, t
                 <div className="flex items-center gap-2 mb-3">
                   <h2 className="text-sm font-bold text-gray-800 dark:text-gray-100">{weekLabel(wk)}</h2>
                   {wk === thisWeek && (
-                    <span className="text-[10px] font-bold uppercase tracking-wide text-emerald-600 bg-emerald-100 dark:bg-emerald-900/40 dark:text-emerald-300 rounded-full px-2 py-0.5">
+                    <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-600 bg-emerald-100 dark:bg-emerald-900/40 dark:text-emerald-300 rounded-full px-2 py-0.5">
                       esta semana
                     </span>
                   )}
-                  <span className="text-[11px] text-gray-400">· {cards.length} producto{cards.length === 1 ? '' : 's'}</span>
+                  <span className="text-xs text-gray-400">· {cards.length} producto{cards.length === 1 ? '' : 's'}</span>
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
                   {cards.map(a => <CreatorCard key={a.id} a={a} addToast={addToast} />)}

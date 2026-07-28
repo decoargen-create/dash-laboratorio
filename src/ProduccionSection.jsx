@@ -47,7 +47,7 @@ const CHIP_CLS = {
 };
 const PersonaChip = ({ persona, onClick, small }) => (
   <button onClick={onClick}
-    className={`inline-flex items-center rounded font-bold uppercase tracking-wide ${small ? 'text-[9px] px-1.5 py-0.5' : 'text-[10px] px-2 py-0.5'} ${CHIP_CLS[personaColor(persona)]} ${onClick ? 'hover:opacity-80 transition' : ''}`}>
+    className={`inline-flex items-center rounded font-bold uppercase tracking-wide ${small ? 'text-[10px] px-1.5 py-0.5' : 'text-[11px] px-2 py-0.5'} ${CHIP_CLS[personaColor(persona)]} ${onClick ? 'hover:opacity-80 transition' : ''}`}>
     {persona || 'Sin asignar'}
   </button>
 );
@@ -55,7 +55,7 @@ const PersonaChip = ({ persona, onClick, small }) => (
 // Badge de persona más grande y prolijo (avatar con inicial + nombre).
 const PersonaBadge = ({ persona }) => (
   <span className={`inline-flex items-center gap-1.5 rounded-full pl-1 pr-2.5 py-0.5 ${CHIP_CLS[personaColor(persona)]}`}>
-    <span className="w-5 h-5 rounded-full bg-black/20 flex items-center justify-center text-[10px] font-black uppercase">
+    <span className="w-5 h-5 rounded-full bg-black/20 flex items-center justify-center text-[11px] font-black uppercase">
       {(persona || '?').charAt(0)}
     </span>
     <span className="text-[12px] font-extrabold">{persona || 'Sin asignar'}</span>
@@ -133,7 +133,7 @@ function ResumenSemana({ asigs, filtroSinAsignar = false, onToggleSinAsignar }) 
     <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/60 overflow-hidden">
       {/* Resumen del EQUIPO (todos juntos) */}
       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-100 dark:border-gray-700/60 flex-wrap">
-        <span className="text-[10px] font-bold uppercase tracking-wide text-gray-400 mr-auto">Semana del equipo</span>
+        <span className="text-[11px] font-bold uppercase tracking-wide text-gray-400 mr-auto">Semana del equipo</span>
         <div className="flex items-center gap-1.5 flex-wrap">
           {[
             ['Asignados', totals.asignados, 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-200'],
@@ -143,13 +143,13 @@ function ResumenSemana({ asigs, filtroSinAsignar = false, onToggleSinAsignar }) 
           ].map(([lab, val, cls]) => (
             <span key={lab} className={`inline-flex items-baseline gap-1.5 rounded-full px-2.5 py-1 font-bold ${cls}`}>
               <span className="tabular-nums text-sm leading-none">{val}</span>
-              <span className="text-[9px] uppercase tracking-wide opacity-80">{lab}</span>
+              <span className="text-[10px] uppercase tracking-wide opacity-80">{lab}</span>
             </span>
           ))}
           {sinAsignar > 0 && (
             <button onClick={onToggleSinAsignar}
               title={filtroSinAsignar ? 'Quitar el filtro' : 'Ver solo las tarjetas sin asignar'}
-              className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-bold transition ${filtroSinAsignar ? 'bg-amber-500 text-white ring-2 ring-amber-300 dark:ring-amber-700' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-900/60'}`}>
+              className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold transition ${filtroSinAsignar ? 'bg-amber-500 text-white ring-2 ring-amber-300 dark:ring-amber-700' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-900/60'}`}>
               <AlertTriangle size={10} /> {sinAsignar} sin asignar
             </button>
           )}
@@ -178,7 +178,7 @@ function ResumenSemana({ asigs, filtroSinAsignar = false, onToggleSinAsignar }) 
               <div key={s.persona}
                 className="relative min-w-[218px] max-w-[270px] flex-1 rounded-2xl border border-pink-200/50 dark:border-white/10 bg-gradient-to-br from-pink-500/10 via-violet-500/5 to-transparent p-3 flex flex-col gap-2.5 transition hover:-translate-y-0.5 hover:shadow-lg hover:shadow-pink-900/10">
                 {esMVP && (
-                  <span className="absolute -top-2 right-3 text-[9px] font-black uppercase tracking-wide bg-gradient-to-r from-amber-400 to-yellow-500 text-amber-950 rounded-full px-2 py-0.5 shadow" title="La persona con más aprobados de la semana">
+                  <span className="absolute -top-2 right-3 text-[10px] font-black uppercase tracking-wide bg-gradient-to-r from-amber-400 to-yellow-500 text-amber-950 rounded-full px-2 py-0.5 shadow" title="La persona con más aprobados de la semana">
                     👑 MVP
                   </span>
                 )}
@@ -192,11 +192,11 @@ function ResumenSemana({ asigs, filtroSinAsignar = false, onToggleSinAsignar }) 
                     </div>
                   </div>
                   <div className="min-w-0">
-                    <span className={`inline-flex items-center gap-1.5 rounded-full pl-1 pr-2.5 py-0.5 text-[11px] font-bold ${CHIP_CLS[personaColor(s.persona)]}`}>
-                      <span className="w-4 h-4 rounded-full bg-black/20 flex items-center justify-center text-[9px] font-black">{s.persona.charAt(0).toUpperCase()}</span>
+                    <span className={`inline-flex items-center gap-1.5 rounded-full pl-1 pr-2.5 py-0.5 text-xs font-bold ${CHIP_CLS[personaColor(s.persona)]}`}>
+                      <span className="w-4 h-4 rounded-full bg-black/20 flex items-center justify-center text-[10px] font-black">{s.persona.charAt(0).toUpperCase()}</span>
                       {s.persona}
                     </span>
-                    <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-1">{copyPct}</div>
+                    <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">{copyPct}</div>
                   </div>
                 </div>
 
@@ -209,13 +209,13 @@ function ResumenSemana({ asigs, filtroSinAsignar = false, onToggleSinAsignar }) 
                   ].map(([lab, val, cls]) => (
                     <div key={lab} className={`flex-1 rounded-lg py-1 ${cls}`} title={`${val} ${lab}`}>
                       <div className="text-sm font-extrabold tabular-nums leading-none">{val}</div>
-                      <div className="text-[8px] uppercase tracking-wide opacity-80 mt-0.5">{lab}</div>
+                      <div className="text-[9.5px] uppercase tracking-wide opacity-80 mt-0.5">{lab}</div>
                     </div>
                   ))}
                 </div>
 
                 {/* Pie: bonus + ritmo */}
-                <div className="flex items-center justify-between border-t border-gray-200/60 dark:border-white/10 pt-2 text-[10px]">
+                <div className="flex items-center justify-between border-t border-gray-200/60 dark:border-white/10 pt-2 text-[11px]">
                   {s.bonus > 0
                     ? <span className="font-extrabold text-emerald-600 dark:text-emerald-400">🎯 ¡Bonus!</span>
                     : <span className="text-gray-400">{faltaBonus} más y hay bonus 🎯</span>}
@@ -339,7 +339,7 @@ export default function ProduccionSection({ addToast }) {
 
       {/* Aviso de filtro activo */}
       {soloSinAsignar && (
-        <div className="flex items-center gap-2 text-[11px] font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-1.5">
+        <div className="flex items-center gap-2 text-xs font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-1.5">
           <AlertTriangle size={12} /> Mostrando solo lo sin asignar
           <button onClick={() => setSoloSinAsignar(false)} className="ml-auto inline-flex items-center gap-1 hover:underline">
             <X size={12} /> quitar filtro
@@ -361,7 +361,7 @@ export default function ProduccionSection({ addToast }) {
               <div className={`flex items-center gap-2 px-2.5 py-1.5 mb-2 rounded-lg ${col.hdr}`}>
                 <span className="text-sm leading-none">{col.emoji}</span>
                 <span className={`text-xs font-bold uppercase tracking-wide ${col.text}`}>{ESTADO_LABELS[col.key]}</span>
-                <span className="ml-auto text-[11px] font-mono text-gray-400 tabular-nums">{cards.length}</span>
+                <span className="ml-auto text-xs font-mono text-gray-400 tabular-nums">{cards.length}</span>
               </div>
               <div className="space-y-2 min-h-[60px]">
                 {cards.map(a => (
@@ -370,7 +370,7 @@ export default function ProduccionSection({ addToast }) {
                     onAssign={(p) => assignPersona(a.id, p)} />
                 ))}
                 {cards.length === 0 && (
-                  <div className="text-center text-[11px] text-gray-300 dark:text-gray-600 py-4 select-none">
+                  <div className="text-center text-xs text-gray-300 dark:text-gray-600 py-4 select-none">
                     {col.empty}
                   </div>
                 )}
@@ -462,13 +462,13 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
               <>
                 {team.length > 5 && (
                   <input autoFocus value={menuQ} onChange={e => setMenuQ(e.target.value)} placeholder="Buscar…"
-                    className="mb-0.5 px-2 py-1 text-[11px] bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded focus:outline-none focus:ring-1 focus:ring-brand-500" />
+                    className="mb-0.5 px-2 py-1 text-xs bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded focus:outline-none focus:ring-1 focus:ring-brand-500" />
                 )}
                 {team
                   .filter(m => !menuQ.trim() || `${m.display_name || ''} ${m.email || ''}`.toLowerCase().includes(menuQ.trim().toLowerCase()))
                   .map(m => (
                     <button key={m.id} onClick={() => { assignCreator(a.id, { creatorId: m.id, persona: m.display_name || m.email }); setMenu(false); setMenuQ(''); }}
-                      className={`text-left text-[11px] font-semibold px-2 py-1 rounded hover:bg-brand-50 dark:hover:bg-brand-900/30 whitespace-nowrap ${a.creatorId === m.id ? 'text-brand-600 dark:text-brand-300' : 'text-gray-700 dark:text-gray-200'}`}>
+                      className={`text-left text-xs font-semibold px-2 py-1 rounded hover:bg-brand-50 dark:hover:bg-brand-900/30 whitespace-nowrap ${a.creatorId === m.id ? 'text-brand-600 dark:text-brand-300' : 'text-gray-700 dark:text-gray-200'}`}>
                       {a.creatorId === m.id ? '✓ ' : ''}{m.display_name || m.email}
                     </button>
                   ))}
@@ -477,14 +477,14 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
               <>
                 {personas.map(p => (
                   <button key={p} onClick={() => { onAssign(p); setMenu(false); }}
-                    className="text-left text-[11px] font-semibold px-2 py-1 rounded hover:bg-brand-50 dark:hover:bg-brand-900/30 text-gray-700 dark:text-gray-200 whitespace-nowrap">{p}</button>
+                    className="text-left text-xs font-semibold px-2 py-1 rounded hover:bg-brand-50 dark:hover:bg-brand-900/30 text-gray-700 dark:text-gray-200 whitespace-nowrap">{p}</button>
                 ))}
-                <div className="text-[9px] text-gray-400 px-2 py-1 border-t border-gray-100 dark:border-gray-700">Creá cuentas en "Equipo" para que las vean en su tablero.</div>
+                <div className="text-[10px] text-gray-400 px-2 py-1 border-t border-gray-100 dark:border-gray-700">Creá cuentas en "Equipo" para que las vean en su tablero.</div>
               </>
             )}
             {(a.persona || a.creatorId) && (
               <button onClick={() => { assignCreator(a.id, { creatorId: null, persona: '' }); setMenu(false); }}
-                className="text-left text-[11px] px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 border-t border-gray-100 dark:border-gray-700 mt-0.5">Sin asignar</button>
+                className="text-left text-xs px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 border-t border-gray-100 dark:border-gray-700 mt-0.5">Sin asignar</button>
             )}
           </div>
         )}
@@ -492,7 +492,7 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
       </div>
 
       {/* Meta: subidos · aprobados ✓ · brief · trabada · botón de mover */}
-      <div className="mt-2 pl-4 flex items-center gap-2.5 text-[11px] text-gray-500 dark:text-gray-400">
+      <div className="mt-2 pl-5 flex items-center gap-2.5 text-xs text-gray-500 dark:text-gray-400">
         <span className="inline-flex items-center gap-1" title={`${subidos} creativos subidos`}>
           <Film size={12} className="text-emerald-500" /><b className="text-gray-700 dark:text-gray-200">{subidos}</b> subidos
         </span>
@@ -502,7 +502,7 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
           </b>
         )}
         {a.brief?.trim() && <FileText size={12} className="text-gray-400" title="Tiene brief" />}
-        {trabada && <span className="text-[9px] font-bold text-amber-600 dark:text-amber-400" title="Hace más de 24h que está en revisión">🐢 +24h</span>}
+        {trabada && <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400" title="Hace más de 24h que está en revisión">🐢 +24h</span>}
         {/* Mover de columna (clave en celular): punto de color + chevron */}
         <div className="relative ml-auto" onClick={e => e.stopPropagation()}>
           <button onClick={() => setMoveMenu(v => !v)} title={`${ESTADO_LABELS[a.estado]} — mover a…`}
@@ -512,10 +512,10 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
           </button>
           {moveMenu && (
             <div className="absolute right-0 top-6 z-20 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl p-1 flex flex-col gap-0.5 min-w-[120px]">
-              <span className="text-[8px] font-bold uppercase text-gray-400 px-2 pt-1">Mover a</span>
+              <span className="text-[9.5px] font-bold uppercase text-gray-400 px-2 pt-1">Mover a</span>
               {ESTADOS.map(e => (
                 <button key={e} onClick={() => { updateAssignment(a.id, { estado: e }); setMoveMenu(false); }}
-                  className={`text-left text-[11px] font-semibold px-2 py-1 rounded whitespace-nowrap ${a.estado === e ? 'bg-brand-50 dark:bg-brand-900/30 text-brand-600 dark:text-brand-300' : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200'}`}>
+                  className={`text-left text-xs font-semibold px-2 py-1 rounded whitespace-nowrap ${a.estado === e ? 'bg-brand-50 dark:bg-brand-900/30 text-brand-600 dark:text-brand-300' : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200'}`}>
                   {a.estado === e ? '✓ ' : ''}{ESTADO_LABELS[e]}
                 </button>
               ))}
@@ -524,7 +524,7 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
         </div>
       </div>
       {subidos > 0 && (
-        <div className="mt-1.5 pl-4">
+        <div className="mt-1.5 pl-5">
           <div className="h-1 rounded-full bg-gray-100 dark:bg-gray-700 overflow-hidden">
             <div className="h-full bg-emerald-500 transition-all" style={{ width: `${Math.round((aprob / subidos) * 100)}%` }} />
           </div>
@@ -532,32 +532,32 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
       )}
 
       {/* Acciones grandes (mock Estudio): Subir gradiente + Drive outline + estado */}
-      <div className="mt-2.5 pl-4 flex items-stretch gap-1.5">
+      <div className="mt-2.5 pl-5 flex items-stretch gap-1.5">
         {prog ? (
-          <span className="flex-1 inline-flex items-center justify-center gap-1.5 py-1.5 text-[11px] font-bold text-brand-600 dark:text-brand-400">
+          <span className="flex-1 inline-flex items-center justify-center gap-1.5 py-1.5 text-xs font-bold text-brand-600 dark:text-brand-400">
             <Loader2 size={12} className="animate-spin" /> Subiendo {prog.total ? `${prog.i + 1}/${prog.total}` : ''}…
           </span>
         ) : (
           <button onClick={e => { e.stopPropagation(); fileRef.current?.click(); }}
-            className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 text-[11.5px] font-extrabold text-white bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 rounded-lg transition shadow-sm">
+            className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 text-xs font-extrabold text-white bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 rounded-lg transition shadow-sm">
             <UploadCloud size={13} /> Subir
           </button>
         )}
         {folderLink && (
           <a href={folderLink} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
-            className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 text-[11.5px] font-extrabold text-gray-500 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:border-pink-400 hover:text-pink-600 dark:hover:text-pink-300 rounded-lg transition">
+            className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 text-xs font-extrabold text-gray-500 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:border-pink-400 hover:text-pink-600 dark:hover:text-pink-300 rounded-lg transition">
             ▶ Drive
           </a>
         )}
         {a.estado === 'revision' && subidos > 0 && (
           <button onClick={aprobarTodos}
-            className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 text-[11.5px] font-extrabold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 rounded-lg transition">
+            className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 text-xs font-extrabold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 rounded-lg transition">
             <CheckCircle2 size={13} /> Aprobar
           </button>
         )}
         {a.estado === 'aprobado' && (
           <button onClick={publicar}
-            className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 text-[11.5px] font-extrabold text-white bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 rounded-lg transition shadow-sm">
+            className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 text-xs font-extrabold text-white bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 rounded-lg transition shadow-sm">
             🚀 Publicar
           </button>
         )}
@@ -617,7 +617,7 @@ function AgregarProductoModal({ productos, personas, team = [], asigs, weekKey, 
         </div>
         <div className="p-5 space-y-4">
           <div>
-            <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">
+            <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">
               Productos {selected.size > 0 && <span className="text-brand-500">· {selected.size} elegido{selected.size === 1 ? '' : 's'}</span>}
             </span>
             {/* Buscador — filtra la lista por nombre */}
@@ -644,14 +644,14 @@ function AgregarProductoModal({ productos, personas, team = [], asigs, weekKey, 
                   <label key={p.id} className={`flex items-center gap-2.5 px-3 py-2 text-sm ${ya ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800'}`}>
                     <input type="checkbox" checked={sel} disabled={ya} onChange={() => toggle(p.id)} className="w-4 h-4 accent-brand-600" />
                     <span className="flex-1 text-gray-800 dark:text-gray-100 truncate">{p.nombre}</span>
-                    {ya && <span className="text-[10px] text-gray-400">ya está</span>}
+                    {ya && <span className="text-[11px] text-gray-400">ya está</span>}
                   </label>
                 );
               })}
             </div>
           </div>
           <div>
-            <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">¿Para quién? (opcional)</span>
+            <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">¿Para quién? (opcional)</span>
             {team.length > 0 ? (
               <div className="flex flex-wrap gap-1.5">
                 {team.map(m => {
@@ -659,7 +659,7 @@ function AgregarProductoModal({ productos, personas, team = [], asigs, weekKey, 
                   const sel = creatorId === m.id;
                   return (
                     <button key={m.id} onClick={() => setCreatorId(sel ? '' : m.id)}
-                      className={`text-[11px] font-bold px-2.5 py-1 rounded-md transition ${sel ? CHIP_CLS[personaColor(nombre)] : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200'}`}>
+                      className={`text-xs font-bold px-2.5 py-1 rounded-md transition ${sel ? CHIP_CLS[personaColor(nombre)] : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200'}`}>
                       {nombre}
                     </button>
                   );
@@ -669,9 +669,9 @@ function AgregarProductoModal({ productos, personas, team = [], asigs, weekKey, 
               <div className="flex flex-wrap gap-1.5">
                 {personas.map(p => (
                   <button key={p} onClick={() => setPersona(persona === p ? '' : p)}
-                    className={`text-[11px] font-bold px-2.5 py-1 rounded-md transition ${persona === p ? CHIP_CLS[personaColor(p)] : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200'}`}>{p}</button>
+                    className={`text-xs font-bold px-2.5 py-1 rounded-md transition ${persona === p ? CHIP_CLS[personaColor(p)] : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200'}`}>{p}</button>
                 ))}
-                <p className="w-full text-[9px] text-gray-400 mt-1">Tip: creá cuentas en "Equipo" para que cada uno vea lo suyo.</p>
+                <p className="w-full text-[10px] text-gray-400 mt-1">Tip: creá cuentas en "Equipo" para que cada uno vea lo suyo.</p>
               </div>
             )}
           </div>
@@ -740,7 +740,7 @@ function ReasignarModal({ asigs, team, weekKey, onClose, addToast }) {
           ) : (
             <>
               <label className="flex flex-col gap-1">
-                <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400">Mover las tarjetas de…</span>
+                <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400">Mover las tarjetas de…</span>
                 <select value={from} onChange={e => setFrom(e.target.value)}
                   className="px-2.5 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500">
                   <option value="">Elegí…</option>
@@ -748,7 +748,7 @@ function ReasignarModal({ asigs, team, weekKey, onClose, addToast }) {
                 </select>
               </label>
               <label className="flex flex-col gap-1">
-                <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400">…a la cuenta de</span>
+                <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400">…a la cuenta de</span>
                 <select value={toId} onChange={e => setToId(e.target.value)}
                   className="px-2.5 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500">
                   <option value="">Elegí…</option>
@@ -756,7 +756,7 @@ function ReasignarModal({ asigs, team, weekKey, onClose, addToast }) {
                 </select>
               </label>
               {sel && destino && (
-                <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                <p className="text-xs text-gray-500 dark:text-gray-400">
                   Se mueven <b>{sel.n}</b> tarjeta{sel.n === 1 ? '' : 's'} de <b>{sel.label}</b> a <b>{destino.display_name || destino.email}</b> (va a verlas en su tablero).
                 </p>
               )}
@@ -796,17 +796,17 @@ function HistorialTarjeta({ a }) {
       {/* Cabecera desplegable: cerrada muestra solo el último movimiento */}
       <button onClick={() => setAbierto(o => !o)} className="w-full flex items-center gap-1.5 text-left group">
         <History size={13} className="text-gray-400" />
-        <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400">Historial</span>
-        <span className="text-[10px] text-gray-400 tabular-nums">({eventos.length})</span>
+        <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400">Historial</span>
+        <span className="text-[11px] text-gray-400 tabular-nums">({eventos.length})</span>
         {!abierto && ultimo && (
-          <span className="text-[10px] text-gray-400 truncate">· último: {label(ultimo)} — {fmt(ultimo.ts)}</span>
+          <span className="text-[11px] text-gray-400 truncate">· último: {label(ultimo)} — {fmt(ultimo.ts)}</span>
         )}
         <ChevronDown size={13} className={`ml-auto shrink-0 text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-200 transition-transform ${abierto ? 'rotate-180' : ''}`} />
       </button>
       {abierto && (
         <ol className="mt-2 space-y-2 border-l border-gray-200 dark:border-gray-700 pl-3.5 ml-1 max-h-44 overflow-y-auto">
           {[...eventos].reverse().map((ev, i) => (
-            <li key={i} className="relative text-[11px] leading-tight">
+            <li key={i} className="relative text-xs leading-tight">
               <span className="absolute -left-[17px] top-1 w-2 h-2 rounded-full bg-brand-400 ring-2 ring-white dark:ring-gray-900" />
               <span className="font-semibold text-gray-700 dark:text-gray-200">{label(ev)}</span>
               <div className="text-gray-400">{ev.byName || 'Alguien'} · {fmt(ev.ts)}</div>
@@ -844,7 +844,7 @@ function CardDetailModal({ a, personas, team = [], onClose, addToast }) {
             <h3 className="text-base font-bold text-gray-900 dark:text-gray-100">{a.productoNombre || 'Producto'}</h3>
             <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
               <PersonaChip persona={a.persona} />
-              <span className="text-[10px] text-gray-400">{ESTADO_LABELS[a.estado]}</span>
+              <span className="text-[11px] text-gray-400">{ESTADO_LABELS[a.estado]}</span>
             </div>
           </div>
           <button onClick={() => { saveBrief(); onClose(); }} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
@@ -853,7 +853,7 @@ function CardDetailModal({ a, personas, team = [], onClose, addToast }) {
         <div className="p-5 space-y-5 max-h-[70vh] overflow-y-auto">
           {/* Asignar a una cuenta del equipo (login del creator) */}
           <div>
-            <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Asignar a (cuenta)</span>
+            <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Asignar a (cuenta)</span>
             <div className="relative">
               <select value={a.creatorId || ''} onChange={e => onAssignCuenta(e.target.value)}
                 className="appearance-none w-full pl-3 pr-8 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500">
@@ -862,7 +862,7 @@ function CardDetailModal({ a, personas, team = [], onClose, addToast }) {
               </select>
               <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
             </div>
-            <p className="text-[10px] text-gray-400 mt-1">
+            <p className="text-[11px] text-gray-400 mt-1">
               {team.length === 0
                 ? 'No hay cuentas del equipo todavía. Creá una en "Equipo".'
                 : 'El chico asignado va a ver esta tarjeta en su tablero y va a poder subir los creativos.'}
@@ -875,21 +875,21 @@ function CardDetailModal({ a, personas, team = [], onClose, addToast }) {
           <div className="grid sm:grid-cols-2 gap-4">
             {team.length === 0 && (
               <div>
-                <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Persona</span>
+                <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Persona</span>
                 <div className="flex flex-wrap gap-1.5">
                   {personas.map(p => (
                     <button key={p} onClick={() => assignPersona(a.id, a.persona === p ? '' : p)}
-                      className={`text-[11px] font-bold px-2.5 py-1 rounded-md transition ${a.persona === p ? CHIP_CLS[personaColor(p)] : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200'}`}>{p}</button>
+                      className={`text-xs font-bold px-2.5 py-1 rounded-md transition ${a.persona === p ? CHIP_CLS[personaColor(p)] : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200'}`}>{p}</button>
                   ))}
                 </div>
               </div>
             )}
             <div>
-              <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Estado</span>
+              <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Estado</span>
               <div className="flex flex-wrap gap-1">
                 {ESTADOS.map(e => (
                   <button key={e} onClick={() => updateAssignment(a.id, { estado: e })}
-                    className={`text-[10px] font-bold px-2 py-1 rounded-md transition ${a.estado === e ? 'bg-brand-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200'}`}>
+                    className={`text-[11px] font-bold px-2 py-1 rounded-md transition ${a.estado === e ? 'bg-brand-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200'}`}>
                     {ESTADO_LABELS[e]}
                   </button>
                 ))}
@@ -900,7 +900,7 @@ function CardDetailModal({ a, personas, team = [], onClose, addToast }) {
           {/* Cambios pedidos (lo que ve el creativo) */}
           {(a.nota || '').trim() && (
             <div className="rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-3 py-2">
-              <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase text-amber-700 dark:text-amber-300 mb-0.5"><AlertTriangle size={11} /> Cambios pedidos</div>
+              <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase text-amber-700 dark:text-amber-300 mb-0.5"><AlertTriangle size={11} /> Cambios pedidos</div>
               <p className="text-xs text-amber-800 dark:text-amber-200 whitespace-pre-wrap">{a.nota}</p>
             </div>
           )}
@@ -909,7 +909,7 @@ function CardDetailModal({ a, personas, team = [], onClose, addToast }) {
           <div>
             <div className="flex items-center gap-1.5 mb-1.5">
               <FileText size={13} className="text-gray-400" />
-              <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400">Brief / guiones</span>
+              <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400">Brief / guiones</span>
             </div>
             <textarea value={brief} onChange={e => setBrief(e.target.value)} onBlur={saveBrief}
               rows={7} placeholder="Pegá acá las consignas, los guiones de los 9 videos, links de Drive (material / creativos), lo que haga falta…"
@@ -927,7 +927,7 @@ function CardDetailModal({ a, personas, team = [], onClose, addToast }) {
             return (
               <div>
                 <div className="flex items-center gap-3 flex-wrap">
-                  <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400">Videos aprobados</span>
+                  <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400">Videos aprobados</span>
                   <div className="flex items-center gap-1.5">
                     <button onClick={() => updateAssignment(a.id, { videosAprobados: Math.max(0, aprob - 1) })}
                       className="w-6 h-6 rounded bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 text-gray-500 font-bold leading-none">−</button>
@@ -944,10 +944,10 @@ function CardDetailModal({ a, personas, team = [], onClose, addToast }) {
                     </button>
                   )}
                 </div>
-                <p className="text-[10px] text-gray-400 mt-1.5">
+                <p className="text-[11px] text-gray-400 mt-1.5">
                   El total es la cantidad de videos subidos ({subidos}). "Aprobar todos" marca todo aprobado y pasa la tarjeta a <b>Aprobado</b> (lista para publicar).
                 </p>
-                {esCompleto(a.estado) && <span className="mt-1.5 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1"><CheckCircle2 size={13} /> Cuenta para el pago</span>}
+                {esCompleto(a.estado) && <span className="mt-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1"><CheckCircle2 size={13} /> Cuenta para el pago</span>}
               </div>
             );
           })()}

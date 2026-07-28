@@ -596,8 +596,9 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
 function AgregarProductoModal({ productos, personas, team = [], asigs, weekKey, onClose, addToast }) {
   useEscape(onClose);
   const [selected, setSelected] = useState(() => new Set());
-  const [creatorId, setCreatorId] = useState('');
-  const [persona, setPersona] = useState('');
+  // Multi-persona con MULTIPLICADOR: click en un chip cicla ×1 → ×2 → ×3 → sacar.
+  // key = id de cuenta del equipo, o "p:Nombre" para etiquetas sin cuenta.
+  const [counts, setCounts] = useState(() => new Map());
   const [q, setQ] = useState('');
 
   const yaEnSemana = useMemo(() => new Set(asigs.map(a => String(a.productoId))), [asigs]);
@@ -613,19 +614,40 @@ function AgregarProductoModal({ productos, personas, team = [], asigs, weekKey, 
     return n;
   });
 
+  const cycle = (key) => setCounts(prev => {
+    const n = new Map(prev);
+    const c = (n.get(key) || 0) + 1;
+    if (c > 3) n.delete(key); else n.set(key, c);
+    return n;
+  });
+
+  // Destinos activos (persona × cantidad). Sin ninguno → tarjetas sin asignar.
+  const targets = [...counts.entries()].filter(([, c]) => c > 0);
+  const copiasPorProducto = targets.reduce((s, [, c]) => s + c, 0) || 1;
+  const totalTarjetas = selected.size * copiasPorProducto;
+
   const crear = () => {
     const ids = [...selected];
     if (ids.length === 0) { addToast?.({ type: 'warning', message: 'Elegí al menos un producto.' }); return; }
-    const m = team.find(t => t.id === creatorId);
-    const per = m ? (m.display_name || m.email) : persona;
     let n = 0;
     ids.forEach(id => {
       const prod = productos.find(p => String(p.id) === id);
       if (!prod) return;
-      addAssignment({ weekKey, productoId: prod.id, productoNombre: prod.nombre, persona: per, creatorId: m ? m.id : null });
-      n++;
+      if (targets.length === 0) {
+        addAssignment({ weekKey, productoId: prod.id, productoNombre: prod.nombre, persona: '', creatorId: null });
+        n++;
+        return;
+      }
+      targets.forEach(([key, c]) => {
+        const m = team.find(t => t.id === key);
+        const per = m ? (m.display_name || m.email) : key.slice(2); // "p:Nombre"
+        for (let i = 0; i < c; i++) {
+          addAssignment({ weekKey, productoId: prod.id, productoNombre: prod.nombre, persona: per, creatorId: m ? m.id : null });
+          n++;
+        }
+      });
     });
-    addToast?.({ type: 'success', message: `${n} producto${n === 1 ? '' : 's'} agregado${n === 1 ? '' : 's'}${per ? ` para ${per}` : ''}` });
+    addToast?.({ type: 'success', message: `🎬 ${n} tarjeta${n === 1 ? '' : 's'} creada${n === 1 ? '' : 's'} para ${weekLabel(weekKey)}` });
     onClose();
   };
 
@@ -663,45 +685,61 @@ function AgregarProductoModal({ productos, personas, team = [], asigs, weekKey, 
                 const ya = yaEnSemana.has(String(p.id));
                 const sel = selected.has(String(p.id));
                 return (
-                  <label key={p.id} className={`flex items-center gap-2.5 px-3 py-2 text-sm ${ya ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800'}`}>
-                    <input type="checkbox" checked={sel} disabled={ya} onChange={() => toggle(p.id)} className="w-4 h-4 accent-brand-600" />
+                  <label key={p.id} className="flex items-center gap-2.5 px-3 py-2 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800">
+                    <input type="checkbox" checked={sel} onChange={() => toggle(p.id)} className="w-4 h-4 accent-brand-600" />
                     <span className="flex-1 text-gray-800 dark:text-gray-100 truncate">{p.nombre}</span>
-                    {ya && <span className="text-[11px] text-gray-400">ya está</span>}
+                    {/* Repetir está PERMITIDO: Fran puede hacer Tiva ×2 y Wanda ×3.
+                        Solo avisamos que ya tiene tarjetas esta semana. */}
+                    {ya && <span className="text-[11px] text-gray-400" title="Ya tiene tarjetas esta semana — podés agregarle más igual">ya está · se puede repetir</span>}
                   </label>
                 );
               })}
             </div>
           </div>
           <div>
-            <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">¿Para quién? (opcional)</span>
-            {team.length > 0 ? (
-              <div className="flex flex-wrap gap-1.5">
-                {team.map(m => {
-                  const nombre = m.display_name || m.email;
-                  const sel = creatorId === m.id;
-                  return (
-                    <button key={m.id} onClick={() => setCreatorId(sel ? '' : m.id)}
-                      className={`text-xs font-bold px-2.5 py-1 rounded-md transition ${sel ? CHIP_CLS[personaColor(nombre)] : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200'}`}>
-                      {nombre}
-                    </button>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="flex flex-wrap gap-1.5">
-                {personas.map(p => (
-                  <button key={p} onClick={() => setPersona(persona === p ? '' : p)}
-                    className={`text-xs font-bold px-2.5 py-1 rounded-md transition ${persona === p ? CHIP_CLS[personaColor(p)] : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200'}`}>{p}</button>
-                ))}
-                <p className="w-full text-[10px] text-gray-400 mt-1">Tip: creá cuentas en "Equipo" para que cada uno vea lo suyo.</p>
-              </div>
-            )}
+            <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">
+              ¿Para quién? <span className="normal-case font-medium text-gray-400">(tocá de nuevo para ×2 / ×3 — podés elegir a varios)</span>
+            </span>
+            {(() => {
+              // Chips con multiplicador: sirven para cuentas del equipo y, si no
+              // hay cuentas, para las etiquetas de siempre.
+              const opciones = team.length > 0
+                ? team.map(m => ({ key: m.id, nombre: m.display_name || m.email }))
+                : personas.map(p => ({ key: `p:${p}`, nombre: p }));
+              return (
+                <div className="flex flex-wrap gap-1.5">
+                  {opciones.map(({ key, nombre }) => {
+                    const c = counts.get(key) || 0;
+                    return (
+                      <button key={key} onClick={() => cycle(key)}
+                        title={c === 0 ? `Asignarle a ${nombre}` : c < 3 ? `${nombre} ×${c} — tocá para ×${c + 1}` : `${nombre} ×3 — tocá para sacar`}
+                        className={`text-xs font-bold px-2.5 py-1 rounded-md transition ${c > 0 ? CHIP_CLS[personaColor(nombre)] : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200'}`}>
+                        {nombre}{c > 1 && <span className="ml-1 rounded bg-black/25 px-1 text-[11px] tabular-nums">×{c}</span>}
+                      </button>
+                    );
+                  })}
+                  {team.length === 0 && (
+                    <p className="w-full text-[10px] text-gray-400 mt-1">Tip: creá cuentas en "Equipo" para que cada uno vea lo suyo.</p>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         </div>
         <div className="flex items-center gap-2 px-5 py-3.5 border-t border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
+          {/* Resumen del reparto: "2 productos × (Fran ×2 + Wanda ×3)" */}
+          {selected.size > 0 && targets.length > 0 && (
+            <span className="text-[11px] text-gray-500 dark:text-gray-400 truncate">
+              {selected.size} producto{selected.size === 1 ? '' : 's'} × ({targets.map(([key, c]) => {
+                const m = team.find(t => t.id === key);
+                const nombre = m ? (m.display_name || m.email) : key.slice(2);
+                return c > 1 ? `${nombre} ×${c}` : nombre;
+              }).join(' + ')})
+            </span>
+          )}
           <button onClick={crear} disabled={selected.size === 0}
             className="ml-auto inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed">
-            <Plus size={15} /> Crear {selected.size > 0 ? `${selected.size} ` : ''}tarjeta{selected.size === 1 ? '' : 's'}
+            <Plus size={15} /> Crear {selected.size > 0 ? `${totalTarjetas} ` : ''}tarjeta{totalTarjetas === 1 ? '' : 's'}
           </button>
         </div>
       </div>

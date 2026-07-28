@@ -88,7 +88,7 @@ export default function TeamModal({ onClose, addToast }) {
           <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white"><Users size={18} /></div>
           <div className="flex-1">
             <h3 className="text-base font-bold text-gray-900 dark:text-gray-100">Equipo</h3>
-            <p className="text-[11px] text-gray-500 dark:text-gray-400">Cuentas de los creativos. Cada uno entra y ve solo su tablero.</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Cuentas de los creativos. Cada uno entra y ve solo su tablero.</p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
         </div>
@@ -96,7 +96,7 @@ export default function TeamModal({ onClose, addToast }) {
         <div className="p-5 space-y-5 max-h-[70vh] overflow-y-auto">
           {/* Alta */}
           <form onSubmit={onCreate} className="rounded-xl border border-gray-200 dark:border-gray-700 p-4 space-y-3">
-            <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400">
+            <div className="flex items-center gap-1.5 text-xs font-bold uppercase text-gray-500 dark:text-gray-400">
               <UserPlus size={13} /> Crear cuenta nueva
             </div>
             <div className="grid sm:grid-cols-2 gap-2">
@@ -117,7 +117,7 @@ export default function TeamModal({ onClose, addToast }) {
               className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition disabled:opacity-50">
               {busy ? <><Loader2 size={15} className="animate-spin" /> Creando…</> : <><UserPlus size={15} /> Crear cuenta</>}
             </button>
-            <p className="text-[10px] text-gray-400 leading-relaxed">
+            <p className="text-[11px] text-gray-400 leading-relaxed">
               La cuenta queda lista para entrar (sin email de confirmación). Pasale al chico el <b>email</b> y la <b>contraseña</b>.
             </p>
           </form>
@@ -132,7 +132,7 @@ export default function TeamModal({ onClose, addToast }) {
               </div>
               {[['Email', lastCreated.email, 'em'], ['Contraseña', lastCreated.password, 'pw']].map(([lbl, val, key]) => (
                 <div key={key} className="flex items-center gap-2 mb-1.5 last:mb-0">
-                  <span className="text-[10px] font-bold uppercase text-emerald-700/70 dark:text-emerald-400/70 w-20">{lbl}</span>
+                  <span className="text-[11px] font-bold uppercase text-emerald-700/70 dark:text-emerald-400/70 w-20">{lbl}</span>
                   <code className="flex-1 text-sm font-mono text-gray-800 dark:text-gray-100 bg-white dark:bg-gray-800 rounded px-2 py-1 border border-emerald-200 dark:border-emerald-800 truncate">{val}</code>
                   <button onClick={() => copy(val, key)} title="Copiar"
                     className="p-1.5 rounded-md text-emerald-700 hover:bg-emerald-100 dark:hover:bg-emerald-900/40">
@@ -145,7 +145,7 @@ export default function TeamModal({ onClose, addToast }) {
 
           {/* Lista */}
           <div>
-            <div className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 mb-2">
+            <div className="text-xs font-bold uppercase text-gray-500 dark:text-gray-400 mb-2">
               En el equipo {team.length > 0 && `(${team.length})`}
             </div>
             {team.length > 3 && (
@@ -168,7 +168,7 @@ export default function TeamModal({ onClose, addToast }) {
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="text-sm font-semibold text-gray-800 dark:text-gray-100 truncate">{m.display_name || m.email}</div>
-                      <div className="text-[11px] text-gray-400 truncate inline-flex items-center gap-1"><Mail size={10} /> {m.email}</div>
+                      <div className="text-xs text-gray-400 truncate inline-flex items-center gap-1"><Mail size={10} /> {m.email}</div>
                     </div>
                     <button onClick={() => onReset(m)} title="Cambiar contraseña"
                       className="p-1.5 rounded-md text-gray-400 hover:text-brand-600 hover:bg-gray-100 dark:hover:bg-gray-800"><KeyRound size={15} /></button>

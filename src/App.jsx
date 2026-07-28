@@ -2624,14 +2624,17 @@ function NavSection({ title, sectionKey, sidebarOpen, defaultOpen = true, childr
   }
   return (
     <div className="mt-3 first:mt-0">
+      {/* Título de categoría: más presencia que sus ítems (jerarquía correcta):
+          12px, extrabold, tracking amplio y mejor contraste. */}
       <button
         onClick={toggle}
-        className="flex items-center gap-1.5 px-4 mb-1 text-[10px] font-bold uppercase tracking-wider text-white/40 hover:text-white/70 transition w-full"
+        className="flex items-center gap-1.5 px-4 mb-1.5 text-xs font-extrabold uppercase tracking-[0.14em] text-white/65 hover:text-white/90 transition w-full"
       >
-        <ChevronDown size={10} className={`transition-transform duration-200 ${open ? '' : '-rotate-90'}`} />
+        <ChevronDown size={12} className={`transition-transform duration-200 ${open ? '' : '-rotate-90'}`} />
         {title}
       </button>
-      <div className={`space-y-1 overflow-hidden transition-all duration-200 ${open ? 'max-h-screen opacity-100' : 'max-h-0 opacity-0'}`}>
+      {/* Ítems con leve sangría para que se lean como hijos de la categoría */}
+      <div className={`space-y-1 pl-1.5 overflow-hidden transition-all duration-200 ${open ? 'max-h-screen opacity-100' : 'max-h-0 opacity-0'}`}>
         {children}
       </div>
     </div>

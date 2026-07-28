@@ -440,46 +440,23 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
     <div draggable={!prog}
       onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/prod-id', a.id); }}
       onClick={() => onOpen()}
-      className={`group bg-white dark:bg-gray-800 border rounded-xl p-2.5 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition cursor-pointer ${trabada ? 'border-amber-400/80 dark:border-amber-500/60 hover:border-amber-500' : 'border-gray-200 dark:border-gray-700 hover:border-brand-300 dark:hover:border-brand-600'}`}>
+      className={`group bg-white dark:bg-gray-800 border rounded-xl p-2.5 shadow-sm hover:shadow-lg hover:shadow-pink-500/10 hover:-translate-y-0.5 transition cursor-pointer ${trabada ? 'border-amber-400/80 dark:border-amber-500/60 hover:border-amber-500' : 'border-gray-200 dark:border-gray-700 hover:border-pink-300 dark:hover:border-pink-700/70'}`}>
+      {/* Título grande + persona a la derecha (como el mock del Estudio) */}
       <div className="flex items-start gap-1.5">
-        <GripVertical size={14} className="text-gray-300 dark:text-gray-600 mt-0.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition" />
-        <span className="text-sm font-bold text-gray-900 dark:text-gray-100 leading-tight flex-1">{a.productoNombre || 'Producto'}</span>
-        {/* Pill de estado clickeable → mover de columna (útil en celular, sin drag) */}
-        <div className="relative shrink-0" onClick={e => e.stopPropagation()}>
-          {/* Compacto: la columna ya dice el estado; acá solo el punto de color
-              + chevron para abrir "Mover a" (clave en celular). */}
-          <button onClick={() => setMoveMenu(v => !v)} title={`${ESTADO_LABELS[a.estado]} — mover a…`}
-            className="inline-flex items-center gap-1 px-1.5 py-1 rounded-md bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition">
-            <span className={`w-1.5 h-1.5 rounded-full ${(COLS.find(c => c.key === a.estado) || COLS[0]).dot}`} />
-            <ChevronDown size={10} />
-          </button>
-          {moveMenu && (
-            <div className="absolute right-0 top-6 z-20 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl p-1 flex flex-col gap-0.5 min-w-[120px]">
-              <span className="text-[8px] font-bold uppercase text-gray-400 px-2 pt-1">Mover a</span>
-              {ESTADOS.map(e => (
-                <button key={e} onClick={() => { updateAssignment(a.id, { estado: e }); setMoveMenu(false); }}
-                  className={`text-left text-[11px] font-semibold px-2 py-1 rounded whitespace-nowrap ${a.estado === e ? 'bg-brand-50 dark:bg-brand-900/30 text-brand-600 dark:text-brand-300' : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200'}`}>
-                  {a.estado === e ? '✓ ' : ''}{ESTADO_LABELS[e]}
-                </button>
-              ))}
-            </div>
+        <GripVertical size={14} className="text-gray-300 dark:text-gray-600 mt-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition" />
+        <span className="text-[15px] font-extrabold tracking-tight text-gray-900 dark:text-white leading-tight flex-1 min-w-0 truncate" title={a.productoNombre}>{a.productoNombre || 'Producto'}</span>
+        <div className="relative shrink-0 flex items-center gap-1" onClick={e => e.stopPropagation()}>
+          {/* Aviso compacto: etiqueta sin cuenta → nadie la ve en su tablero */}
+          {a.persona && !a.creatorId && (
+            <span className="text-amber-500 cursor-help" title="Sin cuenta asignada: ningún creativo la ve en su tablero. Tocá el nombre y elegí una cuenta del equipo.">
+              <AlertTriangle size={13} />
+            </span>
           )}
-        </div>
-      </div>
-
-      {/* Persona (badge grande) + menú de asignación por CUENTA del equipo */}
-      <div className="mt-2.5 pl-4 relative flex items-center gap-1.5 flex-wrap">
-        <span onClick={e => { e.stopPropagation(); setMenu(v => !v); }} className="cursor-pointer">
-          <PersonaBadge persona={a.persona} />
-        </span>
-        {/* Aviso compacto: etiqueta sin cuenta → nadie la ve en su tablero */}
-        {a.persona && !a.creatorId && (
-          <span className="text-amber-500 cursor-help" title="Sin cuenta asignada: ningún creativo la ve en su tablero. Tocá el nombre y elegí una cuenta del equipo.">
-            <AlertTriangle size={13} />
+          <span onClick={() => setMenu(v => !v)} className="cursor-pointer">
+            <PersonaBadge persona={a.persona} />
           </span>
-        )}
         {menu && (
-          <div className="absolute top-8 left-4 z-10 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl p-1 flex flex-col gap-0.5 min-w-[140px]"
+          <div className="absolute right-0 top-8 z-10 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl p-1 flex flex-col gap-0.5 min-w-[140px]"
             onClick={e => e.stopPropagation()}>
             {team.length > 0 ? (
               <>
@@ -511,21 +488,40 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
             )}
           </div>
         )}
+        </div>
       </div>
 
-      {/* Contadores: subidos + aprobados (sobre lo subido) + brief */}
-      <div className="mt-2 pl-4 flex items-center gap-2.5 text-[10px] text-gray-500 dark:text-gray-400">
+      {/* Meta: subidos · aprobados ✓ · brief · trabada · botón de mover */}
+      <div className="mt-2 pl-4 flex items-center gap-2.5 text-[11px] text-gray-500 dark:text-gray-400">
         <span className="inline-flex items-center gap-1" title={`${subidos} creativos subidos`}>
           <Film size={12} className="text-emerald-500" /><b className="text-gray-700 dark:text-gray-200">{subidos}</b> subidos
         </span>
         {subidos > 0 && (
-          <span className="inline-flex items-center gap-1" title="Aprobados sobre subidos">
-            <CheckCircle2 size={12} className={aprob >= subidos ? 'text-emerald-500' : 'text-gray-400'} />
-            <b className="text-gray-700 dark:text-gray-200">{aprob}/{subidos}</b>
-          </span>
+          <b className={`tabular-nums ${aprob >= subidos ? 'text-emerald-500' : 'text-gray-400'}`} title="Aprobados sobre subidos">
+            {aprob}/{subidos}{aprob >= subidos ? ' ✓' : ''}
+          </b>
         )}
         {a.brief?.trim() && <FileText size={12} className="text-gray-400" title="Tiene brief" />}
-        {trabada && <span className="ml-auto text-[9px] font-bold text-amber-600 dark:text-amber-400" title="Hace más de 24h que está en revisión">🐢 +24h</span>}
+        {trabada && <span className="text-[9px] font-bold text-amber-600 dark:text-amber-400" title="Hace más de 24h que está en revisión">🐢 +24h</span>}
+        {/* Mover de columna (clave en celular): punto de color + chevron */}
+        <div className="relative ml-auto" onClick={e => e.stopPropagation()}>
+          <button onClick={() => setMoveMenu(v => !v)} title={`${ESTADO_LABELS[a.estado]} — mover a…`}
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition">
+            <span className={`w-1.5 h-1.5 rounded-full ${(COLS.find(c => c.key === a.estado) || COLS[0]).dot}`} />
+            <ChevronDown size={10} />
+          </button>
+          {moveMenu && (
+            <div className="absolute right-0 top-6 z-20 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl p-1 flex flex-col gap-0.5 min-w-[120px]">
+              <span className="text-[8px] font-bold uppercase text-gray-400 px-2 pt-1">Mover a</span>
+              {ESTADOS.map(e => (
+                <button key={e} onClick={() => { updateAssignment(a.id, { estado: e }); setMoveMenu(false); }}
+                  className={`text-left text-[11px] font-semibold px-2 py-1 rounded whitespace-nowrap ${a.estado === e ? 'bg-brand-50 dark:bg-brand-900/30 text-brand-600 dark:text-brand-300' : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200'}`}>
+                  {a.estado === e ? '✓ ' : ''}{ESTADO_LABELS[e]}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
       {subidos > 0 && (
         <div className="mt-1.5 pl-4">
@@ -535,34 +531,34 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
         </div>
       )}
 
-      {/* Acciones: subir, ver en Drive, y acción según estado */}
-      <div className="mt-2.5 pl-4 flex items-center gap-1.5 flex-wrap">
+      {/* Acciones grandes (mock Estudio): Subir gradiente + Drive outline + estado */}
+      <div className="mt-2.5 pl-4 flex items-stretch gap-1.5">
         {prog ? (
-          <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-brand-600 dark:text-brand-400">
+          <span className="flex-1 inline-flex items-center justify-center gap-1.5 py-1.5 text-[11px] font-bold text-brand-600 dark:text-brand-400">
             <Loader2 size={12} className="animate-spin" /> Subiendo {prog.total ? `${prog.i + 1}/${prog.total}` : ''}…
           </span>
         ) : (
           <button onClick={e => { e.stopPropagation(); fileRef.current?.click(); }}
-            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-md transition shadow-sm">
-            <UploadCloud size={12} /> Subir
+            className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 text-[11.5px] font-extrabold text-white bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 rounded-lg transition shadow-sm">
+            <UploadCloud size={13} /> Subir
           </button>
         )}
         {folderLink && (
           <a href={folderLink} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
-            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-brand-700 dark:text-brand-300 bg-brand-50 dark:bg-brand-900/30 hover:bg-brand-100 dark:hover:bg-brand-900/50 rounded-md transition">
-            <ExternalLink size={11} /> Ver en Drive
+            className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 text-[11.5px] font-extrabold text-gray-500 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:border-pink-400 hover:text-pink-600 dark:hover:text-pink-300 rounded-lg transition">
+            ▶ Drive
           </a>
         )}
         {a.estado === 'revision' && subidos > 0 && (
           <button onClick={aprobarTodos}
-            className="ml-auto inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 rounded-md transition">
-            <CheckCircle2 size={12} /> Aprobar
+            className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 text-[11.5px] font-extrabold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 rounded-lg transition">
+            <CheckCircle2 size={13} /> Aprobar
           </button>
         )}
         {a.estado === 'aprobado' && (
           <button onClick={publicar}
-            className="ml-auto inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-violet-700 dark:text-violet-300 bg-violet-50 dark:bg-violet-900/30 hover:bg-violet-100 dark:hover:bg-violet-900/50 rounded-md transition">
-            Publicar
+            className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 text-[11.5px] font-extrabold text-white bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 rounded-lg transition shadow-sm">
+            🚀 Publicar
           </button>
         )}
       </div>

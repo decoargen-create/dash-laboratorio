@@ -21,6 +21,7 @@ import {
 import { CreativosSection, subirParaTarjeta, VIDEO_ACCEPT } from './produccionUpload.jsx';
 import { listTeam } from './produccionTeam.js';
 import TeamModal from './TeamModal.jsx';
+import ConfirmDialog from './ConfirmDialog.jsx';
 
 const EQUIPO_DEFAULT = ['Fran', 'Wanda', 'Flor'];
 
@@ -552,13 +553,15 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
         </div>
       )}
 
-      {/* Acciones grandes (mock Estudio): Subir gradiente + Drive outline + estado */}
+      {/* Acciones CONTEXTUALES según columna — menos ruido con muchas tarjetas:
+          Por hacer → Subir · Revisión → Subir + Aprobar · Aprobado → Publicar ·
+          Publicado → solo Drive. (Subir sigue siempre disponible en el detalle.) */}
       <div className="mt-2.5 pl-5 flex items-stretch gap-1.5">
         {prog ? (
           <span className="flex-1 inline-flex items-center justify-center gap-1.5 py-1.5 text-xs font-bold text-brand-600 dark:text-brand-400">
             <Loader2 size={12} className="animate-spin" /> Subiendo {prog.total ? `${prog.i + 1}/${prog.total}` : ''}…
           </span>
-        ) : (
+        ) : (a.estado === 'porhacer' || a.estado === 'revision') && (
           <button onClick={e => { e.stopPropagation(); fileRef.current?.click(); }}
             className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 text-xs font-extrabold text-white bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 rounded-lg transition shadow-sm">
             <UploadCloud size={13} /> Subir
@@ -894,7 +897,9 @@ function CardDetailModal({ a, personas, team = [], onClose, addToast }) {
   };
 
   const saveBrief = () => { if (brief !== (a.brief || '')) updateAssignment(a.id, { brief }); };
-  useEscape(() => { saveBrief(); onClose(); }); // Esc = guardar brief y cerrar
+  // Diálogos propios (reemplazan window.confirm/prompt): 'eliminar' | 'cambios'.
+  const [dlg, setDlg] = useState(null);
+  useEscape(() => { if (dlg) return; saveBrief(); onClose(); }); // Esc = guardar brief y cerrar (salvo diálogo abierto)
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto bg-black/50 backdrop-blur-sm" onClick={() => { saveBrief(); onClose(); }}>
@@ -1019,22 +1024,41 @@ function CardDetailModal({ a, personas, team = [], onClose, addToast }) {
         </div>
 
         <div className="flex items-center gap-2 px-5 py-3.5 border-t border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
-          <button onClick={() => { if (window.confirm(`¿Eliminar la tarjeta de ${a.productoNombre}?`)) { removeAssignment(a.id); onClose(); } }}
+          <button onClick={() => setDlg('eliminar')}
             className="inline-flex items-center gap-1.5 text-xs font-bold text-red-500 hover:text-red-600 transition">
             <Trash2 size={14} /> Eliminar tarjeta
           </button>
-          <button
-            onClick={() => {
-              const nota = window.prompt('¿Qué hay que corregir? El creativo lo va a ver en su tarjeta.', a.nota || '');
-              if (nota == null) return;
-              updateAssignment(a.id, { nota, estado: 'porhacer' });
-              addToast?.({ type: 'success', message: 'Devuelta al creativo para corregir.' });
-            }}
+          <button onClick={() => setDlg('cambios')}
             className="ml-auto inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/30 hover:bg-amber-200 dark:hover:bg-amber-900/50 rounded-lg transition">
             <AlertTriangle size={14} /> Pedir cambios
           </button>
           <button onClick={() => { saveBrief(); onClose(); }} className="px-4 py-2 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition">Listo</button>
         </div>
+
+        {/* Diálogos propios de la plataforma */}
+        <ConfirmDialog
+          open={dlg === 'eliminar'}
+          title={`¿Eliminar la tarjeta de ${a.productoNombre}?`}
+          message="Se pierde su historial y su lista de videos. Los archivos ya subidos a Drive/AdsLab no se borran."
+          confirmLabel="Eliminar tarjeta" tone="danger"
+          onConfirm={() => { setDlg(null); removeAssignment(a.id); onClose(); }}
+          onClose={() => setDlg(null)}
+        />
+        <ConfirmDialog
+          open={dlg === 'cambios'}
+          title="Pedir cambios"
+          message="La tarjeta vuelve a «Por hacer» y el creativo ve tu nota bien destacada."
+          withInput multiline inputLabel="¿Qué hay que corregir?"
+          defaultValue={a.nota || ''}
+          placeholder="Ej: el video 3 está oscuro — rehacelo con más luz…"
+          confirmLabel="Devolver al creativo" tone="warn"
+          onConfirm={(nota) => {
+            setDlg(null);
+            updateAssignment(a.id, { nota: nota || '', estado: 'porhacer' });
+            addToast?.({ type: 'success', message: 'Devuelta al creativo para corregir.' });
+          }}
+          onClose={() => setDlg(null)}
+        />
       </div>
     </div>
   );

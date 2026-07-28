@@ -5,9 +5,10 @@
 // contraseña, se crea la cuenta, y se la pasás al chico. Después, en cada
 // tarjeta, lo asignás desde "Asignar a (cuenta)".
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { X, UserPlus, Loader2, Trash2, KeyRound, Users, Mail, Copy, Check, Search } from 'lucide-react';
 import { listTeam, createMember, resetPassword, removeMember } from './produccionTeam.js';
+import ConfirmDialog from './ConfirmDialog.jsx';
 
 // Genera una contraseña simple pero decente para pasarle al chico.
 function suggestPassword() {
@@ -18,9 +19,15 @@ function suggestPassword() {
 }
 
 export default function TeamModal({ onClose, addToast }) {
+  // Diálogos propios: { type: 'reset'|'remove', m, pass? }. Ref para que el
+  // Esc del panel no se dispare mientras un diálogo está abierto.
+  const [dlg, setDlg] = useState(null);
+  const dlgRef = useRef(null);
+  dlgRef.current = dlg;
+
   // Esc cierra el panel (detalle de uso esperado en cualquier popup).
   useEffect(() => {
-    const h = (e) => { if (e.key === 'Escape') onClose?.(); };
+    const h = (e) => { if (e.key === 'Escape' && !dlgRef.current) onClose?.(); };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
   }, [onClose]);
@@ -64,24 +71,9 @@ export default function TeamModal({ onClose, addToast }) {
     }
   };
 
-  const onReset = async (m) => {
-    const nueva = window.prompt(`Nueva contraseña para ${m.display_name || m.email} (mínimo 6):`, suggestPassword());
-    if (nueva == null) return;
-    if (nueva.length < 6) { addToast?.({ type: 'warning', message: 'Mínimo 6 caracteres' }); return; }
-    try {
-      await resetPassword(m.id, nueva);
-      addToast?.({ type: 'success', message: `Contraseña actualizada. Nueva: ${nueva}` });
-    } catch (err) { addToast?.({ type: 'error', message: err.message }); }
-  };
-
-  const onRemove = async (m) => {
-    if (!window.confirm(`¿Sacar a ${m.display_name || m.email} del equipo? Su cuenta se elimina. Las tarjetas que tenía quedan sin dueño (no se pierden).`)) return;
-    try {
-      await removeMember(m.id);
-      addToast?.({ type: 'success', message: 'Cuenta eliminada del equipo.' });
-      reload();
-    } catch (err) { addToast?.({ type: 'error', message: err.message }); }
-  };
+  // Abren los diálogos propios (nada de window.prompt/confirm del navegador).
+  const onReset = (m) => setDlg({ type: 'reset', m, pass: suggestPassword() });
+  const onRemove = (m) => setDlg({ type: 'remove', m });
 
   const copy = async (text, key) => {
     try { await navigator.clipboard.writeText(text); setCopied(key); setTimeout(() => setCopied(''), 1500); } catch {}
@@ -187,6 +179,40 @@ export default function TeamModal({ onClose, addToast }) {
             )}
           </div>
         </div>
+
+        {/* Diálogos propios de la plataforma */}
+        <ConfirmDialog
+          open={dlg?.type === 'remove'}
+          title={`¿Sacar a ${dlg?.m?.display_name || dlg?.m?.email || ''} del equipo?`}
+          message="Su cuenta se elimina y no va a poder entrar más. Las tarjetas que tenía quedan sin dueño (no se pierden)."
+          confirmLabel="Sacar del equipo" tone="danger"
+          onConfirm={async () => {
+            const m = dlg.m; setDlg(null);
+            try {
+              await removeMember(m.id);
+              addToast?.({ type: 'success', message: 'Cuenta eliminada del equipo.' });
+              reload();
+            } catch (err) { addToast?.({ type: 'error', message: err.message }); }
+          }}
+          onClose={() => setDlg(null)}
+        />
+        <ConfirmDialog
+          open={dlg?.type === 'reset'}
+          title={`Nueva contraseña para ${dlg?.m?.display_name || dlg?.m?.email || ''}`}
+          message="Pasásela al chico después de cambiarla."
+          withInput inputLabel="Contraseña (mínimo 6)"
+          defaultValue={dlg?.pass || ''}
+          confirmLabel="Cambiar contraseña" tone="brand"
+          onConfirm={async (nueva) => {
+            if (!nueva || nueva.length < 6) { addToast?.({ type: 'warning', message: 'Mínimo 6 caracteres' }); return; }
+            const m = dlg.m; setDlg(null);
+            try {
+              await resetPassword(m.id, nueva);
+              addToast?.({ type: 'success', message: `Contraseña actualizada. Nueva: ${nueva}` });
+            } catch (err) { addToast?.({ type: 'error', message: err.message }); }
+          }}
+          onClose={() => setDlg(null)}
+        />
       </div>
     </div>
   );

@@ -545,17 +545,21 @@ function CardDetailModal({ a, personas, team = [], onClose, addToast }) {
             </p>
           </div>
 
-          {/* Persona + estado */}
+          {/* Persona (texto libre) + estado. Los chips de persona solo aparecen
+              si TODAVÍA no hay cuentas del equipo — con cuentas, se asigna arriba
+              en "Asignar a (cuenta)" y evitamos el doble control confuso. */}
           <div className="grid sm:grid-cols-2 gap-4">
-            <div>
-              <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Persona</span>
-              <div className="flex flex-wrap gap-1.5">
-                {personas.map(p => (
-                  <button key={p} onClick={() => assignPersona(a.id, a.persona === p ? '' : p)}
-                    className={`text-[11px] font-bold px-2.5 py-1 rounded-md transition ${a.persona === p ? CHIP_CLS[personaColor(p)] : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200'}`}>{p}</button>
-                ))}
+            {team.length === 0 && (
+              <div>
+                <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Persona</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {personas.map(p => (
+                    <button key={p} onClick={() => assignPersona(a.id, a.persona === p ? '' : p)}
+                      className={`text-[11px] font-bold px-2.5 py-1 rounded-md transition ${a.persona === p ? CHIP_CLS[personaColor(p)] : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200'}`}>{p}</button>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
             <div>
               <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Estado</span>
               <div className="flex flex-wrap gap-1">

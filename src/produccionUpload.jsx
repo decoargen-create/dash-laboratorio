@@ -45,13 +45,18 @@ async function getAuthToken() {
 
 // Sondeo al server (sin efectos): ¿Drive conectado? + link a la carpeta raíz.
 // Devuelve { configured, rootLink } o null si no se pudo consultar.
-export async function probeDrive(productoNombre) {
+export async function probeDrive(productoNombre, persona, weekKey) {
   try {
     const token = await getAuthToken();
     const r = await fetch('/api/produccion/drive-session', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      body: JSON.stringify({ probe: true, ...(productoNombre ? { productoNombre } : {}) }),
+      body: JSON.stringify({
+        probe: true,
+        ...(productoNombre ? { productoNombre } : {}),
+        ...(persona ? { persona } : {}),
+        ...(weekKey ? { weekKey } : {}),
+      }),
     });
     return await r.json().catch(() => null);
   } catch { return null; }
@@ -200,13 +205,14 @@ export function CreativosSection({ a, addToast, canDelete = true }) {
   // Sondeo con el producto: trae si Drive está conectado + el link a la
   // carpeta del producto (se asegura de que exista), para ofrecer "carpeta de
   // Drive" SIEMPRE que la conexión esté viva, tenga o no videos en Drive.
-  const [drive, setDrive] = useState(null); // { configured, rootLink, prodLink } | null
+  const [drive, setDrive] = useState(null); // { configured, rootLink, prodLink, cardLink } | null
   useEffect(() => {
     let dead = false;
-    probeDrive(a.productoNombre).then(d => { if (!dead && d) setDrive(d); });
+    probeDrive(a.productoNombre, a.persona, a.weekKey).then(d => { if (!dead && d) setDrive(d); });
     return () => { dead = true; };
-  }, [a.productoNombre]);
-  const driveFolder = folderLink || drive?.prodLink || drive?.rootLink || null;
+  }, [a.productoNombre, a.persona, a.weekKey]);
+  // Prioridad: la carpeta EXACTA de la tarjeta (donde están/irán los videos).
+  const driveFolder = folderLink || drive?.cardLink || drive?.prodLink || drive?.rootLink || null;
 
   // Ver un video guardado en AdsLab: el bucket es privado, así que generamos
   // un link firmado (1h) al momento del click.

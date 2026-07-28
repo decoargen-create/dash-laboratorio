@@ -52,6 +52,16 @@ function hoyAR() {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
 }
 
+// Nombre ESTABLE de la carpeta de una tarjeta: <Persona> - sem <d>-<m>. Como
+// depende de la semana (no del día de subida), todos los videos de la misma
+// tarjeta caen en la MISMA carpeta, sin importar en qué día se suben.
+function cardFolderName(persona, weekKey) {
+  const p = clean(persona, 'Equipo');
+  if (!weekKey || !/^\d{4}-\d{2}-\d{2}$/.test(weekKey)) return `${p} - ${hoyAR()}`;
+  const [, m, d] = weekKey.split('-');
+  return `${p} - sem ${Number(d)}-${Number(m)}`;
+}
+
 function respondJSON(res, status, obj) {
   res.status(status).setHeader('Content-Type', 'application/json');
   res.end(JSON.stringify(obj));
@@ -86,6 +96,12 @@ export default async function handler(req, res) {
         const token = await getAccessToken();
         const prodFolder = await driveEnsureFolder(token, rootId, clean(body.productoNombre, 'Producto'));
         out.prodLink = `https://drive.google.com/drive/folders/${prodFolder}`;
+        // Si además viene la persona/semana, aseguramos la carpeta EXACTA de la
+        // tarjeta y devolvemos su link — así el botón lleva justo ahí.
+        if (body.persona || body.weekKey) {
+          const cardFolder = await driveEnsureFolder(token, prodFolder, cardFolderName(body.persona, body.weekKey));
+          out.cardLink = `https://drive.google.com/drive/folders/${cardFolder}`;
+        }
       } catch { /* devolvemos al menos el root */ }
     }
     // (El auto-test de CORS se removió: con el relay server-side la subida a
@@ -93,7 +109,7 @@ export default async function handler(req, res) {
     return respondJSON(res, 200, out);
   }
 
-  const { productoNombre, persona, filename, mimeType, size } = body;
+  const { productoNombre, persona, weekKey, filename, mimeType, size } = body;
   if (!filename) return respondJSON(res, 400, { error: 'Falta el nombre del archivo.' });
 
   // Drive no configurado → el browser guarda en AdsLab (Supabase). No es error.
@@ -112,7 +128,9 @@ export default async function handler(req, res) {
     // Estructura: <raíz>/<Producto>/<Persona> - <fecha>/
     // Cada producto su carpeta; adentro, una carpeta por persona+día de subida.
     const prodFolder = await driveEnsureFolder(token, rootId, clean(productoNombre, 'Producto'));
-    const subFolder = await driveEnsureFolder(token, prodFolder, `${clean(persona, 'Equipo')} - ${hoyAR()}`);
+    // Carpeta ESTABLE por tarjeta (producto × persona × semana): todos los
+    // videos de la tarjeta caen acá, aunque se suban en días distintos.
+    const subFolder = await driveEnsureFolder(token, prodFolder, cardFolderName(persona, weekKey));
 
     const finalName = finalFileName(filename);
     const contentType = mimeType || 'video/mp4';

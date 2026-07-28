@@ -89,67 +89,103 @@ export default function CreativaDashboard({ addToast }) {
             </div>
           )}
 
-          {/* Detalle por persona */}
-          <div className="space-y-2.5">
-            {personas.map(p => {
-              const open = expanded === p.persona;
-              return (
-                <div key={p.persona} className={`bg-white dark:bg-gray-800 border rounded-xl overflow-hidden ${p.pendiente > 0 ? 'border-amber-200 dark:border-amber-900/40' : 'border-emerald-200 dark:border-emerald-900/40'}`}>
-                  <button onClick={() => setExpanded(open ? null : p.persona)}
-                    className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/40 transition text-left">
-                    <div className="w-8 h-8 rounded-lg bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center text-brand-600 dark:text-brand-300 flex-shrink-0">
-                      <Users size={15} />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="font-bold text-gray-900 dark:text-gray-100">{p.persona}</div>
-                      <div className="text-[11px] text-gray-500 dark:text-gray-400">{p.completados} completos · {p.semanas.length} sem.</div>
-                    </div>
-                    <div className="ml-auto flex items-center gap-3">
-                      {p.pendiente > 0 ? (
-                        <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">{fmtPago(p.pendiente)} pendiente</span>
-                      ) : (
-                        <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 inline-flex items-center gap-1"><Check size={12} /> Al día</span>
-                      )}
-                      <span className="text-sm font-mono font-bold tabular-nums text-gray-800 dark:text-gray-100">{fmtPago(p.total)}</span>
-                      <ChevronDown size={15} className={`text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} />
-                    </div>
-                  </button>
-
-                  {open && (
-                    <div className="border-t border-gray-100 dark:border-gray-700 px-4 py-3 space-y-2 bg-gray-50/50 dark:bg-gray-800/30">
-                      {p.semanas.map(s => (
-                        <div key={s.weekKey} className="flex items-center gap-3 text-sm flex-wrap">
-                          <span className="font-semibold text-gray-700 dark:text-gray-200 min-w-[110px]">{weekLabel(s.weekKey)}</span>
-                          <span className="text-[11px] text-gray-500 dark:text-gray-400">
-                            {s.completados} × $42k{s.bonus > 0 ? ` + objetivo ${fmtPago(s.bonus)}` : ''}
-                          </span>
-                          <span className="ml-auto font-mono tabular-nums font-semibold text-gray-800 dark:text-gray-100">{fmtPago(s.total)}</span>
-                          {s.paid ? (
-                            <button onClick={() => pagarSemana(s.weekKey, p.persona, false)}
-                              className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-1 rounded-md bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 hover:bg-emerald-200 transition" title="Marcar como no pagada">
-                              <Check size={12} /> Pagada
-                            </button>
-                          ) : (
-                            <button onClick={() => pagarSemana(s.weekKey, p.persona, true)}
-                              className="text-[11px] font-bold px-2.5 py-1 rounded-md bg-brand-600 text-white hover:bg-brand-700 transition">
-                              Marcar pagada
-                            </button>
-                          )}
-                        </div>
-                      ))}
-                      {p.pendiente > 0 && (
-                        <div className="flex justify-end pt-1">
-                          <button onClick={() => pagarTodoPersona(p)}
-                            className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition">
-                            <CheckCircle2 size={14} /> Pagar todo lo pendiente ({fmtPago(p.pendiente)})
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+          {/* Detalle por persona — formato TABLA (pedido del user), con fila
+              expandible para el detalle semana por semana. */}
+          <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-[11px] font-bold uppercase tracking-wide text-gray-400 dark:text-gray-500 border-b border-gray-200 dark:border-gray-700">
+                    <th className="text-left px-4 py-2.5">Persona</th>
+                    <th className="text-center px-3 py-2.5">Completos</th>
+                    <th className="text-center px-3 py-2.5">Sem.</th>
+                    <th className="text-right px-3 py-2.5">Total</th>
+                    <th className="text-right px-3 py-2.5">Pagado</th>
+                    <th className="text-right px-3 py-2.5">Pendiente</th>
+                    <th className="w-10" aria-label="detalle" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 dark:divide-gray-700/60">
+                  {personas.map(p => {
+                    const open = expanded === p.persona;
+                    return (
+                      <React.Fragment key={p.persona}>
+                        <tr onClick={() => setExpanded(open ? null : p.persona)}
+                          className="cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/40 transition">
+                          <td className="px-4 py-2.5">
+                            <span className="inline-flex items-center gap-2 font-bold text-gray-900 dark:text-gray-100">
+                              <span className="w-7 h-7 rounded-lg bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center text-brand-600 dark:text-brand-300 shrink-0">
+                                <Users size={14} />
+                              </span>
+                              {p.persona}
+                            </span>
+                          </td>
+                          <td className="text-center px-3 py-2.5 tabular-nums font-semibold text-gray-700 dark:text-gray-200">{p.completados}</td>
+                          <td className="text-center px-3 py-2.5 tabular-nums text-gray-500 dark:text-gray-400">{p.semanas.length}</td>
+                          <td className="text-right px-3 py-2.5 font-mono tabular-nums font-bold text-gray-800 dark:text-gray-100">{fmtPago(p.total)}</td>
+                          <td className="text-right px-3 py-2.5 font-mono tabular-nums text-emerald-600 dark:text-emerald-400">{p.pagado > 0 ? fmtPago(p.pagado) : '—'}</td>
+                          <td className="text-right px-3 py-2.5">
+                            {p.pendiente > 0
+                              ? <span className="font-mono tabular-nums font-bold text-amber-600 dark:text-amber-400">{fmtPago(p.pendiente)}</span>
+                              : <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 dark:text-emerald-400"><Check size={12} /> Al día</span>}
+                          </td>
+                          <td className="text-center pr-3">
+                            <ChevronDown size={15} className={`inline text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+                          </td>
+                        </tr>
+                        {open && (
+                          <tr>
+                            <td colSpan={7} className="px-4 py-3 bg-gray-50/60 dark:bg-gray-900/30">
+                              <div className="space-y-2">
+                                {p.semanas.map(s => (
+                                  <div key={s.weekKey} className="flex items-center gap-3 text-sm flex-wrap">
+                                    <span className="font-semibold text-gray-700 dark:text-gray-200 min-w-[150px]">{weekLabel(s.weekKey)}</span>
+                                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                                      {s.completados} × $42k{s.bonus > 0 ? ` + objetivo ${fmtPago(s.bonus)}` : ''}
+                                    </span>
+                                    <span className="ml-auto font-mono tabular-nums font-semibold text-gray-800 dark:text-gray-100">{fmtPago(s.total)}</span>
+                                    {s.paid ? (
+                                      <button onClick={() => pagarSemana(s.weekKey, p.persona, false)}
+                                        className="inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-md bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 hover:bg-emerald-200 transition" title="Marcar como no pagada">
+                                        <Check size={12} /> Pagada
+                                      </button>
+                                    ) : (
+                                      <button onClick={() => pagarSemana(s.weekKey, p.persona, true)}
+                                        className="text-xs font-bold px-2.5 py-1 rounded-md bg-brand-600 text-white hover:bg-brand-700 transition">
+                                        Marcar pagada
+                                      </button>
+                                    )}
+                                  </div>
+                                ))}
+                                {p.pendiente > 0 && (
+                                  <div className="flex justify-end pt-1">
+                                    <button onClick={() => pagarTodoPersona(p)}
+                                      className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition">
+                                      <CheckCircle2 size={14} /> Pagar todo lo pendiente ({fmtPago(p.pendiente)})
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t border-gray-200 dark:border-gray-700 bg-gray-50/60 dark:bg-gray-900/30 font-bold">
+                    <td className="px-4 py-2.5 text-xs uppercase tracking-wide text-gray-400">Total del mes</td>
+                    <td className="text-center px-3 py-2.5 tabular-nums text-gray-700 dark:text-gray-200">{totals.completados}</td>
+                    <td />
+                    <td className="text-right px-3 py-2.5 font-mono tabular-nums text-gray-900 dark:text-gray-100">{fmtPago(totals.total)}</td>
+                    <td className="text-right px-3 py-2.5 font-mono tabular-nums text-emerald-600 dark:text-emerald-400">{fmtPago(totals.pagado)}</td>
+                    <td className="text-right px-3 py-2.5 font-mono tabular-nums text-amber-600 dark:text-amber-400">{totals.pendiente > 0 ? fmtPago(totals.pendiente) : '—'}</td>
+                    <td />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
           </div>
 
           <p className="text-[10px] text-gray-400 dark:text-gray-500 px-1">

@@ -1,24 +1,57 @@
-// Store de PRODUCCIÓN del equipo creativo (Fase 1 — capa de control, local).
+// Store de PRODUCCIÓN del equipo creativo.
 //
 // Reemplaza los dos Excels: la planilla master de control + el detalle por
 // persona. Guarda ASIGNACIONES semanales (producto × persona), cada una con su
-// ESTADO (asignado → subido → en revisión → aprobado → publicado) y calcula el
-// pago del equipo. Se integra con los productos que YA existen (productoId de
+// ESTADO (por hacer → revisión → aprobado → publicado) y calcula el pago del
+// equipo. Se integra con los productos que YA existen (productoId de
 // marketing_productos), no crea un catálogo aparte.
 //
-// El control (asignaciones/estados/pago) es local (mismo patrón que
-// costsStore/moneyStore). Los videos se suben directo a Google Drive desde
-// "Subir creativos" (con fallback al bucket de AdsLab). El login del equipo
-// es Fase 2.
+// FASE 2 — la nube: antes el control vivía SOLO en localStorage (por-navegador),
+// lo que impedía que cada creativo entrara desde su compu. Ahora sincroniza con
+// Supabase (tabla produccion_asignaciones + produccion_pagos, con RLS):
+//   - Los admin ven/editan TODO. Un creator ve SOLO sus tarjetas y solo puede
+//     cambiar estado (por hacer/revisión) y subir creativos — vía la RPC
+//     produccion_creator_update.
+//   - La API pública sigue siendo SÍNCRONA: escribimos optimista en un cache en
+//     memoria (con espejo en localStorage para pintar al instante) y empujamos
+//     el cambio a la nube en segundo plano. Así ProduccionSection/CreativaDashboard
+//     no cambian.
+//   - initProduccionSync({role,userId}) arranca el sync al loguear; hidrata de
+//     la nube y, la primera vez de un admin, migra la data local existente.
+
+import { supabase } from './supabase.js';
 
 const KEY = 'adslab-produccion-v1';
+const PAGOS_KEY = 'adslab-produccion-pagos-v1';
+const MIGRATED_KEY = 'adslab-produccion-migrated-v1';
+const OWNER_KEY = 'adslab-produccion-owner-v1'; // último userId dueño del cache local
+const TABLE = 'produccion_asignaciones';
+const PAGOS_TABLE = 'produccion_pagos';
+
 const listeners = new Set();
+
+// ── Estado del módulo (sync con la nube) ──
+let _role = null;      // 'admin' | 'creator' | null (null = modo 100% local)
+let _userId = null;
+let _actorName = null; // nombre para el historial ("quién hizo qué")
+let _cache = null;     // asignaciones en memoria; null hasta el primer read()
+let _pagos = null;     // { 'weekKey|persona': { paid, paidAt } }
+let _refetchBound = false;
+// ¿La base ya tiene la columna `historial` (migración 0021)? Se detecta al
+// hidratar. Si es false, el historial se registra local pero NO se manda a la
+// nube (para no romper writes cuando la migración todavía no se aplicó).
+let _histCloud = false;
+// Contador de escrituras locales. Sirve para que un hydrate/refetch NO pise un
+// cambio optimista que ocurrió mientras traíamos la data de la nube.
+let _writeSeq = 0;
 
 // Columnas del kanban (como las listas de Trello del equipo).
 export const ESTADOS = ['porhacer', 'revision', 'aprobado', 'publicado'];
 export const ESTADO_LABELS = {
   porhacer: 'Por hacer', revision: 'En revisión', aprobado: 'Aprobado', publicado: 'Publicado',
 };
+// Estados que un creator puede setear (aprobar/publicar es del admin).
+export const ESTADOS_CREATOR = ['porhacer', 'revision'];
 // Estados viejos → nuevos (antes había 'asignado' y 'subido').
 const ESTADO_MIGRACION = { asignado: 'porhacer', subido: 'porhacer' };
 function normEstado(e) { return ESTADO_MIGRACION[e] || e || 'porhacer'; }
@@ -38,20 +71,39 @@ export function bonusObjetivo(completados) {
 const COMPLETO = new Set(['aprobado', 'publicado']);
 export function esCompleto(estado) { return COMPLETO.has(estado); }
 
-function read() {
+// =========================================================================
+// Cache local (espejo en localStorage para pintar al instante)
+// =========================================================================
+function readLocalRaw() {
   try {
     const r = localStorage.getItem(KEY);
     const arr = r ? JSON.parse(r) : [];
-    // Normaliza estados legacy al vuelo (se persiste en el próximo write).
     return arr.map(a => ({ ...a, estado: normEstado(a.estado) }));
   } catch { return []; }
 }
-function write(arr) {
+function persistLocal(arr) {
   try { localStorage.setItem(KEY, JSON.stringify(arr)); } catch {}
+}
+function ensureCache() {
+  if (_cache == null) _cache = readLocalRaw();
+  return _cache;
+}
+function read() { return ensureCache(); }
+
+function notify() {
   listeners.forEach(fn => { try { fn(); } catch {} });
   if (typeof window !== 'undefined') {
     try { window.dispatchEvent(new CustomEvent('viora:produccion-changed')); } catch {}
   }
+}
+
+// write() = actualiza cache + espejo local + avisa. NO empuja a la nube (eso lo
+// hace cada mutador con pushRow/pushDelete, que sabe el tipo de operación).
+function write(arr) {
+  _cache = arr;
+  _writeSeq++;
+  persistLocal(arr);
+  notify();
 }
 function genId() { return `prodasig-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`; }
 
@@ -65,6 +117,221 @@ export function subscribeProduccion(fn) {
   };
 }
 
+// =========================================================================
+// Sync con la nube (Supabase)
+// =========================================================================
+function cloudReady() { return !!supabase && !!_role; }
+
+function rowToLocal(r) {
+  return {
+    id: r.id,
+    weekKey: r.week_key,
+    productoId: r.producto_id != null ? String(r.producto_id) : null,
+    productoNombre: r.producto_nombre || '',
+    persona: r.persona || '',
+    creatorId: r.creator_id || null,
+    tipo: r.tipo === 'testeo' ? 'testeo' : 'renovado',
+    estado: normEstado(r.estado),
+    videosTotal: r.videos_total != null ? r.videos_total : VIDEOS_POR_PRODUCTO,
+    videosAprobados: r.videos_aprobados != null ? r.videos_aprobados : 0,
+    brief: r.brief || '',
+    nota: r.nota || '',
+    pagado: !!r.pagado,
+    archivos: Array.isArray(r.archivos) ? r.archivos : [],
+    historial: Array.isArray(r.historial) ? r.historial : [],
+    createdAt: r.created_at || new Date().toISOString(),
+    updatedAt: r.updated_at || new Date().toISOString(),
+  };
+}
+function localToRow(a) {
+  const row = {
+    id: a.id,
+    week_key: a.weekKey,
+    producto_id: a.productoId != null ? String(a.productoId) : null,
+    producto_nombre: a.productoNombre || '',
+    persona: a.persona || '',
+    creator_id: a.creatorId || null,
+    tipo: a.tipo === 'testeo' ? 'testeo' : 'renovado',
+    estado: a.estado || 'porhacer',
+    videos_total: a.videosTotal != null ? a.videosTotal : VIDEOS_POR_PRODUCTO,
+    videos_aprobados: a.videosAprobados != null ? a.videosAprobados : 0,
+    brief: a.brief || '',
+    nota: a.nota || '',
+    pagado: !!a.pagado,
+    archivos: Array.isArray(a.archivos) ? a.archivos : [],
+    created_at: a.createdAt || new Date().toISOString(),
+  };
+  // Solo mandamos historial si la base lo soporta (evita romper el write
+  // cuando la migración 0021 todavía no se aplicó).
+  if (_histCloud) row.historial = Array.isArray(a.historial) ? a.historial : [];
+  return row;
+}
+
+// Crea un evento de historial con el actor actual.
+function nuevoEvento(tipo, extra = {}) {
+  return {
+    ts: new Date().toISOString(),
+    tipo,
+    by: _userId || null,
+    byName: _actorName || 'Alguien',
+    ...extra,
+  };
+}
+
+// Serializamos los push POR tarjeta: en una subida cada archivo dispara un
+// push con la lista acumulada; si se resolvieran fuera de orden, uno viejo
+// (con menos archivos) podría pisar al nuevo. La cadena por id garantiza que
+// el último en encolarse (lista completa) es el último en escribir. Además
+// contamos los push en vuelo para no dejar que un refetch por foco pise un
+// cambio optimista que todavía no llegó al server.
+const _pushChains = new Map();
+let _inflight = 0;
+
+function enqueue(id, fn) {
+  const prev = _pushChains.get(id) || Promise.resolve();
+  _inflight++;
+  const next = prev
+    .then(fn)
+    .catch(e => console.warn('[produccion] push chain:', e?.message || e))
+    .finally(() => {
+      _inflight = Math.max(0, _inflight - 1);
+      if (_pushChains.get(id) === next) _pushChains.delete(id);
+    });
+  _pushChains.set(id, next);
+  return next;
+}
+
+function pushRow(id, evento = null) { return enqueue(id, () => doPushRow(id, evento)); }
+function pushDelete(id) { return enqueue(id, () => doPushDelete(id)); }
+
+// Empuja una fila (insert/update) a la nube. Admin → tabla directa; creator →
+// RPC acotada (solo estado permitido + archivos de SU tarjeta). `evento` es la
+// entrada de historial a registrar (para el creator viaja por la RPC).
+async function doPushRow(id, evento = null) {
+  if (!cloudReady()) return;
+  const a = ensureCache().find(x => x.id === id);
+  if (!a) return;
+  if (_role === 'admin') {
+    // El historial ya está dentro de la fila (localToRow lo incluye si _histCloud).
+    const { error } = await supabase.from(TABLE).upsert(localToRow(a), { onConflict: 'id' });
+    if (error) console.warn('[produccion] push(admin):', error.message);
+  } else if (_role === 'creator') {
+    const estado = ESTADOS_CREATOR.includes(a.estado) ? a.estado : null;
+    const params = { p_id: id, p_estado: estado, p_archivos: a.archivos || [] };
+    if (_histCloud && evento) params.p_evento = evento; // solo si la base lo soporta
+    const { error } = await supabase.rpc('produccion_creator_update', params);
+    if (error) console.warn('[produccion] push(creator):', error.message);
+  }
+}
+
+async function doPushDelete(id) {
+  if (!cloudReady() || _role !== 'admin') return;
+  const { error } = await supabase.from(TABLE).delete().eq('id', id);
+  if (error) console.warn('[produccion] delete:', error.message);
+}
+
+// Devuelve true solo si el upsert confirmó OK (para no marcar la migración
+// como hecha si en realidad falló — sino se podría perder el tablero).
+async function pushMany(rows) {
+  if (!cloudReady() || _role !== 'admin' || rows.length === 0) return false;
+  try {
+    const { error } = await supabase.from(TABLE).upsert(rows.map(localToRow), { onConflict: 'id' });
+    if (error) { console.warn('[produccion] migrate:', error.message); return false; }
+    return true;
+  } catch (e) { console.warn('[produccion] migrate ex:', e?.message || e); return false; }
+}
+
+// Trae de la nube y reemplaza el cache. La RLS ya acota: admin=todo, creator=lo
+// suyo. La primera vez de un admin con cloud vacío, migra la data local.
+async function hydrate() {
+  if (!cloudReady()) return;
+  try {
+    // Detecta si la base ya tiene la columna `historial` (migración 0021).
+    try {
+      const probe = await supabase.from(TABLE).select('historial').limit(1);
+      _histCloud = !probe.error;
+    } catch { _histCloud = false; }
+
+    const seqBefore = _writeSeq;
+    const { data, error } = await supabase.from(TABLE).select('*');
+    if (error) { console.warn('[produccion] pull:', error.message); return; }
+
+    // Si mientras traíamos la data hubo un cambio optimista local (o quedan
+    // push en vuelo), NO pisamos el cache: el push ya persiste en el server y
+    // el próximo refetch reconcilia. Evita que un refetch revierta un cambio.
+    if (_writeSeq !== seqBefore || _inflight > 0) return;
+
+    const cloud = (data || []).map(rowToLocal);
+    if (cloud.length > 0) {
+      write(cloud);
+    } else {
+      const local = readLocalRaw();
+      const yaMigro = !!localStorage.getItem(MIGRATED_KEY);
+      if (_role === 'admin' && local.length > 0 && !yaMigro) {
+        // Migración one-time. Solo marcamos MIGRATED si el upsert confirmó OK,
+        // y SIEMPRE mantenemos el tablero local (si falló, se reintenta luego).
+        const ok = await pushMany(local);
+        if (ok) { try { localStorage.setItem(MIGRATED_KEY, '1'); } catch {} }
+        write(local);
+      } else if (_role === 'admin' && local.length > 0) {
+        // Ya migramos antes pero la nube volvió vacía. NO borramos el tablero
+        // (podría ser un fallo transitorio); mantenemos lo local.
+        write(local);
+      } else {
+        // Creator sin asignaciones, o admin sin nada local → vacío de verdad.
+        write([]);
+      }
+    }
+    await hydratePagos();
+  } catch (e) { console.warn('[produccion] hydrate ex:', e?.message || e); }
+}
+
+export function refreshProduccion() { return hydrate(); }
+
+// Arranca (o reinicia) el sync. Llamar al loguear con el rol resuelto.
+export async function initProduccionSync({ role, userId, name } = {}) {
+  _role = role || null;
+  _userId = userId || null;
+  _actorName = name || _actorName || null;
+
+  // Si cambió el dueño del cache local (otro user en el mismo navegador),
+  // limpiamos el espejo para no mostrar data ajena mientras hidrata.
+  try {
+    const prevOwner = localStorage.getItem(OWNER_KEY);
+    if (_userId && prevOwner && prevOwner !== _userId) {
+      localStorage.removeItem(KEY);
+      localStorage.removeItem(PAGOS_KEY);
+      localStorage.removeItem(MIGRATED_KEY);
+      localStorage.removeItem(MIGRATED_KEY + '-pagos');
+      _cache = null; _pagos = null;
+    }
+    if (_userId) localStorage.setItem(OWNER_KEY, _userId);
+  } catch {}
+
+  if (!supabase || !_role) return; // sin nube → modo local puro (compat)
+  setupRefetch();
+  await hydrate();
+}
+
+export function teardownProduccionSync() {
+  _role = null;
+  _userId = null;
+}
+
+// Refresca al volver a la pestaña (así admin ve lo que subió el creator y
+// viceversa) sin necesidad de realtime.
+function setupRefetch() {
+  if (_refetchBound || typeof window === 'undefined') return;
+  _refetchBound = true;
+  const onVisible = () => {
+    // No refrescamos si hay push optimistas en vuelo: el server todavía no
+    // tiene el último cambio y traerlo pisaría el cache con data vieja.
+    if (document.visibilityState === 'visible' && cloudReady() && _inflight === 0) hydrate();
+  };
+  window.addEventListener('focus', onVisible);
+  document.addEventListener('visibilitychange', onVisible);
+}
+
 // Lunes (horario AR) de la semana de una fecha → 'YYYY-MM-DD'. Es la clave de
 // semana con la que se agrupan las asignaciones.
 export function weekKeyOf(date = new Date()) {
@@ -76,11 +343,33 @@ export function weekKeyOf(date = new Date()) {
   return dt.toISOString().slice(0, 10);
 }
 
-// Etiqueta legible de una semana: "Sem. del 28/7".
+// Etiqueta legible de una semana: "Semana 4 · 27/7 al 2/8" (lunes a domingo).
+// El número es la semana del mes (base lunes). El rango de fechas es lo que
+// pidió el user (como el Excel): de lunes a domingo.
 export function weekLabel(weekKey) {
   if (!weekKey) return '';
-  const [, m, d] = weekKey.split('-');
-  return `Sem. del ${Number(d)}/${Number(m)}`;
+  const [y, m, d] = weekKey.split('-').map(Number);
+  const monday = new Date(Date.UTC(y, m - 1, d));
+  const sunday = new Date(monday); sunday.setUTCDate(monday.getUTCDate() + 6);
+  const n = Math.floor((d - 1) / 7) + 1;
+  const f = dt => `${dt.getUTCDate()}/${dt.getUTCMonth() + 1}`;
+  return `Semana ${n} · ${f(monday)} al ${f(sunday)}`;
+}
+
+// Solo el número de semana (para chips compactos).
+export function weekNumber(weekKey) {
+  if (!weekKey) return '';
+  const d = Number(weekKey.split('-')[2]);
+  return Math.floor((d - 1) / 7) + 1;
+}
+// Solo el rango de fechas "27/7 al 2/8".
+export function weekRange(weekKey) {
+  if (!weekKey) return '';
+  const [y, m, d] = weekKey.split('-').map(Number);
+  const monday = new Date(Date.UTC(y, m - 1, d));
+  const sunday = new Date(monday); sunday.setUTCDate(monday.getUTCDate() + 6);
+  const f = dt => `${dt.getUTCDate()}/${dt.getUTCMonth() + 1}`;
+  return `${f(monday)} al ${f(sunday)}`;
 }
 
 export function listAssignments(weekKey) {
@@ -90,18 +379,19 @@ export function allWeekKeys() {
   return [...new Set(read().map(a => a.weekKey))].sort().reverse();
 }
 
-export function addAssignment({ weekKey, productoId, productoNombre, persona, tipo = 'renovado', brief = '' }) {
+export function addAssignment({ weekKey, productoId, productoNombre, persona, creatorId = null, tipo = 'renovado', brief = '' }) {
   const per = (persona || '').trim();
   // persona es opcional: una tarjeta puede quedar "sin asignar" hasta que se le
   // cuelgue la persona (como en Trello, agregás el label después).
   if (!weekKey) return null;
-  const arr = read();
+  const arr = read().slice();
   const nueva = {
     id: genId(),
     weekKey,
     productoId: productoId != null ? String(productoId) : null,
     productoNombre: productoNombre || '',
     persona: per,
+    creatorId: creatorId || null,
     tipo: tipo === 'testeo' ? 'testeo' : 'renovado',
     estado: 'porhacer',
     videosTotal: VIDEOS_POR_PRODUCTO,
@@ -109,11 +399,14 @@ export function addAssignment({ weekKey, productoId, productoNombre, persona, ti
     brief: brief || '',
     nota: '',
     pagado: false,
+    archivos: [],
+    historial: [nuevoEvento('creacion')],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
   arr.push(nueva);
   write(arr);
+  pushRow(nueva.id);
   return nueva;
 }
 
@@ -135,15 +428,32 @@ export function assignPersona(id, persona) {
   updateAssignment(id, { persona: (persona || '').trim() });
 }
 
+// Asigna una tarjeta a un creator (cuenta del equipo). Setea creator_id (para
+// la RLS/scope del creator) y, por comodidad, la persona (label) con su nombre.
+export function assignCreator(id, { creatorId, persona }) {
+  const patch = { creatorId: creatorId || null };
+  if (persona !== undefined) patch.persona = (persona || '').trim();
+  updateAssignment(id, patch);
+}
+
 export function updateAssignment(id, patch) {
-  const arr = read();
+  const arr = read().slice();
   const i = arr.findIndex(a => a.id === id);
   if (i === -1) return;
-  arr[i] = { ...arr[i], ...patch, updatedAt: new Date().toISOString() };
+  const before = arr[i];
+  // Si cambia el estado, dejamos registro en el historial (KPIs de tiempos).
+  let evento = null;
+  if (patch.estado && patch.estado !== before.estado) {
+    evento = nuevoEvento('estado', { from: before.estado, to: patch.estado });
+  }
+  const historial = evento ? [...(before.historial || []), evento] : before.historial;
+  arr[i] = { ...before, ...patch, historial, updatedAt: new Date().toISOString() };
   write(arr);
+  pushRow(id, evento);
 }
 export function removeAssignment(id) {
   write(read().filter(a => a.id !== id));
+  pushDelete(id);
 }
 
 // Busca la asignación (semana × producto × persona); si no existe, la crea.
@@ -169,21 +479,23 @@ export function findOrCreateAssignment({ weekKey, productoId, productoNombre, pe
 // NO cambia la columna: el estado se mueve arrastrando la tarjeta (Trello-like).
 export function addArchivos(id, archivos) {
   if (!Array.isArray(archivos) || archivos.length === 0) return;
-  const arr = read();
+  const arr = read().slice();
   const i = arr.findIndex(a => a.id === id);
   if (i === -1) return;
   const prev = arr[i].archivos || [];
   arr[i] = { ...arr[i], archivos: [...prev, ...archivos], updatedAt: new Date().toISOString() };
   write(arr);
+  pushRow(id);
   return arr[i];
 }
 
 export function removeArchivo(id, ts) {
-  const arr = read();
+  const arr = read().slice();
   const i = arr.findIndex(a => a.id === id);
   if (i === -1) return;
   arr[i] = { ...arr[i], archivos: (arr[i].archivos || []).filter(f => f.ts !== ts), updatedAt: new Date().toISOString() };
   write(arr);
+  pushRow(id);
 }
 
 // Resumen de pago por persona para una semana. Montos en ARS (así paga el user).
@@ -206,36 +518,85 @@ export function paymentSummary(weekKey) {
 }
 
 // =========================================================================
-// PAGOS + RESUMEN MENSUAL (para el dashboard de Área creativa)
+// PAGOS + RESUMEN MENSUAL (para el dashboard de Área creativa) — SOLO admin.
 // =========================================================================
 // El pago se salda por (semana × persona) — es la unidad natural porque el
 // bonus por objetivo es semanal. Guardamos el estado "pagado" aparte de las
-// asignaciones así no ensucia el tablero operativo.
+// asignaciones así no ensucia el tablero operativo. Espejo en produccion_pagos.
 
-const PAGOS_KEY = 'adslab-produccion-pagos-v1';
 const pagoKey = (weekKey, persona) => `${weekKey}|${persona}`;
 
-function readPagos() {
+function readPagosLocal() {
   try { const r = localStorage.getItem(PAGOS_KEY); return r ? JSON.parse(r) : {}; }
   catch { return {}; }
 }
-function writePagos(obj) {
+function ensurePagos() {
+  if (_pagos == null) _pagos = readPagosLocal();
+  return _pagos;
+}
+function persistPagos(obj) {
   try { localStorage.setItem(PAGOS_KEY, JSON.stringify(obj)); } catch {}
-  listeners.forEach(fn => { try { fn(); } catch {} });
-  if (typeof window !== 'undefined') {
-    try { window.dispatchEvent(new CustomEvent('viora:produccion-changed')); } catch {}
-  }
+}
+function writePagos(obj) {
+  _pagos = obj;
+  persistPagos(obj);
+  notify();
+}
+
+async function hydratePagos() {
+  if (!cloudReady() || _role !== 'admin') return; // pagos son cosa del admin
+  try {
+    const { data, error } = await supabase.from(PAGOS_TABLE).select('*');
+    if (error) { console.warn('[produccion] pull pagos:', error.message); return; }
+    if ((data || []).length > 0) {
+      const obj = {};
+      data.forEach(r => { if (r.paid) obj[pagoKey(r.week_key, r.persona)] = { paid: true, paidAt: r.paid_at }; });
+      writePagos(obj);
+      return;
+    }
+    // Cloud vacío → migrar los pagos locales existentes (una vez).
+    const local = readPagosLocal();
+    const yaMigro = !!localStorage.getItem(MIGRATED_KEY + '-pagos');
+    const entries = Object.entries(local).filter(([, v]) => v?.paid);
+    if (entries.length > 0 && !yaMigro) {
+      const payload = entries.map(([k, v]) => {
+        const [wk, ...rest] = k.split('|');
+        return { week_key: wk, persona: rest.join('|'), paid: true, paid_at: v.paidAt || new Date().toISOString() };
+      });
+      const { error: upErr } = await supabase.from(PAGOS_TABLE).upsert(payload, { onConflict: 'week_key,persona' });
+      if (upErr) console.warn('[produccion] migrate pagos:', upErr.message);
+      try { localStorage.setItem(MIGRATED_KEY + '-pagos', '1'); } catch {}
+      writePagos(local);
+    } else {
+      writePagos({});
+    }
+  } catch (e) { console.warn('[produccion] hydrate pagos ex:', e?.message || e); }
+}
+
+async function pushPago(weekKey, persona, paid) {
+  if (!cloudReady() || _role !== 'admin') return;
+  try {
+    if (paid) {
+      const { error } = await supabase.from(PAGOS_TABLE)
+        .upsert({ week_key: weekKey, persona, paid: true, paid_at: new Date().toISOString() }, { onConflict: 'week_key,persona' });
+      if (error) console.warn('[produccion] pushPago:', error.message);
+    } else {
+      const { error } = await supabase.from(PAGOS_TABLE).delete().match({ week_key: weekKey, persona });
+      if (error) console.warn('[produccion] pushPago del:', error.message);
+    }
+  } catch (e) { console.warn('[produccion] pushPago ex:', e?.message || e); }
 }
 
 export function isWeekPaid(weekKey, persona) {
-  return !!readPagos()[pagoKey(weekKey, persona)]?.paid;
+  return !!ensurePagos()[pagoKey(weekKey, persona)]?.paid;
 }
 export function setWeekPaid(weekKey, persona, paid = true) {
-  const p = readPagos();
+  const p = { ...ensurePagos() };
   const k = pagoKey(weekKey, persona);
   if (paid) p[k] = { paid: true, paidAt: new Date().toISOString() };
   else delete p[k];
   writePagos(p);
+  pushPago(weekKey, persona, paid);
 }
 
 // Mes (horario AR) → 'YYYY-MM'. Una semana pertenece al mes de su lunes.

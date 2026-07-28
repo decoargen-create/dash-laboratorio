@@ -33,6 +33,30 @@ export function isSupabaseConfigured() {
   return !!getClient();
 }
 
+// Cliente service-role crudo (bypassa RLS). Úsalo SOLO en el server y después
+// de verificar la identidad/rol del caller con getUserIdFromAuth + getUserRole.
+export function getServiceClient() {
+  return getClient();
+}
+
+// Rol del user en public.profiles ('admin' | 'creator' | 'user' | ...).
+// null si no hay Supabase o el user no existe.
+export async function getUserRole(userId) {
+  const supabase = getClient();
+  if (!supabase || !userId) return null;
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', userId)
+      .maybeSingle();
+    if (error) return null;
+    return data?.role || null;
+  } catch {
+    return null;
+  }
+}
+
 // Lee Authorization: Bearer <token>, verifica con Supabase y devuelve el
 // user.id. null si el token no es válido.
 export async function getUserIdFromAuth(req) {

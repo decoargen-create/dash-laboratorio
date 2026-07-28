@@ -50,6 +50,8 @@ import SupabaseAuthScreen from './SupabaseAuth.jsx';
 import { useMarketingSync } from './useMarketingSync.js';
 import { useUserPrefs } from './useUserPrefs.js';
 import { supabase, onAuthChange } from './supabase.js';
+import { initProduccionSync, teardownProduccionSync } from './produccionStore.js';
+import CreatorWorkspace from './CreatorWorkspace.jsx';
 import { generateCSV, downloadCSV, parseCSV, toNumber, toBool } from './csv.js';
 import { loadVioraState, saveVioraState, clearVioraState, createBackup } from './vioraStorage.js';
 import { safeSetItem } from './safeStorage.js';
@@ -2093,18 +2095,45 @@ function AppShell({ onExit }) {
   // puerta. El componente LoginScreen y el endpoint /api/auth siguen en el
   // repo intactos por si en algún momento se necesitan de nuevo.
   useEffect(() => {
+    let cancelled = false;
     if (supabaseUser && !currentUser) {
-      setCurrentUser({
-        role: 'admin',
-        name: supabaseUser.user_metadata?.display_name || supabaseUser.email?.split('@')[0] || 'Admin',
-        email: supabaseUser.email,
-        id: 'admin',
-      });
+      (async () => {
+        // Leemos el rol real de profiles. IMPORTANTE: solo el rol 'creator'
+        // cambia la experiencia (tablero acotado del equipo). Cualquier otro
+        // rol se trata como admin — igual que antes — para NO romper a los
+        // usuarios que ya usan la app (la base es multi-inquilino).
+        let role = 'admin';
+        try {
+          if (supabase) {
+            const { data } = await supabase.from('profiles').select('role').eq('id', supabaseUser.id).maybeSingle();
+            if (data?.role === 'creator') role = 'creator';
+          }
+        } catch { /* ante la duda, admin (comportamiento previo) */ }
+        if (cancelled) return;
+        setCurrentUser({
+          role,
+          name: supabaseUser.user_metadata?.display_name || supabaseUser.email?.split('@')[0] || 'Usuario',
+          email: supabaseUser.email,
+          id: role === 'creator' ? supabaseUser.id : 'admin',
+        });
+      })();
     } else if (!supabaseUser && currentUser) {
       // Si la sesión de Supabase expiró/salió, deslogueamos del dashboard.
       setCurrentUser(null);
     }
+    return () => { cancelled = true; };
   }, [supabaseUser, currentUser]);
+
+  // Arranca (o apaga) el sync de Producción con la nube según el rol resuelto.
+  // Para un admin, esto también migra su tablero local existente a la nube la
+  // primera vez. Para un creator, trae solo sus tarjetas (RLS).
+  useEffect(() => {
+    if (currentUser && supabaseUser) {
+      initProduccionSync({ role: currentUser.role, userId: supabaseUser.id, name: currentUser.name });
+    } else {
+      teardownProduccionSync();
+    }
+  }, [currentUser?.role, supabaseUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Si el user clickeó el link de "Olvidaste tu contraseña" desde el email
   // mientras YA estaba logueado, el URL hash tiene type=recovery. Sin esto,
@@ -2121,6 +2150,24 @@ function AppShell({ onExit }) {
         {supabase
           ? <SupabaseAuthScreen onLoggedIn={setSupabaseUser} />
           : <LoginScreen onLogin={handleLogin} onSessionAuth={handleSessionAuth} darkMode={darkMode} toggleDarkMode={toggleDarkMode} />}
+        <ToastContainer toasts={toasts} />
+      </>
+    );
+  }
+
+  // Rol 'creator' (equipo creativo): experiencia acotada — SOLO su tablero de
+  // Producción, sin el resto del panel de admin. Es una app aparte y liviana,
+  // así no tocamos el workspace de admin ni arriesgamos filtrar secciones.
+  if (currentUser.role === 'creator') {
+    return (
+      <>
+        <CreatorWorkspace
+          user={currentUser}
+          onLogout={handleLogout}
+          addToast={addToast}
+          darkMode={darkMode}
+          toggleDarkMode={toggleDarkMode}
+        />
         <ToastContainer toasts={toasts} />
       </>
     );

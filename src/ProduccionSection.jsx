@@ -20,6 +20,7 @@ import {
 } from './produccionStore.js';
 import { CreativosSection, subirParaTarjeta, VIDEO_ACCEPT, probeDrive } from './produccionUpload.jsx';
 import { listTeam } from './produccionTeam.js';
+import { driveStatus, connectDrive, disconnectDrive } from './produccionDrive.js';
 import TeamModal from './TeamModal.jsx';
 import ConfirmDialog from './ConfirmDialog.jsx';
 
@@ -272,12 +273,25 @@ export default function ProduccionSection({ addToast }) {
   useEffect(reloadTeam, []);
 
   // Link a la carpeta raíz de Drive (para el botón "Drive" del header).
-  const [driveRoot, setDriveRoot] = useState(null);
-  useEffect(() => {
-    let dead = false;
-    probeDrive().then(d => { if (!dead && d?.configured && d.rootLink) setDriveRoot(d.rootLink); });
-    return () => { dead = true; };
-  }, []);
+  // Estado de Drive: si funciona (rootLink) + si el OAuth del user está conectado.
+  const [drive, setDrive] = useState({ rootLink: null, connected: false, email: null, connecting: false });
+  const refreshDrive = () => {
+    Promise.all([probeDrive(), driveStatus()]).then(([p, s]) => {
+      setDrive(d => ({ ...d, rootLink: (p?.configured && p?.rootLink) || null, connected: !!s?.connected, email: s?.email || p?.email || null }));
+    });
+  };
+  useEffect(refreshDrive, []);
+  const onConnectDrive = async () => {
+    setDrive(d => ({ ...d, connecting: true }));
+    let r;
+    try { r = await connectDrive(); } finally { setDrive(d => ({ ...d, connecting: false })); }
+    if (r === true) { addToast?.({ type: 'success', message: '✅ Google Drive conectado — ahora los videos van a tu Drive.' }); refreshDrive(); }
+    else if (r === 'closed') { addToast?.({ type: 'warning', message: 'Cerraste la ventana antes de terminar.' }); refreshDrive(); }
+  };
+  const onDisconnectDrive = async () => {
+    try { await disconnectDrive(); addToast?.({ type: 'success', message: 'Drive desconectado.' }); refreshDrive(); }
+    catch (e) { addToast?.({ type: 'error', message: e.message }); }
+  };
 
   const semanas = useMemo(() => {
     const keys = new Set(allWeekKeys());
@@ -340,12 +354,26 @@ export default function ProduccionSection({ addToast }) {
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition shadow-sm">
             <ArrowLeftRight size={14} /> Reasignar
           </button>
-          {driveRoot && (
-            <a href={driveRoot} target="_blank" rel="noopener noreferrer"
+          {drive.rootLink && (
+            <a href={drive.rootLink} target="_blank" rel="noopener noreferrer"
               title="Abrir la carpeta de creativos en Google Drive (todos los productos)"
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition shadow-sm">
               <ExternalLink size={14} /> Drive
             </a>
+          )}
+          {drive.connected ? (
+            <span title={`Drive conectado como ${drive.email || 'tu cuenta'} — clic para desconectar`}
+              onClick={onDisconnectDrive}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800 rounded-lg cursor-pointer hover:bg-emerald-100 transition" >
+              <CheckCircle2 size={14} /> Drive OK
+            </span>
+          ) : (
+            <button onClick={onConnectDrive} disabled={drive.connecting}
+              title="Conectar tu Google Drive para que los videos se suban ahí (cualquier tamaño)"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-r from-pink-500 to-rose-500 rounded-lg hover:from-pink-600 hover:to-rose-600 transition shadow-sm disabled:opacity-60">
+              {drive.connecting ? <Loader2 size={14} className="animate-spin" /> : <ExternalLink size={14} />}
+              {drive.connecting ? 'Conectando…' : 'Conectar Drive'}
+            </button>
           )}
           <button onClick={() => setShowTeam(true)}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition shadow-sm">

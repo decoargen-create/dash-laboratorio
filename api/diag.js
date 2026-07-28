@@ -121,20 +121,25 @@ export default function handler(req, res) {
       const carpetaTranscripts = env.DRIVE_TRANSCRIPTS_FOLDER_ID || '';
       const credsOk = !!(clientEmail && tieneKey);
       const carpetaOk = !!(carpetaCreativos || carpetaTranscripts);
+      const oauthOk = !!(env.GOOGLE_OAUTH_CLIENT_ID && env.GOOGLE_OAUTH_CLIENT_SECRET);
       return {
+        // Camino RECOMENDADO para Drive personal (@gmail): OAuth del usuario.
+        oauth: {
+          GOOGLE_OAUTH_CLIENT_ID: { configured: !!env.GOOGLE_OAUTH_CLIENT_ID },
+          GOOGLE_OAUTH_CLIENT_SECRET: { configured: !!env.GOOGLE_OAUTH_CLIENT_SECRET },
+          ok: oauthOk,
+          hint: oauthOk
+            ? 'OAuth listo. En Producción tocá "Conectar Drive" para vincular tu cuenta.'
+            : 'Falta GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET (credencial OAuth de Google Cloud). Es lo que hace que los videos suban a TU Drive personal.',
+        },
+        // Camino service account (solo sirve con Google Workspace / shared drive).
         service_account_configured: !!raw,
         service_account_valida: credsOk,
-        client_email: clientEmail, // compartí la carpeta de Drive con este mail (Editor)
+        client_email: clientEmail,
         DRIVE_CREATIVOS_FOLDER_ID: { configured: !!carpetaCreativos, length: carpetaCreativos.length },
         DRIVE_TRANSCRIPTS_FOLDER_ID: { configured: !!carpetaTranscripts, length: carpetaTranscripts.length },
-        ok: credsOk && carpetaOk,
-        hint: !raw
-          ? 'Falta GOOGLE_SERVICE_ACCOUNT_JSON (el JSON de la service account de Google). Sin esto los videos van al almacenamiento AdsLab.'
-          : !credsOk
-          ? 'GOOGLE_SERVICE_ACCOUNT_JSON existe pero no parsea o le faltan client_email/private_key.'
-          : !carpetaOk
-          ? 'Credenciales OK pero falta DRIVE_CREATIVOS_FOLDER_ID (el ID de la carpeta de Drive, compartida con el client_email como Editor).'
-          : 'OK — los creativos van a Drive.',
+        ok: oauthOk || (credsOk && carpetaOk),
+        hint: 'Para Drive PERSONAL (@gmail) usá OAuth (arriba). La service account solo sube en Google Workspace / shared drives.',
       };
     })(),
     deployment: {

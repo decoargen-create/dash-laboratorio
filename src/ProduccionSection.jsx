@@ -11,7 +11,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Film, Plus, X, Trash2, ChevronDown, UploadCloud, Loader2, CheckCircle2,
-  AlertTriangle, ExternalLink, FileText, GripVertical, Users, History,
+  AlertTriangle, ExternalLink, FileText, GripVertical, Users, History, Search,
 } from 'lucide-react';
 import {
   ESTADOS, ESTADO_LABELS, VIDEOS_POR_PRODUCTO, weekKeyOf, weekLabel, weekRange, allWeekKeys,
@@ -453,7 +453,7 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
 
       <input ref={fileRef} type="file" accept={VIDEO_ACCEPT} multiple hidden
         onClick={e => e.stopPropagation()}
-        onChange={e => { const fl = e.target.files; e.target.value = ''; onPick(fl); }} />
+        onChange={e => { const fl = Array.from(e.target.files || []); e.target.value = ''; onPick(fl); }} />
     </div>
   );
 }
@@ -464,8 +464,13 @@ function AgregarProductoModal({ productos, personas, team = [], asigs, weekKey, 
   const [selected, setSelected] = useState(() => new Set());
   const [creatorId, setCreatorId] = useState('');
   const [persona, setPersona] = useState('');
+  const [q, setQ] = useState('');
 
   const yaEnSemana = useMemo(() => new Set(asigs.map(a => String(a.productoId))), [asigs]);
+  const filtrados = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    return t ? productos.filter(p => (p.nombre || '').toLowerCase().includes(t)) : productos;
+  }, [productos, q]);
 
   const toggle = (id) => setSelected(prev => {
     const n = new Set(prev);
@@ -503,9 +508,24 @@ function AgregarProductoModal({ productos, personas, team = [], asigs, weekKey, 
             <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">
               Productos {selected.size > 0 && <span className="text-brand-500">· {selected.size} elegido{selected.size === 1 ? '' : 's'}</span>}
             </span>
+            {/* Buscador — filtra la lista por nombre */}
+            <div className="relative mb-1.5">
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+              <input
+                autoFocus
+                value={q}
+                onChange={e => setQ(e.target.value)}
+                placeholder="Buscar producto…"
+                className="w-full pl-8 pr-8 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500"
+              />
+              {q && (
+                <button onClick={() => setQ('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"><X size={14} /></button>
+              )}
+            </div>
             <div className="max-h-56 overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-100 dark:divide-gray-800">
               {productos.length === 0 && <p className="text-xs text-gray-400 p-3">No hay productos cargados.</p>}
-              {productos.map(p => {
+              {productos.length > 0 && filtrados.length === 0 && <p className="text-xs text-gray-400 p-3">Nada coincide con «{q}».</p>}
+              {filtrados.map(p => {
                 const ya = yaEnSemana.has(String(p.id));
                 const sel = selected.has(String(p.id));
                 return (

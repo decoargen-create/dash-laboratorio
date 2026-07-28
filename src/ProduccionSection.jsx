@@ -24,6 +24,15 @@ import TeamModal from './TeamModal.jsx';
 
 const EQUIPO_DEFAULT = ['Fran', 'Wanda', 'Flor'];
 
+// Escape cierra el modal (detalle de uso: el user espera Esc en cualquier popup).
+function useEscape(onClose) {
+  useEffect(() => {
+    const h = (e) => { if (e.key === 'Escape') onClose?.(); };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [onClose]);
+}
+
 const COLS = [
   { key: 'porhacer', emoji: '🎬', dot: 'bg-slate-400', text: 'text-slate-500 dark:text-slate-400', hdr: 'bg-slate-200/60 dark:bg-slate-700/30', empty: '🎬 Agregá productos y ¡acción!' },
   { key: 'revision', emoji: '👀', dot: 'bg-amber-400', text: 'text-amber-600 dark:text-amber-400', hdr: 'bg-amber-100/70 dark:bg-amber-900/20', empty: '👀 Nada en revisión — todo al día' },
@@ -405,6 +414,17 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
   const [moveMenu, setMoveMenu] = useState(false);
   const [prog, setProg] = useState(null); // { i, total } mientras sube
   const fileRef = useRef(null);
+
+  // Los menús desplegables se cierran con Esc o click en cualquier otro lado
+  // (los clicks internos no llegan acá: los wrappers hacen stopPropagation).
+  useEffect(() => {
+    if (!menu && !moveMenu) return;
+    const cerrar = () => { setMenu(false); setMoveMenu(false); setMenuQ(''); };
+    const onKey = (e) => { if (e.key === 'Escape') cerrar(); };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('click', cerrar);
+    return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('click', cerrar); };
+  }, [menu, moveMenu]);
   const subidos = a.archivos?.length || 0;
   const aprob = Math.min(a.videosAprobados || 0, subidos);
   const folderLink = (a.archivos || []).find(f => f.folderLink)?.folderLink;
@@ -444,7 +464,7 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
       className={`group bg-white dark:bg-gray-800 border rounded-xl p-2.5 shadow-sm hover:shadow-lg hover:shadow-pink-500/10 hover:-translate-y-0.5 transition cursor-pointer ${trabada ? 'border-amber-400/80 dark:border-amber-500/60 hover:border-amber-500' : 'border-gray-200 dark:border-gray-700 hover:border-pink-300 dark:hover:border-pink-700/70'}`}>
       {/* Título grande + persona a la derecha (como el mock del Estudio) */}
       <div className="flex items-start gap-1.5">
-        <GripVertical size={14} className="text-gray-300 dark:text-gray-600 mt-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition" />
+        <GripVertical size={14} className="text-gray-300 dark:text-gray-600 mt-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition cursor-grab active:cursor-grabbing" />
         <span className="text-[15px] font-extrabold tracking-tight text-gray-900 dark:text-white leading-tight flex-1 min-w-0 truncate" title={a.productoNombre}>{a.productoNombre || 'Producto'}</span>
         <div className="relative shrink-0 flex items-center gap-1" onClick={e => e.stopPropagation()}>
           {/* Aviso compacto: etiqueta sin cuenta → nadie la ve en su tablero */}
@@ -574,6 +594,7 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
 // ── Agregar productos (crea tarjetas en "Por hacer"). Multi-selección: podés
 // tildar varios productos y crearlos todos juntos con una sola vuelta.
 function AgregarProductoModal({ productos, personas, team = [], asigs, weekKey, onClose, addToast }) {
+  useEscape(onClose);
   const [selected, setSelected] = useState(() => new Set());
   const [creatorId, setCreatorId] = useState('');
   const [persona, setPersona] = useState('');
@@ -692,6 +713,7 @@ function AgregarProductoModal({ productos, personas, team = [], asigs, weekKey, 
 // (o las sin asignar) a una cuenta del equipo. Para cubrir vacaciones/bajas o
 // repartir lo que quedó suelto, sin ir tarjeta por tarjeta.
 function ReasignarModal({ asigs, team, weekKey, onClose, addToast }) {
+  useEscape(onClose);
   const [from, setFrom] = useState('');
   const [toId, setToId] = useState('');
 
@@ -742,7 +764,7 @@ function ReasignarModal({ asigs, team, weekKey, onClose, addToast }) {
             <>
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400">Mover las tarjetas de…</span>
-                <select value={from} onChange={e => setFrom(e.target.value)}
+                <select autoFocus value={from} onChange={e => setFrom(e.target.value)}
                   className="px-2.5 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500">
                   <option value="">Elegí…</option>
                   {origenes.map(o => <option key={o.key} value={o.key}>{o.label} ({o.n})</option>)}
@@ -834,6 +856,7 @@ function CardDetailModal({ a, personas, team = [], onClose, addToast }) {
   };
 
   const saveBrief = () => { if (brief !== (a.brief || '')) updateAssignment(a.id, { brief }); };
+  useEscape(() => { saveBrief(); onClose(); }); // Esc = guardar brief y cerrar
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto bg-black/50 backdrop-blur-sm" onClick={() => { saveBrief(); onClose(); }}>

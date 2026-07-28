@@ -72,98 +72,108 @@ function fmtDur(ms) {
   return `${(h / 24).toFixed(1)} d`;
 }
 
+// Panel VERTICAL por persona: una fila por creativo con asignados, por hacer,
+// en revisión y objetivo (aprobados/asignados) + su ritmo (tiempo prom).
+// Las clases grid-cols van LITERALES (Tailwind no genera clases interpoladas).
 function ResumenSemana({ asigs }) {
-  const { porPersona, sinAsignar, total, aprobados } = useMemo(() => {
-    const map = {};
-    let sin = 0, apr = 0;
-    asigs.forEach(a => {
-      if (esCompleto(a.estado)) apr++;
-      const p = (a.persona || '').trim();
-      if (p) map[p] = (map[p] || 0) + 1; else sin++;
-    });
-    return {
-      porPersona: Object.entries(map).sort((x, y) => y[1] - x[1]),
-      sinAsignar: sin, total: asigs.length, aprobados: apr,
-    };
-  }, [asigs]);
-
-  // KPIs de tiempos (del historial): promedio creada→aprobada y tarjetas
-  // "trabadas" (más de 24h en revisión). Se llena a medida que hay historial.
-  const kpi = useMemo(() => {
+  const { rows, sinAsignar, total } = useMemo(() => {
     const now = Date.now();
-    const tiempos = [];
-    let trabadas = 0;
+    const by = {};
+    let sin = 0;
     asigs.forEach(a => {
+      const p = (a.persona || '').trim();
+      if (!p) { sin++; return; }
+      if (!by[p]) by[p] = { persona: p, asignados: 0, porhacer: 0, revision: 0, completos: 0, tiempos: [], trabadas: 0 };
+      const s = by[p];
+      s.asignados++;
+      if (a.estado === 'porhacer') s.porhacer++;
+      else if (a.estado === 'revision') s.revision++;
+      if (esCompleto(a.estado)) s.completos++;
       const hist = a.historial || [];
       const creadaTs = a.createdAt ? Date.parse(a.createdAt)
         : (hist.find(e => e.tipo === 'creacion')?.ts ? Date.parse(hist.find(e => e.tipo === 'creacion').ts) : NaN);
       const aprobEv = [...hist].reverse().find(e => e.tipo === 'estado' && e.to === 'aprobado');
-      if (!Number.isNaN(creadaTs) && aprobEv?.ts) {
-        const d = Date.parse(aprobEv.ts) - creadaTs;
-        if (d > 0) tiempos.push(d);
-      }
+      if (!Number.isNaN(creadaTs) && aprobEv?.ts) { const d = Date.parse(aprobEv.ts) - creadaTs; if (d > 0) s.tiempos.push(d); }
       if (a.estado === 'revision') {
         const revEv = [...hist].reverse().find(e => e.tipo === 'estado' && e.to === 'revision');
         const t = revEv?.ts ? Date.parse(revEv.ts) : (a.updatedAt ? Date.parse(a.updatedAt) : NaN);
-        if (!Number.isNaN(t) && (now - t) > 24 * 3600 * 1000) trabadas++;
+        if (!Number.isNaN(t) && (now - t) > 24 * 3600 * 1000) s.trabadas++;
       }
     });
-    const avg = tiempos.length ? tiempos.reduce((s, x) => s + x, 0) / tiempos.length : null;
-    return { avg, n: tiempos.length, trabadas };
+    const rows = Object.values(by).map(s => ({
+      ...s,
+      avg: s.tiempos.length ? s.tiempos.reduce((x, y) => x + y, 0) / s.tiempos.length : null,
+      bonus: bonusObjetivo(s.completos),
+    })).sort((a, b) => b.asignados - a.asignados);
+    return { rows, sinAsignar: sin, total: asigs.length };
   }, [asigs]);
 
   if (total === 0) return null;
-  const bonus = bonusObjetivo(aprobados);
-  const pct = total ? Math.round((aprobados / total) * 100) : 0;
 
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/60 px-3.5 py-2.5">
-      <div className="flex items-center gap-1.5 flex-wrap">
-        <span className="text-[10px] font-bold uppercase text-gray-400 mr-0.5">Carga del equipo</span>
-        {porPersona.map(([p, n]) => (
-          <span key={p} className={`inline-flex items-center gap-1 rounded-full pl-1 pr-2 py-0.5 text-[11px] font-bold ${CHIP_CLS[personaColor(p)]}`}>
-            <span className="w-4 h-4 rounded-full bg-black/20 flex items-center justify-center text-[9px] font-black">{n}</span>
-            {p}
-          </span>
-        ))}
+    <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/60 overflow-hidden">
+      <div className="flex items-center justify-between px-3.5 py-2 border-b border-gray-100 dark:border-gray-700/60">
+        <span className="text-[10px] font-bold uppercase tracking-wide text-gray-400">Objetivo y avance por persona</span>
         {sinAsignar > 0 && (
-          <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-bold bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-300">
-            {sinAsignar} sin asignar
+          <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+            <AlertTriangle size={10} /> {sinAsignar} sin asignar
           </span>
         )}
       </div>
 
-      <div className="ml-auto flex items-center gap-2.5 min-w-[200px]">
-        <div className="flex-1">
-          <div className="flex items-center justify-between text-[10px] mb-1">
-            <span className="font-bold uppercase text-gray-400">Objetivo de la semana</span>
-            <span className="font-mono text-gray-500 dark:text-gray-400">{aprobados}/{total} aprobados</span>
+      {rows.length === 0 ? (
+        <p className="text-xs text-gray-400 px-3.5 py-3">Asigná tarjetas a cada uno para ver su avance.</p>
+      ) : (
+        <>
+          {/* Encabezado de columnas (solo desktop) */}
+          <div className="hidden sm:grid grid-cols-[1.2fr_54px_54px_54px_1.6fr] gap-2 px-3.5 py-1.5 text-[9px] font-bold uppercase tracking-wide text-gray-400 border-b border-gray-100 dark:border-gray-800">
+            <span>Persona</span>
+            <span className="text-center">Asign.</span>
+            <span className="text-center">Por hacer</span>
+            <span className="text-center">Revisión</span>
+            <span>Objetivo</span>
           </div>
-          <div className="h-1.5 rounded-full bg-gray-100 dark:bg-gray-700 overflow-hidden">
-            <div className="h-full bg-gradient-to-r from-emerald-400 to-emerald-600 transition-all" style={{ width: `${pct}%` }} />
+          <div className="divide-y divide-gray-100 dark:divide-gray-800">
+            {rows.map(s => {
+              const pct = s.asignados ? Math.round((s.completos / s.asignados) * 100) : 0;
+              return (
+                <div key={s.persona} className="grid grid-cols-2 sm:grid-cols-[1.2fr_54px_54px_54px_1.6fr] gap-x-2 gap-y-1.5 px-3.5 py-2.5 items-center">
+                  {/* persona */}
+                  <span className={`inline-flex items-center gap-1.5 rounded-full pl-1 pr-2.5 py-0.5 text-[11px] font-bold w-fit ${CHIP_CLS[personaColor(s.persona)]}`}>
+                    <span className="w-4 h-4 rounded-full bg-black/20 flex items-center justify-center text-[9px] font-black">{s.persona.charAt(0).toUpperCase()}</span>
+                    {s.persona}
+                  </span>
+                  {/* asignados */}
+                  <span className="text-right sm:text-center text-sm font-bold tabular-nums text-gray-700 dark:text-gray-200">
+                    <span className="sm:hidden text-[9px] font-bold uppercase text-gray-400 mr-1">Asign.</span>{s.asignados}
+                  </span>
+                  {/* por hacer */}
+                  <span className="text-right sm:text-center text-sm tabular-nums text-gray-600 dark:text-gray-300">
+                    <span className="sm:hidden text-[9px] font-bold uppercase text-gray-400 mr-1">Por hacer</span>{s.porhacer}
+                  </span>
+                  {/* en revisión */}
+                  <span className="text-right sm:text-center text-sm tabular-nums text-amber-600 dark:text-amber-400">
+                    <span className="sm:hidden text-[9px] font-bold uppercase text-gray-400 mr-1">Revisión</span>{s.revision}
+                  </span>
+                  {/* objetivo */}
+                  <div className="col-span-2 sm:col-span-1">
+                    <div className="flex items-center justify-between text-[10px] mb-0.5">
+                      <span className="tabular-nums text-gray-500 dark:text-gray-400">{s.completos}/{s.asignados} aprobados</span>
+                      <span className="flex items-center gap-1.5">
+                        {s.avg != null && <span className="tabular-nums text-gray-400" title="Tiempo prom. a aprobado">⏱ {fmtDur(s.avg)}</span>}
+                        {s.trabadas > 0 && <span className="text-amber-600 dark:text-amber-400 font-bold" title="Trabadas +24h en revisión">🐢{s.trabadas}</span>}
+                        {s.bonus > 0 && <span className="text-emerald-600 dark:text-emerald-400 font-bold" title="Alcanzó bonus">🎯</span>}
+                      </span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-gray-100 dark:bg-gray-700 overflow-hidden">
+                      <div className="h-full bg-gradient-to-r from-emerald-400 to-emerald-600 transition-all" style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        </div>
-        {bonus > 0 && (
-          <span className="text-[11px] font-extrabold text-emerald-600 dark:text-emerald-400 whitespace-nowrap">🎯 bonus</span>
-        )}
-      </div>
-
-      {/* KPIs de tiempos (eficiencia del equipo) */}
-      {(kpi.n > 0 || kpi.trabadas > 0) && (
-        <div className="w-full flex items-center gap-4 flex-wrap pt-2 mt-1 border-t border-gray-100 dark:border-gray-700/60 text-[11px]">
-          {kpi.n > 0 && (
-            <span className="inline-flex items-center gap-1 text-gray-500 dark:text-gray-400">
-              <History size={12} className="text-brand-400" /> Prom. a aprobado:
-              <b className="text-gray-700 dark:text-gray-200">{fmtDur(kpi.avg)}</b>
-              <span className="text-gray-400">(n={kpi.n})</span>
-            </span>
-          )}
-          {kpi.trabadas > 0 && (
-            <span className="inline-flex items-center gap-1 font-semibold text-amber-600 dark:text-amber-400">
-              <AlertTriangle size={12} /> {kpi.trabadas} trabada{kpi.trabadas === 1 ? '' : 's'} (+24h en revisión)
-            </span>
-          )}
-        </div>
+        </>
       )}
     </div>
   );

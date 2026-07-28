@@ -74,7 +74,11 @@ async function uploadOne(file, ctx) {
         const link = meta.webViewLink || (meta.id ? `https://drive.google.com/file/d/${meta.id}/view` : sess.folderLink) || null;
         return { name: sess.finalName || file.name, driveId: meta.id || null, link, folderLink: sess.folderLink || null, destino: 'drive', sizeMB: +(file.size / 1024 / 1024).toFixed(1), ts: uid() };
       }
-    } catch { /* fallback abajo */ }
+      console.warn('[produccion] PUT a Drive respondió', put.status, '— cayendo a AdsLab');
+    } catch (err) {
+      // Típicamente CORS: la sesión no quedó atada al origin del browser.
+      console.warn('[produccion] PUT a Drive falló:', err?.message || err, '— cayendo a AdsLab');
+    }
   }
   return await uploadToSupabase(file, user, ext);
 }

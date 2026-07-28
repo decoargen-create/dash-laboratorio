@@ -93,6 +93,11 @@ export default async function handler(req, res) {
     const contentType = mimeType || 'video/mp4';
 
     // Abrir la resumable session. Google devuelve la session URI en Location.
+    // CLAVE: pasamos el Origin del navegador — Google "ata" la sesión a ese
+    // origin y recién entonces responde los headers CORS en el PUT del browser.
+    // Sin esto, el PUT directo browser→Google es bloqueado por CORS y la subida
+    // caía siempre al fallback de AdsLab (bug detectado en producción).
+    const browserOrigin = req.headers.origin || '';
     const initResp = await fetch(`${UPLOAD}?uploadType=resumable&supportsAllDrives=true&fields=id,name,webViewLink`, {
       method: 'POST',
       headers: {
@@ -100,6 +105,7 @@ export default async function handler(req, res) {
         'Content-Type': 'application/json; charset=UTF-8',
         'X-Upload-Content-Type': contentType,
         ...(size ? { 'X-Upload-Content-Length': String(size) } : {}),
+        ...(browserOrigin ? { Origin: browserOrigin } : {}),
       },
       body: JSON.stringify({ name: finalName, parents: [subFolder] }),
     });

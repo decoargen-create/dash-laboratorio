@@ -478,7 +478,7 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
     <div draggable={!prog}
       onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/prod-id', a.id); }}
       onClick={() => onOpen()}
-      className={`group bg-white dark:bg-gray-800 border rounded-xl p-2.5 shadow-sm hover:shadow-lg hover:shadow-pink-500/10 hover:-translate-y-0.5 transition cursor-pointer ${trabada ? 'border-amber-400/80 dark:border-amber-500/60 hover:border-amber-500' : 'border-gray-200 dark:border-gray-700 hover:border-pink-300 dark:hover:border-pink-700/70'}`}>
+      className={`group relative bg-white dark:bg-gray-800 border rounded-xl p-2.5 shadow-sm hover:shadow-lg hover:shadow-pink-500/10 hover:-translate-y-0.5 transition cursor-pointer ${(menu || moveMenu) ? 'z-30' : ''} ${trabada ? 'border-amber-400/80 dark:border-amber-500/60 hover:border-amber-500' : 'border-gray-200 dark:border-gray-700 hover:border-pink-300 dark:hover:border-pink-700/70'}`}>
       {/* Título grande + persona a la derecha (como el mock del Estudio) */}
       <div className="flex items-start gap-1.5">
         <GripVertical size={14} className="text-gray-300 dark:text-gray-600 mt-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition cursor-grab active:cursor-grabbing" />
@@ -541,8 +541,12 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
         )}
         {a.brief?.trim() && <FileText size={12} className="text-gray-400" title="Tiene brief" />}
         {trabada && <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400" title="Hace más de 24h que está en revisión">🐢 +24h</span>}
-        {/* Mover de columna (clave en celular): punto de color + chevron */}
-        <div className="relative ml-auto" onClick={e => e.stopPropagation()}>
+        {/* Eliminar directo + mover de columna (punto de color + chevron) */}
+        <div className="relative ml-auto flex items-center gap-0.5" onClick={e => e.stopPropagation()}>
+          <button onClick={() => setConfirmDel(true)} title="Eliminar tarjeta"
+            className="p-1 rounded-md text-gray-300 dark:text-gray-600 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition">
+            <Trash2 size={12} />
+          </button>
           <button onClick={() => setMoveMenu(v => !v)} title={`${ESTADO_LABELS[a.estado]} — mover a…`}
             className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition">
             <span className={`w-1.5 h-1.5 rounded-full ${(COLS.find(c => c.key === a.estado) || COLS[0]).dot}`} />

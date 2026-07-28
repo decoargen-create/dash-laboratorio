@@ -18,7 +18,7 @@ import {
   listAssignments, addAssignment, updateAssignment, removeAssignment, assignPersona,
   assignCreator, subscribeProduccion, esCompleto, bonusObjetivo,
 } from './produccionStore.js';
-import { CreativosSection, subirParaTarjeta, VIDEO_ACCEPT } from './produccionUpload.jsx';
+import { CreativosSection, subirParaTarjeta, VIDEO_ACCEPT, probeDrive } from './produccionUpload.jsx';
 import { listTeam } from './produccionTeam.js';
 import TeamModal from './TeamModal.jsx';
 import ConfirmDialog from './ConfirmDialog.jsx';
@@ -271,6 +271,14 @@ export default function ProduccionSection({ addToast }) {
   const reloadTeam = () => { listTeam().then(setTeam).catch(() => {}); };
   useEffect(reloadTeam, []);
 
+  // Link a la carpeta raíz de Drive (para el botón "Drive" del header).
+  const [driveRoot, setDriveRoot] = useState(null);
+  useEffect(() => {
+    let dead = false;
+    probeDrive().then(d => { if (!dead && d?.configured && d.rootLink) setDriveRoot(d.rootLink); });
+    return () => { dead = true; };
+  }, []);
+
   const semanas = useMemo(() => {
     const keys = new Set(allWeekKeys());
     keys.add(weekKeyOf());
@@ -332,6 +340,13 @@ export default function ProduccionSection({ addToast }) {
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition shadow-sm">
             <ArrowLeftRight size={14} /> Reasignar
           </button>
+          {driveRoot && (
+            <a href={driveRoot} target="_blank" rel="noopener noreferrer"
+              title="Abrir la carpeta de creativos en Google Drive (todos los productos)"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition shadow-sm">
+              <ExternalLink size={14} /> Drive
+            </a>
+          )}
           <button onClick={() => setShowTeam(true)}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition shadow-sm">
             <Users size={14} /> Equipo
@@ -413,6 +428,7 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
   const [menu, setMenu] = useState(false);
   const [menuQ, setMenuQ] = useState('');
   const [moveMenu, setMoveMenu] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(false);
   const [prog, setProg] = useState(null); // { i, total } mientras sube
   const fileRef = useRef(null);
 
@@ -533,7 +549,7 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
             <ChevronDown size={10} />
           </button>
           {moveMenu && (
-            <div className="absolute right-0 top-6 z-20 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl p-1 flex flex-col gap-0.5 min-w-[120px]">
+            <div className="absolute right-0 top-6 z-20 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl p-1 flex flex-col gap-0.5 min-w-[130px]">
               <span className="text-[9.5px] font-bold uppercase text-gray-400 px-2 pt-1">Mover a</span>
               {ESTADOS.map(e => (
                 <button key={e} onClick={() => { updateAssignment(a.id, { estado: e }); setMoveMenu(false); }}
@@ -541,6 +557,11 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
                   {a.estado === e ? '✓ ' : ''}{ESTADO_LABELS[e]}
                 </button>
               ))}
+              {/* Eliminar directo desde la tarjeta (con confirmación propia) */}
+              <button onClick={() => { setMoveMenu(false); setConfirmDel(true); }}
+                className="text-left text-xs font-semibold px-2 py-1 rounded whitespace-nowrap text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 border-t border-gray-100 dark:border-gray-700 mt-0.5 inline-flex items-center gap-1">
+                <Trash2 size={11} /> Eliminar tarjeta
+              </button>
             </div>
           )}
         </div>
@@ -590,6 +611,21 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
       <input ref={fileRef} type="file" accept={VIDEO_ACCEPT} multiple hidden
         onClick={e => e.stopPropagation()}
         onChange={e => { const fl = Array.from(e.target.files || []); e.target.value = ''; onPick(fl); }} />
+
+      {/* Confirmación propia de eliminar (el span evita que el click burbujee
+          a la tarjeta y abra el detalle) */}
+      {confirmDel && (
+        <span onClick={e => e.stopPropagation()}>
+          <ConfirmDialog
+            open
+            title={`¿Eliminar la tarjeta de ${a.productoNombre}?`}
+            message="Se pierde su historial y su lista de videos. Los archivos ya subidos a Drive/AdsLab no se borran."
+            confirmLabel="Eliminar tarjeta" tone="danger"
+            onConfirm={() => { setConfirmDel(false); removeAssignment(a.id); addToast?.({ type: 'success', message: `Tarjeta de ${a.productoNombre} eliminada.` }); }}
+            onClose={() => setConfirmDel(false)}
+          />
+        </span>
+      )}
     </div>
   );
 }

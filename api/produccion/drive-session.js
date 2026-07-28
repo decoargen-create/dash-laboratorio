@@ -69,9 +69,15 @@ export default async function handler(req, res) {
   body = body || {};
 
   // Sondeo liviano del front (sin efectos): ¿Drive está configurado?
-  // Lo usa el cartel de la tarjeta para no decir "no conectado" cuando sí lo está.
+  // Lo usan el cartel de la tarjeta y el botón "Drive" del header del tablero.
+  // rootLink = la carpeta raíz de creativos, para entrar a ver todo.
   if (body.probe) {
-    return respondJSON(res, 200, { configured: driveReady() });
+    const ready = driveReady();
+    const rootId = process.env.DRIVE_CREATIVOS_FOLDER_ID || null;
+    return respondJSON(res, 200, {
+      configured: ready,
+      rootLink: ready && rootId ? `https://drive.google.com/drive/folders/${rootId}` : null,
+    });
   }
 
   const { productoNombre, persona, filename, mimeType, size } = body;

@@ -43,6 +43,20 @@ async function getAuthToken() {
   catch { return ''; }
 }
 
+// Sondeo al server (sin efectos): ¿Drive conectado? + link a la carpeta raíz.
+// Devuelve { configured, rootLink } o null si no se pudo consultar.
+export async function probeDrive() {
+  try {
+    const token = await getAuthToken();
+    const r = await fetch('/api/produccion/drive-session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({ probe: true }),
+    });
+    return await r.json().catch(() => null);
+  } catch { return null; }
+}
+
 async function uploadToSupabase(file, user, ext) {
   const path = `${user.id}/produccion/pv-${uid()}.${ext}`;
   const { error } = await supabase.storage.from(BUCKET).upload(path, file, {
@@ -122,18 +136,7 @@ export function CreativosSection({ a, addToast, canDelete = true }) {
   useEffect(() => {
     if (!soloAdslab) return; // solo hace falta para decidir el cartel
     let dead = false;
-    (async () => {
-      try {
-        const token = await getAuthToken();
-        const r = await fetch('/api/produccion/drive-session', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-          body: JSON.stringify({ probe: true }),
-        });
-        const d = await r.json().catch(() => ({}));
-        if (!dead) setDriveOk(!!d.configured);
-      } catch { /* dejamos null: no afirmamos nada */ }
-    })();
+    probeDrive().then(d => { if (!dead && d) setDriveOk(!!d.configured); });
     return () => { dead = true; };
   }, [soloAdslab]);
 

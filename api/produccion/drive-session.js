@@ -88,6 +88,48 @@ export default async function handler(req, res) {
         out.prodLink = `https://drive.google.com/drive/folders/${prodFolder}`;
       } catch { /* devolvemos al menos el root */ }
     }
+    // AUTO-TEST de CORS: abrimos una sesión efímera atada al Origin del
+    // navegador y le preguntamos a Google (preflight OPTIONS) si aceptaría el
+    // PUT desde esa web. Si no, el front lo muestra con el detalle exacto —
+    // diagnóstico sin depender de la consola del usuario.
+    if (ready && rootId) {
+      const origin = req.headers.origin || '';
+      try {
+        const token = await getAccessToken();
+        const init = await fetch(`${UPLOAD}?uploadType=resumable&supportsAllDrives=true`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json; charset=UTF-8',
+            ...(origin ? { Origin: origin } : {}),
+          },
+          body: JSON.stringify({ name: 'selftest.tmp', parents: [rootId] }),
+        });
+        const uri = init.headers.get('location');
+        if (!init.ok || !uri) {
+          const t = await init.text().catch(() => '');
+          out.cors = { ok: false, fase: 'init', status: init.status, detail: t.slice(0, 160) };
+        } else {
+          const pre = await fetch(uri, {
+            method: 'OPTIONS',
+            headers: {
+              ...(origin ? { Origin: origin } : {}),
+              'Access-Control-Request-Method': 'PUT',
+              'Access-Control-Request-Headers': 'content-type',
+            },
+          });
+          const allow = pre.headers.get('access-control-allow-origin') || '';
+          out.cors = {
+            ok: !!allow && (allow === '*' || allow === origin),
+            status: pre.status,
+            allowOrigin: allow || null,
+            origin: origin || null,
+          };
+        }
+      } catch (e) {
+        out.cors = { ok: false, fase: 'exception', detail: String(e?.message || e).slice(0, 160) };
+      }
+    }
     return respondJSON(res, 200, out);
   }
 

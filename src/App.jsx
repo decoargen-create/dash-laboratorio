@@ -2624,14 +2624,14 @@ function NavSection({ title, sectionKey, sidebarOpen, defaultOpen = true, childr
   }
   return (
     <div className="mt-3 first:mt-0">
-      {/* Título de categoría: más presencia que sus ítems (jerarquía correcta):
-          12px, extrabold, tracking amplio y mejor contraste. */}
+      {/* Título de categoría: presencia sin desbordar — 11px extrabold, tracking
+          moderado y en UNA línea (truncate) para títulos largos. */}
       <button
         onClick={toggle}
-        className="flex items-center gap-1.5 px-4 mb-1.5 text-xs font-extrabold uppercase tracking-[0.14em] text-white/65 hover:text-white/90 transition w-full"
+        className="flex items-center gap-1.5 px-4 mb-1 text-[11px] font-extrabold uppercase tracking-[0.07em] text-white/60 hover:text-white/90 transition w-full"
       >
-        <ChevronDown size={12} className={`transition-transform duration-200 ${open ? '' : '-rotate-90'}`} />
-        {title}
+        <ChevronDown size={11} className={`shrink-0 transition-transform duration-200 ${open ? '' : '-rotate-90'}`} />
+        <span className="truncate text-left" title={title}>{title}</span>
       </button>
       {/* Ítems con leve sangría para que se lean como hijos de la categoría */}
       <div className={`space-y-1 pl-1.5 overflow-hidden transition-all duration-200 ${open ? 'max-h-screen opacity-100' : 'max-h-0 opacity-0'}`}>
@@ -2660,8 +2660,8 @@ function NavItem({ icon: Icon, label, section, currentSection, onSelect, sidebar
           isActive ? 'h-6 opacity-100' : 'h-0 opacity-0'
         }`}
       />
-      <Icon size={19} className={`shrink-0 transition-transform duration-200 ${isActive ? 'scale-110' : 'group-hover:scale-110'}`} />
-      {sidebarOpen && <span className="text-sm font-medium whitespace-nowrap">{label}</span>}
+      <Icon size={18} className={`shrink-0 transition-transform duration-200 ${isActive ? 'scale-110' : 'group-hover:scale-110'}`} />
+      {sidebarOpen && <span className="text-[13px] font-medium whitespace-nowrap">{label}</span>}
       {/* Tooltip en modo colapsado */}
       {!sidebarOpen && (
         <span className="pointer-events-none absolute left-full ml-3 px-2 py-1 rounded-md text-xs font-semibold whitespace-nowrap bg-gray-900 text-white opacity-0 group-hover:opacity-100 translate-x-[-6px] group-hover:translate-x-0 transition-all duration-150 z-50 shadow-lg">

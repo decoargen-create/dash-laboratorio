@@ -2633,8 +2633,8 @@ function NavSection({ title, sectionKey, sidebarOpen, defaultOpen = true, childr
         <ChevronDown size={11} className={`shrink-0 transition-transform duration-200 ${open ? '' : '-rotate-90'}`} />
         <span className="truncate text-left" title={title}>{title}</span>
       </button>
-      {/* Ítems con leve sangría para que se lean como hijos de la categoría */}
-      <div className={`space-y-1 pl-1.5 overflow-hidden transition-all duration-200 ${open ? 'max-h-screen opacity-100' : 'max-h-0 opacity-0'}`}>
+      {/* Ítems con leve sangría y ritmo parejo (misma altura para todos) */}
+      <div className={`space-y-0.5 pl-1.5 overflow-hidden transition-all duration-200 ${open ? 'max-h-screen opacity-100' : 'max-h-0 opacity-0'}`}>
         {children}
       </div>
     </div>
@@ -2647,21 +2647,22 @@ function NavItem({ icon: Icon, label, section, currentSection, onSelect, sidebar
     <button
       onClick={() => onSelect(section)}
       title={!sidebarOpen ? label : undefined}
-      className={`group relative w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all duration-200 ${
+      className={`group relative w-full flex items-center gap-2.5 px-3 py-2 rounded-lg transition-colors duration-200 ${
         isActive
-          ? 'bg-gradient-to-r from-pink-600/80 to-rose-500/60 text-white shadow-lg shadow-pink-900/40'
-          : 'text-pink-100/80 hover:text-white hover:bg-white/5'
+          ? 'bg-gradient-to-r from-pink-600/75 to-rose-500/55 text-white'
+          : 'text-pink-100/75 hover:text-white hover:bg-white/5'
       }`}
     >
-      {/* Indicador lateral animado sobre el activo */}
+      {/* Indicador lateral sutil sobre el activo (misma geometría que el resto:
+          el activo se distingue por color, no por tamaño). */}
       <span
         aria-hidden="true"
-        className={`absolute left-0 top-1/2 -translate-y-1/2 w-1 rounded-r-full bg-gradient-to-b from-amber-200 to-amber-400 transition-all duration-300 ${
-          isActive ? 'h-6 opacity-100' : 'h-0 opacity-0'
+        className={`absolute left-0 top-1/2 -translate-y-1/2 w-0.5 rounded-r-full bg-white/80 transition-all duration-300 ${
+          isActive ? 'h-4 opacity-100' : 'h-0 opacity-0'
         }`}
       />
-      <Icon size={18} className={`shrink-0 transition-transform duration-200 ${isActive ? 'scale-110' : 'group-hover:scale-110'}`} />
-      {sidebarOpen && <span className="text-[13px] font-medium whitespace-nowrap">{label}</span>}
+      <Icon size={17} className="shrink-0" />
+      {sidebarOpen && <span className={`text-[13px] whitespace-nowrap ${isActive ? 'font-semibold' : 'font-medium'}`}>{label}</span>}
       {/* Tooltip en modo colapsado */}
       {!sidebarOpen && (
         <span className="pointer-events-none absolute left-full ml-3 px-2 py-1 rounded-md text-xs font-semibold whitespace-nowrap bg-gray-900 text-white opacity-0 group-hover:opacity-100 translate-x-[-6px] group-hover:translate-x-0 transition-all duration-150 z-50 shadow-lg">

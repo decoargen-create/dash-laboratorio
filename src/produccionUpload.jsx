@@ -57,6 +57,34 @@ export async function probeDrive(productoNombre) {
   } catch { return null; }
 }
 
+// PLAN B: subir a Drive VÍA NUESTRO SERVER en chunks (< 4MB c/u). Se usa
+// cuando el PUT directo browser→Google falla (CORS u otro bloqueo): el server
+// reenvía cada chunk a la sesión de Google con Content-Range, y ahí CORS no
+// existe. También destraba los videos grandes (AdsLab corta en ~50MB).
+async function uploadViaRelay(file, sess, token) {
+  const CHUNK = 15 * 256 * 1024; // 3.75MB — múltiplo de 256KiB (requisito de Google)
+  const total = file.size;
+  for (let start = 0; start < total; start += CHUNK) {
+    const end = Math.min(start + CHUNK, total) - 1;
+    const r = await fetch('/api/produccion/drive-chunk', {
+      method: 'POST',
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        'Content-Type': 'application/octet-stream',
+        'x-session-uri': sess.sessionUri,
+        'x-content-range': `bytes ${start}-${end}/${total}`,
+        'x-upload-content-type': sess.contentType || file.type || 'video/mp4',
+      },
+      body: file.slice(start, end + 1),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || `relay HTTP ${r.status}`);
+    if (d.done) return d.file || {};
+    if (d.status !== 308) throw new Error(d.error || `Google respondió ${d.status}`);
+  }
+  throw new Error('la sesión terminó sin confirmar el archivo');
+}
+
 async function uploadToSupabase(file, user, ext) {
   const path = `${user.id}/produccion/pv-${uid()}.${ext}`;
   const { error } = await supabase.storage.from(BUCKET).upload(path, file, {
@@ -93,11 +121,21 @@ async function uploadOne(file, ctx) {
       }
       driveReason = `HTTP ${put.status}`;
       try { const t = await put.text(); if (t) driveReason += `: ${t.slice(0, 140)}`; } catch { /* sin cuerpo */ }
-      console.warn('[produccion] PUT a Drive', driveReason, '— cayendo a AdsLab');
+      console.warn('[produccion] PUT directo a Drive', driveReason, '— probando relay');
     } catch (err) {
       // Típicamente CORS: la sesión no quedó atada al origin del browser.
       driveReason = err?.message || 'bloqueado por el navegador (probable CORS)';
-      console.warn('[produccion] PUT a Drive falló:', driveReason, '— cayendo a AdsLab');
+      console.warn('[produccion] PUT directo a Drive falló:', driveReason, '— probando relay');
+    }
+
+    // PLAN B: relay por nuestro server en chunks — inmune a CORS.
+    try {
+      const meta = await uploadViaRelay(file, sess, token);
+      const link = meta.webViewLink || (meta.id ? `https://drive.google.com/file/d/${meta.id}/view` : sess.folderLink) || null;
+      return { name: sess.finalName || file.name, driveId: meta.id || null, link, folderLink: sess.folderLink || null, destino: 'drive', sizeMB: +(file.size / 1024 / 1024).toFixed(1), ts: uid() };
+    } catch (e2) {
+      driveReason = `${driveReason} | relay: ${e2?.message || e2}`;
+      console.warn('[produccion] relay a Drive también falló:', e2?.message || e2, '— cayendo a AdsLab');
     }
   } else if (sess && sess.configured === false) {
     driveReason = sess.reason || 'no configurado';

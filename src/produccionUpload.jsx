@@ -45,13 +45,13 @@ async function getAuthToken() {
 
 // Sondeo al server (sin efectos): ¿Drive conectado? + link a la carpeta raíz.
 // Devuelve { configured, rootLink } o null si no se pudo consultar.
-export async function probeDrive() {
+export async function probeDrive(productoNombre) {
   try {
     const token = await getAuthToken();
     const r = await fetch('/api/produccion/drive-session', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      body: JSON.stringify({ probe: true }),
+      body: JSON.stringify({ probe: true, ...(productoNombre ? { productoNombre } : {}) }),
     });
     return await r.json().catch(() => null);
   } catch { return null; }
@@ -80,6 +80,9 @@ async function uploadOne(file, ctx) {
     if (!r.ok) throw new Error(sess.error || `HTTP ${r.status}`);
   } catch { sess = { configured: false }; }
 
+  // Si Drive falla, guardamos el MOTIVO para mostrarlo en el toast (antes
+  // quedaba solo en la consola y era invisible para diagnosticar).
+  let driveReason = null;
   if (sess.configured && sess.sessionUri) {
     try {
       const put = await fetch(sess.sessionUri, { method: 'PUT', headers: { 'Content-Type': sess.contentType || file.type || 'video/mp4' }, body: file });
@@ -88,13 +91,29 @@ async function uploadOne(file, ctx) {
         const link = meta.webViewLink || (meta.id ? `https://drive.google.com/file/d/${meta.id}/view` : sess.folderLink) || null;
         return { name: sess.finalName || file.name, driveId: meta.id || null, link, folderLink: sess.folderLink || null, destino: 'drive', sizeMB: +(file.size / 1024 / 1024).toFixed(1), ts: uid() };
       }
-      console.warn('[produccion] PUT a Drive respondió', put.status, '— cayendo a AdsLab');
+      driveReason = `HTTP ${put.status}`;
+      try { const t = await put.text(); if (t) driveReason += `: ${t.slice(0, 140)}`; } catch { /* sin cuerpo */ }
+      console.warn('[produccion] PUT a Drive', driveReason, '— cayendo a AdsLab');
     } catch (err) {
       // Típicamente CORS: la sesión no quedó atada al origin del browser.
-      console.warn('[produccion] PUT a Drive falló:', err?.message || err, '— cayendo a AdsLab');
+      driveReason = err?.message || 'bloqueado por el navegador (probable CORS)';
+      console.warn('[produccion] PUT a Drive falló:', driveReason, '— cayendo a AdsLab');
     }
+  } else if (sess && sess.configured === false) {
+    driveReason = sess.reason || 'no configurado';
   }
-  return await uploadToSupabase(file, user, ext);
+
+  try {
+    const archivo = await uploadToSupabase(file, user, ext);
+    if (driveReason) archivo.driveError = driveReason;
+    return archivo;
+  } catch (e) {
+    // El fallback también falló (típico: video más grande que el límite del
+    // bucket). Armamos un error que cuente la historia completa.
+    const esTamano = /exceeded the maximum allowed size/i.test(e?.message || '');
+    const base = esTamano ? 'el video supera el límite de AdsLab (~50MB)' : (e?.message || 'error');
+    throw new Error(driveReason ? `${base} — y antes Drive falló (${driveReason})` : base);
+  }
 }
 
 // Sube una tanda de videos a una tarjeta y, si estaba en "Por hacer", la manda
@@ -107,14 +126,19 @@ export async function subirParaTarjeta(a, fileList, { onProgress, addToast } = {
   const token = await getAuthToken();
   const ctx = { user, token, weekKey: a.weekKey, productoNombre: a.productoNombre, persona: a.persona || 'Equipo' };
   const eraPorHacer = a.estado === 'porhacer';
-  let ok = 0, dest = null;
+  let ok = 0, dest = null, driveWarn = null;
   for (let i = 0; i < files.length; i++) {
     onProgress?.({ i, total: files.length, name: files[i].name });
-    try { const archivo = await uploadOne(files[i], ctx); addArchivos(a.id, [archivo]); ok++; dest = archivo.destino; }
+    try {
+      const archivo = await uploadOne(files[i], ctx);
+      addArchivos(a.id, [archivo]); ok++; dest = archivo.destino;
+      if (!driveWarn && archivo.driveError) driveWarn = archivo.driveError;
+    }
     catch (err) { addToast?.({ type: 'error', message: `"${files[i].name}": ${err.message}` }); }
   }
   if (ok > 0 && eraPorHacer) updateAssignment(a.id, { estado: 'revision' });
   if (ok > 0) addToast?.({ type: 'success', message: `${ok} video${ok > 1 ? 's' : ''} → ${dest === 'drive' ? 'Google Drive' : 'AdsLab'}${eraPorHacer ? ' · pasó a En revisión' : ''}` });
+  if (driveWarn) addToast?.({ type: 'warning', message: `⚠ Drive falló (${driveWarn}) — se guardó en AdsLab. Pasale este texto a Claude.` });
   return { ok };
 }
 
@@ -132,13 +156,16 @@ export function CreativosSection({ a, addToast, canDelete = true }) {
 
   // Sondeo real al server: ¿Drive está conectado HOY? Así el cartel no miente
   // cuando la tarjeta solo tiene videos viejos de AdsLab.
-  const [driveOk, setDriveOk] = useState(null); // null = todavía no sabemos
+  // Sondeo con el producto: trae si Drive está conectado + el link a la
+  // carpeta del producto (se asegura de que exista), para ofrecer "carpeta de
+  // Drive" SIEMPRE que la conexión esté viva, tenga o no videos en Drive.
+  const [drive, setDrive] = useState(null); // { configured, rootLink, prodLink } | null
   useEffect(() => {
-    if (!soloAdslab) return; // solo hace falta para decidir el cartel
     let dead = false;
-    probeDrive().then(d => { if (!dead && d) setDriveOk(!!d.configured); });
+    probeDrive(a.productoNombre).then(d => { if (!dead && d) setDrive(d); });
     return () => { dead = true; };
-  }, [soloAdslab]);
+  }, [a.productoNombre]);
+  const driveFolder = folderLink || drive?.prodLink || drive?.rootLink || null;
 
   // Ver un video guardado en AdsLab: el bucket es privado, así que generamos
   // un link firmado (1h) al momento del click.
@@ -168,7 +195,7 @@ export function CreativosSection({ a, addToast, canDelete = true }) {
     const token = await getAuthToken();
     const ctx = { user, token, weekKey: a.weekKey, productoNombre: a.productoNombre, persona: a.persona || 'Equipo' };
     const eraPorHacer = a.estado === 'porhacer';
-    let ok = 0, dest = null;
+    let ok = 0, dest = null, driveWarn = null;
     for (const item of files) {
       if (item.status === 'ok') continue;
       setFiles(prev => prev.map(f => f.id === item.id ? { ...f, status: 'subiendo' } : f));
@@ -176,6 +203,7 @@ export function CreativosSection({ a, addToast, canDelete = true }) {
         const archivo = await uploadOne(item.file, ctx);
         addArchivos(a.id, [archivo]);
         ok++; dest = archivo.destino;
+        if (!driveWarn && archivo.driveError) driveWarn = archivo.driveError;
         setFiles(prev => prev.map(f => f.id === item.id ? { ...f, status: 'ok', destino: archivo.destino } : f));
       } catch (err) {
         setFiles(prev => prev.map(f => f.id === item.id ? { ...f, status: 'error', msg: err.message } : f));
@@ -184,6 +212,7 @@ export function CreativosSection({ a, addToast, canDelete = true }) {
     if (ok > 0 && eraPorHacer) updateAssignment(a.id, { estado: 'revision' });
     setBusy(false);
     if (ok > 0) addToast?.({ type: 'success', message: `${ok} video${ok > 1 ? 's' : ''} → ${dest === 'drive' ? 'Google Drive' : 'AdsLab'}${eraPorHacer ? ' · pasó a En revisión' : ''}` });
+    if (driveWarn) addToast?.({ type: 'warning', message: `⚠ Drive falló (${driveWarn}) — se guardó en AdsLab. Pasale este texto a Claude.` });
     setFiles(prev => prev.filter(f => f.status !== 'ok'));
   };
 
@@ -192,18 +221,20 @@ export function CreativosSection({ a, addToast, canDelete = true }) {
       <div className="flex items-center gap-1.5 mb-1.5">
         <UploadCloud size={13} className="text-gray-400" />
         <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400">Creativos</span>
-        {folderLink && (
-          <a href={folderLink} target="_blank" rel="noopener noreferrer" className="text-[11px] text-brand-500 hover:text-brand-600 inline-flex items-center gap-0.5 ml-1">
-            carpeta de Drive <ExternalLink size={10} />
+        {/* Link a la carpeta SIEMPRE que Drive esté conectado: la de esta tanda
+            si ya hay videos en Drive, o la del producto si no. */}
+        {driveFolder && drive?.configured !== false && (
+          <a href={driveFolder} target="_blank" rel="noopener noreferrer" className="text-[11px] font-bold text-brand-500 hover:text-brand-600 inline-flex items-center gap-0.5 ml-1">
+            ▶ carpeta de Drive <ExternalLink size={10} />
           </a>
         )}
-        {soloAdslab && driveOk === true && (
+        {soloAdslab && drive?.configured === true && (
           <span className="text-[11px] font-semibold text-gray-400 ml-1 cursor-help"
             title="Estos videos se subieron antes de conectar Drive y quedaron en AdsLab (se ven con el ícono de cada archivo). Los videos NUEVOS van a la carpeta de Drive.">
             ℹ estos son de antes (AdsLab) — los nuevos van a Drive ✓
           </span>
         )}
-        {soloAdslab && driveOk === false && (
+        {soloAdslab && drive?.configured === false && (
           <span className="text-[11px] font-bold text-amber-600 dark:text-amber-400 ml-1 cursor-help"
             title="Google Drive no está conectado, así que los videos se guardan en AdsLab (podés verlos con el ícono de cada archivo). Para que vayan a una carpeta de Drive: configurar DRIVE_CREATIVOS_FOLDER_ID en Vercel.">
             ⚠ Drive no conectado — se guardan en AdsLab

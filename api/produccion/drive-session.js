@@ -74,10 +74,21 @@ export default async function handler(req, res) {
   if (body.probe) {
     const ready = driveReady();
     const rootId = process.env.DRIVE_CREATIVOS_FOLDER_ID || null;
-    return respondJSON(res, 200, {
+    const out = {
       configured: ready,
       rootLink: ready && rootId ? `https://drive.google.com/drive/folders/${rootId}` : null,
-    });
+    };
+    // Si el probe viene con un producto, aseguramos su carpeta y devolvemos el
+    // link directo — así el detalle ofrece "carpeta de Drive" aunque la tarjeta
+    // todavía no tenga videos subidos a Drive.
+    if (ready && rootId && body.productoNombre) {
+      try {
+        const token = await getAccessToken();
+        const prodFolder = await driveEnsureFolder(token, rootId, clean(body.productoNombre, 'Producto'));
+        out.prodLink = `https://drive.google.com/drive/folders/${prodFolder}`;
+      } catch { /* devolvemos al menos el root */ }
+    }
+    return respondJSON(res, 200, out);
   }
 
   const { productoNombre, persona, filename, mimeType, size } = body;

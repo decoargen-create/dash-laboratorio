@@ -8,6 +8,7 @@
 // Con entrada de texto: withInput (+ multiline para textarea).
 
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AlertTriangle, X } from 'lucide-react';
 
 export default function ConfirmDialog({
@@ -40,7 +41,11 @@ export default function ConfirmDialog({
     : tone === 'warn' ? 'bg-amber-500 hover:bg-amber-600'
     : 'bg-brand-600 hover:bg-brand-700';
 
-  return (
+  // PORTAL a <body>: si el diálogo se renderizara dentro de un ancestro con
+  // transform (ej. la tarjeta del kanban, que se mueve al hover), `fixed` deja
+  // de ser relativo a la pantalla y el popup queda pegado/tapado. En el body
+  // siempre se centra en el viewport, por encima de todo.
+  return createPortal(
     <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={onClose}>
       <div className="w-full max-w-sm bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="px-5 pt-4 pb-3">
@@ -73,6 +78,7 @@ export default function ConfirmDialog({
           <button onClick={confirm} className={`px-3.5 py-1.5 text-xs font-bold text-white rounded-lg transition ${toneCls}`}>{confirmLabel}</button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

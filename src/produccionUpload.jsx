@@ -240,6 +240,21 @@ export function CreativosSection({ a, addToast, canDelete = true }) {
             ⚠ Drive no conectado — se guardan en AdsLab
           </span>
         )}
+        {/* Auto-diagnóstico: Drive conectado pero Google no acepta subidas
+            desde esta web (CORS). Click = copiar el detalle para pegarlo en
+            el chat con Claude. */}
+        {drive?.configured === true && drive?.cors && drive.cors.ok === false && (
+          <button type="button"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(`diagnóstico drive.cors = ${JSON.stringify(drive.cors)}`);
+                addToast?.({ type: 'success', message: 'Detalle técnico copiado — pegámelo a Claude en el chat.' });
+              } catch { addToast?.({ type: 'warning', message: JSON.stringify(drive.cors) }); }
+            }}
+            className="text-[11px] font-bold text-red-500 hover:text-red-600 ml-1 underline decoration-dotted">
+            ⚠ el navegador no puede subir a Drive (CORS) — click para copiar el detalle
+          </button>
+        )}
       </div>
 
       {/* Archivos ya subidos */}
@@ -283,7 +298,7 @@ export function CreativosSection({ a, addToast, canDelete = true }) {
                     : <Film size={12} className="text-gray-400" />}
               </span>
               <span className="truncate flex-1 text-gray-600 dark:text-gray-300">{f.file.name}</span>
-              {f.status === 'error' && <span className="text-[11px] text-red-500 truncate max-w-[110px]" title={f.msg}>{f.msg}</span>}
+              {f.status === 'error' && <span className="w-full text-[11px] text-red-500 break-words">{f.msg}</span>}
               {!busy && <button onClick={() => setFiles(prev => prev.filter(x => x.id !== f.id))} className="text-gray-300 hover:text-red-500"><X size={12} /></button>}
             </div>
           ))}

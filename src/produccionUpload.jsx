@@ -108,37 +108,36 @@ async function uploadOne(file, ctx) {
     if (!r.ok) throw new Error(sess.error || `HTTP ${r.status}`);
   } catch { sess = { configured: false }; }
 
-  // Si Drive falla, guardamos el MOTIVO para mostrarlo en el toast (antes
-  // quedaba solo en la consola y era invisible para diagnosticar).
+  const armarArchivo = (meta) => {
+    const link = meta.webViewLink || (meta.id ? `https://drive.google.com/file/d/${meta.id}/view` : sess.folderLink) || null;
+    return { name: sess.finalName || file.name, driveId: meta.id || null, link, folderLink: sess.folderLink || null, destino: 'drive', sizeMB: +(file.size / 1024 / 1024).toFixed(1), ts: uid() };
+  };
+
+  // Guardamos el MOTIVO de cada intento fallido para el toast (diagnóstico).
   let driveReason = null;
   if (sess.configured && sess.sessionUri) {
-    try {
-      const put = await fetch(sess.sessionUri, { method: 'PUT', headers: { 'Content-Type': sess.contentType || file.type || 'video/mp4' }, body: file });
-      if (put.ok) {
-        const meta = await put.json().catch(() => ({}));
-        const link = meta.webViewLink || (meta.id ? `https://drive.google.com/file/d/${meta.id}/view` : sess.folderLink) || null;
-        return { name: sess.finalName || file.name, driveId: meta.id || null, link, folderLink: sess.folderLink || null, destino: 'drive', sizeMB: +(file.size / 1024 / 1024).toFixed(1), ts: uid() };
+    // Fast-path: PUT directo browser→Google, SOLO si la sesión quedó atada al
+    // origin (corsBound !== false). Si no, vamos derecho al relay.
+    if (sess.corsBound !== false) {
+      try {
+        const put = await fetch(sess.sessionUri, { method: 'PUT', headers: { 'Content-Type': sess.contentType || file.type || 'video/mp4' }, body: file });
+        if (put.ok) return armarArchivo(await put.json().catch(() => ({})));
+        driveReason = `directo HTTP ${put.status}`;
+        try { const t = await put.text(); if (t) driveReason += `: ${t.slice(0, 120)}`; } catch { /* sin cuerpo */ }
+      } catch (err) {
+        driveReason = `directo: ${err?.message || 'bloqueado por el navegador (CORS)'}`;
       }
-      driveReason = `HTTP ${put.status}`;
-      try { const t = await put.text(); if (t) driveReason += `: ${t.slice(0, 140)}`; } catch { /* sin cuerpo */ }
-      console.warn('[produccion] PUT directo a Drive', driveReason, '— probando relay');
-    } catch (err) {
-      // Típicamente CORS: la sesión no quedó atada al origin del browser.
-      driveReason = err?.message || 'bloqueado por el navegador (probable CORS)';
-      console.warn('[produccion] PUT directo a Drive falló:', driveReason, '— probando relay');
     }
 
-    // PLAN B: relay por nuestro server en chunks — inmune a CORS.
+    // Camino robusto: relay por NUESTRO server en chunks — inmune a CORS.
     try {
-      const meta = await uploadViaRelay(file, sess, token);
-      const link = meta.webViewLink || (meta.id ? `https://drive.google.com/file/d/${meta.id}/view` : sess.folderLink) || null;
-      return { name: sess.finalName || file.name, driveId: meta.id || null, link, folderLink: sess.folderLink || null, destino: 'drive', sizeMB: +(file.size / 1024 / 1024).toFixed(1), ts: uid() };
+      return armarArchivo(await uploadViaRelay(file, sess, token));
     } catch (e2) {
-      driveReason = `${driveReason} | relay: ${e2?.message || e2}`;
-      console.warn('[produccion] relay a Drive también falló:', e2?.message || e2, '— cayendo a AdsLab');
+      driveReason = `${driveReason ? driveReason + ' | ' : ''}relay: ${e2?.message || e2}`;
+      console.warn('[produccion] Drive falló:', driveReason, '— cayendo a AdsLab');
     }
   } else if (sess && sess.configured === false) {
-    driveReason = sess.reason || 'no configurado';
+    driveReason = `no configurado${sess.reason ? ` (${sess.reason})` : ''}${sess.error ? `: ${sess.error}` : ''}`;
   }
 
   try {
@@ -277,21 +276,6 @@ export function CreativosSection({ a, addToast, canDelete = true }) {
             title="Google Drive no está conectado, así que los videos se guardan en AdsLab (podés verlos con el ícono de cada archivo). Para que vayan a una carpeta de Drive: configurar DRIVE_CREATIVOS_FOLDER_ID en Vercel.">
             ⚠ Drive no conectado — se guardan en AdsLab
           </span>
-        )}
-        {/* Auto-diagnóstico: Drive conectado pero Google no acepta subidas
-            desde esta web (CORS). Click = copiar el detalle para pegarlo en
-            el chat con Claude. */}
-        {drive?.configured === true && drive?.cors && drive.cors.ok === false && (
-          <button type="button"
-            onClick={async () => {
-              try {
-                await navigator.clipboard.writeText(`diagnóstico drive.cors = ${JSON.stringify(drive.cors)}`);
-                addToast?.({ type: 'success', message: 'Detalle técnico copiado — pegámelo a Claude en el chat.' });
-              } catch { addToast?.({ type: 'warning', message: JSON.stringify(drive.cors) }); }
-            }}
-            className="text-[11px] font-bold text-red-500 hover:text-red-600 ml-1 underline decoration-dotted">
-            ⚠ el navegador no puede subir a Drive (CORS) — click para copiar el detalle
-          </button>
         )}
       </div>
 

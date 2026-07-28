@@ -16,8 +16,35 @@
 // cae a guardar en el bucket de AdsLab (Supabase) — así la subida siempre
 // funciona aunque todavía no hayas conectado la carpeta de Drive.
 
+import https from 'node:https';
 import { getUserIdFromAuth } from '../marketing/_supabase-server.js';
 import { getCreds, getAccessToken, driveEnsureFolder } from '../actas/_google.js';
+
+// Request HTTPS crudo (node:https). Lo usamos donde necesitamos GARANTIZAR
+// headers como Origin: el fetch de undici los trata como "prohibidos" (según
+// la versión los elimina en silencio o falla), y eso rompía la apertura de la
+// sesión de subida en producción.
+function rawRequest(urlStr, { method = 'GET', headers = {}, body = null } = {}) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(urlStr);
+    const r = https.request(
+      { hostname: u.hostname, path: `${u.pathname}${u.search}`, method, headers },
+      (resp) => {
+        let data = '';
+        resp.on('data', (c) => { data += c; });
+        resp.on('end', () => resolve({
+          ok: resp.statusCode >= 200 && resp.statusCode < 300,
+          status: resp.statusCode,
+          headers: resp.headers,
+          text: data,
+        }));
+      }
+    );
+    r.on('error', reject);
+    if (body != null) r.write(body);
+    r.end();
+  });
+}
 
 const UPLOAD = 'https://www.googleapis.com/upload/drive/v3/files';
 
@@ -88,48 +115,8 @@ export default async function handler(req, res) {
         out.prodLink = `https://drive.google.com/drive/folders/${prodFolder}`;
       } catch { /* devolvemos al menos el root */ }
     }
-    // AUTO-TEST de CORS: abrimos una sesión efímera atada al Origin del
-    // navegador y le preguntamos a Google (preflight OPTIONS) si aceptaría el
-    // PUT desde esa web. Si no, el front lo muestra con el detalle exacto —
-    // diagnóstico sin depender de la consola del usuario.
-    if (ready && rootId) {
-      const origin = req.headers.origin || '';
-      try {
-        const token = await getAccessToken();
-        const init = await fetch(`${UPLOAD}?uploadType=resumable&supportsAllDrives=true`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json; charset=UTF-8',
-            ...(origin ? { Origin: origin } : {}),
-          },
-          body: JSON.stringify({ name: 'selftest.tmp', parents: [rootId] }),
-        });
-        const uri = init.headers.get('location');
-        if (!init.ok || !uri) {
-          const t = await init.text().catch(() => '');
-          out.cors = { ok: false, fase: 'init', status: init.status, detail: t.slice(0, 160) };
-        } else {
-          const pre = await fetch(uri, {
-            method: 'OPTIONS',
-            headers: {
-              ...(origin ? { Origin: origin } : {}),
-              'Access-Control-Request-Method': 'PUT',
-              'Access-Control-Request-Headers': 'content-type',
-            },
-          });
-          const allow = pre.headers.get('access-control-allow-origin') || '';
-          out.cors = {
-            ok: !!allow && (allow === '*' || allow === origin),
-            status: pre.status,
-            allowOrigin: allow || null,
-            origin: origin || null,
-          };
-        }
-      } catch (e) {
-        out.cors = { ok: false, fase: 'exception', detail: String(e?.message || e).slice(0, 160) };
-      }
-    }
+    // (El auto-test de CORS se removió: con el relay server-side la subida a
+    // Drive ya no depende de CORS, así que no aporta y gastaba llamadas.)
     return respondJSON(res, 200, out);
   }
 
@@ -157,35 +144,46 @@ export default async function handler(req, res) {
     const finalName = finalFileName(filename);
     const contentType = mimeType || 'video/mp4';
 
-    // Abrir la resumable session. Google devuelve la session URI en Location.
-    // CLAVE: pasamos el Origin del navegador — Google "ata" la sesión a ese
-    // origin y recién entonces responde los headers CORS en el PUT del browser.
-    // Sin esto, el PUT directo browser→Google es bloqueado por CORS y la subida
-    // caía siempre al fallback de AdsLab (bug detectado en producción).
+    // Abrir la resumable session (con node:https crudo, no fetch: garantiza el
+    // header Origin, que en el fetch de undici de Vercel se descartaba/rompía
+    // y hacía fallar la apertura — la causa real de que todo cayera a AdsLab).
+    //
+    // El Origin ATA la sesión al navegador para que el PUT directo browser→Google
+    // reciba headers CORS. Si por lo que sea la apertura CON Origin falla,
+    // REINTENTAMOS SIN Origin: la sesión igual sirve para el relay server-side
+    // (server→Google no tiene CORS), así que la subida a Drive nunca depende de
+    // este detalle.
     const browserOrigin = req.headers.origin || '';
-    const initResp = await fetch(`${UPLOAD}?uploadType=resumable&supportsAllDrives=true&fields=id,name,webViewLink`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json; charset=UTF-8',
-        'X-Upload-Content-Type': contentType,
-        ...(size ? { 'X-Upload-Content-Length': String(size) } : {}),
-        ...(browserOrigin ? { Origin: browserOrigin } : {}),
-      },
-      body: JSON.stringify({ name: finalName, parents: [subFolder] }),
-    });
+    const url = `${UPLOAD}?uploadType=resumable&supportsAllDrives=true&fields=id,name,webViewLink`;
+    const baseHeaders = {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json; charset=UTF-8',
+      'X-Upload-Content-Type': contentType,
+      ...(size ? { 'X-Upload-Content-Length': String(size) } : {}),
+    };
+    const payload = JSON.stringify({ name: finalName, parents: [subFolder] });
 
-    if (!initResp.ok) {
-      const t = await initResp.text().catch(() => '');
-      return respondJSON(res, 502, { error: `Drive no aceptó la subida (${initResp.status}): ${t.slice(0, 180)}` });
+    async function abrirSesion(conOrigin) {
+      const headers = { ...baseHeaders, ...(conOrigin && browserOrigin ? { Origin: browserOrigin } : {}) };
+      return rawRequest(url, { method: 'POST', headers, body: payload });
     }
-    const sessionUri = initResp.headers.get('location');
-    if (!sessionUri) {
-      return respondJSON(res, 502, { error: 'Drive no devolvió la URL de subida.' });
+
+    let initResp = await abrirSesion(true);
+    let corsBound = true;
+    if ((!initResp.ok || !initResp.headers.location) && browserOrigin) {
+      // Fallback sin Origin — la sesión sirve para el relay igual.
+      const retry = await abrirSesion(false);
+      if (retry.ok && retry.headers.location) { initResp = retry; corsBound = false; }
     }
+
+    if (!initResp.ok || !initResp.headers.location) {
+      return respondJSON(res, 502, { error: `Drive no aceptó la subida (${initResp.status}): ${String(initResp.text || '').slice(0, 180)}` });
+    }
+    const sessionUri = initResp.headers.location;
 
     const folderLink = `https://drive.google.com/drive/folders/${subFolder}`;
-    return respondJSON(res, 200, { configured: true, sessionUri, finalName, folderId: subFolder, folderLink, contentType });
+    // corsBound=false → el front va directo al relay (no intenta el PUT directo).
+    return respondJSON(res, 200, { configured: true, sessionUri, finalName, folderId: subFolder, folderLink, contentType, corsBound });
   } catch (err) {
     return respondJSON(res, 500, { error: `Error abriendo la subida a Drive: ${err.message}` });
   }

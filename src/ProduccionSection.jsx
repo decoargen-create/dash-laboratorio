@@ -11,12 +11,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Film, Plus, X, Trash2, ChevronDown, UploadCloud, Loader2, CheckCircle2,
-  AlertTriangle, ExternalLink, FileText, GripVertical, Users,
+  AlertTriangle, ExternalLink, FileText, GripVertical, Users, History,
 } from 'lucide-react';
 import {
-  ESTADOS, ESTADO_LABELS, VIDEOS_POR_PRODUCTO, weekKeyOf, weekLabel, allWeekKeys,
+  ESTADOS, ESTADO_LABELS, VIDEOS_POR_PRODUCTO, weekKeyOf, weekLabel, weekRange, allWeekKeys,
   listAssignments, addAssignment, updateAssignment, removeAssignment, assignPersona,
-  assignCreator, subscribeProduccion, esCompleto,
+  assignCreator, subscribeProduccion, esCompleto, bonusObjetivo,
 } from './produccionStore.js';
 import { CreativosSection, subirParaTarjeta, VIDEO_ACCEPT } from './produccionUpload.jsx';
 import { listTeam } from './produccionTeam.js';
@@ -51,6 +51,72 @@ const PersonaChip = ({ persona, onClick, small }) => (
     {persona || 'Sin asignar'}
   </button>
 );
+
+// Badge de persona más grande y prolijo (avatar con inicial + nombre).
+const PersonaBadge = ({ persona }) => (
+  <span className={`inline-flex items-center gap-1.5 rounded-full pl-1 pr-2.5 py-0.5 ${CHIP_CLS[personaColor(persona)]}`}>
+    <span className="w-5 h-5 rounded-full bg-black/20 flex items-center justify-center text-[10px] font-black uppercase">
+      {(persona || '?').charAt(0)}
+    </span>
+    <span className="text-[12px] font-extrabold">{persona || 'Sin asignar'}</span>
+  </span>
+);
+
+// Resumen de la semana: cuántas tarjetas tiene cada persona + progreso hacia el
+// objetivo (productos aprobados) con el bonus semanal.
+function ResumenSemana({ asigs }) {
+  const { porPersona, sinAsignar, total, aprobados } = useMemo(() => {
+    const map = {};
+    let sin = 0, apr = 0;
+    asigs.forEach(a => {
+      if (esCompleto(a.estado)) apr++;
+      const p = (a.persona || '').trim();
+      if (p) map[p] = (map[p] || 0) + 1; else sin++;
+    });
+    return {
+      porPersona: Object.entries(map).sort((x, y) => y[1] - x[1]),
+      sinAsignar: sin, total: asigs.length, aprobados: apr,
+    };
+  }, [asigs]);
+
+  if (total === 0) return null;
+  const bonus = bonusObjetivo(aprobados);
+  const pct = total ? Math.round((aprobados / total) * 100) : 0;
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/60 px-3.5 py-2.5">
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span className="text-[10px] font-bold uppercase text-gray-400 mr-0.5">Carga del equipo</span>
+        {porPersona.map(([p, n]) => (
+          <span key={p} className={`inline-flex items-center gap-1 rounded-full pl-1 pr-2 py-0.5 text-[11px] font-bold ${CHIP_CLS[personaColor(p)]}`}>
+            <span className="w-4 h-4 rounded-full bg-black/20 flex items-center justify-center text-[9px] font-black">{n}</span>
+            {p}
+          </span>
+        ))}
+        {sinAsignar > 0 && (
+          <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-bold bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-300">
+            {sinAsignar} sin asignar
+          </span>
+        )}
+      </div>
+
+      <div className="ml-auto flex items-center gap-2.5 min-w-[200px]">
+        <div className="flex-1">
+          <div className="flex items-center justify-between text-[10px] mb-1">
+            <span className="font-bold uppercase text-gray-400">Objetivo de la semana</span>
+            <span className="font-mono text-gray-500 dark:text-gray-400">{aprobados}/{total} aprobados</span>
+          </div>
+          <div className="h-1.5 rounded-full bg-gray-100 dark:bg-gray-700 overflow-hidden">
+            <div className="h-full bg-gradient-to-r from-emerald-400 to-emerald-600 transition-all" style={{ width: `${pct}%` }} />
+          </div>
+        </div>
+        {bonus > 0 && (
+          <span className="text-[11px] font-extrabold text-emerald-600 dark:text-emerald-400 whitespace-nowrap">🎯 bonus</span>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function readProductos() {
   try { return JSON.parse(localStorage.getItem('adslab-marketing-productos-v1') || '[]'); }
@@ -135,6 +201,9 @@ export default function ProduccionSection({ addToast }) {
         </div>
       </div>
 
+      {/* Resumen de la semana: carga por persona + objetivo */}
+      <ResumenSemana asigs={asigs} />
+
       {/* Tablero */}
       <div className="flex gap-3 overflow-x-auto pb-2">
         {COLS.map(col => {
@@ -185,7 +254,8 @@ function KanbanCard({ a, personas, onOpen, onAssign, addToast }) {
   const [menu, setMenu] = useState(false);
   const [prog, setProg] = useState(null); // { i, total } mientras sube
   const fileRef = useRef(null);
-  const nFiles = a.archivos?.length || 0;
+  const subidos = a.archivos?.length || 0;
+  const aprob = Math.min(a.videosAprobados || 0, subidos);
   const folderLink = (a.archivos || []).find(f => f.folderLink)?.folderLink;
 
   const onPick = async (fileList) => {
@@ -197,33 +267,34 @@ function KanbanCard({ a, personas, onOpen, onAssign, addToast }) {
     setProg(null);
   };
 
+  const aprobarTodos = (e) => {
+    e.stopPropagation();
+    updateAssignment(a.id, { videosAprobados: subidos, estado: 'aprobado' });
+    addToast?.({ type: 'success', message: `${a.productoNombre} · aprobado (${subidos}/${subidos}) — listo para publicar` });
+  };
+  const publicar = (e) => {
+    e.stopPropagation();
+    updateAssignment(a.id, { estado: 'publicado' });
+    addToast?.({ type: 'success', message: `${a.productoNombre} · publicado 🚀` });
+  };
+
   return (
     <div draggable={!prog}
       onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/prod-id', a.id); }}
       onClick={() => onOpen()}
-      className="group bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-2.5 shadow-sm hover:shadow-md hover:border-brand-300 dark:hover:border-brand-600 transition cursor-pointer">
+      className="group bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-3 shadow-sm hover:shadow-md hover:border-brand-300 dark:hover:border-brand-600 transition cursor-pointer">
       <div className="flex items-start gap-1.5">
-        <GripVertical size={13} className="text-gray-300 dark:text-gray-600 mt-0.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition" />
+        <GripVertical size={14} className="text-gray-300 dark:text-gray-600 mt-0.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition" />
         <span className="text-sm font-bold text-gray-900 dark:text-gray-100 leading-tight flex-1">{a.productoNombre || 'Producto'}</span>
       </div>
-      <div className="flex items-center gap-1.5 flex-wrap mt-2 pl-4 relative">
-        <span onClick={e => { e.stopPropagation(); setMenu(v => !v); }}>
-          <PersonaChip persona={a.persona} small onClick={() => {}} />
-        </span>
-        {nFiles > 0 && (
-          <span className="inline-flex items-center gap-0.5 text-[10px] text-gray-500 dark:text-gray-400" title={`${nFiles} creativos subidos`}>
-            <Film size={11} className="text-emerald-500" />{nFiles}
-          </span>
-        )}
-        {folderLink && (
-          <a href={folderLink} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
-            className="text-brand-500 hover:text-brand-600" title="Abrir carpeta en Drive"><ExternalLink size={11} /></a>
-        )}
-        {a.brief?.trim() && <FileText size={11} className="text-gray-400" title="Tiene brief" />}
-        <span className="ml-auto text-[10px] font-mono text-gray-400 tabular-nums">{a.videosAprobados}/{a.videosTotal}</span>
 
+      {/* Persona (badge grande) + menú de asignación */}
+      <div className="mt-2.5 pl-4 relative">
+        <span onClick={e => { e.stopPropagation(); setMenu(v => !v); }} className="cursor-pointer">
+          <PersonaBadge persona={a.persona} />
+        </span>
         {menu && (
-          <div className="absolute top-6 left-4 z-10 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl p-1 flex flex-col gap-0.5"
+          <div className="absolute top-8 left-4 z-10 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl p-1 flex flex-col gap-0.5"
             onClick={e => e.stopPropagation()}>
             {personas.map(p => (
               <button key={p} onClick={() => { onAssign(p); setMenu(false); }}
@@ -237,22 +308,62 @@ function KanbanCard({ a, personas, onOpen, onAssign, addToast }) {
         )}
       </div>
 
-      {/* Subir directo, sin abrir la tarjeta. Al subir pasa solo a "En revisión". */}
-      <div className="mt-2 pl-4">
-        {prog ? (
-          <div className="flex items-center gap-1.5 text-[11px] text-brand-600 dark:text-brand-400">
-            <Loader2 size={12} className="animate-spin" /> Subiendo {prog.total ? `${prog.i + 1}/${prog.total}` : ''}…
+      {/* Contadores: subidos + aprobados (sobre lo subido) + brief */}
+      <div className="mt-2 pl-4 flex items-center gap-2.5 text-[10px] text-gray-500 dark:text-gray-400">
+        <span className="inline-flex items-center gap-1" title={`${subidos} creativos subidos`}>
+          <Film size={12} className="text-emerald-500" /><b className="text-gray-700 dark:text-gray-200">{subidos}</b> subidos
+        </span>
+        {subidos > 0 && (
+          <span className="inline-flex items-center gap-1" title="Aprobados sobre subidos">
+            <CheckCircle2 size={12} className={aprob >= subidos ? 'text-emerald-500' : 'text-gray-400'} />
+            <b className="text-gray-700 dark:text-gray-200">{aprob}/{subidos}</b>
+          </span>
+        )}
+        {a.brief?.trim() && <FileText size={12} className="text-gray-400" title="Tiene brief" />}
+      </div>
+      {subidos > 0 && (
+        <div className="mt-1.5 pl-4">
+          <div className="h-1 rounded-full bg-gray-100 dark:bg-gray-700 overflow-hidden">
+            <div className="h-full bg-emerald-500 transition-all" style={{ width: `${Math.round((aprob / subidos) * 100)}%` }} />
           </div>
+        </div>
+      )}
+
+      {/* Acciones: subir, ver en Drive, y acción según estado */}
+      <div className="mt-2.5 pl-4 flex items-center gap-1.5 flex-wrap">
+        {prog ? (
+          <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-brand-600 dark:text-brand-400">
+            <Loader2 size={12} className="animate-spin" /> Subiendo {prog.total ? `${prog.i + 1}/${prog.total}` : ''}…
+          </span>
         ) : (
           <button onClick={e => { e.stopPropagation(); fileRef.current?.click(); }}
-            className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 transition">
-            <UploadCloud size={12} /> Subir creativos
+            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-md transition shadow-sm">
+            <UploadCloud size={12} /> Subir
           </button>
         )}
-        <input ref={fileRef} type="file" accept={VIDEO_ACCEPT} multiple hidden
-          onClick={e => e.stopPropagation()}
-          onChange={e => { const fl = e.target.files; e.target.value = ''; onPick(fl); }} />
+        {folderLink && (
+          <a href={folderLink} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
+            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-brand-700 dark:text-brand-300 bg-brand-50 dark:bg-brand-900/30 hover:bg-brand-100 dark:hover:bg-brand-900/50 rounded-md transition">
+            <ExternalLink size={11} /> Ver en Drive
+          </a>
+        )}
+        {a.estado === 'revision' && subidos > 0 && (
+          <button onClick={aprobarTodos}
+            className="ml-auto inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 rounded-md transition">
+            <CheckCircle2 size={12} /> Aprobar
+          </button>
+        )}
+        {a.estado === 'aprobado' && (
+          <button onClick={publicar}
+            className="ml-auto inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-violet-700 dark:text-violet-300 bg-violet-50 dark:bg-violet-900/30 hover:bg-violet-100 dark:hover:bg-violet-900/50 rounded-md transition">
+            Publicar
+          </button>
+        )}
       </div>
+
+      <input ref={fileRef} type="file" accept={VIDEO_ACCEPT} multiple hidden
+        onClick={e => e.stopPropagation()}
+        onChange={e => { const fl = e.target.files; e.target.value = ''; onPick(fl); }} />
     </div>
   );
 }
@@ -308,6 +419,40 @@ function AgregarProductoModal({ productos, personas, asigs, weekKey, onClose, ad
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Historial de la tarjeta: creación + cada cambio de estado (quién y cuándo).
+// Base para medir tiempos de entrega / eficiencia del equipo.
+function HistorialTarjeta({ a }) {
+  const eventos = a.historial || [];
+  if (eventos.length === 0) return null;
+  const fmt = (ts) => {
+    try { return new Date(ts).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); }
+    catch { return ''; }
+  };
+  const label = (ev) => {
+    if (ev.tipo === 'creacion') return 'Tarjeta creada';
+    if (ev.tipo === 'estado') return `${ESTADO_LABELS[ev.from] || ev.from || '—'} → ${ESTADO_LABELS[ev.to] || ev.to}`;
+    if (ev.tipo === 'subida') return `Subió ${ev.n ? `${ev.n} ` : ''}video(s)`;
+    return ev.tipo;
+  };
+  return (
+    <div>
+      <div className="flex items-center gap-1.5 mb-2">
+        <History size={13} className="text-gray-400" />
+        <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400">Historial</span>
+      </div>
+      <ol className="space-y-2 border-l border-gray-200 dark:border-gray-700 pl-3.5 ml-1">
+        {[...eventos].reverse().map((ev, i) => (
+          <li key={i} className="relative text-[11px] leading-tight">
+            <span className="absolute -left-[17px] top-1 w-2 h-2 rounded-full bg-brand-400 ring-2 ring-white dark:ring-gray-900" />
+            <span className="font-semibold text-gray-700 dark:text-gray-200">{label(ev)}</span>
+            <div className="text-gray-400">{ev.byName || 'Alguien'} · {fmt(ev.ts)}</div>
+          </li>
+        ))}
+      </ol>
     </div>
   );
 }
@@ -401,18 +546,41 @@ function CardDetailModal({ a, personas, team = [], onClose, addToast }) {
           {/* Creativos */}
           <CreativosSection a={a} addToast={addToast} />
 
-          {/* Videos aprobados */}
-          <div className="flex items-center gap-3">
-            <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400">Videos aprobados</span>
-            <div className="flex items-center gap-1.5">
-              <button onClick={() => updateAssignment(a.id, { videosAprobados: Math.max(0, (a.videosAprobados || 0) - 1) })}
-                className="w-6 h-6 rounded bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 text-gray-500 font-bold leading-none">−</button>
-              <span className="font-mono tabular-nums text-sm w-12 text-center">{a.videosAprobados}/{a.videosTotal}</span>
-              <button onClick={() => updateAssignment(a.id, { videosAprobados: Math.min(a.videosTotal, (a.videosAprobados || 0) + 1) })}
-                className="w-6 h-6 rounded bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 text-gray-500 font-bold leading-none">+</button>
-            </div>
-            {esCompleto(a.estado) && <span className="ml-auto text-[11px] font-bold text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1"><CheckCircle2 size={13} /> Cuenta para el pago</span>}
-          </div>
+          {/* Videos aprobados (sobre los subidos) + Aprobar todos */}
+          {(() => {
+            const subidos = a.archivos?.length || 0;
+            const aprob = Math.min(a.videosAprobados || 0, subidos);
+            const todo = subidos > 0 && aprob >= subidos;
+            return (
+              <div>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400">Videos aprobados</span>
+                  <div className="flex items-center gap-1.5">
+                    <button onClick={() => updateAssignment(a.id, { videosAprobados: Math.max(0, aprob - 1) })}
+                      className="w-6 h-6 rounded bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 text-gray-500 font-bold leading-none">−</button>
+                    <span className="font-mono tabular-nums text-sm w-14 text-center">{aprob}/{subidos}</span>
+                    <button onClick={() => updateAssignment(a.id, { videosAprobados: Math.min(subidos, aprob + 1) })}
+                      disabled={aprob >= subidos}
+                      className="w-6 h-6 rounded bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 text-gray-500 font-bold leading-none disabled:opacity-40">+</button>
+                  </div>
+                  {subidos > 0 && (
+                    <button
+                      onClick={() => { updateAssignment(a.id, { videosAprobados: subidos, estado: 'aprobado' }); addToast?.({ type: 'success', message: `Aprobado (${subidos}/${subidos}) — listo para publicar` }); }}
+                      className={`ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition ${todo && !esCompleto(a.estado) ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm' : 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100'}`}>
+                      <CheckCircle2 size={14} /> Aprobar todos
+                    </button>
+                  )}
+                </div>
+                <p className="text-[10px] text-gray-400 mt-1.5">
+                  El total es la cantidad de videos subidos ({subidos}). "Aprobar todos" marca todo aprobado y pasa la tarjeta a <b>Aprobado</b> (lista para publicar).
+                </p>
+                {esCompleto(a.estado) && <span className="mt-1.5 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1"><CheckCircle2 size={13} /> Cuenta para el pago</span>}
+              </div>
+            );
+          })()}
+
+          {/* Historial de la tarjeta (KPIs de tiempos) */}
+          <HistorialTarjeta a={a} />
         </div>
 
         <div className="flex items-center px-5 py-3.5 border-t border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">

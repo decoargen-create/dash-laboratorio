@@ -2129,7 +2129,7 @@ function AppShell({ onExit }) {
   // primera vez. Para un creator, trae solo sus tarjetas (RLS).
   useEffect(() => {
     if (currentUser && supabaseUser) {
-      initProduccionSync({ role: currentUser.role, userId: supabaseUser.id });
+      initProduccionSync({ role: currentUser.role, userId: supabaseUser.id, name: currentUser.name });
     } else {
       teardownProduccionSync();
     }

@@ -11,7 +11,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Film, LogOut, Moon, Sun, RefreshCw, CheckCircle2, Clock, ChevronDown, ChevronRight, Sparkles,
+  Film, LogOut, Moon, Sun, RefreshCw, CheckCircle2, Clock, ChevronDown, ChevronRight, Sparkles, ExternalLink,
 } from 'lucide-react';
 import {
   subscribeProduccion, allWeekKeys, listAssignments, weekLabel, weekKeyOf,
@@ -48,6 +48,8 @@ function CreatorCard({ a, addToast }) {
   };
 
   const nSubidos = (a.archivos || []).length;
+  const aprob = Math.min(a.videosAprobados || 0, nSubidos);
+  const folderLink = (a.archivos || []).find(f => f.folderLink)?.folderLink;
 
   return (
     <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm overflow-hidden">
@@ -64,14 +66,24 @@ function CreatorCard({ a, addToast }) {
           <EstadoBadge estado={a.estado} />
         </div>
 
-        {/* Meta: videos objetivo + subidos */}
-        <div className="flex items-center gap-3 text-[11px] text-gray-500 dark:text-gray-400 mb-3">
+        {/* Meta: subidos + aprobados + link a Drive */}
+        <div className="flex items-center gap-3 text-[11px] text-gray-500 dark:text-gray-400 mb-3 flex-wrap">
           <span className="inline-flex items-center gap-1">
             <Film size={12} className="text-emerald-500" />
-            {nSubidos} subido{nSubidos === 1 ? '' : 's'}
+            <b className="text-gray-700 dark:text-gray-200">{nSubidos}</b> subido{nSubidos === 1 ? '' : 's'}
           </span>
-          <span className="text-gray-300 dark:text-gray-600">|</span>
-          <span>Objetivo: {a.videosTotal || VIDEOS_POR_PRODUCTO} videos</span>
+          {nSubidos > 0 && (
+            <span className="inline-flex items-center gap-1" title="Aprobados por el equipo">
+              <CheckCircle2 size={12} className={aprob >= nSubidos ? 'text-emerald-500' : 'text-gray-400'} />
+              <b className="text-gray-700 dark:text-gray-200">{aprob}/{nSubidos}</b> aprob.
+            </span>
+          )}
+          {folderLink && (
+            <a href={folderLink} target="_blank" rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 font-bold text-brand-600 dark:text-brand-300 hover:underline">
+              <ExternalLink size={11} /> Ver en Drive
+            </a>
+          )}
         </div>
 
         {/* Brief (consignas / guiones) — solo lectura, colapsable */}

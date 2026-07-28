@@ -33,9 +33,14 @@ const listeners = new Set();
 // ── Estado del módulo (sync con la nube) ──
 let _role = null;      // 'admin' | 'creator' | null (null = modo 100% local)
 let _userId = null;
+let _actorName = null; // nombre para el historial ("quién hizo qué")
 let _cache = null;     // asignaciones en memoria; null hasta el primer read()
 let _pagos = null;     // { 'weekKey|persona': { paid, paidAt } }
 let _refetchBound = false;
+// ¿La base ya tiene la columna `historial` (migración 0021)? Se detecta al
+// hidratar. Si es false, el historial se registra local pero NO se manda a la
+// nube (para no romper writes cuando la migración todavía no se aplicó).
+let _histCloud = false;
 
 // Columnas del kanban (como las listas de Trello del equipo).
 export const ESTADOS = ['porhacer', 'revision', 'aprobado', 'publicado'];
@@ -129,12 +134,13 @@ function rowToLocal(r) {
     nota: r.nota || '',
     pagado: !!r.pagado,
     archivos: Array.isArray(r.archivos) ? r.archivos : [],
+    historial: Array.isArray(r.historial) ? r.historial : [],
     createdAt: r.created_at || new Date().toISOString(),
     updatedAt: r.updated_at || new Date().toISOString(),
   };
 }
 function localToRow(a) {
-  return {
+  const row = {
     id: a.id,
     week_key: a.weekKey,
     producto_id: a.productoId != null ? String(a.productoId) : null,
@@ -150,6 +156,21 @@ function localToRow(a) {
     pagado: !!a.pagado,
     archivos: Array.isArray(a.archivos) ? a.archivos : [],
     created_at: a.createdAt || new Date().toISOString(),
+  };
+  // Solo mandamos historial si la base lo soporta (evita romper el write
+  // cuando la migración 0021 todavía no se aplicó).
+  if (_histCloud) row.historial = Array.isArray(a.historial) ? a.historial : [];
+  return row;
+}
+
+// Crea un evento de historial con el actor actual.
+function nuevoEvento(tipo, extra = {}) {
+  return {
+    ts: new Date().toISOString(),
+    tipo,
+    by: _userId || null,
+    byName: _actorName || 'Alguien',
+    ...extra,
   };
 }
 
@@ -176,23 +197,25 @@ function enqueue(id, fn) {
   return next;
 }
 
-function pushRow(id) { return enqueue(id, () => doPushRow(id)); }
+function pushRow(id, evento = null) { return enqueue(id, () => doPushRow(id, evento)); }
 function pushDelete(id) { return enqueue(id, () => doPushDelete(id)); }
 
 // Empuja una fila (insert/update) a la nube. Admin → tabla directa; creator →
-// RPC acotada (solo estado permitido + archivos de SU tarjeta).
-async function doPushRow(id) {
+// RPC acotada (solo estado permitido + archivos de SU tarjeta). `evento` es la
+// entrada de historial a registrar (para el creator viaja por la RPC).
+async function doPushRow(id, evento = null) {
   if (!cloudReady()) return;
   const a = ensureCache().find(x => x.id === id);
   if (!a) return;
   if (_role === 'admin') {
+    // El historial ya está dentro de la fila (localToRow lo incluye si _histCloud).
     const { error } = await supabase.from(TABLE).upsert(localToRow(a), { onConflict: 'id' });
     if (error) console.warn('[produccion] push(admin):', error.message);
   } else if (_role === 'creator') {
     const estado = ESTADOS_CREATOR.includes(a.estado) ? a.estado : null;
-    const { error } = await supabase.rpc('produccion_creator_update', {
-      p_id: id, p_estado: estado, p_archivos: a.archivos || [],
-    });
+    const params = { p_id: id, p_estado: estado, p_archivos: a.archivos || [] };
+    if (_histCloud && evento) params.p_evento = evento; // solo si la base lo soporta
+    const { error } = await supabase.rpc('produccion_creator_update', params);
     if (error) console.warn('[produccion] push(creator):', error.message);
   }
 }
@@ -216,6 +239,12 @@ async function pushMany(rows) {
 async function hydrate() {
   if (!cloudReady()) return;
   try {
+    // Detecta si la base ya tiene la columna `historial` (migración 0021).
+    try {
+      const probe = await supabase.from(TABLE).select('historial').limit(1);
+      _histCloud = !probe.error;
+    } catch { _histCloud = false; }
+
     const { data, error } = await supabase.from(TABLE).select('*');
     if (error) { console.warn('[produccion] pull:', error.message); return; }
     const cloud = (data || []).map(rowToLocal);
@@ -240,9 +269,10 @@ async function hydrate() {
 export function refreshProduccion() { return hydrate(); }
 
 // Arranca (o reinicia) el sync. Llamar al loguear con el rol resuelto.
-export async function initProduccionSync({ role, userId } = {}) {
+export async function initProduccionSync({ role, userId, name } = {}) {
   _role = role || null;
   _userId = userId || null;
+  _actorName = name || _actorName || null;
 
   // Si cambió el dueño del cache local (otro user en el mismo navegador),
   // limpiamos el espejo para no mostrar data ajena mientras hidrata.
@@ -292,11 +322,33 @@ export function weekKeyOf(date = new Date()) {
   return dt.toISOString().slice(0, 10);
 }
 
-// Etiqueta legible de una semana: "Sem. del 28/7".
+// Etiqueta legible de una semana: "Semana 4 · 27/7 al 2/8" (lunes a domingo).
+// El número es la semana del mes (base lunes). El rango de fechas es lo que
+// pidió el user (como el Excel): de lunes a domingo.
 export function weekLabel(weekKey) {
   if (!weekKey) return '';
-  const [, m, d] = weekKey.split('-');
-  return `Sem. del ${Number(d)}/${Number(m)}`;
+  const [y, m, d] = weekKey.split('-').map(Number);
+  const monday = new Date(Date.UTC(y, m - 1, d));
+  const sunday = new Date(monday); sunday.setUTCDate(monday.getUTCDate() + 6);
+  const n = Math.floor((d - 1) / 7) + 1;
+  const f = dt => `${dt.getUTCDate()}/${dt.getUTCMonth() + 1}`;
+  return `Semana ${n} · ${f(monday)} al ${f(sunday)}`;
+}
+
+// Solo el número de semana (para chips compactos).
+export function weekNumber(weekKey) {
+  if (!weekKey) return '';
+  const d = Number(weekKey.split('-')[2]);
+  return Math.floor((d - 1) / 7) + 1;
+}
+// Solo el rango de fechas "27/7 al 2/8".
+export function weekRange(weekKey) {
+  if (!weekKey) return '';
+  const [y, m, d] = weekKey.split('-').map(Number);
+  const monday = new Date(Date.UTC(y, m - 1, d));
+  const sunday = new Date(monday); sunday.setUTCDate(monday.getUTCDate() + 6);
+  const f = dt => `${dt.getUTCDate()}/${dt.getUTCMonth() + 1}`;
+  return `${f(monday)} al ${f(sunday)}`;
 }
 
 export function listAssignments(weekKey) {
@@ -327,6 +379,7 @@ export function addAssignment({ weekKey, productoId, productoNombre, persona, cr
     nota: '',
     pagado: false,
     archivos: [],
+    historial: [nuevoEvento('creacion')],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -366,9 +419,16 @@ export function updateAssignment(id, patch) {
   const arr = read().slice();
   const i = arr.findIndex(a => a.id === id);
   if (i === -1) return;
-  arr[i] = { ...arr[i], ...patch, updatedAt: new Date().toISOString() };
+  const before = arr[i];
+  // Si cambia el estado, dejamos registro en el historial (KPIs de tiempos).
+  let evento = null;
+  if (patch.estado && patch.estado !== before.estado) {
+    evento = nuevoEvento('estado', { from: before.estado, to: patch.estado });
+  }
+  const historial = evento ? [...(before.historial || []), evento] : before.historial;
+  arr[i] = { ...before, ...patch, historial, updatedAt: new Date().toISOString() };
   write(arr);
-  pushRow(id);
+  pushRow(id, evento);
 }
 export function removeAssignment(id) {
   write(read().filter(a => a.id !== id));

@@ -155,9 +155,13 @@ export default function CreatorWorkspace({ user, onLogout, addToast, darkMode, t
 
   const totalCards = grupos.reduce((n, g) => n + g.cards.length, 0);
 
-  // Resumen motivador de la semana (aprobados + cuánto falta para el bonus).
+  // Resumen motivador de la semana (aprobados + cuánto falta para el bonus) +
+  // el avance propio (asignados / por hacer / en revisión).
   const cardsSemana = listAssignments(thisWeek);
   const aprobadosSemana = cardsSemana.filter(a => esCompleto(a.estado)).length;
+  const asignadosSemana = cardsSemana.length;
+  const porHacerSemana = cardsSemana.filter(a => a.estado === 'porhacer').length;
+  const revisionSemana = cardsSemana.filter(a => a.estado === 'revision').length;
   const faltaBonus = aprobadosSemana < 3 ? 3 - aprobadosSemana : 0;
 
   const doRefresh = async () => {
@@ -214,13 +218,22 @@ export default function CreatorWorkspace({ user, onLogout, addToast, darkMode, t
               <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center shrink-0">
                 <CheckCircle2 size={18} />
               </div>
-              <div className="text-sm leading-tight">
+              <div className="text-sm leading-tight flex-1">
                 <div className="font-bold">{aprobadosSemana} aprobado{aprobadosSemana === 1 ? '' : 's'} esta semana</div>
                 <div className="text-white/80 text-[12px]">
                   {faltaBonus > 0
                     ? `Te falta${faltaBonus === 1 ? '' : 'n'} ${faltaBonus} para el bonus 🎯`
                     : '¡Bonus conseguido! Seguí sumando 🎉'}
                 </div>
+              </div>
+              {/* Tu avance de la semana */}
+              <div className="hidden sm:flex items-stretch gap-1.5 text-center">
+                {[['Asignados', asignadosSemana], ['Por hacer', porHacerSemana], ['Revisión', revisionSemana], ['Aprob.', aprobadosSemana]].map(([lab, val]) => (
+                  <div key={lab} className="rounded-lg bg-white/15 px-2.5 py-1 min-w-[52px]">
+                    <div className="text-base font-extrabold tabular-nums leading-none">{val}</div>
+                    <div className="text-[9px] uppercase tracking-wide text-white/75 mt-0.5">{lab}</div>
+                  </div>
+                ))}
               </div>
             </div>
 

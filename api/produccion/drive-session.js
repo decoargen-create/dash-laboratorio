@@ -17,21 +17,10 @@
 // funciona aunque todavía no hayas conectado la carpeta de Drive.
 
 import { getUserIdFromAuth } from '../marketing/_supabase-server.js';
-import { getCreds, getAccessToken, driveEnsureFolder } from '../actas/_google.js';
+import { driveEnsureFolder } from '../actas/_google.js';
+import { getDriveContext } from './_drive-ctx.js';
 
 const UPLOAD = 'https://www.googleapis.com/upload/drive/v3/files';
-
-// Carpeta raíz de creativos en Drive. Preferimos una dedicada; si no está,
-// caemos a la de transcripciones (creando un subfolder "Producción" adentro,
-// así los creativos NO se mezclan con las actas).
-function creativosRootId() {
-  return process.env.DRIVE_CREATIVOS_FOLDER_ID || process.env.DRIVE_TRANSCRIPTS_FOLDER_ID || null;
-}
-
-function driveReady() {
-  const creds = getCreds();
-  return !!(creds?.client_email && creds?.private_key && creativosRootId());
-}
 
 // Saca caracteres que rompen nombres de archivo/carpeta en Drive.
 function clean(s, fallback = '') {
@@ -82,51 +71,43 @@ export default async function handler(req, res) {
   // Lo usan el cartel de la tarjeta y el botón "Drive" del header del tablero.
   // rootLink = la carpeta raíz de creativos, para entrar a ver todo.
   if (body.probe) {
-    const ready = driveReady();
-    const rootId = process.env.DRIVE_CREATIVOS_FOLDER_ID || null;
+    const ctx = await getDriveContext();
     const out = {
-      configured: ready,
-      rootLink: ready && rootId ? `https://drive.google.com/drive/folders/${rootId}` : null,
+      configured: !!ctx,
+      mode: ctx?.mode || null,
+      email: ctx?.email || null,
+      rootLink: ctx ? `https://drive.google.com/drive/folders/${ctx.rootId}` : null,
     };
     // Si el probe viene con un producto, aseguramos su carpeta y devolvemos el
     // link directo — así el detalle ofrece "carpeta de Drive" aunque la tarjeta
     // todavía no tenga videos subidos a Drive.
-    if (ready && rootId && body.productoNombre) {
+    if (ctx && body.productoNombre) {
       try {
-        const token = await getAccessToken();
-        const prodFolder = await driveEnsureFolder(token, rootId, clean(body.productoNombre, 'Producto'));
+        const prodFolder = await driveEnsureFolder(ctx.token, ctx.rootId, clean(body.productoNombre, 'Producto'));
         out.prodLink = `https://drive.google.com/drive/folders/${prodFolder}`;
-        // Si además viene la persona/semana, aseguramos la carpeta EXACTA de la
-        // tarjeta y devolvemos su link — así el botón lleva justo ahí.
         if (body.persona || body.weekKey) {
-          const cardFolder = await driveEnsureFolder(token, prodFolder, cardFolderName(body.persona, body.weekKey));
+          const cardFolder = await driveEnsureFolder(ctx.token, prodFolder, cardFolderName(body.persona, body.weekKey));
           out.cardLink = `https://drive.google.com/drive/folders/${cardFolder}`;
         }
       } catch { /* devolvemos al menos el root */ }
     }
-    // (El auto-test de CORS se removió: con el relay server-side la subida a
-    // Drive ya no depende de CORS, así que no aporta y gastaba llamadas.)
     return respondJSON(res, 200, out);
   }
 
   const { productoNombre, persona, weekKey, filename, mimeType, size } = body;
   if (!filename) return respondJSON(res, 400, { error: 'Falta el nombre del archivo.' });
 
-  // Drive no configurado → el browser guarda en AdsLab (Supabase). No es error.
-  if (!driveReady()) {
-    return respondJSON(res, 200, { configured: false, reason: 'drive-no-configurado' });
+  // ¿Hay forma de subir a Drive (OAuth del user o service account)?
+  const ctx = await getDriveContext();
+  if (!ctx) {
+    return respondJSON(res, 200, { configured: false, reason: 'drive-no-conectado' });
   }
 
   try {
-    const token = await getAccessToken();
+    const token = ctx.token;
+    const rootId = ctx.rootId;
 
-    // Raíz: si hay carpeta dedicada de creativos, va directo ahí. Si caemos a la
-    // de transcripciones, metemos todo bajo "Creativos" para no mezclar con actas.
-    let rootId = process.env.DRIVE_CREATIVOS_FOLDER_ID;
-    if (!rootId) rootId = await driveEnsureFolder(token, process.env.DRIVE_TRANSCRIPTS_FOLDER_ID, 'Creativos');
-
-    // Estructura: <raíz>/<Producto>/<Persona> - <fecha>/
-    // Cada producto su carpeta; adentro, una carpeta por persona+día de subida.
+    // Estructura: <raíz>/<Producto>/<Persona> - sem d-m/
     const prodFolder = await driveEnsureFolder(token, rootId, clean(productoNombre, 'Producto'));
     // Carpeta ESTABLE por tarjeta (producto × persona × semana): todos los
     // videos de la tarjeta caen acá, aunque se suban en días distintos.

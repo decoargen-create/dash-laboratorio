@@ -116,6 +116,57 @@ function decryptToken(stored) {
   }
 }
 
+// =========================================================================
+// GOOGLE OAUTH — refresh_token del dueño del lab para subir a SU Drive.
+// Tabla public.google_oauth (service-role only). El refresh_token se cifra.
+// Es lab-wide: guardamos el del/los admin(s); las subidas (admin o creator)
+// usan el más reciente. El token NUNCA sale del server.
+// =========================================================================
+export async function saveGoogleOAuth(userId, refreshToken, email) {
+  const supabase = getClient();
+  if (!supabase || !userId || !refreshToken) return false;
+  const { error } = await supabase.from('google_oauth').upsert({
+    id: userId,
+    email: email || null,
+    refresh_token: encryptToken(refreshToken),
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'id' });
+  if (error) { console.warn('[oauth] save:', error.message); return false; }
+  return true;
+}
+
+// Devuelve { refreshToken, email } de la conexión más reciente, o null.
+export async function getGoogleOAuth() {
+  const supabase = getClient();
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase
+      .from('google_oauth')
+      .select('refresh_token,email,updated_at')
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error || !data) return null;
+    const rt = decryptToken(data.refresh_token);
+    if (!rt) return null;
+    return { refreshToken: rt, email: data.email || null };
+  } catch (e) {
+    // Tabla inexistente (migración sin aplicar) → tratamos como "no conectado".
+    return null;
+  }
+}
+
+export async function deleteGoogleOAuth(userId) {
+  const supabase = getClient();
+  if (!supabase) return false;
+  try {
+    const q = supabase.from('google_oauth').delete();
+    const { error } = userId ? await q.eq('id', userId) : await q.neq('id', '00000000-0000-0000-0000-000000000000');
+    if (error) { console.warn('[oauth] delete:', error.message); return false; }
+    return true;
+  } catch { return false; }
+}
+
 // Lista las conexiones del user SIN el access_token (nunca se expone).
 export async function listMetaConnections(userId) {
   const supabase = getClient();

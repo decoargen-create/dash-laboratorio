@@ -9,8 +9,85 @@ import crypto from 'node:crypto';
 
 const DRIVE = 'https://www.googleapis.com/drive/v3';
 const UPLOAD = 'https://www.googleapis.com/upload/drive/v3/files';
+const OAUTH_TOKEN = 'https://oauth2.googleapis.com/token';
+const OAUTH_AUTH = 'https://accounts.google.com/o/oauth2/v2/auth';
+// Scope MÍNIMO: solo los archivos que crea la app. No ve el resto del Drive.
+const OAUTH_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 
-let cachedToken = null; // { token, exp(ms) }
+let cachedToken = null; // { token, exp(ms) } — service account
+
+// =========================================================================
+// OAuth de USUARIO (para subir a un Drive personal @gmail, donde la service
+// account no tiene quota). El usuario conecta su cuenta una vez; guardamos su
+// refresh_token y con él sacamos access_tokens para subir COMO él.
+// =========================================================================
+
+export function oauthConfigured() {
+  return !!(process.env.GOOGLE_OAUTH_CLIENT_ID && process.env.GOOGLE_OAUTH_CLIENT_SECRET);
+}
+
+// URL de consentimiento de Google. `state` liga el callback al pedido (CSRF).
+export function oauthConsentUrl(redirectUri, state) {
+  const u = new URL(OAUTH_AUTH);
+  u.search = new URLSearchParams({
+    client_id: process.env.GOOGLE_OAUTH_CLIENT_ID,
+    redirect_uri: redirectUri,
+    response_type: 'code',
+    scope: OAUTH_SCOPE,
+    access_type: 'offline',   // pide refresh_token
+    prompt: 'consent',        // fuerza refresh_token aunque ya haya consentido
+    include_granted_scopes: 'true',
+    state,
+  }).toString();
+  return u.toString();
+}
+
+// Cambia el `code` del callback por tokens (incluye refresh_token) + email.
+export async function oauthExchangeCode(code, redirectUri) {
+  const resp = await fetch(OAUTH_TOKEN, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      code,
+      client_id: process.env.GOOGLE_OAUTH_CLIENT_ID,
+      client_secret: process.env.GOOGLE_OAUTH_CLIENT_SECRET,
+      redirect_uri: redirectUri,
+      grant_type: 'authorization_code',
+    }),
+  });
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(`OAuth exchange: ${data.error_description || data.error || resp.status}`);
+  let email = null;
+  try {
+    const who = await fetch(`${DRIVE}/about?fields=user(emailAddress)`, {
+      headers: { Authorization: `Bearer ${data.access_token}` },
+    });
+    const j = await who.json();
+    email = j?.user?.emailAddress || null;
+  } catch { /* email es opcional */ }
+  return { refreshToken: data.refresh_token || null, accessToken: data.access_token, email };
+}
+
+// Access token fresco a partir del refresh_token guardado. Cache corto por rt.
+const _oauthCache = new Map(); // refreshToken -> { token, exp }
+export async function oauthAccessFromRefresh(refreshToken) {
+  const c = _oauthCache.get(refreshToken);
+  if (c && c.exp > Date.now() + 60_000) return c.token;
+  const resp = await fetch(OAUTH_TOKEN, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      refresh_token: refreshToken,
+      client_id: process.env.GOOGLE_OAUTH_CLIENT_ID,
+      client_secret: process.env.GOOGLE_OAUTH_CLIENT_SECRET,
+      grant_type: 'refresh_token',
+    }),
+  });
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(`OAuth refresh: ${data.error_description || data.error || resp.status}`);
+  _oauthCache.set(refreshToken, { token: data.access_token, exp: Date.now() + (data.expires_in || 3600) * 1000 });
+  return data.access_token;
+}
 
 export function getCreds() {
   const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;

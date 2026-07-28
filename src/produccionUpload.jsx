@@ -106,7 +106,11 @@ async function uploadOne(file, ctx) {
     });
     sess = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(sess.error || `HTTP ${r.status}`);
-  } catch { sess = { configured: false }; }
+  } catch (e) {
+    // Preservamos el motivo (antes se descartaba y el toast decía solo
+    // "no configurado", sin poder diagnosticar).
+    sess = { configured: false, error: e?.message || 'no se pudo abrir la subida' };
+  }
 
   const armarArchivo = (meta) => {
     const link = meta.webViewLink || (meta.id ? `https://drive.google.com/file/d/${meta.id}/view` : sess.folderLink) || null;

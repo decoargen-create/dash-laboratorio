@@ -19,6 +19,9 @@ alter table public.produccion_asignaciones
 -- Reemplazamos la RPC para sumar p_evento. Drop + create porque cambia la firma.
 drop function if exists public.produccion_creator_update(text, text, jsonb);
 
+-- p_evento se mantiene por compatibilidad de firma pero NO se confía: el evento
+-- de historial se construye SERVER-SIDE con auth.uid()/now(), así un creator no
+-- puede falsificar quién/cuándo hizo el cambio.
 create or replace function public.produccion_creator_update(
   p_id       text,
   p_estado   text  default null,
@@ -32,6 +35,7 @@ set search_path = public
 as $$
 declare
   r public.produccion_asignaciones;
+  actor_name text;
 begin
   select * into r
   from public.produccion_asignaciones
@@ -45,18 +49,27 @@ begin
     if p_estado not in ('porhacer', 'revision') then
       raise exception 'Un creator solo puede mover entre Por hacer y En revisión';
     end if;
-    update public.produccion_asignaciones set estado = p_estado where id = p_id;
+    -- Si el estado realmente cambia, registramos el evento (server-side).
+    if p_estado is distinct from r.estado then
+      select display_name into actor_name from public.profiles where id = auth.uid();
+      update public.produccion_asignaciones
+        set estado = p_estado,
+            historial = coalesce(historial, '[]'::jsonb) || jsonb_build_object(
+              'ts',     to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+              'tipo',   'estado',
+              'from',   r.estado,
+              'to',     p_estado,
+              'by',     auth.uid(),
+              'byName', coalesce(nullif(actor_name, ''), 'Equipo')
+            )
+        where id = p_id;
+    else
+      update public.produccion_asignaciones set estado = p_estado where id = p_id;
+    end if;
   end if;
 
   if p_archivos is not null then
     update public.produccion_asignaciones set archivos = p_archivos where id = p_id;
-  end if;
-
-  -- Appendea el evento (no reescribe todo el historial).
-  if p_evento is not null then
-    update public.produccion_asignaciones
-      set historial = coalesce(historial, '[]'::jsonb) || p_evento
-      where id = p_id;
   end if;
 
   select * into r from public.produccion_asignaciones where id = p_id;

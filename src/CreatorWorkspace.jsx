@@ -11,11 +11,11 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Film, LogOut, Moon, Sun, RefreshCw, CheckCircle2, Clock, ChevronDown, ChevronRight, Sparkles, ExternalLink,
+  Film, LogOut, Moon, Sun, RefreshCw, CheckCircle2, Clock, ChevronDown, ChevronRight, Sparkles, ExternalLink, AlertTriangle,
 } from 'lucide-react';
 import {
   subscribeProduccion, allWeekKeys, listAssignments, weekLabel, weekKeyOf,
-  ESTADO_LABELS, ESTADOS_CREATOR, VIDEOS_POR_PRODUCTO, updateAssignment, refreshProduccion,
+  ESTADO_LABELS, ESTADOS_CREATOR, updateAssignment, refreshProduccion, esCompleto,
 } from './produccionStore.js';
 import { CreativosSection } from './produccionUpload.jsx';
 
@@ -65,6 +65,14 @@ function CreatorCard({ a, addToast }) {
           </div>
           <EstadoBadge estado={a.estado} />
         </div>
+
+        {/* Cambios pedidos por el equipo — bien visible */}
+        {(a.nota || '').trim() && (
+          <div className="mb-3 rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-3 py-2">
+            <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase text-amber-700 dark:text-amber-300 mb-0.5"><AlertTriangle size={11} /> Hay que corregir</div>
+            <p className="text-xs text-amber-800 dark:text-amber-200 whitespace-pre-wrap">{a.nota}</p>
+          </div>
+        )}
 
         {/* Meta: subidos + aprobados + link a Drive */}
         <div className="flex items-center gap-3 text-[11px] text-gray-500 dark:text-gray-400 mb-3 flex-wrap">
@@ -135,11 +143,10 @@ export default function CreatorWorkspace({ user, onLogout, addToast, darkMode, t
 
   useEffect(() => subscribeProduccion(() => force(x => x + 1)), []);
 
-  // Semanas con tarjetas (más reciente primero). Aseguramos la semana actual.
-  const weeks = useMemo(() => {
-    const set = new Set(allWeekKeys());
-    return [...set].sort().reverse();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Semanas con tarjetas (más reciente primero). Se calcula en cada render (no
+  // memoizar con []: al primer login el cache está vacío hasta que hidrata, y
+  // un memo congelado dejaría el tablero vacío para siempre).
+  const weeks = [...new Set(allWeekKeys())].sort().reverse();
 
   const thisWeek = weekKeyOf();
   const grupos = weeks
@@ -147,6 +154,11 @@ export default function CreatorWorkspace({ user, onLogout, addToast, darkMode, t
     .filter(g => g.cards.length > 0);
 
   const totalCards = grupos.reduce((n, g) => n + g.cards.length, 0);
+
+  // Resumen motivador de la semana (aprobados + cuánto falta para el bonus).
+  const cardsSemana = listAssignments(thisWeek);
+  const aprobadosSemana = cardsSemana.filter(a => esCompleto(a.estado)).length;
+  const faltaBonus = aprobadosSemana < 3 ? 3 - aprobadosSemana : 0;
 
   const doRefresh = async () => {
     setRefreshing(true);
@@ -197,6 +209,21 @@ export default function CreatorWorkspace({ user, onLogout, addToast, darkMode, t
           </div>
         ) : (
           <div className="space-y-8">
+            {/* Resumen motivador de la semana */}
+            <div className="rounded-2xl bg-gradient-to-r from-pink-500 to-rose-500 text-white px-4 py-3 flex items-center gap-3 shadow-sm">
+              <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center shrink-0">
+                <CheckCircle2 size={18} />
+              </div>
+              <div className="text-sm leading-tight">
+                <div className="font-bold">{aprobadosSemana} aprobado{aprobadosSemana === 1 ? '' : 's'} esta semana</div>
+                <div className="text-white/80 text-[12px]">
+                  {faltaBonus > 0
+                    ? `Te falta${faltaBonus === 1 ? '' : 'n'} ${faltaBonus} para el bonus 🎯`
+                    : '¡Bonus conseguido! Seguí sumando 🎉'}
+                </div>
+              </div>
+            </div>
+
             {grupos.map(({ wk, cards }) => (
               <section key={wk}>
                 <div className="flex items-center gap-2 mb-3">

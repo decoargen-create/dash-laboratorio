@@ -41,6 +41,9 @@ let _refetchBound = false;
 // hidratar. Si es false, el historial se registra local pero NO se manda a la
 // nube (para no romper writes cuando la migración todavía no se aplicó).
 let _histCloud = false;
+// Contador de escrituras locales. Sirve para que un hydrate/refetch NO pise un
+// cambio optimista que ocurrió mientras traíamos la data de la nube.
+let _writeSeq = 0;
 
 // Columnas del kanban (como las listas de Trello del equipo).
 export const ESTADOS = ['porhacer', 'revision', 'aprobado', 'publicado'];
@@ -98,6 +101,7 @@ function notify() {
 // hace cada mutador con pushRow/pushDelete, que sabe el tipo de operación).
 function write(arr) {
   _cache = arr;
+  _writeSeq++;
   persistLocal(arr);
   notify();
 }
@@ -226,12 +230,15 @@ async function doPushDelete(id) {
   if (error) console.warn('[produccion] delete:', error.message);
 }
 
+// Devuelve true solo si el upsert confirmó OK (para no marcar la migración
+// como hecha si en realidad falló — sino se podría perder el tablero).
 async function pushMany(rows) {
-  if (!cloudReady() || _role !== 'admin' || rows.length === 0) return;
+  if (!cloudReady() || _role !== 'admin' || rows.length === 0) return false;
   try {
     const { error } = await supabase.from(TABLE).upsert(rows.map(localToRow), { onConflict: 'id' });
-    if (error) console.warn('[produccion] migrate:', error.message);
-  } catch (e) { console.warn('[produccion] migrate ex:', e?.message || e); }
+    if (error) { console.warn('[produccion] migrate:', error.message); return false; }
+    return true;
+  } catch (e) { console.warn('[produccion] migrate ex:', e?.message || e); return false; }
 }
 
 // Trae de la nube y reemplaza el cache. La RLS ya acota: admin=todo, creator=lo
@@ -245,8 +252,15 @@ async function hydrate() {
       _histCloud = !probe.error;
     } catch { _histCloud = false; }
 
+    const seqBefore = _writeSeq;
     const { data, error } = await supabase.from(TABLE).select('*');
     if (error) { console.warn('[produccion] pull:', error.message); return; }
+
+    // Si mientras traíamos la data hubo un cambio optimista local (o quedan
+    // push en vuelo), NO pisamos el cache: el push ya persiste en el server y
+    // el próximo refetch reconcilia. Evita que un refetch revierta un cambio.
+    if (_writeSeq !== seqBefore || _inflight > 0) return;
+
     const cloud = (data || []).map(rowToLocal);
     if (cloud.length > 0) {
       write(cloud);
@@ -254,11 +268,17 @@ async function hydrate() {
       const local = readLocalRaw();
       const yaMigro = !!localStorage.getItem(MIGRATED_KEY);
       if (_role === 'admin' && local.length > 0 && !yaMigro) {
-        await pushMany(local);
-        try { localStorage.setItem(MIGRATED_KEY, '1'); } catch {}
+        // Migración one-time. Solo marcamos MIGRATED si el upsert confirmó OK,
+        // y SIEMPRE mantenemos el tablero local (si falló, se reintenta luego).
+        const ok = await pushMany(local);
+        if (ok) { try { localStorage.setItem(MIGRATED_KEY, '1'); } catch {} }
+        write(local);
+      } else if (_role === 'admin' && local.length > 0) {
+        // Ya migramos antes pero la nube volvió vacía. NO borramos el tablero
+        // (podría ser un fallo transitorio); mantenemos lo local.
         write(local);
       } else {
-        // Cloud vacío y sin nada para migrar → la verdad es "vacío".
+        // Creator sin asignaciones, o admin sin nada local → vacío de verdad.
         write([]);
       }
     }
@@ -282,6 +302,7 @@ export async function initProduccionSync({ role, userId, name } = {}) {
       localStorage.removeItem(KEY);
       localStorage.removeItem(PAGOS_KEY);
       localStorage.removeItem(MIGRATED_KEY);
+      localStorage.removeItem(MIGRATED_KEY + '-pagos');
       _cache = null; _pagos = null;
     }
     if (_userId) localStorage.setItem(OWNER_KEY, _userId);

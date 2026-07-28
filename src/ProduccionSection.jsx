@@ -221,7 +221,7 @@ export default function ProduccionSection({ addToast }) {
               </div>
               <div className="space-y-2 min-h-[60px]">
                 {cards.map(a => (
-                  <KanbanCard key={a.id} a={a} personas={personas} addToast={addToast}
+                  <KanbanCard key={a.id} a={a} personas={personas} team={team} addToast={addToast}
                     onOpen={() => setDetailId(a.id)}
                     onAssign={(p) => assignPersona(a.id, p)} />
                 ))}
@@ -237,7 +237,7 @@ export default function ProduccionSection({ addToast }) {
       </div>
 
       {showAdd && (
-        <AgregarProductoModal productos={productos} personas={personas} asigs={asigs} weekKey={weekKey}
+        <AgregarProductoModal productos={productos} personas={personas} team={team} asigs={asigs} weekKey={weekKey}
           onClose={() => setShowAdd(false)} addToast={addToast} />
       )}
       {detail && (
@@ -250,7 +250,7 @@ export default function ProduccionSection({ addToast }) {
   );
 }
 
-function KanbanCard({ a, personas, onOpen, onAssign, addToast }) {
+function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
   const [menu, setMenu] = useState(false);
   const [prog, setProg] = useState(null); // { i, total } mientras sube
   const fileRef = useRef(null);
@@ -288,20 +288,38 @@ function KanbanCard({ a, personas, onOpen, onAssign, addToast }) {
         <span className="text-sm font-bold text-gray-900 dark:text-gray-100 leading-tight flex-1">{a.productoNombre || 'Producto'}</span>
       </div>
 
-      {/* Persona (badge grande) + menú de asignación */}
-      <div className="mt-2.5 pl-4 relative">
+      {/* Persona (badge grande) + menú de asignación por CUENTA del equipo */}
+      <div className="mt-2.5 pl-4 relative flex items-center gap-1.5 flex-wrap">
         <span onClick={e => { e.stopPropagation(); setMenu(v => !v); }} className="cursor-pointer">
           <PersonaBadge persona={a.persona} />
         </span>
+        {/* Aviso: tiene etiqueta pero ninguna cuenta la ve en su tablero */}
+        {a.persona && !a.creatorId && (
+          <span className="inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9px] font-bold bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" title="Esta tarjeta tiene etiqueta pero no está asignada a una cuenta, así que ningún creativo la ve. Elegí una cuenta del equipo.">
+            <AlertTriangle size={9} /> sin cuenta
+          </span>
+        )}
         {menu && (
-          <div className="absolute top-8 left-4 z-10 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl p-1 flex flex-col gap-0.5"
+          <div className="absolute top-8 left-4 z-10 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl p-1 flex flex-col gap-0.5 min-w-[140px]"
             onClick={e => e.stopPropagation()}>
-            {personas.map(p => (
-              <button key={p} onClick={() => { onAssign(p); setMenu(false); }}
-                className="text-left text-[11px] font-semibold px-2 py-1 rounded hover:bg-brand-50 dark:hover:bg-brand-900/30 text-gray-700 dark:text-gray-200 whitespace-nowrap">{p}</button>
-            ))}
-            {a.persona && (
-              <button onClick={() => { onAssign(''); setMenu(false); }}
+            {team.length > 0 ? (
+              team.map(m => (
+                <button key={m.id} onClick={() => { assignCreator(a.id, { creatorId: m.id, persona: m.display_name || m.email }); setMenu(false); }}
+                  className={`text-left text-[11px] font-semibold px-2 py-1 rounded hover:bg-brand-50 dark:hover:bg-brand-900/30 whitespace-nowrap ${a.creatorId === m.id ? 'text-brand-600 dark:text-brand-300' : 'text-gray-700 dark:text-gray-200'}`}>
+                  {a.creatorId === m.id ? '✓ ' : ''}{m.display_name || m.email}
+                </button>
+              ))
+            ) : (
+              <>
+                {personas.map(p => (
+                  <button key={p} onClick={() => { onAssign(p); setMenu(false); }}
+                    className="text-left text-[11px] font-semibold px-2 py-1 rounded hover:bg-brand-50 dark:hover:bg-brand-900/30 text-gray-700 dark:text-gray-200 whitespace-nowrap">{p}</button>
+                ))}
+                <div className="text-[9px] text-gray-400 px-2 py-1 border-t border-gray-100 dark:border-gray-700">Creá cuentas en "Equipo" para que las vean en su tablero.</div>
+              </>
+            )}
+            {(a.persona || a.creatorId) && (
+              <button onClick={() => { assignCreator(a.id, { creatorId: null, persona: '' }); setMenu(false); }}
                 className="text-left text-[11px] px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 border-t border-gray-100 dark:border-gray-700 mt-0.5">Sin asignar</button>
             )}
           </div>
@@ -369,8 +387,9 @@ function KanbanCard({ a, personas, onOpen, onAssign, addToast }) {
 }
 
 // ── Agregar producto (crea una tarjeta en "Por hacer").
-function AgregarProductoModal({ productos, personas, asigs, weekKey, onClose, addToast }) {
+function AgregarProductoModal({ productos, personas, team = [], asigs, weekKey, onClose, addToast }) {
   const [prodId, setProdId] = useState('');
+  const [creatorId, setCreatorId] = useState('');
   const [persona, setPersona] = useState('');
 
   const yaEnSemana = useMemo(() => new Set(asigs.map(a => String(a.productoId))), [asigs]);
@@ -378,8 +397,10 @@ function AgregarProductoModal({ productos, personas, asigs, weekKey, onClose, ad
 
   const crear = () => {
     if (!prod) { addToast?.({ type: 'warning', message: 'Elegí un producto.' }); return; }
-    addAssignment({ weekKey, productoId: prod.id, productoNombre: prod.nombre, persona });
-    addToast?.({ type: 'success', message: `${prod.nombre} agregado${persona ? ` para ${persona}` : ''}` });
+    const m = team.find(t => t.id === creatorId);
+    const per = m ? (m.display_name || m.email) : persona;
+    addAssignment({ weekKey, productoId: prod.id, productoNombre: prod.nombre, persona: per, creatorId: m ? m.id : null });
+    addToast?.({ type: 'success', message: `${prod.nombre} agregado${per ? ` para ${per}` : ''}` });
     onClose();
   };
 
@@ -404,12 +425,28 @@ function AgregarProductoModal({ productos, personas, asigs, weekKey, onClose, ad
           </label>
           <div>
             <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">¿Para quién? (opcional)</span>
-            <div className="flex flex-wrap gap-1.5">
-              {personas.map(p => (
-                <button key={p} onClick={() => setPersona(persona === p ? '' : p)}
-                  className={`text-[11px] font-bold px-2.5 py-1 rounded-md transition ${persona === p ? CHIP_CLS[personaColor(p)] : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200'}`}>{p}</button>
-              ))}
-            </div>
+            {team.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5">
+                {team.map(m => {
+                  const nombre = m.display_name || m.email;
+                  const sel = creatorId === m.id;
+                  return (
+                    <button key={m.id} onClick={() => setCreatorId(sel ? '' : m.id)}
+                      className={`text-[11px] font-bold px-2.5 py-1 rounded-md transition ${sel ? CHIP_CLS[personaColor(nombre)] : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200'}`}>
+                      {nombre}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {personas.map(p => (
+                  <button key={p} onClick={() => setPersona(persona === p ? '' : p)}
+                    className={`text-[11px] font-bold px-2.5 py-1 rounded-md transition ${persona === p ? CHIP_CLS[personaColor(p)] : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200'}`}>{p}</button>
+                ))}
+                <p className="w-full text-[9px] text-gray-400 mt-1">Tip: creá cuentas en "Equipo" para que cada uno vea lo suyo.</p>
+              </div>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2 px-5 py-3.5 border-t border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
@@ -532,6 +569,14 @@ function CardDetailModal({ a, personas, team = [], onClose, addToast }) {
             </div>
           </div>
 
+          {/* Cambios pedidos (lo que ve el creativo) */}
+          {(a.nota || '').trim() && (
+            <div className="rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-3 py-2">
+              <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase text-amber-700 dark:text-amber-300 mb-0.5"><AlertTriangle size={11} /> Cambios pedidos</div>
+              <p className="text-xs text-amber-800 dark:text-amber-200 whitespace-pre-wrap">{a.nota}</p>
+            </div>
+          )}
+
           {/* Brief a mano */}
           <div>
             <div className="flex items-center gap-1.5 mb-1.5">
@@ -583,12 +628,22 @@ function CardDetailModal({ a, personas, team = [], onClose, addToast }) {
           <HistorialTarjeta a={a} />
         </div>
 
-        <div className="flex items-center px-5 py-3.5 border-t border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
+        <div className="flex items-center gap-2 px-5 py-3.5 border-t border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
           <button onClick={() => { if (window.confirm(`¿Eliminar la tarjeta de ${a.productoNombre}?`)) { removeAssignment(a.id); onClose(); } }}
             className="inline-flex items-center gap-1.5 text-xs font-bold text-red-500 hover:text-red-600 transition">
             <Trash2 size={14} /> Eliminar tarjeta
           </button>
-          <button onClick={() => { saveBrief(); onClose(); }} className="ml-auto px-4 py-2 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition">Listo</button>
+          <button
+            onClick={() => {
+              const nota = window.prompt('¿Qué hay que corregir? El creativo lo va a ver en su tarjeta.', a.nota || '');
+              if (nota == null) return;
+              updateAssignment(a.id, { nota, estado: 'porhacer' });
+              addToast?.({ type: 'success', message: 'Devuelta al creativo para corregir.' });
+            }}
+            className="ml-auto inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/30 hover:bg-amber-200 dark:hover:bg-amber-900/50 rounded-lg transition">
+            <AlertTriangle size={14} /> Pedir cambios
+          </button>
+          <button onClick={() => { saveBrief(); onClose(); }} className="px-4 py-2 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition">Listo</button>
         </div>
       </div>
     </div>

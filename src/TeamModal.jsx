@@ -27,6 +27,7 @@ export default function TeamModal({ onClose, addToast }) {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState(() => suggestPassword());
+  const [lastCreated, setLastCreated] = useState(null); // { name, email, password }
 
   const reload = () => {
     setLoading(true);
@@ -43,7 +44,9 @@ export default function TeamModal({ onClose, addToast }) {
     setBusy(true);
     try {
       await createMember(em, password, name.trim());
-      addToast?.({ type: 'success', message: `Cuenta creada para ${name.trim() || em}. Pasale el email y la contraseña.` });
+      // Dejamos las credenciales A LA VISTA (el toast se va y se perderían).
+      setLastCreated({ name: name.trim() || em.split('@')[0], email: em, password });
+      addToast?.({ type: 'success', message: `Cuenta creada para ${name.trim() || em}.` });
       setName(''); setEmail(''); setPassword(suggestPassword());
       reload();
     } catch (err) {
@@ -117,6 +120,27 @@ export default function TeamModal({ onClose, addToast }) {
               La cuenta queda lista para entrar (sin email de confirmación). Pasale al chico el <b>email</b> y la <b>contraseña</b>.
             </p>
           </form>
+
+          {/* Credenciales recién creadas — quedan a la vista hasta cerrarlas */}
+          {lastCreated && (
+            <div className="rounded-xl border border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 p-4">
+              <div className="flex items-center gap-1.5 mb-2">
+                <Check size={14} className="text-emerald-600" />
+                <span className="text-xs font-bold text-emerald-800 dark:text-emerald-300">Cuenta de {lastCreated.name} lista — pasale estos datos</span>
+                <button onClick={() => setLastCreated(null)} className="ml-auto text-emerald-700/60 hover:text-emerald-800"><X size={15} /></button>
+              </div>
+              {[['Email', lastCreated.email, 'em'], ['Contraseña', lastCreated.password, 'pw']].map(([lbl, val, key]) => (
+                <div key={key} className="flex items-center gap-2 mb-1.5 last:mb-0">
+                  <span className="text-[10px] font-bold uppercase text-emerald-700/70 dark:text-emerald-400/70 w-20">{lbl}</span>
+                  <code className="flex-1 text-sm font-mono text-gray-800 dark:text-gray-100 bg-white dark:bg-gray-800 rounded px-2 py-1 border border-emerald-200 dark:border-emerald-800 truncate">{val}</code>
+                  <button onClick={() => copy(val, key)} title="Copiar"
+                    className="p-1.5 rounded-md text-emerald-700 hover:bg-emerald-100 dark:hover:bg-emerald-900/40">
+                    {copied === key ? <Check size={14} /> : <Copy size={14} />}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Lista */}
           <div>

@@ -18,6 +18,13 @@ function suggestPassword() {
 }
 
 export default function TeamModal({ onClose, addToast }) {
+  // Esc cierra el panel (detalle de uso esperado en cualquier popup).
+  useEffect(() => {
+    const h = (e) => { if (e.key === 'Escape') onClose?.(); };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [onClose]);
+
   const [team, setTeam] = useState([]);
   const [q, setQ] = useState('');
   const [loading, setLoading] = useState(true);

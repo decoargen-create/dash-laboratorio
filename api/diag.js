@@ -122,15 +122,34 @@ export default function handler(req, res) {
       const credsOk = !!(clientEmail && tieneKey);
       const carpetaOk = !!(carpetaCreativos || carpetaTranscripts);
       const oauthOk = !!(env.GOOGLE_OAUTH_CLIENT_ID && env.GOOGLE_OAUTH_CLIENT_SECRET);
+      // Diagnóstico de FORMA de las credenciales, sin exponer valores. Sirve
+      // para cazar el error "The provided client secret is invalid": casi
+      // siempre es un espacio/enter al pegar, un valor cambiado (client_id en el
+      // slot del secret o al revés) o un secret que no arranca con GOCSPX-.
+      const rawId = env.GOOGLE_OAUTH_CLIENT_ID || '';
+      const rawSecret = env.GOOGLE_OAUTH_CLIENT_SECRET || '';
+      const idTrim = rawId.trim();
+      const secretTrim = rawSecret.trim();
+      const idLooksLikeId = idTrim.endsWith('.apps.googleusercontent.com');
+      const secretLooksLikeSecret = secretTrim.startsWith('GOCSPX-');
+      const swapped = secretTrim.endsWith('.apps.googleusercontent.com') || idTrim.startsWith('GOCSPX-');
+      const idHasSpaces = rawId !== idTrim;
+      const secretHasSpaces = rawSecret !== secretTrim;
+      let oauthHint;
+      if (!oauthOk) oauthHint = 'Falta GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET (credencial OAuth de Google Cloud). Es lo que hace que los videos suban a TU Drive personal.';
+      else if (swapped) oauthHint = '⚠️ Parece que CLIENT_ID y CLIENT_SECRET están CAMBIADOS de lugar. El ID termina en ".apps.googleusercontent.com" y el secret empieza con "GOCSPX-".';
+      else if (idHasSpaces || secretHasSpaces) oauthHint = '⚠️ Hay espacios o un enter al principio/fin del ' + (secretHasSpaces ? 'CLIENT_SECRET' : 'CLIENT_ID') + '. El código ya los recorta, pero conviene re-pegar el valor limpio en Vercel.';
+      else if (!idLooksLikeId) oauthHint = '⚠️ El CLIENT_ID no termina en ".apps.googleusercontent.com" — no parece un client_id de OAuth válido.';
+      else if (!secretLooksLikeSecret) oauthHint = '⚠️ El CLIENT_SECRET no empieza con "GOCSPX-" (el formato actual de Google). Revisá que sea el secret correcto y completo del MISMO cliente OAuth.';
+      else oauthHint = 'Forma OK. Si igual da "client secret is invalid", el secret no corresponde a este client_id: regeneralo en Google Cloud (mismo cliente) y re-pegá ambos en Vercel.';
       return {
         // Camino RECOMENDADO para Drive personal (@gmail): OAuth del usuario.
         oauth: {
-          GOOGLE_OAUTH_CLIENT_ID: { configured: !!env.GOOGLE_OAUTH_CLIENT_ID },
-          GOOGLE_OAUTH_CLIENT_SECRET: { configured: !!env.GOOGLE_OAUTH_CLIENT_SECRET },
+          GOOGLE_OAUTH_CLIENT_ID: { configured: !!env.GOOGLE_OAUTH_CLIENT_ID, length: idTrim.length, endsWithGoogle: idLooksLikeId, hasSpaces: idHasSpaces },
+          GOOGLE_OAUTH_CLIENT_SECRET: { configured: !!env.GOOGLE_OAUTH_CLIENT_SECRET, length: secretTrim.length, startsWithGOCSPX: secretLooksLikeSecret, hasSpaces: secretHasSpaces },
+          swapped,
           ok: oauthOk,
-          hint: oauthOk
-            ? 'OAuth listo. En Producción tocá "Conectar Drive" para vincular tu cuenta.'
-            : 'Falta GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET (credencial OAuth de Google Cloud). Es lo que hace que los videos suban a TU Drive personal.',
+          hint: oauthHint,
         },
         // Camino service account (solo sirve con Google Workspace / shared drive).
         service_account_configured: !!raw,

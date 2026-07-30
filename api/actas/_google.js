@@ -22,15 +22,23 @@ let cachedToken = null; // { token, exp(ms) } — service account
 // refresh_token y con él sacamos access_tokens para subir COMO él.
 // =========================================================================
 
+// Leemos las credenciales SIEMPRE con .trim(): al pegarlas en Vercel es muy
+// común que se cuele un espacio o un salto de línea al final, y Google entonces
+// rechaza el canje con "The provided client secret is invalid". Recortar acá
+// evita ese error (la causa #1 del fallo) sin que el usuario tenga que darse
+// cuenta de un carácter invisible.
+const oauthClientId = () => (process.env.GOOGLE_OAUTH_CLIENT_ID || '').trim();
+const oauthClientSecret = () => (process.env.GOOGLE_OAUTH_CLIENT_SECRET || '').trim();
+
 export function oauthConfigured() {
-  return !!(process.env.GOOGLE_OAUTH_CLIENT_ID && process.env.GOOGLE_OAUTH_CLIENT_SECRET);
+  return !!(oauthClientId() && oauthClientSecret());
 }
 
 // URL de consentimiento de Google. `state` liga el callback al pedido (CSRF).
 export function oauthConsentUrl(redirectUri, state) {
   const u = new URL(OAUTH_AUTH);
   u.search = new URLSearchParams({
-    client_id: process.env.GOOGLE_OAUTH_CLIENT_ID,
+    client_id: oauthClientId(),
     redirect_uri: redirectUri,
     response_type: 'code',
     scope: OAUTH_SCOPE,
@@ -49,8 +57,8 @@ export async function oauthExchangeCode(code, redirectUri) {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       code,
-      client_id: process.env.GOOGLE_OAUTH_CLIENT_ID,
-      client_secret: process.env.GOOGLE_OAUTH_CLIENT_SECRET,
+      client_id: oauthClientId(),
+      client_secret: oauthClientSecret(),
       redirect_uri: redirectUri,
       grant_type: 'authorization_code',
     }),
@@ -78,8 +86,8 @@ export async function oauthAccessFromRefresh(refreshToken) {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       refresh_token: refreshToken,
-      client_id: process.env.GOOGLE_OAUTH_CLIENT_ID,
-      client_secret: process.env.GOOGLE_OAUTH_CLIENT_SECRET,
+      client_id: oauthClientId(),
+      client_secret: oauthClientSecret(),
       grant_type: 'refresh_token',
     }),
   });

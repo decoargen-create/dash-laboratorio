@@ -79,8 +79,11 @@ export default async function handler(req, res) {
     const token = req.query?.token || '';
     const uid = await getUserIdFromAuth({ headers: { authorization: `Bearer ${token}` } });
     if (!uid) return closePopup(res, false, 'Sesión inválida — volvé a entrar a la app.');
+    // "Admin" a los fines de Producción = cualquiera que NO sea creator (misma
+    // regla con la que la app muestra el tablero de admin). Un creator ni ve
+    // este botón, así que en la práctica siempre entra el dueño del lab.
     const role = await getUserRole(uid);
-    if (role !== 'admin') return closePopup(res, false, 'Solo un admin puede conectar Drive.');
+    if (role === 'creator') return closePopup(res, false, 'Un creator no puede conectar Drive.');
     const state = signState({ uid, nonce: crypto.randomBytes(8).toString('hex'), exp: Date.now() + 10 * 60 * 1000 });
     res.statusCode = 302;
     res.setHeader('Location', oauthConsentUrl(redirectUriFrom(req), state));
@@ -117,7 +120,7 @@ export default async function handler(req, res) {
 
   if (action === 'disconnect') {
     const role = await getUserRole(uid);
-    if (role !== 'admin') return respondJSON(res, 403, { error: 'Solo un admin puede desconectar.' });
+    if (role === 'creator') return respondJSON(res, 403, { error: 'Un creator no puede desconectar Drive.' });
     await deleteGoogleOAuth(null); // borra la conexión lab-wide
     return respondJSON(res, 200, { ok: true, connected: false });
   }

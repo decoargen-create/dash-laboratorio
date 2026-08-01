@@ -507,6 +507,19 @@ function extForMime(mime) {
 }
 
 async function fetchImage(url) {
+  // Data URL (bytes que el cliente ya tenía cacheados del ad): la decodificamos
+  // directo, sin red. Es el camino que evita el 403 del CDN de Meta cuando la
+  // URL del ad ya expiró — si el ad se cacheó al scrapear, sus bytes viajan acá.
+  if (typeof url === 'string' && url.startsWith('data:')) {
+    const comma = url.indexOf(',');
+    const meta = url.slice(5, comma); // ej: "image/jpeg;base64"
+    const declaredMime = (meta.split(';')[0] || '').trim() || null;
+    const buf = Buffer.from(url.slice(comma + 1), 'base64');
+    if (buf.length < 100) {
+      throw new Error('La imagen del ad ref (cacheada) vino vacía. Re-scrapeá la marca.');
+    }
+    return { buf, mime: detectImageType(buf) || declaredMime || 'image/jpeg' };
+  }
   let resp;
   try {
     resp = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
@@ -1489,6 +1502,10 @@ export default async function handler(req, res) {
   const body = await readBody(req);
   const {
     producto, inspiracion, productoImagen, inspiracionImageUrl, accentColor,
+    // Bytes de la imagen del ad ref (data URL) que el cliente ya tenía cacheados
+    // en IndexedDB al scrapear. Si viene, lo preferimos sobre inspiracionImageUrl
+    // porque la URL del CDN de Meta expira ~1h y da 403; los bytes cacheados no.
+    inspiracionImagenData,
     skeletonCached,  // Si el frontend ya tiene el skeleton del ad cacheado,
                      // lo pasa y nos saltamos Vision (ahorra ~$0.005 + 5-10s).
   } = body || {};
@@ -1499,8 +1516,8 @@ export default async function handler(req, res) {
   if (!productoImagen || typeof productoImagen !== 'string') {
     return respondJSON(res, 400, { error: 'Falta productoImagen (data URL). Cargá la foto del producto en Setup.' });
   }
-  if (!inspiracionImageUrl) {
-    return respondJSON(res, 400, { error: 'Falta inspiracionImageUrl (URL de la imagen del ad de referencia)' });
+  if (!inspiracionImageUrl && !inspiracionImagenData) {
+    return respondJSON(res, 400, { error: 'Falta la imagen del ad de referencia (inspiracionImageUrl o inspiracionImagenData)' });
   }
   if (!inspiracion) {
     return respondJSON(res, 400, { error: 'Falta el ad de inspiración' });
@@ -1522,8 +1539,26 @@ export default async function handler(req, res) {
   const aspectRatio = aspectRatioFromSize(size);
 
   try {
-    // Paso 1 — bajar la ref (Meta CDN).
-    const { buf: refImgBuf, mime: refMime } = await fetchImage(inspiracionImageUrl);
+    // Paso 1 — obtener la ref. Preferimos los bytes cacheados (data URL) que
+    // mandó el cliente: la URL del CDN de Meta expira ~1h (403). Si no hay
+    // bytes, caemos a la URL (y si expiró, fetchImage tira el mensaje de
+    // "re-scrapeá la marca").
+    const refSource = (typeof inspiracionImagenData === 'string' && inspiracionImagenData.startsWith('data:'))
+      ? inspiracionImagenData
+      : inspiracionImageUrl;
+    let refImgBuf, refMime;
+    try {
+      ({ buf: refImgBuf, mime: refMime } = await fetchImage(refSource));
+    } catch (errRef) {
+      // Si fallaron los bytes cacheados por lo que sea pero tenemos URL, o al
+      // revés, probamos la otra fuente antes de rendirnos.
+      const alt = refSource === inspiracionImageUrl ? inspiracionImagenData : inspiracionImageUrl;
+      if (alt && alt !== refSource) {
+        ({ buf: refImgBuf, mime: refMime } = await fetchImage(alt));
+      } else {
+        throw errRef;
+      }
+    }
 
     // Paso 2 — decodificar foto del producto.
     const prodBase64 = productoImagen.includes(',') ? productoImagen.split(',')[1] : productoImagen;

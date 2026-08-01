@@ -59,6 +59,35 @@ export async function getCachedAdImageUrl(adId) {
   }
 }
 
+// Devuelve la imagen cacheada de un ad como DATA URL ("data:image/...;base64,..")
+// o null si no está cacheada. Se usa para MANDAR los bytes al backend cuando se
+// generan creativos: la URL del CDN de Meta expira (~1h) y el server no la puede
+// bajar (403), pero si el ad se cacheó al scrapear, estos bytes sobreviven y el
+// creativo se genera igual. Incluye maxBytes para no pasar el límite de body de
+// Vercel (~4.5MB) — si el blob es más grande, devuelve null y el caller cae a la URL.
+export async function getCachedAdImageDataUrl(adId, { maxBytes = 3_800_000 } = {}) {
+  if (!adId) return null;
+  try {
+    const db = await openDB();
+    const rec = await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readonly');
+      const req = tx.objectStore(STORE).get(String(adId));
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    if (!rec?.blob) return null;
+    if (rec.blob.size > maxBytes) return null; // muy grande para el body → usar URL
+    return await new Promise((resolve) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(typeof fr.result === 'string' ? fr.result : null);
+      fr.onerror = () => resolve(null);
+      fr.readAsDataURL(rec.blob);
+    });
+  } catch {
+    return null;
+  }
+}
+
 export async function hasCachedAdImage(adId) {
   if (!adId) return false;
   if (objectUrlCache.has(adId)) return true;

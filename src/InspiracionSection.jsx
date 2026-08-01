@@ -34,7 +34,7 @@ import { addGeneratedIdeas } from './bandejaStore.js';
 import { getProductoImagen, getAccentColor } from './productoImagen.js';
 import { saveReferencial, getUsedAdIdsForProducto } from './galeriaReferenciales.js';
 import { startBulk, patchBulk, reportAdFinished, finishBulk, clearBulk, subscribeBulk } from './bulkProgressStore.js';
-import { cacheAdImagesBatch, getCachedAdImageUrl } from './adImagesStore.js';
+import { cacheAdImagesBatch, getCachedAdImageUrl, getCachedAdImageDataUrl } from './adImagesStore.js';
 import { checkAdProductMismatch } from './adDomainCheck.js';
 import { startExecution, updateExecution, finishExecution } from './executionsStore.js';
 import { trackQuotaFailure, isQuotaError, removeFromQuotaQueue, getQuotaQueue, clearQuotaQueue, subscribeQuotaQueue } from './quotaRetryStore.js';
@@ -2032,7 +2032,11 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     });
 
     const refImageUrl = ad.imageUrls?.[0];
-    if (!refImageUrl) {
+    // Bytes de la imagen del ad cacheados al scrapear (IndexedDB). Los mandamos
+    // al backend para que NO dependa de la URL del CDN de Meta (que expira ~1h
+    // y da 403). Si no está cacheada, va null y el server usa la URL.
+    const refImageData = await getCachedAdImageDataUrl(ad.id).catch(() => null);
+    if (!refImageUrl && !refImageData) {
       addToast?.({ type: 'error', message: 'Este ad no tiene imagen para usar como referencia' });
       finishExecution(execId, { ok: false, message: 'sin imagen' });
       setCreandoAdIds(prev => { const n = new Set(prev); n.delete(ad.id); return n; });
@@ -2066,6 +2070,8 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         visual: ad.visual || null,
       },
       inspiracionImageUrl: refImageUrl,
+      // Bytes cacheados (si los hay) — prioridad sobre la URL en el backend.
+      inspiracionImagenData: refImageData || undefined,
       productoImagen: prodImg,
       accentColor: getAccentColor(producto.id, producto) || '',
       quality: genOpts.quality,

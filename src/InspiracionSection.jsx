@@ -1739,47 +1739,67 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   // `producto` ya fue declarado arriba (~línea 1150) por TDZ fix — los
   // useEffects de hidratación de comp ads lo necesitan en su dep array.
 
-  // Sync uni-direccional: competidores → brands. Cada competidor cargado en
-  // Setup/Competencia aparece automático en Inspiración como marca scrapeable.
-  // Matcheamos por landingUrl (más estable que id porque competidor.id es
-  // numérico y brand.id es string `brand-xxx`). Si no hay match, agregamos.
-  // No removemos las brands que no tienen competidor — eso lo decide el user
-  // explícito desde Inspiración (que también borra del competidores como
-  // efecto cascade — ver handleRemoveBrand abajo).
+  // Modo "Solo Competencia": Inspiración = las marcas del Setup → Competencia
+  // (una sola fuente de verdad). El Setup manda:
+  //   - Agrega automático las marcas de Competencia que falten.
+  //   - SACA las marcas que ya NO son competidor (marcas sueltas viejas), para
+  //     que no se mezclen con las reales.
+  // Guarda de seguridad: si NO hay ningún competidor, no podamos nada (evita
+  // vaciar todo por un estado transitorio de carga). No borramos los ads del
+  // IDB — solo sacamos la tarjeta de la lista; si la marca vuelve a Competencia,
+  // sus ads rehidratan. El borrado definitivo sigue siendo manual (🗑).
   useEffect(() => {
     if (!producto?.competidores) return;
     const comps = producto.competidores;
     if (comps.length === 0) return;
-    setBrands(prev => {
-      const byHost = new Map();
-      for (const b of prev) {
-        const host = (b.landingUrl || '').replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
-        if (host) byHost.set(host, b);
-        // Match alternativo por nombre normalizado (lower + trim)
-        const n = (b.nombre || '').toLowerCase().trim();
-        if (n) byHost.set(`n:${n}`, b);
-      }
-      const nuevas = [];
-      for (const c of comps) {
-        const host = (c.landingUrl || '').replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
-        const nKey = `n:${(c.nombre || '').toLowerCase().trim()}`;
-        const existsBy = (host && byHost.get(host)) || byHost.get(nKey);
-        if (existsBy) continue;
-        nuevas.push({
-          id: `brand-from-comp-${c.id}`,
-          nombre: c.nombre,
-          landingUrl: c.landingUrl || '',
-          fbPageUrl: c.fbPageUrl || '',
-          notas: c.notas || '',
-          createdAt: c.createdAt || new Date().toISOString(),
-          lastScraped: null,
-          seenAdIds: [],
-          fromCompetidorId: c.id,  // marker para tracking del origen
-        });
-      }
-      return nuevas.length > 0 ? [...nuevas, ...prev] : prev;
-    });
-  }, [producto?.competidores]);
+    const hostOf = (u) => (u || '').replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+    const validHosts = new Set(), validNames = new Set(), validIds = new Set();
+    for (const c of comps) {
+      const h = hostOf(c.landingUrl); if (h) validHosts.add(h);
+      const n = (c.nombre || '').toLowerCase().trim(); if (n) validNames.add(n);
+      validIds.add(String(c.id));
+    }
+    const esCompetidor = (b) => {
+      if (b.fromCompetidorId && validIds.has(String(b.fromCompetidorId))) return true;
+      const h = hostOf(b.landingUrl); if (h && validHosts.has(h)) return true;
+      const n = (b.nombre || '').toLowerCase().trim(); if (n && validNames.has(n)) return true;
+      return false;
+    };
+    const kept = brands.filter(esCompetidor);
+    const removed = brands.filter(b => !esCompetidor(b));
+    // Competidores que todavía no tienen tarjeta → agregarlos.
+    const byKey = new Map();
+    for (const b of kept) {
+      const h = hostOf(b.landingUrl); if (h) byKey.set(h, b);
+      const n = (b.nombre || '').toLowerCase().trim(); if (n) byKey.set(`n:${n}`, b);
+    }
+    const nuevas = [];
+    for (const c of comps) {
+      const h = hostOf(c.landingUrl);
+      const nKey = `n:${(c.nombre || '').toLowerCase().trim()}`;
+      if ((h && byKey.get(h)) || byKey.get(nKey)) continue;
+      nuevas.push({
+        id: `brand-from-comp-${c.id}`,
+        nombre: c.nombre,
+        landingUrl: c.landingUrl || '',
+        fbPageUrl: c.fbPageUrl || '',
+        notas: c.notas || '',
+        createdAt: c.createdAt || new Date().toISOString(),
+        lastScraped: null,
+        seenAdIds: [],
+        fromCompetidorId: c.id,
+      });
+    }
+    if (removed.length === 0 && nuevas.length === 0) return; // ya está en sync
+    setBrands([...nuevas, ...kept]);
+    if (removed.length) {
+      setAdsByBrand(prev => {
+        const copy = { ...prev };
+        for (const b of removed) delete copy[b.id];
+        return copy;
+      });
+    }
+  }, [producto?.competidores, brands, activeProductoId]);
 
   // useEffect para usedAdIds — ahora SÍ podemos referenciar `producto`.
   useEffect(() => {
@@ -1829,20 +1849,33 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       addToast?.({ type: 'error', message: 'Ponele nombre a la marca' });
       return;
     }
-    const nueva = {
-      id: `brand-${Date.now()}`,
+    if (!activeProductoId) {
+      addToast?.({ type: 'error', message: 'Elegí un producto primero' });
+      return;
+    }
+    // Modo "Solo Competencia": una marca agregada acá se carga en Setup →
+    // Competencia (fuente de verdad). El sync de arriba crea su tarjeta sola.
+    // Así no queda como "marca suelta" que después la poda saca.
+    const compEntry = {
+      id: Date.now(),
       nombre,
       landingUrl: draft.landingUrl.trim(),
       fbPageUrl: draft.fbPageUrl.trim(),
       notas: draft.notas.trim(),
       createdAt: new Date().toISOString(),
-      lastScraped: null,
-      seenAdIds: [],
     };
-    setBrands(prev => [nueva, ...prev]);
+    const updated = loadProductos().map(p => {
+      if (String(p.id) !== String(activeProductoId)) return p;
+      return { ...p, competidores: [compEntry, ...(p.competidores || [])] };
+    });
+    try {
+      localStorage.setItem(PRODUCTOS_KEY, JSON.stringify(updated));
+      notifyMarketingChange(PRODUCTOS_KEY);
+    } catch {}
+    setProductos(updated);
     setDraft({ nombre: '', landingUrl: '', fbPageUrl: '', notas: '' });
     setShowAddForm(false);
-    addToast?.({ type: 'success', message: `Marca "${nombre}" sumada` });
+    addToast?.({ type: 'success', message: `Marca "${nombre}" sumada a Competencia` });
   };
 
   const handleRemoveBrand = (id) => {

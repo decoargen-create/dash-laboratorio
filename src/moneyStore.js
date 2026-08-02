@@ -8,22 +8,38 @@
 //     transfiere plata; se registra cuánto cargó para llevar su saldo aparte,
 //     aunque todo corra bajo el mismo login.
 
+import { supabase } from './supabase.js';
+
 const KEY = 'adslab-money-v1';
 const PEOPLE_KEY = 'adslab-people-loaded-v1';
 const DEFAULT_RATE = 1400; // ARS por USD — editable desde el switch.
+const TABLE = 'money_settings';
 
 const listeners = new Set();
+
+// ── Estado del sync con la nube ──
+let _userId = null;      // uuid del dueño logueado (null = modo 100% local)
+let _ready = false;      // ya hidratamos de la nube
+let _pushTimer = null;   // debounce del push
+let _pendingPush = false;// hubo un cambio local mientras hidratábamos
 
 function read(k, fallback) {
   try { const r = localStorage.getItem(k); return r ? JSON.parse(r) : fallback; }
   catch { return fallback; }
 }
-function write(k, v) {
-  try { localStorage.setItem(k, JSON.stringify(v)); } catch {}
+// Notifica a la UI (sin tocar la nube).
+function notify() {
   listeners.forEach(fn => { try { fn(); } catch {} });
   if (typeof window !== 'undefined') {
     try { window.dispatchEvent(new CustomEvent('viora:money-changed')); } catch {}
   }
+}
+// Escribe local + notifica + agenda push a la nube. Es el camino de TODA
+// escritura del usuario (moneda, tipo de cambio, cargas por persona).
+function write(k, v) {
+  try { localStorage.setItem(k, JSON.stringify(v)); } catch {}
+  notify();
+  schedulePush();
 }
 const normalize = (name) => (name || '').trim().toLowerCase();
 
@@ -106,4 +122,89 @@ export function removePersonLoad(name, ts) {
 // Total cargado por la persona, en USD (base) para restarle el gasto.
 export function getPersonLoadedUSD(name) {
   return getPersonLoads(name).reduce((s, e) => s + toUSD(e.amount, e.currency), 0);
+}
+
+// =========================================================================
+// SYNC CON LA NUBE (Supabase, tabla money_settings — una fila por usuario).
+// Patrón igual al de Producción: escribimos local al instante (para pintar ya)
+// y empujamos a la nube en segundo plano. Al loguear, hidratamos de la nube.
+// =========================================================================
+
+// Snapshot del estado local → blob que guardamos en la nube.
+function snapshot() {
+  const s = read(KEY, {});
+  return {
+    currency: s.currency === 'ARS' ? 'ARS' : 'USD',
+    rate: Number(s.rate) > 0 ? Number(s.rate) : DEFAULT_RATE,
+    people: readPeople(),
+  };
+}
+
+// ¿Hay algo local que valga la pena sembrar en la nube vacía?
+function hasLocalContent() {
+  if (Object.keys(readPeople()).length > 0) return true;
+  const s = read(KEY, {});
+  return s.currency != null || s.rate != null;
+}
+
+// Aplica un blob de la nube al localStorage y refresca la UI — SIN re-empujar.
+function applyToLocal(data) {
+  if (!data || typeof data !== 'object') return;
+  const s = read(KEY, {});
+  if (data.currency) s.currency = data.currency === 'ARS' ? 'ARS' : 'USD';
+  if (Number(data.rate) > 0) s.rate = Number(data.rate);
+  try { localStorage.setItem(KEY, JSON.stringify(s)); } catch {}
+  if (data.people && typeof data.people === 'object') {
+    try { localStorage.setItem(PEOPLE_KEY, JSON.stringify(data.people)); } catch {}
+  }
+  notify();
+}
+
+function schedulePush() {
+  if (!_userId || !supabase) return;
+  if (!_ready) { _pendingPush = true; return; } // todavía hidratando
+  if (_pushTimer) clearTimeout(_pushTimer);
+  _pushTimer = setTimeout(pushCloud, 400);
+}
+
+async function pushCloud() {
+  _pushTimer = null;
+  if (!_userId || !supabase) return;
+  try {
+    await supabase.from(TABLE).upsert(
+      { user_id: _userId, data: snapshot(), updated_at: new Date().toISOString() },
+      { onConflict: 'user_id' },
+    );
+  } catch { /* queda local; se reintenta en la próxima escritura */ }
+}
+
+// Arranca el sync al loguear. Hidrata de la nube (o siembra la nube con lo que
+// haya local la primera vez). Idempotente por userId.
+export async function initMoneySync({ userId } = {}) {
+  if (!userId || !supabase) return;
+  if (_userId === userId && _ready) return;
+  _userId = userId;
+  _ready = false;
+  _pendingPush = false;
+  try {
+    const { data: row, error } = await supabase
+      .from(TABLE).select('data').eq('user_id', userId).maybeSingle();
+    if (!error && row) {
+      // La nube manda: aplicamos lo guardado (puede ser {} si nunca cargó nada).
+      applyToLocal(row.data || {});
+    } else if (!error && hasLocalContent()) {
+      // No hay fila en la nube pero este dispositivo TIENE datos → sembramos.
+      _ready = true;
+      await pushCloud();
+    }
+  } catch { /* seguimos en modo local */ }
+  _ready = true;
+  if (_pendingPush) { _pendingPush = false; schedulePush(); }
+}
+
+export function teardownMoneySync() {
+  _userId = null;
+  _ready = false;
+  _pendingPush = false;
+  if (_pushTimer) { clearTimeout(_pushTimer); _pushTimer = null; }
 }

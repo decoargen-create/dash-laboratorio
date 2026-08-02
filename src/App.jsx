@@ -51,6 +51,7 @@ import { useMarketingSync } from './useMarketingSync.js';
 import { useUserPrefs } from './useUserPrefs.js';
 import { supabase, onAuthChange } from './supabase.js';
 import { initProduccionSync, teardownProduccionSync } from './produccionStore.js';
+import { initMoneySync, teardownMoneySync } from './moneyStore.js';
 import CreatorWorkspace from './CreatorWorkspace.jsx';
 import { generateCSV, downloadCSV, parseCSV, toNumber, toBool } from './csv.js';
 import { loadVioraState, saveVioraState, clearVioraState, createBackup } from './vioraStorage.js';
@@ -2130,8 +2131,12 @@ function AppShell({ onExit }) {
   useEffect(() => {
     if (currentUser && supabaseUser) {
       initProduccionSync({ role: currentUser.role, userId: supabaseUser.id, name: currentUser.name });
+      // Saldo por persona + moneda: se sincroniza por el UUID real del dueño,
+      // así aparece en cualquier dispositivo (antes vivía solo en localStorage).
+      initMoneySync({ userId: supabaseUser.id });
     } else {
       teardownProduccionSync();
+      teardownMoneySync();
     }
   }, [currentUser?.role, supabaseUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 

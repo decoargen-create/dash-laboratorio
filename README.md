@@ -20,6 +20,7 @@ Panel interno para la gestión del laboratorio: órdenes de producción, cliente
 - **PWA**: la app se instala como aplicación nativa (Android, iOS, Desktop) con manifest, service worker y cache de fuentes.
 - **Export / Import CSV** + backup JSON completo de la base.
 - **Landing pública** con animaciones y sección de productos.
+- **Proyección de IVA** (plataforma *Fiscal*): carga del Libro IVA Ventas/Compras, liquidación mensual (DF − CF), aplicación de saldos del período anterior (técnico y de libre disponibilidad) y beneficio fiscal configurable. Simulador de ventas por facturar (posición proyectada), objetivos inversos (cuánto facturar para neutralizar el saldo o alcanzar una posición/rentabilidad objetivo) y análisis contable con IA vía `/api/iva`. Motor de cálculo puro y testeable en `src/ivaCalc.js`.
 
 ## Instalación
 

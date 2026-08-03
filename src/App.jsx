@@ -7,7 +7,7 @@ import {
   Menu, LogOut, Home, ShoppingCart, Package, Users, AlertCircle, CreditCard,
   UserCheck, TrendingUp, Plus, Filter, Eye, Edit2, Trash2, Calendar, DollarSign,
   Moon, Sun, ChevronDown, ChevronRight, Search, X, Command, Check, Bell,
-  AlignJustify, LayoutGrid, LayoutGrid as LayoutGridIcon, Columns3, Sparkles, Bot, Zap, Activity, FileText, Settings, Loader2, Calculator, Copy, Save, RotateCcw, Target, Play, Inbox, BarChart3, Instagram, SlidersHorizontal, ClipboardList, AlertTriangle, Trophy, Bookmark, Film, Wallet
+  AlignJustify, LayoutGrid, LayoutGrid as LayoutGridIcon, Columns3, Sparkles, Bot, Zap, Activity, FileText, Settings, Loader2, Calculator, Copy, Save, RotateCcw, Target, Play, Inbox, BarChart3, Instagram, SlidersHorizontal, ClipboardList, AlertTriangle, Trophy, Bookmark, Film, Wallet, Landmark
 } from 'lucide-react';
 import { VioraLogo, VioraMark, AdsLabLogo, AdsLabMark } from './logo.jsx';
 import { installDebugLog, exportDebugLog } from './debugLog.js';
@@ -29,6 +29,7 @@ import BandejaSection from './Bandeja.jsx';
 import InspiracionSection from './InspiracionSection.jsx';
 import WinnersGlobalSection from './WinnersGlobalSection.jsx';
 import ConsultoriaSection from './Consultoria.jsx';
+import IvaProyeccionSection from './IvaProyeccion.jsx';
 import CampanasTracker from './CampanasTracker.jsx';
 import ProduccionSection from './ProduccionSection.jsx';
 import CreativaDashboard from './CreativaDashboard.jsx';
@@ -639,6 +640,16 @@ const PLATFORMS = [
     badgeBg: 'bg-gradient-to-br from-[#2F4A3A] to-[#3E6B4F]',
     badgeText: 'text-white',
     defaultSection: 'con-acta',
+  },
+  {
+    id: 'fiscal',
+    name: 'Fiscal',
+    shortName: 'Fiscal',
+    initials: 'FI',
+    sidebarGradient: 'from-[#064e3b] via-[#0f766e] to-[#065f46]',
+    badgeBg: 'bg-gradient-to-br from-emerald-600 to-teal-600',
+    badgeText: 'text-white',
+    defaultSection: 'fis-iva',
   },
 ];
 
@@ -1448,7 +1459,7 @@ function AppShell({ onExit }) {
       // Si tenía una sección de Viora/Senydrop/MetaAds, defaulteamos a la
       // de Marketing. Lista de secciones válidas en las plataformas activas:
       const validSections = ['mk-home', 'mk-arranque', 'mk-bandeja', 'mk-copy', 'mk-meta',
-        'mk-inspiracion', 'mk-winners', 'mk-produccion', 'mk-creativa-dash', 'mk-gastos', 'mk-docs', 'con-acta'];
+        'mk-inspiracion', 'mk-winners', 'mk-produccion', 'mk-creativa-dash', 'mk-gastos', 'mk-docs', 'con-acta', 'fis-iva'];
       return validSections.includes(saved) ? saved : 'mk-home';
     } catch { return 'mk-home'; }
   });
@@ -2321,6 +2332,13 @@ function AppShell({ onExit }) {
               <NavItem icon={ClipboardList} label="Acta de reunión" section="con-acta" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
             </>
           )}
+          {currentUser.role === 'admin' && currentPlatform === 'fiscal' && (
+            <>
+              <NavSection title="Impuestos" sectionKey="fis-imp" sidebarOpen={sidebarOpen}>
+                <NavItem icon={Landmark} label="Proyección IVA" section="fis-iva" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              </NavSection>
+            </>
+          )}
           {currentUser.role !== 'admin' && (
             <>
               <NavItem icon={Home} label="Inicio" section="inicio" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
@@ -2429,6 +2447,7 @@ function AppShell({ onExit }) {
 
           {/* Consultoría */}
           {currentUser.role === 'admin' && currentPlatform === 'consultoria' && currentSection === 'con-acta' && <ConsultoriaSection addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'fiscal' && currentSection === 'fis-iva' && <IvaProyeccionSection addToast={addToast} />}
 
 
           {/* Mentor Views */}

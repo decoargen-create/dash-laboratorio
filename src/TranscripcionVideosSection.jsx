@@ -144,11 +144,22 @@ export default function TranscripcionVideosSection({ addToast, forcedProductoId,
       setProducto(fresh);
       setItems(prev => {
         const cloudItems = fresh?.transcripcionesVideos || [];
-        // No pisar items en curso (subiendo/transcribiendo/adaptando) con la
-        // versión persistida — el estado transitorio vive en memoria.
-        const inFlight = new Map(prev.filter(i => !['listo', 'error'].includes(i.status)).map(i => [i.id, i]));
-        return cloudItems.map(i => inFlight.get(i.id) || i).concat(
-          [...inFlight.values()].filter(i => !cloudItems.some(c => c.id === i.id))
+        // No pisar con la versión persistida:
+        //   - items EN CURSO (subiendo/transcribiendo/adaptando): viven en memoria.
+        //   - items RECIÉN TERMINADOS (listo/error) que el cloud quizá todavía no
+        //     tiene: sin esta gracia, un pull que corría en paralelo pisaba el
+        //     localStorage y el bloque "Listo" desaparecía a los segundos. La
+        //     gracia (2 min) cubre el ciclo persist→push→pull; después, si el
+        //     cloud sigue sin tenerlo, dejamos que mande el cloud (respeta
+        //     borrados hechos en otra PC, no los resucita para siempre).
+        const RECENT_MS = 120000;
+        const now = Date.now();
+        const esReciente = (i) => (now - (Date.parse(i.finishedAt || i.createdAt || 0) || 0)) < RECENT_MS;
+        const keepLocal = new Map(
+          prev.filter(i => !['listo', 'error'].includes(i.status) || esReciente(i)).map(i => [i.id, i])
+        );
+        return cloudItems.map(i => keepLocal.get(i.id) || i).concat(
+          [...keepLocal.values()].filter(i => !cloudItems.some(c => c.id === i.id))
         );
       });
     };

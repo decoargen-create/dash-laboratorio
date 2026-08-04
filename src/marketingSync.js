@@ -157,6 +157,24 @@ export async function pullMarketingFromCloud() {
         const soloLocal = localComps.filter(c => !cloudIds.has(String(c.id)));
         if (soloLocal.length) merged.competidores = [...cloudComps, ...soloLocal];
       }
+
+      // TRANSCRIPCIONES/GUIONES DE VIDEO — misma lógica union + LWW que
+      // competidores. Sin esto, el cloud (que puede estar unos segundos atrás,
+      // antes de que el push del video recién traducido llegue) pisaba el array
+      // y el bloque "Listo" desaparecía a los segundos (bug reportado: "cargo el
+      // video, aparece terminado y a los segundos ese bloque desaparece").
+      const cloudTV = Array.isArray(merged.transcripcionesVideos) ? merged.transcripcionesVideos : [];
+      const localTV = Array.isArray(localP.transcripcionesVideos) ? localP.transcripcionesVideos : [];
+      if (cloudTV.length === 0 && localTV.length) {
+        merged.transcripcionesVideos = localTV;
+      } else if (localTV.length && localTs > cloudTs) {
+        const localIds = new Set(localTV.map(t => String(t.id)));
+        merged.transcripcionesVideos = [...localTV, ...cloudTV.filter(t => !localIds.has(String(t.id)))];
+      } else if (localTV.length && localTs === cloudTs) {
+        const cloudIds = new Set(cloudTV.map(t => String(t.id)));
+        const soloLocal = localTV.filter(t => !cloudIds.has(String(t.id)));
+        if (soloLocal.length) merged.transcripcionesVideos = [...cloudTV, ...soloLocal];
+      }
     }
     if ((!merged.bandejaIdeas || merged.bandejaIdeas.length === 0) && localP.bandejaIdeas?.length) {
       merged.bandejaIdeas = localP.bandejaIdeas;

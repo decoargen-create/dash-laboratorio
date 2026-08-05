@@ -2085,6 +2085,8 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         // Formato físico — si el user lo declaró explícito, lo pasamos para
         // que el server NO infiera y NO copie el formato del ad ref.
         formato: producto.formato || '',
+        // Tamaño real declarado por el user — directiva de escala en el prompt.
+        medidas: producto.medidas || '',
         // Ofertas: pasamos ambos campos para que el server pueda preferir
         // ofertasReales (focalizado, llenado en Setup) y caer a offerBrief
         // (doc generado por la pipeline) como fallback.

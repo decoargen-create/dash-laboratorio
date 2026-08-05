@@ -126,6 +126,13 @@ function inferProductForm(producto) {
 // Devuelve un string de instrucción (en inglés, igual que el prompt de imagen)
 // o null si no hay señal — en ese caso no agregamos ruido al prompt.
 function inferRealWorldScale(producto) {
+  // MÁXIMA PRIORIDAD: la medida EXPLÍCITA que cargó el user en Setup. Le gana a
+  // cualquier heurística — es el dato más confiable para dimensionar bien el
+  // producto en TODOS los creativos.
+  const userMedidas = (producto?.medidas || '').toString().trim();
+  if (userMedidas) {
+    return `Real size stated by the seller: ${userMedidas.slice(0, 200)}. Scale the product realistically against any hand, body part, surface or person in the scene so it matches THIS real size — do NOT shrink it to the reference product's footprint, and do NOT enlarge it. Keep proportions consistent across the whole image.`;
+  }
   const haystack = [
     producto?.nombre || '',
     producto?.descripcion || '',
@@ -1136,7 +1143,12 @@ function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentCol
   // Escala real (CRÍTICO): preferimos lo que dedujo el plan (lee research +
   // descripción de la landing); si no vino, caemos a la heurística. Sin esto
   // un producto grande sale del tamaño del producto chico de la referencia.
-  const realScale = (plan?.visual?.realWorldScale || '').toString().trim() || inferRealWorldScale(producto);
+  // Si el user cargó medidas explícitas en Setup, MANDAN sobre la estimación
+  // del plan (Sonnet adivina; el user sabe). Sin medidas, usamos el plan y si
+  // no, la heurística.
+  const realScale = (producto?.medidas || '').toString().trim()
+    ? inferRealWorldScale(producto)
+    : ((plan?.visual?.realWorldScale || '').toString().trim() || inferRealWorldScale(producto));
   if (realScale) parts.push(`  • **REAL-WORLD SCALE (CRITICAL — size the product correctly)**: ${realScale}`);
   // Merge avatar + research evitando duplicación si el research ya tiene
   // el avatar embebido. Audit LOW.

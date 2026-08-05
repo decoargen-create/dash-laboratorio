@@ -3890,6 +3890,29 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                   <option value="hogar">🏠 Hogar / organizador</option>
                   <option value="otros">❓ Otros (deja heurística)</option>
                 </select>
+
+                {/* Tamaño real — se inyecta como directiva de ESCALA en todos
+                    los creativos, para que el producto no salga "más grande" ni
+                    encogido al tamaño del producto de la referencia. */}
+                <div className="pt-1">
+                  <label className="block text-[10px] font-semibold text-gray-600 dark:text-gray-300 mb-1">
+                    📏 Tamaño real / medidas (opcional — se usa en TODOS los creativos)
+                  </label>
+                  <input
+                    type="text"
+                    value={producto.medidas || ''}
+                    onChange={e => setProductos(prev => prev.map(p =>
+                      String(p.id) === String(activeProductoId)
+                        ? { ...p, medidas: e.target.value, updated_at: new Date().toISOString() }
+                        : p
+                    ))}
+                    placeholder="ej: 13 cm de largo, entra en la palma de la mano"
+                    className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                  <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1">
+                    Poné cuánto mide y con qué se compara (una mano, una mesa, etc.). Es lo que hace que se dibuje del tamaño correcto, no del tamaño del producto de la referencia.
+                  </p>
+                </div>
               </div>
             </details>
 

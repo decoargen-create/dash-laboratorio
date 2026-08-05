@@ -3883,6 +3883,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                   <option value="stick">📍 Stick / barra</option>
                   <option value="mascarilla">🎭 Mascarilla / máscara</option>
                   <option value="parches">🩹 Parches</option>
+                  <option value="cepillo">🪮 Cepillo / masajeador / gua sha</option>
+                  <option value="gadget">🔌 Gadget / dispositivo</option>
+                  <option value="herramienta">🛠️ Herramienta / accesorio</option>
+                  <option value="textil">🧣 Textil / prenda</option>
+                  <option value="hogar">🏠 Hogar / organizador</option>
                   <option value="otros">❓ Otros (deja heurística)</option>
                 </select>
               </div>

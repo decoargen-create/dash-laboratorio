@@ -84,6 +84,10 @@ function inferProductForm(producto) {
     String(producto?.research || producto?.docs?.research || ''),
   ].join(' ').toLowerCase();
   const patterns = [
+    // Dispositivos/herramientas PRIMERO: un "Cepillo Drenaje Linfático" no debe
+    // caer en crema/otro formato ingerible. Sin esto, el generador copiaba las
+    // cápsulas del ad de referencia (bug reportado con Getaeki → cápsulas).
+    { canon: 'cepillo',      re: /\b(cepillos?|brush|masajeador(es)?|gua ?sha|rodillos?|rollers?|dispositivos?|gadgets?|aparatos?)\b/ },
     { canon: 'gomitas',      re: /\b(gomitas?|gummies|gummys?)\b/ },
     { canon: 'cápsulas',     re: /\b(c[áa]psulas?|capsules?|softgels?|pastillas?|tabletas?|tablets?)\b/ },
     { canon: 'polvo',        re: /\b(polvo|powder|mix en polvo)\b/ },
@@ -237,6 +241,21 @@ const NON_GRANULAR_FORMATS = new Set([
 function isNonGranular(formato) {
   if (!formato) return false;
   return NON_GRANULAR_FORMATS.has(String(formato).toLowerCase().trim());
+}
+
+// Formatos que son OBJETOS FÍSICOS reusables (no se ingieren ni se untan): un
+// cepillo, un gadget, una herramienta, un textil, un producto de hogar. Para
+// estos, el generador NUNCA debe dibujar cápsulas/pastillas/frascos aunque el
+// ad de referencia sea un suplemento — tiene que replicar EXACTO la foto del
+// producto. Es el guardrail más fuerte contra la contaminación por la referencia.
+const DEVICE_FORMATS = new Set([
+  'cepillo', 'brush', 'masajeador', 'gua sha', 'guasha',
+  'gadget', 'dispositivo', 'aparato', 'herramienta', 'accesorio',
+  'rodillo', 'roller', 'textil', 'prenda', 'hogar', 'organizador',
+]);
+function isDevice(formato) {
+  if (!formato) return false;
+  return DEVICE_FORMATS.has(String(formato).toLowerCase().trim());
 }
 
 // Devuelve la "categoría de uso" del producto — el contexto en el que vive
@@ -442,6 +461,27 @@ function inferProductCategory(formato) {
       label: 'sachet / single-serve',
       context: 'kitchen counter or hand holding sachet, water glass, mid-morning light',
       avoidContext: 'jar/bottle imagery',
+    };
+  }
+  if (['cepillo', 'brush', 'masajeador', 'gua sha', 'guasha', 'gadget', 'dispositivo', 'aparato', 'herramienta', 'accesorio', 'rodillo', 'roller'].includes(f)) {
+    return {
+      label: 'dispositivo / herramienta de belleza',
+      context: 'a hand HOLDING and USING the device on the body or face (leg, arm, jawline, neck) OR the device resting on a clean bathroom vanity / marble surface with a folded towel and soft natural light — the real device is the hero, at real handheld scale',
+      avoidContext: 'capsules, pills, softgels, tablets, gummies, powder, supplement bottles/jars, blister packs, mortar and pestle, food, pharmacy shelves — this product is NOT ingestible',
+    };
+  }
+  if (f === 'textil' || f === 'prenda') {
+    return {
+      label: 'textil / prenda',
+      context: 'the garment or fabric worn by a person, or laid out neatly in a lifestyle setting (bedroom, closet), soft natural light, clean editorial look',
+      avoidContext: 'capsules, pills, supplement bottles, food, jars of cream — this is a wearable textile',
+    };
+  }
+  if (f === 'hogar' || f === 'organizador') {
+    return {
+      label: 'hogar / organizador',
+      context: 'the product in a real home setting (closet, shelf, drawer, room), scaled realistically against furniture and people, clean bright light',
+      avoidContext: 'capsules, pills, cosmetics vanity, tiny handheld framing — this is a home / furniture-scale object',
     };
   }
   return null;
@@ -1033,6 +1073,13 @@ function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentCol
   const effectiveForm = productoForm || inferCategoryFromText(producto);
   if (effectiveForm) {
     parts.push(`  • **PHYSICAL FORM**: ${effectiveForm} (NOT capsules/pills/another format). If reference shows the product contents, show ${effectiveForm}.`);
+    if (isDevice(effectiveForm)) {
+      // Guardrail MÁS FUERTE: producto físico reusable (cepillo/gadget/etc.).
+      // Sin esto, con un ad de referencia de suplemento el modelo dibujaba el
+      // cepillo como cápsulas en un bowl o como un frasco de suplemento
+      // (bug reportado: "Cepillo Drenaje Linfático" → cápsulas / frasco).
+      parts.push(`  • **PHYSICAL DEVICE / TOOL (CRITICAL, HARD RULE — overrides the reference)**: This product is a physical ${effectiveForm}: a reusable TOOL/DEVICE, NOT something you ingest, swallow or spread. You MUST render EXACTLY the object shown in IMAGE 2 (the product photo): same shape, material, color and proportions. NEVER draw capsules, pills, softgels, tablets, gummies, powder, liquid, a supplement bottle/jar/blister, or ANY ingestible — even if IMAGE 1 (the reference) is a supplement and shows capsules/pills/a bottle. Replace the reference product ENTIRELY with the device from IMAGE 2. Do NOT place the device inside a bowl/jar as if it were content, and do NOT scatter loose capsules/pills anywhere in the scene. The label/packaging (if any) must show the device, never a pill bottle.`);
+    }
     if (isNonGranular(effectiveForm)) {
       // Sin esta sección, gpt-image-2 copia el "contenedor abierto" del
       // winner y lo rellena con cápsulas default cuando el target es

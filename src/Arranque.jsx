@@ -2007,6 +2007,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     // competidores ni generar ideas. opts puede venir como evento de onClick
     // (que no tiene docsOnly) → queda false.
     const docsOnly = opts?.docsOnly === true;
+    // forceDocs: "Rehacer todo desde la landing" — regenera los docs aunque ya
+    // existan (por ej. el user agregó/cambió la landing después de la 1ª corrida
+    // y quiere que se rehaga con esos datos nuevos). Sin esto, el pipeline
+    // REUSA los docs viejos y la landing nueva nunca entra.
+    const forceDocs = opts?.forceDocs === true;
     if (!producto?.nombre) {
       addToast?.({ type: 'error', message: 'Primero cargá el producto (nombre + landing)' });
       return;
@@ -2079,7 +2084,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     // Chequeamos los 4 docs, no solo `research`. Si una corrida quedó con
     // docs PARCIALES (research sí, avatar no), mirar solo research activaba
     // el skip y el avatar faltante nunca se regeneraba.
-    const necesitaDocs = docsOnly || ['research', 'avatar', 'offerBrief', 'beliefs']
+    const necesitaDocs = forceDocs || docsOnly || ['research', 'avatar', 'offerBrief', 'beliefs']
       .some(k => !producto?.docs?.[k]);
 
     const pasosIniciales = [
@@ -2168,7 +2173,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     // skip se activaba y nunca regenerábamos — quedabas atascado con keywords
     // pobres salvo que borraras el producto. 3 es el mínimo que da una mezcla
     // viable de problema + categoría + ángulo.
-    const yaTienePostResearch = !docsOnly && !!productoActualizado?.stage && searchKeywords.length >= 3;
+    const yaTienePostResearch = !docsOnly && !forceDocs && !!productoActualizado?.stage && searchKeywords.length >= 3;
     if (!cancelledRef.current && productoActualizado?.docs?.research && !yaTienePostResearch) {
       updateStep('post-research', { status: 'running', startedAt: Date.now() });
       try {
@@ -4471,6 +4476,22 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                 <button onClick={handleCancel}
                   className="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-bold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 transition">
                   <X size={14} /> Cancelar
+                </button>
+              )}
+              {/* Rehacer TODO desde la landing: fuerza regenerar los docs aunque
+                  ya existan. Aparece solo cuando ya hay docs (si no, "Correr
+                  pipeline" ya los genera). */}
+              {!running && producto?.docs?.research && (
+                <button
+                  onClick={() => {
+                    if (window.confirm('¿Rehacer TODO con la landing / datos nuevos?\n\nVuelve a generar research, avatar, oferta y resumen desde la landing ACTUAL (reemplaza los que ya estaban) y sigue con el análisis e ideas. Tarda ~3-5 min y tiene costo de IA.')) {
+                      runPipeline({ forceDocs: true });
+                    }
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-2.5 text-sm font-bold text-brand-700 dark:text-brand-300 bg-white dark:bg-gray-800 border border-brand-300 dark:border-brand-700 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/30 transition"
+                  title="Regenera los documentos desde la landing actual (no reusa los viejos)"
+                >
+                  🔄 Rehacer todo (landing nueva)
                 </button>
               )}
               {!running && steps.length > 0 && (

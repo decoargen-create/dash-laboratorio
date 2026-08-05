@@ -87,7 +87,7 @@ function inferProductForm(producto) {
     // Dispositivos/herramientas PRIMERO: un "Cepillo Drenaje Linfático" no debe
     // caer en crema/otro formato ingerible. Sin esto, el generador copiaba las
     // cápsulas del ad de referencia (bug reportado con Getaeki → cápsulas).
-    { canon: 'cepillo',      re: /\b(cepillos?|brush|masajeador(es)?|gua ?sha|rodillos?|rollers?|dispositivos?|gadgets?|aparatos?)\b/ },
+    { canon: 'cepillo',      re: /\b(cepillos?|brush|masajeador(es)?|gua ?sha|rodillo facial|roller facial|jade roller|dispositivos?|gadgets?|aparatos?)\b/ },
     { canon: 'gomitas',      re: /\b(gomitas?|gummies|gummys?)\b/ },
     { canon: 'cápsulas',     re: /\b(c[áa]psulas?|capsules?|softgels?|pastillas?|tabletas?|tablets?)\b/ },
     { canon: 'polvo',        re: /\b(polvo|powder|mix en polvo)\b/ },
@@ -263,6 +263,14 @@ const DEVICE_FORMATS = new Set([
 function isDevice(formato) {
   if (!formato) return false;
   return DEVICE_FORMATS.has(String(formato).toLowerCase().trim());
+}
+
+// Regla dura para productos físicos NO ingeribles (cepillo, gadget, textil,
+// hogar). Es el guardrail más fuerte contra la contaminación por la referencia:
+// aunque el ad de referencia sea un suplemento, NO se dibujan cápsulas/frascos.
+// Compartida por los dos constructores de prompt (v3 con plan y v2 fallback).
+function deviceGuardLine(effectiveForm) {
+  return `  • **PHYSICAL, NON-INGESTIBLE PRODUCT (CRITICAL, HARD RULE — overrides the reference)**: This product is a physical ${effectiveForm} — a real object you hold, use or wear, NOT something you ingest, swallow or spread, and NOT a supplement. You MUST render EXACTLY the object shown in IMAGE 2 (the product photo): same shape, material, color and proportions. NEVER draw capsules, pills, softgels, tablets, gummies, powder, liquid, a supplement bottle/jar/blister, or ANY ingestible — even if IMAGE 1 (the reference) is a supplement and shows capsules/pills/a bottle. Replace the reference product ENTIRELY with the object from IMAGE 2. Do NOT place it inside a bowl/jar as if it were content, and do NOT scatter loose capsules/pills anywhere in the scene. Any label or packaging must show THIS product, never a pill bottle.`;
 }
 
 // Devuelve la "categoría de uso" del producto — el contexto en el que vive
@@ -1080,13 +1088,7 @@ function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentCol
   const effectiveForm = productoForm || inferCategoryFromText(producto);
   if (effectiveForm) {
     parts.push(`  • **PHYSICAL FORM**: ${effectiveForm} (NOT capsules/pills/another format). If reference shows the product contents, show ${effectiveForm}.`);
-    if (isDevice(effectiveForm)) {
-      // Guardrail MÁS FUERTE: producto físico reusable (cepillo/gadget/etc.).
-      // Sin esto, con un ad de referencia de suplemento el modelo dibujaba el
-      // cepillo como cápsulas en un bowl o como un frasco de suplemento
-      // (bug reportado: "Cepillo Drenaje Linfático" → cápsulas / frasco).
-      parts.push(`  • **PHYSICAL DEVICE / TOOL (CRITICAL, HARD RULE — overrides the reference)**: This product is a physical ${effectiveForm}: a reusable TOOL/DEVICE, NOT something you ingest, swallow or spread. You MUST render EXACTLY the object shown in IMAGE 2 (the product photo): same shape, material, color and proportions. NEVER draw capsules, pills, softgels, tablets, gummies, powder, liquid, a supplement bottle/jar/blister, or ANY ingestible — even if IMAGE 1 (the reference) is a supplement and shows capsules/pills/a bottle. Replace the reference product ENTIRELY with the device from IMAGE 2. Do NOT place the device inside a bowl/jar as if it were content, and do NOT scatter loose capsules/pills anywhere in the scene. The label/packaging (if any) must show the device, never a pill bottle.`);
-    }
+    if (isDevice(effectiveForm)) parts.push(deviceGuardLine(effectiveForm));
     if (isNonGranular(effectiveForm)) {
       // Sin esta sección, gpt-image-2 copia el "contenedor abierto" del
       // winner y lo rellena con cápsulas default cuando el target es
@@ -1288,6 +1290,9 @@ function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio
     const singular = singularFormato(effectiveForm);
     parts.push(`  - **PHYSICAL FORM**: ${effectiveForm} (NOT capsules, NOT pills, NOT another format). If the reference ad shows the product contents (a single capsule on a hand, powder in a glass, etc.), YOU MUST show ${effectiveForm} instead. Any spilled/displayed product detail must visually be ${effectiveForm}.`);
     parts.push(`  - **TEXT OVERLAY WORDING**: If any overlay says "1 cápsula", "1 pastilla", "una pill", etc., REPLACE it with "1 ${singular}" (the correct singular form for ${effectiveForm}). Same rule for plural: "60 cápsulas" → "60 ${effectiveForm}". NEVER let a text on the canvas contradict the physical form of the product.`);
+    // Misma regla dura para dispositivos que en el path v3 (antes faltaba acá,
+    // así que un fallback a Haiku podía dibujar el cepillo como cápsulas).
+    if (isDevice(effectiveForm)) parts.push(deviceGuardLine(effectiveForm));
     if (isNonGranular(effectiveForm)) {
       // Productos no-granulares: el contenido NO se muestra. Ver comentario
       // largo en buildPromptFromPlan — mismo bug.

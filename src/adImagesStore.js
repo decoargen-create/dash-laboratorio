@@ -59,13 +59,49 @@ export async function getCachedAdImageUrl(adId) {
   }
 }
 
-// Devuelve la imagen cacheada de un ad como DATA URL ("data:image/...;base64,..")
-// o null si no está cacheada. Se usa para MANDAR los bytes al backend cuando se
-// generan creativos: la URL del CDN de Meta expira (~1h) y el server no la puede
-// bajar (403), pero si el ad se cacheó al scrapear, estos bytes sobreviven y el
-// creativo se genera igual. Incluye maxBytes para no pasar el límite de body de
-// Vercel (~4.5MB) — si el blob es más grande, devuelve null y el caller cae a la URL.
-export async function getCachedAdImageDataUrl(adId, { maxBytes = 3_800_000 } = {}) {
+// Blob → data URL crudo (sin redimensionar).
+function blobToDataUrl(blob) {
+  return new Promise((resolve) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(typeof fr.result === 'string' ? fr.result : null);
+    fr.onerror = () => resolve(null);
+    fr.readAsDataURL(blob);
+  });
+}
+
+// Blob → data URL REDIMENSIONADO (JPEG). Achica la imagen a `maxDim` px en su
+// lado más largo. Clave para no reventar el límite de body de Vercel (~4.5MB):
+// el ad viaja junto a la foto del producto y, en full-res, las dos juntas dan
+// HTTP 413 (FUNCTION_PAYLOAD_TOO_LARGE). A 1280px alcanza de sobra para que
+// Claude lea el ad y para usarlo como referencia de composición.
+async function blobToDownscaledDataUrl(blob, { maxDim = 1280, quality = 0.82 } = {}) {
+  try {
+    if (typeof createImageBitmap !== 'function' || typeof document === 'undefined') return null;
+    const bitmap = await createImageBitmap(blob);
+    const { width, height } = bitmap;
+    const scale = Math.min(1, maxDim / Math.max(width || 1, height || 1));
+    const w = Math.max(1, Math.round((width || 1) * scale));
+    const h = Math.max(1, Math.round((height || 1) * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) { try { bitmap.close?.(); } catch {} return null; }
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    try { bitmap.close?.(); } catch {}
+    return canvas.toDataURL('image/jpeg', quality);
+  } catch {
+    return null;
+  }
+}
+
+// Devuelve la imagen cacheada de un ad como DATA URL, YA REDIMENSIONADA, para
+// mandar los bytes al backend al generar creativos. Motivo: la URL del CDN de
+// Meta expira (~1h) y el server no la puede bajar (403); estos bytes cacheados
+// al scrapear sobreviven. Se redimensiona a ~1280px para que el request no
+// pase el límite de body de Vercel (~4.5MB → 413) al viajar junto a la foto del
+// producto. Si no se puede redimensionar, cae al original solo si es chico;
+// si es grande, null (el caller usa la URL para no reventar el body).
+export async function getCachedAdImageDataUrl(adId, { maxDim = 1280, quality = 0.82 } = {}) {
   if (!adId) return null;
   try {
     const db = await openDB();
@@ -76,13 +112,11 @@ export async function getCachedAdImageDataUrl(adId, { maxBytes = 3_800_000 } = {
       req.onerror = () => reject(req.error);
     });
     if (!rec?.blob) return null;
-    if (rec.blob.size > maxBytes) return null; // muy grande para el body → usar URL
-    return await new Promise((resolve) => {
-      const fr = new FileReader();
-      fr.onload = () => resolve(typeof fr.result === 'string' ? fr.result : null);
-      fr.onerror = () => resolve(null);
-      fr.readAsDataURL(rec.blob);
-    });
+    const down = await blobToDownscaledDataUrl(rec.blob, { maxDim, quality });
+    if (down) return down;
+    // Fallback: sin canvas, mandamos el original SOLO si es chico (~0.9MB).
+    if (rec.blob.size <= 900_000) return await blobToDataUrl(rec.blob);
+    return null;
   } catch {
     return null;
   }

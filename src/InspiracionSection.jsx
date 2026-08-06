@@ -2723,12 +2723,13 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       // Límite 500 (era 100) para traer TODOS los activos de la biblioteca,
       // no solo los primeros 100. Apify devuelve hasta 500 pero solo cobra
       // por los que existan — si el comp tiene 60, devuelve 60.
-      // limit 1000 (era 500): trae más del histórico de marcas grandes. Apify
-      // solo cobra por los ads que existan, así que subir el cap no encarece a
-      // marcas chicas. productoId/competidorId + auth → llena el índice de
+      // limit 500: con 1000 las marcas grandes (~1000 ads activos) NO entraban
+      // en los 300s de Vercel y el scrape daba timeout (0 ads). 500 completa
+      // holgado y alcanza de sobra para encontrar winners. Apify solo cobra por
+      // los ads que existan. productoId/competidorId + auth → llena el índice de
       // búsqueda server-side (antes la lupa quedaba vacía para lo scrapeado acá).
       const payload = {
-        country: 'ALL', limit: 1000, activeStatus: 'active',
+        country: 'ALL', limit: 500, activeStatus: 'active',
         productoId: activeProductoId ? String(activeProductoId) : undefined,
         competidorId: `brand-${brand.id}`,
       };
@@ -2889,7 +2890,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     });
     try {
       const payload = {
-        country: 'ALL', limit: 1000, activeStatus: 'active',
+        country: 'ALL', limit: 500, activeStatus: 'active',
         productoId: producto?.id ? String(producto.id) : undefined,
         competidorId: comp.id,
       };

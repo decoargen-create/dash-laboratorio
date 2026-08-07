@@ -29,18 +29,23 @@ let cachedToken = null; // { token, exp(ms) } — service account
 // cuenta de un carácter invisible.
 const rawOauthClientId = () => (process.env.GOOGLE_OAUTH_CLIENT_ID || '').trim();
 const rawOauthClientSecret = () => (process.env.GOOGLE_OAUTH_CLIENT_SECRET || '').trim();
-// Auto-corrige el caso "credenciales cambiadas de lugar" en Vercel: si el ID
-// tiene forma de SECRET (empieza con GOCSPX-) y el secret tiene forma de ID
-// (termina en .apps.googleusercontent.com), están pegados al revés → los
-// intercambiamos. Es 100% seguro: un ID real nunca arranca con GOCSPX- y un
-// secret real nunca termina en .apps.googleusercontent.com. Así Drive funciona
-// aunque en Vercel estén cruzados, sin depender de que alguien lo corrija.
-function oauthSwapped() {
-  return rawOauthClientId().startsWith('GOCSPX-')
-    && rawOauthClientSecret().endsWith('.apps.googleusercontent.com');
-}
-const oauthClientId = () => (oauthSwapped() ? rawOauthClientSecret() : rawOauthClientId());
-const oauthClientSecret = () => (oauthSwapped() ? rawOauthClientId() : rawOauthClientSecret());
+// Auto-corrige credenciales mal ubicadas en Vercel eligiendo cada valor por su
+// FORMA, no por el slot en el que está: el client_id real SIEMPRE termina en
+// ".apps.googleusercontent.com" y el secret real SIEMPRE empieza con "GOCSPX-".
+// Así Drive funciona aunque estén cruzadas (el caso más común) o aunque una haya
+// quedado pegada en el slot equivocado. Es 100% seguro: un ID nunca arranca con
+// GOCSPX- y un secret nunca termina en .apps.googleusercontent.com; si no se
+// puede identificar por forma, se usa el valor del slot tal cual (fallback).
+const looksLikeOauthId = (v) => v.endsWith('.apps.googleusercontent.com');
+const looksLikeOauthSecret = (v) => v.startsWith('GOCSPX-');
+const oauthClientId = () => {
+  const a = rawOauthClientId(), b = rawOauthClientSecret();
+  return looksLikeOauthId(a) ? a : looksLikeOauthId(b) ? b : a;
+};
+const oauthClientSecret = () => {
+  const a = rawOauthClientId(), b = rawOauthClientSecret();
+  return looksLikeOauthSecret(b) ? b : looksLikeOauthSecret(a) ? a : b;
+};
 
 export function oauthConfigured() {
   return !!(oauthClientId() && oauthClientSecret());

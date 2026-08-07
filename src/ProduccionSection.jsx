@@ -407,8 +407,8 @@ export default function ProduccionSection({ addToast }) {
           tone = 'error';
           titulo = 'Faltan las credenciales de Google (GOOGLE_OAUTH_CLIENT_ID / SECRET) en Vercel.';
         } else if (driveDiag.swapped) {
-          tone = 'error';
-          titulo = 'El CLIENT_ID y el CLIENT_SECRET están CAMBIADOS de lugar en Vercel.';
+          tone = 'warn';
+          titulo = 'El CLIENT_ID y el SECRET están cruzados en Vercel, pero la app lo corrige sola — tocá "Conectar Drive", debería andar. (Cuando puedas, ordenalos en Vercel.)';
         } else if (id.hasSpaces || sec.hasSpaces) {
           tone = 'warn';
           titulo = `Hay un espacio o un enter pegado en ${sec.hasSpaces ? 'el CLIENT_SECRET' : 'el CLIENT_ID'}. Re-pegá el valor limpio en Vercel.`;

@@ -27,8 +27,20 @@ let cachedToken = null; // { token, exp(ms) } — service account
 // rechaza el canje con "The provided client secret is invalid". Recortar acá
 // evita ese error (la causa #1 del fallo) sin que el usuario tenga que darse
 // cuenta de un carácter invisible.
-const oauthClientId = () => (process.env.GOOGLE_OAUTH_CLIENT_ID || '').trim();
-const oauthClientSecret = () => (process.env.GOOGLE_OAUTH_CLIENT_SECRET || '').trim();
+const rawOauthClientId = () => (process.env.GOOGLE_OAUTH_CLIENT_ID || '').trim();
+const rawOauthClientSecret = () => (process.env.GOOGLE_OAUTH_CLIENT_SECRET || '').trim();
+// Auto-corrige el caso "credenciales cambiadas de lugar" en Vercel: si el ID
+// tiene forma de SECRET (empieza con GOCSPX-) y el secret tiene forma de ID
+// (termina en .apps.googleusercontent.com), están pegados al revés → los
+// intercambiamos. Es 100% seguro: un ID real nunca arranca con GOCSPX- y un
+// secret real nunca termina en .apps.googleusercontent.com. Así Drive funciona
+// aunque en Vercel estén cruzados, sin depender de que alguien lo corrija.
+function oauthSwapped() {
+  return rawOauthClientId().startsWith('GOCSPX-')
+    && rawOauthClientSecret().endsWith('.apps.googleusercontent.com');
+}
+const oauthClientId = () => (oauthSwapped() ? rawOauthClientSecret() : rawOauthClientId());
+const oauthClientSecret = () => (oauthSwapped() ? rawOauthClientId() : rawOauthClientSecret());
 
 export function oauthConfigured() {
   return !!(oauthClientId() && oauthClientSecret());

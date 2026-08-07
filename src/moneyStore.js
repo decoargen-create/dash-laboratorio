@@ -130,6 +130,16 @@ export function getPersonLoadedUSD(name) {
 // y empujamos a la nube en segundo plano. Al loguear, hidratamos de la nube.
 // =========================================================================
 
+// Saldos de APIs (Anthropic/OpenAI) que administra balanceStore.js. Los
+// leemos/escribimos por su clave de localStorage (sin importar el módulo, para
+// no acoplar) y viajan dentro del MISMO blob → moneyStore es el ÚNICO escritor
+// de money_settings, así no hay clobber entre módulos.
+const BALANCES_KEY = 'adslab-balances-v1';
+function readBalances() {
+  try { const r = localStorage.getItem(BALANCES_KEY); return r ? JSON.parse(r) : {}; }
+  catch { return {}; }
+}
+
 // Snapshot del estado local → blob que guardamos en la nube.
 function snapshot() {
   const s = read(KEY, {});
@@ -137,12 +147,14 @@ function snapshot() {
     currency: s.currency === 'ARS' ? 'ARS' : 'USD',
     rate: Number(s.rate) > 0 ? Number(s.rate) : DEFAULT_RATE,
     people: readPeople(),
+    balances: readBalances(),
   };
 }
 
 // ¿Hay algo local que valga la pena sembrar en la nube vacía?
 function hasLocalContent() {
   if (Object.keys(readPeople()).length > 0) return true;
+  if (Object.keys(readBalances()).length > 0) return true;
   const s = read(KEY, {});
   return s.currency != null || s.rate != null;
 }
@@ -157,7 +169,22 @@ function applyToLocal(data) {
   if (data.people && typeof data.people === 'object') {
     try { localStorage.setItem(PEOPLE_KEY, JSON.stringify(data.people)); } catch {}
   }
+  if (data.balances && typeof data.balances === 'object') {
+    try { localStorage.setItem(BALANCES_KEY, JSON.stringify(data.balances)); } catch {}
+    // Avisamos a balanceStore/BalanceBar que los saldos cambiaron (cross-módulo).
+    if (typeof window !== 'undefined') {
+      try { window.dispatchEvent(new CustomEvent('viora:balances-changed')); } catch {}
+    }
+  }
   notify();
+}
+
+// Lo llama balanceStore cuando el user cambia un saldo de API: agenda el push
+// del blob (que ya incluye los balances vía snapshot). Así balanceStore no
+// escribe money_settings directo (evita clobber) — moneyStore sigue siendo el
+// único escritor.
+export function pokeMoneySync() {
+  schedulePush();
 }
 
 function schedulePush() {

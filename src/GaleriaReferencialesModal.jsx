@@ -1180,6 +1180,17 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
     limpiarSeleccion();
     refresh();
   };
+  // Archiva de una TODOS los ya descargados (los saca de "Todos" → van a
+  // Archivados, no se borran). Así "Todos" queda como la cola de lo que FALTA
+  // descargar. Es lo que pidió el user: un toque para limpiar lo ya bajado.
+  const handleArchivarDescargados = async () => {
+    const ids = items.filter(it => it.descargada && !it.archivado).map(it => it.id);
+    if (ids.length === 0) return;
+    if (!window.confirm(`¿Archivar los ${ids.length} creativo${ids.length !== 1 ? 's' : ''} ya descargado${ids.length !== 1 ? 's' : ''}? Salen de "Todos" y quedan en Archivados (no se borran). Así "Todos" te queda solo con lo que falta descargar.`)) return;
+    await patchReferenciales(ids, { archivado: true, archivadoAt: new Date().toISOString() });
+    limpiarSeleccion();
+    refresh();
+  };
   // Bulk: marcar los seleccionados como winner (sin form de métricas — quick
   // mark). Aparecen en la pestaña Winners y en la galería global de winners.
   const handleBulkWinner = async () => {
@@ -1237,6 +1248,16 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
               <option value="pending">Pendientes</option>
               <option value="downloaded">Descargados</option>
             </select>
+            {/* Un toque para archivar todo lo ya descargado → "Todos" queda solo
+                con lo pendiente. */}
+            {panel === 'todos' && yaDescargadosCount > 0 && (
+              <button
+                onClick={handleArchivarDescargados}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-800 rounded hover:bg-amber-100 dark:hover:bg-amber-900/40 transition"
+                title="Saca de 'Todos' los que ya descargaste (van a Archivados). Así te queda solo lo pendiente.">
+                <Archive size={12} /> Archivar descargados ({yaDescargadosCount})
+              </button>
+            )}
             <select
               value={filtroVariante}
               onChange={e => setFiltroVariante(e.target.value)}

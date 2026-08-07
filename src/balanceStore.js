@@ -9,6 +9,7 @@
 // El widget en el header pide actualización cuando el user recarga crédito.
 
 import { spendSince } from './costsStore.js';
+import { pokeMoneySync } from './moneyStore.js';
 
 const KEY = 'adslab-balances-v1';
 const listeners = new Set();
@@ -23,6 +24,11 @@ function readAll() {
 function writeAll(data) {
   try { localStorage.setItem(KEY, JSON.stringify(data)); } catch {}
   listeners.forEach(fn => { try { fn(data); } catch {} });
+  // Sincroniza a la nube (via money_settings) + avisa a otras vistas.
+  if (typeof window !== 'undefined') {
+    try { window.dispatchEvent(new CustomEvent('viora:balances-changed')); } catch {}
+  }
+  try { pokeMoneySync(); } catch {}
 }
 
 // Devuelve { saldo, setAt } o null si nunca se setearon.
@@ -56,11 +62,14 @@ export function subscribeBalance(fn) {
   const onCost = () => { try { fn(readAll()); } catch {} };
   if (typeof window !== 'undefined') {
     window.addEventListener('viora:cost-logged', onCost);
+    // Cuando la nube hidrata los saldos (otra PC), moneyStore dispara esto.
+    window.addEventListener('viora:balances-changed', onCost);
   }
   return () => {
     listeners.delete(fn);
     if (typeof window !== 'undefined') {
       window.removeEventListener('viora:cost-logged', onCost);
+      window.removeEventListener('viora:balances-changed', onCost);
     }
   };
 }

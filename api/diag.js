@@ -132,22 +132,27 @@ export default function handler(req, res) {
       const secretTrim = rawSecret.trim();
       const idLooksLikeId = idTrim.endsWith('.apps.googleusercontent.com');
       const secretLooksLikeSecret = secretTrim.startsWith('GOCSPX-');
-      const swapped = secretTrim.endsWith('.apps.googleusercontent.com') || idTrim.startsWith('GOCSPX-');
+      const idLooksLikeSecret = idTrim.startsWith('GOCSPX-');
+      const secretLooksLikeId = secretTrim.endsWith('.apps.googleusercontent.com');
+      // Cruce LIMPIO (ID↔SECRET intercambiados): el código lo corrige solo.
+      const autoCorrected = idLooksLikeSecret && secretLooksLikeId;
+      const swapped = secretLooksLikeId || idLooksLikeSecret;
       const idHasSpaces = rawId !== idTrim;
       const secretHasSpaces = rawSecret !== secretTrim;
       let oauthHint;
       if (!oauthOk) oauthHint = 'Falta GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET (credencial OAuth de Google Cloud). Es lo que hace que los videos suban a TU Drive personal.';
-      else if (swapped) oauthHint = 'ℹ️ CLIENT_ID y CLIENT_SECRET están CAMBIADOS de lugar en Vercel, PERO la app lo corrige sola (auto-swap), así que Drive igual funciona. Para dejarlo prolijo, poné el valor que empieza con "GOCSPX-" en GOOGLE_OAUTH_CLIENT_SECRET y el que termina en ".apps.googleusercontent.com" en GOOGLE_OAUTH_CLIENT_ID.';
+      else if (autoCorrected) oauthHint = 'ℹ️ CLIENT_ID y CLIENT_SECRET están CAMBIADOS de lugar en Vercel, PERO la app lo corrige sola (auto-swap), así que Drive funciona. Para dejarlo prolijo, poné el "GOCSPX-" en GOOGLE_OAUTH_CLIENT_SECRET y el ".apps.googleusercontent.com" en GOOGLE_OAUTH_CLIENT_ID.';
+      else if (!secretLooksLikeSecret) oauthHint = '❌ El valor cargado en GOOGLE_OAUTH_CLIENT_SECRET NO es un secret válido (no empieza con "GOCSPX-"' + (secretLooksLikeId ? '; parece ser otro client_id' : '') + '). No hay forma de arreglarlo por código: poné el secret REAL — Google Cloud → APIs y servicios → Credenciales → tu cliente OAuth → "Restablecer secreto" → copiá el "GOCSPX-…" y pegalo en GOOGLE_OAUTH_CLIENT_SECRET en Vercel → Redeploy.';
       else if (idHasSpaces || secretHasSpaces) oauthHint = '⚠️ Hay espacios o un enter al principio/fin del ' + (secretHasSpaces ? 'CLIENT_SECRET' : 'CLIENT_ID') + '. El código ya los recorta, pero conviene re-pegar el valor limpio en Vercel.';
       else if (!idLooksLikeId) oauthHint = '⚠️ El CLIENT_ID no termina en ".apps.googleusercontent.com" — no parece un client_id de OAuth válido.';
-      else if (!secretLooksLikeSecret) oauthHint = '⚠️ El CLIENT_SECRET no empieza con "GOCSPX-" (el formato actual de Google). Revisá que sea el secret correcto y completo del MISMO cliente OAuth.';
       else oauthHint = 'Forma OK. Si igual da "client secret is invalid", el secret no corresponde a este client_id: regeneralo en Google Cloud (mismo cliente) y re-pegá ambos en Vercel.';
       return {
         // Camino RECOMENDADO para Drive personal (@gmail): OAuth del usuario.
         oauth: {
           GOOGLE_OAUTH_CLIENT_ID: { configured: !!env.GOOGLE_OAUTH_CLIENT_ID, length: idTrim.length, endsWithGoogle: idLooksLikeId, hasSpaces: idHasSpaces },
-          GOOGLE_OAUTH_CLIENT_SECRET: { configured: !!env.GOOGLE_OAUTH_CLIENT_SECRET, length: secretTrim.length, startsWithGOCSPX: secretLooksLikeSecret, hasSpaces: secretHasSpaces },
+          GOOGLE_OAUTH_CLIENT_SECRET: { configured: !!env.GOOGLE_OAUTH_CLIENT_SECRET, length: secretTrim.length, startsWithGOCSPX: secretLooksLikeSecret, looksLikeId: secretLooksLikeId, hasSpaces: secretHasSpaces },
           swapped,
+          autoCorrected,
           ok: oauthOk,
           hint: oauthHint,
         },

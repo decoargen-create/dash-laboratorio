@@ -88,6 +88,43 @@ async function fetchWithTimeout(url, opts = {}, ms = 310000) {
   }
 }
 
+// Llama a apify-ingest y, si da TIMEOUT (Vercel mata la función a los 300s en
+// marcas muy grandes), REINTENTA UNA VEZ con menos ads (el hint retryWithLimit
+// del server, o la mitad). Así el scrape se auto-cura en vez de fallar con 0
+// ads. Devuelve el data parseado (ok) o throwea con el error/sugerencia.
+async function scrapeApifyWithRetry(payload, { onRetry } = {}) {
+  const attempt = async (p) => {
+    const resp = await fetchWithTimeout('/api/marketing/apify-ingest', {
+      method: 'POST', headers: await authHeaders(), body: JSON.stringify(p),
+    });
+    const data = await parseJsonOrThrow(resp, 'apify-ingest');
+    if (!resp.ok) {
+      const base = stringifyApiError(data.error) || `HTTP ${resp.status}`;
+      const sug = typeof data.sugerencia === 'string' ? data.sugerencia
+                : data.sugerencia ? JSON.stringify(data.sugerencia) : '';
+      const err = new Error(sug ? `${base} — ${sug}` : base);
+      err.httpStatus = resp.status;
+      err.retryWithLimit = data.retryWithLimit;
+      throw err;
+    }
+    return data;
+  };
+  try {
+    return await attempt(payload);
+  } catch (err) {
+    const msg = String(err?.message || '');
+    const isTimeout = err?.httpStatus === 504
+      || /timeout|tardó más|crashe[oó]|FUNCTION_INVOCATION_TIMEOUT|Internal Server Error/i.test(msg);
+    const curLimit = Number(payload.limit) || 500;
+    const nextLimit = Math.max(150, Number(err?.retryWithLimit) || Math.floor(curLimit / 2));
+    if (isTimeout && curLimit > 200 && nextLimit < curLimit) {
+      onRetry?.(nextLimit);
+      return await attempt({ ...payload, limit: nextLimit });
+    }
+    throw err;
+  }
+}
+
 // Corre `worker(item)` sobre `items` con un límite de concurrencia: arranca
 // hasta `limit` workers y, a medida que cada uno termina, toma el próximo de
 // la cola. Devuelve cuando se procesaron todos. Los errores de un item no
@@ -2123,48 +2160,60 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         const { data: { session } } = await supabase.auth.getSession();
         authToken = session?.access_token || '';
       } catch {}
-      // Timeout de cliente. El endpoint tiene maxDuration 300s server-side; si
-      // la function muere o el proxy retiene la conexión, el fetch puede colgar
-      // para SIEMPRE y la barra de progreso queda en 0% sin error ni estado
-      // terminal. Abortamos a los 330s (300 + margen) para que la promesa
-      // RECHACE y el ad se marque como fallido en vez de quedar zombie.
-      const ac = new AbortController();
-      const timer = setTimeout(() => ac.abort(), 330000);
+      // Un intento. qualityOverride permite reintentar más liviano.
+      const attempt = async (qualityOverride) => {
+        // Timeout de cliente. El endpoint tiene maxDuration 300s server-side; si
+        // la function muere o el proxy retiene la conexión, el fetch puede colgar
+        // para SIEMPRE. Abortamos a los 330s para que la promesa RECHACE y el ad
+        // se marque como fallido en vez de quedar zombie.
+        const ac = new AbortController();
+        const timer = setTimeout(() => ac.abort(), 330000);
+        try {
+          const resp = await fetch('/api/marketing/crear-creativo-referencial', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
+            },
+            body: JSON.stringify({
+              ...baseBody,
+              ...(qualityOverride ? { quality: qualityOverride } : {}),
+              n: 1,
+              nPlan: nVar,
+              variationStartIndex,
+              skeletonCached: planCached || null,
+            }),
+            signal: ac.signal,
+          });
+          const data = await parseJsonOrThrow(resp, 'crear-creativo-referencial');
+          if (!resp.ok) {
+            const base = stringifyApiError(data.error) || `HTTP ${resp.status}`;
+            const sug = typeof data.sugerencia === 'string' ? data.sugerencia
+                      : data.sugerencia ? JSON.stringify(data.sugerencia) : '';
+            throw new Error(sug ? `${base} — ${sug}` : base);
+          }
+          return data;
+        } catch (err) {
+          if (err?.name === 'AbortError') {
+            throw new Error('La generación tardó más de 5 min y se canceló (timeout).');
+          }
+          throw err;
+        } finally {
+          clearTimeout(timer);
+        }
+      };
       try {
-        const resp = await fetch('/api/marketing/crear-creativo-referencial', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
-          },
-          body: JSON.stringify({
-            ...baseBody,
-            n: 1,
-            nPlan: nVar,
-            variationStartIndex,
-            skeletonCached: planCached || null,
-          }),
-          signal: ac.signal,
-        });
-        const data = await parseJsonOrThrow(resp, 'crear-creativo-referencial');
-        if (!resp.ok) {
-        // Propagar la sugerencia del backend (apify-ingest devuelve sugerencias
-        // accionables como "cargá fbPageUrl en Setup"). Sin esto el user veía
-        // solo el error técnico sin context.
-        const base = stringifyApiError(data.error) || `HTTP ${resp.status}`;
-        // Si sugerencia es objeto (shape futuro), serializamos sin perder info.
-        const sug = typeof data.sugerencia === 'string' ? data.sugerencia
-                  : data.sugerencia ? JSON.stringify(data.sugerencia) : '';
-        throw new Error(sug ? `${base} — ${sug}` : base);
-      }
-        return data;
+        return await attempt(null);
       } catch (err) {
-        if (err?.name === 'AbortError') {
-          throw new Error('La generación tardó más de 5 min y se canceló (timeout). Reintentá ese ad.');
+        // Auto-retry UNA vez en quality 'medium' si fue timeout/crash del server
+        // (medium es más rápido y liviano → suele pasar). Solo si veníamos en
+        // high (si ya era medium/low no ganamos nada bajando más).
+        const msg = String(err?.message || '');
+        const isTimeoutOrCrash = /timeout|tardó más|crashe[oó]|Internal Server Error|FUNCTION_INVOCATION|50[24]/i.test(msg);
+        if (isTimeoutOrCrash && (baseBody.quality === 'high' || !baseBody.quality)) {
+          return await attempt('medium');
         }
         throw err;
-      } finally {
-        clearTimeout(timer);
       }
     };
 
@@ -2780,21 +2829,12 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       }
 
       updateExecution(execId, { stage: `Scrapeando ${payload.fbPageUrl ? 'desde FB page' : `keyword "${payload.searchKeyword}"`}…` });
-      const resp = await fetchWithTimeout('/api/marketing/apify-ingest', {
-        method: 'POST', headers: await authHeaders(),
-        body: JSON.stringify(payload),
+      // apify-ingest con auto-retry: si la marca es enorme y da timeout,
+      // reintenta solo con menos ads en vez de fallar con 0. La sugerencia del
+      // backend (ej "cargá fbPageUrl en Setup") viaja dentro del error.
+      const data = await scrapeApifyWithRetry(payload, {
+        onRetry: (n) => updateExecution(execId, { stage: `El scrape tardó demasiado — reintentando con ${n} ads…` }),
       });
-      const data = await parseJsonOrThrow(resp, 'apify-ingest');
-      if (!resp.ok) {
-        // Propagar la sugerencia del backend (apify-ingest devuelve sugerencias
-        // accionables como "cargá fbPageUrl en Setup"). Sin esto el user veía
-        // solo el error técnico sin context.
-        const base = stringifyApiError(data.error) || `HTTP ${resp.status}`;
-        // Si sugerencia es objeto (shape futuro), serializamos sin perder info.
-        const sug = typeof data.sugerencia === 'string' ? data.sugerencia
-                  : data.sugerencia ? JSON.stringify(data.sugerencia) : '';
-        throw new Error(sug ? `${base} — ${sug}` : base);
-      }
       const scrapeCost = logCostsFromResponse(data, `inspiracion · ${brand.nombre}`, { productoId: producto?.id });
 
       const allAds = data.ads || [];
@@ -2937,21 +2977,12 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       }
 
       updateExecution(execId, { stage: `Scrapeando ${payload.fbPageUrl ? 'desde FB page' : `keyword "${payload.searchKeyword}"`}…` });
-      const resp = await fetchWithTimeout('/api/marketing/apify-ingest', {
-        method: 'POST', headers: await authHeaders(),
-        body: JSON.stringify(payload),
+      // apify-ingest con auto-retry: si la marca es enorme y da timeout,
+      // reintenta solo con menos ads en vez de fallar con 0. La sugerencia del
+      // backend (ej "cargá fbPageUrl en Setup") viaja dentro del error.
+      const data = await scrapeApifyWithRetry(payload, {
+        onRetry: (n) => updateExecution(execId, { stage: `El scrape tardó demasiado — reintentando con ${n} ads…` }),
       });
-      const data = await parseJsonOrThrow(resp, 'apify-ingest');
-      if (!resp.ok) {
-        // Propagar la sugerencia del backend (apify-ingest devuelve sugerencias
-        // accionables como "cargá fbPageUrl en Setup"). Sin esto el user veía
-        // solo el error técnico sin context.
-        const base = stringifyApiError(data.error) || `HTTP ${resp.status}`;
-        // Si sugerencia es objeto (shape futuro), serializamos sin perder info.
-        const sug = typeof data.sugerencia === 'string' ? data.sugerencia
-                  : data.sugerencia ? JSON.stringify(data.sugerencia) : '';
-        throw new Error(sug ? `${base} — ${sug}` : base);
-      }
       const scrapeCost = logCostsFromResponse(data, `inspiracion · ${comp.nombre}`, { productoId: producto?.id });
 
       const ads = data.ads || [];

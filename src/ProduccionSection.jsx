@@ -281,6 +281,17 @@ export default function ProduccionSection({ addToast }) {
     });
   };
   useEffect(refreshDrive, []);
+  // Diagnóstico de las credenciales OAuth (leído de /api/diag, público). Sirve
+  // para ver EN LA APP por qué falla "Conectar Drive" (secret inválido,
+  // cambiado de lugar, con espacios, etc.) sin tener que leer JSON crudo.
+  const [driveDiag, setDriveDiag] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    fetch('/api/diag').then(r => r.json())
+      .then(j => { if (alive) setDriveDiag(j?.checks?.GOOGLE_DRIVE?.oauth || null); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
   const onConnectDrive = async () => {
     setDrive(d => ({ ...d, connecting: true }));
     let r;
@@ -385,6 +396,47 @@ export default function ProduccionSection({ addToast }) {
           </button>
         </div>
       </div>
+
+      {/* Diagnóstico de Drive: por qué falla "Conectar Drive" (en español, sin
+          leer JSON). Solo cuando NO está conectado y ya tenemos el diag. */}
+      {!drive.connected && driveDiag && (() => {
+        const id = driveDiag.GOOGLE_OAUTH_CLIENT_ID || {};
+        const sec = driveDiag.GOOGLE_OAUTH_CLIENT_SECRET || {};
+        let tone = 'info', titulo = '';
+        if (!driveDiag.ok) {
+          tone = 'error';
+          titulo = 'Faltan las credenciales de Google (GOOGLE_OAUTH_CLIENT_ID / SECRET) en Vercel.';
+        } else if (driveDiag.swapped) {
+          tone = 'error';
+          titulo = 'El CLIENT_ID y el CLIENT_SECRET están CAMBIADOS de lugar en Vercel.';
+        } else if (id.hasSpaces || sec.hasSpaces) {
+          tone = 'warn';
+          titulo = `Hay un espacio o un enter pegado en ${sec.hasSpaces ? 'el CLIENT_SECRET' : 'el CLIENT_ID'}. Re-pegá el valor limpio en Vercel.`;
+        } else if (!id.endsWithGoogle) {
+          tone = 'warn';
+          titulo = 'El CLIENT_ID no termina en ".apps.googleusercontent.com" — no parece un client_id válido.';
+        } else if (!sec.startsWithGOCSPX) {
+          tone = 'warn';
+          titulo = 'El CLIENT_SECRET no arranca con "GOCSPX-" (el formato de Google). Revisá que sea el secret correcto y completo.';
+        } else {
+          tone = 'info';
+          titulo = 'Las credenciales tienen forma correcta. Si al conectar sigue diciendo "client secret is invalid", el secret NO corresponde a ese client_id: regeneralo en Google Cloud (mismo cliente OAuth) y re-pegá los DOS valores en Vercel.';
+        }
+        const colors = tone === 'error'
+          ? 'text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'
+          : tone === 'warn'
+          ? 'text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800'
+          : 'text-blue-800 dark:text-blue-200 bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800';
+        return (
+          <div className={`flex items-start gap-2 text-xs rounded-lg px-3 py-2 border ${colors}`}>
+            <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+            <div>
+              <b>Drive no conectado.</b> {titulo}{' '}
+              <span className="opacity-70">(diagnóstico automático de las credenciales cargadas en Vercel)</span>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Resumen de la semana: carga por persona + objetivo */}
       <ResumenSemana asigs={asigs} filtroSinAsignar={soloSinAsignar}

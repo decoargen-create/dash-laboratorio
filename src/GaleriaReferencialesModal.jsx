@@ -23,7 +23,7 @@ import {
 } from './galeriaReferenciales.js';
 import WinnerForm from './WinnerForm.jsx';
 import WinnersReport from './WinnersReport.jsx';
-import { iterateFromWinner, generateFromWinner } from './winnerIterate.js';
+import { iterateFromWinner, generateFromWinner, regenerarReferencial } from './winnerIterate.js';
 import { BarChart3 } from 'lucide-react';
 import { SkeletonGrid } from './Skeleton.jsx';
 import EmptyState from './EmptyState.jsx';
@@ -511,8 +511,15 @@ function GalleryTableView({ items, blobUrls, seleccionados, selectedOrder, onTog
 
 // Lightbox separado para mantener este archivo manejable.
 
-function Lightbox({ item, imgSrc, onClose, showDebug, setShowDebug, onDownload, onDelete, onToggleDescargada, onArchive, onToggleWinner, onIterateWinner, iterating = false }) {
+function Lightbox({ item, imgSrc, onClose, showDebug, setShowDebug, onDownload, onDelete, onToggleDescargada, onArchive, onToggleWinner, onIterateWinner, iterating = false, onRegenerar, regenerating = false }) {
   const metrics = item.winnerMetrics || {};
+  // Panel "Regenerar / Corregir": se abre con el botón y toma una instrucción
+  // opcional de ajuste ("el cepillo más grande, sin cápsulas").
+  const [regenOpen, setRegenOpen] = useState(false);
+  const [ajusteText, setAjusteText] = useState('');
+  // Se puede regenerar si tenemos de dónde sacar el ad original (bytes cacheados
+  // o la URL de la referencia). Sin eso, el server no puede rehacerlo.
+  const puedeRegenerar = !!onRegenerar && !!(item.sourceImageUrl || item.sourceAdId);
   return (
     <div
       className="fixed inset-0 z-[60] bg-black/90 flex items-start justify-center p-6 overflow-y-auto"
@@ -624,6 +631,32 @@ function Lightbox({ item, imgSrc, onClose, showDebug, setShowDebug, onDownload, 
           </div>
         )}
 
+        {/* Panel Regenerar / Corregir — rehace desde el ad original + un ajuste. */}
+        {puedeRegenerar && regenOpen && (
+          <div className="border-t border-brand-200 dark:border-brand-800 bg-brand-50/50 dark:bg-brand-900/15 px-4 py-3">
+            <p className="text-[11px] font-bold text-brand-800 dark:text-brand-200 mb-1">🔄 Regenerar / Corregir</p>
+            <p className="text-[10px] text-gray-600 dark:text-gray-400 mb-2">
+              Se rehace desde el ad original con las mejoras actuales (formato, tamaño, etc.). Escribí qué corregir (opcional) — ej: "el cepillo más grande, sin cápsulas", "fondo más claro", "sacá el texto de arriba".
+            </p>
+            <textarea
+              value={ajusteText}
+              onChange={e => setAjusteText(e.target.value)}
+              rows={2}
+              placeholder="Qué corregir (opcional)…"
+              className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500"
+            />
+            <div className="flex items-center gap-2 mt-2">
+              <button
+                onClick={() => onRegenerar(ajusteText.trim())}
+                disabled={regenerating}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-brand-600 rounded-lg hover:from-brand-700 hover:to-brand-600 transition disabled:opacity-60">
+                {regenerating ? <><span className="animate-spin">⏳</span> Regenerando…</> : <><Sparkles size={12} /> Regenerar</>}
+              </button>
+              <span className="text-[10px] text-gray-400 dark:text-gray-500">Crea uno nuevo — el actual no se borra.</span>
+            </div>
+          </div>
+        )}
+
         <div className="flex items-center justify-between gap-2 p-3 bg-gray-50 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
           <div className="text-[10px] text-gray-500 dark:text-gray-400">
             {item.createdAt && <span>{fmtDate(item.createdAt)}</span>}
@@ -633,6 +666,13 @@ function Lightbox({ item, imgSrc, onClose, showDebug, setShowDebug, onDownload, 
               className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition">
               <Download size={13} /> Descargar
             </button>
+            {puedeRegenerar && (
+              <button onClick={() => setRegenOpen(o => !o)}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-brand-700 dark:text-brand-300 bg-brand-50 dark:bg-brand-900/20 hover:bg-brand-100 dark:hover:bg-brand-900/40 border border-brand-300 dark:border-brand-800 rounded-lg transition"
+                title="Rehace este creativo desde el ad original, con una corrección opcional">
+                🔄 {regenOpen ? 'Cerrar' : 'Regenerar / Corregir'}
+              </button>
+            )}
             <button onClick={onToggleWinner}
               className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg transition ${
                 item.winner
@@ -762,6 +802,8 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
   // Iteración de winner en curso — bloquea el botón y muestra progreso.
   const [iteratingId, setIteratingId] = useState(null);
   const [iterateProgress, setIterateProgress] = useState(null);
+  // Regeneración/corrección de un creativo en curso (bloquea el botón).
+  const [regenId, setRegenId] = useState(null);
 
   // ⚠️ visibleItems TIENE que estar acá arriba (antes del useEffect de
   // keyboard nav que lo usa en su dep array). Estaba abajo en línea 935
@@ -1102,6 +1144,28 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
     }
   };
 
+  // Regenerar / corregir un creativo que salió mal. Rehace DESDE EL AD ORIGINAL
+  // (aplicando las mejoras actuales: formato, tamaño, guardas) + la instrucción
+  // de ajuste que escribió el user. Crea uno NUEVO — no pisa el viejo.
+  const handleRegenerar = async (item, ajuste) => {
+    if (!producto) { alert('Falta el contexto del producto para regenerar.'); return; }
+    if (regenId) return; // ya hay una regeneración corriendo
+    setRegenId(item.id);
+    try {
+      await regenerarReferencial(item, producto, {
+        ajuste: ajuste || '',
+        quality: item.quality || 'high',
+        size: item.size || '1024x1024',
+      });
+      refresh();
+      alert('✓ Nuevo creativo generado. El anterior sigue en el repositorio por si querés compararlos (borrá el que no sirva).');
+    } catch (err) {
+      alert(`No se pudo regenerar: ${err.message}`);
+    } finally {
+      setRegenId(null);
+    }
+  };
+
   // Bulk archive: archiva todos los seleccionados a la vez. Útil cuando
   // armaste una grilla de 4 variaciones y solo querés guardar las 2 que
   // sirven para usar en Meta.
@@ -1382,6 +1446,8 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
           onToggleWinner={() => handleToggleWinner(selected)}
           onIterateWinner={() => handleIterateWinner(selected)}
           iterating={iteratingId === selected.id}
+          onRegenerar={(ajuste) => handleRegenerar(selected, ajuste)}
+          regenerating={regenId === selected.id}
         />
       )}
 

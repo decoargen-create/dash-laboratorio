@@ -986,7 +986,7 @@ function aspectRatioFromSize(size) {
 // Cada variación termina con un prompt distinto → la grilla de N creativos
 // son N ejecuciones distintas de la misma fórmula validada, no N versiones
 // de la misma foto.
-function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentColor, aspectRatio, rebrand = false }) {
+function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentColor, aspectRatio, rebrand = false, ajuste = '' }) {
   const nombre = (producto?.nombre || '').trim();
   const descripcion = (producto?.descripcion || '').trim();
   const research = (producto?.research || producto?.docs?.research || '').trim();
@@ -1001,6 +1001,7 @@ function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentCol
   parts.push('YOU RECEIVE TWO IMAGES:');
   parts.push('  • IMAGE 1 = a winning competitor ad. COPY its composition, framing, lighting, background style, palette, mood.');
   parts.push('  • IMAGE 2 = the product you must feature. KEEP it pixel-faithful.');
+  if (ajuste) parts.push(`  • **USER CORRECTION (HIGHEST PRIORITY — the user is re-generating this creative because the previous version was wrong; obey this ABOVE everything else below)**: ${ajuste}`);
 
   // Strategy: el "por qué" del ad
   parts.push('');
@@ -1217,7 +1218,7 @@ function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentCol
   return parts.join('\n');
 }
 
-function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio, variantStyle = 'reference' }) {
+function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio, variantStyle = 'reference', ajuste = '' }) {
   const nombre = (producto?.nombre || '').trim();
   const descripcion = (producto?.descripcion || '').trim();
   const research = (producto?.research || producto?.docs?.research || '').trim();
@@ -1230,6 +1231,7 @@ function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio
   parts.push('YOU RECEIVE TWO IMAGES:');
   parts.push('  • IMAGE 1 = a winning competitor ad. COPY its composition, framing, lighting, background style, palette, and overall mood — but DO NOT copy the brand, the actual product, or the literal text.');
   parts.push('  • IMAGE 2 = the product you must feature. KEEP its shape, color, label artwork, packaging and proportions IDENTICAL. Do NOT redraw the label. Do NOT invent any new text on the packaging.');
+  if (ajuste) parts.push(`  • **USER CORRECTION (HIGHEST PRIORITY — the user is re-generating this creative because the previous version was wrong; obey this ABOVE everything else below)**: ${ajuste}`);
   parts.push('');
 
   if (skeleton && typeof skeleton === 'object') {
@@ -1570,9 +1572,14 @@ export default async function handler(req, res) {
     // en IndexedDB al scrapear. Si viene, lo preferimos sobre inspiracionImageUrl
     // porque la URL del CDN de Meta expira ~1h y da 403; los bytes cacheados no.
     inspiracionImagenData,
+    // Instrucción de corrección que escribe el user al "Regenerar" un creativo
+    // que salió mal (ej: "el cepillo más grande, sin cápsulas"). Se inyecta como
+    // regla de MÁXIMA prioridad en el prompt.
+    ajusteUsuario,
     skeletonCached,  // Si el frontend ya tiene el skeleton del ad cacheado,
                      // lo pasa y nos saltamos Vision (ahorra ~$0.005 + 5-10s).
   } = body || {};
+  const ajuste = (typeof ajusteUsuario === 'string' ? ajusteUsuario : '').trim().slice(0, 500);
 
   if (!producto?.nombre) {
     return respondJSON(res, 400, { error: 'Falta producto.nombre' });
@@ -1715,7 +1722,7 @@ export default async function handler(req, res) {
         return {
           prompt: buildPromptFromPlan({
             producto, inspiracion, plan, variation, accentColor, aspectRatio,
-            rebrand: shouldRebrand,
+            rebrand: shouldRebrand, ajuste,
           }),
           variantStyle: shouldRebrand ? 'rebrand' : 'strategist',
           variation,
@@ -1724,9 +1731,9 @@ export default async function handler(req, res) {
     } else {
       // Fallback legacy: reference / rebrand.
       const usarRebrandVariant = !!accentColor && n >= 2;
-      const promptRef = buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio, variantStyle: 'reference' });
+      const promptRef = buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio, variantStyle: 'reference', ajuste });
       const promptRebrand = usarRebrandVariant
-        ? buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio, variantStyle: 'rebrand' })
+        ? buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio, variantStyle: 'rebrand', ajuste })
         : null;
       prompts = null; // marcador para que runCalls use el path viejo
       __legacyPromptRef = promptRef;

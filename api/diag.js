@@ -137,7 +137,7 @@ export default function handler(req, res) {
       const secretHasSpaces = rawSecret !== secretTrim;
       let oauthHint;
       if (!oauthOk) oauthHint = 'Falta GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET (credencial OAuth de Google Cloud). Es lo que hace que los videos suban a TU Drive personal.';
-      else if (swapped) oauthHint = '⚠️ Parece que CLIENT_ID y CLIENT_SECRET están CAMBIADOS de lugar. El ID termina en ".apps.googleusercontent.com" y el secret empieza con "GOCSPX-".';
+      else if (swapped) oauthHint = 'ℹ️ CLIENT_ID y CLIENT_SECRET están CAMBIADOS de lugar en Vercel, PERO la app lo corrige sola (auto-swap), así que Drive igual funciona. Para dejarlo prolijo, poné el valor que empieza con "GOCSPX-" en GOOGLE_OAUTH_CLIENT_SECRET y el que termina en ".apps.googleusercontent.com" en GOOGLE_OAUTH_CLIENT_ID.';
       else if (idHasSpaces || secretHasSpaces) oauthHint = '⚠️ Hay espacios o un enter al principio/fin del ' + (secretHasSpaces ? 'CLIENT_SECRET' : 'CLIENT_ID') + '. El código ya los recorta, pero conviene re-pegar el valor limpio en Vercel.';
       else if (!idLooksLikeId) oauthHint = '⚠️ El CLIENT_ID no termina en ".apps.googleusercontent.com" — no parece un client_id de OAuth válido.';
       else if (!secretLooksLikeSecret) oauthHint = '⚠️ El CLIENT_SECRET no empieza con "GOCSPX-" (el formato actual de Google). Revisá que sea el secret correcto y completo del MISMO cliente OAuth.';

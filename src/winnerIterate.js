@@ -18,6 +18,7 @@
 import { supabase } from './supabase.js';
 import { getProductoImagen, getAccentColor } from './productoImagen.js';
 import { saveReferencial } from './galeriaReferenciales.js';
+import { getCachedAdImageDataUrl } from './adImagesStore.js';
 
 // Parse defensivo de la response — el endpoint a veces devuelve HTML cuando
 // Vercel mata la función. Sin esto el JSON.parse rompe con "Unexpected token".
@@ -183,6 +184,114 @@ export async function generateFromWinner(creativo, producto, opts = {}) {
   }
 
   return { created, count: created.length };
+}
+
+// Regenera un creativo que salió mal, DESDE EL AD ORIGINAL de referencia (no
+// desde el creativo, para no arrastrar el error) y aplicando las mejoras
+// actuales (formato, tamaño real, guardas anti-cápsula) + una instrucción de
+// ajuste opcional que escribe el user. Crea un creativo NUEVO — no pisa el
+// viejo (el user borra el que no sirve).
+export async function regenerarReferencial(creativo, producto, opts = {}) {
+  if (!creativo?.id) throw new Error('regenerarReferencial: falta creativo');
+  if (!producto?.id) throw new Error('regenerarReferencial: falta producto');
+  const { ajuste = '', quality = 'high', size, onProgress } = opts;
+
+  // Referencia = el AD ORIGINAL. Preferimos los bytes cacheados (por sourceAdId)
+  // para no depender de la URL del CDN de Meta (que expira ~1h). Si no hay ni
+  // bytes ni URL, no podemos regenerar sin re-scrapear la marca.
+  const sourceAdId = creativo.sourceAdId || null;
+  let inspiracionImagenData = null;
+  if (sourceAdId) {
+    try { inspiracionImagenData = await getCachedAdImageDataUrl(sourceAdId); } catch {}
+  }
+  const inspiracionImageUrl = creativo.sourceImageUrl || null;
+  if (!inspiracionImagenData && !inspiracionImageUrl) {
+    throw new Error('No tengo la imagen del ad original para regenerar. Re-scrapeá esa marca en Inspiración y generá de nuevo desde ahí.');
+  }
+
+  const prodImg = await getProductoImagen(producto.id, producto);
+  if (!prodImg) throw new Error('Cargá la foto del producto en Setup primero.');
+
+  let authToken = '';
+  try { const { data: { session } } = await supabase.auth.getSession(); authToken = session?.access_token || ''; } catch {}
+
+  const variationStartIndex = Math.max(0, Number(creativo.variantIndex) || 0);
+  const body = {
+    producto: {
+      id: producto.id,
+      nombre: producto.nombre,
+      descripcion: producto.descripcion,
+      research: producto.docs?.research,
+      avatar: producto.docs?.avatar || '',
+      formato: producto.formato || '',
+      medidas: producto.medidas || '',
+      ofertasReales: producto.ofertasReales || '',
+      offerBrief: producto.ofertasReales || producto.docs?.offerBrief || '',
+    },
+    inspiracion: {
+      adId: sourceAdId || creativo.id,
+      brandNombre: creativo.sourceBrand || 'referencia',
+      body: creativo.sourceHeadline || '',
+      headline: creativo.sourceHeadline || '',
+      formato: 'static',
+      analysis: null,
+      visual: null,
+    },
+    inspiracionImageUrl,
+    inspiracionImagenData: inspiracionImagenData || undefined,
+    productoImagen: prodImg,
+    accentColor: getAccentColor(producto.id, producto) || '',
+    ajusteUsuario: ajuste || undefined,
+    n: 1,
+    nPlan: 1,
+    variationStartIndex,
+    quality,
+    ...(size ? { size } : {}),
+  };
+
+  onProgress?.({ current: 1, total: 1 });
+  const resp = await fetch('/api/marketing/crear-creativo-referencial', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) },
+    body: JSON.stringify(body),
+  });
+  const data = await parseJsonOrThrow(resp);
+  if (!resp.ok) {
+    const errMsg = (data && typeof data.error === 'string') ? data.error : `HTTP ${resp.status}`;
+    throw new Error(data?.sugerencia ? `${errMsg} — ${data.sugerencia}` : errMsg);
+  }
+
+  // Cloud-save server-side (auth presente) → solo refrescamos.
+  if (Array.isArray(data.cloudCreativos) && data.cloudCreativos.length > 0) {
+    try {
+      window.dispatchEvent(new CustomEvent('viora:referencial-saved', { detail: { productoId: String(producto.id), cloud: true } }));
+    } catch {}
+    return { ok: true, cloud: true };
+  }
+
+  // Fallback IDB local.
+  const newId = `ref_${Date.now()}_regen_${creativo.id}`;
+  await saveReferencial({
+    id: newId,
+    productoId: String(producto.id),
+    sourceAdId: sourceAdId || null,
+    sourceBrand: creativo.sourceBrand || null,
+    sourceImageUrl: inspiracionImageUrl,
+    sourceHeadline: creativo.sourceHeadline || null,
+    sourceType: 'regen',
+    variantIndex: variationStartIndex,
+    variantStyle: data.variantStyles?.[0] || 'regen',
+    imageBase64: data.imagenes?.[0] || '',
+    mimeType: data.mimeType || 'image/png',
+    prompt: data.prompts?.[0]?.prompt || data.promptReference || '',
+    skeleton: data.plan?.visual || data.skeleton || null,
+    model: data.model,
+    size: data.size,
+    quality: data.quality || quality,
+    createdAt: new Date().toISOString(),
+  });
+  if (data.imagenes) data.imagenes.length = 0;
+  return { ok: true, cloud: false, id: newId };
 }
 
 // ---------- Legacy: iterar via Bandeja (deprecated, conservar por compat) ---

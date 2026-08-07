@@ -3712,6 +3712,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         <GaleriaReferencialesModal
           productoId={producto.id}
           productoNombre={producto.nombre}
+          producto={producto}
           embedded
         />
       )}

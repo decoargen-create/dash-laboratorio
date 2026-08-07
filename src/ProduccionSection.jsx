@@ -406,18 +406,18 @@ export default function ProduccionSection({ addToast }) {
         if (!driveDiag.ok) {
           tone = 'error';
           titulo = 'Faltan las credenciales de Google (GOOGLE_OAUTH_CLIENT_ID / SECRET) en Vercel.';
-        } else if (driveDiag.swapped) {
+        } else if (driveDiag.autoCorrected) {
           tone = 'warn';
           titulo = 'El CLIENT_ID y el SECRET están cruzados en Vercel, pero la app lo corrige sola — tocá "Conectar Drive", debería andar. (Cuando puedas, ordenalos en Vercel.)';
+        } else if (!sec.startsWithGOCSPX) {
+          tone = 'error';
+          titulo = `El valor en GOOGLE_OAUTH_CLIENT_SECRET NO es un secret válido (no empieza con "GOCSPX-"${sec.looksLikeId ? '; parece ser otro client_id' : ''}). Hay que poner el secret REAL: Google Cloud → tu cliente OAuth → "Restablecer secreto" → copiá el "GOCSPX-…" y pegalo en Vercel → Redeploy.`;
         } else if (id.hasSpaces || sec.hasSpaces) {
           tone = 'warn';
           titulo = `Hay un espacio o un enter pegado en ${sec.hasSpaces ? 'el CLIENT_SECRET' : 'el CLIENT_ID'}. Re-pegá el valor limpio en Vercel.`;
         } else if (!id.endsWithGoogle) {
           tone = 'warn';
           titulo = 'El CLIENT_ID no termina en ".apps.googleusercontent.com" — no parece un client_id válido.';
-        } else if (!sec.startsWithGOCSPX) {
-          tone = 'warn';
-          titulo = 'El CLIENT_SECRET no arranca con "GOCSPX-" (el formato de Google). Revisá que sea el secret correcto y completo.';
         } else {
           tone = 'info';
           titulo = 'Las credenciales tienen forma correcta. Si al conectar sigue diciendo "client secret is invalid", el secret NO corresponde a ese client_id: regeneralo en Google Cloud (mismo cliente OAuth) y re-pegá los DOS valores en Vercel.';

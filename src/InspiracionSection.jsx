@@ -1103,7 +1103,8 @@ function BrandAdsGrid({ ads, brandNombre, brandId = null, isCompetidor = false, 
 // (Crear creativo, + ideas en Bandeja, multi-select).
 
 function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect, onSaveToBoard, onClearProgress }) {
-  const [expanded, setExpanded] = useState(true);
+  // Arranca COLAPSADO: al entrar se ve solo el encabezado (se despliega con el chevron).
+  const [expanded, setExpanded] = useState(false);
   // Vista del Top 10 — persistida en localStorage. 3 opciones:
   //   grid: strip horizontal de 10 thumbs (default, denso)
   //   list: rows con thumb chico + brand + métricas + acciones inline

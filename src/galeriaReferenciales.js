@@ -131,7 +131,12 @@ export async function getReferencialesByProducto(productoId, opts = {}) {
   let cloudItems = [];
   if (cloud) {
     try {
-      cloudItems = await getReferencialesByProductoCloud(productoId, opts);
+      // Traemos SIEMPRE con archivados incluidos: así el merge tiene la versión
+      // fresca de la nube (archivado=true) para pisar una copia vieja de IDB que
+      // todavía diga archivado=false. El filtro final (más abajo) saca los
+      // archivados cuando el panel no los pide. Sin esto, archivar no se reflejaba:
+      // la nube excluía el item y IDB stale lo revivía en "Todos".
+      cloudItems = await getReferencialesByProductoCloud(productoId, { ...opts, includeArchived: true });
     } catch (err) {
       console.warn('[galería] cloud read falló, cae a IDB:', err.message);
     }
@@ -149,8 +154,9 @@ export async function getReferencialesByProducto(productoId, opts = {}) {
       const req = idx.getAll(String(productoId));
       req.onsuccess = () => {
         const all = req.result || [];
-        const filtered = includeArchived ? all : all.filter(it => !it.archivado);
-        resolve(filtered);
+        // Traemos TODO (incl. archivados); el filtro por archivado se aplica
+        // después del merge, sobre el estado ganador (nube > IDB stale).
+        resolve(all);
       };
       req.onerror = () => reject(req.error);
     });
@@ -210,7 +216,10 @@ export async function getReferencialesByProducto(productoId, opts = {}) {
       updatedAt: idbIsFresher ? it.updatedAt : existing.updatedAt,
     });
   }
-  const merged = Array.from(byId.values());
+  let merged = Array.from(byId.values());
+  // Filtro de archivados AL FINAL, sobre el estado ya mergeado (la nube pisa a
+  // IDB si es más fresca). Así archivar/restaurar se refleja de una en "Todos".
+  if (!includeArchived) merged = merged.filter(it => !it.archivado);
   merged.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
   return merged;
 }

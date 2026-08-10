@@ -15,6 +15,7 @@ import {
   saveReferencialCloud,
   getReferencialesByProductoCloud,
   countReferencialesByProductoCloud,
+  countReferencialesAllProductosCloud,
   getUsedAdIdsForProductoCloud,
   patchReferencialesCloud,
   archiveReferencialCloud,
@@ -251,6 +252,39 @@ export async function countReferencialesByProducto(productoId) {
   } catch {
     return { total: 0, active: 0, archived: 0, downloaded: 0 };
   }
+}
+
+// BATCH: conteos de creativos por producto para TODOS los productos, en una
+// sola pasada. Map { [productoId]: { total, downloaded, pending, archived } }.
+// Lo usa la lista de productos para mostrar Creativos/Descargados/Pendientes/
+// Archivados sin hacer N queries. Cloud si está; si no, IDB.
+export async function countReferencialesAllProductos() {
+  const cloud = await isCloudReady();
+  if (cloud) {
+    try { return await countReferencialesAllProductosCloud(); }
+    catch (err) { console.warn('[galería] batch count cloud falló, cae a IDB:', err.message); }
+  }
+  try {
+    const db = await openDB();
+    return await new Promise((resolve) => {
+      const tx = db.transaction(STORE, 'readonly');
+      const req = tx.objectStore(STORE).getAll();
+      req.onsuccess = () => {
+        const map = {};
+        for (const it of (req.result || [])) {
+          const pid = it.productoId != null ? String(it.productoId) : null;
+          if (!pid) continue;
+          const m = map[pid] || (map[pid] = { total: 0, downloaded: 0, pending: 0, archived: 0 });
+          m.total++;
+          if (it.archivado) m.archived++;
+          else if (it.descargada) m.downloaded++;
+          else m.pending++;
+        }
+        resolve(map);
+      };
+      req.onerror = () => resolve({});
+    });
+  } catch { return {}; }
 }
 
 export async function getUsedAdIdsForProducto(productoId) {

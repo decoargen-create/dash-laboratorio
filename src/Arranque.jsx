@@ -108,6 +108,7 @@ import CampanasTracker from './CampanasTracker.jsx';
 import GeneradorRapido from './GeneradorRapido.jsx';
 import ProductoImagenUploader from './ProductoImagenUploader.jsx';
 import GaleriaReferencialesModal from './GaleriaReferencialesModal.jsx';
+import { countReferencialesAllProductos } from './galeriaReferenciales.js';
 import TranscripcionVideosSection from './TranscripcionVideosSection.jsx';
 import { usePipelineRun } from './PipelineRunContext.jsx';
 import { getProductoImagen } from './productoImagen.js';
@@ -1303,6 +1304,21 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     const refresh = () => setProductSpendMap(spendAllProductos());
     window.addEventListener('viora:cost-logged', refresh);
     return () => window.removeEventListener('viora:cost-logged', refresh);
+  }, []);
+  // Conteos de creativos por producto (Creados / Descargados / Pendientes /
+  // Archivados) para la lista. Batch (una sola query). Se refresca al
+  // guardar/borrar/archivar un creativo (viora:referencial-saved).
+  const [creativoCounts, setCreativoCounts] = useState({});
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      countReferencialesAllProductos()
+        .then(m => { if (!cancelled) setCreativoCounts(m || {}); })
+        .catch(() => {});
+    };
+    load();
+    window.addEventListener('viora:referencial-saved', load);
+    return () => { cancelled = true; window.removeEventListener('viora:referencial-saved', load); };
   }, []);
   useEffect(() => {
     if (!supabase) return;
@@ -3217,6 +3233,9 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               const costoRuns = runsDelProducto.reduce((sum, r) => sum + (r.cost?.total || 0), 0);
               const costoAtribuido = (productSpendMap[String(p.id)] || 0) + (cloudSpendMap[String(p.id)] || 0);
               const costoTotal = Math.max(costoAtribuido, costoRuns);
+              // Conteos de creativos del repositorio (creados/descargados/
+              // pendientes/archivados) — batch cargado arriba.
+              const cc = creativoCounts[String(p.id)] || { total: 0, downloaded: 0, pending: 0, archived: 0 };
 
               const open = () => setActiveProductoId(String(p.id));
               const openCosts = (e) => { e.stopPropagation(); setCostsModalProducto(p); };
@@ -3417,19 +3436,31 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                         )}
                       </div>
                     </div>
-                    {/* 2 números fuertes (ideas, ads) — animados al cargar. */}
-                    <div className="hidden md:flex items-center gap-5 shrink-0 px-2 text-xs">
+                    {/* Creativos / Descargados / Pendientes / Archivados + gastado. */}
+                    <div className="hidden md:flex items-center gap-4 shrink-0 px-2 text-xs">
                       <div className="text-right leading-none">
-                        <div className={`text-base font-bold ${ideasCount > 0 ? 'text-brand-600 dark:text-brand-400' : 'text-gray-300 dark:text-gray-600'}`}>
-                          <AnimatedCounter value={ideasCount} />
+                        <div className={`text-base font-bold ${cc.total > 0 ? 'text-brand-600 dark:text-brand-400' : 'text-gray-300 dark:text-gray-600'}`}>
+                          <AnimatedCounter value={cc.total} />
                         </div>
-                        <div className="text-[9px] text-gray-400 mt-0.5">ideas</div>
+                        <div className="text-[9px] text-gray-400 mt-0.5">creativos</div>
                       </div>
                       <div className="text-right leading-none">
-                        <div className={`text-base font-bold ${adsScrapeados > 0 ? 'text-gray-900 dark:text-gray-100' : 'text-gray-300 dark:text-gray-600'}`}>
-                          <AnimatedCounter value={adsScrapeados} />
+                        <div className={`text-base font-bold ${cc.downloaded > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-300 dark:text-gray-600'}`}>
+                          <AnimatedCounter value={cc.downloaded} />
                         </div>
-                        <div className="text-[9px] text-gray-400 mt-0.5">ads</div>
+                        <div className="text-[9px] text-gray-400 mt-0.5">descargados</div>
+                      </div>
+                      <div className="text-right leading-none">
+                        <div className={`text-base font-bold ${cc.pending > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-gray-300 dark:text-gray-600'}`}>
+                          <AnimatedCounter value={cc.pending} />
+                        </div>
+                        <div className="text-[9px] text-gray-400 mt-0.5">pendientes</div>
+                      </div>
+                      <div className="text-right leading-none">
+                        <div className={`text-base font-bold ${cc.archived > 0 ? 'text-gray-700 dark:text-gray-200' : 'text-gray-300 dark:text-gray-600'}`}>
+                          <AnimatedCounter value={cc.archived} />
+                        </div>
+                        <div className="text-[9px] text-gray-400 mt-0.5">archivados</div>
                       </div>
                       {costoTotal > 0 && (
                         <button onClick={openCosts} className="text-right leading-none group/cost" title="Ver resumen de costos de este producto">
@@ -3439,8 +3470,8 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                           <div className="text-[9px] text-gray-400 mt-0.5">gastado</div>
                         </button>
                       )}
-                      <div className="hidden lg:block w-28 text-[10px] text-gray-400 dark:text-gray-500 leading-tight">
-                        {(ideasByEstado.pendiente || 0)} pend{comps.length > 0 ? ` · ${comps.length} comp` : ''}{deepAnalyses > 0 ? ` · ${deepAnalyses} IA` : ''}
+                      <div className="hidden xl:block w-20 text-[10px] text-gray-400 dark:text-gray-500 leading-tight">
+                        {comps.length > 0 ? `${comps.length} comp` : ''}{deepAnalyses > 0 ? ` · ${deepAnalyses} IA` : ''}
                       </div>
                     </div>
                     <div className="hidden xl:block text-[10px] shrink-0 w-40 truncate">{metaPill}</div>
@@ -3477,10 +3508,10 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                   </div>
                   {/* Métricas */}
                   <div className="grid grid-cols-4 gap-2 py-3 border-y border-gray-100 dark:border-gray-700/60">
-                    <ProductMetric label="Ideas" value={ideasCount} tone={ideasCount > 0 ? 'brand' : 'muted'} />
-                    <ProductMetric label="Pendientes" value={ideasByEstado.pendiente || 0} tone={(ideasByEstado.pendiente || 0) > 0 ? 'amber' : 'muted'} />
-                    <ProductMetric label="Competidores" value={comps.length} tone={comps.length > 0 ? 'default' : 'muted'} />
-                    <ProductMetric label="Ads" value={adsScrapeados} tone={adsScrapeados > 0 ? 'default' : 'muted'} />
+                    <ProductMetric label="Creativos" value={cc.total} tone={cc.total > 0 ? 'brand' : 'muted'} />
+                    <ProductMetric label="Descargados" value={cc.downloaded} tone={cc.downloaded > 0 ? 'default' : 'muted'} />
+                    <ProductMetric label="Pendientes" value={cc.pending} tone={cc.pending > 0 ? 'amber' : 'muted'} />
+                    <ProductMetric label="Archivados" value={cc.archived} tone={cc.archived > 0 ? 'default' : 'muted'} />
                   </div>
                   {/* Footer */}
                   <div className="flex items-center gap-2 mt-3 text-[10px] text-gray-500 dark:text-gray-400 flex-wrap">

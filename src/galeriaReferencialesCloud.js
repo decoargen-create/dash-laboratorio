@@ -308,6 +308,38 @@ export async function countReferencialesByProductoCloud(productoId) {
   return { total: t, active: t - a, archived: a, downloaded: d, winners: w };
 }
 
+// BATCH: conteos de creativos por producto para TODOS los productos del user en
+// UNA sola pasada paginada (en vez de 4×N queries). Devuelve un map
+// { [productoId]: { total, downloaded, pending, archived } }.
+//   downloaded = descargada (y no archivado) · pending = ni descargada ni
+//   archivado · archived = archivado · total = todos.
+export async function countReferencialesAllProductosCloud() {
+  if (!supabase) return {};
+  const user = await getCurrentUser();
+  if (!user) return {};
+  const map = {};
+  const PAGE = 1000;
+  for (let from = 0; from < 100000; from += PAGE) {
+    const { data, error } = await supabase
+      .from('marketing_creativos')
+      .select('producto_id, descargada, archivado')
+      .eq('user_id', user.id)
+      .range(from, from + PAGE - 1);
+    if (error || !data || data.length === 0) break;
+    for (const r of data) {
+      const pid = r.producto_id != null ? String(r.producto_id) : null;
+      if (!pid) continue;
+      const m = map[pid] || (map[pid] = { total: 0, downloaded: 0, pending: 0, archived: 0 });
+      m.total++;
+      if (r.archivado) m.archived++;
+      else if (r.descargada) m.downloaded++;
+      else m.pending++;
+    }
+    if (data.length < PAGE) break;
+  }
+  return map;
+}
+
 // Set de sourceAdId que ya fueron usados para generar (para marcar en Inspiración).
 export async function getUsedAdIdsForProductoCloud(productoId) {
   if (!supabase) return new Set();

@@ -547,6 +547,26 @@ function BoardPickerModal({ data, onClose, addToast }) {
   );
 }
 
+// Dedup de ads por IMAGEN: Meta corre el MISMO creativo como varios ads
+// (distinto ad.id, misma imagen) → se veían repetidos. Nos quedamos con el
+// primero de cada imagen (clave = path del CDN, sin los query/tokens que varían).
+function adImgKey(ad) {
+  const u = ad?.imageUrls?.[0] || '';
+  if (!u) return '';
+  try { return new URL(u).pathname; } catch { return String(u).split('?')[0]; }
+}
+function dedupAdsByImage(ads) {
+  const seen = new Set();
+  const out = [];
+  for (const a of (ads || [])) {
+    const k = adImgKey(a);
+    if (k && seen.has(k)) continue;
+    if (k) seen.add(k);
+    out.push(a);
+  }
+  return out;
+}
+
 function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onScrape, onAdapt, onCrearReferencial, onToggleSelect, onSaveToBoard, onRemove, onClearProgress, onOcrWinners, onTranscribeVideos }) {
   // onClearProgress se forwardea a BrandAdsGrid (que lo pasa a AdThumb) para
   // que el user pueda cerrar el overlay de error que ahora queda persistente.
@@ -3223,9 +3243,9 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   // VISTA 2: BRANDS DE INSPIRACIÓN DEL PRODUCTO
   // ====================================================================
   return (
-    // Embebido en el workspace: sin cap de ancho (usa los 1800px del padre).
-    // Standalone: mantiene el max-w-5xl centrado.
-    <div className={`${embedded ? '' : 'max-w-5xl mx-auto'} space-y-5`}>
+    // Embebido en el workspace: sin cap propio (usa el ancho del padre, 1800px).
+    // Standalone: cap ancho (1800px) — antes era 5xl (1024px) y se veía chico.
+    <div className={`${embedded ? '' : 'max-w-[1800px] mx-auto'} space-y-5`}>
       {/* Banner de cola de Apify: REMOVIDO por pedido del user (no quiere verlo).
           La cola de retry sigue existiendo por si se reintenta un scrape. */}
       {false && quotaQueue.length > 0 && (
@@ -3434,7 +3454,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
             lastScraped: c.lastAdsCheck,
             seenAdIds: c._inspirationSeenIds || [],
             isCompetidor: true,
-            __ads: staticAds,
+            __ads: dedupAdsByImage(staticAds),
             __sourceComp: c,
           };
         });
@@ -3444,9 +3464,9 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         const customUnif = brands.map(b => ({
           ...b,
           isCompetidor: false,
-          __ads: (adsByBrand[b.id] || []).filter(a =>
+          __ads: dedupAdsByImage((adsByBrand[b.id] || []).filter(a =>
             !soloProbados || a.daysRunning == null || a.daysRunning >= MIN_DAYS_PROBADO
-          ),
+          )),
         }));
         // Dedup competidor vs brand-from-comp: si una brand vino del competidor
         // (fromCompetidorId), o su host/nombre coincide con un competidor,

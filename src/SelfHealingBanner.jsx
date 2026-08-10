@@ -40,18 +40,9 @@ function setDismissed(set) {
 function detectIssues() {
   const issues = [];
 
-  // 1. Apify quota — hay scrapes encolados por hard limit.
-  try {
-    const queue = getQuotaQueue();
-    if (queue.length > 0) {
-      issues.push({
-        id: 'apify-quota',
-        severity: 'warning',
-        title: 'Apify llegó al límite mensual',
-        hint: `${queue.length} scrape${queue.length !== 1 ? 's' : ''} en cola — subí el plan en console.apify.com y reintentá desde Inspiración.`,
-      });
-    }
-  } catch {}
+  // 1. Apify quota — REMOVIDO del banner por pedido del user (no le interesa
+  //    verlo). La cola de retry sigue existiendo (quotaRetryStore) por si se
+  //    reintenta un scrape, solo que no mostramos el aviso global.
 
   // 2. Service key faltante (inferido de un 503 reciente en server-side).
   try {

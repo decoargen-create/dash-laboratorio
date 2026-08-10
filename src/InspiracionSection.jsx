@@ -1171,7 +1171,7 @@ function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, se
 
 function TopGridView({ items, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect, onSaveToBoard, onClearProgress }) {
   return (
-    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-10 gap-2">
+    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
       {items.map(({ ad, brandNombre, brandId, isCompetidor }, idx) => (
         <div key={ad.id} className="relative">
           <div className={`absolute -top-1 -left-1 z-20 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shadow-md ${
@@ -3223,11 +3223,12 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   // VISTA 2: BRANDS DE INSPIRACIÓN DEL PRODUCTO
   // ====================================================================
   return (
-    <div className="max-w-5xl mx-auto space-y-5">
-      {/* Banner de retry de scrapes que fallaron por quota de Apify.
-          Aparece SOLO cuando la cola tiene entries — sin esto, el user
-          tenía que volver a click-por-comp después de subir el plan. */}
-      {quotaQueue.length > 0 && (
+    // Embebido en el workspace: sin cap de ancho (usa los 1800px del padre).
+    // Standalone: mantiene el max-w-5xl centrado.
+    <div className={`${embedded ? '' : 'max-w-5xl mx-auto'} space-y-5`}>
+      {/* Banner de cola de Apify: REMOVIDO por pedido del user (no quiere verlo).
+          La cola de retry sigue existiendo por si se reintenta un scrape. */}
+      {false && quotaQueue.length > 0 && (
         <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 rounded-xl p-3 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
             <div className="text-2xl shrink-0">⏳</div>
@@ -3820,7 +3821,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                 }}
               />
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                 {unif.map(b => (
                   <BrandCard
                     key={b.id}

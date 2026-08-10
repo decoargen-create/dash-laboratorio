@@ -3528,11 +3528,11 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         });
         const topEscalados = allAdsForRanking
           .sort((a, b) => (b.ad.score || 0) - (a.ad.score || 0))
-          .slice(0, 10);
+          .slice(0, 15);
 
         return (
           <div className="space-y-4">
-            {/* Top 10 escalados — solo aparece si hay 3+ ads para rankear. */}
+            {/* Top 15 escalados — solo aparece si hay 3+ ads para rankear. */}
             {topEscalados.length >= 3 && (
               <TopEscaladosBar
                 items={topEscalados}

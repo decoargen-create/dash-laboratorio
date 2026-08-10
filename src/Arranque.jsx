@@ -3659,7 +3659,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // WORKSPACE DEL PRODUCTO ACTIVO
   // ====================================================================
   return (
-    <div className="max-w-[1500px] mx-auto space-y-6">
+    <div className="max-w-[1800px] mx-auto space-y-6">
       {/* Guía del flujo — arriba de todo, misma referencia en cualquier tab. */}
       <FlowGuide />
       {/* Header del producto */}

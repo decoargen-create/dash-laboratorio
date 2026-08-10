@@ -194,9 +194,19 @@ function HoverPreview({ item, imgSrc, children, className = '' }) {
 
 // VISTA 1 — Grid: thumbs cuadrados con número de selección + badge si ya descargado.
 
-function GalleryGridView({ items, blobUrls, seleccionados, selectedOrder, onToggleSelect, onOpen, onArchive, onToggleWinner }) {
+// Clases LITERALES de columnas (Tailwind JIT NO genera clases interpoladas, así
+// que tienen que estar escritas tal cual). Elegible por el user (2 a 6).
+const GRID_COLS_CLASS = {
+  2: 'grid-cols-2',
+  3: 'grid-cols-2 sm:grid-cols-3',
+  4: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4',
+  5: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-5',
+  6: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-6',
+};
+
+function GalleryGridView({ items, blobUrls, seleccionados, selectedOrder, onToggleSelect, onOpen, onArchive, onToggleWinner, cols = 4 }) {
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+    <div className={`grid ${GRID_COLS_CLASS[cols] || GRID_COLS_CLASS[4]} gap-3`}>
       {items.map(it => {
         const isSel = seleccionados.has(it.id);
         const selIdx = selectedOrder.get(it.id);
@@ -781,6 +791,15 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
     setViewMode(m);
     try { localStorage.setItem('adslab-galeria-view', m); } catch {}
   };
+  // Cuántas imágenes por fila en la vista Grid (elegible 2-6). Persistido.
+  const [gridCols, setGridColsState] = useState(() => {
+    try { const n = Number(localStorage.getItem('adslab-galeria-cols')); return n >= 2 && n <= 6 ? n : 4; }
+    catch { return 4; }
+  });
+  const setGridCols = (n) => {
+    setGridColsState(n);
+    try { localStorage.setItem('adslab-galeria-cols', String(n)); } catch {}
+  };
   // Multi-select. Set preserva orden de inserción.
   const [seleccionados, setSeleccionados] = useState(new Set());
   // Último ID clickeado — usado para shift+click range selection
@@ -1299,6 +1318,17 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
                 </button>
               ))}
             </div>
+            {/* Columnas por fila — solo en vista Grid. Aprovecha el ancho. */}
+            {viewMode === 'grid' && (
+              <select
+                value={gridCols}
+                onChange={e => setGridCols(Number(e.target.value))}
+                className="px-2 py-1.5 text-[10px] font-bold bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
+                title="Cuántas imágenes por fila"
+              >
+                {[2, 3, 4, 5, 6].map(n => <option key={n} value={n}>{n} col.</option>)}
+              </select>
+            )}
             <button onClick={onClose}
               className="p-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 transition">
               <X size={16} />
@@ -1383,7 +1413,7 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
             )
           ) : viewMode === 'grid' ? (
             <GalleryGridView items={visibleItems} blobUrls={blobUrls} seleccionados={seleccionados} selectedOrder={selectedOrder}
-              onToggleSelect={toggleSeleccion} onOpen={setSelected} onArchive={handleArchive} onToggleWinner={handleToggleWinner} />
+              onToggleSelect={toggleSeleccion} onOpen={setSelected} onArchive={handleArchive} onToggleWinner={handleToggleWinner} cols={gridCols} />
           ) : viewMode === 'list' ? (
             <GalleryListView items={visibleItems} blobUrls={blobUrls} seleccionados={seleccionados} selectedOrder={selectedOrder}
               onToggleSelect={toggleSeleccion} onOpen={setSelected}

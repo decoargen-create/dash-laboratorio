@@ -3255,12 +3255,14 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                   {(STAGE_LABEL[p.stage] || p.stage).replace('_', '-')}
                 </span>
               ) : null;
-              const metaPill = (
-                <span className={`inline-flex items-center gap-1 ${p.metaAccount ? 'text-gray-600 dark:text-gray-300' : 'text-gray-400 dark:text-gray-500 italic'}`}>
+              // Solo mostramos la cuenta Meta si EXISTE. El "Sin cuenta Meta"
+              // se sacó por pedido del user (no lo usa).
+              const metaPill = p.metaAccount ? (
+                <span className="inline-flex items-center gap-1 text-gray-600 dark:text-gray-300">
                   <BarChart3 size={11} />
-                  {p.metaAccount ? `${p.metaAccount.name} · ${p.metaAccount.ads?.length || 0} ads` : 'Sin cuenta Meta'}
+                  {`${p.metaAccount.name} · ${p.metaAccount.ads?.length || 0} ads`}
                 </span>
-              );
+              ) : null;
 
               // Botones de acción (sync / export / borrar) — aparecen en hover.
               const actions = (
@@ -3437,40 +3439,47 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                       </div>
                     </div>
                     {/* Creativos / Descargados / Pendientes / Archivados + gastado. */}
-                    <div className="hidden md:flex items-center gap-4 shrink-0 px-2 text-xs">
-                      <div className="text-right leading-none">
+                    {/* Anchos FIJOS por columna → las cifras alinean entre filas.
+                        "gastado" siempre presente (— si es 0) para no correr las columnas. */}
+                    <div className="hidden md:flex items-center gap-2 shrink-0 px-2 text-xs">
+                      <div className="w-16 text-center leading-none">
                         <div className={`text-base font-bold ${cc.total > 0 ? 'text-brand-600 dark:text-brand-400' : 'text-gray-300 dark:text-gray-600'}`}>
                           <AnimatedCounter value={cc.total} />
                         </div>
                         <div className="text-[9px] text-gray-400 mt-0.5">creativos</div>
                       </div>
-                      <div className="text-right leading-none">
+                      <div className="w-16 text-center leading-none">
                         <div className={`text-base font-bold ${cc.downloaded > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-300 dark:text-gray-600'}`}>
                           <AnimatedCounter value={cc.downloaded} />
                         </div>
                         <div className="text-[9px] text-gray-400 mt-0.5">descargados</div>
                       </div>
-                      <div className="text-right leading-none">
+                      <div className="w-16 text-center leading-none">
                         <div className={`text-base font-bold ${cc.pending > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-gray-300 dark:text-gray-600'}`}>
                           <AnimatedCounter value={cc.pending} />
                         </div>
                         <div className="text-[9px] text-gray-400 mt-0.5">pendientes</div>
                       </div>
-                      <div className="text-right leading-none">
+                      <div className="w-16 text-center leading-none">
                         <div className={`text-base font-bold ${cc.archived > 0 ? 'text-gray-700 dark:text-gray-200' : 'text-gray-300 dark:text-gray-600'}`}>
                           <AnimatedCounter value={cc.archived} />
                         </div>
                         <div className="text-[9px] text-gray-400 mt-0.5">archivados</div>
                       </div>
-                      {costoTotal > 0 && (
-                        <button onClick={openCosts} className="text-right leading-none group/cost" title="Ver resumen de costos de este producto">
+                      {costoTotal > 0 ? (
+                        <button onClick={openCosts} className="w-24 text-center leading-none group/cost" title="Ver resumen de costos de este producto">
                           <div className="text-base font-bold font-mono text-brand-600 dark:text-brand-400 group-hover/cost:underline">
                             {fmtMoney(costoTotal)}
                           </div>
                           <div className="text-[9px] text-gray-400 mt-0.5">gastado</div>
                         </button>
+                      ) : (
+                        <div className="w-24 text-center leading-none">
+                          <div className="text-base font-bold text-gray-300 dark:text-gray-600">—</div>
+                          <div className="text-[9px] text-gray-400 mt-0.5">gastado</div>
+                        </div>
                       )}
-                      <div className="hidden xl:block w-20 text-[10px] text-gray-400 dark:text-gray-500 leading-tight">
+                      <div className="hidden xl:block w-16 text-[10px] text-gray-400 dark:text-gray-500 leading-tight text-center">
                         {comps.length > 0 ? `${comps.length} comp` : ''}{deepAnalyses > 0 ? ` · ${deepAnalyses} IA` : ''}
                       </div>
                     </div>
@@ -3534,14 +3543,23 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             // persona asignada, la lista se divide en grupos con header
             // (👤 nombre · N productos · $gastado). Sin asignaciones, la
             // lista queda plana como siempre.
-            const conResp = productos.filter(p => (p.responsable || '').trim());
+            // ORDEN FIJO: ordenamos por fecha de creación (fallback id) para que
+            // los productos NO se muevan de posición a cada rato (antes el orden
+            // seguía al array crudo, que el sync reordenaba por updated_at).
+            const stableCmp = (a, b) => {
+              const ta = Date.parse(a.createdAt || a.created_at || 0) || 0;
+              const tb = Date.parse(b.createdAt || b.created_at || 0) || 0;
+              return ta - tb || String(a.id).localeCompare(String(b.id));
+            };
+            const productosOrd = [...productos].sort(stableCmp);
+            const conResp = productosOrd.filter(p => (p.responsable || '').trim());
             if (conResp.length === 0) {
-              return <div className={contClass}>{productos.map(renderProductoCard)}</div>;
+              return <div className={contClass}>{productosOrd.map(renderProductoCard)}</div>;
             }
             const nombres = [...new Set(conResp.map(p => p.responsable.trim()))].sort((a, b) => a.localeCompare(b, 'es'));
             const grupos = [
-              ...nombres.map(n => ({ label: n, items: productos.filter(p => (p.responsable || '').trim() === n) })),
-              { label: null, items: productos.filter(p => !(p.responsable || '').trim()) },
+              ...nombres.map(n => ({ label: n, items: productosOrd.filter(p => (p.responsable || '').trim() === n) })),
+              { label: null, items: productosOrd.filter(p => !(p.responsable || '').trim()) },
             ].filter(g => g.items.length > 0);
             return (
               <div className="space-y-6">

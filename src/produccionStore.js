@@ -541,6 +541,58 @@ export function inversionPorProducto() {
   return Object.values(byProd).sort((a, b) => b.invertido - a.invertido || a.productoNombre.localeCompare(b.productoNombre, 'es'));
 }
 
+// Rol actual del sync ('admin' | 'creator' | null). La UI lo usa para mostrar
+// cosas que son solo del admin (ej: el aviso de entregas nuevas).
+export function getRole() { return _role; }
+
+// Momento de subida de un archivo: el `ts` de uid() arranca con Date.now().
+function tsSubida(f) {
+  const n = parseInt(String(f?.ts || '').split('-')[0], 10);
+  return Number.isFinite(n) ? n : 0;
+}
+
+// Última subida registrada en TODA la producción (epoch ms, 0 si no hay nada).
+// Sirve para saber "hay algo nuevo desde X" sin recorrer todo en el render.
+export function ultimaSubidaTs() {
+  let max = 0;
+  for (const a of read()) {
+    for (const f of (a.archivos || [])) {
+      const t = tsSubida(f);
+      if (t > max) max = t;
+    }
+  }
+  return max;
+}
+
+// Entregas (videos subidos por el equipo) más nuevas que `sinceTs`, agrupadas
+// por tarjeta. Es el corazón del aviso "🆕 Entregas nuevas" del admin: en vez de
+// revisar tarjeta por tarjeta, ve de una lo que se subió y no miró todavía.
+// Recorre TODAS las semanas. Devuelve
+// [{ id, weekKey, productoId, productoNombre, persona, nuevos, lastTs, archivos }]
+// ordenado por lo más reciente primero.
+export function entregasNuevas(sinceTs = 0) {
+  const out = [];
+  for (const wk of allWeekKeys()) {
+    for (const a of listAssignments(wk)) {
+      const nuevos = (a.archivos || []).filter(f => tsSubida(f) > sinceTs);
+      if (nuevos.length === 0) continue;
+      const lastTs = nuevos.reduce((m, f) => Math.max(m, tsSubida(f)), 0);
+      out.push({
+        id: a.id,
+        weekKey: wk,
+        productoId: a.productoId ?? null,
+        productoNombre: (a.productoNombre || '').trim() || 'Sin nombre',
+        persona: a.persona || '',
+        estado: a.estado,
+        nuevos: nuevos.length,
+        lastTs,
+        archivos: nuevos,
+      });
+    }
+  }
+  return out.sort((a, b) => b.lastTs - a.lastTs);
+}
+
 // =========================================================================
 // PAGOS + RESUMEN MENSUAL (para el dashboard de Área creativa) — SOLO admin.
 // =========================================================================

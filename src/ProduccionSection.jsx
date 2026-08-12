@@ -12,11 +12,13 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Film, Plus, X, Trash2, ChevronDown, UploadCloud, Loader2, CheckCircle2,
   AlertTriangle, ExternalLink, FileText, GripVertical, Users, History, Search, ArrowLeftRight,
+  Bell, BellRing, Inbox, Eye,
 } from 'lucide-react';
 import {
   ESTADOS, ESTADO_LABELS, VIDEOS_POR_PRODUCTO, weekKeyOf, weekLabel, weekRange, allWeekKeys,
   listAssignments, addAssignment, updateAssignment, removeAssignment, assignPersona,
   assignCreator, subscribeProduccion, esCompleto, bonusObjetivo, inversionPorProducto,
+  getRole, entregasNuevas, ultimaSubidaTs,
 } from './produccionStore.js';
 import { CreativosSection, subirParaTarjeta, VIDEO_ACCEPT, probeDrive } from './produccionUpload.jsx';
 import { listTeam } from './produccionTeam.js';
@@ -27,6 +29,177 @@ import ConfirmDialog from './ConfirmDialog.jsx';
 const EQUIPO_DEFAULT = ['Fran', 'Wanda', 'Flor'];
 
 const fmtArs = (n) => '$' + new Intl.NumberFormat('es-AR').format(Math.round(n || 0));
+
+// "hace X" corto para timestamps de subida.
+function fmtHace(ts) {
+  const diff = Date.now() - ts;
+  if (diff < 60_000) return 'recién';
+  const min = Math.floor(diff / 60_000);
+  if (min < 60) return `hace ${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `hace ${h} h`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `hace ${d} día${d === 1 ? '' : 's'}`;
+  try { return new Date(ts).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' }); }
+  catch { return ''; }
+}
+
+const VISTAS_KEY = 'adslab-produccion-entregas-vistas-v1';
+function getVistasTs() {
+  try { const n = parseInt(localStorage.getItem(VISTAS_KEY), 10); return Number.isFinite(n) ? n : 0; }
+  catch { return 0; }
+}
+function setVistasTs(ts) {
+  try { localStorage.setItem(VISTAS_KEY, String(ts)); } catch {}
+}
+
+// Aviso del admin: entregas (videos que subió el equipo) que TODAVÍA NO MIRÓ.
+// En vez de revisar tarjeta por tarjeta buscando qué cambió, ve de una lo nuevo,
+// con "Ver" (abre la tarjeta para mirar/descargar de Drive o AdsLab) y "Marcar
+// visto". Cuando llega algo nuevo con la app abierta dispara un toast, y una
+// notificación del navegador si el admin activó los avisos (🔔). El "visto" es
+// una marca local por dispositivo (localStorage) — no toca la nube.
+function NovedadesPanel({ onOpen, addToast }) {
+  const [open, setOpen] = useState(true);
+  const [vistas, setVistas] = useState(() => getVistasTs());
+  const [notifOn, setNotifOn] = useState(
+    () => typeof Notification !== 'undefined' && Notification.permission === 'granted');
+  const prevMaxTs = useRef(null);
+
+  const nuevas = entregasNuevas(vistas);
+  const totalNuevos = nuevas.reduce((s, e) => s + e.nuevos, 0);
+  const maxTs = nuevas.length ? nuevas[0].lastTs : 0;
+
+  // Aviso al llegar algo nuevo (toast + notificación del navegador). El primer
+  // render fija la línea de base sin avisar: solo avisamos por lo que entra
+  // DESPUÉS de abrir la sección, no por el backlog ya existente.
+  useEffect(() => {
+    if (prevMaxTs.current === null) { prevMaxTs.current = maxTs; return; }
+    if (maxTs > prevMaxTs.current && totalNuevos > 0) {
+      addToast?.({ type: 'info', message: `🆕 ${totalNuevos} entrega${totalNuevos === 1 ? '' : 's'} nueva${totalNuevos === 1 ? '' : 's'} del equipo` });
+      if (notifOn && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        try {
+          new Notification('AdsLab — entregas nuevas', {
+            body: `${totalNuevos} video${totalNuevos === 1 ? '' : 's'} nuevo${totalNuevos === 1 ? '' : 's'} del equipo. Entrá a Producción para verlos.`,
+            tag: 'adslab-entregas',
+          });
+        } catch { /* notificación bloqueada */ }
+      }
+    }
+    prevMaxTs.current = maxTs;
+  }, [maxTs, totalNuevos, notifOn, addToast]);
+
+  const marcarTodoVisto = () => {
+    const ts = Math.max(ultimaSubidaTs(), maxTs, Date.now() - 1);
+    setVistasTs(ts); setVistas(ts); prevMaxTs.current = ts;
+  };
+
+  const activarAvisos = async () => {
+    if (typeof Notification === 'undefined') {
+      addToast?.({ type: 'warning', message: 'Este navegador no soporta notificaciones.' }); return;
+    }
+    if (Notification.permission === 'granted') { setNotifOn(true); return; }
+    if (Notification.permission === 'denied') {
+      addToast?.({ type: 'warning', message: 'Los avisos están bloqueados en el navegador. Habilitalos desde el candado 🔒 de la barra de direcciones.' });
+      return;
+    }
+    try {
+      const p = await Notification.requestPermission();
+      if (p === 'granted') { setNotifOn(true); addToast?.({ type: 'success', message: '🔔 Avisos activados — te notifico cuando el equipo suba creativos.' }); }
+      else addToast?.({ type: 'warning', message: 'No diste permiso para los avisos.' });
+    } catch { /* usuario canceló */ }
+  };
+
+  // Estado en reposo: nada nuevo. Barra fina para que se sepa que existe + toggle
+  // de avisos. Sin ruido cuando no hay novedades.
+  if (totalNuevos === 0) {
+    return (
+      <div className="flex items-center gap-2 px-4 py-2 text-xs bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-500 dark:text-gray-400">
+        <Inbox size={14} className="text-gray-400" />
+        <span>Sin entregas nuevas por ahora. Cuando el equipo suba creativos, aparecen acá.</span>
+        {!notifOn && (
+          <button onClick={activarAvisos}
+            className="ml-auto inline-flex items-center gap-1 font-semibold text-brand-600 dark:text-brand-300 hover:underline">
+            <Bell size={12} /> Activar avisos
+          </button>
+        )}
+        {notifOn && (
+          <span className="ml-auto inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold">
+            <BellRing size={12} /> Avisos activados
+          </span>
+        )}
+      </div>
+    );
+  }
+
+  const visibles = nuevas.slice(0, 30);
+  const resto = nuevas.length - visibles.length;
+
+  return (
+    <div className="bg-gradient-to-r from-brand-50 to-white dark:from-brand-900/25 dark:to-gray-800 border border-brand-200 dark:border-brand-800/60 rounded-xl overflow-hidden shadow-sm">
+      <div className="w-full px-4 py-2.5 flex items-center gap-2.5">
+        <button onClick={() => setOpen(o => !o)} className="flex items-center gap-2.5 flex-1 min-w-0 text-left">
+          <span className="relative">
+            <BellRing size={18} className="text-brand-600 dark:text-brand-300" />
+            <span className="absolute -top-1.5 -right-1.5 min-w-[15px] h-[15px] px-1 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center">{totalNuevos > 99 ? '99+' : totalNuevos}</span>
+          </span>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold text-gray-900 dark:text-gray-100">
+              {totalNuevos} entrega{totalNuevos === 1 ? '' : 's'} nueva{totalNuevos === 1 ? '' : 's'} del equipo
+            </p>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400">
+              en {nuevas.length} tarjeta{nuevas.length === 1 ? '' : 's'} · lo más reciente {fmtHace(maxTs)}
+            </p>
+          </div>
+          <ChevronDown size={16} className={`text-gray-400 transition-transform shrink-0 ${open ? 'rotate-180' : ''}`} />
+        </button>
+        <button onClick={marcarTodoVisto}
+          className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 transition"
+          title="Ocultar todo lo de abajo (marca local, no borra nada)">
+          <CheckCircle2 size={12} /> Marcar visto
+        </button>
+      </div>
+      {open && (
+        <div className="border-t border-brand-100 dark:border-brand-800/40 divide-y divide-gray-100 dark:divide-gray-800 bg-white/60 dark:bg-gray-800/40">
+          {visibles.map(e => (
+            <div key={e.id} className="flex items-center gap-3 px-4 py-2 text-xs">
+              <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-gray-800 dark:text-gray-100 truncate">{e.productoNombre}</p>
+                <p className="text-[10px] text-gray-500 dark:text-gray-400 truncate">
+                  {e.persona ? `${e.persona} · ` : ''}{ESTADO_LABELS[e.estado] || e.estado} · {weekLabel(e.weekKey)}
+                </p>
+              </div>
+              <span className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300 font-bold text-[10px]">
+                +{e.nuevos} video{e.nuevos === 1 ? '' : 's'}
+              </span>
+              <span className="shrink-0 text-[10px] text-gray-400 tabular-nums w-16 text-right">{fmtHace(e.lastTs)}</span>
+              <button onClick={() => onOpen?.(e.weekKey, e.id)}
+                className="shrink-0 inline-flex items-center gap-1 px-2 py-1 text-[11px] font-bold text-white bg-brand-500 hover:bg-brand-600 rounded-lg transition">
+                <Eye size={12} /> Ver
+              </button>
+            </div>
+          ))}
+          {resto > 0 && (
+            <p className="px-4 py-1.5 text-[10px] text-gray-400 dark:text-gray-500">y {resto} tarjeta{resto === 1 ? '' : 's'} más con entregas nuevas…</p>
+          )}
+          <div className="flex items-center gap-2 px-4 py-2 bg-gray-50 dark:bg-gray-900/40">
+            <span className="text-[10px] text-gray-400 dark:text-gray-500 flex-1">Abrí una tarjeta para mirar o descargar los videos (Drive o AdsLab).</span>
+            {!notifOn ? (
+              <button onClick={activarAvisos} className="inline-flex items-center gap-1 text-[11px] font-semibold text-brand-600 dark:text-brand-300 hover:underline">
+                <Bell size={12} /> Activar avisos
+              </button>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+                <BellRing size={12} /> Avisos activados
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // Panel colapsable: cuánto se INVIRTIÓ (pago al equipo) en cada producto,
 // acumulado de todas las semanas. Se actualiza solo cada vez que una tarjeta
@@ -486,6 +659,13 @@ export default function ProduccionSection({ addToast }) {
           </div>
         );
       })()}
+
+      {/* Aviso de entregas nuevas del equipo (solo el admin). Lo primero que ve:
+          qué se subió y todavía no miró, sin revisar tarjeta por tarjeta. */}
+      {getRole() === 'admin' && (
+        <NovedadesPanel addToast={addToast}
+          onOpen={(wk, id) => { setWeekKey(wk); setDetailId(id); }} />
+      )}
 
       {/* Resumen de la semana: carga por persona + objetivo */}
       <ResumenSemana asigs={asigs} filtroSinAsignar={soloSinAsignar}

@@ -517,6 +517,30 @@ export function paymentSummary(weekKey) {
   }).sort((a, b) => a.persona.localeCompare(b.persona, 'es'));
 }
 
+// Inversión (pago al equipo) acumulada POR PRODUCTO, sumando TODAS las semanas.
+// Cada tarjeta completada (aprobado/publicado) = PAGO_POR_PRODUCTO invertido en
+// ese producto. No incluye el bonus por objetivo (es un incentivo por persona/
+// semana, no atribuible a un producto puntual). Devuelve
+// [{ key, productoId, productoNombre, tarjetas, completados, enProceso, invertido }]
+// ordenado por invertido desc.
+export function inversionPorProducto() {
+  const byProd = {};
+  for (const wk of allWeekKeys()) {
+    for (const a of listAssignments(wk)) {
+      const nombre = (a.productoNombre || '').trim() || 'Sin nombre';
+      const key = a.productoId != null && String(a.productoId) ? `id:${a.productoId}` : `n:${nombre.toLowerCase()}`;
+      if (!byProd[key]) {
+        byProd[key] = { key, productoId: a.productoId ?? null, productoNombre: nombre, tarjetas: 0, completados: 0, enProceso: 0, invertido: 0 };
+      }
+      const p = byProd[key];
+      p.tarjetas++;
+      if (esCompleto(a.estado)) { p.completados++; p.invertido += PAGO_POR_PRODUCTO; }
+      else p.enProceso++;
+    }
+  }
+  return Object.values(byProd).sort((a, b) => b.invertido - a.invertido || a.productoNombre.localeCompare(b.productoNombre, 'es'));
+}
+
 // =========================================================================
 // PAGOS + RESUMEN MENSUAL (para el dashboard de Área creativa) — SOLO admin.
 // =========================================================================

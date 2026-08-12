@@ -16,7 +16,7 @@ import {
 import {
   ESTADOS, ESTADO_LABELS, VIDEOS_POR_PRODUCTO, weekKeyOf, weekLabel, weekRange, allWeekKeys,
   listAssignments, addAssignment, updateAssignment, removeAssignment, assignPersona,
-  assignCreator, subscribeProduccion, esCompleto, bonusObjetivo,
+  assignCreator, subscribeProduccion, esCompleto, bonusObjetivo, inversionPorProducto,
 } from './produccionStore.js';
 import { CreativosSection, subirParaTarjeta, VIDEO_ACCEPT, probeDrive } from './produccionUpload.jsx';
 import { listTeam } from './produccionTeam.js';
@@ -25,6 +25,55 @@ import TeamModal from './TeamModal.jsx';
 import ConfirmDialog from './ConfirmDialog.jsx';
 
 const EQUIPO_DEFAULT = ['Fran', 'Wanda', 'Flor'];
+
+const fmtArs = (n) => '$' + new Intl.NumberFormat('es-AR').format(Math.round(n || 0));
+
+// Panel colapsable: cuánto se INVIRTIÓ (pago al equipo) en cada producto,
+// acumulado de todas las semanas. Se actualiza solo cada vez que una tarjeta
+// pasa a aprobado/publicado (el padre re-renderiza al cambiar el store).
+function InversionPanel() {
+  const [open, setOpen] = useState(false);
+  const rows = inversionPorProducto();
+  if (rows.length === 0) return null;
+  const totalInvertido = rows.reduce((s, r) => s + r.invertido, 0);
+  const totalCompletados = rows.reduce((s, r) => s + r.completados, 0);
+  return (
+    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
+      <button onClick={() => setOpen(o => !o)}
+        className="w-full px-4 py-2.5 flex items-center gap-2.5 hover:bg-gray-50 dark:hover:bg-gray-700/40 transition">
+        <span className="text-base">💰</span>
+        <div className="flex-1 min-w-0 text-left">
+          <p className="text-sm font-bold text-gray-900 dark:text-gray-100">Inversión por producto</p>
+          <p className="text-[11px] text-gray-500 dark:text-gray-400">
+            {rows.length} producto{rows.length !== 1 ? 's' : ''} · {totalCompletados} entregado{totalCompletados !== 1 ? 's' : ''} · total <b className="text-emerald-600 dark:text-emerald-400">{fmtArs(totalInvertido)}</b>
+          </p>
+        </div>
+        <ChevronDown size={16} className={`text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="border-t border-gray-100 dark:border-gray-700/60 divide-y divide-gray-100 dark:divide-gray-800">
+          {rows.map(r => (
+            <div key={r.key} className="flex items-center gap-3 px-4 py-2 text-xs">
+              <span className="flex-1 min-w-0 truncate font-semibold text-gray-800 dark:text-gray-100">{r.productoNombre}</span>
+              <span className="w-32 text-right text-gray-500 dark:text-gray-400 tabular-nums">
+                {r.completados} entregado{r.completados !== 1 ? 's' : ''}{r.enProceso > 0 ? ` · ${r.enProceso} en curso` : ''}
+              </span>
+              <span className="w-24 text-right font-bold font-mono text-emerald-600 dark:text-emerald-400 tabular-nums">{fmtArs(r.invertido)}</span>
+            </div>
+          ))}
+          <div className="flex items-center gap-3 px-4 py-2 text-xs bg-gray-50 dark:bg-gray-900/40">
+            <span className="flex-1 font-bold text-gray-900 dark:text-gray-100">Total</span>
+            <span className="w-32 text-right text-gray-500 dark:text-gray-400 tabular-nums">{totalCompletados} entregado{totalCompletados !== 1 ? 's' : ''}</span>
+            <span className="w-24 text-right font-bold font-mono text-emerald-700 dark:text-emerald-300 tabular-nums">{fmtArs(totalInvertido)}</span>
+          </div>
+          <p className="px-4 py-1.5 text-[10px] text-gray-400 dark:text-gray-500">
+            Acumulado de todas las semanas · lo que se le paga al equipo por cada producto entregado (aprobado/publicado). El bonus por objetivo va aparte, por persona.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // Escape cierra el modal (detalle de uso: el user espera Esc en cualquier popup).
 function useEscape(onClose) {
@@ -441,6 +490,9 @@ export default function ProduccionSection({ addToast }) {
       {/* Resumen de la semana: carga por persona + objetivo */}
       <ResumenSemana asigs={asigs} filtroSinAsignar={soloSinAsignar}
         onToggleSinAsignar={() => setSoloSinAsignar(v => !v)} />
+
+      {/* Dashboard: inversión (pago al equipo) acumulada por producto. */}
+      <InversionPanel />
 
       {/* Aviso de filtro activo */}
       {soloSinAsignar && (

@@ -593,6 +593,24 @@ export function entregasNuevas(sinceTs = 0) {
   return out.sort((a, b) => b.lastTs - a.lastTs);
 }
 
+// Pulso de la semana: cuántos videos (archivos) subió el equipo cada día,
+// lunes→domingo. Alimenta el mini-gráfico de barras del Home. Bucket por el
+// día real de subida (ts del archivo). Devuelve { labels, counts, total }.
+export function entregasPorDiaSemana(weekKey = weekKeyOf()) {
+  const labels = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
+  const counts = [0, 0, 0, 0, 0, 0, 0];
+  for (const a of listAssignments(weekKey)) {
+    for (const f of (a.archivos || [])) {
+      const t = tsSubida(f);
+      if (!t) continue;
+      // getDay(): 0=domingo..6=sábado → índice lunes-primero.
+      const idx = (new Date(t).getDay() + 6) % 7;
+      counts[idx]++;
+    }
+  }
+  return { labels, counts, total: counts.reduce((s, n) => s + n, 0) };
+}
+
 // =========================================================================
 // PAGOS + RESUMEN MENSUAL (para el dashboard de Área creativa) — SOLO admin.
 // =========================================================================

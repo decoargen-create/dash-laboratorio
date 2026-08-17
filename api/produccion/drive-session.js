@@ -22,23 +22,49 @@ import { getDriveContext } from './_drive-ctx.js';
 
 const UPLOAD = 'https://www.googleapis.com/upload/drive/v3/files';
 
+const TZ = 'America/Argentina/Buenos_Aires';
+
 // Saca caracteres que rompen nombres de archivo/carpeta en Drive.
 function clean(s, fallback = '') {
   const t = String(s || '').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim();
   return t || fallback;
 }
 
-// El archivo conserva su nombre original (la carpeta ya da todo el contexto:
-// Producto / Persona - fecha).
-function finalFileName(filename) {
+// Abreviatura del producto para el nombre de archivo: iniciales de las palabras
+// significativas (saltea conectores). La carpeta ya lleva el nombre completo, así
+// que acá va corto y reconocible. Un producto de una sola palabra usa sus 1as
+// letras. Ej: "Cepillo Drenaje Linfatico" → "CDL"; "Colageno" → "Colage".
+function abreviarProducto(nombre) {
+  const stop = new Set(['de', 'del', 'la', 'el', 'los', 'las', 'y', 'con', 'para', 'por', 'a', 'en', 'the']);
+  const words = clean(nombre, '').split(' ').filter(w => w && !stop.has(w.toLowerCase()));
+  if (words.length === 0) return 'PROD';
+  if (words.length === 1) return words[0].slice(0, 8);
+  return words.slice(0, 4).map(w => w[0].toUpperCase()).join('');
+}
+
+// Sello de subida en horario AR: 'YYYY-MM-DD HH.MM' (fecha + hora, así dos videos
+// del mismo día no colisionan en el nombre).
+function selloAR() {
+  const now = new Date();
+  const fecha = now.toLocaleDateString('en-CA', { timeZone: TZ });
+  const hora = now.toLocaleTimeString('es-AR', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false });
+  return `${fecha} ${hora.replace(':', '.')}`;
+}
+
+// Nomenclatura del archivo: "<Persona> - <fecha subida> - <Producto abreviado>".
+// Autoexplicativo aunque el video se baje fuera de su carpeta (dice quién lo
+// hizo, cuándo lo subió y de qué producto es). Ej:
+// "Fran - 2026-08-17 14.05 - CDL.mp4".
+function finalFileName(filename, productoNombre, persona) {
   const ext = (String(filename).split('.').pop() || 'mp4').toLowerCase().slice(0, 5);
-  const base = clean(String(filename).replace(/\.[^.]+$/, ''), 'video').slice(0, 80);
-  return `${base}.${ext}`;
+  const per = clean(persona, 'Equipo');
+  const abrev = abreviarProducto(productoNombre);
+  return `${per} - ${selloAR()} - ${abrev}.${ext}`;
 }
 
 // Fecha de hoy (horario AR) → 'YYYY-MM-DD', para nombrar la carpeta de la subida.
 function hoyAR() {
-  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
+  return new Date().toLocaleDateString('en-CA', { timeZone: TZ });
 }
 
 // Nombre ESTABLE de la carpeta de una tarjeta: <Persona> - sem <d>-<m>. Como
@@ -113,7 +139,7 @@ export default async function handler(req, res) {
     // videos de la tarjeta caen acá, aunque se suban en días distintos.
     const subFolder = await driveEnsureFolder(token, prodFolder, cardFolderName(persona, weekKey));
 
-    const finalName = finalFileName(filename);
+    const finalName = finalFileName(filename, productoNombre, persona);
     const contentType = mimeType || 'video/mp4';
 
     // Abrir la resumable session (con node:https crudo, no fetch: garantiza el

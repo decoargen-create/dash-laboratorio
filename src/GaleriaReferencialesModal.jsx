@@ -204,6 +204,16 @@ const GRID_COLS_CLASS = {
   6: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-6',
 };
 
+// Etiqueta corta + color por estilo de variante (para el badge de cada creativo).
+// Clases LITERALES (Tailwind JIT no genera interpoladas).
+const VARIANTE_META = {
+  reference: { label: 'Fiel', cls: 'bg-slate-500 text-white' },
+  rebrand: { label: 'Rebrand', cls: 'bg-brand-500 text-white' },
+  tight: { label: 'Réplica', cls: 'bg-blue-500 text-white' },
+  medium: { label: 'Concepto', cls: 'bg-violet-500 text-white' },
+  loose: { label: 'Libre', cls: 'bg-amber-500 text-white' },
+};
+
 function GalleryGridView({ items, blobUrls, seleccionados, selectedOrder, onToggleSelect, onOpen, onArchive, onToggleWinner, cols = 4 }) {
   return (
     <div className={`grid ${GRID_COLS_CLASS[cols] || GRID_COLS_CLASS[4]} gap-3`}>
@@ -250,14 +260,6 @@ function GalleryGridView({ items, blobUrls, seleccionados, selectedOrder, onTogg
             >
               {isSel ? selIdx : <Plus size={14} />}
             </button>
-            {/* Badge "descargada" — esquina superior derecha, debajo de winner+archive */}
-            {it.descargada && (
-              <div className={`absolute ${onToggleWinner && onArchive ? 'top-[4.5rem]' : onArchive || onToggleWinner ? 'top-10' : 'top-2'} right-2 z-10 inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold text-white bg-emerald-500 rounded-md shadow-md`}
-                title={`Descargado ${fmtDate(it.descargadaAt)}`}
-              >
-                <Check size={10} /> ✓
-              </div>
-            )}
             {/* Trofeo: si ya es winner, siempre visible (amber sólido). Si no lo es,
                 aparece en hover para marcarlo desde la card sin entrar al lightbox. */}
             {onToggleWinner && (
@@ -289,12 +291,22 @@ function GalleryGridView({ items, blobUrls, seleccionados, selectedOrder, onTogg
                 {it.archivado ? <ArchiveRestore size={12} /> : <Archive size={12} />}
               </button>
             )}
-            {/* Footer con brand + variant */}
-            <div className="absolute bottom-0 left-0 right-0 px-1.5 py-1 bg-gradient-to-t from-black/80 to-transparent text-white pointer-events-none">
-              <p className="text-[9px] font-semibold truncate">
-                {it.sourceBrand && <span>Ref: {it.sourceBrand}</span>}
-                {it.variantStyle === 'rebrand' && <span className="ml-1 px-1 bg-brand-500 rounded text-[8px]">REBRAND</span>}
-              </p>
+            {/* Footer: badge de variante + marca de referencia + sello descargado. */}
+            <div className="absolute bottom-0 left-0 right-0 px-1.5 py-1.5 bg-gradient-to-t from-black/85 via-black/40 to-transparent pointer-events-none flex items-center gap-1.5">
+              {VARIANTE_META[it.variantStyle] && (
+                <span className={`shrink-0 px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wide ${VARIANTE_META[it.variantStyle].cls}`}>
+                  {VARIANTE_META[it.variantStyle].label}
+                </span>
+              )}
+              {it.sourceBrand && (
+                <span className="min-w-0 truncate text-[9px] font-semibold text-white/90">{it.sourceBrand}</span>
+              )}
+              {it.descargada && (
+                <span className="ml-auto shrink-0 inline-flex items-center gap-0.5 text-[8px] font-bold text-emerald-300"
+                  title={`Descargado ${fmtDate(it.descargadaAt)}`}>
+                  <Check size={9} /> Descargado
+                </span>
+              )}
             </div>
           </div>
         );

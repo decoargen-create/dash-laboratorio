@@ -379,6 +379,23 @@ export function allWeekKeys() {
   return [...new Set(read().map(a => a.weekKey))].sort().reverse();
 }
 
+// Personas (labels de texto) que aparecen en las tarjetas de TODAS las semanas,
+// con cuántas tarjetas tienen y si alguna ya quedó atada a una cuenta real
+// (creatorId). Sirve para ofrecer, en el panel de Equipo, "creale la cuenta a
+// Fran" a partir de los nombres que ya venís usando, sin tener que retipearlos.
+export function personasEnTarjetas() {
+  const map = new Map(); // persona -> { persona, tarjetas, conCuenta }
+  for (const a of read()) {
+    const p = (a.persona || '').trim();
+    if (!p) continue;
+    const cur = map.get(p) || { persona: p, tarjetas: 0, conCuenta: false };
+    cur.tarjetas++;
+    if (a.creatorId) cur.conCuenta = true;
+    map.set(p, cur);
+  }
+  return [...map.values()].sort((x, y) => y.tarjetas - x.tarjetas);
+}
+
 export function addAssignment({ weekKey, productoId, productoNombre, persona, creatorId = null, tipo = 'renovado', brief = '' }) {
   const per = (persona || '').trim();
   // persona es opcional: una tarjeta puede quedar "sin asignar" hasta que se le

@@ -5,9 +5,10 @@
 // contraseña, se crea la cuenta, y se la pasás al chico. Después, en cada
 // tarjeta, lo asignás desde "Asignar a (cuenta)".
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { X, UserPlus, Loader2, Trash2, KeyRound, Users, Mail, Copy, Check, Search } from 'lucide-react';
 import { listTeam, createMember, resetPassword, removeMember } from './produccionTeam.js';
+import { personasEnTarjetas } from './produccionStore.js';
 import ConfirmDialog from './ConfirmDialog.jsx';
 
 // Genera una contraseña simple pero decente para pasarle al chico.
@@ -43,6 +44,16 @@ export default function TeamModal({ onClose, addToast }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState(() => suggestPassword());
   const [lastCreated, setLastCreated] = useState(null); // { name, email, password }
+  const emailRef = useRef(null);
+
+  // Personas que ya venís usando como texto en las tarjetas (Fran, Wanda…).
+  // Las que todavía NO tienen cuenta se ofrecen para crearlas con un click.
+  const personas = useMemo(() => { try { return personasEnTarjetas(); } catch { return []; } }, []);
+  const teamNames = new Set(team.map(m => (m.display_name || '').trim().toLowerCase()).filter(Boolean));
+  const sinCuenta = personas.filter(p => !p.conCuenta && !teamNames.has(p.persona.toLowerCase()));
+
+  // Precarga el nombre en el form de alta y manda el foco al email.
+  const usarPersona = (nombre) => { setName(nombre); setLastCreated(null); setTimeout(() => emailRef.current?.focus(), 0); };
 
   const reload = () => {
     setLoading(true);
@@ -101,7 +112,7 @@ export default function TeamModal({ onClose, addToast }) {
             <div className="grid sm:grid-cols-2 gap-2">
               <input value={name} onChange={e => setName(e.target.value)} placeholder="Nombre (ej. Fran)"
                 className="px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
-              <input value={email} onChange={e => setEmail(e.target.value)} type="email" placeholder="email@ejemplo.com"
+              <input ref={emailRef} value={email} onChange={e => setEmail(e.target.value)} type="email" placeholder="email@ejemplo.com"
                 className="px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
             </div>
             <div className="flex items-center gap-2">
@@ -120,6 +131,33 @@ export default function TeamModal({ onClose, addToast }) {
               La cuenta queda lista para entrar (sin email de confirmación). Pasale al chico el <b>email</b> y la <b>contraseña</b>.
             </p>
           </form>
+
+          {/* Personas ya usadas en las tarjetas que todavía no tienen cuenta —
+              un click precarga el nombre y te lleva al email para crearla. */}
+          {sinCuenta.length > 0 && (
+            <div className="rounded-xl border border-amber-200 dark:border-amber-900/50 bg-amber-50/60 dark:bg-amber-900/15 p-4">
+              <div className="flex items-center gap-1.5 text-xs font-bold uppercase text-amber-700 dark:text-amber-300 mb-1">
+                <Users size={13} /> Personas sin cuenta ({sinCuenta.length})
+              </div>
+              <p className="text-[11px] text-amber-700/80 dark:text-amber-300/70 mb-2.5">
+                Ya las venís usando en las tarjetas. Tocá una para crearle la cuenta — le cargamos el nombre y vos ponés el email.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {sinCuenta.map(p => (
+                  <button key={p.persona} type="button" onClick={() => usarPersona(p.persona)}
+                    className="group inline-flex items-center gap-1.5 pl-1.5 pr-2.5 py-1 rounded-full bg-white dark:bg-gray-800 border border-amber-300 dark:border-amber-800 hover:border-brand-400 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition"
+                    title={`Crear la cuenta de ${p.persona} (${p.tarjetas} tarjeta${p.tarjetas !== 1 ? 's' : ''})`}>
+                    <span className="w-5 h-5 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 flex items-center justify-center text-[10px] font-bold uppercase">
+                      {p.persona.charAt(0)}
+                    </span>
+                    <span className="text-xs font-semibold text-gray-800 dark:text-gray-100">{p.persona}</span>
+                    <span className="text-[10px] text-gray-400 tabular-nums">{p.tarjetas}</span>
+                    <UserPlus size={12} className="text-brand-500 opacity-60 group-hover:opacity-100" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Credenciales recién creadas — quedan a la vista hasta cerrarlas */}
           {lastCreated && (

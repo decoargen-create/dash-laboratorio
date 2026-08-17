@@ -758,6 +758,19 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
   const aprob = Math.min(a.videosAprobados || 0, subidos);
   const folderLink = (a.archivos || []).find(f => f.folderLink)?.folderLink;
 
+  // ¿Tiene entregas nuevas que el admin todavía no miró? (misma marca local que
+  // el aviso "Entregas nuevas"). Muestra un puntito "🆕 nuevo" en la tarjeta.
+  const tieneNuevo = getRole() === 'admin' && (() => {
+    try {
+      const n = parseInt(localStorage.getItem('adslab-produccion-entregas-vistas-v1'), 10);
+      const vistas = Number.isFinite(n) ? n : 0;
+      return (a.archivos || []).some(f => {
+        const t = parseInt(String(f?.ts || '').split('-')[0], 10);
+        return Number.isFinite(t) && t > vistas;
+      });
+    } catch { return false; }
+  })();
+
   // ¿Trabada? +24h desde que entró a "En revisión" → borde ámbar (urgencia).
   const trabada = (() => {
     if (a.estado !== 'revision') return false;
@@ -791,6 +804,11 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
       onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/prod-id', a.id); }}
       onClick={() => onOpen()}
       className={`group relative bg-white dark:bg-gray-800 border rounded-xl p-2.5 shadow-sm hover:shadow-lg hover:shadow-pink-500/10 hover:-translate-y-0.5 transition cursor-pointer ${(menu || moveMenu) ? 'z-30' : ''} ${trabada ? 'border-amber-400/80 dark:border-amber-500/60 hover:border-amber-500' : 'border-gray-200 dark:border-gray-700 hover:border-pink-300 dark:hover:border-pink-700/70'}`}>
+      {/* Puntito "nuevo": el equipo subió algo que el admin no miró todavía. */}
+      {tieneNuevo && (
+        <span className="absolute -top-1.5 -right-1.5 z-20 text-[9px] font-bold text-white bg-rose-500 rounded-full px-1.5 py-0.5 shadow-md"
+          title="El equipo subió creativos nuevos que todavía no miraste">🆕 nuevo</span>
+      )}
       {/* Título grande + persona a la derecha (como el mock del Estudio) */}
       <div className="flex items-start gap-1.5">
         <GripVertical size={14} className="text-gray-300 dark:text-gray-600 mt-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition cursor-grab active:cursor-grabbing" />
@@ -843,8 +861,8 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
 
       {/* Meta: subidos · aprobados ✓ · brief · trabada · botón de mover */}
       <div className="mt-2 pl-5 flex items-center gap-2.5 text-xs text-gray-500 dark:text-gray-400">
-        <span className="inline-flex items-center gap-1" title={`${subidos} creativos subidos`}>
-          <Film size={12} className="text-emerald-500" /><b className="text-gray-700 dark:text-gray-200">{subidos}</b> subidos
+        <span className="inline-flex items-center gap-1" title={`${subidos} de ${VIDEOS_POR_PRODUCTO} videos subidos`}>
+          <Film size={12} className="text-emerald-500" /><b className="text-gray-700 dark:text-gray-200">{subidos}</b>/{VIDEOS_POR_PRODUCTO} videos
         </span>
         {subidos > 0 && (
           <b className={`tabular-nums ${aprob >= subidos ? 'text-emerald-500' : 'text-gray-400'}`} title="Aprobados sobre subidos">

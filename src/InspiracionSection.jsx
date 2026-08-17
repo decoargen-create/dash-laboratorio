@@ -2078,7 +2078,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   //   • Falla 1 → las otras 3 siguen funcionando.
   //   • Progreso real (1/4, 2/4, ...).
   //   • Mismo costo de Sonnet ($0.04 una vez) gracias al cache.
-  const crearReferencialDeAd = async (brandNombre, ad, { skipCategoryWarn = false } = {}) => {
+  const crearReferencialDeAd = async (brandNombre, ad, { skipCategoryWarn = false, silentExecution = false } = {}) => {
     if (!producto) return false;
     // RED DE SEGURIDAD (bug Femflora): si el ad de referencia parece de otra
     // categoría (pies/uñas/cara) que el producto (íntimo/etc.), avisamos ANTES
@@ -2111,7 +2111,10 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     const visionCost = skeletonCache[skelKey(ad.id)] ? 0 : 0.04; // Sonnet Strategist
     const nVar = Math.max(1, Math.min(10, genOpts.n || 2));
     const estimatedCost = nVar * costoPorImg + visionCost;
-    const execId = startExecution({
+    // En un bulk suprimimos la card por-ad del tray (silentExecution): la barra
+    // única de porcentaje ya muestra el avance agregado, así no se apilan N cards.
+    // Fuera del bulk (generar 1 ad) sí mostramos la card, que es una sola y limpia.
+    const execId = silentExecution ? null : startExecution({
       label: `Creando ${nVar} creativo${nVar !== 1 ? 's' : ''} de ${brandNombre}`,
       // Sanitizamos templates Meta del estilo {{product.name}} que algunos
       // competidores dejan en el headline — Apify scrapea el raw template
@@ -2599,7 +2602,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     // El aviso agregado ya se mostró antes del startBulk (más abajo en el
     // código, computado como bulkMismatchCount).
     const promises = adsAGenerar.map(({ brandNombre, ad }, i) =>
-      crearReferencialDeAd(brandNombre, ad, { skipCategoryWarn: true }).then(ok => {
+      crearReferencialDeAd(brandNombre, ad, { skipCategoryWarn: true, silentExecution: true }).then(ok => {
         reportAdFinished(i, { ok, errorBrand: ok ? null : brandNombre });
         return ok;
       })

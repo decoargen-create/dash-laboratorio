@@ -3427,7 +3427,17 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                     className="group glass-card card-hover flex items-center gap-3 border border-gray-200 dark:border-gray-700/80 rounded-xl px-3 py-2.5 cursor-pointer animate-fade-in-up">
                     <ProductAvatar id={p.id} nombre={p.nombre} producto={p} sizeClass="w-10 h-10" extra="text-base shrink-0" />
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{p.nombre}</p>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{p.nombre}</p>
+                        {p.responsable && (
+                          <span className="hidden sm:inline-flex items-center gap-1 shrink-0 text-[10px] font-semibold text-gray-500 dark:text-gray-400">
+                            <span className="w-4 h-4 rounded bg-gradient-to-br from-brand-400 to-brand-600 text-white flex items-center justify-center text-[8px] font-bold">
+                              {(p.responsable[0] || '?').toUpperCase()}
+                            </span>
+                            {p.responsable}
+                          </span>
+                        )}
+                      </div>
                       {/* Un solo chip de estado (research) + stage en texto sutil. */}
                       <div className="flex items-center gap-2 mt-0.5">
                         {researchPill}
@@ -3435,6 +3445,30 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                           <span className="text-[10px] text-gray-400 dark:text-gray-500 truncate">
                             {(STAGE_LABEL[p.stage] || p.stage).replace('_', '-')}
                           </span>
+                        )}
+                      </div>
+                      {/* Barra de avance de descargas — visible en toda pantalla. */}
+                      {cc.total > 0 && (
+                        <div className="mt-1.5 max-w-[240px]">
+                          <div className="flex justify-between text-[9px] text-gray-400 dark:text-gray-500 mb-0.5">
+                            <span>Descargados</span>
+                            <span className="tabular-nums">{cc.downloaded}/{cc.total}</span>
+                          </div>
+                          <div className="h-1 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                            <div className="h-full bg-emerald-500 rounded-full transition-all"
+                              style={{ width: `${Math.round((cc.downloaded / cc.total) * 100)}%` }} />
+                          </div>
+                        </div>
+                      )}
+                      {/* Stats compactos SOLO en celular (en desktop van en columnas). */}
+                      <div className="md:hidden flex items-center flex-wrap gap-x-2.5 gap-y-1 mt-1.5 text-[10px] font-semibold">
+                        <span className="text-brand-600 dark:text-brand-400 tabular-nums">{cc.total} creativos</span>
+                        {cc.pending > 0 && <span className="text-amber-600 dark:text-amber-400 tabular-nums">{cc.pending} pend</span>}
+                        {cc.archived > 0 && <span className="text-gray-500 dark:text-gray-400 tabular-nums">{cc.archived} arch</span>}
+                        {costoTotal > 0 && (
+                          <button onClick={openCosts} className="font-mono text-emerald-600 dark:text-emerald-400 tabular-nums hover:underline">
+                            {fmtMoney(costoTotal)}
+                          </button>
                         )}
                       </div>
                     </div>

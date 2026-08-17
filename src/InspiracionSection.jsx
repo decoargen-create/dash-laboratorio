@@ -2567,6 +2567,8 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     startBulk({
       origin: 'inspiracion-bulk',
       total: adsAGenerar.length,
+      imagesPerAd: nVarBulk,
+      estimatedCost: costoEstimado,
       ads: adsAGenerar.map(x => ({
         id: x.ad.id,
         brandNombre: x.brandNombre,

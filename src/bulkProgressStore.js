@@ -50,13 +50,17 @@ function persist() {
   } catch {}
 })();
 
-export function startBulk({ origin, total, ads }) {
+export function startBulk({ origin, total, ads, imagesPerAd = 1, estimatedCost = 0 }) {
   _state = {
     origin: origin || 'bulk',
     startedAt: Date.now(),
     total,
     completed: 0,
     currentIdx: 0,
+    // Imágenes = ads × variantes por ad. Para mostrar "X de N imágenes" (más
+    // natural para el user que "X de N ads") y el gasto acumulado estimado.
+    imagesPerAd: imagesPerAd || 1,
+    estimatedCost: estimatedCost || 0, // USD total proyectado del run
     adDurations: [],
     errors: [],
     adsList: (ads || []).map(a => ({ adId: a.id, brandNombre: a.brandNombre, status: 'pending' })),

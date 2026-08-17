@@ -12,16 +12,27 @@
 import React, { useEffect, useState } from 'react';
 import {
   Sparkles, TrendingUp, Package, Inbox, Trophy, Activity, ArrowRight,
-  Clock, CheckCircle2, Wallet, Image as ImageIcon, Search,
+  Clock, CheckCircle2, Wallet, Image as ImageIcon, Search, Film, BarChart3,
 } from 'lucide-react';
 import AnimatedCounter from './AnimatedCounter.jsx';
 import { loadIdeas } from './bandejaStore.js';
 import { globalCostKPIs } from './costsStore.js';
 import { fmtMoney, subscribeMoney } from './moneyStore.js';
+import { entregasPorDiaSemana, entregasNuevas, subscribeProduccion } from './produccionStore.js';
 
 function readProductos() {
   try { return JSON.parse(localStorage.getItem('adslab-marketing-productos-v1') || '[]'); }
   catch { return []; }
+}
+
+// Entregas del equipo que el admin todavía no miró (misma marca local que usa
+// el aviso de Producción). Para el badge del acceso rápido.
+function entregasNuevasCount() {
+  try {
+    const n = parseInt(localStorage.getItem('adslab-produccion-entregas-vistas-v1'), 10);
+    const vistas = Number.isFinite(n) ? n : 0;
+    return entregasNuevas(vistas).reduce((s, e) => s + e.nuevos, 0);
+  } catch { return 0; }
 }
 
 export default function MarketingDashboard({ onNavigate }) {
@@ -43,13 +54,21 @@ export default function MarketingDashboard({ onNavigate }) {
     window.addEventListener('viora:marketing-storage-changed', refresh);
     window.addEventListener('viora:cost-logged', refresh);
     const unMoney = subscribeMoney(() => forceMoney(x => x + 1));
+    // Producción cambia (el equipo sube videos) → refrescamos el pulso + badge.
+    const unProd = subscribeProduccion(() => forceMoney(x => x + 1));
     return () => {
       window.removeEventListener('focus', refresh);
       window.removeEventListener('viora:marketing-storage-changed', refresh);
       window.removeEventListener('viora:cost-logged', refresh);
       unMoney();
+      unProd();
     };
   }, []);
+
+  // Pulso de la semana: entregas (videos) por día + accesos rápidos.
+  const pulso = entregasPorDiaSemana();
+  const pulsoMax = Math.max(1, ...pulso.counts);
+  const nuevasEntregas = entregasNuevasCount();
 
   // KPIs de costo (histórico de este dispositivo).
   const kpis = globalCostKPIs();
@@ -162,6 +181,54 @@ export default function MarketingDashboard({ onNavigate }) {
         />
       </div>
 
+      {/* Pulso de la semana + accesos rápidos */}
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-3">
+        {/* Gráfico: entregas del equipo por día */}
+        <div className="lg:col-span-3 glass-card border border-gray-200 dark:border-gray-700 rounded-xl p-4 md:p-5">
+          <div className="flex items-center gap-2 mb-1">
+            <BarChart3 size={14} className="text-brand-500" />
+            <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Entregas del equipo · esta semana</h3>
+            <span className="ml-auto text-[11px] font-bold text-brand-600 dark:text-brand-400 tabular-nums">
+              {pulso.total} video{pulso.total !== 1 ? 's' : ''}
+            </span>
+          </div>
+          {pulso.total > 0 ? (
+            <>
+              <div className="flex items-end gap-2 h-24 mt-3">
+                {pulso.counts.map((n, i) => (
+                  <div key={i} className="flex-1 flex flex-col items-center justify-end gap-1">
+                    {n > 0 && <span className="text-[10px] font-bold text-gray-500 dark:text-gray-400 tabular-nums">{n}</span>}
+                    <div
+                      className={`w-full rounded-t-md transition-all ${n > 0 ? 'bg-gradient-to-t from-brand-600 to-brand-400' : 'bg-gray-200 dark:bg-gray-700'}`}
+                      style={{ height: `${Math.max(6, (n / pulsoMax) * 100)}%` }}
+                      title={`${n} entrega${n !== 1 ? 's' : ''}`}
+                    />
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-2 mt-1.5">
+                {pulso.labels.map((l, i) => (
+                  <span key={i} className="flex-1 text-center text-[10px] text-gray-400 dark:text-gray-500">{l}</span>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="h-24 flex items-center justify-center text-xs text-gray-400 dark:text-gray-500">
+              Todavía no hay entregas esta semana.
+            </div>
+          )}
+        </div>
+
+        {/* Accesos rápidos */}
+        <div className="lg:col-span-2 glass-card border border-gray-200 dark:border-gray-700 rounded-xl p-4 md:p-5 flex flex-col gap-2">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-0.5">Accesos rápidos</p>
+          <QuickAction icon={<Package size={14} />} label="Tus productos" onClick={() => onNavigate?.('mk-arranque')} />
+          <QuickAction icon={<Film size={14} />} label="Producción" badge={nuevasEntregas > 0 ? `${nuevasEntregas} nuevas` : null} onClick={() => onNavigate?.('mk-produccion')} />
+          <QuickAction icon={<Trophy size={14} />} label="Winners" onClick={() => onNavigate?.('mk-winners')} />
+          <QuickAction icon={<Wallet size={14} />} label="Área creativa" onClick={() => onNavigate?.('mk-creativa-dash')} />
+        </div>
+      </div>
+
       {/* KPIs de costos — promedios sobre todo el histórico */}
       {kpis.total > 0 && (
         <div className="glass-card border border-gray-200 dark:border-gray-700 rounded-xl p-4 md:p-5">
@@ -257,6 +324,21 @@ function CostKpi({ icon, label, value, sub, tone = 'default' }) {
       <div className={`text-xl md:text-2xl font-bold font-mono tabular-nums ${toneCls}`}>{value}</div>
       {sub && <div className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">{sub}</div>}
     </div>
+  );
+}
+
+// Botón de acceso rápido del Home. Badge opcional (ej: "3 nuevas").
+function QuickAction({ icon, label, badge, onClick }) {
+  return (
+    <button onClick={onClick}
+      className="card-hover group flex items-center gap-2.5 px-3 py-2.5 bg-white/50 dark:bg-gray-800/40 border border-gray-200 dark:border-gray-700 rounded-lg text-left transition">
+      <span className="w-8 h-8 rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 text-white flex items-center justify-center shrink-0">{icon}</span>
+      <span className="flex-1 text-xs font-bold text-gray-800 dark:text-gray-100">{label}</span>
+      {badge && (
+        <span className="text-[10px] font-bold text-brand-600 dark:text-brand-300 bg-brand-50 dark:bg-brand-900/30 rounded-full px-2 py-0.5">{badge}</span>
+      )}
+      <ArrowRight size={13} className="text-gray-400 group-hover:translate-x-0.5 transition-transform shrink-0" />
+    </button>
   );
 }
 

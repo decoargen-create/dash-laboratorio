@@ -736,6 +736,21 @@ export default function ProduccionSection({ addToast }) {
   );
 }
 
+// Formato del tiempo restante (mm:ss / h m) y de la velocidad (MB/s) para la
+// barra de subida.
+function fmtEta(sec) {
+  if (sec == null || !isFinite(sec)) return '';
+  const s = Math.max(0, Math.round(sec));
+  if (s >= 3600) return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+function fmtSpeed(bps) {
+  if (!bps || bps <= 0) return '';
+  const mb = bps / (1024 * 1024);
+  if (mb >= 1) return `${mb.toFixed(1)} MB/s`;
+  return `${Math.max(1, Math.round(bps / 1024))} KB/s`;
+}
+
 function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
   const [menu, setMenu] = useState(false);
   const [menuQ, setMenuQ] = useState('');
@@ -780,10 +795,10 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
   })();
 
   const onPick = async (fileList) => {
-    setProg({ i: 0, total: 0 });
+    setProg({ i: 0, total: 0, pct: 0, bps: 0, eta: null });
     await subirParaTarjeta(a, fileList, {
       addToast,
-      onProgress: ({ i, total }) => setProg({ i, total }),
+      onProgress: (p) => setProg(p),
     });
     setProg(null);
   };
@@ -911,34 +926,54 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
       {/* Acciones CONTEXTUALES según columna — menos ruido con muchas tarjetas:
           Por hacer → Subir · Revisión → Subir + Aprobar · Aprobado → Publicar ·
           Publicado → solo Drive. (Subir sigue siempre disponible en el detalle.) */}
-      <div className="mt-2.5 pl-5 flex items-stretch gap-1.5">
+      <div className="mt-2.5 pl-5">
         {prog ? (
-          <span className="flex-1 inline-flex items-center justify-center gap-1.5 py-1.5 text-xs font-bold text-brand-600 dark:text-brand-400">
-            <Loader2 size={12} className="animate-spin" /> Subiendo {prog.total ? `${prog.i + 1}/${prog.total}` : ''}…
-          </span>
-        ) : (a.estado === 'porhacer' || a.estado === 'revision') && (
-          <button onClick={e => { e.stopPropagation(); fileRef.current?.click(); }}
-            className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 text-xs font-extrabold text-white bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 rounded-lg transition shadow-sm">
-            <UploadCloud size={13} /> Subir
-          </button>
-        )}
-        {folderLink && (
-          <a href={folderLink} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
-            className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 text-xs font-extrabold text-gray-500 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:border-pink-400 hover:text-pink-600 dark:hover:text-pink-300 rounded-lg transition">
-            ▶ Drive
-          </a>
-        )}
-        {a.estado === 'revision' && subidos > 0 && (
-          <button onClick={aprobarTodos}
-            className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 text-xs font-extrabold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 rounded-lg transition">
-            <CheckCircle2 size={13} /> Aprobar
-          </button>
-        )}
-        {a.estado === 'aprobado' && (
-          <button onClick={publicar}
-            className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 text-xs font-extrabold text-white bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 rounded-lg transition shadow-sm">
-            🚀 Publicar
-          </button>
+          <div className="min-w-0">
+            <div className="flex items-center justify-between text-[11px] font-bold text-brand-600 dark:text-brand-400 mb-1">
+              <span className="inline-flex items-center gap-1 tabular-nums">
+                <Loader2 size={11} className="animate-spin" />
+                {Math.round((prog.pct || 0) * 100)}%{prog.total > 1 ? ` · ${prog.i + 1}/${prog.total}` : ''}
+              </span>
+              <span className="text-gray-400 dark:text-gray-500 font-semibold tabular-nums">
+                {prog.eta != null ? `faltan ${fmtEta(prog.eta)}` : 'subiendo…'}
+              </span>
+            </div>
+            <div className="h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+              <div className="h-full rounded-full bg-gradient-to-r from-brand-500 to-brand-400 transition-all"
+                style={{ width: `${Math.round((prog.pct || 0) * 100)}%` }} />
+            </div>
+            <div className="flex items-center justify-between text-[9px] text-gray-400 dark:text-gray-500 mt-0.5 tabular-nums">
+              <span>Subiendo a Drive</span>
+              <span>{prog.bps ? fmtSpeed(prog.bps) : ''}</span>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-stretch gap-1.5">
+            {(a.estado === 'porhacer' || a.estado === 'revision') && (
+              <button onClick={e => { e.stopPropagation(); fileRef.current?.click(); }}
+                className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 text-xs font-extrabold text-white bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 rounded-lg transition shadow-sm">
+                <UploadCloud size={13} /> Subir
+              </button>
+            )}
+            {folderLink && (
+              <a href={folderLink} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
+                className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 text-xs font-extrabold text-gray-500 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:border-pink-400 hover:text-pink-600 dark:hover:text-pink-300 rounded-lg transition">
+                ▶ Drive
+              </a>
+            )}
+            {a.estado === 'revision' && subidos > 0 && (
+              <button onClick={aprobarTodos}
+                className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 text-xs font-extrabold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 rounded-lg transition">
+                <CheckCircle2 size={13} /> Aprobar
+              </button>
+            )}
+            {a.estado === 'aprobado' && (
+              <button onClick={publicar}
+                className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 text-xs font-extrabold text-white bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 rounded-lg transition shadow-sm">
+                🚀 Publicar
+              </button>
+            )}
+          </div>
         )}
       </div>
 

@@ -66,7 +66,7 @@ export async function probeDrive(productoNombre, persona, weekKey) {
 // cuando el PUT directo browser→Google falla (CORS u otro bloqueo): el server
 // reenvía cada chunk a la sesión de Google con Content-Range, y ahí CORS no
 // existe. También destraba los videos grandes (AdsLab corta en ~50MB).
-async function uploadViaRelay(file, sess, token) {
+async function uploadViaRelay(file, sess, token, onBytes) {
   const CHUNK = 15 * 256 * 1024; // 3.75MB — múltiplo de 256KiB (requisito de Google)
   const total = file.size;
   for (let start = 0; start < total; start += CHUNK) {
@@ -84,6 +84,8 @@ async function uploadViaRelay(file, sess, token) {
     });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(d.error || `relay HTTP ${r.status}`);
+    // El chunk quedó arriba: reportamos bytes acumulados para la barra de progreso.
+    onBytes?.(Math.min(end + 1, total), total);
     if (d.done) return d.file || {};
     if (d.status !== 308) throw new Error(d.error || `Google respondió ${d.status}`);
   }
@@ -99,7 +101,7 @@ async function uploadToSupabase(file, user, ext) {
   return { name: file.name, storagePath: path, destino: 'adslab', sizeMB: +(file.size / 1024 / 1024).toFixed(1), ts: uid() };
 }
 
-async function uploadOne(file, ctx) {
+async function uploadOne(file, ctx, onBytes) {
   const { user, token, weekKey, productoNombre, persona } = ctx;
   const ext = (file.name.split('.').pop() || 'mp4').toLowerCase();
   let sess = null;
@@ -140,7 +142,7 @@ async function uploadOne(file, ctx) {
 
     // Camino robusto: relay por NUESTRO server en chunks — inmune a CORS.
     try {
-      return armarArchivo(await uploadViaRelay(file, sess, token));
+      return armarArchivo(await uploadViaRelay(file, sess, token, onBytes));
     } catch (e2) {
       driveReason = `${driveReason ? driveReason + ' | ' : ''}relay: ${e2?.message || e2}`;
       console.warn('[produccion] Drive falló:', driveReason, '— cayendo a AdsLab');
@@ -173,14 +175,29 @@ export async function subirParaTarjeta(a, fileList, { onProgress, addToast } = {
   const ctx = { user, token, weekKey: a.weekKey, productoNombre: a.productoNombre, persona: a.persona || 'Equipo' };
   const eraPorHacer = a.estado === 'porhacer';
   let ok = 0, dest = null, driveWarn = null;
+  // Progreso GLOBAL por bytes (barra + % + ETA + velocidad). Todas las subidas a
+  // Drive van por el relay en chunks → reportan bytes reales; el fallback a
+  // AdsLab no reporta chunks, así que ahí la barra salta al terminar el archivo.
+  const totalBytes = files.reduce((s, f) => s + (f.size || 0), 0);
+  const t0 = Date.now();
+  let sentBefore = 0; // bytes de archivos ya terminados
+  const emit = (i, sentThisFile) => {
+    const sentAll = sentBefore + sentThisFile;
+    const elapsed = (Date.now() - t0) / 1000;
+    const bps = elapsed > 0.4 ? sentAll / elapsed : 0;      // velocidad promedio
+    const pct = totalBytes > 0 ? Math.min(1, sentAll / totalBytes) : 0;
+    const eta = bps > 0 ? Math.max(0, (totalBytes - sentAll) / bps) : null;
+    onProgress?.({ i, total: files.length, name: files[i].name, pct, bps, eta });
+  };
   for (let i = 0; i < files.length; i++) {
-    onProgress?.({ i, total: files.length, name: files[i].name });
+    emit(i, 0);
     try {
-      const archivo = await uploadOne(files[i], ctx);
+      const archivo = await uploadOne(files[i], ctx, (sent) => emit(i, sent));
       addArchivos(a.id, [archivo]); ok++; dest = archivo.destino;
       if (!driveWarn && archivo.driveError) driveWarn = archivo.driveError;
     }
     catch (err) { addToast?.({ type: 'error', message: `"${files[i].name}": ${err.message}` }); }
+    sentBefore += (files[i].size || 0);
   }
   if (ok > 0 && eraPorHacer) updateAssignment(a.id, { estado: 'revision' });
   if (ok > 0) addToast?.({ type: 'success', message: `${ok} video${ok > 1 ? 's' : ''} → ${dest === 'drive' ? 'Google Drive' : 'AdsLab'}${eraPorHacer ? ' · pasó a En revisión' : ''}` });

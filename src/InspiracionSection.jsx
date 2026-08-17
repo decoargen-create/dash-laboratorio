@@ -615,6 +615,9 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
                 <Link2 size={9} /> {brand.landingUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0]}
               </a>
             )}
+            {ads.length > 0 && (
+              <span className="shrink-0 font-semibold text-gray-600 dark:text-gray-300 tabular-nums">· {ads.length} estáticos</span>
+            )}
             {brand.lastScraped && (
               <span className="shrink-0">· {new Date(brand.lastScraped).toLocaleDateString('es-AR')}</span>
             )}
@@ -666,12 +669,6 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
       {/* Notas — solo si hay, en línea aparte chiquita */}
       {brand.notas && (
         <p className="text-[10px] text-gray-600 dark:text-gray-400 italic mt-1.5 line-clamp-1">"{brand.notas}"</p>
-      )}
-      {/* Contador de ads cargados — solo si hay ads */}
-      {ads.length > 0 && (
-        <div className="mt-1.5 text-[10px] text-gray-500 dark:text-gray-400">
-          {ads.length} estáticos cargados
-        </div>
       )}
 
       {/* Grilla de estáticos scrapeados */}

@@ -230,6 +230,21 @@ export default function CreativaDashboard({ addToast }) {
             </div>
           )}
 
+          {/* Tarjetas por persona — resumen de un vistazo (anillo de pago,
+              a-pagar, pendiente, "Pagar todo"). El detalle semana a semana
+              sigue en la tabla de abajo. */}
+          <div>
+            <div className="flex items-center gap-2 mb-2 px-1">
+              <Users size={14} className="text-brand-500" />
+              <span className="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Por persona</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {personas.map(p => (
+                <PersonaPayCard key={p.persona} p={p} fmt={fmtPago} onPagarTodo={pagarTodoPersona} />
+              ))}
+            </div>
+          </div>
+
           {/* Detalle por persona — formato TABLA (pedido del user), con fila
               expandible para el detalle semana por semana. */}
           <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
@@ -334,6 +349,58 @@ export default function CreativaDashboard({ addToast }) {
           </p>
         </>
       )}
+    </div>
+  );
+}
+
+// Tarjeta de pago por persona — resumen de un vistazo: anillo con cuánto de lo
+// que ganó ya está pagado, completos del mes, a-pagar / pagado / pendiente, y
+// botón "Pagar todo". El detalle semana a semana sigue en la tabla de abajo.
+function PersonaPayCard({ p, fmt, onPagarTodo }) {
+  const bonus = p.semanas.reduce((s, x) => s + (x.bonus || 0), 0);
+  const pctPaid = p.total > 0 ? Math.round((p.pagado / p.total) * 100) : 100;
+  const alDia = p.pendiente <= 0;
+  const R = 19, C = 2 * Math.PI * R; // circunferencia del anillo
+  const off = C * (1 - Math.min(1, Math.max(0, pctPaid / 100)));
+  const ringColor = alDia ? '#34d399' : '#fbbf24';
+  return (
+    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
+      <div className="flex items-center gap-3 mb-3">
+        <div className="relative w-[46px] h-[46px] shrink-0">
+          <svg width="46" height="46" viewBox="0 0 46 46" className="-rotate-90">
+            <circle cx="23" cy="23" r={R} fill="none" stroke="currentColor" strokeWidth="5" className="text-gray-200 dark:text-gray-700" />
+            <circle cx="23" cy="23" r={R} fill="none" stroke={ringColor} strokeWidth="5" strokeLinecap="round"
+              strokeDasharray={C} strokeDashoffset={off} />
+          </svg>
+          <span className="absolute inset-0 flex items-center justify-center text-[11px] font-bold tabular-nums"
+            style={{ color: ringColor }}>
+            {alDia ? '✓' : `${pctPaid}%`}
+          </span>
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{p.persona}</p>
+          <p className="text-[11px] text-gray-500 dark:text-gray-400">
+            {p.completados} completo{p.completados !== 1 ? 's' : ''}{bonus > 0 ? ` · bonus ${fmt(bonus)}` : ''}
+          </p>
+        </div>
+      </div>
+      <div className="space-y-1 text-[13px]">
+        <div className="flex justify-between"><span className="text-gray-500 dark:text-gray-400">A pagar</span><span className="font-mono tabular-nums font-bold text-gray-900 dark:text-gray-100">{fmt(p.total)}</span></div>
+        <div className="flex justify-between"><span className="text-gray-500 dark:text-gray-400">Pagado</span><span className="font-mono tabular-nums text-emerald-600 dark:text-emerald-400">{p.pagado > 0 ? fmt(p.pagado) : '—'}</span></div>
+        <div className="flex justify-between"><span className="text-gray-500 dark:text-gray-400">Pendiente</span><span className={`font-mono tabular-nums font-bold ${alDia ? 'text-gray-400 dark:text-gray-500' : 'text-amber-600 dark:text-amber-400'}`}>{alDia ? '—' : fmt(p.pendiente)}</span></div>
+      </div>
+      <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700/60">
+        {alDia ? (
+          <div className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400">
+            <CheckCircle2 size={14} /> Al día
+          </div>
+        ) : (
+          <button onClick={() => onPagarTodo(p)}
+            className="w-full inline-flex items-center justify-center gap-1.5 text-xs font-bold px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition">
+            <CheckCircle2 size={14} /> Pagar todo ({fmt(p.pendiente)})
+          </button>
+        )}
+      </div>
     </div>
   );
 }

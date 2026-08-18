@@ -906,7 +906,7 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
       {/* Título grande + persona a la derecha (como el mock del Estudio) */}
       <div className="flex items-start gap-1.5">
         <GripVertical size={14} className="text-gray-300 dark:text-gray-600 mt-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition cursor-grab active:cursor-grabbing" />
-        <span className="text-[15px] font-extrabold tracking-tight text-gray-900 dark:text-white leading-tight flex-1 min-w-0 truncate" title={a.productoNombre}>{a.productoNombre || 'Producto'}</span>
+        <span className="text-sm font-extrabold tracking-tight text-gray-900 dark:text-white leading-snug flex-1 min-w-0 line-clamp-2 break-words" title={a.productoNombre}>{a.productoNombre || 'Producto'}</span>
         <div className="relative shrink-0 flex items-center gap-1" onClick={e => e.stopPropagation()}>
           {/* Aviso compacto: etiqueta sin cuenta → nadie la ve en su tablero */}
           {a.persona && !a.creatorId && (

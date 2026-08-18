@@ -336,6 +336,23 @@ async function hydrate() {
 
 export function refreshProduccion() { return hydrate(); }
 
+// Escape hatch: DESCARTA el cache local (y las marcas de sin-sincronizar) y
+// vuelve a traer todo de la nube (la fuente de verdad). Sirve cuando quedó una
+// tarjeta "fantasma" local que nunca sincronizó y no querés que vuelva. Ojo:
+// descarta cambios locales que todavía no llegaron al server.
+export async function resyncDesdeNube() {
+  _unsynced = new Set();
+  try {
+    localStorage.removeItem(UNSYNCED_KEY);
+    localStorage.removeItem(MIGRATED_KEY);
+    localStorage.removeItem(MIGRATED_KEY + '-pagos');
+  } catch {}
+  _cache = [];
+  try { localStorage.setItem(KEY, '[]'); } catch {}
+  notify();
+  return hydrate();
+}
+
 // Arranca (o reinicia) el sync. Llamar al loguear con el rol resuelto.
 export async function initProduccionSync({ role, userId, name } = {}) {
   _role = role || null;

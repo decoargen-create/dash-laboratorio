@@ -7,12 +7,21 @@
 // vista de plata/resumen.
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Wallet, ChevronDown, Check, Clock, CheckCircle2, Users, Film, TrendingUp, Rocket, ExternalLink, Table2 } from 'lucide-react';
+import { Wallet, ChevronDown, Check, Clock, CheckCircle2, Users, Film, TrendingUp, Rocket, ExternalLink, Table2, UploadCloud } from 'lucide-react';
 import {
   monthKeyOf, monthLabel, allMonthKeys, monthlySummary, setWeekPaid,
   weekLabel, subscribeProduccion, weeksInMonth, listAssignments, paymentSummary,
-  weekNumber, weekRange, esCompleto,
+  weekNumber, weekRange, esCompleto, allWeekKeys, updateAssignment,
 } from './produccionStore.js';
+
+// Nombre de la carpeta de Drive de una tarjeta: "<Persona> - sem d-m" (igual que
+// lo arma el server), para mostrarlo en la cola "Para subir".
+function folderName(persona, weekKey) {
+  const p = (persona || 'Equipo').trim() || 'Equipo';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(weekKey || '')) return p;
+  const [, m, d] = weekKey.split('-');
+  return `${p} - sem ${Number(d)}-${Number(m)}`;
+}
 import { probeDrive } from './produccionUpload.jsx';
 import { fmtMoney, toUSD, subscribeMoney } from './moneyStore.js';
 
@@ -96,6 +105,30 @@ export default function CreativaDashboard({ addToast }) {
     addToast?.({ type: 'success', message: `Todo lo pendiente de ${p.persona} marcado como pagado` });
   };
 
+  // ── "Para subir a la plataforma": tarjetas APROBADAS (entregadas y ok en
+  // Drive) que todavía no publicaste. Se calcula en cada render (no memoizar):
+  // al marcar una como subida, updateAssignment dispara el re-render y la fila
+  // tiene que desaparecer sola. Cross-mes: es tu agenda de pendientes.
+  const paraSubir = [];
+  for (const wk of allWeekKeys()) {
+    for (const a of listAssignments(wk)) {
+      if (a.estado !== 'aprobado') continue;
+      paraSubir.push({
+        id: a.id,
+        producto: a.productoNombre || 'Producto',
+        carpeta: folderName(a.persona, wk),
+        videos: (a.archivos || []).length,
+        folderLink: (a.archivos || []).find(f => f.folderLink)?.folderLink || null,
+      });
+    }
+  }
+  paraSubir.sort((x, y) => x.producto.localeCompare(y.producto, 'es'));
+
+  const marcarSubido = (row) => {
+    updateAssignment(row.id, { estado: 'publicado' });
+    addToast?.({ type: 'success', message: `${row.producto} marcado como subido 🚀 (pasó a Publicado)` });
+  };
+
   return (
     <div className="max-w-4xl mx-auto space-y-5">
       {/* Header */}
@@ -115,6 +148,43 @@ export default function CreativaDashboard({ addToast }) {
           <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
         </div>
       </div>
+
+      {/* Para subir a la plataforma — cola de lo aprobado en Drive, listo para
+          que lo bajes y lo subas a los ads. Tu agenda: entrás, ves, subís. */}
+      {paraSubir.length > 0 && (
+        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-100 dark:border-gray-700/60">
+            <UploadCloud size={15} className="text-brand-500" />
+            <span className="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Para subir a la plataforma</span>
+            <span className="ml-auto text-xs font-bold text-brand-600 dark:text-brand-400">{paraSubir.length} pendiente{paraSubir.length !== 1 ? 's' : ''}</span>
+          </div>
+          <div className="divide-y divide-gray-100 dark:divide-gray-700/60">
+            {paraSubir.map(row => (
+              <div key={row.id} className="flex items-center gap-3 px-4 py-2.5">
+                <button onClick={() => marcarSubido(row)} title="Marcar como subido a la plataforma"
+                  className="w-5 h-5 shrink-0 rounded-md border-2 border-gray-300 dark:border-gray-500 text-transparent hover:text-white hover:bg-emerald-500 hover:border-emerald-500 flex items-center justify-center transition">
+                  <Check size={13} />
+                </button>
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-semibold text-gray-800 dark:text-gray-100 truncate">{row.producto}</div>
+                  <div className="text-[11px] text-gray-400 dark:text-gray-500 truncate">{row.carpeta} · {row.videos} video{row.videos !== 1 ? 's' : ''}</div>
+                </div>
+                {row.folderLink ? (
+                  <a href={row.folderLink} target="_blank" rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-xs font-bold text-brand-600 dark:text-brand-300 hover:underline shrink-0">
+                    <ExternalLink size={13} /> Abrir Drive
+                  </a>
+                ) : (
+                  <span className="text-[10px] text-gray-400 shrink-0" title="Se subió a AdsLab (antes de conectar Drive)">AdsLab</span>
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="px-4 py-2 text-[10px] text-gray-400 dark:text-gray-500 border-t border-gray-100 dark:border-gray-700/60">
+            Productos aprobados listos en Drive. Al marcarlos como subidos pasan a <b>Publicado</b> en Producción.
+          </div>
+        </div>
+      )}
 
       {/* KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

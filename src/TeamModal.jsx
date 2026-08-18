@@ -8,7 +8,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { X, UserPlus, Loader2, Trash2, KeyRound, Users, Mail, Copy, Check, Search } from 'lucide-react';
 import { listTeam, createMember, resetPassword, removeMember } from './produccionTeam.js';
-import { personasEnTarjetas } from './produccionStore.js';
+import { personasEnTarjetas, assignCreator, allWeekKeys, listAssignments } from './produccionStore.js';
 import ConfirmDialog from './ConfirmDialog.jsx';
 
 // Genera una contraseña simple pero decente para pasarle al chico.
@@ -26,12 +26,16 @@ export default function TeamModal({ onClose, addToast }) {
   const dlgRef = useRef(null);
   dlgRef.current = dlg;
 
-  // Esc cierra el panel (detalle de uso esperado en cualquier popup).
+  // Cierre PROTEGIDO: si hay datos tipeados en el alta, click-afuera y Esc NO
+  // cierran (para no perder lo escrito). La ✕ siempre cierra. Usamos un ref para
+  // que el handler de Esc lea siempre los valores actuales del form.
+  const guardedCloseRef = useRef(() => {});
+
   useEffect(() => {
-    const h = (e) => { if (e.key === 'Escape' && !dlgRef.current) onClose?.(); };
+    const h = (e) => { if (e.key === 'Escape' && !dlgRef.current) guardedCloseRef.current(); };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
-  }, [onClose]);
+  }, []);
 
   const [team, setTeam] = useState([]);
   const [q, setQ] = useState('');
@@ -44,7 +48,16 @@ export default function TeamModal({ onClose, addToast }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState(() => suggestPassword());
   const [lastCreated, setLastCreated] = useState(null); // { name, email, password }
+  // Persona de texto que estamos convirtiendo en cuenta: al crear, se le
+  // vinculan SUS tarjetas (aunque le cambies el nombre). { name, cards } | null.
+  const [linkPersona, setLinkPersona] = useState(null);
   const emailRef = useRef(null);
+
+  // Cierre protegido: no cerrar si hay algo escrito en el alta.
+  guardedCloseRef.current = () => {
+    if (name.trim() || email.trim()) return;
+    onClose?.();
+  };
 
   // Personas que ya venís usando como texto en las tarjetas (Fran, Wanda…).
   // Las que todavía NO tienen cuenta se ofrecen para crearlas con un click.
@@ -52,8 +65,14 @@ export default function TeamModal({ onClose, addToast }) {
   const teamNames = new Set(team.map(m => (m.display_name || '').trim().toLowerCase()).filter(Boolean));
   const sinCuenta = personas.filter(p => !p.conCuenta && !teamNames.has(p.persona.toLowerCase()));
 
-  // Precarga el nombre en el form de alta y manda el foco al email.
-  const usarPersona = (nombre) => { setName(nombre); setLastCreated(null); setTimeout(() => emailRef.current?.focus(), 0); };
+  // Precarga el nombre y recuerda de qué persona viene (para vincular sus
+  // tarjetas al crear). Podés editar el nombre libremente después.
+  const usarPersona = (p) => {
+    setName(p.persona);
+    setLinkPersona({ name: p.persona, cards: p.tarjetas });
+    setLastCreated(null);
+    setTimeout(() => emailRef.current?.focus(), 0);
+  };
 
   const reload = () => {
     setLoading(true);
@@ -69,11 +88,23 @@ export default function TeamModal({ onClose, addToast }) {
     if (password.length < 6) { addToast?.({ type: 'warning', message: 'La contraseña necesita 6+ caracteres' }); return; }
     setBusy(true);
     try {
-      await createMember(em, password, name.trim());
+      const member = await createMember(em, password, name.trim());
+      const displayName = name.trim() || em.split('@')[0];
+      // Si venís de una persona de texto (ej: "Fran"), le enganchamos SUS
+      // tarjetas a la cuenta nueva — aunque le hayas cambiado el nombre.
+      let linked = 0;
+      if (linkPersona && member?.id) {
+        const target = linkPersona.name.trim().toLowerCase();
+        for (const wk of allWeekKeys()) {
+          for (const a of listAssignments(wk)) {
+            if ((a.persona || '').trim().toLowerCase() === target) { assignCreator(a.id, { creatorId: member.id, persona: displayName }); linked++; }
+          }
+        }
+      }
       // Dejamos las credenciales A LA VISTA (el toast se va y se perderían).
-      setLastCreated({ name: name.trim() || em.split('@')[0], email: em, password });
-      addToast?.({ type: 'success', message: `Cuenta creada para ${name.trim() || em}.` });
-      setName(''); setEmail(''); setPassword(suggestPassword());
+      setLastCreated({ name: displayName, email: em, password });
+      addToast?.({ type: 'success', message: `Cuenta creada para ${displayName}${linked > 0 ? ` · ${linked} tarjeta${linked !== 1 ? 's' : ''} vinculada${linked !== 1 ? 's' : ''}` : ''}.` });
+      setName(''); setEmail(''); setPassword(suggestPassword()); setLinkPersona(null);
       reload();
     } catch (err) {
       addToast?.({ type: 'error', message: err.message });
@@ -91,7 +122,7 @@ export default function TeamModal({ onClose, addToast }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto bg-black/50 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto bg-black/50 backdrop-blur-sm" onClick={() => guardedCloseRef.current()}>
       <div className="w-full max-w-lg my-6 bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden" onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div className="flex items-center gap-2 px-5 py-4 border-b border-gray-100 dark:border-gray-800">
@@ -123,6 +154,14 @@ export default function TeamModal({ onClose, addToast }) {
                 {copied === 'newpass' ? <Check size={15} className="text-emerald-500" /> : <Copy size={15} />}
               </button>
             </div>
+            {/* Aviso de vinculación: al crear, se le enganchan las tarjetas del
+                nombre original (aunque hayas editado el nombre a mostrar). */}
+            {linkPersona && (
+              <div className="flex items-center gap-2 text-[11px] text-brand-700 dark:text-brand-300 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-lg px-2.5 py-1.5">
+                <span className="flex-1">Se le vinculan las <b>{linkPersona.cards} tarjeta{linkPersona.cards !== 1 ? 's' : ''}</b> de «{linkPersona.name}» a esta cuenta.</span>
+                <button type="button" onClick={() => setLinkPersona(null)} className="font-bold hover:underline shrink-0">quitar</button>
+              </div>
+            )}
             <button type="submit" disabled={busy}
               className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition disabled:opacity-50">
               {busy ? <><Loader2 size={15} className="animate-spin" /> Creando…</> : <><UserPlus size={15} /> Crear cuenta</>}
@@ -144,7 +183,7 @@ export default function TeamModal({ onClose, addToast }) {
               </p>
               <div className="flex flex-wrap gap-2">
                 {sinCuenta.map(p => (
-                  <button key={p.persona} type="button" onClick={() => usarPersona(p.persona)}
+                  <button key={p.persona} type="button" onClick={() => usarPersona(p)}
                     className="group inline-flex items-center gap-1.5 pl-1.5 pr-2.5 py-1 rounded-full bg-white dark:bg-gray-800 border border-amber-300 dark:border-amber-800 hover:border-brand-400 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition"
                     title={`Crear la cuenta de ${p.persona} (${p.tarjetas} tarjeta${p.tarjetas !== 1 ? 's' : ''})`}>
                     <span className="w-5 h-5 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 flex items-center justify-center text-[10px] font-bold uppercase">

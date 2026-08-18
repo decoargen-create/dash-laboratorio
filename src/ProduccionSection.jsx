@@ -748,9 +748,11 @@ export default function ProduccionSection({ addToast }) {
         );
       })()}
 
-      {/* Tablero: en desktop, 4 columnas EXACTAMENTE iguales (grid); en
-          pantallas chicas cae a scroll horizontal. */}
-      <div className="flex gap-3 overflow-x-auto pb-2 lg:grid lg:grid-cols-4 lg:overflow-visible">
+      {/* Tablero: en desktop, 4 columnas EXACTAMENTE iguales (grid) que se
+          estiran para llenar el alto de la pantalla (se adapta al viewport con
+          vh, así no queda un vacío gigante debajo); en pantallas chicas cae a
+          scroll horizontal. */}
+      <div className="flex items-stretch gap-3 overflow-x-auto pb-2 lg:grid lg:grid-cols-4 lg:overflow-visible lg:min-h-[calc(100vh-18rem)]">
         {COLS.map(col => {
           const cards = byCol[col.key] || [];
           return (
@@ -758,21 +760,23 @@ export default function ProduccionSection({ addToast }) {
               onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDragOver(col.key); }}
               onDragLeave={() => setDragOver(d => d === col.key ? null : d)}
               onDrop={e => onDrop(e, col.key)}
-              className={`flex-1 min-w-[240px] lg:min-w-0 rounded-xl p-2.5 transition ${dragOver === col.key ? 'bg-brand-50 dark:bg-brand-900/20 ring-2 ring-brand-300 dark:ring-brand-700' : 'bg-gray-50 dark:bg-gray-800/40'}`}>
+              className={`flex flex-col flex-1 min-w-[240px] lg:min-w-0 rounded-xl p-2.5 transition ${dragOver === col.key ? 'bg-brand-50 dark:bg-brand-900/20 ring-2 ring-brand-300 dark:ring-brand-700' : 'bg-gray-50 dark:bg-gray-800/40'}`}>
               {/* Cabecera tintada con el color del estado: se reconoce por zona */}
-              <div className={`flex items-center gap-2 px-2.5 py-1.5 mb-2 rounded-lg ${col.hdr}`}>
+              <div className={`flex items-center gap-2 px-2.5 py-1.5 mb-2 rounded-lg shrink-0 ${col.hdr}`}>
                 <span className="text-sm leading-none">{col.emoji}</span>
                 <span className={`text-xs font-bold uppercase tracking-wide ${col.text}`}>{ESTADO_LABELS[col.key]}</span>
                 <span className="ml-auto text-xs font-mono text-gray-400 tabular-nums">{cards.length}</span>
               </div>
-              <div className="space-y-2 min-h-[60px]">
+              {/* La lista crece para ocupar la columna; si hay muchas tarjetas,
+                  scrollea DENTRO de la columna (no empuja toda la página). */}
+              <div className="flex flex-col gap-2 flex-1 min-h-[60px] lg:overflow-y-auto">
                 {cards.map(a => (
                   <KanbanCard key={a.id} a={a} personas={personas} team={team} addToast={addToast}
                     onOpen={() => setDetailId(a.id)}
                     onAssign={(p) => assignPersona(a.id, p)} />
                 ))}
                 {cards.length === 0 && (
-                  <div className="text-center text-xs text-gray-300 dark:text-gray-600 py-4 select-none">
+                  <div className="m-auto text-center text-xs text-gray-300 dark:text-gray-600 py-4 select-none">
                     {col.empty}
                   </div>
                 )}

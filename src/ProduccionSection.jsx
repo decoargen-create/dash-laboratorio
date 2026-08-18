@@ -12,14 +12,14 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Film, Plus, X, Trash2, ChevronDown, UploadCloud, Loader2, CheckCircle2,
   AlertTriangle, ExternalLink, FileText, GripVertical, Users, History, Search, ArrowLeftRight,
-  Bell, BellRing, Inbox, Eye, RefreshCw, Calendar, Filter,
+  Bell, BellRing, Inbox, Eye, RefreshCw, Calendar, Filter, FolderOpen,
 } from 'lucide-react';
 import {
   ESTADOS, ESTADO_LABELS, VIDEOS_POR_PRODUCTO, weekKeyOf, weekLabel, weekRange, allWeekKeys,
   listAssignments, addAssignment, updateAssignment, removeAssignment, assignPersona,
   assignCreator, subscribeProduccion, esCompleto, bonusObjetivo, inversionPorProducto,
   getRole, entregasNuevas, ultimaSubidaTs, personasEnTarjetas, resumenVideosPorProducto,
-  resyncDesdeNube, vaciarTodo, pagoProductoDe,
+  resyncDesdeNube, vaciarTodo, setMaterialLinkProducto, pagoProductoDe,
 } from './produccionStore.js';
 import { CreativosSection, subirParaTarjeta, VIDEO_ACCEPT, probeDrive } from './produccionUpload.jsx';
 import { listTeam, createMember, removeMember } from './produccionTeam.js';
@@ -1122,6 +1122,13 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
           </b>
         )}
         {a.brief?.trim() && <FileText size={12} className="text-gray-400" title="Tiene brief" />}
+        {(a.materialLink || '').trim() && (
+          <a href={a.materialLink.trim()} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
+            title="Abrir la carpeta de material del producto en Drive"
+            className="inline-flex items-center text-pink-500 hover:text-pink-600">
+            <FolderOpen size={12} />
+          </a>
+        )}
         {trabada && <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400" title="Hace más de 24h que está en revisión">🐢 +24h</span>}
         {/* Eliminar directo + mover de columna (punto de color + chevron) */}
         <div className="relative ml-auto flex items-center gap-0.5" onClick={e => e.stopPropagation()}>
@@ -1691,15 +1698,20 @@ function IntegranteSelector({ a, team = [], personas = [], onTeamChange, addToas
 // creativos (subida a Drive), y contador de videos aprobados.
 function CardDetailModal({ a, personas, team = [], onClose, addToast, onTeamChange }) {
   const [brief, setBrief] = useState(a.brief || '');
+  const [material, setMaterial] = useState(a.materialLink || '');
   const nFiles = a.archivos?.length || 0;
 
   const saveBrief = () => { if (brief !== (a.brief || '')) updateAssignment(a.id, { brief }); };
+  // El link de material es POR PRODUCTO: lo copiamos a todas las tarjetas del
+  // mismo producto (así el editor lo ve en cualquiera de ellas).
+  const saveMaterial = () => { const v = material.trim(); if (v !== (a.materialLink || '')) setMaterialLinkProducto(a.productoId, a.productoNombre, v); };
+  const saveAll = () => { saveBrief(); saveMaterial(); };
   // Diálogos propios (reemplazan window.confirm/prompt): 'eliminar' | 'cambios'.
   const [dlg, setDlg] = useState(null);
-  useEscape(() => { if (dlg) return; saveBrief(); onClose(); }); // Esc = guardar brief y cerrar (salvo diálogo abierto)
+  useEscape(() => { if (dlg) return; saveAll(); onClose(); }); // Esc = guardar brief y cerrar (salvo diálogo abierto)
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto bg-black/50 backdrop-blur-sm" onClick={() => { saveBrief(); onClose(); }}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto bg-black/50 backdrop-blur-sm" onClick={() => { saveAll(); onClose(); }}>
       <div className="w-full max-w-2xl my-6 bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden" onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div className="flex items-start gap-2 px-5 py-4 border-b border-gray-100 dark:border-gray-800">
@@ -1711,7 +1723,7 @@ function CardDetailModal({ a, personas, team = [], onClose, addToast, onTeamChan
               <span className="text-[11px] text-gray-400">{ESTADO_LABELS[a.estado]}</span>
             </div>
           </div>
-          <button onClick={() => { saveBrief(); onClose(); }} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+          <button onClick={() => { saveAll(); onClose(); }} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
         </div>
 
         <div className="p-5 space-y-5 max-h-[70vh] overflow-y-auto">
@@ -1738,6 +1750,28 @@ function CardDetailModal({ a, personas, team = [], onClose, addToast, onTeamChan
               <p className="text-xs text-amber-800 dark:text-amber-200 whitespace-pre-wrap">{a.nota}</p>
             </div>
           )}
+
+          {/* Material del producto (Drive) — link a la carpeta con TODO el
+              material. Es por PRODUCTO: se guarda en todas las tarjetas del
+              mismo producto y el editor lo abre desde su tablero. */}
+          <div>
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <FolderOpen size={13} className="text-pink-500" />
+              <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400">Material del producto (Drive)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <input type="url" value={material} onChange={e => setMaterial(e.target.value)} onBlur={saveMaterial}
+                placeholder="https://drive.google.com/… (carpeta con todo el material del producto)"
+                className="flex-1 min-w-0 px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500" />
+              {material.trim() && (
+                <a href={material.trim()} target="_blank" rel="noopener noreferrer" onClick={saveMaterial}
+                  className="shrink-0 inline-flex items-center gap-1 px-3 py-2 text-xs font-bold text-pink-600 dark:text-pink-300 border border-pink-300 dark:border-pink-800 rounded-lg hover:bg-pink-50 dark:hover:bg-pink-900/20 transition">
+                  <FolderOpen size={13} /> Abrir
+                </a>
+              )}
+            </div>
+            <p className="text-[10px] text-gray-400 mt-1">Se aplica a todas las tarjetas de este producto.</p>
+          </div>
 
           {/* Brief a mano */}
           <div>
@@ -1799,7 +1833,7 @@ function CardDetailModal({ a, personas, team = [], onClose, addToast, onTeamChan
             className="ml-auto inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/30 hover:bg-amber-200 dark:hover:bg-amber-900/50 rounded-lg transition">
             <AlertTriangle size={14} /> Pedir cambios
           </button>
-          <button onClick={() => { saveBrief(); onClose(); }} className="px-4 py-2 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition">Listo</button>
+          <button onClick={() => { saveAll(); onClose(); }} className="px-4 py-2 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition">Listo</button>
         </div>
 
         {/* Diálogos propios de la plataforma */}

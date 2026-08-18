@@ -48,6 +48,10 @@ let _refetchBound = false;
 // hidratar. Si es false, el historial se registra local pero NO se manda a la
 // nube (para no romper writes cuando la migración todavía no se aplicó).
 let _histCloud = false;
+// ¿La base ya tiene la columna `material_link` (migración 0028)? Igual que
+// _histCloud: si es false, el link de material se guarda local pero NO se manda
+// a la nube (para no romper writes cuando la migración todavía no se aplicó).
+let _materialCloud = false;
 // Contador de escrituras locales. Sirve para que un hydrate/refetch NO pise un
 // cambio optimista que ocurrió mientras traíamos la data de la nube.
 let _writeSeq = 0;
@@ -136,6 +140,7 @@ function rowToLocal(r) {
     videosAprobados: r.videos_aprobados != null ? r.videos_aprobados : 0,
     brief: r.brief || '',
     nota: r.nota || '',
+    materialLink: r.material_link || '',
     pagado: !!r.pagado,
     archivos: Array.isArray(r.archivos) ? r.archivos : [],
     historial: Array.isArray(r.historial) ? r.historial : [],
@@ -167,6 +172,8 @@ function localToRow(a) {
   // Solo mandamos historial si la base lo soporta (evita romper el write
   // cuando la migración 0021 todavía no se aplicó).
   if (_histCloud) row.historial = Array.isArray(a.historial) ? a.historial : [];
+  // Ídem con material_link (migración 0028).
+  if (_materialCloud) row.material_link = a.materialLink || '';
   return row;
 }
 
@@ -281,6 +288,11 @@ async function hydrate() {
       const probe = await supabase.from(TABLE).select('historial').limit(1);
       _histCloud = !probe.error;
     } catch { _histCloud = false; }
+    // Ídem `material_link` (migración 0028).
+    try {
+      const probe = await supabase.from(TABLE).select('material_link').limit(1);
+      _materialCloud = !probe.error;
+    } catch { _materialCloud = false; }
 
     const seqBefore = _writeSeq;
     const { data, error } = await supabase.from(TABLE).select('*');
@@ -531,12 +543,42 @@ export function personasEnTarjetas() {
   return [...map.values()].sort((x, y) => y.tarjetas - x.tarjetas);
 }
 
-export function addAssignment({ weekKey, productoId, productoNombre, persona, creatorId = null, tipo = 'renovado', brief = '' }) {
+// Busca el link de material de un producto en cualquier tarjeta existente del
+// mismo producto (así el link es "por producto": se setea una vez y se reusa).
+export function materialLinkDeProducto(productoId, productoNombre) {
+  const pid = productoId != null ? String(productoId) : null;
+  const nom = (productoNombre || '').trim().toLowerCase();
+  for (const a of read()) {
+    const match = pid != null ? String(a.productoId) === pid : (a.productoNombre || '').trim().toLowerCase() === nom;
+    if (match && (a.materialLink || '').trim()) return a.materialLink.trim();
+  }
+  return '';
+}
+
+// Setea el link de material para TODAS las tarjetas de un producto (por eso es
+// "por producto"): el admin lo pone una vez y queda en todas. Devuelve cuántas
+// tarjetas tocó.
+export function setMaterialLinkProducto(productoId, productoNombre, url) {
+  const pid = productoId != null ? String(productoId) : null;
+  const nom = (productoNombre || '').trim().toLowerCase();
+  const link = (url || '').trim();
+  let n = 0;
+  for (const a of read()) {
+    const match = pid != null ? String(a.productoId) === pid : (a.productoNombre || '').trim().toLowerCase() === nom;
+    if (match && (a.materialLink || '') !== link) { updateAssignment(a.id, { materialLink: link }); n++; }
+  }
+  return n;
+}
+
+export function addAssignment({ weekKey, productoId, productoNombre, persona, creatorId = null, tipo = 'renovado', brief = '', materialLink = '' }) {
   const per = (persona || '').trim();
   // persona es opcional: una tarjeta puede quedar "sin asignar" hasta que se le
   // cuelgue la persona (como en Trello, agregás el label después).
   if (!weekKey) return null;
   const arr = read().slice();
+  // El link de material es por producto: si no lo pasan, lo heredamos de otra
+  // tarjeta del mismo producto.
+  const material = (materialLink || '').trim() || materialLinkDeProducto(productoId, productoNombre);
   const nueva = {
     id: genId(),
     weekKey,
@@ -551,6 +593,7 @@ export function addAssignment({ weekKey, productoId, productoNombre, persona, cr
     videosAprobados: 0,
     brief: brief || '',
     nota: '',
+    materialLink: material,
     pagado: false,
     archivos: [],
     historial: [nuevoEvento('creacion')],

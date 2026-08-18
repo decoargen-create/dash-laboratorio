@@ -11,7 +11,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Film, LogOut, Moon, Sun, RefreshCw, CheckCircle2, Clock, ChevronDown, ChevronRight, Sparkles, ExternalLink, AlertTriangle, Wallet, X, FileText, UploadCloud, Loader2,
+  Film, LogOut, Moon, Sun, RefreshCw, CheckCircle2, Clock, ChevronDown, ChevronRight, Sparkles, ExternalLink, AlertTriangle, Wallet, X, FileText, UploadCloud, Loader2, FolderOpen,
 } from 'lucide-react';
 import {
   subscribeProduccion, allWeekKeys, listAssignments, weekLabel, weekKeyOf,
@@ -74,6 +74,11 @@ function CreatorMiniCard({ a, num, onOpen, addToast }) {
         {corregir && <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400"><AlertTriangle size={10} /> Corregir</span>}
         <span className="inline-flex items-center gap-1 text-gray-500 dark:text-gray-400"><Film size={11} className="text-emerald-500" /><b className="text-gray-700 dark:text-gray-200">{nSubidos}</b>/{VIDEOS_POR_PRODUCTO} videos</span>
         {conBrief && <span className="inline-flex items-center gap-1 text-brand-600 dark:text-brand-300"><FileText size={10} /> Consigna</span>}
+        {(a.materialLink || '').trim() && (
+          <a href={a.materialLink.trim()} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
+            title="Material del producto en Drive"
+            className="inline-flex items-center gap-1 text-pink-600 dark:text-pink-300 hover:underline"><FolderOpen size={10} /> Material</a>
+        )}
       </div>
       {/* Subir directo (mismo botón que ve el admin). El wrapper corta el click
           para no abrir el detalle al tocar el botón / elegir archivos. */}
@@ -141,6 +146,18 @@ function CreatorCardDetail({ a, num, onClose, addToast }) {
         </div>
 
         <div className="p-5 space-y-4 max-h-[72vh] overflow-y-auto">
+          {/* Material del producto: carpeta de Drive con todo el contenido. */}
+          {(a.materialLink || '').trim() && (
+            <a href={a.materialLink.trim()} target="_blank" rel="noopener noreferrer"
+              className="flex items-center gap-2 rounded-lg border border-pink-300 dark:border-pink-800 bg-pink-50 dark:bg-pink-900/20 px-3 py-2.5 hover:bg-pink-100 dark:hover:bg-pink-900/30 transition">
+              <FolderOpen size={16} className="text-pink-500 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="text-[11px] font-bold uppercase text-pink-700 dark:text-pink-300">Material del producto</div>
+                <div className="text-xs text-pink-600 dark:text-pink-400">Abrí la carpeta de Drive con todo el contenido</div>
+              </div>
+              <ExternalLink size={14} className="text-pink-500 shrink-0" />
+            </a>
+          )}
           {(a.nota || '').trim() && (
             <div className="rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-3 py-2.5">
               <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase text-amber-700 dark:text-amber-300 mb-1"><AlertTriangle size={12} /> Hay que corregir</div>

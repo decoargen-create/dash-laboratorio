@@ -65,7 +65,7 @@ export default async function handler(req, res) {
           const personaFolder = await driveEnsureFolder(ctx.token, prodFolder, clean(body.persona, 'Equipo'));
           out.personaLink = `https://drive.google.com/drive/folders/${personaFolder}`;
           if (!out.cardLink && body.cardId) {
-            const cardFolder = await driveEnsureFolder(ctx.token, personaFolder, cardFolderName(body.weekKey, body.cardId));
+            const cardFolder = await driveEnsureFolder(ctx.token, personaFolder, cardFolderName(body.productoNombre, body.persona, body.weekKey));
             out.cardLink = `https://drive.google.com/drive/folders/${cardFolder}`;
           }
         }
@@ -96,7 +96,7 @@ export default async function handler(req, res) {
     } else {
       const prodFolder = await driveEnsureFolder(token, rootId, clean(productoNombre, 'Producto'));
       const personaFolder = await driveEnsureFolder(token, prodFolder, clean(persona, 'Equipo'));
-      subFolder = await driveEnsureFolder(token, personaFolder, cardFolderName(weekKey, body.cardId));
+      subFolder = await driveEnsureFolder(token, personaFolder, cardFolderName(productoNombre, persona, weekKey));
     }
 
     const finalName = finalFileName(filename, productoNombre, persona);

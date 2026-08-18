@@ -11,7 +11,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Film, LogOut, Moon, Sun, RefreshCw, CheckCircle2, Clock, ChevronDown, ChevronRight, Sparkles, ExternalLink, AlertTriangle, Wallet,
+  Film, LogOut, Moon, Sun, RefreshCw, CheckCircle2, Clock, ChevronDown, ChevronRight, Sparkles, ExternalLink, AlertTriangle, Wallet, X, FileText, UploadCloud,
 } from 'lucide-react';
 import {
   subscribeProduccion, allWeekKeys, listAssignments, weekLabel, weekKeyOf,
@@ -35,104 +35,134 @@ function EstadoBadge({ estado }) {
   );
 }
 
-function CreatorCard({ a, addToast }) {
-  const [openBrief, setOpenBrief] = useState(false);
+// Numera los duplicados del mismo producto en la misma semana → { id: n } (solo
+// si hay 2+). Diferencia "Cepillo #1 / #2 / #3" asignados a la misma persona.
+function numerarDuplicados(cards) {
+  const groups = {};
+  for (const a of cards) {
+    const k = `${a.weekKey}|${(a.productoNombre || '').trim().toLowerCase()}`;
+    (groups[k] = groups[k] || []).push(a);
+  }
+  const out = {};
+  for (const k in groups) {
+    const arr = groups[k].slice().sort((x, y) => String(x.createdAt || '').localeCompare(String(y.createdAt || '')));
+    if (arr.length > 1) arr.forEach((a, i) => { out[a.id] = i + 1; });
+  }
+  return out;
+}
+
+// Columnas del tablero del editor (mismo orden que ve el admin).
+const COLS_CREATOR = [
+  { key: 'porhacer', label: 'Por hacer', dot: 'bg-slate-400' },
+  { key: 'revision', label: 'En revisión', dot: 'bg-amber-400' },
+  { key: 'aprobado', label: 'Aprobado', dot: 'bg-emerald-500' },
+  { key: 'publicado', label: 'Publicado', dot: 'bg-violet-500' },
+];
+
+// Tarjeta compacta del tablero — se toca para entrar al detalle.
+function CreatorMiniCard({ a, num, onOpen }) {
+  const nSubidos = (a.archivos || []).length;
+  const corregir = (a.nota || '').trim().length > 0;
+  const conBrief = (a.brief || '').trim().length > 0;
+  return (
+    <button onClick={onOpen}
+      className="w-full text-left rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 shadow-sm hover:border-pink-300 dark:hover:border-pink-700 hover:shadow-md transition">
+      <div className="flex items-start gap-2">
+        <h3 className="font-bold text-sm text-gray-900 dark:text-white leading-tight flex-1 min-w-0 line-clamp-2">
+          {a.productoNombre || 'Producto'}{num ? <span className="text-brand-500"> #{num}</span> : ''}
+        </h3>
+        <ChevronRight size={15} className="text-gray-300 shrink-0 mt-0.5" />
+      </div>
+      <p className="text-[10px] uppercase tracking-wide text-gray-400 dark:text-gray-500 mt-1">{a.tipo === 'testeo' ? 'Testeo' : 'Renovado'} · {weekLabel(a.weekKey)}</p>
+      <div className="flex items-center gap-2 mt-2 flex-wrap text-[10px] font-semibold">
+        {corregir && <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400"><AlertTriangle size={10} /> Corregir</span>}
+        <span className="inline-flex items-center gap-1 text-gray-500 dark:text-gray-400"><Film size={11} className="text-emerald-500" />{nSubidos} video{nSubidos === 1 ? '' : 's'}</span>
+        {conBrief && <span className="inline-flex items-center gap-1 text-brand-600 dark:text-brand-300"><FileText size={10} /> Consigna</span>}
+      </div>
+    </button>
+  );
+}
+
+// Detalle de la tarjeta para el editor: la CONSIGNA del producto (lo que el
+// admin le quiere pasar), los cambios pedidos, y la zona para subir los videos.
+function CreatorCardDetail({ a, num, onClose, addToast }) {
+  useEffect(() => {
+    const h = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [onClose]);
+
   const puedeMover = ESTADOS_CREATOR.includes(a.estado);
   const enRevision = a.estado === 'revision';
-
+  const folderLink = (a.archivos || []).find(f => f.folderLink)?.folderLink;
+  const brief = (a.brief || '').trim();
   const toggleEstado = () => {
     updateAssignment(a.id, { estado: enRevision ? 'porhacer' : 'revision' });
-    addToast?.({
-      type: 'success',
-      message: enRevision ? 'Volviste la tarjeta a "Por hacer"' : '¡Listo! Pasó a "En revisión"',
-    });
+    addToast?.({ type: 'success', message: enRevision ? 'Volviste la tarjeta a "Por hacer"' : '¡Listo! Pasó a "En revisión"' });
   };
 
-  const nSubidos = (a.archivos || []).length;
-  const aprob = Math.min(a.videosAprobados || 0, nSubidos);
-  const folderLink = (a.archivos || []).find(f => f.folderLink)?.folderLink;
-
   return (
-    <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm overflow-hidden">
-      <div className="p-4">
-        <div className="flex items-start justify-between gap-3 mb-2">
-          <div className="min-w-0">
-            <h3 className="font-bold text-gray-900 dark:text-white truncate">{a.productoNombre || 'Producto'}</h3>
-            <div className="mt-1 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-              <span className="uppercase font-semibold tracking-wide">{a.tipo === 'testeo' ? 'Testeo' : 'Renovado'}</span>
-              <span>·</span>
-              <span>{weekLabel(a.weekKey)}</span>
+    <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-lg my-6 bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="flex items-start gap-2 px-5 py-4 border-b border-gray-100 dark:border-gray-800">
+          <Film size={18} className="text-pink-500 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <h3 className="text-base font-bold text-gray-900 dark:text-gray-100 leading-tight">{a.productoNombre || 'Producto'}{num ? <span className="text-brand-500"> #{num}</span> : ''}</h3>
+            <div className="flex items-center gap-2 mt-1 flex-wrap">
+              <EstadoBadge estado={a.estado} />
+              <span className="text-[11px] text-gray-400">{a.tipo === 'testeo' ? 'Testeo' : 'Renovado'} · {weekLabel(a.weekKey)}</span>
             </div>
           </div>
-          <EstadoBadge estado={a.estado} />
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
         </div>
 
-        {/* Cambios pedidos por el equipo — bien visible */}
-        {(a.nota || '').trim() && (
-          <div className="mb-3 rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-3 py-2">
-            <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase text-amber-700 dark:text-amber-300 mb-0.5"><AlertTriangle size={11} /> Hay que corregir</div>
-            <p className="text-xs text-amber-800 dark:text-amber-200 whitespace-pre-wrap">{a.nota}</p>
-          </div>
-        )}
-
-        {/* Meta: subidos + aprobados + link a Drive */}
-        <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400 mb-3 flex-wrap">
-          <span className="inline-flex items-center gap-1">
-            <Film size={12} className="text-emerald-500" />
-            <b className="text-gray-700 dark:text-gray-200">{nSubidos}</b> subido{nSubidos === 1 ? '' : 's'}
-          </span>
-          {nSubidos > 0 && (
-            <span className="inline-flex items-center gap-1" title="Aprobados por el equipo">
-              <CheckCircle2 size={12} className={aprob >= nSubidos ? 'text-emerald-500' : 'text-gray-400'} />
-              <b className="text-gray-700 dark:text-gray-200">{aprob}/{nSubidos}</b> aprob.
-            </span>
+        <div className="p-5 space-y-4 max-h-[72vh] overflow-y-auto">
+          {(a.nota || '').trim() && (
+            <div className="rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-3 py-2.5">
+              <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase text-amber-700 dark:text-amber-300 mb-1"><AlertTriangle size={12} /> Hay que corregir</div>
+              <p className="text-sm text-amber-800 dark:text-amber-200 whitespace-pre-wrap">{a.nota}</p>
+            </div>
           )}
-          {folderLink && (
-            <a href={folderLink} target="_blank" rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 font-bold text-brand-600 dark:text-brand-300 hover:underline">
-              <ExternalLink size={11} /> Ver en Drive
-            </a>
-          )}
-        </div>
 
-        {/* Brief (consignas / guiones) — solo lectura, colapsable */}
-        {(a.brief || '').trim() && (
-          <div className="mb-3">
-            <button
-              onClick={() => setOpenBrief(o => !o)}
-              className="inline-flex items-center gap-1 text-xs font-semibold text-brand-600 dark:text-brand-400 hover:underline">
-              {openBrief ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-              Consigna / guiones
-            </button>
-            {openBrief && (
-              <pre className="mt-2 whitespace-pre-wrap break-words text-xs text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-gray-900/40 rounded-lg p-3 border border-gray-100 dark:border-gray-700">
-                {a.brief}
-              </pre>
+          {/* Consigna / guiones — LA info del producto que le pasa el admin */}
+          <div>
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <FileText size={14} className="text-brand-500" />
+              <span className="text-[11px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Lo que tenés que hacer</span>
+            </div>
+            {brief ? (
+              <pre className="whitespace-pre-wrap break-words text-sm text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-gray-800/60 rounded-lg p-3 border border-gray-200 dark:border-gray-700 leading-relaxed font-sans">{brief}</pre>
+            ) : (
+              <p className="text-sm text-gray-400 dark:text-gray-500 italic">El equipo todavía no cargó la consigna. Consultá antes de arrancar.</p>
+            )}
+            {folderLink && (
+              <a href={folderLink} target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 mt-2 text-xs font-bold text-brand-600 dark:text-brand-300 hover:underline">
+                <ExternalLink size={13} /> Carpeta de material / Drive
+              </a>
             )}
           </div>
-        )}
 
-        {/* Subida de creativos */}
-        <CreativosSection a={a} addToast={addToast} canDelete />
-      </div>
+          {/* Subir videos */}
+          <div>
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <UploadCloud size={14} className="text-emerald-500" />
+              <span className="text-[11px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Tus videos</span>
+            </div>
+            <CreativosSection a={a} addToast={addToast} canDelete />
+          </div>
+        </div>
 
-      {/* Acción de estado (solo entre Por hacer / En revisión) */}
-      <div className="border-t border-gray-100 dark:border-gray-700 px-4 py-2.5 bg-gray-50/60 dark:bg-gray-900/30">
-        {puedeMover ? (
-          <button
-            onClick={toggleEstado}
-            className={`w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg transition ${
-              enRevision
-                ? 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
-                : 'bg-amber-500 text-white hover:bg-amber-600'
-            }`}>
-            {enRevision ? <><Clock size={14} /> Volver a "Por hacer"</> : <><CheckCircle2 size={14} /> Marcar "En revisión"</>}
-          </button>
-        ) : (
-          <p className="text-center text-xs text-gray-400 dark:text-gray-500 py-1">
-            {a.estado === 'aprobado' ? '✓ Aprobado por el equipo' : '✓ Publicado'}
-          </p>
-        )}
+        <div className="border-t border-gray-100 dark:border-gray-800 px-5 py-3 bg-gray-50/60 dark:bg-gray-900/40">
+          {puedeMover ? (
+            <button onClick={toggleEstado}
+              className={`w-full inline-flex items-center justify-center gap-1.5 px-3 py-2.5 text-sm font-bold rounded-lg transition ${enRevision ? 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600' : 'bg-amber-500 text-white hover:bg-amber-600'}`}>
+              {enRevision ? <><Clock size={15} /> Volver a "Por hacer"</> : <><CheckCircle2 size={15} /> Marcar "En revisión"</>}
+            </button>
+          ) : (
+            <p className="text-center text-sm font-semibold text-gray-400 dark:text-gray-500">{a.estado === 'aprobado' ? '✓ Aprobado por el equipo' : '✓ Publicado'}</p>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -141,6 +171,7 @@ function CreatorCard({ a, addToast }) {
 export default function CreatorWorkspace({ user, onLogout, addToast, darkMode, toggleDarkMode }) {
   const [, force] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  const [detailId, setDetailId] = useState(null); // tarjeta abierta en el detalle
 
   useEffect(() => subscribeProduccion(() => force(x => x + 1)), []);
 
@@ -165,6 +196,9 @@ export default function CreatorWorkspace({ user, onLogout, addToast, darkMode, t
     .filter(g => g.cards.length > 0);
 
   const totalCards = grupos.reduce((n, g) => n + g.cards.length, 0);
+  const allCards = grupos.flatMap(g => g.cards);
+  const numMap = numerarDuplicados(allCards);
+  const detailCard = allCards.find(a => a.id === detailId) || null;
 
   // Resumen motivador de la semana (aprobados + cuánto falta para el bonus) +
   // el avance propio (asignados / por hacer / en revisión).
@@ -291,25 +325,36 @@ export default function CreatorWorkspace({ user, onLogout, addToast, darkMode, t
                 </p>
               </div>
             ) : (
-              grupos.map(({ wk, cards }) => (
-                <section key={wk}>
-                  <div className="flex items-center gap-2 mb-3">
-                    <h2 className="text-sm font-bold text-gray-800 dark:text-gray-100">{weekLabel(wk)}</h2>
-                    {wk === thisWeek && (
-                      <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-600 bg-emerald-100 dark:bg-emerald-900/40 dark:text-emerald-300 rounded-full px-2 py-0.5">
-                        esta semana
-                      </span>
-                    )}
-                    <span className="text-xs text-gray-400">· {cards.length} producto{cards.length === 1 ? '' : 's'}</span>
-                  </div>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    {cards.map(a => <CreatorCard key={a.id} a={a} addToast={addToast} />)}
-                  </div>
-                </section>
-              ))
+              /* Tablero por estado (como lo ve el admin). Tocá una tarjeta para
+                 ver la consigna y subir los videos. */
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {COLS_CREATOR.map(col => {
+                  const cards = allCards
+                    .filter(a => a.estado === col.key)
+                    .sort((x, y) => (y.weekKey || '').localeCompare(x.weekKey || '') || (x.productoNombre || '').localeCompare(y.productoNombre || '', 'es'));
+                  return (
+                    <div key={col.key} className="rounded-2xl bg-gray-100/70 dark:bg-gray-800/40 border border-gray-200 dark:border-gray-700/60 p-2.5">
+                      <div className="flex items-center gap-2 px-1 pb-2">
+                        <span className={`w-2 h-2 rounded-full ${col.dot}`} />
+                        <span className="text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-gray-300">{col.label}</span>
+                        <span className="ml-auto text-[11px] font-bold text-gray-400 tabular-nums">{cards.length}</span>
+                      </div>
+                      <div className="space-y-2 min-h-[44px]">
+                        {cards.length === 0
+                          ? <p className="text-[11px] text-gray-400 dark:text-gray-600 text-center py-3">—</p>
+                          : cards.map(a => <CreatorMiniCard key={a.id} a={a} num={numMap[a.id]} onOpen={() => setDetailId(a.id)} />)}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
       </main>
+
+      {detailCard && (
+        <CreatorCardDetail a={detailCard} num={numMap[detailCard.id]} onClose={() => setDetailId(null)} addToast={addToast} />
+      )}
     </div>
   );
 }

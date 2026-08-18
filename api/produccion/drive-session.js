@@ -42,13 +42,13 @@ function abreviarProducto(nombre) {
   return words.slice(0, 4).map(w => w[0].toUpperCase()).join('');
 }
 
-// Sello de subida en horario AR: 'YYYY-MM-DD HH.MM' (fecha + hora, así dos videos
-// del mismo día no colisionan en el nombre).
+// Sello de subida en horario AR: 'YYYY-MM-DD HH.MM.SS' (fecha + hora con
+// segundos, así dos videos del mismo minuto no colisionan en el nombre).
 function selloAR() {
   const now = new Date();
   const fecha = now.toLocaleDateString('en-CA', { timeZone: TZ });
-  const hora = now.toLocaleTimeString('es-AR', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false });
-  return `${fecha} ${hora.replace(':', '.')}`;
+  const hora = now.toLocaleTimeString('es-AR', { timeZone: TZ, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  return `${fecha} ${hora.replace(/:/g, '.')}`;
 }
 
 // Nomenclatura del archivo: "<Persona> - <fecha subida> - <Producto abreviado>".

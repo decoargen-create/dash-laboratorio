@@ -917,30 +917,44 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
         {menu && (
           <div className="absolute right-0 top-8 z-10 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl p-1 flex flex-col gap-0.5 min-w-[140px]"
             onClick={e => e.stopPropagation()}>
-            {team.length > 0 ? (
-              <>
-                {team.length > 5 && (
-                  <input autoFocus value={menuQ} onChange={e => setMenuQ(e.target.value)} placeholder="Buscar…"
-                    className="mb-0.5 px-2 py-1 text-xs bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded focus:outline-none focus:ring-1 focus:ring-brand-500" />
-                )}
-                {team
-                  .filter(m => !menuQ.trim() || `${m.display_name || ''} ${m.email || ''}`.toLowerCase().includes(menuQ.trim().toLowerCase()))
-                  .map(m => (
-                    <button key={m.id} onClick={() => { assignCreator(a.id, { creatorId: m.id, persona: m.display_name || m.email }); setMenu(false); setMenuQ(''); }}
-                      className={`text-left text-xs font-semibold px-2 py-1 rounded hover:bg-brand-50 dark:hover:bg-brand-900/30 whitespace-nowrap ${a.creatorId === m.id ? 'text-brand-600 dark:text-brand-300' : 'text-gray-700 dark:text-gray-200'}`}>
-                      {a.creatorId === m.id ? '✓ ' : ''}{m.display_name || m.email}
-                    </button>
-                  ))}
-              </>
-            ) : (
-              <>
-                {personas.map(p => (
-                  <button key={p} onClick={() => { onAssign(p); setMenu(false); }}
-                    className="text-left text-xs font-semibold px-2 py-1 rounded hover:bg-brand-50 dark:hover:bg-brand-900/30 text-gray-700 dark:text-gray-200 whitespace-nowrap">{p}</button>
-                ))}
-                <div className="text-[10px] text-gray-400 px-2 py-1 border-t border-gray-100 dark:border-gray-700">Creá cuentas en "Equipo" para que las vean en su tablero.</div>
-              </>
-            )}
+            {(() => {
+              // Lista UNIFICADA (cuentas + personas de texto reales), igual que el
+              // selector del detalle: sin fantasmas de 0 tarjetas y con badge.
+              const accountNames = new Set(team.map(m => (m.display_name || m.email || '').trim().toLowerCase()).filter(Boolean));
+              const counts = {};
+              try { for (const pp of personasEnTarjetas()) counts[pp.persona.trim().toLowerCase()] = pp.tarjetas; } catch {}
+              const curPer = (a.persona || '').trim().toLowerCase();
+              const items = [
+                ...team.map(m => ({ key: `a:${m.id}`, name: m.display_name || m.email, creatorId: m.id, hasAccess: true })),
+                ...personas.filter(p => { const k = (p || '').trim().toLowerCase(); return k && !accountNames.has(k) && ((counts[k] || 0) > 0 || k === curPer); })
+                  .map(p => ({ key: `p:${p}`, name: p, creatorId: null, hasAccess: false })),
+              ];
+              const q = menuQ.trim().toLowerCase();
+              const filtered = q ? items.filter(it => it.name.toLowerCase().includes(q)) : items;
+              return (
+                <>
+                  {items.length > 6 && (
+                    <input autoFocus value={menuQ} onChange={e => setMenuQ(e.target.value)} placeholder="Buscar…"
+                      className="mb-0.5 px-2 py-1 text-xs bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded focus:outline-none focus:ring-1 focus:ring-brand-500" />
+                  )}
+                  {filtered.map(it => {
+                    const sel = it.creatorId ? a.creatorId === it.creatorId : (!a.creatorId && (a.persona || '').trim().toLowerCase() === it.name.trim().toLowerCase());
+                    return (
+                      <button key={it.key} onClick={() => { assignCreator(a.id, { creatorId: it.creatorId, persona: it.name }); setMenu(false); setMenuQ(''); }}
+                        className={`flex items-center gap-1.5 text-left text-xs font-semibold px-2 py-1 rounded hover:bg-brand-50 dark:hover:bg-brand-900/30 whitespace-nowrap ${sel ? 'text-brand-600 dark:text-brand-300' : 'text-gray-700 dark:text-gray-200'}`}>
+                        <span className="flex-1">{sel ? '✓ ' : ''}{it.name}</span>
+                        {it.hasAccess
+                          ? <span className="text-[9px] text-emerald-500">🔑</span>
+                          : <span className="text-[9px] text-amber-500">sin acceso</span>}
+                      </button>
+                    );
+                  })}
+                  {items.length === 0 && (
+                    <div className="text-[10px] text-gray-400 px-2 py-1">Creá cuentas en "Equipo".</div>
+                  )}
+                </>
+              );
+            })()}
             {(a.persona || a.creatorId) && (
               <button onClick={() => { assignCreator(a.id, { creatorId: null, persona: '' }); setMenu(false); }}
                 className="text-left text-xs px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 border-t border-gray-100 dark:border-gray-700 mt-0.5">Sin asignar</button>
@@ -1389,18 +1403,34 @@ function IntegranteSelector({ a, team = [], personas = [], onTeamChange, addToas
 
   // Lista unificada: cuentas (con acceso) + personas de texto que no coincidan
   // con una cuenta ya existente (sin acceso).
+  const teamById = new Map(team.map(m => [m.id, m]));
   const accountNames = new Set(team.map(m => (m.display_name || m.email || '').trim().toLowerCase()).filter(Boolean));
+  const currentPersonaKey = (a.persona || '').trim().toLowerCase();
   const integrantes = [
     ...team.map(m => {
       const name = m.display_name || m.email;
       return { key: `a:${m.id}`, name, creatorId: m.id, hasAccess: true, email: m.email, cards: cardCounts[(name || '').trim().toLowerCase()] || 0 };
     }),
     ...personas
-      .filter(p => (p || '').trim() && !accountNames.has(p.trim().toLowerCase()))
+      // Solo personas de texto que NO tienen cuenta y que son REALES (con
+      // tarjetas) o la asignación actual — así no ensuciamos con los nombres por
+      // defecto vacíos (Fran/Wanda/Flor…) que ya no se usan.
+      .filter(p => {
+        const k = (p || '').trim().toLowerCase();
+        if (!k || accountNames.has(k)) return false;
+        return (cardCounts[k] || 0) > 0 || k === currentPersonaKey;
+      })
       .map(p => ({ key: `p:${p}`, name: p, creatorId: null, hasAccess: false, email: null, cards: cardCounts[p.trim().toLowerCase()] || 0 })),
   ].sort((x, y) => (Number(y.hasAccess) - Number(x.hasAccess)) || (y.cards - x.cards) || x.name.localeCompare(y.name, 'es'));
 
-  const currentKey = a.creatorId ? `a:${a.creatorId}` : (a.persona ? `p:${a.persona}` : null);
+  // Selección actual. Si la cuenta fue borrada (el creatorId ya no está en el
+  // equipo), caemos al label de persona; y si la actual no quedó en la lista, la
+  // agregamos para que igual se vea seleccionada (nada de selección en blanco).
+  const accountVivo = !!(a.creatorId && teamById.has(a.creatorId));
+  const currentKey = accountVivo ? `a:${a.creatorId}` : (a.persona ? `p:${a.persona}` : null);
+  if (currentKey && !integrantes.some(it => it.key === currentKey)) {
+    integrantes.unshift({ key: currentKey, name: a.persona || '(sin nombre)', creatorId: accountVivo ? a.creatorId : null, hasAccess: accountVivo, email: null, cards: cardCounts[currentPersonaKey] || 0 });
+  }
 
   const asignar = (it) => {
     assignCreator(a.id, { creatorId: it.creatorId, persona: it.name });

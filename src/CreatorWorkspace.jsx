@@ -144,6 +144,16 @@ export default function CreatorWorkspace({ user, onLogout, addToast, darkMode, t
 
   useEffect(() => subscribeProduccion(() => force(x => x + 1)), []);
 
+  // Re-consulta al server cuando el editor vuelve a la pestaña y cada ~1 min.
+  // Necesario porque una tarjeta recién asignada NO estaba en su vista (RLS), así
+  // que el realtime no se la empuja: hay que re-fetchear para que aparezca sola.
+  useEffect(() => {
+    const refetch = () => { refreshProduccion().catch(() => {}); };
+    window.addEventListener('focus', refetch);
+    const iv = setInterval(refetch, 60000);
+    return () => { window.removeEventListener('focus', refetch); clearInterval(iv); };
+  }, []);
+
   // Semanas con tarjetas (más reciente primero). Se calcula en cada render (no
   // memoizar con []: al primer login el cache está vacío hasta que hidrata, y
   // un memo congelado dejaría el tablero vacío para siempre).

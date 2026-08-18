@@ -17,6 +17,7 @@ import {
   subscribeProduccion, allWeekKeys, listAssignments, weekLabel, weekKeyOf,
   ESTADO_LABELS, ESTADOS_CREATOR, updateAssignment, refreshProduccion, esCompleto,
   monthKeyOf, monthLabel, weeksInMonth, pagoProductoDe, bonusDe,
+  resumenVideosPorProducto, VIDEOS_POR_PRODUCTO,
 } from './produccionStore.js';
 import { CreativosSection } from './produccionUpload.jsx';
 
@@ -76,7 +77,7 @@ function CreatorMiniCard({ a, num, onOpen }) {
       <p className="text-[10px] uppercase tracking-wide text-gray-400 dark:text-gray-500 mt-1">{a.tipo === 'testeo' ? 'Testeo' : 'Renovado'} · {weekLabel(a.weekKey)}</p>
       <div className="flex items-center gap-2 mt-2 flex-wrap text-[10px] font-semibold">
         {corregir && <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400"><AlertTriangle size={10} /> Corregir</span>}
-        <span className="inline-flex items-center gap-1 text-gray-500 dark:text-gray-400"><Film size={11} className="text-emerald-500" />{nSubidos} video{nSubidos === 1 ? '' : 's'}</span>
+        <span className="inline-flex items-center gap-1 text-gray-500 dark:text-gray-400"><Film size={11} className="text-emerald-500" /><b className="text-gray-700 dark:text-gray-200">{nSubidos}</b>/{VIDEOS_POR_PRODUCTO} videos</span>
         {conBrief && <span className="inline-flex items-center gap-1 text-brand-600 dark:text-brand-300"><FileText size={10} /> Consigna</span>}
       </div>
     </button>
@@ -332,9 +333,34 @@ export default function CreatorWorkspace({ user, onLogout, addToast, darkMode, t
                 </p>
               </div>
             ) : (
-              /* Tablero por estado (como lo ve el admin). Tocá una tarjeta para
-                 ver la consigna y subir los videos. */
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="space-y-4">
+                {/* Resumen: cuántos videos faltan por producto */}
+                <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 shadow-sm">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Film size={15} className="text-emerald-500" />
+                    <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Videos por producto</h3>
+                  </div>
+                  <div className="space-y-2.5">
+                    {resumenVideosPorProducto(allCards).map(r => {
+                      const pct = r.target > 0 ? Math.round((r.subidos / r.target) * 100) : 0;
+                      return (
+                        <div key={r.producto}>
+                          <div className="flex items-center justify-between text-xs mb-1 gap-2">
+                            <span className="font-semibold text-gray-800 dark:text-gray-100 truncate">{r.producto}</span>
+                            <span className="tabular-nums text-gray-500 dark:text-gray-400 shrink-0">{r.subidos}/{r.target} · faltan {r.faltan}</span>
+                          </div>
+                          <div className="h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+                            <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Tablero por estado (como lo ve el admin). Tocá una tarjeta para
+                    ver la consigna y subir los videos. */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 {COLS_CREATOR.map(col => {
                   const cards = allCards
                     .filter(a => a.estado === col.key)
@@ -354,6 +380,7 @@ export default function CreatorWorkspace({ user, onLogout, addToast, darkMode, t
                     </div>
                   );
                 })}
+                </div>
               </div>
             )}
           </div>

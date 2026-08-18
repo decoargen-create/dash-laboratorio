@@ -330,6 +330,7 @@ async function hydrate() {
       }
     }
     await hydratePagos();
+    await hydratePagoConfig();
   } catch (e) { console.warn('[produccion] hydrate ex:', e?.message || e); }
 }
 
@@ -566,6 +567,96 @@ export function removeArchivo(id, ts) {
   pushRow(id);
 }
 
+// ── Config de pago POR PERSONA (monto por producto + tramos de bono) ─────────
+// Sin config para una persona → se usan los defaults globales (PAGO_POR_PRODUCTO
+// + bonusObjetivo). El dueño la edita en "Equipo"; se guarda en la tabla
+// produccion_pago_config (RLS por dueño; el editor solo lee la suya por creatorId).
+export const DEFAULT_BONUS_TRAMOS = [{ min: 3, monto: 24000 }, { min: 4, monto: 30000 }, { min: 5, monto: 36000 }];
+const PAGOS_CONFIG_TABLE = 'produccion_pago_config';
+const PAGOS_CONFIG_KEY = 'adslab-produccion-pago-config-v1';
+const cfgKey = (persona) => (persona || '').trim().toLowerCase();
+function readPagoConfigLocal() { try { return JSON.parse(localStorage.getItem(PAGOS_CONFIG_KEY) || '{}') || {}; } catch { return {}; } }
+let _pagoConfig = readPagoConfigLocal();
+function writePagoConfigLocal(obj) {
+  _pagoConfig = obj || {};
+  try { localStorage.setItem(PAGOS_CONFIG_KEY, JSON.stringify(_pagoConfig)); } catch {}
+  notify();
+}
+
+// Monto por producto (9 videos) de una persona (o el default si no configuró).
+export function pagoProductoDe(persona) {
+  const c = _pagoConfig[cfgKey(persona)];
+  return Number.isFinite(c?.pagoProducto) ? c.pagoProducto : PAGO_POR_PRODUCTO;
+}
+// Bono de una persona según sus completados de la semana. Sin config → default
+// global; con config → el tramo más alto que alcanzó (o 0 si no tiene tramos).
+export function bonusDe(persona, completados) {
+  const c = _pagoConfig[cfgKey(persona)];
+  if (!c) return bonusObjetivo(completados);
+  const tramos = Array.isArray(c.bonusTramos) ? c.bonusTramos : [];
+  let monto = 0;
+  for (const t of tramos) { if (completados >= (t.min || 0)) monto = Math.max(monto, t.monto || 0); }
+  return monto;
+}
+// Config completa de una persona para la UI (con defaults si no hay fila).
+export function getPagoConfig(persona) {
+  const c = _pagoConfig[cfgKey(persona)];
+  return {
+    persona,
+    pagoProducto: Number.isFinite(c?.pagoProducto) ? c.pagoProducto : PAGO_POR_PRODUCTO,
+    bonusTramos: Array.isArray(c?.bonusTramos) ? c.bonusTramos.map(t => ({ ...t })) : DEFAULT_BONUS_TRAMOS.map(t => ({ ...t })),
+    tieneConfig: !!c,
+  };
+}
+export function listPagoConfigs() { return { ..._pagoConfig }; }
+
+// Guarda la config de una persona (solo dueño). creatorId opcional: si la
+// persona es una cuenta, lo guardamos para que ESE editor pueda leer su config.
+export function setPagoConfig(persona, { pagoProducto, bonusTramos, creatorId } = {}) {
+  const key = cfgKey(persona);
+  if (!key) return;
+  const cfg = {
+    persona: (persona || '').trim(),
+    pagoProducto: Number.isFinite(pagoProducto) ? Math.max(0, Math.round(pagoProducto)) : PAGO_POR_PRODUCTO,
+    bonusTramos: (Array.isArray(bonusTramos) ? bonusTramos : [])
+      .filter(t => Number.isFinite(t?.min) && Number.isFinite(t?.monto))
+      .map(t => ({ min: Math.max(1, Math.round(t.min)), monto: Math.max(0, Math.round(t.monto)) }))
+      .sort((a, b) => a.min - b.min),
+    creatorId: creatorId || _pagoConfig[key]?.creatorId || null,
+  };
+  writePagoConfigLocal({ ..._pagoConfig, [key]: cfg });
+  pushPagoConfig(cfg);
+}
+
+async function pushPagoConfig(cfg) {
+  if (!cloudReady() || _role !== 'admin') return;
+  try {
+    const { error } = await supabase.from(PAGOS_CONFIG_TABLE).upsert({
+      owner_id: _userId, persona: cfg.persona, creator_id: cfg.creatorId || null,
+      pago_producto: cfg.pagoProducto, bonus_tramos: cfg.bonusTramos, updated_at: new Date().toISOString(),
+    }, { onConflict: 'owner_id,persona' });
+    if (error) { console.warn('[produccion] pushPagoConfig:', error.message); emitSyncError(error.message); }
+  } catch (e) { console.warn('[produccion] pushPagoConfig ex:', e?.message || e); }
+}
+
+async function hydratePagoConfig() {
+  if (!cloudReady()) return;
+  try {
+    const { data, error } = await supabase.from(PAGOS_CONFIG_TABLE).select('*');
+    if (error) { console.warn('[produccion] pull pago-config:', error.message); return; }
+    const obj = {};
+    for (const r of (data || [])) {
+      obj[cfgKey(r.persona)] = {
+        persona: r.persona,
+        pagoProducto: r.pago_producto,
+        bonusTramos: Array.isArray(r.bonus_tramos) ? r.bonus_tramos : [],
+        creatorId: r.creator_id || null,
+      };
+    }
+    writePagoConfigLocal(obj);
+  } catch (e) { console.warn('[produccion] hydrate pago-config ex:', e?.message || e); }
+}
+
 // Resumen de pago por persona para una semana. Montos en ARS (así paga el user).
 export function paymentSummary(weekKey) {
   const asigs = listAssignments(weekKey);
@@ -579,8 +670,8 @@ export function paymentSummary(weekKey) {
     if (a.pagado) byPersona[p].pagados++;
   }
   return Object.values(byPersona).map(x => {
-    const montoProductos = x.completados * PAGO_POR_PRODUCTO;
-    const bonus = bonusObjetivo(x.completados);
+    const montoProductos = x.completados * pagoProductoDe(x.persona);
+    const bonus = bonusDe(x.persona, x.completados);
     return { ...x, montoProductos, bonus, totalArs: montoProductos + bonus };
   }).sort((a, b) => a.persona.localeCompare(b.persona, 'es'));
 }
@@ -602,7 +693,7 @@ export function inversionPorProducto() {
       }
       const p = byProd[key];
       p.tarjetas++;
-      if (esCompleto(a.estado)) { p.completados++; p.invertido += PAGO_POR_PRODUCTO; }
+      if (esCompleto(a.estado)) { p.completados++; p.invertido += pagoProductoDe(a.persona); }
       else p.enProceso++;
     }
   }

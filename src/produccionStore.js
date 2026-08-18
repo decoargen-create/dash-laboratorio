@@ -131,6 +131,7 @@ function rowToLocal(r) {
     productoNombre: r.producto_nombre || '',
     persona: r.persona || '',
     creatorId: r.creator_id || null,
+    ownerId: r.owner_id || null,
     tipo: r.tipo === 'testeo' ? 'testeo' : 'renovado',
     estado: normEstado(r.estado),
     videosTotal: r.videos_total != null ? r.videos_total : VIDEOS_POR_PRODUCTO,
@@ -152,6 +153,9 @@ function localToRow(a) {
     producto_nombre: a.productoNombre || '',
     persona: a.persona || '',
     creator_id: a.creatorId || null,
+    // Dueño del tablero (aislamiento por inquilino): la RLS deja escribir/leer
+    // solo tus propias filas. Si la fila no lo trae, usamos el usuario actual.
+    owner_id: a.ownerId || _userId || null,
     tipo: a.tipo === 'testeo' ? 'testeo' : 'renovado',
     estado: a.estado || 'porhacer',
     videos_total: a.videosTotal != null ? a.videosTotal : VIDEOS_POR_PRODUCTO,
@@ -452,6 +456,7 @@ export function addAssignment({ weekKey, productoId, productoNombre, persona, cr
     productoNombre: productoNombre || '',
     persona: per,
     creatorId: creatorId || null,
+    ownerId: _userId || null, // dueño = quien crea la tarjeta (aislamiento por inquilino)
     tipo: tipo === 'testeo' ? 'testeo' : 'renovado',
     estado: 'porhacer',
     videosTotal: VIDEOS_POR_PRODUCTO,
@@ -718,9 +723,9 @@ async function hydratePagos() {
     if (entries.length > 0 && !yaMigro) {
       const payload = entries.map(([k, v]) => {
         const [wk, ...rest] = k.split('|');
-        return { week_key: wk, persona: rest.join('|'), paid: true, paid_at: v.paidAt || new Date().toISOString() };
+        return { week_key: wk, persona: rest.join('|'), owner_id: _userId, paid: true, paid_at: v.paidAt || new Date().toISOString() };
       });
-      const { error: upErr } = await supabase.from(PAGOS_TABLE).upsert(payload, { onConflict: 'week_key,persona' });
+      const { error: upErr } = await supabase.from(PAGOS_TABLE).upsert(payload, { onConflict: 'owner_id,week_key,persona' });
       // Solo marcamos MIGRATED si el upsert CONFIRMÓ (sino perderíamos el pago:
       // si la RLS lo rechazó y marcamos migrado, la próxima vez se borraría lo
       // local sin haber llegado nunca a la nube). Igual mantenemos lo local.
@@ -742,10 +747,10 @@ async function pushPago(weekKey, persona, paid) {
   try {
     if (paid) {
       const { error } = await supabase.from(PAGOS_TABLE)
-        .upsert({ week_key: weekKey, persona, paid: true, paid_at: new Date().toISOString() }, { onConflict: 'week_key,persona' });
+        .upsert({ week_key: weekKey, persona, owner_id: _userId, paid: true, paid_at: new Date().toISOString() }, { onConflict: 'owner_id,week_key,persona' });
       if (error) console.warn('[produccion] pushPago:', error.message);
     } else {
-      const { error } = await supabase.from(PAGOS_TABLE).delete().match({ week_key: weekKey, persona });
+      const { error } = await supabase.from(PAGOS_TABLE).delete().match({ owner_id: _userId, week_key: weekKey, persona });
       if (error) console.warn('[produccion] pushPago del:', error.message);
     }
   } catch (e) { console.warn('[produccion] pushPago ex:', e?.message || e); }

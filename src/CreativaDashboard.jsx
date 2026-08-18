@@ -105,24 +105,31 @@ export default function CreativaDashboard({ addToast }) {
     addToast?.({ type: 'success', message: `Todo lo pendiente de ${p.persona} marcado como pagado` });
   };
 
-  // ── "Para subir a la plataforma": tarjetas APROBADAS (entregadas y ok en
-  // Drive) que todavía no publicaste. Se calcula en cada render (no memoizar):
-  // al marcar una como subida, updateAssignment dispara el re-render y la fila
-  // tiene que desaparecer sola. Cross-mes: es tu agenda de pendientes.
+  // ── "Para subir a la plataforma": creativos ya entregados (con videos en
+  // Drive) listos para que los bajes y los subas a los ads. Incluye APROBADOS
+  // (listos) y EN REVISIÓN (todavía sin aprobar, pero se pueden subir igual) —
+  // cada uno marcado con su estado. Se calcula en cada render (no memoizar): al
+  // marcar uno subido, updateAssignment re-renderiza y la fila desaparece sola.
   const paraSubir = [];
   for (const wk of allWeekKeys()) {
     for (const a of listAssignments(wk)) {
-      if (a.estado !== 'aprobado') continue;
+      if (a.estado !== 'aprobado' && a.estado !== 'revision') continue;
+      const videos = (a.archivos || []).length;
+      if (videos === 0) continue; // sin videos no hay nada para subir
       paraSubir.push({
         id: a.id,
         producto: a.productoNombre || 'Producto',
+        estado: a.estado, // 'aprobado' | 'revision'
         carpeta: folderName(a.persona, wk),
-        videos: (a.archivos || []).length,
+        videos,
         folderLink: (a.archivos || []).find(f => f.folderLink)?.folderLink || null,
       });
     }
   }
-  paraSubir.sort((x, y) => x.producto.localeCompare(y.producto, 'es'));
+  // Aprobados primero (listos), después los de revisión; dentro, por producto.
+  paraSubir.sort((x, y) =>
+    (x.estado === y.estado ? 0 : x.estado === 'aprobado' ? -1 : 1) ||
+    x.producto.localeCompare(y.producto, 'es'));
 
   const marcarSubido = (row) => {
     updateAssignment(row.id, { estado: 'publicado' });
@@ -166,7 +173,16 @@ export default function CreativaDashboard({ addToast }) {
                   <Check size={13} />
                 </button>
                 <div className="min-w-0 flex-1">
-                  <div className="text-sm font-semibold text-gray-800 dark:text-gray-100 truncate">{row.producto}</div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-gray-800 dark:text-gray-100 truncate">{row.producto}</span>
+                    <span className={`shrink-0 text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${
+                      row.estado === 'aprobado'
+                        ? 'text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/40'
+                        : 'text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/40'
+                    }`}>
+                      {row.estado === 'aprobado' ? '✓ Aprobado' : '👀 En revisión'}
+                    </span>
+                  </div>
                   <div className="text-[11px] text-gray-400 dark:text-gray-500 truncate">{row.carpeta} · {row.videos} video{row.videos !== 1 ? 's' : ''}</div>
                 </div>
                 {row.folderLink ? (
@@ -181,7 +197,7 @@ export default function CreativaDashboard({ addToast }) {
             ))}
           </div>
           <div className="px-4 py-2 text-[10px] text-gray-400 dark:text-gray-500 border-t border-gray-100 dark:border-gray-700/60">
-            Productos aprobados listos en Drive. Al marcarlos como subidos pasan a <b>Publicado</b> en Producción.
+            Creativos con videos en Drive, listos para bajar y subir a los ads. Incluye <b>aprobados</b> y <b>en revisión</b>. Al marcarlos subidos pasan a <b>Publicado</b>.
           </div>
         </div>
       )}

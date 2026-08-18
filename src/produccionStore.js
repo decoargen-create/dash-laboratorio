@@ -201,22 +201,33 @@ function enqueue(id, fn) {
   return next;
 }
 
-function pushRow(id, evento = null) { return enqueue(id, () => doPushRow(id, evento)); }
+function pushRow(id, evento = null, opts = {}) { return enqueue(id, () => doPushRow(id, evento, opts)); }
 function pushDelete(id) { return enqueue(id, () => doPushDelete(id)); }
 
 // Empuja una fila (insert/update) a la nube. Admin → tabla directa; creator →
 // RPC acotada (solo estado permitido + archivos de SU tarjeta). `evento` es la
 // entrada de historial a registrar (para el creator viaja por la RPC).
-async function doPushRow(id, evento = null) {
+async function doPushRow(id, evento = null, opts = {}) {
   if (!cloudReady()) return;
   const a = ensureCache().find(x => x.id === id);
   if (!a) return;
   if (_role === 'admin') {
     // El historial ya está dentro de la fila (localToRow lo incluye si _histCloud).
-    const { error } = await supabase.from(TABLE).upsert(localToRow(a), { onConflict: 'id' });
+    const row = localToRow(a);
+    // Un update que NO toca archivos (estado / brief / nota / asignación) omite
+    // la columna `archivos` del upsert. Como el upsert solo pisa las columnas del
+    // payload, así NO borra videos que el editor subió concurrentemente (el
+    // last-writer-wins de la fila entera se los comía). Los cambios de archivos
+    // (addArchivos/removeArchivo/nueva tarjeta) NO pasan skipArchivos.
+    if (opts.skipArchivos) delete row.archivos;
+    const { error } = await supabase.from(TABLE).upsert(row, { onConflict: 'id' });
     if (error) console.warn('[produccion] push(admin):', error.message);
   } else if (_role === 'creator') {
-    const estado = ESTADOS_CREATOR.includes(a.estado) ? a.estado : null;
+    // Solo mandamos p_estado si ESTE push viene de un cambio de estado real
+    // (evento tipo 'estado'). Un push de solo-archivos NO debe tocar el estado:
+    // con cache vieja, mandar el estado local podía revertir una aprobación que
+    // el admin acababa de hacer.
+    const estado = (evento && evento.tipo === 'estado' && ESTADOS_CREATOR.includes(a.estado)) ? a.estado : null;
     const params = { p_id: id, p_estado: estado, p_archivos: a.archivos || [] };
     if (_histCloud && evento) params.p_evento = evento; // solo si la base lo soporta
     const { error } = await supabase.rpc('produccion_creator_update', params);
@@ -466,7 +477,9 @@ export function updateAssignment(id, patch) {
   const historial = evento ? [...(before.historial || []), evento] : before.historial;
   arr[i] = { ...before, ...patch, historial, updatedAt: new Date().toISOString() };
   write(arr);
-  pushRow(id, evento);
+  // updateAssignment nunca modifica `archivos` (eso va por addArchivos/removeArchivo)
+  // → skipArchivos para no pisar los videos que el editor subió en paralelo.
+  pushRow(id, evento, { skipArchivos: true });
 }
 export function removeAssignment(id) {
   write(read().filter(a => a.id !== id));
@@ -675,8 +688,15 @@ async function hydratePagos() {
         return { week_key: wk, persona: rest.join('|'), paid: true, paid_at: v.paidAt || new Date().toISOString() };
       });
       const { error: upErr } = await supabase.from(PAGOS_TABLE).upsert(payload, { onConflict: 'week_key,persona' });
+      // Solo marcamos MIGRATED si el upsert CONFIRMÓ (sino perderíamos el pago:
+      // si la RLS lo rechazó y marcamos migrado, la próxima vez se borraría lo
+      // local sin haber llegado nunca a la nube). Igual mantenemos lo local.
       if (upErr) console.warn('[produccion] migrate pagos:', upErr.message);
-      try { localStorage.setItem(MIGRATED_KEY + '-pagos', '1'); } catch {}
+      else { try { localStorage.setItem(MIGRATED_KEY + '-pagos', '1'); } catch {} }
+      writePagos(local);
+    } else if (entries.length > 0) {
+      // Ya migramos antes pero la nube volvió vacía → NO borrar (puede ser un
+      // fallo transitorio); preservamos lo local (espeja la lógica de asignaciones).
       writePagos(local);
     } else {
       writePagos({});

@@ -18,10 +18,10 @@ import {
   ESTADOS, ESTADO_LABELS, VIDEOS_POR_PRODUCTO, weekKeyOf, weekLabel, weekRange, allWeekKeys,
   listAssignments, addAssignment, updateAssignment, removeAssignment, assignPersona,
   assignCreator, subscribeProduccion, esCompleto, bonusObjetivo, inversionPorProducto,
-  getRole, entregasNuevas, ultimaSubidaTs,
+  getRole, entregasNuevas, ultimaSubidaTs, personasEnTarjetas,
 } from './produccionStore.js';
 import { CreativosSection, subirParaTarjeta, VIDEO_ACCEPT, probeDrive } from './produccionUpload.jsx';
-import { listTeam } from './produccionTeam.js';
+import { listTeam, createMember } from './produccionTeam.js';
 import { driveStatus, connectDrive, disconnectDrive } from './produccionDrive.js';
 import TeamModal from './TeamModal.jsx';
 import ConfirmDialog from './ConfirmDialog.jsx';
@@ -730,7 +730,7 @@ export default function ProduccionSection({ addToast }) {
           onClose={() => setShowAdd(false)} addToast={addToast} />
       )}
       {detail && (
-        <CardDetailModal a={detail} personas={personas} team={team} onClose={() => setDetailId(null)} addToast={addToast} />
+        <CardDetailModal a={detail} personas={personas} team={team} onClose={() => setDetailId(null)} addToast={addToast} onTeamChange={reloadTeam} />
       )}
       {showTeam && (
         <TeamModal onClose={() => { setShowTeam(false); reloadTeam(); }} addToast={addToast} />
@@ -1294,19 +1294,158 @@ function HistorialTarjeta({ a }) {
   );
 }
 
+// Contraseña sugerida para darle acceso a un integrante (se la pasás vos).
+function suggestPass() {
+  const w = ['creativo', 'video', 'lab', 'equipo', 'reel', 'clip'][Math.floor(Math.random() * 6)];
+  return `${w}${Math.floor(1000 + Math.random() * 9000)}`;
+}
+
+// Selector UNIFICADO de integrante: funde "persona" (texto) y "cuenta" (login)
+// en una sola lista. Elegís a quién asignar; los que no tienen login muestran
+// "Dar acceso", que crea la cuenta con el mismo nombre y VINCULA las tarjetas
+// que ese nombre ya tenía (setea creator_id en todas). Reemplaza el doble
+// control "Asignar a cuenta" + chips de "Persona".
+function IntegranteSelector({ a, team = [], personas = [], onTeamChange, addToast }) {
+  const [giving, setGiving] = useState(null); // nombre al que le estamos dando acceso
+  const [email, setEmail] = useState('');
+  const [pass, setPass] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  // Cuántas tarjetas tiene cada nombre (para el subtítulo de cada fila).
+  const cardCounts = useMemo(() => {
+    const m = {};
+    try { for (const p of personasEnTarjetas()) m[p.persona.trim().toLowerCase()] = p.tarjetas; } catch {}
+    return m;
+  }, [team]); // recomputa al cambiar el equipo (después de dar acceso)
+
+  // Lista unificada: cuentas (con acceso) + personas de texto que no coincidan
+  // con una cuenta ya existente (sin acceso).
+  const accountNames = new Set(team.map(m => (m.display_name || m.email || '').trim().toLowerCase()).filter(Boolean));
+  const integrantes = [
+    ...team.map(m => {
+      const name = m.display_name || m.email;
+      return { key: `a:${m.id}`, name, creatorId: m.id, hasAccess: true, email: m.email, cards: cardCounts[(name || '').trim().toLowerCase()] || 0 };
+    }),
+    ...personas
+      .filter(p => (p || '').trim() && !accountNames.has(p.trim().toLowerCase()))
+      .map(p => ({ key: `p:${p}`, name: p, creatorId: null, hasAccess: false, email: null, cards: cardCounts[p.trim().toLowerCase()] || 0 })),
+  ].sort((x, y) => (Number(y.hasAccess) - Number(x.hasAccess)) || (y.cards - x.cards) || x.name.localeCompare(y.name, 'es'));
+
+  const currentKey = a.creatorId ? `a:${a.creatorId}` : (a.persona ? `p:${a.persona}` : null);
+
+  const asignar = (it) => {
+    assignCreator(a.id, { creatorId: it.creatorId, persona: it.name });
+    if (it.hasAccess) addToast?.({ type: 'success', message: `Tarjeta asignada a ${it.name} — la va a ver en su tablero` });
+  };
+  const sinAsignar = () => assignCreator(a.id, { creatorId: null, persona: '' });
+
+  const startGive = (it) => { setGiving(it.name); setEmail(''); setPass(suggestPass()); };
+  const confirmGive = async () => {
+    const em = email.trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)) { addToast?.({ type: 'warning', message: 'Email inválido' }); return; }
+    if (pass.length < 6) { addToast?.({ type: 'warning', message: 'La contraseña necesita 6+ caracteres' }); return; }
+    setBusy(true);
+    try {
+      const member = await createMember(em, pass, giving);
+      const cid = member?.id;
+      // Vinculamos TODAS las tarjetas de ese nombre a la nueva cuenta.
+      let n = 0;
+      const target = giving.trim().toLowerCase();
+      for (const wk of allWeekKeys()) {
+        for (const asg of listAssignments(wk)) {
+          if ((asg.persona || '').trim().toLowerCase() === target) { assignCreator(asg.id, { creatorId: cid, persona: giving }); n++; }
+        }
+      }
+      // Aseguramos también la tarjeta actual (por si su persona no matcheaba).
+      assignCreator(a.id, { creatorId: cid, persona: giving });
+      onTeamChange?.();
+      addToast?.({ type: 'success', message: `Acceso creado para ${giving}${n > 0 ? ` · ${n} tarjeta${n !== 1 ? 's' : ''} vinculada${n !== 1 ? 's' : ''}` : ''}. Contraseña: ${pass}` });
+      setGiving(null);
+    } catch (err) {
+      addToast?.({ type: 'error', message: err.message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div>
+      <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Asignar a</span>
+      <div className="space-y-1.5">
+        {integrantes.map(it => {
+          const sel = it.key === currentKey;
+          return (
+            <div key={it.key}>
+              <div
+                onClick={() => asignar(it)}
+                className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg border cursor-pointer transition ${
+                  sel ? 'border-brand-500 bg-brand-50/60 dark:bg-brand-900/20 ring-1 ring-brand-300 dark:ring-brand-700'
+                      : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                }`}>
+                <span className={`w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center ${sel ? 'border-brand-500' : 'border-gray-300 dark:border-gray-500'}`}>
+                  {sel && <span className="w-2 h-2 rounded-full bg-brand-500" />}
+                </span>
+                <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-brand-400 to-brand-600 text-white flex items-center justify-center text-xs font-bold uppercase shrink-0">
+                  {(it.name[0] || '?')}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-bold text-gray-800 dark:text-gray-100 truncate">{it.name}</div>
+                  <div className="text-[10px] text-gray-400 dark:text-gray-500 truncate">
+                    {it.hasAccess ? (it.email || 'con login') : `${it.cards} tarjeta${it.cards !== 1 ? 's' : ''}`}
+                  </div>
+                </div>
+                {it.hasAccess ? (
+                  <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/40 rounded-full px-2 py-0.5 shrink-0">🔑 con acceso</span>
+                ) : (
+                  <>
+                    <span className="text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-800 rounded-full px-2 py-0.5 shrink-0">sin acceso</span>
+                    <button onClick={e => { e.stopPropagation(); startGive(it); }}
+                      className="text-[10px] font-bold text-brand-600 dark:text-brand-300 border border-brand-300 dark:border-brand-700 rounded-md px-2 py-1 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition shrink-0">
+                      Dar acceso
+                    </button>
+                  </>
+                )}
+              </div>
+              {/* Form inline de "dar acceso" */}
+              {giving === it.name && (
+                <div className="mt-1.5 ml-6 mr-1 p-3 rounded-lg border border-brand-200 dark:border-brand-800 bg-brand-50/40 dark:bg-brand-900/10 space-y-2" onClick={e => e.stopPropagation()}>
+                  <p className="text-[11px] text-gray-600 dark:text-gray-300">Creale el login a <b>{it.name}</b>. Se le vinculan sus {it.cards} tarjeta{it.cards !== 1 ? 's' : ''}.</p>
+                  <input value={email} onChange={e => setEmail(e.target.value)} type="email" placeholder="email@ejemplo.com" autoFocus
+                    className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                  <div className="flex items-center gap-2">
+                    <input value={pass} onChange={e => setPass(e.target.value)} placeholder="Contraseña"
+                      className="flex-1 px-2.5 py-1.5 text-sm font-mono bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                    <button onClick={confirmGive} disabled={busy}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-md transition disabled:opacity-50">
+                      {busy ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />} Crear acceso
+                    </button>
+                    <button onClick={() => setGiving(null)} className="px-2 py-1.5 text-xs font-semibold text-gray-500 hover:text-gray-700">Cancelar</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {/* Sin asignar */}
+        <button onClick={sinAsignar}
+          className={`w-full text-left px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition ${
+            !currentKey ? 'border-brand-400 text-brand-600 dark:text-brand-300 bg-brand-50/50 dark:bg-brand-900/20' : 'border-dashed border-gray-300 dark:border-gray-600 text-gray-400 hover:text-gray-600'
+          }`}>
+          — Sin asignar —
+        </button>
+      </div>
+      <p className="text-[11px] text-gray-400 mt-1.5">
+        El integrante <b>con acceso</b> entra a la app y ve esta tarjeta en su tablero. <b>Sin acceso</b> es solo un nombre (para asignar y para los pagos) — dale acceso cuando quieras.
+      </p>
+    </div>
+  );
+}
+
 // ── Detalle de la tarjeta (estilo Trello): persona, tipo, estado, brief a mano,
 // creativos (subida a Drive), y contador de videos aprobados.
-function CardDetailModal({ a, personas, team = [], onClose, addToast }) {
+function CardDetailModal({ a, personas, team = [], onClose, addToast, onTeamChange }) {
   const [brief, setBrief] = useState(a.brief || '');
   const nFiles = a.archivos?.length || 0;
-
-  // Asignar la tarjeta a una CUENTA del equipo: setea creator_id (lo que la RLS
-  // usa para que ese chico vea la tarjeta) y la persona con su nombre.
-  const onAssignCuenta = (cid) => {
-    const m = team.find(t => t.id === cid);
-    assignCreator(a.id, { creatorId: cid || null, persona: m ? (m.display_name || m.email) : a.persona });
-    if (m) addToast?.({ type: 'success', message: `Tarjeta asignada a ${m.display_name || m.email}` });
-  };
 
   const saveBrief = () => { if (brief !== (a.brief || '')) updateAssignment(a.id, { brief }); };
   // Diálogos propios (reemplazan window.confirm/prompt): 'eliminar' | 'cambios'.
@@ -1330,49 +1469,19 @@ function CardDetailModal({ a, personas, team = [], onClose, addToast }) {
         </div>
 
         <div className="p-5 space-y-5 max-h-[70vh] overflow-y-auto">
-          {/* Asignar a una cuenta del equipo (login del creator) */}
-          <div>
-            <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Asignar a (cuenta)</span>
-            <div className="relative">
-              <select value={a.creatorId || ''} onChange={e => onAssignCuenta(e.target.value)}
-                className="appearance-none w-full pl-3 pr-8 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500">
-                <option value="">— sin cuenta asignada —</option>
-                {team.map(m => <option key={m.id} value={m.id}>{m.display_name || m.email}</option>)}
-              </select>
-              <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-            </div>
-            <p className="text-[11px] text-gray-400 mt-1">
-              {team.length === 0
-                ? 'No hay cuentas del equipo todavía. Creá una en "Equipo".'
-                : 'El chico asignado va a ver esta tarjeta en su tablero y va a poder subir los creativos.'}
-            </p>
-          </div>
+          {/* Asignar a — selector UNIFICADO de integrante (persona + cuenta). */}
+          <IntegranteSelector a={a} team={team} personas={personas} onTeamChange={onTeamChange} addToast={addToast} />
 
-          {/* Persona (texto libre) + estado. Los chips de persona solo aparecen
-              si TODAVÍA no hay cuentas del equipo — con cuentas, se asigna arriba
-              en "Asignar a (cuenta)" y evitamos el doble control confuso. */}
-          <div className="grid sm:grid-cols-2 gap-4">
-            {team.length === 0 && (
-              <div>
-                <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Persona</span>
-                <div className="flex flex-wrap gap-1.5">
-                  {personas.map(p => (
-                    <button key={p} onClick={() => assignPersona(a.id, a.persona === p ? '' : p)}
-                      className={`text-xs font-bold px-2.5 py-1 rounded-md transition ${a.persona === p ? CHIP_CLS[personaColor(p)] : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200'}`}>{p}</button>
-                  ))}
-                </div>
-              </div>
-            )}
-            <div>
-              <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Estado</span>
-              <div className="flex flex-wrap gap-1">
-                {ESTADOS.map(e => (
-                  <button key={e} onClick={() => updateAssignment(a.id, { estado: e })}
-                    className={`text-[11px] font-bold px-2 py-1 rounded-md transition ${a.estado === e ? 'bg-brand-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200'}`}>
-                    {ESTADO_LABELS[e]}
-                  </button>
-                ))}
-              </div>
+          {/* Estado */}
+          <div>
+            <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Estado</span>
+            <div className="flex flex-wrap gap-1">
+              {ESTADOS.map(e => (
+                <button key={e} onClick={() => updateAssignment(a.id, { estado: e })}
+                  className={`text-[11px] font-bold px-2 py-1 rounded-md transition ${a.estado === e ? 'bg-brand-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200'}`}>
+                  {ESTADO_LABELS[e]}
+                </button>
+              ))}
             </div>
           </div>
 

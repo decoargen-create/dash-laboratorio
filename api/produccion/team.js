@@ -31,6 +31,21 @@ function readBody(req) {
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
+// Busca un usuario de Auth por email (no hay getByEmail en el admin API, así que
+// paginamos listUsers). Devuelve el user o null. Cap de páginas por las dudas.
+async function findAuthUserByEmail(supabase, email) {
+  const target = email.trim().toLowerCase();
+  for (let page = 1; page <= 20; page++) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 200 });
+    if (error) return null;
+    const users = data?.users || [];
+    const hit = users.find(u => (u.email || '').toLowerCase() === target);
+    if (hit) return hit;
+    if (users.length < 200) break; // era la última página
+  }
+  return null;
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
 
@@ -83,26 +98,47 @@ export default async function handler(req, res) {
       email_confirm: true, // sin email de verificación: entra directo con la clave
       user_metadata: { display_name: name },
     });
+
+    // Si el email YA existe en Auth (típico: un intento previo que creó la cuenta
+    // pero quedó sin profile de editor → no aparece en el equipo), en vez de
+    // frenar con "ya existe", la ADOPTAMOS: le ponemos el nombre + la contraseña
+    // que pusiste y la marcamos como editor. Así queda usable y aparece en el
+    // equipo, sin que tengas que borrarla a mano en Supabase. No tocamos admins.
+    let userId = created?.user?.id || null;
+    let adopted = false;
     if (createErr) {
-      const msg = /already|registered|exists/i.test(createErr.message || '')
-        ? 'Ya existe una cuenta con ese email.'
-        : createErr.message;
-      return respondJSON(res, 400, { error: msg });
+      if (!/already|registered|exists/i.test(createErr.message || '')) {
+        return respondJSON(res, 400, { error: createErr.message });
+      }
+      const existing = await findAuthUserByEmail(supabase, email);
+      if (!existing) {
+        return respondJSON(res, 400, { error: 'Ese email ya existe pero no lo pude ubicar. Borralo en Supabase → Authentication → Users y reintentá.' });
+      }
+      const existingRole = await getUserRole(existing.id);
+      if (existingRole === 'admin') {
+        return respondJSON(res, 400, { error: 'Ese email es de un admin — no se puede convertir en editor.' });
+      }
+      const { error: updErr } = await supabase.auth.admin.updateUserById(existing.id, {
+        password, email_confirm: true, user_metadata: { display_name: name },
+      });
+      if (updErr) return respondJSON(res, 500, { error: `No se pudo actualizar la cuenta existente: ${updErr.message}` });
+      userId = existing.id;
+      adopted = true;
     }
 
-    const newId = created?.user?.id;
-    if (!newId) return respondJSON(res, 500, { error: 'No se pudo crear la cuenta.' });
+    if (!userId) return respondJSON(res, 500, { error: 'No se pudo crear la cuenta.' });
 
     // El trigger handle_new_user ya creó el profile con role default 'user'.
     // Lo forzamos a 'creator' (upsert por si el trigger todavía no corrió).
     const { error: upErr } = await supabase
       .from('profiles')
-      .upsert({ id: newId, email, display_name: name, role: 'creator' }, { onConflict: 'id' });
-    if (upErr) return respondJSON(res, 500, { error: `Cuenta creada pero falló marcarla como creator: ${upErr.message}` });
+      .upsert({ id: userId, email, display_name: name, role: 'creator' }, { onConflict: 'id' });
+    if (upErr) return respondJSON(res, 500, { error: `Cuenta lista pero falló marcarla como editor: ${upErr.message}` });
 
     return respondJSON(res, 200, {
       ok: true,
-      member: { id: newId, email, display_name: name, role: 'creator' },
+      adopted,
+      member: { id: userId, email, display_name: name, role: 'creator' },
     });
   }
 

@@ -513,7 +513,6 @@ export default function ProduccionSection({ addToast }) {
   const [weekKey, setWeekKey] = useState(() => weekKeyOf());
   const [showAdd, setShowAdd] = useState(false);
   const [showTeam, setShowTeam] = useState(false);
-  const [showReasignar, setShowReasignar] = useState(false);
   const [confirmResync, setConfirmResync] = useState(false);
   const [resyncing, setResyncing] = useState(false);
   const [team, setTeam] = useState([]);
@@ -664,10 +663,6 @@ export default function ProduccionSection({ addToast }) {
             className="inline-flex items-center justify-center w-8 h-8 text-gray-500 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition shadow-sm disabled:opacity-50">
             <RefreshCw size={14} className={resyncing ? 'animate-spin' : ''} />
           </button>
-          <button onClick={() => setShowReasignar(true)} title="Mover todas las tarjetas de una persona a otra"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition shadow-sm">
-            <ArrowLeftRight size={14} /> Reasignar
-          </button>
           {drive.rootLink && (
             <a href={drive.rootLink} target="_blank" rel="noopener noreferrer"
               title="Abrir la carpeta de creativos en Google Drive (todos los productos)"
@@ -762,8 +757,8 @@ export default function ProduccionSection({ addToast }) {
         </div>
       )}
 
-      {/* Por producto (esta semana): videos que faltan + plata invertida. Unifica
-          lo que antes eran dos bloques ("Videos por producto" + "Inversión"). */}
+      {/* Por producto (esta semana): cuántas TARJETAS faltan entregar (no cuenta
+          videos) + plata invertida. La barra mide tarjetas entregadas/total. */}
       {asigs.length > 0 && (() => {
         const resumen = resumenVideosPorProducto(asigs).map(r => {
           const invertido = asigs.reduce((s, a) => {
@@ -773,29 +768,35 @@ export default function ProduccionSection({ addToast }) {
           return { ...r, invertido };
         });
         const totalInvertido = resumen.reduce((s, r) => s + r.invertido, 0);
+        const totalPend = resumen.reduce((s, r) => s + r.pendientes, 0);
         return (
           <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
             <div className="flex items-center gap-2 mb-3">
               <Film size={15} className="text-emerald-500" />
               <span className="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Por producto · esta semana</span>
+              {totalPend > 0 && (
+                <span className="text-[11px] font-bold text-amber-600 dark:text-amber-400 tabular-nums">· faltan entregar {totalPend}</span>
+              )}
               {totalInvertido > 0 && (
                 <span className="ml-auto text-xs font-bold text-emerald-600 dark:text-emerald-400 font-mono tabular-nums">{fmtArs(totalInvertido)}</span>
               )}
             </div>
             <div className="grid gap-x-6 gap-y-2.5 sm:grid-cols-2">
               {resumen.map(r => {
-                const pct = r.target > 0 ? Math.round((r.subidos / r.target) * 100) : 0;
+                const pct = r.tarjetas > 0 ? Math.round((r.entregadas / r.tarjetas) * 100) : 0;
                 return (
                   <div key={r.producto}>
                     <div className="flex items-center justify-between text-xs mb-1 gap-2">
                       <span className="font-semibold text-gray-800 dark:text-gray-100 truncate min-w-0">
                         {r.producto}
-                        <span className="font-normal text-gray-400 dark:text-gray-500"> · {r.tarjetas} tarj · {r.pendientes > 0
-                          ? <>falta{r.pendientes === 1 ? '' : 'n'} entregar <b className="text-amber-600 dark:text-amber-400">{r.pendientes}</b></>
-                          : <span className="text-emerald-500">✓ entregado</span>}</span>
+                        <span className="font-normal text-gray-400 dark:text-gray-500"> · {r.tarjetas} tarj</span>
                       </span>
                       <span className="flex items-center gap-2 shrink-0 tabular-nums">
-                        <span className="text-gray-500 dark:text-gray-400">{r.subidos}/{r.target} vid · faltan <b className={r.faltan === 0 ? 'text-emerald-500' : 'text-amber-600 dark:text-amber-400'}>{r.faltan}</b></span>
+                        <span className="text-gray-500 dark:text-gray-400">
+                          {r.entregadas}/{r.tarjetas} entregadas · {r.pendientes > 0
+                            ? <>falta{r.pendientes === 1 ? '' : 'n'} <b className="text-amber-600 dark:text-amber-400">{r.pendientes}</b></>
+                            : <b className="text-emerald-500">✓ listo</b>}
+                        </span>
                         {r.invertido > 0 && <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">{fmtArs(r.invertido)}</span>}
                       </span>
                     </div>
@@ -893,10 +894,6 @@ export default function ProduccionSection({ addToast }) {
       )}
       {showTeam && (
         <TeamModal onClose={() => { setShowTeam(false); reloadTeam(); }} addToast={addToast} />
-      )}
-      {showReasignar && (
-        <ReasignarModal asigs={asigs} team={team} weekKey={weekKey}
-          onClose={() => setShowReasignar(false)} addToast={addToast} />
       )}
       <ConfirmDialog
         open={confirmResync}

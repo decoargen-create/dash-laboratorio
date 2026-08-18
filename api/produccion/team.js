@@ -37,9 +37,14 @@ export default async function handler(req, res) {
   const userId = await getUserIdFromAuth(req);
   if (!userId) return respondJSON(res, 401, { error: 'No autorizado — iniciá sesión de nuevo.' });
 
+  // "Admin" a los fines de Producción = cualquiera que NO sea editor (creator).
+  // Misma regla que ya usan el tablero de admin del cliente y el endpoint de
+  // Drive: hay UNA cuenta dueña (la tuya) que gestiona todo, y los editores son
+  // solo editores. Así el dueño puede tener role 'user'/null y aún así manejar
+  // el equipo, sin tener que marcar nada en la base.
   const role = await getUserRole(userId);
-  if (role !== 'admin') {
-    return respondJSON(res, 403, { error: 'Solo un admin puede gestionar el equipo.' });
+  if (role === 'creator') {
+    return respondJSON(res, 403, { error: 'Un editor no puede gestionar el equipo.' });
   }
 
   const supabase = getServiceClient();

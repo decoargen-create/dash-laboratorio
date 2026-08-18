@@ -20,6 +20,12 @@
 //     la nube y, la primera vez de un admin, migra la data local existente.
 
 import { supabase } from './supabase.js';
+import {
+  PAGO_POR_PRODUCTO, VIDEOS_POR_PRODUCTO, DEFAULT_BONUS_TRAMOS,
+  bonusObjetivo, pagoProductoDeCfg, bonusDeCfg, resumenVideosPorProducto,
+} from './produccionCalc.js';
+// Re-exportamos la lógica pura para no romper a quien la importaba desde acá.
+export { PAGO_POR_PRODUCTO, VIDEOS_POR_PRODUCTO, DEFAULT_BONUS_TRAMOS, bonusObjetivo, resumenVideosPorProducto };
 
 const KEY = 'adslab-produccion-v1';
 const PAGOS_KEY = 'adslab-produccion-pagos-v1';
@@ -56,16 +62,8 @@ export const ESTADOS_CREATOR = ['porhacer', 'revision'];
 // Estados viejos → nuevos (antes había 'asignado' y 'subido').
 const ESTADO_MIGRACION = { asignado: 'porhacer', subido: 'porhacer' };
 function normEstado(e) { return ESTADO_MIGRACION[e] || e || 'porhacer'; }
-export const VIDEOS_POR_PRODUCTO = 9;
-export const PAGO_POR_PRODUCTO = 42000; // ARS por producto completo y aprobado.
-
-// Bonus por objetivo semanal (productos COMPLETADOS en la semana).
-export function bonusObjetivo(completados) {
-  if (completados >= 5) return 36000;
-  if (completados === 4) return 30000;
-  if (completados === 3) return 24000;
-  return 0;
-}
+// PAGO_POR_PRODUCTO / VIDEOS_POR_PRODUCTO / bonusObjetivo ahora viven en
+// produccionCalc.js (importados + re-exportados arriba).
 
 // Un producto cuenta como "completado" (para pago/objetivo) cuando está
 // aprobado o publicado — NO cuando solo se subió.
@@ -647,7 +645,6 @@ export function removeArchivo(id, ts) {
 // Sin config para una persona → se usan los defaults globales (PAGO_POR_PRODUCTO
 // + bonusObjetivo). El dueño la edita en "Equipo"; se guarda en la tabla
 // produccion_pago_config (RLS por dueño; el editor solo lee la suya por creatorId).
-export const DEFAULT_BONUS_TRAMOS = [{ min: 3, monto: 24000 }, { min: 4, monto: 30000 }, { min: 5, monto: 36000 }];
 const PAGOS_CONFIG_TABLE = 'produccion_pago_config';
 const PAGOS_CONFIG_KEY = 'adslab-produccion-pago-config-v1';
 const cfgKey = (persona) => (persona || '').trim().toLowerCase();
@@ -659,21 +656,10 @@ function writePagoConfigLocal(obj) {
   notify();
 }
 
-// Monto por producto (9 videos) de una persona (o el default si no configuró).
-export function pagoProductoDe(persona) {
-  const c = _pagoConfig[cfgKey(persona)];
-  return Number.isFinite(c?.pagoProducto) ? c.pagoProducto : PAGO_POR_PRODUCTO;
-}
-// Bono de una persona según sus completados de la semana. Sin config → default
-// global; con config → el tramo más alto que alcanzó (o 0 si no tiene tramos).
-export function bonusDe(persona, completados) {
-  const c = _pagoConfig[cfgKey(persona)];
-  if (!c) return bonusObjetivo(completados);
-  const tramos = Array.isArray(c.bonusTramos) ? c.bonusTramos : [];
-  let monto = 0;
-  for (const t of tramos) { if (completados >= (t.min || 0)) monto = Math.max(monto, t.monto || 0); }
-  return monto;
-}
+// Monto y bono de una persona = la lógica pura (produccionCalc) aplicada a SU
+// config guardada (o los defaults si no configuró).
+export function pagoProductoDe(persona) { return pagoProductoDeCfg(_pagoConfig[cfgKey(persona)]); }
+export function bonusDe(persona, completados) { return bonusDeCfg(_pagoConfig[cfgKey(persona)], completados); }
 // Config completa de una persona para la UI (con defaults si no hay fila).
 export function getPagoConfig(persona) {
   const c = _pagoConfig[cfgKey(persona)];
@@ -776,24 +762,8 @@ export function inversionPorProducto() {
   return Object.values(byProd).sort((a, b) => b.invertido - a.invertido || a.productoNombre.localeCompare(b.productoNombre, 'es'));
 }
 
-// Resumen de VIDEOS por producto sobre un set de tarjetas: cuántos subidos vs.
-// el objetivo (9 por tarjeta) y cuántos faltan. Sirve para el resumen "cuántos
-// videos hay para hacer por producto", tanto en el admin como en el editor.
-// Devuelve [{ producto, subidos, target, tarjetas, faltan }] ordenado por faltan.
-export function resumenVideosPorProducto(cards) {
-  const by = {};
-  for (const a of (cards || [])) {
-    const nombre = (a.productoNombre || '').trim() || 'Sin nombre';
-    const k = nombre.toLowerCase();
-    if (!by[k]) by[k] = { producto: nombre, subidos: 0, target: 0, tarjetas: 0 };
-    by[k].subidos += (a.archivos?.length || 0);
-    by[k].target += VIDEOS_POR_PRODUCTO;
-    by[k].tarjetas++;
-  }
-  return Object.values(by)
-    .map(x => ({ ...x, faltan: Math.max(0, x.target - x.subidos) }))
-    .sort((x, y) => y.faltan - x.faltan || x.producto.localeCompare(y.producto, 'es'));
-}
+// resumenVideosPorProducto vive ahora en produccionCalc.js (importado y
+// re-exportado arriba), para que la app y los tests usen el mismo código.
 
 // Rol actual del sync ('admin' | 'creator' | null). La UI lo usa para mostrar
 // cosas que son solo del admin (ej: el aviso de entregas nuevas).

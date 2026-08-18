@@ -20,6 +20,7 @@ import {
   resumenVideosPorProducto, VIDEOS_POR_PRODUCTO,
 } from './produccionStore.js';
 import { CreativosSection } from './produccionUpload.jsx';
+import { numerarDuplicados } from './produccionCalc.js';
 
 const ESTADO_BADGE = {
   porhacer: 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-200',
@@ -34,22 +35,6 @@ function EstadoBadge({ estado }) {
       {ESTADO_LABELS[estado] || estado}
     </span>
   );
-}
-
-// Numera los duplicados del mismo producto en la misma semana → { id: n } (solo
-// si hay 2+). Diferencia "Cepillo #1 / #2 / #3" asignados a la misma persona.
-function numerarDuplicados(cards) {
-  const groups = {};
-  for (const a of cards) {
-    const k = `${a.weekKey}|${(a.productoNombre || '').trim().toLowerCase()}`;
-    (groups[k] = groups[k] || []).push(a);
-  }
-  const out = {};
-  for (const k in groups) {
-    const arr = groups[k].slice().sort((x, y) => String(x.createdAt || '').localeCompare(String(y.createdAt || '')));
-    if (arr.length > 1) arr.forEach((a, i) => { out[a.id] = i + 1; });
-  }
-  return out;
 }
 
 // Columnas del tablero del editor (mismo orden que ve el admin).

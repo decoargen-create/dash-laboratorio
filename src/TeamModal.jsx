@@ -6,9 +6,9 @@
 // tarjeta, lo asignás desde "Asignar a (cuenta)".
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { X, UserPlus, Loader2, Trash2, KeyRound, Users, Mail, Copy, Check, Search } from 'lucide-react';
+import { X, UserPlus, Loader2, Trash2, KeyRound, Users, Mail, Copy, Check, Search, Wallet, Plus } from 'lucide-react';
 import { listTeam, createMember, resetPassword, removeMember } from './produccionTeam.js';
-import { personasEnTarjetas, assignCreator, allWeekKeys, listAssignments } from './produccionStore.js';
+import { personasEnTarjetas, assignCreator, allWeekKeys, listAssignments, getPagoConfig, setPagoConfig, DEFAULT_BONUS_TRAMOS } from './produccionStore.js';
 import ConfirmDialog from './ConfirmDialog.jsx';
 
 // Genera una contraseña simple pero decente para pasarle al chico.
@@ -17,6 +17,75 @@ function suggestPassword() {
   const w = words[Math.floor(Math.random() * words.length)];
   const n = Math.floor(1000 + Math.random() * 9000);
   return `${w}${n}`;
+}
+
+// Editor de PAGO por persona: monto por producto (9 videos) + bono con tramos
+// propios ("cada N completos → $X"), o sin bono. Se guarda por persona; si es
+// una cuenta le pasamos su creatorId para que el editor pueda leer su config.
+function PagoConfigEditor({ member, onClose, addToast }) {
+  const persona = member.display_name || member.email;
+  const inicial = getPagoConfig(persona);
+  const [pago, setPago] = useState(inicial.pagoProducto);
+  const [bonoOn, setBonoOn] = useState((inicial.bonusTramos || []).length > 0);
+  const [tramos, setTramos] = useState(inicial.bonusTramos.length ? inicial.bonusTramos : DEFAULT_BONUS_TRAMOS.map(t => ({ ...t })));
+
+  const setTramo = (i, campo, val) => setTramos(ts => ts.map((t, j) => j === i ? { ...t, [campo]: val === '' ? '' : Math.max(0, parseInt(val, 10) || 0) } : t));
+  const addTramo = () => setTramos(ts => [...ts, { min: (ts[ts.length - 1]?.min || 2) + 1, monto: 0 }]);
+  const delTramo = (i) => setTramos(ts => ts.filter((_, j) => j !== i));
+
+  const save = () => {
+    setPagoConfig(persona, {
+      pagoProducto: parseInt(pago, 10) || 0,
+      bonusTramos: bonoOn ? tramos.map(t => ({ min: parseInt(t.min, 10) || 1, monto: parseInt(t.monto, 10) || 0 })) : [],
+      creatorId: member.id,
+    });
+    addToast?.({ type: 'success', message: `Pago de ${persona} guardado` });
+    onClose();
+  };
+
+  return (
+    <div className="mt-1.5 rounded-lg border border-brand-200 dark:border-brand-800 bg-brand-50/40 dark:bg-brand-900/10 p-3 space-y-3">
+      <div>
+        <label className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1">Pago por producto (9 videos)</label>
+        <div className="flex items-center gap-1.5">
+          <span className="text-sm text-gray-400">$</span>
+          <input type="number" value={pago} onChange={e => setPago(e.target.value)} min="0" step="1000"
+            className="flex-1 px-2.5 py-1.5 text-sm font-mono bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
+          <span className="text-[11px] text-gray-400">ARS c/producto aprobado</span>
+        </div>
+      </div>
+
+      <div>
+        <label className="flex items-center gap-2 cursor-pointer select-none mb-1.5">
+          <input type="checkbox" checked={bonoOn} onChange={e => setBonoOn(e.target.checked)} className="accent-brand-600" />
+          <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400">Bono por objetivo semanal</span>
+        </label>
+        {bonoOn ? (
+          <div className="space-y-1.5">
+            {tramos.map((t, i) => (
+              <div key={i} className="flex items-center gap-1.5 text-sm">
+                <span className="text-[11px] text-gray-400">cada</span>
+                <input type="number" value={t.min} onChange={e => setTramo(i, 'min', e.target.value)} min="1"
+                  className="w-14 px-2 py-1 text-sm font-mono bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md text-center" />
+                <span className="text-[11px] text-gray-400">completos → $</span>
+                <input type="number" value={t.monto} onChange={e => setTramo(i, 'monto', e.target.value)} min="0" step="1000"
+                  className="flex-1 px-2 py-1 text-sm font-mono bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md" />
+                <button onClick={() => delTramo(i)} className="p-1 text-gray-400 hover:text-red-500"><Trash2 size={13} /></button>
+              </div>
+            ))}
+            <button onClick={addTramo} className="inline-flex items-center gap-1 text-[11px] font-bold text-brand-600 dark:text-brand-300 hover:underline"><Plus size={12} /> Agregar tramo</button>
+          </div>
+        ) : (
+          <p className="text-[11px] text-gray-400 italic">Sin bono — cobra solo el monto por producto.</p>
+        )}
+      </div>
+
+      <div className="flex items-center gap-2 justify-end pt-1">
+        <button onClick={onClose} className="px-2.5 py-1 text-xs font-semibold text-gray-500 hover:text-gray-700">Cancelar</button>
+        <button onClick={save} className="px-3 py-1.5 text-xs font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-md">Guardar pago</button>
+      </div>
+    </div>
+  );
 }
 
 export default function TeamModal({ onClose, addToast }) {
@@ -42,6 +111,7 @@ export default function TeamModal({ onClose, addToast }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState('');
+  const [payOpen, setPayOpen] = useState(null); // id del integrante con el editor de pago abierto
 
   // Form de alta
   const [name, setName] = useState('');
@@ -242,18 +312,23 @@ export default function TeamModal({ onClose, addToast }) {
             ) : (
               <div className="space-y-2">
                 {team.filter(m => !q.trim() || `${m.display_name || ''} ${m.email || ''}`.toLowerCase().includes(q.trim().toLowerCase())).map(m => (
-                  <div key={m.id} className="flex items-center gap-3 rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2.5">
-                    <div className="w-8 h-8 rounded-full bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 flex items-center justify-center text-sm font-bold uppercase shrink-0">
-                      {(m.display_name || m.email || '?').charAt(0)}
+                  <div key={m.id}>
+                    <div className="flex items-center gap-3 rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2.5">
+                      <div className="w-8 h-8 rounded-full bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 flex items-center justify-center text-sm font-bold uppercase shrink-0">
+                        {(m.display_name || m.email || '?').charAt(0)}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-semibold text-gray-800 dark:text-gray-100 truncate">{m.display_name || m.email}</div>
+                        <div className="text-xs text-gray-400 truncate inline-flex items-center gap-1"><Mail size={10} /> {m.email}</div>
+                      </div>
+                      <button onClick={() => setPayOpen(o => o === m.id ? null : m.id)} title="Configurar pago"
+                        className={`p-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 ${payOpen === m.id ? 'text-emerald-600' : 'text-gray-400 hover:text-emerald-600'}`}><Wallet size={15} /></button>
+                      <button onClick={() => onReset(m)} title="Cambiar contraseña"
+                        className="p-1.5 rounded-md text-gray-400 hover:text-brand-600 hover:bg-gray-100 dark:hover:bg-gray-800"><KeyRound size={15} /></button>
+                      <button onClick={() => onRemove(m)} title="Sacar del equipo"
+                        className="p-1.5 rounded-md text-gray-400 hover:text-red-500 hover:bg-gray-100 dark:hover:bg-gray-800"><Trash2 size={15} /></button>
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm font-semibold text-gray-800 dark:text-gray-100 truncate">{m.display_name || m.email}</div>
-                      <div className="text-xs text-gray-400 truncate inline-flex items-center gap-1"><Mail size={10} /> {m.email}</div>
-                    </div>
-                    <button onClick={() => onReset(m)} title="Cambiar contraseña"
-                      className="p-1.5 rounded-md text-gray-400 hover:text-brand-600 hover:bg-gray-100 dark:hover:bg-gray-800"><KeyRound size={15} /></button>
-                    <button onClick={() => onRemove(m)} title="Sacar del equipo"
-                      className="p-1.5 rounded-md text-gray-400 hover:text-red-500 hover:bg-gray-100 dark:hover:bg-gray-800"><Trash2 size={15} /></button>
+                    {payOpen === m.id && <PagoConfigEditor member={m} onClose={() => setPayOpen(null)} addToast={addToast} />}
                   </div>
                 ))}
               </div>

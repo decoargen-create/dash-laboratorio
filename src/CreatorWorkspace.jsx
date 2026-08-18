@@ -16,7 +16,7 @@ import {
 import {
   subscribeProduccion, allWeekKeys, listAssignments, weekLabel, weekKeyOf,
   ESTADO_LABELS, ESTADOS_CREATOR, updateAssignment, refreshProduccion, esCompleto,
-  monthKeyOf, monthLabel, weeksInMonth, bonusObjetivo, PAGO_POR_PRODUCTO,
+  monthKeyOf, monthLabel, weeksInMonth, pagoProductoDe, bonusDe,
 } from './produccionStore.js';
 import { CreativosSection } from './produccionUpload.jsx';
 
@@ -213,15 +213,22 @@ export default function CreatorWorkspace({ user, onLogout, addToast, darkMode, t
   // ganó (productos aprobados × $42k + bonus semanal por objetivo), cuántos
   // aprobó y cuántos videos subió.
   const monthKey = monthKeyOf();
-  let completadosMes = 0, bonusMes = 0, videosMes = 0;
+  let completadosMes = 0, bonusMes = 0, videosMes = 0, ganadoProductos = 0;
   for (const wk of weeksInMonth(monthKey)) {
     const cards = listAssignments(wk);
-    const comp = cards.filter(a => esCompleto(a.estado)).length;
-    completadosMes += comp;
-    bonusMes += bonusObjetivo(comp);
+    // Agrupamos por persona (normalmente una sola para el editor) para aplicar
+    // su monto y bono propios.
+    const byPer = {};
+    for (const a of cards) { const p = a.persona || ''; (byPer[p] = byPer[p] || []).push(a); }
+    for (const p in byPer) {
+      const comp = byPer[p].filter(a => esCompleto(a.estado)).length;
+      completadosMes += comp;
+      ganadoProductos += comp * pagoProductoDe(p);
+      bonusMes += bonusDe(p, comp);
+    }
     videosMes += cards.reduce((n, a) => n + (a.archivos?.length || 0), 0);
   }
-  const ganadoMes = completadosMes * PAGO_POR_PRODUCTO + bonusMes;
+  const ganadoMes = ganadoProductos + bonusMes;
   const fmtArs = (n) => '$' + Math.round(n).toLocaleString('es-AR');
 
   const doRefresh = async () => {
@@ -310,7 +317,7 @@ export default function CreatorWorkspace({ user, onLogout, addToast, darkMode, t
                 </div>
               </div>
               <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-2.5">
-                $42.000 por producto aprobado + bonus por objetivo semanal. Es tu total del mes (antes de que te lo transfieran).
+                Según tu tarifa por producto aprobado + tu bono por objetivo. Es tu total del mes (antes de que te lo transfieran).
               </p>
             </div>
 

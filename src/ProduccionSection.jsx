@@ -18,7 +18,7 @@ import {
   ESTADOS, ESTADO_LABELS, VIDEOS_POR_PRODUCTO, weekKeyOf, weekLabel, weekRange, allWeekKeys,
   listAssignments, addAssignment, updateAssignment, removeAssignment, assignPersona,
   assignCreator, subscribeProduccion, esCompleto, bonusObjetivo, inversionPorProducto,
-  getRole, entregasNuevas, ultimaSubidaTs, personasEnTarjetas,
+  getRole, entregasNuevas, ultimaSubidaTs, personasEnTarjetas, resumenVideosPorProducto,
 } from './produccionStore.js';
 import { CreativosSection, subirParaTarjeta, VIDEO_ACCEPT, probeDrive } from './produccionUpload.jsx';
 import { listTeam, createMember } from './produccionTeam.js';
@@ -704,6 +704,35 @@ export default function ProduccionSection({ addToast }) {
           </button>
         </div>
       )}
+
+      {/* Resumen: cuántos videos faltan por producto (de la semana). */}
+      {asigs.length > 0 && (() => {
+        const resumen = resumenVideosPorProducto(asigs);
+        return (
+          <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Film size={15} className="text-emerald-500" />
+              <span className="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Videos por producto · esta semana</span>
+            </div>
+            <div className="grid gap-x-6 gap-y-2.5 sm:grid-cols-2">
+              {resumen.map(r => {
+                const pct = r.target > 0 ? Math.round((r.subidos / r.target) * 100) : 0;
+                return (
+                  <div key={r.producto}>
+                    <div className="flex items-center justify-between text-xs mb-1 gap-2">
+                      <span className="font-semibold text-gray-800 dark:text-gray-100 truncate">{r.producto}</span>
+                      <span className="tabular-nums text-gray-500 dark:text-gray-400 shrink-0">{r.subidos}/{r.target} · faltan <b className={r.faltan === 0 ? 'text-emerald-500' : 'text-amber-600 dark:text-amber-400'}>{r.faltan}</b></span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+                      <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Tablero: en desktop, 4 columnas EXACTAMENTE iguales (grid); en
           pantallas chicas cae a scroll horizontal. */}

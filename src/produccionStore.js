@@ -700,6 +700,25 @@ export function inversionPorProducto() {
   return Object.values(byProd).sort((a, b) => b.invertido - a.invertido || a.productoNombre.localeCompare(b.productoNombre, 'es'));
 }
 
+// Resumen de VIDEOS por producto sobre un set de tarjetas: cuántos subidos vs.
+// el objetivo (9 por tarjeta) y cuántos faltan. Sirve para el resumen "cuántos
+// videos hay para hacer por producto", tanto en el admin como en el editor.
+// Devuelve [{ producto, subidos, target, tarjetas, faltan }] ordenado por faltan.
+export function resumenVideosPorProducto(cards) {
+  const by = {};
+  for (const a of (cards || [])) {
+    const nombre = (a.productoNombre || '').trim() || 'Sin nombre';
+    const k = nombre.toLowerCase();
+    if (!by[k]) by[k] = { producto: nombre, subidos: 0, target: 0, tarjetas: 0 };
+    by[k].subidos += (a.archivos?.length || 0);
+    by[k].target += VIDEOS_POR_PRODUCTO;
+    by[k].tarjetas++;
+  }
+  return Object.values(by)
+    .map(x => ({ ...x, faltan: Math.max(0, x.target - x.subidos) }))
+    .sort((x, y) => y.faltan - x.faltan || x.producto.localeCompare(y.producto, 'es'));
+}
+
 // Rol actual del sync ('admin' | 'creator' | null). La UI lo usa para mostrar
 // cosas que son solo del admin (ej: el aviso de entregas nuevas).
 export function getRole() { return _role; }

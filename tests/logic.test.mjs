@@ -47,12 +47,19 @@ eq('2 Cepillo misma semana → #1 y #2', numerarDuplicados(dupCards), { a: 1, b:
 eq('producto único NO se numera', numerarDuplicados([{ id: 'x', productoNombre: 'Solo', weekKey: '2026-08-17' }]), {});
 
 // ─────────── RESUMEN VIDEOS POR PRODUCTO ───────────
-console.log('\nVIDEOS POR PRODUCTO:');
+console.log('\nVIDEOS + TARJETAS POR PRODUCTO:');
 const vpCards = [
-  { productoNombre: 'Cepillo Drenaje Linfatico', archivos: [{}] },   // 1 video
-  { productoNombre: 'Cepillo Drenaje Linfatico', archivos: [] },     // 0 video
+  { productoNombre: 'Cepillo Drenaje Linfatico', estado: 'porhacer', archivos: [{}] },   // 1 video, no entregada
+  { productoNombre: 'Cepillo Drenaje Linfatico', estado: 'porhacer', archivos: [] },      // 0 video, no entregada
 ];
-eq('2 tarjetas Cepillo: 1/18 faltan 17', resumenVideosPorProducto(vpCards)[0], { producto: 'Cepillo Drenaje Linfatico', subidos: 1, target: 2 * VIDEOS_POR_PRODUCTO, tarjetas: 2, faltan: 2 * VIDEOS_POR_PRODUCTO - 1 });
+eq('2 tarjetas Cepillo: 1/18 videos, 0/2 entregadas', resumenVideosPorProducto(vpCards)[0], { producto: 'Cepillo Drenaje Linfatico', subidos: 1, target: 2 * VIDEOS_POR_PRODUCTO, tarjetas: 2, entregadas: 0, faltan: 2 * VIDEOS_POR_PRODUCTO - 1, pendientes: 2 });
+// Entregadas = publicadas; pendientes = el resto (aprobado todavía "falta entregar")
+const kit = [
+  { productoNombre: 'Kit Inicial', estado: 'publicado', archivos: [] },
+  { productoNombre: 'Kit Inicial', estado: 'aprobado', archivos: [] },
+  { productoNombre: 'Kit Inicial', estado: 'porhacer', archivos: [] },
+];
+eq('Kit Inicial: 3 tarjetas, 1 entregada, 2 pendientes', (({ tarjetas, entregadas, pendientes }) => ({ tarjetas, entregadas, pendientes }))(resumenVideosPorProducto(kit)[0]), { tarjetas: 3, entregadas: 1, pendientes: 2 });
 
 // ─────────── NOMENCLATURA DRIVE ───────────
 console.log('\nNOMENCLATURA DRIVE:');

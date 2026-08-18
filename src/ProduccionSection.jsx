@@ -12,7 +12,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Film, Plus, X, Trash2, ChevronDown, UploadCloud, Loader2, CheckCircle2,
   AlertTriangle, ExternalLink, FileText, GripVertical, Users, History, Search, ArrowLeftRight,
-  Bell, BellRing, Inbox, Eye, RefreshCw,
+  Bell, BellRing, Inbox, Eye, RefreshCw, Calendar, Filter,
 } from 'lucide-react';
 import {
   ESTADOS, ESTADO_LABELS, VIDEOS_POR_PRODUCTO, weekKeyOf, weekLabel, weekRange, allWeekKeys,
@@ -30,6 +30,29 @@ import ConfirmDialog from './ConfirmDialog.jsx';
 const EQUIPO_DEFAULT = ['Fran', 'Wanda', 'Flor'];
 
 const fmtArs = (n) => '$' + new Intl.NumberFormat('es-AR').format(Math.round(n || 0));
+
+// Fecha de creación de la tarjeta en corto: "17/8" (agrega el año si no es el
+// actual). Devuelve null si no hay fecha válida.
+function fmtFechaCorta(iso) {
+  const t = iso ? Date.parse(iso) : NaN;
+  if (Number.isNaN(t)) return null;
+  const d = new Date(t);
+  const mismoAnio = d.getFullYear() === new Date().getFullYear();
+  try {
+    return d.toLocaleDateString('es-AR', mismoAnio
+      ? { day: 'numeric', month: 'numeric' }
+      : { day: 'numeric', month: 'numeric', year: '2-digit' });
+  } catch { return null; }
+}
+
+// Fecha + hora completa para el tooltip ("18/08/2026 14:05").
+function fmtFechaLarga(iso) {
+  const t = iso ? Date.parse(iso) : NaN;
+  if (Number.isNaN(t)) return '';
+  try {
+    return new Date(t).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  } catch { return ''; }
+}
 
 // "hace X" corto para timestamps de subida.
 function fmtHace(ts) {
@@ -479,6 +502,8 @@ export default function ProduccionSection({ addToast }) {
   // Filtro rápido: mostrar solo las tarjetas sin repartir (click en el chip
   // "N sin asignar" del resumen).
   const [soloSinAsignar, setSoloSinAsignar] = useState(false);
+  const [filtroProducto, setFiltroProducto] = useState('');
+  const [filtroPersona, setFiltroPersona] = useState('');
 
   useEffect(() => {
     const un = subscribeProduccion(() => force(x => x + 1));
@@ -559,10 +584,25 @@ export default function ProduccionSection({ addToast }) {
     return [...set];
   }, [weekKey, productos]); // eslint-disable-line
 
-  const asigsBoard = useMemo(
-    () => soloSinAsignar ? asigs.filter(a => !(a.persona || '').trim() && !a.creatorId) : asigs,
-    [asigs, soloSinAsignar],
+  // Opciones de los filtros del tablero: productos y personas presentes esta
+  // semana (así el dropdown solo ofrece lo que existe).
+  const productosEnSemana = useMemo(
+    () => [...new Set(asigs.map(a => (a.productoNombre || '').trim() || 'Sin nombre'))].sort((x, y) => x.localeCompare(y, 'es')),
+    [asigs],
   );
+  const personasEnSemana = useMemo(
+    () => [...new Set(asigs.map(a => (a.persona || '').trim()).filter(Boolean))].sort((x, y) => x.localeCompare(y, 'es')),
+    [asigs],
+  );
+
+  const asigsBoard = useMemo(() => {
+    let list = asigs;
+    if (soloSinAsignar) list = list.filter(a => !(a.persona || '').trim() && !a.creatorId);
+    if (filtroProducto) list = list.filter(a => ((a.productoNombre || '').trim() || 'Sin nombre') === filtroProducto);
+    if (filtroPersona === '__sin__') list = list.filter(a => !(a.persona || '').trim() && !a.creatorId);
+    else if (filtroPersona) list = list.filter(a => (a.persona || '').trim() === filtroPersona);
+    return list;
+  }, [asigs, soloSinAsignar, filtroProducto, filtroPersona]);
   const byCol = useMemo(() => {
     const m = { porhacer: [], revision: [], aprobado: [], publicado: [] };
     for (const a of asigsBoard) (m[a.estado] || m.porhacer).push(a);
@@ -728,12 +768,14 @@ export default function ProduccionSection({ addToast }) {
                 return (
                   <div key={r.producto}>
                     <div className="flex items-center justify-between text-xs mb-1 gap-2">
-                      <span className="font-semibold text-gray-800 dark:text-gray-100 truncate">
+                      <span className="font-semibold text-gray-800 dark:text-gray-100 truncate min-w-0">
                         {r.producto}
-                        {r.tarjetas > 1 && <span className="font-normal text-gray-400 dark:text-gray-500"> · {r.tarjetas} tarjetas</span>}
+                        <span className="font-normal text-gray-400 dark:text-gray-500"> · {r.tarjetas} tarj · {r.pendientes > 0
+                          ? <>falta{r.pendientes === 1 ? '' : 'n'} entregar <b className="text-amber-600 dark:text-amber-400">{r.pendientes}</b></>
+                          : <span className="text-emerald-500">✓ entregado</span>}</span>
                       </span>
                       <span className="flex items-center gap-2 shrink-0 tabular-nums">
-                        <span className="text-gray-500 dark:text-gray-400">{r.subidos}/{r.target} · faltan <b className={r.faltan === 0 ? 'text-emerald-500' : 'text-amber-600 dark:text-amber-400'}>{r.faltan}</b></span>
+                        <span className="text-gray-500 dark:text-gray-400">{r.subidos}/{r.target} vid · faltan <b className={r.faltan === 0 ? 'text-emerald-500' : 'text-amber-600 dark:text-amber-400'}>{r.faltan}</b></span>
                         {r.invertido > 0 && <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">{fmtArs(r.invertido)}</span>}
                       </span>
                     </div>
@@ -747,6 +789,42 @@ export default function ProduccionSection({ addToast }) {
           </div>
         );
       })()}
+
+      {/* Filtros del tablero: por producto y por persona. Acotan las columnas sin
+          tocar los totales de arriba (que son de toda la semana). */}
+      {asigs.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 text-xs font-bold text-gray-500 dark:text-gray-400">
+            <Filter size={13} /> Filtrar
+          </span>
+          <div className="relative">
+            <select value={filtroProducto} onChange={e => setFiltroProducto(e.target.value)}
+              className={`appearance-none pl-2.5 pr-7 py-1 text-xs font-semibold bg-white dark:bg-gray-800 border rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 ${filtroProducto ? 'border-brand-400 text-brand-600 dark:text-brand-300' : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200'}`}>
+              <option value="">Todos los productos</option>
+              {productosEnSemana.map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+            <ChevronDown size={13} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+          </div>
+          <div className="relative">
+            <select value={filtroPersona} onChange={e => setFiltroPersona(e.target.value)}
+              className={`appearance-none pl-2.5 pr-7 py-1 text-xs font-semibold bg-white dark:bg-gray-800 border rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 ${filtroPersona ? 'border-brand-400 text-brand-600 dark:text-brand-300' : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200'}`}>
+              <option value="">Todas las personas</option>
+              {personasEnSemana.map(p => <option key={p} value={p}>{p}</option>)}
+              <option value="__sin__">— Sin asignar —</option>
+            </select>
+            <ChevronDown size={13} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+          </div>
+          {(filtroProducto || filtroPersona) && (
+            <>
+              <span className="text-xs text-gray-400 dark:text-gray-500 tabular-nums">{asigsBoard.length} tarjeta{asigsBoard.length === 1 ? '' : 's'}</span>
+              <button onClick={() => { setFiltroProducto(''); setFiltroPersona(''); }}
+                className="inline-flex items-center gap-1 text-xs font-bold text-gray-500 dark:text-gray-300 hover:text-brand-600 dark:hover:text-brand-300 transition">
+                <X size={12} /> limpiar
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Tablero: en desktop, 4 columnas EXACTAMENTE iguales (grid) que se
           estiran para llenar el alto de la pantalla (se adapta al viewport con
@@ -974,8 +1052,13 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
         </div>
       </div>
 
-      {/* Meta: subidos · aprobados ✓ · brief · trabada · botón de mover */}
-      <div className="mt-2 pl-5 flex items-center gap-2.5 text-xs text-gray-500 dark:text-gray-400">
+      {/* Meta: creada · subidos · aprobados ✓ · brief · trabada · botón de mover */}
+      <div className="mt-2 pl-5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+        {fmtFechaCorta(a.createdAt) && (
+          <span className="inline-flex items-center gap-1" title={`Tarjeta creada el ${fmtFechaLarga(a.createdAt)}`}>
+            <Calendar size={12} className="text-gray-400" />{fmtFechaCorta(a.createdAt)}
+          </span>
+        )}
         <span className="inline-flex items-center gap-1" title={`${subidos} de ${VIDEOS_POR_PRODUCTO} videos subidos`}>
           <Film size={12} className="text-emerald-500" /><b className="text-gray-700 dark:text-gray-200">{subidos}</b>/{VIDEOS_POR_PRODUCTO} videos
         </span>

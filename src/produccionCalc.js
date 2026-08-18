@@ -45,19 +45,22 @@ export function numerarDuplicados(cards) {
   return out;
 }
 
-// Resumen de VIDEOS por producto: subidos vs. objetivo (9 por tarjeta) y cuántos
-// faltan. Devuelve [{ producto, subidos, target, tarjetas, faltan }] por faltan desc.
+// Resumen por producto: VIDEOS (subidos vs. objetivo de 9 por tarjeta) y TARJETAS
+// (cuántas entregadas —publicadas— vs. cuántas faltan entregar). Devuelve
+// [{ producto, subidos, target, faltan, tarjetas, entregadas, pendientes }]
+// ordenado por tarjetas pendientes desc (lo que más falta, primero).
 export function resumenVideosPorProducto(cards) {
   const by = {};
   for (const a of (cards || [])) {
     const nombre = (a.productoNombre || '').trim() || 'Sin nombre';
     const k = nombre.toLowerCase();
-    if (!by[k]) by[k] = { producto: nombre, subidos: 0, target: 0, tarjetas: 0 };
+    if (!by[k]) by[k] = { producto: nombre, subidos: 0, target: 0, tarjetas: 0, entregadas: 0 };
     by[k].subidos += (a.archivos?.length || 0);
     by[k].target += VIDEOS_POR_PRODUCTO;
     by[k].tarjetas++;
+    if (a.estado === 'publicado') by[k].entregadas++;   // entregada = publicada
   }
   return Object.values(by)
-    .map(x => ({ ...x, faltan: Math.max(0, x.target - x.subidos) }))
-    .sort((x, y) => y.faltan - x.faltan || x.producto.localeCompare(y.producto, 'es'));
+    .map(x => ({ ...x, faltan: Math.max(0, x.target - x.subidos), pendientes: x.tarjetas - x.entregadas }))
+    .sort((x, y) => y.pendientes - x.pendientes || y.faltan - x.faltan || x.producto.localeCompare(y.producto, 'es'));
 }

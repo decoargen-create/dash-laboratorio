@@ -26,6 +26,9 @@ async function call(action, payload = {}) {
 }
 
 export const listTeam = () => call('list').then(d => d.team || []);
+// Bootstrap del dueño como admin (para que la RLS de Producción le acepte las
+// escrituras). Idempotente; el server solo promueve si no hay admin todavía.
+export const ensureAppAdmin = () => call('ensure-admin');
 export const createMember = (email, password, displayName) =>
   call('create', { email, password, displayName }).then(d => d.member);
 export const resetPassword = (id, password) => call('reset-password', { id, password });

@@ -51,6 +51,7 @@ import { useMarketingSync } from './useMarketingSync.js';
 import { useUserPrefs } from './useUserPrefs.js';
 import { supabase, onAuthChange } from './supabase.js';
 import { initProduccionSync, teardownProduccionSync } from './produccionStore.js';
+import { ensureAppAdmin } from './produccionTeam.js';
 import { initMoneySync, teardownMoneySync } from './moneyStore.js';
 import CreatorWorkspace from './CreatorWorkspace.jsx';
 import { generateCSV, downloadCSV, parseCSV, toNumber, toBool } from './csv.js';
@@ -2110,6 +2111,13 @@ function AppShell({ onExit }) {
             if (data?.role === 'creator') role = 'creator';
           }
         } catch { /* ante la duda, admin (comportamiento previo) */ }
+        // Si NO es creator, la app lo trata como admin. Aseguramos que su
+        // profiles.role sea 'admin' en la base (bootstrap del primer dueño), sino
+        // la RLS de Producción le rechaza las escrituras y sus asignaciones no
+        // llegan a los editores. Idempotente; si falla, seguimos igual.
+        if (role !== 'creator') {
+          try { await ensureAppAdmin(); } catch { /* no bloqueante */ }
+        }
         if (cancelled) return;
         setCurrentUser({
           role,

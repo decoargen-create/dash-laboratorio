@@ -570,6 +570,30 @@ export function updateAssignment(id, patch) {
   // updateAssignment nunca modifica `archivos` (eso va por addArchivos/removeArchivo)
   // → skipArchivos para no pisar los videos que el editor subió en paralelo.
   pushRow(id, evento, { skipArchivos: true });
+  // Si la tarjeta cruzó el borde de "publicado", reflejamos el estado en el
+  // nombre de su carpeta de Drive (le agrega/saca "— PUBLICADO"). Solo el dueño.
+  if (patch.estado && patch.estado !== before.estado && _role === 'admin') {
+    const esPub = patch.estado === 'publicado';
+    if ((before.estado === 'publicado') !== esPub) {
+      const folderId = (before.archivos || []).find(f => f.folderId)?.folderId;
+      if (folderId) renombrarPublicado(folderId, esPub);
+    }
+  }
+}
+
+// Renombra la carpeta de Drive de una tarjeta para reflejar "publicado" (fire &
+// forget; si Drive no está o falla, no rompe nada).
+async function renombrarPublicado(folderId, published) {
+  if (!supabase) return;
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    const t = session?.access_token;
+    await fetch('/api/produccion/drive-rename', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(t ? { Authorization: `Bearer ${t}` } : {}) },
+      body: JSON.stringify({ folderId, published }),
+    });
+  } catch (e) { console.warn('[produccion] rename folder:', e?.message || e); }
 }
 export function removeAssignment(id) {
   markUnsynced(id, false); // borrada a propósito → no la preservemos en el hydrate

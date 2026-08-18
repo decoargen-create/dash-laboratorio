@@ -67,14 +67,23 @@ function hoyAR() {
   return new Date().toLocaleDateString('en-CA', { timeZone: TZ });
 }
 
-// Nombre ESTABLE de la carpeta de una tarjeta: <Persona> - sem <d>-<m>. Como
-// depende de la semana (no del día de subida), todos los videos de la misma
-// tarjeta caen en la MISMA carpeta, sin importar en qué día se suben.
-function cardFolderName(persona, weekKey) {
-  const p = clean(persona, 'Equipo');
-  if (!weekKey || !/^\d{4}-\d{2}-\d{2}$/.test(weekKey)) return `${p} - ${hoyAR()}`;
+// Token corto y estable a partir del id de la tarjeta, para que la carpeta de
+// cada tarjeta sea única (dos tarjetas del mismo producto/persona/semana no
+// pueden colisionar en el nombre).
+function shortId(cardId) {
+  const s = String(cardId || '').replace(/[^a-zA-Z0-9]/g, '');
+  return s.slice(-5) || 'x';
+}
+
+// Nombre de la carpeta de UNA tarjeta (nivel 3): "sem <d>-<m> · <id>". Único por
+// tarjeta y estable en el tiempo. La estructura completa es
+// <Producto>/<Persona>/<sem d-m · id>/, y esta carpeta es la que se renombra a
+// "… — PUBLICADO" cuando la tarjeta se publica.
+function cardFolderName(weekKey, cardId) {
+  const sid = shortId(cardId);
+  if (!weekKey || !/^\d{4}-\d{2}-\d{2}$/.test(weekKey)) return `sem ${hoyAR()} · ${sid}`;
   const [, m, d] = weekKey.split('-');
-  return `${p} - sem ${Number(d)}-${Number(m)}`;
+  return `sem ${Number(d)}-${Number(m)} · ${sid}`;
 }
 
 function respondJSON(res, status, obj) {
@@ -109,11 +118,19 @@ export default async function handler(req, res) {
     // todavía no tenga videos subidos a Drive.
     if (ctx && body.productoNombre) {
       try {
+        // Si la tarjeta ya tiene carpeta (folderId), linkeamos directo a esa.
+        if (body.folderId) {
+          out.cardLink = `https://drive.google.com/drive/folders/${body.folderId}`;
+        }
         const prodFolder = await driveEnsureFolder(ctx.token, ctx.rootId, clean(body.productoNombre, 'Producto'));
         out.prodLink = `https://drive.google.com/drive/folders/${prodFolder}`;
-        if (body.persona || body.weekKey) {
-          const cardFolder = await driveEnsureFolder(ctx.token, prodFolder, cardFolderName(body.persona, body.weekKey));
-          out.cardLink = `https://drive.google.com/drive/folders/${cardFolder}`;
+        if (body.persona) {
+          const personaFolder = await driveEnsureFolder(ctx.token, prodFolder, clean(body.persona, 'Equipo'));
+          out.personaLink = `https://drive.google.com/drive/folders/${personaFolder}`;
+          if (!out.cardLink && body.cardId) {
+            const cardFolder = await driveEnsureFolder(ctx.token, personaFolder, cardFolderName(body.weekKey, body.cardId));
+            out.cardLink = `https://drive.google.com/drive/folders/${cardFolder}`;
+          }
         }
       } catch { /* devolvemos al menos el root */ }
     }
@@ -133,11 +150,17 @@ export default async function handler(req, res) {
     const token = ctx.token;
     const rootId = ctx.rootId;
 
-    // Estructura: <raíz>/<Producto>/<Persona> - sem d-m/
-    const prodFolder = await driveEnsureFolder(token, rootId, clean(productoNombre, 'Producto'));
-    // Carpeta ESTABLE por tarjeta (producto × persona × semana): todos los
-    // videos de la tarjeta caen acá, aunque se suban en días distintos.
-    const subFolder = await driveEnsureFolder(token, prodFolder, cardFolderName(persona, weekKey));
+    // Carpeta de la tarjeta. Si ya la tenemos (subidas previas), la reusamos por
+    // ID — así no depende del nombre, que pudo renombrarse a "… — PUBLICADO".
+    // Si no, armamos la ruta: <raíz>/<Producto>/<Persona>/<sem d-m · id>/.
+    let subFolder;
+    if (body.folderId) {
+      subFolder = body.folderId;
+    } else {
+      const prodFolder = await driveEnsureFolder(token, rootId, clean(productoNombre, 'Producto'));
+      const personaFolder = await driveEnsureFolder(token, prodFolder, clean(persona, 'Equipo'));
+      subFolder = await driveEnsureFolder(token, personaFolder, cardFolderName(weekKey, body.cardId));
+    }
 
     const finalName = finalFileName(filename, productoNombre, persona);
     const contentType = mimeType || 'video/mp4';

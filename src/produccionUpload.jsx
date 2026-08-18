@@ -45,7 +45,7 @@ async function getAuthToken() {
 
 // Sondeo al server (sin efectos): ¿Drive conectado? + link a la carpeta raíz.
 // Devuelve { configured, rootLink } o null si no se pudo consultar.
-export async function probeDrive(productoNombre, persona, weekKey) {
+export async function probeDrive(productoNombre, persona, weekKey, cardId, folderId) {
   try {
     const token = await getAuthToken();
     const r = await fetch('/api/produccion/drive-session', {
@@ -56,6 +56,8 @@ export async function probeDrive(productoNombre, persona, weekKey) {
         ...(productoNombre ? { productoNombre } : {}),
         ...(persona ? { persona } : {}),
         ...(weekKey ? { weekKey } : {}),
+        ...(cardId ? { cardId } : {}),
+        ...(folderId ? { folderId } : {}),
       }),
     });
     return await r.json().catch(() => null);
@@ -102,14 +104,14 @@ async function uploadToSupabase(file, user, ext) {
 }
 
 async function uploadOne(file, ctx, onBytes) {
-  const { user, token, weekKey, productoNombre, persona } = ctx;
+  const { user, token, weekKey, productoNombre, persona, cardId, folderId } = ctx;
   const ext = (file.name.split('.').pop() || 'mp4').toLowerCase();
   let sess = null;
   try {
     const r = await fetch('/api/produccion/drive-session', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      body: JSON.stringify({ productoNombre, persona, weekKey, filename: file.name, mimeType: file.type || 'video/mp4', size: file.size }),
+      body: JSON.stringify({ productoNombre, persona, weekKey, cardId, folderId, filename: file.name, mimeType: file.type || 'video/mp4', size: file.size }),
     });
     sess = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(sess.error || `HTTP ${r.status}`);
@@ -121,7 +123,7 @@ async function uploadOne(file, ctx, onBytes) {
 
   const armarArchivo = (meta) => {
     const link = meta.webViewLink || (meta.id ? `https://drive.google.com/file/d/${meta.id}/view` : sess.folderLink) || null;
-    return { name: sess.finalName || file.name, driveId: meta.id || null, link, folderLink: sess.folderLink || null, destino: 'drive', sizeMB: +(file.size / 1024 / 1024).toFixed(1), ts: uid() };
+    return { name: sess.finalName || file.name, driveId: meta.id || null, link, folderLink: sess.folderLink || null, folderId: sess.folderId || null, destino: 'drive', sizeMB: +(file.size / 1024 / 1024).toFixed(1), ts: uid() };
   };
 
   // Guardamos el MOTIVO de cada intento fallido para el toast (diagnóstico).
@@ -172,7 +174,11 @@ export async function subirParaTarjeta(a, fileList, { onProgress, addToast } = {
   const user = await getCurrentUser();
   if (!user) { addToast?.({ type: 'error', message: 'Iniciá sesión de nuevo.' }); return { ok: 0 }; }
   const token = await getAuthToken();
-  const ctx = { user, token, weekKey: a.weekKey, productoNombre: a.productoNombre, persona: a.persona || 'Equipo' };
+  const ctx = {
+    user, token, weekKey: a.weekKey, productoNombre: a.productoNombre, persona: a.persona || 'Equipo',
+    cardId: a.id,
+    folderId: (a.archivos || []).find(f => f.folderId)?.folderId || null,
+  };
   const eraPorHacer = a.estado === 'porhacer';
   let ok = 0, dest = null, driveWarn = null;
   // Progreso GLOBAL por bytes (barra + % + ETA + velocidad). Todas las subidas a
@@ -225,7 +231,7 @@ export function CreativosSection({ a, addToast, canDelete = true }) {
   const [drive, setDrive] = useState(null); // { configured, rootLink, prodLink, cardLink } | null
   useEffect(() => {
     let dead = false;
-    probeDrive(a.productoNombre, a.persona, a.weekKey).then(d => { if (!dead && d) setDrive(d); });
+    probeDrive(a.productoNombre, a.persona, a.weekKey, a.id, (a.archivos || []).find(f => f.folderId)?.folderId || null).then(d => { if (!dead && d) setDrive(d); });
     return () => { dead = true; };
   }, [a.productoNombre, a.persona, a.weekKey]);
   // Prioridad: la carpeta EXACTA de la tarjeta (donde están/irán los videos).
@@ -257,7 +263,11 @@ export function CreativosSection({ a, addToast, canDelete = true }) {
     const user = await getCurrentUser();
     if (!user) { setBusy(false); addToast?.({ type: 'error', message: 'Iniciá sesión de nuevo.' }); return; }
     const token = await getAuthToken();
-    const ctx = { user, token, weekKey: a.weekKey, productoNombre: a.productoNombre, persona: a.persona || 'Equipo' };
+    const ctx = {
+      user, token, weekKey: a.weekKey, productoNombre: a.productoNombre, persona: a.persona || 'Equipo',
+      cardId: a.id,
+      folderId: (a.archivos || []).find(f => f.folderId)?.folderId || null,
+    };
     const eraPorHacer = a.estado === 'porhacer';
     let ok = 0, dest = null, driveWarn = null;
     for (const item of files) {

@@ -70,6 +70,23 @@ export default async function handler(req, res) {
   const body = readBody(req);
   const action = body.action;
 
+  // ---- Asegurar que el dueño sea admin en la base ----
+  // La RLS de Producción exige profiles.role='admin' para escribir. La cuenta
+  // dueña suele quedar en 'user' (default del signup), así que sus asignaciones
+  // se rechazan en silencio y no llegan a los editores. Acá la promovemos, pero
+  // SOLO si todavía no hay ningún admin (bootstrap del primer dueño) — así un
+  // signup cualquiera no puede autopromoverse si ya existe un admin.
+  if (action === 'ensure-admin') {
+    if (role === 'admin') return respondJSON(res, 200, { ok: true, role: 'admin', promoted: false });
+    const { count, error: cErr } = await supabase
+      .from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'admin');
+    if (cErr) return respondJSON(res, 500, { error: cErr.message });
+    if ((count || 0) > 0) return respondJSON(res, 200, { ok: true, role: role || 'user', promoted: false });
+    const { error } = await supabase.from('profiles').update({ role: 'admin' }).eq('id', userId);
+    if (error) return respondJSON(res, 500, { error: error.message });
+    return respondJSON(res, 200, { ok: true, role: 'admin', promoted: true });
+  }
+
   // ---- Listar el equipo ----
   if (action === 'list') {
     const { data, error } = await supabase

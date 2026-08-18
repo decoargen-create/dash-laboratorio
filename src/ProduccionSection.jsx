@@ -19,10 +19,10 @@ import {
   listAssignments, addAssignment, updateAssignment, removeAssignment, assignPersona,
   assignCreator, subscribeProduccion, esCompleto, bonusObjetivo, inversionPorProducto,
   getRole, entregasNuevas, ultimaSubidaTs, personasEnTarjetas, resumenVideosPorProducto,
-  resyncDesdeNube, pagoProductoDe,
+  resyncDesdeNube, vaciarTodo, pagoProductoDe,
 } from './produccionStore.js';
 import { CreativosSection, subirParaTarjeta, VIDEO_ACCEPT, probeDrive } from './produccionUpload.jsx';
-import { listTeam, createMember } from './produccionTeam.js';
+import { listTeam, createMember, removeMember } from './produccionTeam.js';
 import { driveStatus, connectDrive, disconnectDrive } from './produccionDrive.js';
 import TeamModal from './TeamModal.jsx';
 import ConfirmDialog from './ConfirmDialog.jsx';
@@ -514,6 +514,8 @@ export default function ProduccionSection({ addToast }) {
   const [showAdd, setShowAdd] = useState(false);
   const [showTeam, setShowTeam] = useState(false);
   const [confirmResync, setConfirmResync] = useState(false);
+  const [confirmVaciar, setConfirmVaciar] = useState(false);
+  const [vaciando, setVaciando] = useState(false);
   const [resyncing, setResyncing] = useState(false);
   const [team, setTeam] = useState([]);
   const [detailId, setDetailId] = useState(null);
@@ -662,6 +664,11 @@ export default function ProduccionSection({ addToast }) {
             title="Re-sincronizar: descarta el tablero local y lo vuelve a traer de la nube (útil si quedó una tarjeta fantasma que no sincronizó)"
             className="inline-flex items-center justify-center w-8 h-8 text-gray-500 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition shadow-sm disabled:opacity-50">
             <RefreshCw size={14} className={resyncing ? 'animate-spin' : ''} />
+          </button>
+          <button onClick={() => setConfirmVaciar(true)} disabled={vaciando}
+            title="Vaciar TODO: borra todas las tarjetas, la config de pagos y las cuentas del equipo. Deja la producción en cero para arrancar de nuevo."
+            className="inline-flex items-center justify-center w-8 h-8 text-gray-400 dark:text-gray-500 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:text-red-600 hover:border-red-300 dark:hover:border-red-800 hover:bg-red-50 dark:hover:bg-red-900/20 transition shadow-sm disabled:opacity-50">
+            <Trash2 size={14} className={vaciando ? 'animate-pulse' : ''} />
           </button>
           {drive.rootLink && (
             <a href={drive.rootLink} target="_blank" rel="noopener noreferrer"
@@ -907,6 +914,30 @@ export default function ProduccionSection({ addToast }) {
           finally { setResyncing(false); }
         }}
         onClose={() => setConfirmResync(false)}
+      />
+      <ConfirmDialog
+        open={confirmVaciar}
+        title="⚠️ ¿Vaciar TODO y empezar de cero?"
+        message="Borra TODAS las tarjetas, la config de pagos y ELIMINA las cuentas del equipo (los editores tendrán que crearse de nuevo). Solo afecta TU producción. Esta acción no se puede deshacer."
+        confirmLabel="Sí, vaciar todo" tone="danger"
+        onConfirm={async () => {
+          setConfirmVaciar(false); setVaciando(true);
+          try {
+            // 1) Eliminar las cuentas del equipo (borra los usuarios de auth).
+            let cuentas = 0;
+            for (const m of team) {
+              try { await removeMember(m.id); cuentas++; } catch (e) { console.warn('remove member', m.id, e?.message || e); }
+            }
+            // 2) Vaciar tarjetas + pagos + config (nube y local, solo lo mío).
+            const r = await vaciarTodo();
+            reloadTeam();
+            if (r.error) addToast?.({ type: 'error', message: `Se limpió local, pero la nube falló: ${r.error}` });
+            else addToast?.({ type: 'success', message: `🧹 Todo en cero: ${r.asignaciones} tarjeta${r.asignaciones === 1 ? '' : 's'} y ${cuentas} cuenta${cuentas === 1 ? '' : 's'} eliminadas. A crear de nuevo 🚀` });
+          } catch (e) {
+            addToast?.({ type: 'error', message: `No se pudo vaciar: ${e?.message || e}` });
+          } finally { setVaciando(false); }
+        }}
+        onClose={() => setConfirmVaciar(false)}
       />
     </div>
   );

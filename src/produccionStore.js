@@ -351,6 +351,43 @@ export async function resyncDesdeNube() {
   return hydrate();
 }
 
+// ⚠️ Vacía TODO lo de producción del dueño actual (tarjetas + pagos + config de
+// pagos), en la nube y local, para arrancar de cero. Borra SOLO las filas del
+// owner (owner_id = _userId), nunca de otros negocios de la base compartida. NO
+// toca las cuentas del equipo (eso lo hace la UI con removeMember). Devuelve
+// { asignaciones, error? } con lo borrado.
+export async function vaciarTodo() {
+  let borradas = 0;
+  if (cloudReady() && _role === 'admin' && _userId) {
+    try {
+      // Contamos antes para reportar, y borramos acotado por owner_id.
+      const { data: prev } = await supabase.from(TABLE).select('id').eq('owner_id', _userId);
+      borradas = (prev || []).length;
+      const d1 = await supabase.from(TABLE).delete().eq('owner_id', _userId);
+      if (d1.error) return { asignaciones: 0, error: d1.error.message };
+      await supabase.from(PAGOS_TABLE).delete().eq('owner_id', _userId);
+      await supabase.from(PAGOS_CONFIG_TABLE).delete().eq('owner_id', _userId);
+    } catch (e) {
+      return { asignaciones: 0, error: e?.message || String(e) };
+    }
+  }
+  // Limpieza local completa (cache en memoria + espejos en localStorage).
+  _cache = [];
+  _pagos = {};
+  _pagoConfig = {};
+  _unsynced = new Set();
+  try {
+    localStorage.setItem(KEY, '[]');
+    localStorage.removeItem(PAGOS_KEY);
+    localStorage.removeItem(PAGOS_CONFIG_KEY);
+    localStorage.removeItem(UNSYNCED_KEY);
+    localStorage.removeItem(MIGRATED_KEY);
+    localStorage.removeItem(MIGRATED_KEY + '-pagos');
+  } catch {}
+  notify();
+  return { asignaciones: borradas };
+}
+
 // Arranca (o reinicia) el sync. Llamar al loguear con el rol resuelto.
 export async function initProduccionSync({ role, userId, name } = {}) {
   _role = role || null;

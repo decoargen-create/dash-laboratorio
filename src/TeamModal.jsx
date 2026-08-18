@@ -91,13 +91,17 @@ export default function TeamModal({ onClose, addToast }) {
       const member = await createMember(em, password, name.trim());
       const displayName = name.trim() || em.split('@')[0];
       // Si venís de una persona de texto (ej: "Fran"), le enganchamos SUS
-      // tarjetas a la cuenta nueva — aunque le hayas cambiado el nombre.
+      // tarjetas a la cuenta nueva. IMPORTANTE: NO pisamos el label `persona` —
+      // solo seteamos creatorId. Los pagos se agrupan por `persona` y las carpetas
+      // de Drive se derivan de `persona`, así que renombrar rompería pagos ya
+      // registrados y partiría las carpetas. La cuenta puede tener un nombre más
+      // completo (display_name); las tarjetas conservan su etiqueta original.
       let linked = 0;
       if (linkPersona && member?.id) {
         const target = linkPersona.name.trim().toLowerCase();
         for (const wk of allWeekKeys()) {
           for (const a of listAssignments(wk)) {
-            if ((a.persona || '').trim().toLowerCase() === target) { assignCreator(a.id, { creatorId: member.id, persona: displayName }); linked++; }
+            if ((a.persona || '').trim().toLowerCase() === target) { assignCreator(a.id, { creatorId: member.id }); linked++; }
           }
         }
       }

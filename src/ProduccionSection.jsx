@@ -302,6 +302,26 @@ const CHIP_CLS = {
   teal: 'bg-teal-500 text-white',
   gray: 'bg-gray-200 text-gray-500 dark:bg-gray-600 dark:text-gray-200',
 };
+// Tinte SUTIL de la tarjeta con el color de la persona: un degradé muy tenue
+// desde la esquina (como background-image, así no pisa el bg-white/gris base) +
+// una barra lateral izquierda (span absoluto, para no pelear con el `border`
+// base). Identifica de un vistazo de quién es la tarjeta. Sin asignar (gray) =
+// sin tinte. Clases estáticas para que Tailwind no las purgue.
+const CARD_TINT = {
+  amber: 'bg-gradient-to-br from-amber-100/50 dark:from-amber-500/10 to-transparent',
+  violet: 'bg-gradient-to-br from-violet-100/50 dark:from-violet-500/10 to-transparent',
+  sky: 'bg-gradient-to-br from-sky-100/50 dark:from-sky-500/10 to-transparent',
+  emerald: 'bg-gradient-to-br from-emerald-100/50 dark:from-emerald-500/10 to-transparent',
+  rose: 'bg-gradient-to-br from-rose-100/50 dark:from-rose-500/10 to-transparent',
+  indigo: 'bg-gradient-to-br from-indigo-100/50 dark:from-indigo-500/10 to-transparent',
+  teal: 'bg-gradient-to-br from-teal-100/50 dark:from-teal-500/10 to-transparent',
+  gray: '',
+};
+const CARD_STRIPE = {
+  amber: 'bg-amber-400', violet: 'bg-violet-500', sky: 'bg-sky-500',
+  emerald: 'bg-emerald-500', rose: 'bg-rose-500', indigo: 'bg-indigo-500',
+  teal: 'bg-teal-500', gray: '',
+};
 const PersonaChip = ({ persona, onClick, small }) => (
   <button onClick={onClick}
     className={`inline-flex items-center rounded font-bold uppercase tracking-wide ${small ? 'text-[10px] px-1.5 py-0.5' : 'text-[11px] px-2 py-0.5'} ${CHIP_CLS[personaColor(persona)]} ${onClick ? 'hover:opacity-80 transition' : ''}`}>
@@ -931,6 +951,10 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
   const subidos = a.archivos?.length || 0;
   const aprob = Math.min(a.videosAprobados || 0, subidos);
   const folderLink = (a.archivos || []).find(f => f.folderLink)?.folderLink;
+  // Tinte sutil con el color de la persona (barra izquierda + degradé tenue).
+  const _pcol = personaColor(a.persona);
+  const tintCls = CARD_TINT[_pcol] || '';
+  const stripeCls = CARD_STRIPE[_pcol] || '';
 
   // ¿Tiene entregas nuevas que el admin todavía no miró? (misma marca local que
   // el aviso "Entregas nuevas"). Muestra un puntito "🆕 nuevo" en la tarjeta.
@@ -982,7 +1006,9 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
     <div draggable={!prog}
       onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/prod-id', a.id); }}
       onClick={() => onOpen()}
-      className={`group relative bg-white dark:bg-gray-800 border rounded-xl p-2.5 shadow-sm hover:shadow-lg hover:shadow-pink-500/10 hover:-translate-y-0.5 transition cursor-pointer ${(menu || moveMenu) ? 'z-30' : ''} ${trabada ? 'border-amber-400/80 dark:border-amber-500/60 hover:border-amber-500' : 'border-gray-200 dark:border-gray-700 hover:border-pink-300 dark:hover:border-pink-700/70'}`}>
+      className={`group relative bg-white dark:bg-gray-800 border rounded-xl p-2.5 shadow-sm hover:shadow-lg hover:shadow-pink-500/10 hover:-translate-y-0.5 transition cursor-pointer ${tintCls} ${(menu || moveMenu) ? 'z-30' : ''} ${trabada ? 'border-amber-400/80 dark:border-amber-500/60 hover:border-amber-500' : 'border-gray-200 dark:border-gray-700 hover:border-pink-300 dark:hover:border-pink-700/70'}`}>
+      {/* Barra lateral con el color de la persona (identificación rápida). */}
+      {stripeCls && <span className={`absolute inset-y-0 left-0 w-1 rounded-l-xl ${stripeCls}`} aria-hidden="true" />}
       {/* Puntito "nuevo": el equipo subió algo que el admin no miró todavía. */}
       {tieneNuevo && (
         <span className="absolute -top-1.5 -right-1.5 z-20 text-[9px] font-bold text-white bg-rose-500 rounded-full px-1.5 py-0.5 shadow-md"

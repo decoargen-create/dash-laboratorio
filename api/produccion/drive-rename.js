@@ -6,10 +6,9 @@
 
 import { getUserIdFromAuth } from '../marketing/_supabase-server.js';
 import { getDriveContext } from './_drive-ctx.js';
+import { nombrePublicado } from './_naming.js';
 
 const DRIVE = 'https://www.googleapis.com/drive/v3';
-const SUFIJO = ' — PUBLICADO';
-const RE_SUFIJO = /\s*[—-]\s*PUBLICADO\s*$/i;
 
 function respondJSON(res, status, obj) {
   res.status(status).setHeader('Content-Type', 'application/json');
@@ -43,8 +42,7 @@ export default async function handler(req, res) {
       return respondJSON(res, 502, { error: `Drive get: ${g.status} ${t.slice(0, 140)}` });
     }
     const actual = (await g.json())?.name || '';
-    const base = actual.replace(RE_SUFIJO, '').trimEnd();
-    const nuevo = published ? `${base}${SUFIJO}` : base;
+    const nuevo = nombrePublicado(actual, published);
     if (nuevo === actual) return respondJSON(res, 200, { ok: true, name: actual, changed: false });
 
     const p = await fetch(`${DRIVE}/files/${folderId}?supportsAllDrives=true&fields=id,name`, {

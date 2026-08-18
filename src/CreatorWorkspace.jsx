@@ -9,9 +9,9 @@
 // La data ya viene acotada por la RLS (el store solo trae sus filas), así que
 // leemos del store como siempre.
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Film, LogOut, Moon, Sun, RefreshCw, CheckCircle2, Clock, ChevronDown, ChevronRight, Sparkles, ExternalLink, AlertTriangle, Wallet, X, FileText, UploadCloud,
+  Film, LogOut, Moon, Sun, RefreshCw, CheckCircle2, Clock, ChevronDown, ChevronRight, Sparkles, ExternalLink, AlertTriangle, Wallet, X, FileText, UploadCloud, Loader2,
 } from 'lucide-react';
 import {
   subscribeProduccion, allWeekKeys, listAssignments, weekLabel, weekKeyOf,
@@ -19,7 +19,8 @@ import {
   monthKeyOf, monthLabel, weeksInMonth, pagoProductoDe, bonusDe,
   resumenVideosPorProducto, VIDEOS_POR_PRODUCTO,
 } from './produccionStore.js';
-import { CreativosSection } from './produccionUpload.jsx';
+import { CreativosSection, subirParaTarjeta, VIDEO_ACCEPT } from './produccionUpload.jsx';
+import { numerarDuplicados } from './produccionCalc.js';
 
 const ESTADO_BADGE = {
   porhacer: 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-200',
@@ -36,22 +37,6 @@ function EstadoBadge({ estado }) {
   );
 }
 
-// Numera los duplicados del mismo producto en la misma semana → { id: n } (solo
-// si hay 2+). Diferencia "Cepillo #1 / #2 / #3" asignados a la misma persona.
-function numerarDuplicados(cards) {
-  const groups = {};
-  for (const a of cards) {
-    const k = `${a.weekKey}|${(a.productoNombre || '').trim().toLowerCase()}`;
-    (groups[k] = groups[k] || []).push(a);
-  }
-  const out = {};
-  for (const k in groups) {
-    const arr = groups[k].slice().sort((x, y) => String(x.createdAt || '').localeCompare(String(y.createdAt || '')));
-    if (arr.length > 1) arr.forEach((a, i) => { out[a.id] = i + 1; });
-  }
-  return out;
-}
-
 // Columnas del tablero del editor (mismo orden que ve el admin).
 const COLS_CREATOR = [
   { key: 'porhacer', label: 'Por hacer', dot: 'bg-slate-400' },
@@ -60,14 +45,24 @@ const COLS_CREATOR = [
   { key: 'publicado', label: 'Publicado', dot: 'bg-violet-500' },
 ];
 
-// Tarjeta compacta del tablero — se toca para entrar al detalle.
-function CreatorMiniCard({ a, num, onOpen }) {
+// Tarjeta compacta del tablero — se toca para entrar al detalle. Trae el mismo
+// botón "Subir" que el admin (subida directa a la tarjeta, sin abrir el detalle).
+function CreatorMiniCard({ a, num, onOpen, addToast }) {
   const nSubidos = (a.archivos || []).length;
   const corregir = (a.nota || '').trim().length > 0;
   const conBrief = (a.brief || '').trim().length > 0;
+  const puedeSubir = a.estado === 'porhacer' || a.estado === 'revision';
+  const fileRef = useRef(null);
+  const [prog, setProg] = useState(null);
+  const onPick = async (fileList) => {
+    setProg({ i: 0, total: 0, pct: 0 });
+    try { await subirParaTarjeta(a, fileList, { addToast, onProgress: (p) => setProg(p) }); }
+    finally { setProg(null); }
+  };
   return (
-    <button onClick={onOpen}
-      className="w-full text-left rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 shadow-sm hover:border-pink-300 dark:hover:border-pink-700 hover:shadow-md transition">
+    <div role="button" tabIndex={0} onClick={onOpen}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); } }}
+      className="w-full text-left rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 shadow-sm hover:border-pink-300 dark:hover:border-pink-700 hover:shadow-md transition cursor-pointer">
       <div className="flex items-start gap-2">
         <h3 className="font-bold text-sm text-gray-900 dark:text-white leading-tight flex-1 min-w-0 line-clamp-2">
           {a.productoNombre || 'Producto'}{num ? <span className="text-brand-500"> #{num}</span> : ''}
@@ -80,7 +75,35 @@ function CreatorMiniCard({ a, num, onOpen }) {
         <span className="inline-flex items-center gap-1 text-gray-500 dark:text-gray-400"><Film size={11} className="text-emerald-500" /><b className="text-gray-700 dark:text-gray-200">{nSubidos}</b>/{VIDEOS_POR_PRODUCTO} videos</span>
         {conBrief && <span className="inline-flex items-center gap-1 text-brand-600 dark:text-brand-300"><FileText size={10} /> Consigna</span>}
       </div>
-    </button>
+      {/* Subir directo (mismo botón que ve el admin). El wrapper corta el click
+          para no abrir el detalle al tocar el botón / elegir archivos. */}
+      {puedeSubir && (
+        <div className="mt-2.5" onClick={(e) => e.stopPropagation()}>
+          {prog ? (
+            <div>
+              <div className="flex items-center justify-between text-[11px] font-bold text-brand-600 dark:text-brand-400 mb-1">
+                <span className="inline-flex items-center gap-1 tabular-nums">
+                  <Loader2 size={11} className="animate-spin" />
+                  {Math.round((prog.pct || 0) * 100)}%{prog.total > 1 ? ` · ${prog.i + 1}/${prog.total}` : ''}
+                </span>
+                <span className="text-gray-400 dark:text-gray-500 tabular-nums">subiendo…</span>
+              </div>
+              <div className="h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+                <div className="h-full rounded-full bg-gradient-to-r from-brand-500 to-brand-400 transition-all" style={{ width: `${Math.round((prog.pct || 0) * 100)}%` }} />
+              </div>
+            </div>
+          ) : (
+            <button onClick={(e) => { e.stopPropagation(); fileRef.current?.click(); }}
+              className="w-full inline-flex items-center justify-center gap-1 px-2 py-1.5 text-xs font-extrabold text-white bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 rounded-lg transition shadow-sm">
+              <UploadCloud size={13} /> Subir
+            </button>
+          )}
+          <input ref={fileRef} type="file" accept={VIDEO_ACCEPT} multiple hidden
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => { const fl = Array.from(e.target.files || []); e.target.value = ''; onPick(fl); }} />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -367,7 +390,7 @@ export default function CreatorWorkspace({ user, onLogout, addToast, darkMode, t
                       <div className="space-y-2 min-h-[44px]">
                         {cards.length === 0
                           ? <p className="text-[11px] text-gray-400 dark:text-gray-600 text-center py-3">—</p>
-                          : cards.map(a => <CreatorMiniCard key={a.id} a={a} num={numMap[a.id]} onOpen={() => setDetailId(a.id)} />)}
+                          : cards.map(a => <CreatorMiniCard key={a.id} a={a} num={numMap[a.id]} onOpen={() => setDetailId(a.id)} addToast={addToast} />)}
                       </div>
                     </div>
                   );

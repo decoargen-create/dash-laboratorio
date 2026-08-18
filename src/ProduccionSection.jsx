@@ -12,17 +12,17 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Film, Plus, X, Trash2, ChevronDown, UploadCloud, Loader2, CheckCircle2,
   AlertTriangle, ExternalLink, FileText, GripVertical, Users, History, Search, ArrowLeftRight,
-  Bell, BellRing, Inbox, Eye, RefreshCw,
+  Bell, BellRing, Inbox, Eye, RefreshCw, Calendar, Filter,
 } from 'lucide-react';
 import {
   ESTADOS, ESTADO_LABELS, VIDEOS_POR_PRODUCTO, weekKeyOf, weekLabel, weekRange, allWeekKeys,
   listAssignments, addAssignment, updateAssignment, removeAssignment, assignPersona,
   assignCreator, subscribeProduccion, esCompleto, bonusObjetivo, inversionPorProducto,
   getRole, entregasNuevas, ultimaSubidaTs, personasEnTarjetas, resumenVideosPorProducto,
-  resyncDesdeNube, pagoProductoDe,
+  resyncDesdeNube, vaciarTodo, pagoProductoDe,
 } from './produccionStore.js';
 import { CreativosSection, subirParaTarjeta, VIDEO_ACCEPT, probeDrive } from './produccionUpload.jsx';
-import { listTeam, createMember } from './produccionTeam.js';
+import { listTeam, createMember, removeMember } from './produccionTeam.js';
 import { driveStatus, connectDrive, disconnectDrive } from './produccionDrive.js';
 import TeamModal from './TeamModal.jsx';
 import ConfirmDialog from './ConfirmDialog.jsx';
@@ -30,6 +30,29 @@ import ConfirmDialog from './ConfirmDialog.jsx';
 const EQUIPO_DEFAULT = ['Fran', 'Wanda', 'Flor'];
 
 const fmtArs = (n) => '$' + new Intl.NumberFormat('es-AR').format(Math.round(n || 0));
+
+// Fecha de creación de la tarjeta en corto: "17/8" (agrega el año si no es el
+// actual). Devuelve null si no hay fecha válida.
+function fmtFechaCorta(iso) {
+  const t = iso ? Date.parse(iso) : NaN;
+  if (Number.isNaN(t)) return null;
+  const d = new Date(t);
+  const mismoAnio = d.getFullYear() === new Date().getFullYear();
+  try {
+    return d.toLocaleDateString('es-AR', mismoAnio
+      ? { day: 'numeric', month: 'numeric' }
+      : { day: 'numeric', month: 'numeric', year: '2-digit' });
+  } catch { return null; }
+}
+
+// Fecha + hora completa para el tooltip ("18/08/2026 14:05").
+function fmtFechaLarga(iso) {
+  const t = iso ? Date.parse(iso) : NaN;
+  if (Number.isNaN(t)) return '';
+  try {
+    return new Date(t).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  } catch { return ''; }
+}
 
 // "hace X" corto para timestamps de subida.
 function fmtHace(ts) {
@@ -279,6 +302,26 @@ const CHIP_CLS = {
   teal: 'bg-teal-500 text-white',
   gray: 'bg-gray-200 text-gray-500 dark:bg-gray-600 dark:text-gray-200',
 };
+// Tinte SUTIL de la tarjeta con el color de la persona: un degradé muy tenue
+// desde la esquina (como background-image, así no pisa el bg-white/gris base) +
+// una barra lateral izquierda (span absoluto, para no pelear con el `border`
+// base). Identifica de un vistazo de quién es la tarjeta. Sin asignar (gray) =
+// sin tinte. Clases estáticas para que Tailwind no las purgue.
+const CARD_TINT = {
+  amber: 'bg-gradient-to-br from-amber-100/50 dark:from-amber-500/10 to-transparent',
+  violet: 'bg-gradient-to-br from-violet-100/50 dark:from-violet-500/10 to-transparent',
+  sky: 'bg-gradient-to-br from-sky-100/50 dark:from-sky-500/10 to-transparent',
+  emerald: 'bg-gradient-to-br from-emerald-100/50 dark:from-emerald-500/10 to-transparent',
+  rose: 'bg-gradient-to-br from-rose-100/50 dark:from-rose-500/10 to-transparent',
+  indigo: 'bg-gradient-to-br from-indigo-100/50 dark:from-indigo-500/10 to-transparent',
+  teal: 'bg-gradient-to-br from-teal-100/50 dark:from-teal-500/10 to-transparent',
+  gray: '',
+};
+const CARD_STRIPE = {
+  amber: 'bg-amber-400', violet: 'bg-violet-500', sky: 'bg-sky-500',
+  emerald: 'bg-emerald-500', rose: 'bg-rose-500', indigo: 'bg-indigo-500',
+  teal: 'bg-teal-500', gray: '',
+};
 const PersonaChip = ({ persona, onClick, small }) => (
   <button onClick={onClick}
     className={`inline-flex items-center rounded font-bold uppercase tracking-wide ${small ? 'text-[10px] px-1.5 py-0.5' : 'text-[11px] px-2 py-0.5'} ${CHIP_CLS[personaColor(persona)]} ${onClick ? 'hover:opacity-80 transition' : ''}`}>
@@ -470,8 +513,9 @@ export default function ProduccionSection({ addToast }) {
   const [weekKey, setWeekKey] = useState(() => weekKeyOf());
   const [showAdd, setShowAdd] = useState(false);
   const [showTeam, setShowTeam] = useState(false);
-  const [showReasignar, setShowReasignar] = useState(false);
   const [confirmResync, setConfirmResync] = useState(false);
+  const [confirmVaciar, setConfirmVaciar] = useState(false);
+  const [vaciando, setVaciando] = useState(false);
   const [resyncing, setResyncing] = useState(false);
   const [team, setTeam] = useState([]);
   const [detailId, setDetailId] = useState(null);
@@ -479,6 +523,8 @@ export default function ProduccionSection({ addToast }) {
   // Filtro rápido: mostrar solo las tarjetas sin repartir (click en el chip
   // "N sin asignar" del resumen).
   const [soloSinAsignar, setSoloSinAsignar] = useState(false);
+  const [filtroProducto, setFiltroProducto] = useState('');
+  const [filtroPersona, setFiltroPersona] = useState('');
 
   useEffect(() => {
     const un = subscribeProduccion(() => force(x => x + 1));
@@ -559,10 +605,25 @@ export default function ProduccionSection({ addToast }) {
     return [...set];
   }, [weekKey, productos]); // eslint-disable-line
 
-  const asigsBoard = useMemo(
-    () => soloSinAsignar ? asigs.filter(a => !(a.persona || '').trim() && !a.creatorId) : asigs,
-    [asigs, soloSinAsignar],
+  // Opciones de los filtros del tablero: productos y personas presentes esta
+  // semana (así el dropdown solo ofrece lo que existe).
+  const productosEnSemana = useMemo(
+    () => [...new Set(asigs.map(a => (a.productoNombre || '').trim() || 'Sin nombre'))].sort((x, y) => x.localeCompare(y, 'es')),
+    [asigs],
   );
+  const personasEnSemana = useMemo(
+    () => [...new Set(asigs.map(a => (a.persona || '').trim()).filter(Boolean))].sort((x, y) => x.localeCompare(y, 'es')),
+    [asigs],
+  );
+
+  const asigsBoard = useMemo(() => {
+    let list = asigs;
+    if (soloSinAsignar) list = list.filter(a => !(a.persona || '').trim() && !a.creatorId);
+    if (filtroProducto) list = list.filter(a => ((a.productoNombre || '').trim() || 'Sin nombre') === filtroProducto);
+    if (filtroPersona === '__sin__') list = list.filter(a => !(a.persona || '').trim() && !a.creatorId);
+    else if (filtroPersona) list = list.filter(a => (a.persona || '').trim() === filtroPersona);
+    return list;
+  }, [asigs, soloSinAsignar, filtroProducto, filtroPersona]);
   const byCol = useMemo(() => {
     const m = { porhacer: [], revision: [], aprobado: [], publicado: [] };
     for (const a of asigsBoard) (m[a.estado] || m.porhacer).push(a);
@@ -604,9 +665,10 @@ export default function ProduccionSection({ addToast }) {
             className="inline-flex items-center justify-center w-8 h-8 text-gray-500 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition shadow-sm disabled:opacity-50">
             <RefreshCw size={14} className={resyncing ? 'animate-spin' : ''} />
           </button>
-          <button onClick={() => setShowReasignar(true)} title="Mover todas las tarjetas de una persona a otra"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition shadow-sm">
-            <ArrowLeftRight size={14} /> Reasignar
+          <button onClick={() => setConfirmVaciar(true)} disabled={vaciando}
+            title="Vaciar TODO: borra todas las tarjetas, la config de pagos y las cuentas del equipo. Deja la producción en cero para arrancar de nuevo."
+            className="inline-flex items-center justify-center w-8 h-8 text-gray-400 dark:text-gray-500 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:text-red-600 hover:border-red-300 dark:hover:border-red-800 hover:bg-red-50 dark:hover:bg-red-900/20 transition shadow-sm disabled:opacity-50">
+            <Trash2 size={14} className={vaciando ? 'animate-pulse' : ''} />
           </button>
           {drive.rootLink && (
             <a href={drive.rootLink} target="_blank" rel="noopener noreferrer"
@@ -702,8 +764,8 @@ export default function ProduccionSection({ addToast }) {
         </div>
       )}
 
-      {/* Por producto (esta semana): videos que faltan + plata invertida. Unifica
-          lo que antes eran dos bloques ("Videos por producto" + "Inversión"). */}
+      {/* Por producto (esta semana): cuántas TARJETAS faltan entregar (no cuenta
+          videos) + plata invertida. La barra mide tarjetas entregadas/total. */}
       {asigs.length > 0 && (() => {
         const resumen = resumenVideosPorProducto(asigs).map(r => {
           const invertido = asigs.reduce((s, a) => {
@@ -713,27 +775,35 @@ export default function ProduccionSection({ addToast }) {
           return { ...r, invertido };
         });
         const totalInvertido = resumen.reduce((s, r) => s + r.invertido, 0);
+        const totalPend = resumen.reduce((s, r) => s + r.pendientes, 0);
         return (
           <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
             <div className="flex items-center gap-2 mb-3">
               <Film size={15} className="text-emerald-500" />
               <span className="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Por producto · esta semana</span>
+              {totalPend > 0 && (
+                <span className="text-[11px] font-bold text-amber-600 dark:text-amber-400 tabular-nums">· faltan entregar {totalPend}</span>
+              )}
               {totalInvertido > 0 && (
                 <span className="ml-auto text-xs font-bold text-emerald-600 dark:text-emerald-400 font-mono tabular-nums">{fmtArs(totalInvertido)}</span>
               )}
             </div>
             <div className="grid gap-x-6 gap-y-2.5 sm:grid-cols-2">
               {resumen.map(r => {
-                const pct = r.target > 0 ? Math.round((r.subidos / r.target) * 100) : 0;
+                const pct = r.tarjetas > 0 ? Math.round((r.entregadas / r.tarjetas) * 100) : 0;
                 return (
                   <div key={r.producto}>
                     <div className="flex items-center justify-between text-xs mb-1 gap-2">
-                      <span className="font-semibold text-gray-800 dark:text-gray-100 truncate">
+                      <span className="font-semibold text-gray-800 dark:text-gray-100 truncate min-w-0">
                         {r.producto}
-                        {r.tarjetas > 1 && <span className="font-normal text-gray-400 dark:text-gray-500"> · {r.tarjetas} tarjetas</span>}
+                        <span className="font-normal text-gray-400 dark:text-gray-500"> · {r.tarjetas} tarj</span>
                       </span>
                       <span className="flex items-center gap-2 shrink-0 tabular-nums">
-                        <span className="text-gray-500 dark:text-gray-400">{r.subidos}/{r.target} · faltan <b className={r.faltan === 0 ? 'text-emerald-500' : 'text-amber-600 dark:text-amber-400'}>{r.faltan}</b></span>
+                        <span className="text-gray-500 dark:text-gray-400">
+                          {r.entregadas}/{r.tarjetas} entregadas · {r.pendientes > 0
+                            ? <>falta{r.pendientes === 1 ? '' : 'n'} <b className="text-amber-600 dark:text-amber-400">{r.pendientes}</b></>
+                            : <b className="text-emerald-500">✓ listo</b>}
+                        </span>
                         {r.invertido > 0 && <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">{fmtArs(r.invertido)}</span>}
                       </span>
                     </div>
@@ -748,9 +818,47 @@ export default function ProduccionSection({ addToast }) {
         );
       })()}
 
-      {/* Tablero: en desktop, 4 columnas EXACTAMENTE iguales (grid); en
-          pantallas chicas cae a scroll horizontal. */}
-      <div className="flex gap-3 overflow-x-auto pb-2 lg:grid lg:grid-cols-4 lg:overflow-visible">
+      {/* Filtros del tablero: por producto y por persona. Acotan las columnas sin
+          tocar los totales de arriba (que son de toda la semana). */}
+      {asigs.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 text-xs font-bold text-gray-500 dark:text-gray-400">
+            <Filter size={13} /> Filtrar
+          </span>
+          <div className="relative">
+            <select value={filtroProducto} onChange={e => setFiltroProducto(e.target.value)}
+              className={`appearance-none pl-2.5 pr-7 py-1 text-xs font-semibold bg-white dark:bg-gray-800 border rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 ${filtroProducto ? 'border-brand-400 text-brand-600 dark:text-brand-300' : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200'}`}>
+              <option value="">Todos los productos</option>
+              {productosEnSemana.map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+            <ChevronDown size={13} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+          </div>
+          <div className="relative">
+            <select value={filtroPersona} onChange={e => setFiltroPersona(e.target.value)}
+              className={`appearance-none pl-2.5 pr-7 py-1 text-xs font-semibold bg-white dark:bg-gray-800 border rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 ${filtroPersona ? 'border-brand-400 text-brand-600 dark:text-brand-300' : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200'}`}>
+              <option value="">Todas las personas</option>
+              {personasEnSemana.map(p => <option key={p} value={p}>{p}</option>)}
+              <option value="__sin__">— Sin asignar —</option>
+            </select>
+            <ChevronDown size={13} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+          </div>
+          {(filtroProducto || filtroPersona) && (
+            <>
+              <span className="text-xs text-gray-400 dark:text-gray-500 tabular-nums">{asigsBoard.length} tarjeta{asigsBoard.length === 1 ? '' : 's'}</span>
+              <button onClick={() => { setFiltroProducto(''); setFiltroPersona(''); }}
+                className="inline-flex items-center gap-1 text-xs font-bold text-gray-500 dark:text-gray-300 hover:text-brand-600 dark:hover:text-brand-300 transition">
+                <X size={12} /> limpiar
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Tablero: en desktop, 4 columnas EXACTAMENTE iguales (grid) que se
+          estiran para llenar el alto de la pantalla (se adapta al viewport con
+          vh, así no queda un vacío gigante debajo); en pantallas chicas cae a
+          scroll horizontal. */}
+      <div className="flex items-stretch gap-3 overflow-x-auto pb-2 lg:grid lg:grid-cols-4 lg:overflow-visible lg:min-h-[calc(100vh-18rem)]">
         {COLS.map(col => {
           const cards = byCol[col.key] || [];
           return (
@@ -758,21 +866,23 @@ export default function ProduccionSection({ addToast }) {
               onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDragOver(col.key); }}
               onDragLeave={() => setDragOver(d => d === col.key ? null : d)}
               onDrop={e => onDrop(e, col.key)}
-              className={`flex-1 min-w-[240px] lg:min-w-0 rounded-xl p-2.5 transition ${dragOver === col.key ? 'bg-brand-50 dark:bg-brand-900/20 ring-2 ring-brand-300 dark:ring-brand-700' : 'bg-gray-50 dark:bg-gray-800/40'}`}>
+              className={`flex flex-col flex-1 min-w-[240px] lg:min-w-0 rounded-xl p-2.5 transition ${dragOver === col.key ? 'bg-brand-50 dark:bg-brand-900/20 ring-2 ring-brand-300 dark:ring-brand-700' : 'bg-gray-50 dark:bg-gray-800/40'}`}>
               {/* Cabecera tintada con el color del estado: se reconoce por zona */}
-              <div className={`flex items-center gap-2 px-2.5 py-1.5 mb-2 rounded-lg ${col.hdr}`}>
+              <div className={`flex items-center gap-2 px-2.5 py-1.5 mb-2 rounded-lg shrink-0 ${col.hdr}`}>
                 <span className="text-sm leading-none">{col.emoji}</span>
                 <span className={`text-xs font-bold uppercase tracking-wide ${col.text}`}>{ESTADO_LABELS[col.key]}</span>
                 <span className="ml-auto text-xs font-mono text-gray-400 tabular-nums">{cards.length}</span>
               </div>
-              <div className="space-y-2 min-h-[60px]">
+              {/* La lista crece para ocupar la columna; si hay muchas tarjetas,
+                  scrollea DENTRO de la columna (no empuja toda la página). */}
+              <div className="flex flex-col gap-2 flex-1 min-h-[60px] lg:overflow-y-auto">
                 {cards.map(a => (
                   <KanbanCard key={a.id} a={a} personas={personas} team={team} addToast={addToast}
                     onOpen={() => setDetailId(a.id)}
                     onAssign={(p) => assignPersona(a.id, p)} />
                 ))}
                 {cards.length === 0 && (
-                  <div className="text-center text-xs text-gray-300 dark:text-gray-600 py-4 select-none">
+                  <div className="m-auto text-center text-xs text-gray-300 dark:text-gray-600 py-4 select-none">
                     {col.empty}
                   </div>
                 )}
@@ -792,10 +902,6 @@ export default function ProduccionSection({ addToast }) {
       {showTeam && (
         <TeamModal onClose={() => { setShowTeam(false); reloadTeam(); }} addToast={addToast} />
       )}
-      {showReasignar && (
-        <ReasignarModal asigs={asigs} team={team} weekKey={weekKey}
-          onClose={() => setShowReasignar(false)} addToast={addToast} />
-      )}
       <ConfirmDialog
         open={confirmResync}
         title="¿Re-sincronizar el tablero?"
@@ -808,6 +914,30 @@ export default function ProduccionSection({ addToast }) {
           finally { setResyncing(false); }
         }}
         onClose={() => setConfirmResync(false)}
+      />
+      <ConfirmDialog
+        open={confirmVaciar}
+        title="⚠️ ¿Vaciar TODO y empezar de cero?"
+        message="Borra TODAS las tarjetas, la config de pagos y ELIMINA las cuentas del equipo (los editores tendrán que crearse de nuevo). Solo afecta TU producción. Esta acción no se puede deshacer."
+        confirmLabel="Sí, vaciar todo" tone="danger"
+        onConfirm={async () => {
+          setConfirmVaciar(false); setVaciando(true);
+          try {
+            // 1) Eliminar las cuentas del equipo (borra los usuarios de auth).
+            let cuentas = 0;
+            for (const m of team) {
+              try { await removeMember(m.id); cuentas++; } catch (e) { console.warn('remove member', m.id, e?.message || e); }
+            }
+            // 2) Vaciar tarjetas + pagos + config (nube y local, solo lo mío).
+            const r = await vaciarTodo();
+            reloadTeam();
+            if (r.error) addToast?.({ type: 'error', message: `Se limpió local, pero la nube falló: ${r.error}` });
+            else addToast?.({ type: 'success', message: `🧹 Todo en cero: ${r.asignaciones} tarjeta${r.asignaciones === 1 ? '' : 's'} y ${cuentas} cuenta${cuentas === 1 ? '' : 's'} eliminadas. A crear de nuevo 🚀` });
+          } catch (e) {
+            addToast?.({ type: 'error', message: `No se pudo vaciar: ${e?.message || e}` });
+          } finally { setVaciando(false); }
+        }}
+        onClose={() => setConfirmVaciar(false)}
       />
     </div>
   );
@@ -849,6 +979,10 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
   const subidos = a.archivos?.length || 0;
   const aprob = Math.min(a.videosAprobados || 0, subidos);
   const folderLink = (a.archivos || []).find(f => f.folderLink)?.folderLink;
+  // Tinte sutil con el color de la persona (barra izquierda + degradé tenue).
+  const _pcol = personaColor(a.persona);
+  const tintCls = CARD_TINT[_pcol] || '';
+  const stripeCls = CARD_STRIPE[_pcol] || '';
 
   // ¿Tiene entregas nuevas que el admin todavía no miró? (misma marca local que
   // el aviso "Entregas nuevas"). Muestra un puntito "🆕 nuevo" en la tarjeta.
@@ -900,7 +1034,9 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
     <div draggable={!prog}
       onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/prod-id', a.id); }}
       onClick={() => onOpen()}
-      className={`group relative bg-white dark:bg-gray-800 border rounded-xl p-2.5 shadow-sm hover:shadow-lg hover:shadow-pink-500/10 hover:-translate-y-0.5 transition cursor-pointer ${(menu || moveMenu) ? 'z-30' : ''} ${trabada ? 'border-amber-400/80 dark:border-amber-500/60 hover:border-amber-500' : 'border-gray-200 dark:border-gray-700 hover:border-pink-300 dark:hover:border-pink-700/70'}`}>
+      className={`group relative bg-white dark:bg-gray-800 border rounded-xl p-2.5 shadow-sm hover:shadow-lg hover:shadow-pink-500/10 hover:-translate-y-0.5 transition cursor-pointer ${tintCls} ${(menu || moveMenu) ? 'z-30' : ''} ${trabada ? 'border-amber-400/80 dark:border-amber-500/60 hover:border-amber-500' : 'border-gray-200 dark:border-gray-700 hover:border-pink-300 dark:hover:border-pink-700/70'}`}>
+      {/* Barra lateral con el color de la persona (identificación rápida). */}
+      {stripeCls && <span className={`absolute inset-y-0 left-0 w-1 rounded-l-xl ${stripeCls}`} aria-hidden="true" />}
       {/* Puntito "nuevo": el equipo subió algo que el admin no miró todavía. */}
       {tieneNuevo && (
         <span className="absolute -top-1.5 -right-1.5 z-20 text-[9px] font-bold text-white bg-rose-500 rounded-full px-1.5 py-0.5 shadow-md"
@@ -970,8 +1106,13 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
         </div>
       </div>
 
-      {/* Meta: subidos · aprobados ✓ · brief · trabada · botón de mover */}
-      <div className="mt-2 pl-5 flex items-center gap-2.5 text-xs text-gray-500 dark:text-gray-400">
+      {/* Meta: creada · subidos · aprobados ✓ · brief · trabada · botón de mover */}
+      <div className="mt-2 pl-5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+        {fmtFechaCorta(a.createdAt) && (
+          <span className="inline-flex items-center gap-1" title={`Tarjeta creada el ${fmtFechaLarga(a.createdAt)}`}>
+            <Calendar size={12} className="text-gray-400" />{fmtFechaCorta(a.createdAt)}
+          </span>
+        )}
         <span className="inline-flex items-center gap-1" title={`${subidos} de ${VIDEOS_POR_PRODUCTO} videos subidos`}>
           <Film size={12} className="text-emerald-500" /><b className="text-gray-700 dark:text-gray-200">{subidos}</b>/{VIDEOS_POR_PRODUCTO} videos
         </span>

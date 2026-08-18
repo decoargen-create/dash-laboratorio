@@ -374,11 +374,14 @@ export async function initProduccionSync({ role, userId, name } = {}) {
   } catch {}
 
   if (!supabase || !_role) return; // sin nube → modo local puro (compat)
+  teardownRealtime(); // por si cambió de usuario en el mismo navegador
   setupRefetch();
   await hydrate();
+  setupRealtime();
 }
 
 export function teardownProduccionSync() {
+  teardownRealtime();
   _role = null;
   _userId = null;
 }
@@ -395,6 +398,38 @@ function setupRefetch() {
   };
   window.addEventListener('focus', onVisible);
   document.addEventListener('visibilitychange', onVisible);
+}
+
+// ── Realtime: cambios de otros usuarios impactan al instante ─────────────────
+// Escuchamos cambios en las tablas de Producción vía Supabase Realtime. La RLS
+// se respeta (cada uno recibe solo los cambios de las filas que puede ver), así
+// que un admin ve cuando el editor sube/mueve, y el editor ve cuando el admin
+// aprueba/reasigna, sin refrescar. Ante cualquier cambio, re-fetch (debounced).
+let _rtChannel = null;
+let _rtTimer = null;
+function scheduleRealtimeRefetch() {
+  if (_rtTimer) clearTimeout(_rtTimer);
+  _rtTimer = setTimeout(() => {
+    _rtTimer = null;
+    // El guard de hydrate (_writeSeq/_inflight) evita pisar un cambio propio en
+    // vuelo; para cambios ajenos, trae lo nuevo.
+    if (cloudReady() && _inflight === 0) hydrate().catch(() => {});
+  }, 250);
+}
+function setupRealtime() {
+  if (!supabase || _rtChannel || typeof window === 'undefined') return;
+  try {
+    _rtChannel = supabase
+      .channel(`produccion-rt-${_userId || 'anon'}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: TABLE }, scheduleRealtimeRefetch)
+      .on('postgres_changes', { event: '*', schema: 'public', table: PAGOS_TABLE }, scheduleRealtimeRefetch)
+      .on('postgres_changes', { event: '*', schema: 'public', table: PAGOS_CONFIG_TABLE }, scheduleRealtimeRefetch)
+      .subscribe();
+  } catch (e) { console.warn('[produccion] realtime setup:', e?.message || e); }
+}
+function teardownRealtime() {
+  if (_rtTimer) { clearTimeout(_rtTimer); _rtTimer = null; }
+  if (_rtChannel) { try { supabase.removeChannel(_rtChannel); } catch {} _rtChannel = null; }
 }
 
 // Lunes (horario AR) de la semana de una fecha → 'YYYY-MM-DD'. Es la clave de

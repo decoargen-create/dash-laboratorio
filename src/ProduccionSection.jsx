@@ -19,7 +19,7 @@ import {
   listAssignments, addAssignment, updateAssignment, removeAssignment, assignPersona,
   assignCreator, subscribeProduccion, esCompleto, bonusObjetivo, inversionPorProducto,
   getRole, entregasNuevas, ultimaSubidaTs, personasEnTarjetas, resumenVideosPorProducto,
-  resyncDesdeNube,
+  resyncDesdeNube, pagoProductoDe,
 } from './produccionStore.js';
 import { CreativosSection, subirParaTarjeta, VIDEO_ACCEPT, probeDrive } from './produccionUpload.jsx';
 import { listTeam, createMember } from './produccionTeam.js';
@@ -369,17 +369,9 @@ function ResumenSemana({ asigs, filtroSinAsignar = false, onToggleSinAsignar }) 
       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-100 dark:border-gray-700/60 flex-wrap">
         <span className="text-[11px] font-bold uppercase tracking-wide text-gray-400 mr-auto">Semana del equipo</span>
         <div className="flex items-center gap-1.5 flex-wrap">
-          {[
-            ['Asignados', totals.asignados, 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-200'],
-            ['Por hacer', totals.porhacer, 'bg-slate-100 dark:bg-slate-700/60 text-slate-600 dark:text-slate-300'],
-            ['Revisión', totals.revision, 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300'],
-            ['Aprobados', totals.aprobados, 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300'],
-          ].map(([lab, val, cls]) => (
-            <span key={lab} className={`inline-flex items-baseline gap-1.5 rounded-full px-2.5 py-1 font-bold ${cls}`}>
-              <span className="tabular-nums text-sm leading-none">{val}</span>
-              <span className="text-[10px] uppercase tracking-wide opacity-80">{lab}</span>
-            </span>
-          ))}
+          {/* Los contadores por estado (asignados/por hacer/revisión/aprobados) se
+              sacaron: ya están en las columnas del tablero. Acá queda el detalle
+              por persona (abajo) + el filtro "sin asignar". */}
           {sinAsignar > 0 && (
             <button onClick={onToggleSinAsignar}
               title={filtroSinAsignar ? 'Quitar el filtro' : 'Ver solo las tarjetas sin asignar'}
@@ -700,9 +692,6 @@ export default function ProduccionSection({ addToast }) {
       <ResumenSemana asigs={asigs} filtroSinAsignar={soloSinAsignar}
         onToggleSinAsignar={() => setSoloSinAsignar(v => !v)} />
 
-      {/* Dashboard: inversión (pago al equipo) acumulada por producto. */}
-      <InversionPanel />
-
       {/* Aviso de filtro activo */}
       {soloSinAsignar && (
         <div className="flex items-center gap-2 text-xs font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-1.5">
@@ -713,14 +702,25 @@ export default function ProduccionSection({ addToast }) {
         </div>
       )}
 
-      {/* Resumen: cuántos videos faltan por producto (de la semana). */}
+      {/* Por producto (esta semana): videos que faltan + plata invertida. Unifica
+          lo que antes eran dos bloques ("Videos por producto" + "Inversión"). */}
       {asigs.length > 0 && (() => {
-        const resumen = resumenVideosPorProducto(asigs);
+        const resumen = resumenVideosPorProducto(asigs).map(r => {
+          const invertido = asigs.reduce((s, a) => {
+            const nombre = ((a.productoNombre || '').trim() || 'Sin nombre').toLowerCase();
+            return (nombre === r.producto.toLowerCase() && esCompleto(a.estado)) ? s + pagoProductoDe(a.persona) : s;
+          }, 0);
+          return { ...r, invertido };
+        });
+        const totalInvertido = resumen.reduce((s, r) => s + r.invertido, 0);
         return (
           <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
             <div className="flex items-center gap-2 mb-3">
               <Film size={15} className="text-emerald-500" />
-              <span className="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Videos por producto · esta semana</span>
+              <span className="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Por producto · esta semana</span>
+              {totalInvertido > 0 && (
+                <span className="ml-auto text-xs font-bold text-emerald-600 dark:text-emerald-400 font-mono tabular-nums">{fmtArs(totalInvertido)}</span>
+              )}
             </div>
             <div className="grid gap-x-6 gap-y-2.5 sm:grid-cols-2">
               {resumen.map(r => {
@@ -732,7 +732,10 @@ export default function ProduccionSection({ addToast }) {
                         {r.producto}
                         {r.tarjetas > 1 && <span className="font-normal text-gray-400 dark:text-gray-500"> · {r.tarjetas} tarjetas</span>}
                       </span>
-                      <span className="tabular-nums text-gray-500 dark:text-gray-400 shrink-0">{r.subidos}/{r.target} · faltan <b className={r.faltan === 0 ? 'text-emerald-500' : 'text-amber-600 dark:text-amber-400'}>{r.faltan}</b></span>
+                      <span className="flex items-center gap-2 shrink-0 tabular-nums">
+                        <span className="text-gray-500 dark:text-gray-400">{r.subidos}/{r.target} · faltan <b className={r.faltan === 0 ? 'text-emerald-500' : 'text-amber-600 dark:text-amber-400'}>{r.faltan}</b></span>
+                        {r.invertido > 0 && <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">{fmtArs(r.invertido)}</span>}
+                      </span>
                     </div>
                     <div className="h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
                       <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: `${pct}%` }} />

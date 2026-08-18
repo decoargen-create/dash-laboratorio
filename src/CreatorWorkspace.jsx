@@ -11,11 +11,12 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Film, LogOut, Moon, Sun, RefreshCw, CheckCircle2, Clock, ChevronDown, ChevronRight, Sparkles, ExternalLink, AlertTriangle,
+  Film, LogOut, Moon, Sun, RefreshCw, CheckCircle2, Clock, ChevronDown, ChevronRight, Sparkles, ExternalLink, AlertTriangle, Wallet,
 } from 'lucide-react';
 import {
   subscribeProduccion, allWeekKeys, listAssignments, weekLabel, weekKeyOf,
   ESTADO_LABELS, ESTADOS_CREATOR, updateAssignment, refreshProduccion, esCompleto,
+  monthKeyOf, monthLabel, weeksInMonth, bonusObjetivo, PAGO_POR_PRODUCTO,
 } from './produccionStore.js';
 import { CreativosSection } from './produccionUpload.jsx';
 
@@ -164,6 +165,21 @@ export default function CreatorWorkspace({ user, onLogout, addToast, darkMode, t
   const revisionSemana = cardsSemana.filter(a => a.estado === 'revision').length;
   const faltaBonus = aprobadosSemana < 3 ? 3 - aprobadosSemana : 0;
 
+  // Resumen personal del MES (solo lo suyo — la RLS ya acota sus filas): cuánto
+  // ganó (productos aprobados × $42k + bonus semanal por objetivo), cuántos
+  // aprobó y cuántos videos subió.
+  const monthKey = monthKeyOf();
+  let completadosMes = 0, bonusMes = 0, videosMes = 0;
+  for (const wk of weeksInMonth(monthKey)) {
+    const cards = listAssignments(wk);
+    const comp = cards.filter(a => esCompleto(a.estado)).length;
+    completadosMes += comp;
+    bonusMes += bonusObjetivo(comp);
+    videosMes += cards.reduce((n, a) => n + (a.archivos?.length || 0), 0);
+  }
+  const ganadoMes = completadosMes * PAGO_POR_PRODUCTO + bonusMes;
+  const fmtArs = (n) => '$' + Math.round(n).toLocaleString('es-AR');
+
   const doRefresh = async () => {
     setRefreshing(true);
     try { await refreshProduccion(); } finally { setRefreshing(false); }
@@ -235,6 +251,34 @@ export default function CreatorWorkspace({ user, onLogout, addToast, darkMode, t
                   </div>
                 ))}
               </div>
+            </div>
+
+            {/* Tu resumen personal del mes (plata + cantidades) — solo tuyo. */}
+            <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 shadow-sm">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white shrink-0"><Wallet size={16} /></div>
+                <div className="min-w-0">
+                  <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Tu resumen del mes</h3>
+                  <p className="text-[11px] text-gray-500 dark:text-gray-400 capitalize">{monthLabel(monthKey)}</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <div className="rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 p-3">
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-emerald-700/70 dark:text-emerald-400/70 mb-1">Ganado</div>
+                  <div className="text-lg md:text-xl font-extrabold font-mono tabular-nums text-emerald-700 dark:text-emerald-300">{fmtArs(ganadoMes)}</div>
+                </div>
+                <div className="rounded-xl bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-gray-700 p-3">
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-1">Aprobados</div>
+                  <div className="text-lg md:text-xl font-extrabold tabular-nums text-gray-900 dark:text-gray-100">{completadosMes}</div>
+                </div>
+                <div className="rounded-xl bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-gray-700 p-3">
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-1">Videos subidos</div>
+                  <div className="text-lg md:text-xl font-extrabold tabular-nums text-gray-900 dark:text-gray-100">{videosMes}</div>
+                </div>
+              </div>
+              <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-2.5">
+                $42.000 por producto aprobado + bonus por objetivo semanal. Es tu total del mes (antes de que te lo transfieran).
+              </p>
             </div>
 
             {grupos.map(({ wk, cards }) => (

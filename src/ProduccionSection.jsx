@@ -491,8 +491,15 @@ export default function ProduccionSection({ addToast }) {
   }, []);
 
   // Cargamos el equipo (creators) para poder asignar tarjetas a una cuenta.
-  const reloadTeam = () => { listTeam().then(setTeam).catch(() => {}); };
-  useEffect(reloadTeam, []);
+  // Si la carga FALLA (ej: falta SUPABASE_SERVICE_ROLE_KEY en el server), lo
+  // avisamos en vez de tragarlo: antes se veía "No hay cuentas del equipo" sin
+  // saber si estaba vacío de verdad o si el endpoint estaba roto.
+  const reloadTeam = () => {
+    listTeam()
+      .then(setTeam)
+      .catch(err => addToast?.({ type: 'error', message: `No se pudo cargar el equipo: ${err.message}` }));
+  };
+  useEffect(reloadTeam, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Link a la carpeta raíz de Drive (para el botón "Drive" del header).
   // Estado de Drive: si funciona (rootLink) + si el OAuth del user está conectado.

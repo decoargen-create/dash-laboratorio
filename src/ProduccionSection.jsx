@@ -12,13 +12,14 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Film, Plus, X, Trash2, ChevronDown, UploadCloud, Loader2, CheckCircle2,
   AlertTriangle, ExternalLink, FileText, GripVertical, Users, History, Search, ArrowLeftRight,
-  Bell, BellRing, Inbox, Eye,
+  Bell, BellRing, Inbox, Eye, RefreshCw,
 } from 'lucide-react';
 import {
   ESTADOS, ESTADO_LABELS, VIDEOS_POR_PRODUCTO, weekKeyOf, weekLabel, weekRange, allWeekKeys,
   listAssignments, addAssignment, updateAssignment, removeAssignment, assignPersona,
   assignCreator, subscribeProduccion, esCompleto, bonusObjetivo, inversionPorProducto,
   getRole, entregasNuevas, ultimaSubidaTs, personasEnTarjetas, resumenVideosPorProducto,
+  resyncDesdeNube,
 } from './produccionStore.js';
 import { CreativosSection, subirParaTarjeta, VIDEO_ACCEPT, probeDrive } from './produccionUpload.jsx';
 import { listTeam, createMember } from './produccionTeam.js';
@@ -478,6 +479,8 @@ export default function ProduccionSection({ addToast }) {
   const [showAdd, setShowAdd] = useState(false);
   const [showTeam, setShowTeam] = useState(false);
   const [showReasignar, setShowReasignar] = useState(false);
+  const [confirmResync, setConfirmResync] = useState(false);
+  const [resyncing, setResyncing] = useState(false);
   const [team, setTeam] = useState([]);
   const [detailId, setDetailId] = useState(null);
   const [dragOver, setDragOver] = useState(null);
@@ -604,6 +607,11 @@ export default function ProduccionSection({ addToast }) {
             </select>
             <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
           </div>
+          <button onClick={() => setConfirmResync(true)} disabled={resyncing}
+            title="Re-sincronizar: descarta el tablero local y lo vuelve a traer de la nube (útil si quedó una tarjeta fantasma que no sincronizó)"
+            className="inline-flex items-center justify-center w-8 h-8 text-gray-500 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition shadow-sm disabled:opacity-50">
+            <RefreshCw size={14} className={resyncing ? 'animate-spin' : ''} />
+          </button>
           <button onClick={() => setShowReasignar(true)} title="Mover todas las tarjetas de una persona a otra"
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition shadow-sm">
             <ArrowLeftRight size={14} /> Reasignar
@@ -782,6 +790,19 @@ export default function ProduccionSection({ addToast }) {
         <ReasignarModal asigs={asigs} team={team} weekKey={weekKey}
           onClose={() => setShowReasignar(false)} addToast={addToast} />
       )}
+      <ConfirmDialog
+        open={confirmResync}
+        title="¿Re-sincronizar el tablero?"
+        message="Descarta el tablero local y lo vuelve a traer de la nube (la fuente de verdad). Útil si quedó una tarjeta fantasma que nunca sincronizó. Ojo: se pierden cambios locales que todavía no hayan llegado al server."
+        confirmLabel="Re-sincronizar" tone="brand"
+        onConfirm={async () => {
+          setConfirmResync(false); setResyncing(true);
+          try { await resyncDesdeNube(); addToast?.({ type: 'success', message: 'Tablero re-sincronizado desde la nube.' }); }
+          catch (e) { addToast?.({ type: 'error', message: `No se pudo re-sincronizar: ${e?.message || e}` }); }
+          finally { setResyncing(false); }
+        }}
+        onClose={() => setConfirmResync(false)}
+      />
     </div>
   );
 }

@@ -136,22 +136,11 @@ function CreatorCardDetail({ a, num, onClose, addToast }) {
             ) : (
               <p className="text-sm text-gray-400 dark:text-gray-500 italic">El equipo todavía no cargó la consigna. Consultá antes de arrancar.</p>
             )}
-            {folderLink && (
-              <a href={folderLink} target="_blank" rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 mt-2 text-xs font-bold text-brand-600 dark:text-brand-300 hover:underline">
-                <ExternalLink size={13} /> Carpeta de material / Drive
-              </a>
-            )}
           </div>
 
-          {/* Subir videos */}
-          <div>
-            <div className="flex items-center gap-1.5 mb-1.5">
-              <UploadCloud size={14} className="text-emerald-500" />
-              <span className="text-[11px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Tus videos</span>
-            </div>
-            <CreativosSection a={a} addToast={addToast} canDelete />
-          </div>
+          {/* Creativos: subir/ver videos (misma sección que ve el admin). Trae su
+              propio header "CREATIVOS" + link a la carpeta de Drive + dropzone. */}
+          <CreativosSection a={a} addToast={addToast} canDelete />
         </div>
 
         <div className="border-t border-gray-100 dark:border-gray-800 px-5 py-3 bg-gray-50/60 dark:bg-gray-900/40">

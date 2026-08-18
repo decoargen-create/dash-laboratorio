@@ -335,7 +335,10 @@ export default function CreatorWorkspace({ user, onLogout, addToast, darkMode, t
                       return (
                         <div key={r.producto}>
                           <div className="flex items-center justify-between text-xs mb-1 gap-2">
-                            <span className="font-semibold text-gray-800 dark:text-gray-100 truncate">{r.producto}</span>
+                            <span className="font-semibold text-gray-800 dark:text-gray-100 truncate">
+                              {r.producto}
+                              {r.tarjetas > 1 && <span className="font-normal text-gray-400 dark:text-gray-500"> · {r.tarjetas} tarjetas</span>}
+                            </span>
                             <span className="tabular-nums text-gray-500 dark:text-gray-400 shrink-0">{r.subidos}/{r.target} · faltan {r.faltan}</span>
                           </div>
                           <div className="h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">

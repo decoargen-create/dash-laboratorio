@@ -131,9 +131,13 @@ export default async function handler(req, res) {
       if (!existing) {
         return respondJSON(res, 400, { error: 'Ese email ya existe pero no lo pude ubicar. Borralo en Supabase → Authentication → Users y reintentá.' });
       }
+      // Solo adoptamos cuentas SIN rol (huérfanas, sin profile) o que ya son
+      // editores. Nunca adoptamos admins/dueños/otros roles: adoptar resetea la
+      // contraseña y baja a 'creator', así que un email tipeado de más no debe
+      // poder secuestrar/lockear una cuenta ajena.
       const existingRole = await getUserRole(existing.id);
-      if (existingRole === 'admin') {
-        return respondJSON(res, 400, { error: 'Ese email es de un admin — no se puede convertir en editor.' });
+      if (existingRole && existingRole !== 'creator') {
+        return respondJSON(res, 400, { error: `Ese email ya pertenece a otra cuenta (${existingRole}) y no se puede convertir en editor. Usá otro email.` });
       }
       const { error: updErr } = await supabase.auth.admin.updateUserById(existing.id, {
         password, email_confirm: true, user_metadata: { display_name: name },

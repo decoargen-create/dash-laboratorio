@@ -803,11 +803,16 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
 
   const onPick = async (fileList) => {
     setProg({ i: 0, total: 0, pct: 0, bps: 0, eta: null });
-    await subirParaTarjeta(a, fileList, {
-      addToast,
-      onProgress: (p) => setProg(p),
-    });
-    setProg(null);
+    try {
+      await subirParaTarjeta(a, fileList, {
+        addToast,
+        onProgress: (p) => setProg(p),
+      });
+    } finally {
+      // Pase lo que pase (incluso si subirParaTarjeta lanza), liberamos la barra;
+      // sino la tarjeta queda no-arrastrable (draggable={!prog}) hasta recargar.
+      setProg(null);
+    }
   };
 
   const aprobarTodos = (e) => {

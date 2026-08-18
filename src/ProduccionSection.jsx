@@ -501,6 +501,20 @@ export default function ProduccionSection({ addToast }) {
   };
   useEffect(reloadTeam, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Aviso si un guardado a la nube falla (antes se perdía en silencio). El store
+  // emite el evento; acá lo mostramos como toast, throttled para no spamear.
+  useEffect(() => {
+    let last = 0;
+    const onErr = () => {
+      const now = Date.now();
+      if (now - last < 8000) return;
+      last = now;
+      addToast?.({ type: 'error', message: 'No se pudo guardar un cambio en la nube. Revisá la conexión — se reintenta al recargar.' });
+    };
+    window.addEventListener('viora:produccion-sync-error', onErr);
+    return () => window.removeEventListener('viora:produccion-sync-error', onErr);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Link a la carpeta raíz de Drive (para el botón "Drive" del header).
   // Estado de Drive: si funciona (rootLink) + si el OAuth del user está conectado.
   const [drive, setDrive] = useState({ rootLink: null, connected: false, email: null, connecting: false });

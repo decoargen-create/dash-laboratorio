@@ -25,6 +25,7 @@ const KEY = 'adslab-produccion-v1';
 const PAGOS_KEY = 'adslab-produccion-pagos-v1';
 const MIGRATED_KEY = 'adslab-produccion-migrated-v1';
 const OWNER_KEY = 'adslab-produccion-owner-v1'; // último userId dueño del cache local
+const UNSYNCED_KEY = 'adslab-produccion-unsynced-v1'; // ids cuyo push a la nube falló
 const TABLE = 'produccion_asignaciones';
 const PAGOS_TABLE = 'produccion_pagos';
 
@@ -201,6 +202,19 @@ function enqueue(id, fn) {
   return next;
 }
 
+// Ids de tarjetas cuyo push a la nube falló (RLS/red). Persistido para sobrevivir
+// un reload. Sirve para (a) preservarlas en el hydrate en vez de descartarlas, y
+// (b) avisarle al usuario que un cambio NO se guardó (en vez de perderlo callado).
+let _unsynced = (() => { try { return new Set(JSON.parse(localStorage.getItem(UNSYNCED_KEY) || '[]')); } catch { return new Set(); } })();
+function persistUnsynced() { try { localStorage.setItem(UNSYNCED_KEY, JSON.stringify([..._unsynced])); } catch {} }
+function markUnsynced(id, bad) {
+  if (bad) { if (!_unsynced.has(id)) { _unsynced.add(id); persistUnsynced(); } }
+  else if (_unsynced.delete(id)) { persistUnsynced(); }
+}
+function emitSyncError(msg) {
+  try { window.dispatchEvent(new CustomEvent('viora:produccion-sync-error', { detail: { message: msg || 'error' } })); } catch {}
+}
+
 function pushRow(id, evento = null, opts = {}) { return enqueue(id, () => doPushRow(id, evento, opts)); }
 function pushDelete(id) { return enqueue(id, () => doPushDelete(id)); }
 
@@ -221,7 +235,8 @@ async function doPushRow(id, evento = null, opts = {}) {
     // (addArchivos/removeArchivo/nueva tarjeta) NO pasan skipArchivos.
     if (opts.skipArchivos) delete row.archivos;
     const { error } = await supabase.from(TABLE).upsert(row, { onConflict: 'id' });
-    if (error) console.warn('[produccion] push(admin):', error.message);
+    if (error) { console.warn('[produccion] push(admin):', error.message); markUnsynced(id, true); emitSyncError(error.message); }
+    else markUnsynced(id, false);
   } else if (_role === 'creator') {
     // Solo mandamos p_estado si ESTE push viene de un cambio de estado real
     // (evento tipo 'estado'). Un push de solo-archivos NO debe tocar el estado:
@@ -231,14 +246,16 @@ async function doPushRow(id, evento = null, opts = {}) {
     const params = { p_id: id, p_estado: estado, p_archivos: a.archivos || [] };
     if (_histCloud && evento) params.p_evento = evento; // solo si la base lo soporta
     const { error } = await supabase.rpc('produccion_creator_update', params);
-    if (error) console.warn('[produccion] push(creator):', error.message);
+    if (error) { console.warn('[produccion] push(creator):', error.message); markUnsynced(id, true); emitSyncError(error.message); }
+    else markUnsynced(id, false);
   }
 }
 
 async function doPushDelete(id) {
   if (!cloudReady() || _role !== 'admin') return;
   const { error } = await supabase.from(TABLE).delete().eq('id', id);
-  if (error) console.warn('[produccion] delete:', error.message);
+  if (error) { console.warn('[produccion] delete:', error.message); emitSyncError(error.message); }
+  else markUnsynced(id, false);
 }
 
 // Devuelve true solo si el upsert confirmó OK (para no marcar la migración
@@ -274,7 +291,22 @@ async function hydrate() {
 
     const cloud = (data || []).map(rowToLocal);
     if (cloud.length > 0) {
-      write(cloud);
+      const cloudIds = new Set(cloud.map(r => r.id));
+      // Las que ya aparecen en la nube dejaron de estar "sin sincronizar".
+      for (const id of [..._unsynced]) if (cloudIds.has(id)) markUnsynced(id, false);
+      // Filas locales que FALLARON al subir (marcadas) y NO están en la nube: las
+      // conservamos y reintentamos, en vez de descartarlas (sino se perdían). Las
+      // borradas remotamente NO están marcadas → se dejan ir (no se resucitan).
+      // Solo aplica al admin (el creator no crea filas).
+      const keep = (_role === 'admin')
+        ? readLocalRaw().filter(a => _unsynced.has(a.id) && !cloudIds.has(a.id))
+        : [];
+      if (keep.length > 0) {
+        pushMany(keep).then(ok => { if (ok) keep.forEach(a => markUnsynced(a.id, false)); }).catch(() => {});
+        write([...cloud, ...keep]);
+      } else {
+        write(cloud);
+      }
     } else {
       const local = readLocalRaw();
       const yaMigro = !!localStorage.getItem(MIGRATED_KEY);
@@ -482,6 +514,7 @@ export function updateAssignment(id, patch) {
   pushRow(id, evento, { skipArchivos: true });
 }
 export function removeAssignment(id) {
+  markUnsynced(id, false); // borrada a propósito → no la preservemos en el hydrate
   write(read().filter(a => a.id !== id));
   pushDelete(id);
 }

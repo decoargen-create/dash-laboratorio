@@ -217,18 +217,7 @@ export default function CreatorWorkspace({ user, onLogout, addToast, darkMode, t
       </header>
 
       <main className="max-w-4xl mx-auto px-4 py-6">
-        {totalCards === 0 ? (
-          <div className="text-center py-24">
-            <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
-              <Film size={24} className="text-gray-400" />
-            </div>
-            <h2 className="font-bold text-gray-700 dark:text-gray-200">Todavía no tenés productos asignados</h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 max-w-xs mx-auto">
-              Cuando el equipo te asigne productos de la semana, van a aparecer acá para que subas los creativos.
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-8">
+        <div className="space-y-8">
             {/* Resumen motivador de la semana */}
             <div className="rounded-2xl bg-gradient-to-r from-pink-500 to-rose-500 text-white px-4 py-3 flex items-center gap-3 shadow-sm">
               <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center shrink-0">
@@ -281,24 +270,35 @@ export default function CreatorWorkspace({ user, onLogout, addToast, darkMode, t
               </p>
             </div>
 
-            {grupos.map(({ wk, cards }) => (
-              <section key={wk}>
-                <div className="flex items-center gap-2 mb-3">
-                  <h2 className="text-sm font-bold text-gray-800 dark:text-gray-100">{weekLabel(wk)}</h2>
-                  {wk === thisWeek && (
-                    <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-600 bg-emerald-100 dark:bg-emerald-900/40 dark:text-emerald-300 rounded-full px-2 py-0.5">
-                      esta semana
-                    </span>
-                  )}
-                  <span className="text-xs text-gray-400">· {cards.length} producto{cards.length === 1 ? '' : 's'}</span>
+            {totalCards === 0 ? (
+              <div className="text-center py-16 rounded-2xl border border-dashed border-gray-200 dark:border-gray-700 bg-white/40 dark:bg-gray-800/30">
+                <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
+                  <Film size={24} className="text-gray-400" />
                 </div>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  {cards.map(a => <CreatorCard key={a.id} a={a} addToast={addToast} />)}
-                </div>
-              </section>
-            ))}
+                <h2 className="font-bold text-gray-700 dark:text-gray-200">Todavía no tenés productos asignados</h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 max-w-xs mx-auto">
+                  Cuando el equipo te asigne productos de la semana, van a aparecer acá para que subas los creativos.
+                </p>
+              </div>
+            ) : (
+              grupos.map(({ wk, cards }) => (
+                <section key={wk}>
+                  <div className="flex items-center gap-2 mb-3">
+                    <h2 className="text-sm font-bold text-gray-800 dark:text-gray-100">{weekLabel(wk)}</h2>
+                    {wk === thisWeek && (
+                      <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-600 bg-emerald-100 dark:bg-emerald-900/40 dark:text-emerald-300 rounded-full px-2 py-0.5">
+                        esta semana
+                      </span>
+                    )}
+                    <span className="text-xs text-gray-400">· {cards.length} producto{cards.length === 1 ? '' : 's'}</span>
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    {cards.map(a => <CreatorCard key={a.id} a={a} addToast={addToast} />)}
+                  </div>
+                </section>
+              ))
+            )}
           </div>
-        )}
       </main>
     </div>
   );

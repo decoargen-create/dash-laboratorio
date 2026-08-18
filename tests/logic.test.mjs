@@ -67,18 +67,20 @@ eq('abreviar "Cepillo Drenaje Linfatico" → CDL', abreviarProducto('Cepillo Dre
 eq('abreviar salta conectores "Crema de la Noche" → CN', abreviarProducto('Crema de la Noche'), 'CN');
 eq('abreviar 1 palabra "Colageno" → Colageno', abreviarProducto('Colageno'), 'Colageno');
 eq('shortId prodasig-…-vdagn → vdagn', shortId('prodasig-1787025026325-vdagn'), 'vdagn');
-eq('cardFolder sem 17-8 · vdagn', cardFolderName('2026-08-17', 'prodasig-x-vdagn'), 'sem 17-8 · vdagn');
+eq('cardFolder "Cepillo Facial [Francisco][13-8]"', cardFolderName('Cepillo Facial', 'Francisco', '2026-08-13'), 'Cepillo Facial [Francisco][13-8]');
+eq('cardFolder sin persona → [Equipo]', cardFolderName('Colageno', '', '2026-08-05'), 'Colageno [Equipo][5-8]');
 eq('clean saca caracteres inválidos', clean('Ana/Bea:1'), 'Ana Bea 1');
 // finalFileName con reloj inyectado (17:05:30 UTC = 14:05:30 AR) → determinista
 const fixed = new Date('2026-08-17T17:05:30Z');
 eq('finalFileName "Fran - 2026-08-17 14.05.30 - CDL.mp4"', finalFileName('clip.MP4', 'Cepillo Drenaje Linfatico', 'Fran', fixed), 'Fran - 2026-08-17 14.05.30 - CDL.mp4');
 
-// ─────────── RENOMBRE PUBLICADO (idempotente) ───────────
+// ─────────── RENOMBRE PUBLICADO (idempotente, sin guion) ───────────
 console.log('\nRENOMBRE PUBLICADO:');
-eq('agregar PUBLICADO', nombrePublicado('sem 17-8 · vdagn', true), 'sem 17-8 · vdagn — PUBLICADO');
-eq('sacar PUBLICADO', nombrePublicado('sem 17-8 · vdagn — PUBLICADO', false), 'sem 17-8 · vdagn');
-eq('re-publicar NO duplica sufijo', nombrePublicado('sem 17-8 · vdagn — PUBLICADO', true), 'sem 17-8 · vdagn — PUBLICADO');
-eq('nombreBase saca el sufijo', nombreBase('sem 17-8 · vdagn — PUBLICADO'), 'sem 17-8 · vdagn');
+const cf = 'Cepillo Facial [Francisco][13-8]';
+eq('agregar PUBLICADO', nombrePublicado(cf, true), `${cf} PUBLICADO`);
+eq('sacar PUBLICADO', nombrePublicado(`${cf} PUBLICADO`, false), cf);
+eq('re-publicar NO duplica sufijo', nombrePublicado(`${cf} PUBLICADO`, true), `${cf} PUBLICADO`);
+eq('nombreBase saca convención vieja "— PUBLICADO"', nombreBase(`${cf} — PUBLICADO`), cf);
 
 // ─────────── RESUMEN ───────────
 console.log(`\n${'─'.repeat(40)}\nRESULTADO: ${pass} ✅   ${fail} ❌\n`);

@@ -7,8 +7,9 @@ export const TZ = 'America/Argentina/Buenos_Aires';
 
 // Sufijo que marca una tarjeta publicada en el nombre de su carpeta, y el regex
 // que lo detecta/saca (idempotente: acepta guion normal o em-dash).
-export const SUFIJO_PUBLICADO = ' — PUBLICADO';
-export const RE_SUFIJO = /\s*[—-]\s*PUBLICADO\s*$/i;
+export const SUFIJO_PUBLICADO = ' PUBLICADO';
+// Detecta/saca el sufijo, con o sin guion (acepta convenciones viejas "— PUBLICADO").
+export const RE_SUFIJO = /\s*(?:[—-]\s*)?PUBLICADO\s*$/i;
 
 // Saca caracteres que rompen nombres de archivo/carpeta en Drive.
 export function clean(s, fallback = '') {
@@ -61,15 +62,17 @@ export function finalFileName(filename, productoNombre, persona, now = new Date(
   return `${per} - ${selloAR(now)} - ${abrev}.${ext}`;
 }
 
-// Nombre de la carpeta de UNA tarjeta (nivel 3): "sem <d>-<m> · <id>". Único por
-// tarjeta y estable en el tiempo. La estructura completa es
-// <Producto>/<Persona>/<sem d-m · id>/, y esta carpeta es la que se renombra a
-// "… — PUBLICADO" cuando la tarjeta se publica.
-export function cardFolderName(weekKey, cardId, now = new Date()) {
-  const sid = shortId(cardId);
-  if (!weekKey || !/^\d{4}-\d{2}-\d{2}$/.test(weekKey)) return `sem ${hoyAR(now)} · ${sid}`;
-  const [, m, d] = weekKey.split('-');
-  return `sem ${Number(d)}-${Number(m)} · ${sid}`;
+// Nombre de la carpeta de UNA tarjeta: "<Producto> [<Persona>][<d-m>]" (la
+// convención del equipo — NO separada por semana). Es la que se renombra a
+// "… PUBLICADO" cuando la tarjeta se publica. La fecha sale del weekKey (estable
+// por tarjeta, así probe y subida coinciden y no se duplican carpetas); si no
+// hay weekKey, usa la fecha de hoy. Ej: "Cepillo Facial [Francisco][13-8]".
+export function cardFolderName(productoNombre, persona, weekKey, now = new Date()) {
+  const prod = clean(productoNombre, 'Producto');
+  const per = clean(persona, 'Equipo');
+  const fecha = (weekKey && /^\d{4}-\d{2}-\d{2}$/.test(weekKey)) ? weekKey : hoyAR(now);
+  const [, m, d] = fecha.split('-');
+  return `${prod} [${per}][${Number(d)}-${Number(m)}]`;
 }
 
 // Nombre base de una carpeta (sin el sufijo PUBLICADO). Idempotente.
@@ -78,7 +81,7 @@ export function nombreBase(nombre) {
 }
 
 // Aplica/saca el sufijo PUBLICADO sobre un nombre de carpeta, sin duplicarlo.
-// published=true → "<base> — PUBLICADO"; false → "<base>".
+// published=true → "<base> PUBLICADO"; false → "<base>".
 export function nombrePublicado(nombre, published) {
   const base = nombreBase(nombre);
   return published ? `${base}${SUFIJO_PUBLICADO}` : base;

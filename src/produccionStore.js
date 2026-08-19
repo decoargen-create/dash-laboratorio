@@ -648,6 +648,10 @@ export function updateAssignment(id, patch) {
   // updateAssignment nunca modifica `archivos` (eso va por addArchivos/removeArchivo)
   // → skipArchivos para no pisar los videos que el editor subió en paralelo.
   pushRow(id, evento, { skipArchivos: true });
+  // Aviso a Discord del cambio de columna (fire & forget). Lo dispara quien hizo
+  // el cambio (admin o editor); el server decide si hay webhook y si el estado
+  // se notifica. Nunca frena la UI ni rompe si falla.
+  if (patch.estado && patch.estado !== before.estado) notificarCambioEstado(arr[i], patch.estado, before.estado);
   // Si la tarjeta cruzó el borde de "publicado", reflejamos el estado en el
   // nombre de su carpeta de Drive (le agrega/saca "— PUBLICADO"). Solo el dueño.
   if (patch.estado && patch.estado !== before.estado && _role === 'admin') {
@@ -673,6 +677,29 @@ async function renombrarPublicado(folderId, published) {
     });
   } catch (e) { console.warn('[produccion] rename folder:', e?.message || e); }
 }
+
+// Avisa a Discord (canal del equipo) que una tarjeta cambió de columna. El
+// webhook y qué estados se notifican los decide el server (/api/produccion/notify);
+// acá solo mandamos el contexto. Fire & forget.
+async function notificarCambioEstado(a, to, from) {
+  if (!supabase) return;
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    const t = session?.access_token;
+    await fetch('/api/produccion/notify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(t ? { Authorization: `Bearer ${t}` } : {}) },
+      body: JSON.stringify({
+        productoNombre: a.productoNombre || '',
+        persona: a.persona || '',
+        from: from || '',
+        to: to || '',
+        actor: _actorName || '',
+      }),
+    });
+  } catch (e) { console.warn('[produccion] notify:', e?.message || e); }
+}
+
 export function removeAssignment(id) {
   markUnsynced(id, false); // borrada a propósito → no la preservemos en el hydrate
   write(read().filter(a => a.id !== id));

@@ -19,7 +19,7 @@ import {
   listAssignments, addAssignment, updateAssignment, removeAssignment, assignPersona,
   assignCreator, subscribeProduccion, esCompleto, bonusObjetivo, inversionPorProducto,
   getRole, entregasNuevas, ultimaSubidaTs, personasEnTarjetas, resumenVideosPorProducto,
-  resyncDesdeNube, vaciarTodo, setMaterialLinkProducto, pagoProductoDe,
+  resyncDesdeNube, vaciarTodo, setMaterialLinkProducto, probarDiscord, pagoProductoDe,
 } from './produccionStore.js';
 import { CreativosSection, subirParaTarjeta, VIDEO_ACCEPT, probeDrive } from './produccionUpload.jsx';
 import { listTeam, createMember, removeMember } from './produccionTeam.js';
@@ -563,6 +563,16 @@ export default function ProduccionSection({ addToast }) {
   const [confirmResync, setConfirmResync] = useState(false);
   const [confirmVaciar, setConfirmVaciar] = useState(false);
   const [vaciando, setVaciando] = useState(false);
+  const [probandoDiscord, setProbandoDiscord] = useState(false);
+  const onProbarDiscord = async () => {
+    setProbandoDiscord(true);
+    try {
+      const r = await probarDiscord();
+      if (r?.sent) addToast?.({ type: 'success', message: '🔔 Mensaje de prueba enviado. Revisá tu canal de Discord.' });
+      else if (r?.reason === 'no-webhook') addToast?.({ type: 'warning', message: 'Discord no configurado: falta la variable DISCORD_WEBHOOK_URL en Vercel (y redeploy).' });
+      else addToast?.({ type: 'error', message: `Discord no aceptó el aviso: ${r?.error || r?.reason || 'error desconocido'}` });
+    } finally { setProbandoDiscord(false); }
+  };
   const [resyncing, setResyncing] = useState(false);
   const [team, setTeam] = useState([]);
   const [detailId, setDetailId] = useState(null);
@@ -718,6 +728,11 @@ export default function ProduccionSection({ addToast }) {
             title="Re-sincronizar: descarta el tablero local y lo vuelve a traer de la nube (útil si quedó una tarjeta fantasma que no sincronizó)"
             className="inline-flex items-center justify-center w-8 h-8 text-gray-500 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition shadow-sm disabled:opacity-50">
             <RefreshCw size={14} className={resyncing ? 'animate-spin' : ''} />
+          </button>
+          <button onClick={onProbarDiscord} disabled={probandoDiscord}
+            title="Probar Discord: manda un mensaje de prueba al canal para verificar que los avisos están conectados."
+            className="inline-flex items-center justify-center w-8 h-8 text-gray-500 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:text-indigo-600 hover:border-indigo-300 dark:hover:border-indigo-800 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition shadow-sm disabled:opacity-50">
+            <Bell size={14} className={probandoDiscord ? 'animate-pulse' : ''} />
           </button>
           <button onClick={() => setConfirmVaciar(true)} disabled={vaciando}
             title="Vaciar TODO: borra todas las tarjetas, la config de pagos y las cuentas del equipo. Deja la producción en cero para arrancar de nuevo."

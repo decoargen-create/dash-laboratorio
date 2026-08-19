@@ -6,11 +6,12 @@
 // embed lindo (color según el estado) al webhook. Los bytes van server→Discord
 // (sin CORS), y la URL nunca se expone al browser.
 //
-// POST { productoNombre, persona, from, to, actor }
-//   → { sent:true } | { sent:false, reason } | { error }
+// POST { productoNombre, persona, from, to, actor }  → avisa el cambio.
+// POST { probe:true }  → manda un mensaje de PRUEBA (para verificar la conexión).
+//   Respuestas: { sent:true } | { sent:false, reason } | { sent:false, error }
 //
-// Si no hay webhook configurado, respondemos { sent:false, reason:'no-webhook' }
-// (no es un error: la app funciona igual, solo no avisa).
+// Si no hay webhook configurado, { sent:false, reason:'no-webhook' } (no es un
+// error: la app funciona igual, solo no avisa).
 
 import { getUserIdFromAuth } from '../marketing/_supabase-server.js';
 
@@ -27,18 +28,47 @@ function respondJSON(res, status, obj) {
   res.end(JSON.stringify(obj));
 }
 
+// Postea un embed al webhook. Devuelve { sent } o { sent:false, error }.
+async function postDiscord(url, embed) {
+  try {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'AdsLab · Producción', embeds: [embed] }),
+    });
+    if (!r.ok) {
+      const t = await r.text().catch(() => '');
+      return { sent: false, error: `Discord ${r.status}: ${t.slice(0, 140)}` };
+    }
+    return { sent: true };
+  } catch (e) {
+    return { sent: false, error: e.message };
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
 
   const userId = await getUserIdFromAuth(req);
   if (!userId) return respondJSON(res, 401, { error: 'No autorizado — iniciá sesión de nuevo.' });
 
-  const url = process.env.DISCORD_WEBHOOK_URL;
-  if (!url) return respondJSON(res, 200, { sent: false, reason: 'no-webhook' });
-
   let body = req.body;
   if (typeof body === 'string') { try { body = JSON.parse(body); } catch { body = {}; } }
   body = body || {};
+
+  const url = process.env.DISCORD_WEBHOOK_URL;
+  if (!url) return respondJSON(res, 200, { sent: false, reason: 'no-webhook' });
+
+  // Prueba de conexión (botón "Probar Discord").
+  if (body.probe) {
+    const out = await postDiscord(url, {
+      title: '🔔 Prueba de conexión',
+      description: 'Si ves esto, los avisos de Producción están conectados. 🎬',
+      color: 0xEC4899,
+      timestamp: new Date().toISOString(),
+    });
+    return respondJSON(res, out.sent ? 200 : 502, out);
+  }
 
   const meta = ESTADO_META[body.to];
   if (!meta) return respondJSON(res, 200, { sent: false, reason: 'estado-no-notificable' });
@@ -51,29 +81,12 @@ export default async function handler(req, res) {
   if (per) fields.push({ name: 'Persona', value: per, inline: true });
   if (who) fields.push({ name: 'Movió', value: who, inline: true });
 
-  const payload = {
-    username: 'AdsLab · Producción',
-    embeds: [{
-      title: `${meta.emoji} ${prod}`,
-      description: `Pasó a **${meta.label}**`,
-      color: meta.color,
-      fields,
-      timestamp: new Date().toISOString(),
-    }],
-  };
-
-  try {
-    const r = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    if (!r.ok) {
-      const t = await r.text().catch(() => '');
-      return respondJSON(res, 502, { sent: false, error: `Discord ${r.status}: ${t.slice(0, 140)}` });
-    }
-    return respondJSON(res, 200, { sent: true });
-  } catch (e) {
-    return respondJSON(res, 502, { sent: false, error: e.message });
-  }
+  const out = await postDiscord(url, {
+    title: `${meta.emoji} ${prod}`,
+    description: `Pasó a **${meta.label}**`,
+    color: meta.color,
+    fields,
+    timestamp: new Date().toISOString(),
+  });
+  return respondJSON(res, out.sent ? 200 : 502, out);
 }

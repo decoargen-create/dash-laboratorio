@@ -700,6 +700,22 @@ async function notificarCambioEstado(a, to, from) {
   } catch (e) { console.warn('[produccion] notify:', e?.message || e); }
 }
 
+// Manda un mensaje de PRUEBA a Discord (botón "Probar Discord"). Devuelve el
+// JSON del server: { sent } | { sent:false, reason } | { sent:false, error }.
+export async function probarDiscord() {
+  if (!supabase) return { sent: false, reason: 'sin-supabase' };
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    const t = session?.access_token;
+    const r = await fetch('/api/produccion/notify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(t ? { Authorization: `Bearer ${t}` } : {}) },
+      body: JSON.stringify({ probe: true }),
+    });
+    return await r.json().catch(() => ({ sent: false, reason: 'respuesta-invalida' }));
+  } catch (e) { return { sent: false, error: e?.message || String(e) }; }
+}
+
 export function removeAssignment(id) {
   markUnsynced(id, false); // borrada a propósito → no la preservemos en el hydrate
   write(read().filter(a => a.id !== id));

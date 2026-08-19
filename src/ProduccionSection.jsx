@@ -339,6 +339,53 @@ const PersonaBadge = ({ persona }) => (
   </span>
 );
 
+// Dropdown de filtro MULTI-selección (varios productos / varias personas).
+// selected = array de valores elegidos; onToggle(val) agrega/saca uno.
+function MultiFiltro({ label, options, selected, onToggle, onClear }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
+  }, [open]);
+  const n = selected.length;
+  const active = n > 0;
+  const resumen = n === 0 ? `Todos los ${label}`
+    : n === 1 ? (options.find(o => o.value === selected[0])?.label || selected[0])
+    : `${n} ${label}`;
+  return (
+    <div className="relative" ref={ref}>
+      <button onClick={() => setOpen(o => !o)}
+        className={`inline-flex items-center gap-1.5 pl-2.5 pr-2 py-1 text-xs font-semibold border rounded-lg transition ${active ? 'border-brand-400 text-brand-600 dark:text-brand-300 bg-brand-50 dark:bg-brand-900/20' : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800'}`}>
+        <span className="truncate max-w-[150px]">{resumen}</span>
+        <ChevronDown size={13} className="text-gray-400 shrink-0" />
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full mt-1 z-40 w-56 max-h-64 overflow-y-auto bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl p-1">
+          {options.length === 0 && <div className="px-2 py-1.5 text-xs text-gray-400">Nada para filtrar</div>}
+          {options.map(o => {
+            const on = selected.includes(o.value);
+            return (
+              <button key={o.value} onClick={() => onToggle(o.value)}
+                className={`w-full flex items-center gap-2 text-left text-xs px-2 py-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 ${on ? 'text-brand-600 dark:text-brand-300 font-bold' : 'text-gray-700 dark:text-gray-200'}`}>
+                <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 text-[9px] ${on ? 'bg-brand-500 border-brand-500 text-white' : 'border-gray-300 dark:border-gray-600'}`}>{on ? '✓' : ''}</span>
+                <span className="truncate">{o.label}</span>
+              </button>
+            );
+          })}
+          {n > 0 && (
+            <button onClick={onClear} className="w-full text-left text-[11px] font-bold text-gray-400 hover:text-brand-600 px-2 py-1.5 border-t border-gray-100 dark:border-gray-800 mt-0.5">Limpiar</button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Resumen de la semana: cuántas tarjetas tiene cada persona + progreso hacia el
 // objetivo (productos aprobados) con el bonus semanal.
 // Formatea una duración en ms → "6 h" / "1.5 d".
@@ -523,8 +570,10 @@ export default function ProduccionSection({ addToast }) {
   // Filtro rápido: mostrar solo las tarjetas sin repartir (click en el chip
   // "N sin asignar" del resumen).
   const [soloSinAsignar, setSoloSinAsignar] = useState(false);
-  const [filtroProducto, setFiltroProducto] = useState('');
-  const [filtroPersona, setFiltroPersona] = useState('');
+  // Filtros multi-selección: arrays de productos y personas elegidos (vacío = todos).
+  const [filtroProducto, setFiltroProducto] = useState([]);
+  const [filtroPersona, setFiltroPersona] = useState([]);
+  const toggleEn = (setter) => (val) => setter(prev => prev.includes(val) ? prev.filter(v => v !== val) : [...prev, val]);
 
   useEffect(() => {
     const un = subscribeProduccion(() => force(x => x + 1));
@@ -619,9 +668,14 @@ export default function ProduccionSection({ addToast }) {
   const asigsBoard = useMemo(() => {
     let list = asigs;
     if (soloSinAsignar) list = list.filter(a => !(a.persona || '').trim() && !a.creatorId);
-    if (filtroProducto) list = list.filter(a => ((a.productoNombre || '').trim() || 'Sin nombre') === filtroProducto);
-    if (filtroPersona === '__sin__') list = list.filter(a => !(a.persona || '').trim() && !a.creatorId);
-    else if (filtroPersona) list = list.filter(a => (a.persona || '').trim() === filtroPersona);
+    // Multi-select: si hay productos elegidos, la tarjeta pasa si su producto
+    // está entre ellos (OR). Ídem personas, con '__sin__' = sin asignar.
+    if (filtroProducto.length) list = list.filter(a => filtroProducto.includes((a.productoNombre || '').trim() || 'Sin nombre'));
+    if (filtroPersona.length) list = list.filter(a => {
+      const per = (a.persona || '').trim();
+      if (!per && !a.creatorId) return filtroPersona.includes('__sin__');
+      return filtroPersona.includes(per);
+    });
     return list;
   }, [asigs, soloSinAsignar, filtroProducto, filtroPersona]);
   const byCol = useMemo(() => {
@@ -825,27 +879,16 @@ export default function ProduccionSection({ addToast }) {
           <span className="inline-flex items-center gap-1.5 text-xs font-bold text-gray-500 dark:text-gray-400">
             <Filter size={13} /> Filtrar
           </span>
-          <div className="relative">
-            <select value={filtroProducto} onChange={e => setFiltroProducto(e.target.value)}
-              className={`appearance-none pl-2.5 pr-7 py-1 text-xs font-semibold bg-white dark:bg-gray-800 border rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 ${filtroProducto ? 'border-brand-400 text-brand-600 dark:text-brand-300' : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200'}`}>
-              <option value="">Todos los productos</option>
-              {productosEnSemana.map(p => <option key={p} value={p}>{p}</option>)}
-            </select>
-            <ChevronDown size={13} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-          </div>
-          <div className="relative">
-            <select value={filtroPersona} onChange={e => setFiltroPersona(e.target.value)}
-              className={`appearance-none pl-2.5 pr-7 py-1 text-xs font-semibold bg-white dark:bg-gray-800 border rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 ${filtroPersona ? 'border-brand-400 text-brand-600 dark:text-brand-300' : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200'}`}>
-              <option value="">Todas las personas</option>
-              {personasEnSemana.map(p => <option key={p} value={p}>{p}</option>)}
-              <option value="__sin__">— Sin asignar —</option>
-            </select>
-            <ChevronDown size={13} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-          </div>
-          {(filtroProducto || filtroPersona) && (
+          <MultiFiltro label="productos" selected={filtroProducto} onToggle={toggleEn(setFiltroProducto)}
+            onClear={() => setFiltroProducto([])}
+            options={productosEnSemana.map(p => ({ value: p, label: p }))} />
+          <MultiFiltro label="personas" selected={filtroPersona} onToggle={toggleEn(setFiltroPersona)}
+            onClear={() => setFiltroPersona([])}
+            options={[...personasEnSemana.map(p => ({ value: p, label: p })), { value: '__sin__', label: '— Sin asignar —' }]} />
+          {(filtroProducto.length > 0 || filtroPersona.length > 0) && (
             <>
               <span className="text-xs text-gray-400 dark:text-gray-500 tabular-nums">{asigsBoard.length} tarjeta{asigsBoard.length === 1 ? '' : 's'}</span>
-              <button onClick={() => { setFiltroProducto(''); setFiltroPersona(''); }}
+              <button onClick={() => { setFiltroProducto([]); setFiltroPersona([]); }}
                 className="inline-flex items-center gap-1 text-xs font-bold text-gray-500 dark:text-gray-300 hover:text-brand-600 dark:hover:text-brand-300 transition">
                 <X size={12} /> limpiar
               </button>

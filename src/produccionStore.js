@@ -603,6 +603,8 @@ export function addAssignment({ weekKey, productoId, productoNombre, persona, cr
   arr.push(nueva);
   write(arr);
   pushRow(nueva.id);
+  // Aviso de "producto nuevo" (canal 1). Fire & forget; el server decide.
+  notificarEventoDiscord(nueva, 'nuevo');
   return nueva;
 }
 
@@ -651,7 +653,7 @@ export function updateAssignment(id, patch) {
   // Aviso a Discord del cambio de columna (fire & forget). Lo dispara quien hizo
   // el cambio (admin o editor); el server decide si hay webhook y si el estado
   // se notifica. Nunca frena la UI ni rompe si falla.
-  if (patch.estado && patch.estado !== before.estado) notificarCambioEstado(arr[i], patch.estado, before.estado);
+  if (patch.estado && patch.estado !== before.estado) notificarEventoDiscord(arr[i], patch.estado, before.estado);
   // Si la tarjeta cruzó el borde de "publicado", reflejamos el estado en el
   // nombre de su carpeta de Drive (le agrega/saca "— PUBLICADO"). Solo el dueño.
   if (patch.estado && patch.estado !== before.estado && _role === 'admin') {
@@ -678,10 +680,11 @@ async function renombrarPublicado(folderId, published) {
   } catch (e) { console.warn('[produccion] rename folder:', e?.message || e); }
 }
 
-// Avisa a Discord (canal del equipo) que una tarjeta cambió de columna. El
-// webhook y qué estados se notifican los decide el server (/api/produccion/notify);
-// acá solo mandamos el contexto. Fire & forget.
-async function notificarCambioEstado(a, to, from) {
+// Avisa a Discord un EVENTO de la tarjeta (fire & forget). `event` puede ser
+// 'nuevo' (producto recién creado) o un estado ('revision'|'aprobado'|
+// 'publicado'). El server decide, según la config del dueño, a qué canal
+// (webhook) manda y a quién menciona. Acá solo pasamos el contexto.
+async function notificarEventoDiscord(a, event, from) {
   if (!supabase) return;
   try {
     const { data: { session } } = await supabase.auth.getSession();
@@ -690,11 +693,12 @@ async function notificarCambioEstado(a, to, from) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(t ? { Authorization: `Bearer ${t}` } : {}) },
       body: JSON.stringify({
+        event,
         cardId: a.id,
         productoNombre: a.productoNombre || '',
         persona: a.persona || '',
         from: from || '',
-        to: to || '',
+        to: event === 'nuevo' ? '' : event,
         actor: _actorName || '',
       }),
     });
@@ -720,9 +724,10 @@ export async function saveNotifConfig(config) {
   } catch (e) { return { error: e?.message || String(e) }; }
 }
 
-// Manda un mensaje de PRUEBA a Discord (botón "Probar Discord"). Devuelve el
-// JSON del server: { sent } | { sent:false, reason } | { sent:false, error }.
-export async function probarDiscord() {
+// Manda un mensaje de PRUEBA a Discord. `webhooks` = URLs a probar (las que están
+// cargadas en el modal, aunque no se hayan guardado). Devuelve el JSON del server:
+// { sent, total, errors? } | { sent:false, reason } | { sent:false, error }.
+export async function probarDiscord(webhooks) {
   if (!supabase) return { sent: false, reason: 'sin-supabase' };
   try {
     const { data: { session } } = await supabase.auth.getSession();
@@ -730,7 +735,7 @@ export async function probarDiscord() {
     const r = await fetch('/api/produccion/notify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(t ? { Authorization: `Bearer ${t}` } : {}) },
-      body: JSON.stringify({ probe: true }),
+      body: JSON.stringify({ probe: true, webhooks: Array.isArray(webhooks) ? webhooks : [] }),
     });
     return await r.json().catch(() => ({ sent: false, reason: 'respuesta-invalida' }));
   } catch (e) { return { sent: false, error: e?.message || String(e) }; }

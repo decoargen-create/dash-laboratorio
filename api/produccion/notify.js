@@ -1,26 +1,28 @@
-// Producción — avisa a un canal de Discord cuando una tarjeta cambia de columna.
+// Producción — avisos de Discord por EVENTO, cada uno a su propio canal.
 //
-// "Un canal del equipo": el webhook se configura UNA vez como variable de
-// entorno DISCORD_WEBHOOK_URL en Vercel. Cuando alguien (admin o editor) mueve
-// una tarjeta de estado, el front pega a este endpoint y nosotros posteamos un
-// embed lindo (color según el estado) al webhook. Los bytes van server→Discord
-// (sin CORS), y la URL nunca se expone al browser.
+// El dueño configura (desde la app, tabla produccion_notif_config) para cada
+// evento: si avisa, a qué canal (webhook) y a quién @mencionar. Eventos:
+//   - nuevo     → se creó una tarjeta/producto
+//   - revision  → una tarjeta pasó a "En revisión"
+//   - aprobado  → una tarjeta pasó a "Aprobado" (lista para publicar)
+//   - publicado → una tarjeta pasó a "Publicado"
 //
-// POST { productoNombre, persona, from, to, actor }  → avisa el cambio.
-// POST { probe:true }  → manda un mensaje de PRUEBA (para verificar la conexión).
-//   Respuestas: { sent:true } | { sent:false, reason } | { sent:false, error }
+// Si un evento no tiene webhook propio, cae al global DISCORD_WEBHOOK_URL (env).
+// Los bytes van server→Discord (sin CORS) y las URLs nunca se exponen al browser
+// de un editor (la config la lee solo el server por service-role, o el dueño por
+// RLS).
 //
-// Si no hay webhook configurado, { sent:false, reason:'no-webhook' } (no es un
-// error: la app funciona igual, solo no avisa).
+// POST { event, cardId, productoNombre, persona, from, to, actor }  → avisa.
+// POST { probe:true, webhooks:[...] }  → manda un test a cada webhook.
 
 import { getUserIdFromAuth, getServiceClient } from '../marketing/_supabase-server.js';
 
-// Estados que se notifican + su presentación (color Discord decimal + emoji).
-// "porhacer" no se notifica (volver atrás no amerita aviso).
-const ESTADO_META = {
-  revision:  { label: 'En revisión', color: 0xF59E0B, emoji: '👀' },
-  aprobado:  { label: 'Aprobado',    color: 0x10B981, emoji: '✅' },
-  publicado: { label: 'Publicado',   color: 0x8B5CF6, emoji: '🚀' },
+// Presentación por evento (color Discord decimal + emoji + frase).
+const EVENT_META = {
+  nuevo:     { color: 0x3B82F6, emoji: '🆕', desc: 'Nuevo producto para producir' },
+  revision:  { color: 0xF59E0B, emoji: '👀', desc: 'Pasó a **En revisión**' },
+  aprobado:  { color: 0x10B981, emoji: '✅', desc: 'Listo para publicar (**Aprobado**)' },
+  publicado: { color: 0x8B5CF6, emoji: '🚀', desc: 'Pasó a **Publicado**' },
 };
 
 function respondJSON(res, status, obj) {
@@ -28,8 +30,7 @@ function respondJSON(res, status, obj) {
   res.end(JSON.stringify(obj));
 }
 
-// Convierte el string de menciones ("123, &456") en tokens de Discord
-// ("<@123> <@&456>"). Un id con prefijo "&" es un ROL. Ignora lo no numérico.
+// "123, &456" → "<@123> <@&456>" (un id con "&" es un rol). Ignora lo no numérico.
 function parseMentions(str) {
   const out = [];
   for (const raw of String(str || '').split(/[\s,]+/)) {
@@ -41,9 +42,9 @@ function parseMentions(str) {
   return out.join(' ');
 }
 
-// Config de notificaciones del dueño de la tarjeta (service-role, bypassa RLS).
-// Devuelve el objeto config o null si no hay (→ default: todo prendido, sin @).
-async function getNotifConfig(cardId) {
+// Config de avisos del dueño de la tarjeta (service-role, bypassa RLS). Soporta
+// el shape nuevo { eventos:{...} } y el viejo { estados:{...} }. Null si no hay.
+async function getEventosConfig(cardId) {
   try {
     const svc = getServiceClient();
     if (!svc || !cardId) return null;
@@ -51,12 +52,11 @@ async function getNotifConfig(cardId) {
     const ownerId = asig?.owner_id;
     if (!ownerId) return null;
     const { data } = await svc.from('produccion_notif_config').select('config').eq('owner_id', ownerId).maybeSingle();
-    return data?.config || null;
+    return data?.config?.eventos || data?.config?.estados || null;
   } catch { return null; }
 }
 
-// Postea al webhook. `content` (opcional) lleva las @menciones (solo pingean
-// desde content, no desde el embed). Devuelve { sent } o { sent:false, error }.
+// Postea un embed (con menciones opcionales en content) a UN webhook.
 async function postDiscord(url, embed, content) {
   try {
     const payload = { username: 'AdsLab · Producción', embeds: [embed] };
@@ -86,41 +86,47 @@ export default async function handler(req, res) {
   if (typeof body === 'string') { try { body = JSON.parse(body); } catch { body = {}; } }
   body = body || {};
 
-  const url = process.env.DISCORD_WEBHOOK_URL;
-  if (!url) return respondJSON(res, 200, { sent: false, reason: 'no-webhook' });
+  const envWebhook = process.env.DISCORD_WEBHOOK_URL || '';
 
-  // Prueba de conexión (botón "Probar Discord").
+  // ── Prueba: manda un test a cada webhook cargado (o al global si no pasan). ──
   if (body.probe) {
-    const out = await postDiscord(url, {
-      title: '🔔 Prueba de conexión',
-      description: 'Si ves esto, los avisos de Producción están conectados. 🎬',
-      color: 0xEC4899,
-      timestamp: new Date().toISOString(),
-    });
-    return respondJSON(res, out.sent ? 200 : 502, out);
+    const urls = [...new Set((Array.isArray(body.webhooks) ? body.webhooks : [])
+      .map(u => String(u || '').trim())
+      .filter(u => /^https:\/\/(discord\.com|discordapp\.com)\/api\/webhooks\//i.test(u)))];
+    if (urls.length === 0 && envWebhook) urls.push(envWebhook);
+    if (urls.length === 0) return respondJSON(res, 200, { sent: false, reason: 'no-webhook' });
+    const embed = { title: '🔔 Prueba de conexión', description: 'Si ves esto, este canal está conectado a Producción. 🎬', color: 0xEC4899, timestamp: new Date().toISOString() };
+    const results = await Promise.all(urls.map(u => postDiscord(u, embed)));
+    const okCount = results.filter(r => r.sent).length;
+    const errors = results.filter(r => !r.sent).map(r => r.error);
+    return respondJSON(res, okCount > 0 ? 200 : 502, { sent: okCount, total: urls.length, errors });
   }
 
-  const meta = ESTADO_META[body.to];
-  if (!meta) return respondJSON(res, 200, { sent: false, reason: 'estado-no-notificable' });
+  // ── Aviso de evento ──
+  const event = body.event || body.to;   // compat: `to` cuando no viene `event`
+  const meta = EVENT_META[event];
+  if (!meta) return respondJSON(res, 200, { sent: false, reason: 'evento-no-notificable' });
 
-  // Config del dueño: si este estado está apagado, no avisamos. Sin config →
-  // default (todo prendido, sin menciones).
-  const cfg = await getNotifConfig(body.cardId);
-  const estCfg = cfg?.estados?.[body.to];
-  if (estCfg && estCfg.on === false) return respondJSON(res, 200, { sent: false, reason: 'estado-apagado' });
-  const menciones = parseMentions(estCfg?.mentions);
+  const eventos = await getEventosConfig(body.cardId);
+  const evCfg = eventos?.[event];
+  if (evCfg && evCfg.on === false) return respondJSON(res, 200, { sent: false, reason: 'evento-apagado' });
 
+  // Canal: el propio del evento, o el global como fallback.
+  const url = (evCfg?.webhook && String(evCfg.webhook).trim()) || envWebhook;
+  if (!url) return respondJSON(res, 200, { sent: false, reason: 'no-webhook' });
+
+  const menciones = parseMentions(evCfg?.mentions);
   const prod = String(body.productoNombre || 'Producto').slice(0, 240);
   const per = String(body.persona || '').trim().slice(0, 80);
   const who = String(body.actor || '').trim().slice(0, 80);
 
   const fields = [];
   if (per) fields.push({ name: 'Persona', value: per, inline: true });
-  if (who) fields.push({ name: 'Movió', value: who, inline: true });
+  if (who) fields.push({ name: event === 'nuevo' ? 'Creó' : 'Movió', value: who, inline: true });
 
   const out = await postDiscord(url, {
     title: `${meta.emoji} ${prod}`,
-    description: `Pasó a **${meta.label}**`,
+    description: meta.desc,
     color: meta.color,
     fields,
     timestamp: new Date().toISOString(),

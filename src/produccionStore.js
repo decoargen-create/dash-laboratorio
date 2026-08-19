@@ -690,6 +690,7 @@ async function notificarCambioEstado(a, to, from) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(t ? { Authorization: `Bearer ${t}` } : {}) },
       body: JSON.stringify({
+        cardId: a.id,
         productoNombre: a.productoNombre || '',
         persona: a.persona || '',
         from: from || '',
@@ -698,6 +699,25 @@ async function notificarCambioEstado(a, to, from) {
       }),
     });
   } catch (e) { console.warn('[produccion] notify:', e?.message || e); }
+}
+
+// Config de notificaciones de Discord del dueño (qué estados avisan + a quién
+// mencionar). Vive en produccion_notif_config (RLS por dueño).
+const NOTIF_CONFIG_TABLE = 'produccion_notif_config';
+export async function loadNotifConfig() {
+  if (!cloudReady() || !_userId) return null;
+  try {
+    const { data } = await supabase.from(NOTIF_CONFIG_TABLE).select('config').eq('owner_id', _userId).maybeSingle();
+    return data?.config || null;
+  } catch { return null; }
+}
+export async function saveNotifConfig(config) {
+  if (!cloudReady() || !_userId) return { error: 'Iniciá sesión de nuevo.' };
+  try {
+    const { error } = await supabase.from(NOTIF_CONFIG_TABLE)
+      .upsert({ owner_id: _userId, config, updated_at: new Date().toISOString() }, { onConflict: 'owner_id' });
+    return { error: error?.message || null };
+  } catch (e) { return { error: e?.message || String(e) }; }
 }
 
 // Manda un mensaje de PRUEBA a Discord (botón "Probar Discord"). Devuelve el

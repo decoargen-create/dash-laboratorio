@@ -19,7 +19,8 @@ import {
   listAssignments, addAssignment, updateAssignment, removeAssignment, assignPersona,
   assignCreator, subscribeProduccion, esCompleto, bonusObjetivo, inversionPorProducto,
   getRole, entregasNuevas, ultimaSubidaTs, personasEnTarjetas, resumenVideosPorProducto,
-  resyncDesdeNube, vaciarTodo, setMaterialLinkProducto, probarDiscord, pagoProductoDe,
+  resyncDesdeNube, vaciarTodo, setMaterialLinkProducto, probarDiscord,
+  loadNotifConfig, saveNotifConfig, pagoProductoDe,
 } from './produccionStore.js';
 import { CreativosSection, subirParaTarjeta, VIDEO_ACCEPT, probeDrive } from './produccionUpload.jsx';
 import { listTeam, createMember, removeMember } from './produccionTeam.js';
@@ -563,16 +564,7 @@ export default function ProduccionSection({ addToast }) {
   const [confirmResync, setConfirmResync] = useState(false);
   const [confirmVaciar, setConfirmVaciar] = useState(false);
   const [vaciando, setVaciando] = useState(false);
-  const [probandoDiscord, setProbandoDiscord] = useState(false);
-  const onProbarDiscord = async () => {
-    setProbandoDiscord(true);
-    try {
-      const r = await probarDiscord();
-      if (r?.sent) addToast?.({ type: 'success', message: '🔔 Mensaje de prueba enviado. Revisá tu canal de Discord.' });
-      else if (r?.reason === 'no-webhook') addToast?.({ type: 'warning', message: 'Discord no configurado: falta la variable DISCORD_WEBHOOK_URL en Vercel (y redeploy).' });
-      else addToast?.({ type: 'error', message: `Discord no aceptó el aviso: ${r?.error || r?.reason || 'error desconocido'}` });
-    } finally { setProbandoDiscord(false); }
-  };
+  const [showNotif, setShowNotif] = useState(false);
   const [resyncing, setResyncing] = useState(false);
   const [team, setTeam] = useState([]);
   const [detailId, setDetailId] = useState(null);
@@ -729,10 +721,10 @@ export default function ProduccionSection({ addToast }) {
             className="inline-flex items-center justify-center w-8 h-8 text-gray-500 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition shadow-sm disabled:opacity-50">
             <RefreshCw size={14} className={resyncing ? 'animate-spin' : ''} />
           </button>
-          <button onClick={onProbarDiscord} disabled={probandoDiscord}
-            title="Probar Discord: manda un mensaje de prueba al canal para verificar que los avisos están conectados."
-            className="inline-flex items-center justify-center w-8 h-8 text-gray-500 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:text-indigo-600 hover:border-indigo-300 dark:hover:border-indigo-800 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition shadow-sm disabled:opacity-50">
-            <Bell size={14} className={probandoDiscord ? 'animate-pulse' : ''} />
+          <button onClick={() => setShowNotif(true)}
+            title="Avisos de Discord: configurar qué transiciones avisan, a quién mencionar, y probar."
+            className="inline-flex items-center justify-center w-8 h-8 text-gray-500 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:text-indigo-600 hover:border-indigo-300 dark:hover:border-indigo-800 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition shadow-sm">
+            <Bell size={14} />
           </button>
           <button onClick={() => setConfirmVaciar(true)} disabled={vaciando}
             title="Vaciar TODO: borra todas las tarjetas, la config de pagos y las cuentas del equipo. Deja la producción en cero para arrancar de nuevo."
@@ -959,6 +951,9 @@ export default function ProduccionSection({ addToast }) {
       )}
       {showTeam && (
         <TeamModal onClose={() => { setShowTeam(false); reloadTeam(); }} addToast={addToast} />
+      )}
+      {showNotif && (
+        <NotifConfigModal team={team} onClose={() => setShowNotif(false)} addToast={addToast} />
       )}
       <ConfirmDialog
         open={confirmResync}
@@ -1748,6 +1743,114 @@ function IntegranteSelector({ a, team = [], personas = [], onTeamChange, addToas
       <p className="text-[11px] text-gray-400 mt-1.5">
         El integrante <b>con acceso</b> entra a la app y ve esta tarjeta en su tablero. <b>Sin acceso</b> es solo un nombre (para asignar y para los pagos) — dale acceso cuando quieras.
       </p>
+    </div>
+  );
+}
+
+// ── Config de avisos de Discord: por cada transición (revisión/aprobado/
+// publicado), si avisa y a quién @mencionar. Se guarda por dueño en la nube.
+const ESTADOS_NOTIF = [
+  { key: 'revision', label: 'En revisión', emoji: '👀' },
+  { key: 'aprobado', label: 'Aprobado', emoji: '✅' },
+  { key: 'publicado', label: 'Publicado', emoji: '🚀' },
+];
+const DEFAULT_NOTIF = {
+  estados: {
+    revision: { on: true, mentions: '' },
+    aprobado: { on: true, mentions: '' },
+    publicado: { on: true, mentions: '' },
+  },
+};
+
+function NotifConfigModal({ team = [], onClose, addToast }) {
+  const [cfg, setCfg] = useState(DEFAULT_NOTIF);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [probando, setProbando] = useState(false);
+  useEscape(onClose);
+  useEffect(() => {
+    let alive = true;
+    loadNotifConfig().then(c => {
+      if (!alive) return;
+      if (c?.estados) setCfg({ estados: { ...DEFAULT_NOTIF.estados, ...c.estados } });
+      setLoading(false);
+    });
+    return () => { alive = false; };
+  }, []);
+  const setEstado = (key, patch) => setCfg(c => ({ estados: { ...c.estados, [key]: { ...c.estados[key], ...patch } } }));
+  const guardar = async () => {
+    setSaving(true);
+    const { error } = await saveNotifConfig(cfg);
+    setSaving(false);
+    if (error) addToast?.({ type: 'error', message: `No se pudo guardar: ${error}` });
+    else { addToast?.({ type: 'success', message: 'Avisos de Discord guardados.' }); onClose(); }
+  };
+  const probar = async () => {
+    setProbando(true);
+    const r = await probarDiscord();
+    setProbando(false);
+    if (r?.sent) addToast?.({ type: 'success', message: '🔔 Mensaje de prueba enviado. Revisá el canal.' });
+    else if (r?.reason === 'no-webhook') addToast?.({ type: 'warning', message: 'Falta la variable DISCORD_WEBHOOK_URL en Vercel (y redeploy).' });
+    else addToast?.({ type: 'error', message: `Discord no aceptó el aviso: ${r?.error || r?.reason || 'error'}` });
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-lg my-6 bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center gap-2 px-5 py-4 border-b border-gray-100 dark:border-gray-800">
+          <Bell size={18} className="text-indigo-500" />
+          <div className="flex-1">
+            <h3 className="text-base font-bold text-gray-900 dark:text-gray-100 leading-tight">Avisos de Discord</h3>
+            <p className="text-[11px] text-gray-400">Qué cambios avisan al canal y a quién mencionar.</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+        </div>
+
+        <div className="p-5 space-y-3 max-h-[70vh] overflow-y-auto">
+          {loading ? (
+            <div className="flex items-center gap-2 text-sm text-gray-400 py-6 justify-center"><Loader2 size={16} className="animate-spin" /> Cargando…</div>
+          ) : (
+            <>
+              {ESTADOS_NOTIF.map(e => {
+                const st = cfg.estados[e.key] || { on: true, mentions: '' };
+                return (
+                  <div key={e.key} className={`rounded-xl border p-3 transition ${st.on ? 'border-gray-200 dark:border-gray-700' : 'border-gray-100 dark:border-gray-800 opacity-60'}`}>
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => setEstado(e.key, { on: !st.on })}
+                        className={`relative w-9 h-5 rounded-full transition shrink-0 ${st.on ? 'bg-indigo-500' : 'bg-gray-300 dark:bg-gray-600'}`}>
+                        <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${st.on ? 'left-4' : 'left-0.5'}`} />
+                      </button>
+                      <span className="text-sm font-bold text-gray-800 dark:text-gray-100">{e.emoji} {e.label}</span>
+                      <span className="ml-auto text-[11px] text-gray-400">{st.on ? 'avisa' : 'sin aviso'}</span>
+                    </div>
+                    <input type="text" value={st.mentions} onChange={ev => setEstado(e.key, { mentions: ev.target.value })} disabled={!st.on}
+                      placeholder="IDs de Discord a @mencionar (coma). Ej: 123456789012345678"
+                      className="mt-2 w-full px-2.5 py-1.5 text-xs bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50" />
+                  </div>
+                );
+              })}
+              <details className="text-[11px] text-gray-500 dark:text-gray-400">
+                <summary className="cursor-pointer font-semibold">¿Cómo consigo el ID de Discord de alguien?</summary>
+                <div className="mt-1.5 space-y-1 pl-1">
+                  <p>1. En Discord: Ajustes de usuario → Avanzado → activá <b>Modo desarrollador</b>.</p>
+                  <p>2. Clic derecho sobre la persona → <b>Copiar ID de usuario</b>.</p>
+                  <p>3. Pegá ese número acá. Para varias personas, separá con coma. Para un <b>rol</b>, poné <b>&amp;</b> antes del ID (ej: <code>&amp;987…</code>).</p>
+                </div>
+              </details>
+            </>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 px-5 py-3.5 border-t border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
+          <button onClick={probar} disabled={probando}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-indigo-600 dark:text-indigo-300 border border-indigo-300 dark:border-indigo-800 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition disabled:opacity-50">
+            {probando ? <Loader2 size={13} className="animate-spin" /> : <Bell size={13} />} Probar
+          </button>
+          <button onClick={guardar} disabled={saving || loading}
+            className="ml-auto inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition disabled:opacity-50">
+            {saving ? <Loader2 size={14} className="animate-spin" /> : null} Guardar
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

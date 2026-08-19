@@ -1747,18 +1747,21 @@ function IntegranteSelector({ a, team = [], personas = [], onTeamChange, addToas
   );
 }
 
-// ── Config de avisos de Discord: por cada transición (revisión/aprobado/
-// publicado), si avisa y a quién @mencionar. Se guarda por dueño en la nube.
-const ESTADOS_NOTIF = [
-  { key: 'revision', label: 'En revisión', emoji: '👀' },
-  { key: 'aprobado', label: 'Aprobado', emoji: '✅' },
-  { key: 'publicado', label: 'Publicado', emoji: '🚀' },
+// ── Config de avisos de Discord: por cada EVENTO (producto nuevo / revisión /
+// aprobado / publicado), si avisa, a qué canal (webhook) y a quién @mencionar.
+// Se guarda por dueño en la nube (produccion_notif_config).
+const EVENTOS_NOTIF = [
+  { key: 'nuevo', label: 'Producto nuevo', emoji: '🆕', hint: 'Al crear una tarjeta/producto' },
+  { key: 'revision', label: 'En revisión', emoji: '👀', hint: 'Cuando una tarjeta pasa a revisión' },
+  { key: 'aprobado', label: 'Listo para publicar', emoji: '✅', hint: 'Cuando una tarjeta se aprueba' },
+  { key: 'publicado', label: 'Publicado', emoji: '🚀', hint: 'Cuando una tarjeta se publica' },
 ];
 const DEFAULT_NOTIF = {
-  estados: {
-    revision: { on: true, mentions: '' },
-    aprobado: { on: true, mentions: '' },
-    publicado: { on: true, mentions: '' },
+  eventos: {
+    nuevo: { on: true, webhook: '', mentions: '' },
+    revision: { on: true, webhook: '', mentions: '' },
+    aprobado: { on: true, webhook: '', mentions: '' },
+    publicado: { on: true, webhook: '', mentions: '' },
   },
 };
 
@@ -1772,12 +1775,17 @@ function NotifConfigModal({ team = [], onClose, addToast }) {
     let alive = true;
     loadNotifConfig().then(c => {
       if (!alive) return;
-      if (c?.estados) setCfg({ estados: { ...DEFAULT_NOTIF.estados, ...c.estados } });
+      const ev = c?.eventos || c?.estados;   // soporta shape viejo
+      if (ev) {
+        const merged = {};
+        for (const e of EVENTOS_NOTIF) merged[e.key] = { ...DEFAULT_NOTIF.eventos[e.key], ...(ev[e.key] || {}) };
+        setCfg({ eventos: merged });
+      }
       setLoading(false);
     });
     return () => { alive = false; };
   }, []);
-  const setEstado = (key, patch) => setCfg(c => ({ estados: { ...c.estados, [key]: { ...c.estados[key], ...patch } } }));
+  const setEvento = (key, patch) => setCfg(c => ({ eventos: { ...c.eventos, [key]: { ...c.eventos[key], ...patch } } }));
   const guardar = async () => {
     setSaving(true);
     const { error } = await saveNotifConfig(cfg);
@@ -1787,11 +1795,12 @@ function NotifConfigModal({ team = [], onClose, addToast }) {
   };
   const probar = async () => {
     setProbando(true);
-    const r = await probarDiscord();
+    const webhooks = [...new Set(EVENTOS_NOTIF.map(e => (cfg.eventos[e.key]?.webhook || '').trim()).filter(Boolean))];
+    const r = await probarDiscord(webhooks);
     setProbando(false);
-    if (r?.sent) addToast?.({ type: 'success', message: '🔔 Mensaje de prueba enviado. Revisá el canal.' });
-    else if (r?.reason === 'no-webhook') addToast?.({ type: 'warning', message: 'Falta la variable DISCORD_WEBHOOK_URL en Vercel (y redeploy).' });
-    else addToast?.({ type: 'error', message: `Discord no aceptó el aviso: ${r?.error || r?.reason || 'error'}` });
+    if (r?.sent > 0) addToast?.({ type: 'success', message: `🔔 Prueba enviada a ${r.sent} canal${r.sent === 1 ? '' : 'es'}. Revisá Discord.` });
+    else if (r?.reason === 'no-webhook') addToast?.({ type: 'warning', message: 'Cargá al menos un webhook (o la env var global) para probar.' });
+    else addToast?.({ type: 'error', message: `Discord no aceptó la prueba: ${r?.errors?.[0] || r?.error || r?.reason || 'error'}` });
   };
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto bg-black/50 backdrop-blur-sm" onClick={onClose}>
@@ -1800,7 +1809,7 @@ function NotifConfigModal({ team = [], onClose, addToast }) {
           <Bell size={18} className="text-indigo-500" />
           <div className="flex-1">
             <h3 className="text-base font-bold text-gray-900 dark:text-gray-100 leading-tight">Avisos de Discord</h3>
-            <p className="text-[11px] text-gray-400">Qué cambios avisan al canal y a quién mencionar.</p>
+            <p className="text-[11px] text-gray-400">Cada evento a su propio canal, con a quién mencionar.</p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
         </div>
@@ -1810,30 +1819,36 @@ function NotifConfigModal({ team = [], onClose, addToast }) {
             <div className="flex items-center gap-2 text-sm text-gray-400 py-6 justify-center"><Loader2 size={16} className="animate-spin" /> Cargando…</div>
           ) : (
             <>
-              {ESTADOS_NOTIF.map(e => {
-                const st = cfg.estados[e.key] || { on: true, mentions: '' };
+              {EVENTOS_NOTIF.map(e => {
+                const ev = cfg.eventos[e.key] || { on: true, webhook: '', mentions: '' };
                 return (
-                  <div key={e.key} className={`rounded-xl border p-3 transition ${st.on ? 'border-gray-200 dark:border-gray-700' : 'border-gray-100 dark:border-gray-800 opacity-60'}`}>
+                  <div key={e.key} className={`rounded-xl border p-3 transition ${ev.on ? 'border-gray-200 dark:border-gray-700' : 'border-gray-100 dark:border-gray-800 opacity-60'}`}>
                     <div className="flex items-center gap-2">
-                      <button onClick={() => setEstado(e.key, { on: !st.on })}
-                        className={`relative w-9 h-5 rounded-full transition shrink-0 ${st.on ? 'bg-indigo-500' : 'bg-gray-300 dark:bg-gray-600'}`}>
-                        <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${st.on ? 'left-4' : 'left-0.5'}`} />
+                      <button onClick={() => setEvento(e.key, { on: !ev.on })}
+                        className={`relative w-9 h-5 rounded-full transition shrink-0 ${ev.on ? 'bg-indigo-500' : 'bg-gray-300 dark:bg-gray-600'}`}>
+                        <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${ev.on ? 'left-4' : 'left-0.5'}`} />
                       </button>
-                      <span className="text-sm font-bold text-gray-800 dark:text-gray-100">{e.emoji} {e.label}</span>
-                      <span className="ml-auto text-[11px] text-gray-400">{st.on ? 'avisa' : 'sin aviso'}</span>
+                      <div className="min-w-0">
+                        <div className="text-sm font-bold text-gray-800 dark:text-gray-100 leading-tight">{e.emoji} {e.label}</div>
+                        <div className="text-[10px] text-gray-400 leading-tight">{e.hint}</div>
+                      </div>
+                      <span className="ml-auto text-[11px] text-gray-400 shrink-0">{ev.on ? 'avisa' : 'off'}</span>
                     </div>
-                    <input type="text" value={st.mentions} onChange={ev => setEstado(e.key, { mentions: ev.target.value })} disabled={!st.on}
-                      placeholder="IDs de Discord a @mencionar (coma). Ej: 123456789012345678"
+                    <input type="url" value={ev.webhook} onChange={x => setEvento(e.key, { webhook: x.target.value })} disabled={!ev.on}
+                      placeholder="Webhook del canal (https://discord.com/api/webhooks/…)"
                       className="mt-2 w-full px-2.5 py-1.5 text-xs bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50" />
+                    <input type="text" value={ev.mentions} onChange={x => setEvento(e.key, { mentions: x.target.value })} disabled={!ev.on}
+                      placeholder="IDs de Discord a @mencionar (coma). Ej: 123…, 456…"
+                      className="mt-1.5 w-full px-2.5 py-1.5 text-xs bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50" />
                   </div>
                 );
               })}
               <details className="text-[11px] text-gray-500 dark:text-gray-400">
-                <summary className="cursor-pointer font-semibold">¿Cómo consigo el ID de Discord de alguien?</summary>
+                <summary className="cursor-pointer font-semibold">Cómo obtener el webhook de un canal y el ID de una persona</summary>
                 <div className="mt-1.5 space-y-1 pl-1">
-                  <p>1. En Discord: Ajustes de usuario → Avanzado → activá <b>Modo desarrollador</b>.</p>
-                  <p>2. Clic derecho sobre la persona → <b>Copiar ID de usuario</b>.</p>
-                  <p>3. Pegá ese número acá. Para varias personas, separá con coma. Para un <b>rol</b>, poné <b>&amp;</b> antes del ID (ej: <code>&amp;987…</code>).</p>
+                  <p><b>Webhook</b>: en Discord, engranaje del canal → Integraciones → Webhooks → Nuevo webhook → Copiar URL. Un canal distinto por evento.</p>
+                  <p><b>ID de persona</b>: Ajustes → Avanzado → Modo desarrollador. Después clic derecho sobre la persona → Copiar ID de usuario. Varias, separadas por coma. Para un rol, <b>&amp;</b> antes del ID.</p>
+                  <p>Si dejás un webhook vacío, ese evento cae al canal global (si está configurado en Vercel).</p>
                 </div>
               </details>
             </>
@@ -1843,7 +1858,7 @@ function NotifConfigModal({ team = [], onClose, addToast }) {
         <div className="flex items-center gap-2 px-5 py-3.5 border-t border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
           <button onClick={probar} disabled={probando}
             className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-indigo-600 dark:text-indigo-300 border border-indigo-300 dark:border-indigo-800 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition disabled:opacity-50">
-            {probando ? <Loader2 size={13} className="animate-spin" /> : <Bell size={13} />} Probar
+            {probando ? <Loader2 size={13} className="animate-spin" /> : <Bell size={13} />} Probar canales
           </button>
           <button onClick={guardar} disabled={saving || loading}
             className="ml-auto inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition disabled:opacity-50">

@@ -59,9 +59,9 @@ let _winnersCloud = false;
 let _writeSeq = 0;
 
 // Columnas del kanban (como las listas de Trello del equipo).
-export const ESTADOS = ['porhacer', 'revision', 'aprobado', 'publicado'];
+export const ESTADOS = ['porhacer', 'revision', 'aprobado', 'publicado', 'archivado'];
 export const ESTADO_LABELS = {
-  porhacer: 'Por hacer', revision: 'En revisión', aprobado: 'Aprobado', publicado: 'Publicado',
+  porhacer: 'Por hacer', revision: 'En revisión', aprobado: 'Aprobado', publicado: 'Publicado', archivado: 'Archivado',
 };
 // Estados que un creator puede setear (aprobar/publicar es del admin).
 export const ESTADOS_CREATOR = ['porhacer', 'revision'];
@@ -72,8 +72,9 @@ function normEstado(e) { return ESTADO_MIGRACION[e] || e || 'porhacer'; }
 // produccionCalc.js (importados + re-exportados arriba).
 
 // Un producto cuenta como "completado" (para pago/objetivo) cuando está
-// aprobado o publicado — NO cuando solo se subió.
-const COMPLETO = new Set(['aprobado', 'publicado']);
+// aprobado, publicado o archivado (archivado = publicado que ya pasó a histórico,
+// sigue contando) — NO cuando solo se subió.
+const COMPLETO = new Set(['aprobado', 'publicado', 'archivado']);
 export function esCompleto(estado) { return COMPLETO.has(estado); }
 
 // =========================================================================

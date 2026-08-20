@@ -12,7 +12,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Film, Plus, X, Trash2, ChevronDown, UploadCloud, Loader2, CheckCircle2,
   AlertTriangle, ExternalLink, FileText, GripVertical, Users, History, Search, ArrowLeftRight,
-  Bell, BellRing, Inbox, Eye, RefreshCw, Calendar, Filter, FolderOpen, Download,
+  Bell, BellRing, Inbox, Eye, RefreshCw, Calendar, Filter, FolderOpen, Download, Star,
 } from 'lucide-react';
 import {
   ESTADOS, ESTADO_LABELS, VIDEOS_POR_PRODUCTO, weekKeyOf, weekLabel, weekRange, allWeekKeys,
@@ -20,7 +20,7 @@ import {
   assignCreator, subscribeProduccion, esCompleto, bonusObjetivo, inversionPorProducto,
   getRole, entregasNuevas, ultimaSubidaTs, personasEnTarjetas, resumenVideosPorProducto,
   resyncDesdeNube, vaciarTodo, setMaterialLinkProducto, probarDiscord,
-  loadNotifConfig, saveNotifConfig, pagoProductoDe,
+  loadNotifConfig, saveNotifConfig, toggleWinner, winnersDeProducto, pagoProductoDe,
 } from './produccionStore.js';
 import { CreativosSection, subirParaTarjeta, VIDEO_ACCEPT, probeDrive } from './produccionUpload.jsx';
 import { listTeam, createMember, removeMember } from './produccionTeam.js';
@@ -962,7 +962,7 @@ export default function ProduccionSection({ addToast }) {
         <NotifConfigModal team={team} onClose={() => setShowNotif(false)} addToast={addToast} />
       )}
       {showBuscar && (
-        <VideoSearchModal onClose={() => setShowBuscar(false)} />
+        <VideoSearchModal onClose={() => setShowBuscar(false)} addToast={addToast} />
       )}
       <ConfirmDialog
         open={confirmResync}
@@ -1755,9 +1755,10 @@ function IntegranteSelector({ a, team = [], personas = [], onTeamChange, addToas
 // y filtra por nombre del video, producto, persona o fecha. Cada resultado trae
 // el link directo a Drive (ver / descargar). Sirve para encontrar rápido un
 // winner y volver a iterarlo.
-function VideoSearchModal({ onClose }) {
+function VideoSearchModal({ onClose, addToast }) {
   useEscape(onClose);
   const [query, setQuery] = useState('');
+  const [bump, setBump] = useState(0);
   const index = useMemo(() => {
     const recs = [];
     for (const wk of allWeekKeys()) {
@@ -1769,7 +1770,7 @@ function VideoSearchModal({ onClose }) {
           recs.push({
             key: `${a.id}:${f.ts}`,
             name: f.name || 'video',
-            producto, persona, fecha,
+            producto, productoId: a.productoId, persona, fecha,
             estado: a.estado,
             destino: f.destino,
             link: f.link || f.folderLink || null,
@@ -1783,6 +1784,24 @@ function VideoSearchModal({ onClose }) {
     }
     return recs.sort((x, y) => y.ts - x.ts);
   }, []);
+
+  // Claves de winners por producto (para pintar la estrella). Se recalcula al
+  // marcar/desmarcar (bump).
+  const winnerKeys = useMemo(() => {
+    const wkey = (w) => String(w?.driveId || w?.link || w?.name || '').trim().toLowerCase();
+    const pkey = (pid, nom) => (pid != null ? String(pid) : (nom || '').trim().toLowerCase());
+    const s = new Set();
+    for (const wk of allWeekKeys()) for (const a of listAssignments(wk)) {
+      for (const w of (a.winners || [])) s.add(`${pkey(a.productoId, a.productoNombre)}::${wkey(w)}`);
+    }
+    return s;
+  }, [bump]);
+  const esWin = (r) => winnerKeys.has(`${r.productoId != null ? String(r.productoId) : r.producto.toLowerCase()}::${String(r.driveId || r.link || r.name || '').trim().toLowerCase()}`);
+  const onToggleWin = (r) => {
+    const quedo = toggleWinner(r, r.productoId, r.producto);
+    setBump(n => n + 1);
+    addToast?.({ type: quedo ? 'success' : 'info', message: quedo ? `★ Marcado winner de ${r.producto}` : `Quitado de winners de ${r.producto}` });
+  };
 
   const toks = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const results = toks.length ? index.filter(r => toks.every(t => r.hay.includes(t))) : index;
@@ -1822,23 +1841,29 @@ function VideoSearchModal({ onClose }) {
                 <div className="text-sm font-semibold text-gray-800 dark:text-gray-100 truncate" title={r.name}>{r.name}</div>
                 <div className="text-[11px] text-gray-400 truncate">{r.producto} · {r.persona} · {r.fecha}{r.sizeMB ? ` · ${r.sizeMB}MB` : ''}</div>
               </div>
-              {r.destino === 'drive' && r.link ? (
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <a href={r.link} target="_blank" rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-brand-600 dark:text-brand-300 border border-brand-300 dark:border-brand-700 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/20 transition">
-                    <ExternalLink size={12} /> Abrir
-                  </a>
-                  {r.driveId && (
-                    <a href={`https://drive.google.com/uc?export=download&id=${r.driveId}`} target="_blank" rel="noopener noreferrer"
-                      title="Descargar el video" aria-label="Descargar"
-                      className="inline-flex items-center justify-center w-8 h-8 text-gray-500 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:text-brand-600 hover:border-brand-400 transition">
-                      <Download size={13} />
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button onClick={() => onToggleWin(r)} title={esWin(r) ? 'Quitar de winners' : 'Marcar como winner'}
+                  className={`inline-flex items-center justify-center w-8 h-8 rounded-lg border transition ${esWin(r) ? 'text-amber-500 border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-800' : 'text-gray-400 border-gray-300 dark:border-gray-600 hover:text-amber-500 hover:border-amber-300'}`}>
+                  <Star size={14} fill={esWin(r) ? 'currentColor' : 'none'} />
+                </button>
+                {r.destino === 'drive' && r.link ? (
+                  <>
+                    <a href={r.link} target="_blank" rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-brand-600 dark:text-brand-300 border border-brand-300 dark:border-brand-700 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/20 transition">
+                      <ExternalLink size={12} /> Abrir
                     </a>
-                  )}
-                </div>
-              ) : (
-                <span className="shrink-0 text-[10px] font-bold text-gray-400 bg-gray-100 dark:bg-gray-700 rounded-full px-2 py-1">En AdsLab</span>
-              )}
+                    {r.driveId && (
+                      <a href={`https://drive.google.com/uc?export=download&id=${r.driveId}`} target="_blank" rel="noopener noreferrer"
+                        title="Descargar el video" aria-label="Descargar"
+                        className="inline-flex items-center justify-center w-8 h-8 text-gray-500 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:text-brand-600 hover:border-brand-400 transition">
+                        <Download size={13} />
+                      </a>
+                    )}
+                  </>
+                ) : (
+                  <span className="text-[10px] font-bold text-gray-400 bg-gray-100 dark:bg-gray-700 rounded-full px-2 py-1">AdsLab</span>
+                )}
+              </div>
             </div>
           ))}
         </div>
@@ -2048,6 +2073,37 @@ function CardDetailModal({ a, personas, team = [], onClose, addToast, onTeamChan
             </div>
             <p className="text-[10px] text-gray-400 mt-1">Se aplica a todas las tarjetas de este producto.</p>
           </div>
+
+          {/* Winners del producto — creativos que vendieron, de referencia. Se
+              marcan desde "Buscar videos" y aparecen en todas las tarjetas del
+              producto (el editor los usa como material). */}
+          {(() => {
+            const winners = winnersDeProducto(a.productoId, a.productoNombre);
+            if (winners.length === 0) return null;
+            return (
+              <div>
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <Star size={13} className="text-amber-500" fill="currentColor" />
+                  <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400">Winners del producto · {winners.length}</span>
+                </div>
+                <div className="space-y-1.5">
+                  {winners.map(w => (
+                    <div key={w.driveId || w.link || w.name} className="flex items-center gap-2 rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50/50 dark:bg-amber-900/10 px-2.5 py-1.5">
+                      <Star size={12} className="text-amber-500 shrink-0" fill="currentColor" />
+                      <span className="flex-1 min-w-0 truncate text-xs font-medium text-gray-800 dark:text-gray-100" title={w.name}>{w.name}</span>
+                      {w.fecha && <span className="text-[10px] text-gray-400 shrink-0 hidden sm:block">{w.fecha}</span>}
+                      {w.link && (
+                        <a href={w.link} target="_blank" rel="noopener noreferrer" title="Abrir en Drive"
+                          className="text-brand-500 hover:text-brand-600 shrink-0"><ExternalLink size={13} /></a>
+                      )}
+                      <button onClick={() => toggleWinner(w, a.productoId, a.productoNombre)} title="Quitar de winners"
+                        className="text-gray-300 hover:text-red-500 shrink-0"><X size={13} /></button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Brief a mano */}
           <div>

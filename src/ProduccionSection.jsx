@@ -855,13 +855,6 @@ export default function ProduccionSection({ addToast }) {
         );
       })()}
 
-      {/* Aviso de entregas nuevas del equipo (solo el admin). Lo primero que ve:
-          qué se subió y todavía no miró, sin revisar tarjeta por tarjeta. */}
-      {getRole() === 'admin' && (
-        <NovedadesPanel addToast={addToast}
-          onOpen={(wk, id) => { setWeekKey(wk); setDetailId(id); }} />
-      )}
-
       {/* Resumen de la semana: carga por persona + objetivo. Clic en una persona
           filtra el tablero por ella (toggle). */}
       <ResumenSemana asigs={asigs} filtroSinAsignar={soloSinAsignar}

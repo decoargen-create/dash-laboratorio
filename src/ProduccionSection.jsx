@@ -751,6 +751,11 @@ export default function ProduccionSection({ addToast }) {
     return n;
   });
   const colsVisibles = mostrarArchivado ? COLS : COLS.filter(c => c.key !== 'archivado');
+  // En mobile el tablero se ve como pestañas por estado (una columna a la vez).
+  const [mobileTab, setMobileTab] = useState('porhacer');
+  // Si la pestaña activa apunta a una columna oculta (ej: se ocultó Archivado),
+  // cae a la primera visible.
+  const mobileTabOk = colsVisibles.some(c => c.key === mobileTab) ? mobileTab : (colsVisibles[0]?.key || 'porhacer');
   // Numeración de duplicados: si una persona tiene el mismo producto 2+ veces en
   // la semana, cada tarjeta lleva #1, #2… (igual que en el tablero del editor).
   const numMap = useMemo(() => numerarDuplicados(asigs), [asigs]);
@@ -1016,11 +1021,26 @@ export default function ProduccionSection({ addToast }) {
         </div>
       )}
 
-      {/* Tablero: en desktop, 4 columnas EXACTAMENTE iguales (grid) que se
-          estiran para llenar el alto de la pantalla (se adapta al viewport con
-          vh, así no queda un vacío gigante debajo); en pantallas chicas cae a
-          scroll horizontal. */}
-      <div className={`flex items-stretch gap-3 overflow-x-auto pb-2 lg:grid lg:overflow-visible lg:min-h-[calc(100vh-18rem)] ${mostrarArchivado ? 'lg:grid-cols-5' : 'lg:grid-cols-4'}`}>
+      {/* Pestañas por estado — SOLO en mobile: se muestra una columna a la vez,
+          a lo ancho (más cómodo con el pulgar que el scroll horizontal). En
+          desktop se ocultan y vuelve el kanban de columnas. */}
+      <div className="flex gap-1.5 overflow-x-auto pb-1 lg:hidden">
+        {colsVisibles.map(col => {
+          const on = col.key === mobileTabOk;
+          return (
+            <button key={col.key} onClick={() => setMobileTab(col.key)}
+              className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition ${on ? `${col.hdr} ${col.text} ring-1 ring-inset ring-black/10 dark:ring-white/10` : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>
+              <span>{col.emoji}</span>{ESTADO_LABELS[col.key]}
+              <span className={`text-[10px] font-mono rounded-full px-1.5 ${on ? 'bg-black/10 dark:bg-white/10' : 'bg-gray-200 dark:bg-gray-700'}`}>{(byCol[col.key] || []).length}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Tablero: en desktop, 4-5 columnas iguales (grid) que se estiran al alto
+          del viewport; en mobile se muestra solo la columna de la pestaña activa,
+          a lo ancho. */}
+      <div className={`flex items-stretch gap-3 pb-2 lg:grid lg:overflow-visible lg:min-h-[calc(100vh-18rem)] ${mostrarArchivado ? 'lg:grid-cols-5' : 'lg:grid-cols-4'}`}>
         {colsVisibles.map(col => {
           const cards = byCol[col.key] || [];
           return (
@@ -1028,7 +1048,7 @@ export default function ProduccionSection({ addToast }) {
               onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDragOver(col.key); }}
               onDragLeave={() => setDragOver(d => d === col.key ? null : d)}
               onDrop={e => onDrop(e, col.key)}
-              className={`flex flex-col flex-1 min-w-[240px] lg:min-w-0 rounded-xl p-2.5 transition ${dragOver === col.key ? 'bg-brand-50 dark:bg-brand-900/20 ring-2 ring-brand-300 dark:ring-brand-700' : 'bg-gray-50 dark:bg-gray-800/40'}`}>
+              className={`${col.key === mobileTabOk ? 'flex' : 'hidden'} lg:flex flex-col flex-1 lg:min-w-0 rounded-xl p-2.5 transition ${dragOver === col.key ? 'bg-brand-50 dark:bg-brand-900/20 ring-2 ring-brand-300 dark:ring-brand-700' : 'bg-gray-50 dark:bg-gray-800/40'}`}>
               {/* Cabecera tintada con el color del estado: se reconoce por zona */}
               <div className={`flex items-center gap-2 px-2.5 py-1.5 mb-2 rounded-lg shrink-0 ${col.hdr}`}>
                 <span className="text-sm leading-none">{col.emoji}</span>

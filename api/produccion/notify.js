@@ -42,14 +42,20 @@ function parseMentions(str) {
   return out.join(' ');
 }
 
-// Config de avisos del dueño de la tarjeta (service-role, bypassa RLS). Soporta
-// el shape nuevo { eventos:{...} } y el viejo { estados:{...} }. Null si no hay.
-async function getEventosConfig(cardId) {
+// Config de avisos del dueño de la tarjeta (service-role, bypassa RLS). Resuelve
+// el dueño por la tarjeta; si no la encuentra (ej: en "producto nuevo" el insert
+// todavía va en camino), cae al usuario autenticado —que en ese evento ES el
+// dueño que la creó—. Soporta el shape nuevo { eventos } y el viejo { estados }.
+async function getEventosConfig(cardId, fallbackOwnerId) {
   try {
     const svc = getServiceClient();
-    if (!svc || !cardId) return null;
-    const { data: asig } = await svc.from('produccion_asignaciones').select('owner_id').eq('id', cardId).maybeSingle();
-    const ownerId = asig?.owner_id;
+    if (!svc) return null;
+    let ownerId = null;
+    if (cardId) {
+      const { data: asig } = await svc.from('produccion_asignaciones').select('owner_id').eq('id', cardId).maybeSingle();
+      ownerId = asig?.owner_id || null;
+    }
+    if (!ownerId) ownerId = fallbackOwnerId || null;
     if (!ownerId) return null;
     const { data } = await svc.from('produccion_notif_config').select('config').eq('owner_id', ownerId).maybeSingle();
     return data?.config?.eventos || data?.config?.estados || null;
@@ -107,7 +113,7 @@ export default async function handler(req, res) {
   const meta = EVENT_META[event];
   if (!meta) return respondJSON(res, 200, { sent: false, reason: 'evento-no-notificable' });
 
-  const eventos = await getEventosConfig(body.cardId);
+  const eventos = await getEventosConfig(body.cardId, userId);
   const evCfg = eventos?.[event];
   if (evCfg && evCfg.on === false) return respondJSON(res, 200, { sent: false, reason: 'evento-apagado' });
 

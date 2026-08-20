@@ -119,17 +119,24 @@ export default async function handler(req, res) {
   const prod = String(body.productoNombre || 'Producto').slice(0, 240);
   const per = String(body.persona || '').trim().slice(0, 80);
   const who = String(body.actor || '').trim().slice(0, 80);
+  // Link a la carpeta de Drive (solo si es una URL de Drive válida).
+  const folderLink = String(body.folderLink || '').trim();
+  const driveOk = /^https:\/\/(drive|docs)\.google\.com\//i.test(folderLink);
 
   const fields = [];
   if (per) fields.push({ name: 'Persona', value: per, inline: true });
   if (who) fields.push({ name: event === 'nuevo' ? 'Creó' : 'Movió', value: who, inline: true });
+  if (driveOk) fields.push({ name: 'Videos', value: `[📁 Abrir carpeta de Drive](${folderLink})`, inline: false });
 
-  const out = await postDiscord(url, {
+  const embed = {
     title: `${meta.emoji} ${prod}`,
     description: meta.desc,
     color: meta.color,
     fields,
     timestamp: new Date().toISOString(),
-  }, menciones);
+  };
+  if (driveOk) embed.url = folderLink;   // hace clickeable el título
+
+  const out = await postDiscord(url, embed, menciones);
   return respondJSON(res, out.sent ? 200 : 502, out);
 }

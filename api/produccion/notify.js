@@ -42,21 +42,22 @@ function parseMentions(str) {
   return out.join(' ');
 }
 
-// Config de avisos del dueño de la tarjeta (service-role, bypassa RLS). Resuelve
-// el dueño por la tarjeta; si no la encuentra (ej: en "producto nuevo" el insert
-// todavía va en camino), cae al usuario autenticado —que en ese evento ES el
-// dueño que la creó—. Soporta el shape nuevo { eventos } y el viejo { estados }.
-async function getEventosConfig(cardId, fallbackOwnerId) {
+// Dueño y creator de una tarjeta (service-role, bypassa RLS). Sirve para saber
+// de quién es la tarjeta y validar que el caller tenga acceso.
+async function resolveTarjeta(cardId) {
   try {
     const svc = getServiceClient();
-    if (!svc) return null;
-    let ownerId = null;
-    if (cardId) {
-      const { data: asig } = await svc.from('produccion_asignaciones').select('owner_id').eq('id', cardId).maybeSingle();
-      ownerId = asig?.owner_id || null;
-    }
-    if (!ownerId) ownerId = fallbackOwnerId || null;
-    if (!ownerId) return null;
+    if (!svc || !cardId) return { ownerId: null, creatorId: null };
+    const { data } = await svc.from('produccion_asignaciones').select('owner_id, creator_id').eq('id', cardId).maybeSingle();
+    return { ownerId: data?.owner_id || null, creatorId: data?.creator_id || null };
+  } catch { return { ownerId: null, creatorId: null }; }
+}
+
+// Config de avisos de un dueño (service-role). Shape nuevo { eventos } o viejo { estados }.
+async function getEventosConfig(ownerId) {
+  try {
+    const svc = getServiceClient();
+    if (!svc || !ownerId) return null;
     const { data } = await svc.from('produccion_notif_config').select('config').eq('owner_id', ownerId).maybeSingle();
     return data?.config?.eventos || data?.config?.estados || null;
   } catch { return null; }
@@ -113,7 +114,15 @@ export default async function handler(req, res) {
   const meta = EVENT_META[event];
   if (!meta) return respondJSON(res, 200, { sent: false, reason: 'evento-no-notificable' });
 
-  const eventos = await getEventosConfig(body.cardId, userId);
+  // Resolvemos la tarjeta y validamos acceso: si la tarjeta existe, el caller
+  // tiene que ser su dueño o el creator asignado (sino un editor podría spoofear
+  // avisos al Discord de OTRO dueño mandando un cardId ajeno). En "producto
+  // nuevo" el insert puede no estar aún → owner null → el caller ES el dueño.
+  const { ownerId, creatorId } = await resolveTarjeta(body.cardId);
+  if (ownerId && userId !== ownerId && userId !== creatorId) {
+    return respondJSON(res, 403, { sent: false, reason: 'sin-acceso-a-la-tarjeta' });
+  }
+  const eventos = await getEventosConfig(ownerId || userId);
   const evCfg = eventos?.[event];
   if (evCfg && evCfg.on === false) return respondJSON(res, 200, { sent: false, reason: 'evento-apagado' });
 

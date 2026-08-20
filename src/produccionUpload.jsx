@@ -214,7 +214,7 @@ export async function subirParaTarjeta(a, fileList, { onProgress, addToast } = {
 // Sección de creativos dentro de una tarjeta: lista de archivos ya subidos +
 // dropzone + cola de subida. `canDelete` controla si se puede quitar un archivo
 // ya subido (el admin sí; un creator también puede borrar los suyos).
-export function CreativosSection({ a, addToast, canDelete = true }) {
+export function CreativosSection({ a, addToast, canDelete = true, readOnly = false }) {
   const [files, setFiles] = useState([]); // { file, id, status, destino?, msg? }
   const [busy, setBusy] = useState(false);
   const [drag, setDrag] = useState(false);
@@ -260,34 +260,37 @@ export function CreativosSection({ a, addToast, canDelete = true }) {
   const subir = async () => {
     if (files.length === 0) return;
     setBusy(true);
-    const user = await getCurrentUser();
-    if (!user) { setBusy(false); addToast?.({ type: 'error', message: 'Iniciá sesión de nuevo.' }); return; }
-    const token = await getAuthToken();
-    const ctx = {
-      user, token, weekKey: a.weekKey, productoNombre: a.productoNombre, persona: a.persona || 'Equipo',
-      cardId: a.id,
-      folderId: (a.archivos || []).find(f => f.folderId)?.folderId || null,
-    };
-    const eraPorHacer = a.estado === 'porhacer';
-    let ok = 0, dest = null, driveWarn = null;
-    for (const item of files) {
-      if (item.status === 'ok') continue;
-      setFiles(prev => prev.map(f => f.id === item.id ? { ...f, status: 'subiendo' } : f));
-      try {
-        const archivo = await uploadOne(item.file, ctx);
-        addArchivos(a.id, [archivo]);
-        ok++; dest = archivo.destino;
-        if (!driveWarn && archivo.driveError) driveWarn = archivo.driveError;
-        setFiles(prev => prev.map(f => f.id === item.id ? { ...f, status: 'ok', destino: archivo.destino } : f));
-      } catch (err) {
-        setFiles(prev => prev.map(f => f.id === item.id ? { ...f, status: 'error', msg: err.message } : f));
+    try {
+      const user = await getCurrentUser();
+      if (!user) { addToast?.({ type: 'error', message: 'Iniciá sesión de nuevo.' }); return; }
+      const token = await getAuthToken();
+      const ctx = {
+        user, token, weekKey: a.weekKey, productoNombre: a.productoNombre, persona: a.persona || 'Equipo',
+        cardId: a.id,
+        folderId: (a.archivos || []).find(f => f.folderId)?.folderId || null,
+      };
+      const eraPorHacer = a.estado === 'porhacer';
+      let ok = 0, dest = null, driveWarn = null;
+      for (const item of files) {
+        if (item.status === 'ok') continue;
+        setFiles(prev => prev.map(f => f.id === item.id ? { ...f, status: 'subiendo' } : f));
+        try {
+          const archivo = await uploadOne(item.file, ctx);
+          addArchivos(a.id, [archivo]);
+          ok++; dest = archivo.destino;
+          if (!driveWarn && archivo.driveError) driveWarn = archivo.driveError;
+          setFiles(prev => prev.map(f => f.id === item.id ? { ...f, status: 'ok', destino: archivo.destino } : f));
+        } catch (err) {
+          setFiles(prev => prev.map(f => f.id === item.id ? { ...f, status: 'error', msg: err.message } : f));
+        }
       }
+      if (ok > 0 && eraPorHacer) updateAssignment(a.id, { estado: 'revision' });
+      if (ok > 0) addToast?.({ type: 'success', message: `${ok} video${ok > 1 ? 's' : ''} → ${dest === 'drive' ? 'Google Drive' : 'AdsLab'}${eraPorHacer ? ' · pasó a En revisión' : ''}` });
+      if (driveWarn) addToast?.({ type: 'warning', message: `⚠ Drive falló (${driveWarn}) — se guardó en AdsLab. Pasale este texto a Claude.` });
+      setFiles(prev => prev.filter(f => f.status !== 'ok'));
+    } finally {
+      setBusy(false);
     }
-    if (ok > 0 && eraPorHacer) updateAssignment(a.id, { estado: 'revision' });
-    setBusy(false);
-    if (ok > 0) addToast?.({ type: 'success', message: `${ok} video${ok > 1 ? 's' : ''} → ${dest === 'drive' ? 'Google Drive' : 'AdsLab'}${eraPorHacer ? ' · pasó a En revisión' : ''}` });
-    if (driveWarn) addToast?.({ type: 'warning', message: `⚠ Drive falló (${driveWarn}) — se guardó en AdsLab. Pasale este texto a Claude.` });
-    setFiles(prev => prev.filter(f => f.status !== 'ok'));
   };
 
   return (
@@ -328,13 +331,15 @@ export function CreativosSection({ a, addToast, canDelete = true }) {
               {!f.link && f.storagePath && (
                 <button onClick={() => verVideo(f)} title="Ver el video (AdsLab)" className="text-brand-500 hover:text-brand-600"><ExternalLink size={11} /></button>
               )}
-              {canDelete && <button onClick={() => removeArchivo(a.id, f.ts)} className="text-gray-300 hover:text-red-500"><X size={12} /></button>}
+              {canDelete && !readOnly && <button onClick={() => removeArchivo(a.id, f.ts)} className="text-gray-300 hover:text-red-500"><X size={12} /></button>}
             </div>
           ))}
         </div>
       )}
 
-      {/* Dropzone */}
+      {/* Dropzone — solo si la tarjeta es editable (no en aprobado/publicado
+          para el editor). En readOnly no se puede subir ni borrar. */}
+      {!readOnly && (
       <div
         onDragOver={e => { e.preventDefault(); setDrag(true); }}
         onDragLeave={() => setDrag(false)}
@@ -345,9 +350,10 @@ export function CreativosSection({ a, addToast, canDelete = true }) {
         <p className="text-xs text-gray-500 dark:text-gray-400">Arrastrá los videos o <span className="text-emerald-600 font-semibold">buscalos</span></p>
         <input ref={inputRef} type="file" accept={VIDEO_ACCEPT} multiple hidden onChange={e => { addFiles(e.target.files); e.target.value = ''; }} />
       </div>
+      )}
 
       {/* Cola de subida */}
-      {files.length > 0 && (
+      {!readOnly && files.length > 0 && (
         <div className="mt-2 space-y-1">
           {files.map(f => (
             <div key={f.id} className="flex items-center gap-2 text-xs bg-gray-50 dark:bg-gray-800 rounded px-2.5 py-1.5">

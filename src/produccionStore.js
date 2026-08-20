@@ -700,6 +700,9 @@ async function notificarEventoDiscord(a, event, from) {
         from: from || '',
         to: event === 'nuevo' ? '' : event,
         actor: _actorName || '',
+        // Link a la carpeta de Drive de la tarjeta (donde están los videos), para
+        // entrar directo desde Discord. Puede no existir si no se subió nada.
+        folderLink: (a.archivos || []).find(f => f.folderLink)?.folderLink || '',
       }),
     });
   } catch (e) { console.warn('[produccion] notify:', e?.message || e); }

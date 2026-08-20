@@ -292,11 +292,33 @@ const COLS = [
 ];
 
 const PERSONA_PALETTE = ['amber', 'violet', 'sky', 'emerald', 'rose', 'indigo', 'teal'];
-function personaColor(name) {
-  if (!name) return 'gray';
+function hashIdx(name) {
   let h = 0;
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
-  return PERSONA_PALETTE[h % PERSONA_PALETTE.length];
+  return h % PERSONA_PALETTE.length;
+}
+// Registro de colores por persona: cada persona recibe un color DISTINTO
+// (resolviendo colisiones del hash), así dos personas no comparten color mientras
+// queden colores libres. registrarColoresPersonas() lo llena con la lista completa.
+const _colorPersona = {};
+function registrarColoresPersonas(names) {
+  const uniq = [...new Set((names || []).map(n => (n || '').trim()).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, 'es'));
+  const usados = new Set();
+  const map = {};
+  for (const n of uniq) {
+    let idx = hashIdx(n.toLowerCase()), tries = 0;
+    while (usados.has(PERSONA_PALETTE[idx]) && tries < PERSONA_PALETTE.length) { idx = (idx + 1) % PERSONA_PALETTE.length; tries++; }
+    const color = PERSONA_PALETTE[idx];
+    usados.add(color); map[n.toLowerCase()] = color;
+  }
+  for (const k in _colorPersona) delete _colorPersona[k];
+  Object.assign(_colorPersona, map);
+}
+function personaColor(name) {
+  if (!name) return 'gray';
+  const k = name.trim().toLowerCase();
+  return _colorPersona[k] || PERSONA_PALETTE[hashIdx(k)];
 }
 const CHIP_CLS = {
   amber: 'bg-amber-400 text-amber-950', violet: 'bg-violet-500 text-white',
@@ -685,6 +707,9 @@ export default function ProduccionSection({ addToast }) {
     productos.forEach(p => { const r = (p.responsable || '').trim(); if (r) set.add(r); });
     return [...set];
   }, [weekKey, productos]); // eslint-disable-line
+  // Asigna un color DISTINTO a cada persona (así Wanda y Dai no comparten color).
+  // Sumamos las cuentas del equipo para cubrir a todos, no solo a los de esta semana.
+  registrarColoresPersonas([...personas, ...team.map(m => m.display_name || m.email)]);
 
   // Opciones de los filtros del tablero: productos y personas presentes esta
   // semana (así el dropdown solo ofrece lo que existe).
@@ -741,6 +766,15 @@ export default function ProduccionSection({ addToast }) {
       const card = asigs.find(a => a.id === id);
       if (card && card.estado !== 'publicado' && card.estado !== 'aprobado') {
         addToast?.({ type: 'warning', message: 'Solo se archiva lo que ya está publicado o aprobado.' });
+        return;
+      }
+    }
+    // Regla: no se pasa a "En revisión" hasta subir los N videos.
+    if (colKey === 'revision') {
+      const card = asigs.find(a => a.id === id);
+      const objetivo = card?.videosTotal || VIDEOS_POR_PRODUCTO;
+      if (card && (card.archivos?.length || 0) < objetivo) {
+        addToast?.({ type: 'warning', message: `Faltan videos: subí los ${objetivo} para pasar a revisión.` });
         return;
       }
     }

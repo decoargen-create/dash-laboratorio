@@ -126,7 +126,15 @@ function CreatorCardDetail({ a, num, onClose, addToast }) {
   const enRevision = a.estado === 'revision';
   const folderLink = (a.archivos || []).find(f => f.folderLink)?.folderLink;
   const brief = (a.brief || '').trim();
+  // Regla: no se pasa a "En revisión" hasta subir los N videos.
+  const nVideos = (a.archivos || []).length;
+  const objetivo = a.videosTotal || VIDEOS_POR_PRODUCTO;
+  const completo = nVideos >= objetivo;
   const toggleEstado = () => {
+    if (!enRevision && !completo) {
+      addToast?.({ type: 'warning', message: `Faltan videos: subí los ${objetivo} para pasar a revisión (${nVideos}/${objetivo}).` });
+      return;
+    }
     updateAssignment(a.id, { estado: enRevision ? 'porhacer' : 'revision' });
     addToast?.({ type: 'success', message: enRevision ? 'Volviste la tarjeta a "Por hacer"' : '¡Listo! Pasó a "En revisión"' });
   };
@@ -207,10 +215,20 @@ function CreatorCardDetail({ a, num, onClose, addToast }) {
 
         <div className="border-t border-gray-100 dark:border-gray-800 px-5 py-3 bg-gray-50/60 dark:bg-gray-900/40">
           {puedeMover ? (
-            <button onClick={toggleEstado}
-              className={`w-full inline-flex items-center justify-center gap-1.5 px-3 py-2.5 text-sm font-bold rounded-lg transition ${enRevision ? 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600' : 'bg-amber-500 text-white hover:bg-amber-600'}`}>
-              {enRevision ? <><Clock size={15} /> Volver a "Por hacer"</> : <><CheckCircle2 size={15} /> Marcar "En revisión"</>}
-            </button>
+            !enRevision && !completo ? (
+              <div className="text-center">
+                <button disabled
+                  className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2.5 text-sm font-bold rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 cursor-not-allowed">
+                  <Clock size={15} /> Faltan {objetivo - nVideos} video{objetivo - nVideos === 1 ? '' : 's'} para revisión
+                </button>
+                <p className="text-[11px] text-gray-400 mt-1.5">Subí los {objetivo} videos y pasa a revisión solo.</p>
+              </div>
+            ) : (
+              <button onClick={toggleEstado}
+                className={`w-full inline-flex items-center justify-center gap-1.5 px-3 py-2.5 text-sm font-bold rounded-lg transition ${enRevision ? 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600' : 'bg-amber-500 text-white hover:bg-amber-600'}`}>
+                {enRevision ? <><Clock size={15} /> Volver a "Por hacer"</> : <><CheckCircle2 size={15} /> Marcar "En revisión"</>}
+              </button>
+            )
           ) : (
             <p className="text-center text-sm font-semibold text-gray-400 dark:text-gray-500">{a.estado === 'aprobado' ? '✓ Aprobado por el equipo' : '✓ Publicado'}</p>
           )}

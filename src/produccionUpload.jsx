@@ -15,7 +15,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Film, X, UploadCloud, Loader2, AlertTriangle, ExternalLink } from 'lucide-react';
 import { supabase, getCurrentUser } from './supabase.js';
-import { addArchivos, removeArchivo, updateAssignment } from './produccionStore.js';
+import { addArchivos, removeArchivo, updateAssignment, VIDEOS_POR_PRODUCTO } from './produccionStore.js';
 
 const BUCKET = 'creativos';
 
@@ -270,6 +270,8 @@ export function CreativosSection({ a, addToast, canDelete = true, readOnly = fal
         folderId: (a.archivos || []).find(f => f.folderId)?.folderId || null,
       };
       const eraPorHacer = a.estado === 'porhacer';
+      const yaTenia = a.archivos?.length || 0;
+      const objetivo = a.videosTotal || VIDEOS_POR_PRODUCTO;
       let ok = 0, dest = null, driveWarn = null;
       for (const item of files) {
         if (item.status === 'ok') continue;
@@ -284,8 +286,11 @@ export function CreativosSection({ a, addToast, canDelete = true, readOnly = fal
           setFiles(prev => prev.map(f => f.id === item.id ? { ...f, status: 'error', msg: err.message } : f));
         }
       }
-      if (ok > 0 && eraPorHacer) updateAssignment(a.id, { estado: 'revision' });
-      if (ok > 0) addToast?.({ type: 'success', message: `${ok} video${ok > 1 ? 's' : ''} → ${dest === 'drive' ? 'Google Drive' : 'AdsLab'}${eraPorHacer ? ' · pasó a En revisión' : ''}` });
+      // Regla: solo pasa a "En revisión" cuando están subidos los N videos.
+      const completoAhora = (yaTenia + ok) >= objetivo;
+      const paso = eraPorHacer && completoAhora;
+      if (paso) updateAssignment(a.id, { estado: 'revision' });
+      if (ok > 0) addToast?.({ type: 'success', message: `${ok} video${ok > 1 ? 's' : ''} → ${dest === 'drive' ? 'Google Drive' : 'AdsLab'}${paso ? ' · completo, pasó a En revisión ✓' : (eraPorHacer ? ` · ${yaTenia + ok}/${objetivo}` : '')}` });
       if (driveWarn) addToast?.({ type: 'warning', message: `⚠ Drive falló (${driveWarn}) — se guardó en AdsLab. Pasale este texto a Claude.` });
       setFiles(prev => prev.filter(f => f.status !== 'ok'));
     } finally {

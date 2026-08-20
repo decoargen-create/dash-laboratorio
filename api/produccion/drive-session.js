@@ -19,7 +19,7 @@
 import { getUserIdFromAuth } from '../marketing/_supabase-server.js';
 import { driveEnsureFolder } from '../actas/_google.js';
 import { getDriveContext } from './_drive-ctx.js';
-import { clean, cardFolderName, finalFileName } from './_naming.js';
+import { clean, cardFolderName } from './_naming.js';
 
 const UPLOAD = 'https://www.googleapis.com/upload/drive/v3/files';
 
@@ -99,7 +99,10 @@ export default async function handler(req, res) {
       subFolder = await driveEnsureFolder(token, personaFolder, cardFolderName(productoNombre, persona, weekKey));
     }
 
-    const finalName = finalFileName(filename, productoNombre, persona);
+    // Respetamos el nombre TAL CUAL se sube (el equipo ya usa su convención, ej:
+    // "[C1][Ponzio][15-08][…].mp4"). Solo sacamos saltos de línea/tabs por las
+    // dudas; Drive acepta corchetes, espacios y acentos sin problema.
+    const finalName = String(filename || '').replace(/[\r\n\t]+/g, ' ').trim() || 'video.mp4';
     const contentType = mimeType || 'video/mp4';
 
     // Abrir la resumable session (con node:https crudo, no fetch: garantiza el

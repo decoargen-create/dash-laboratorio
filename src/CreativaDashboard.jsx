@@ -32,6 +32,18 @@ const ESTADO_BADGE = {
   revision: 'text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/40',
 };
 
+// Celda de chip en columna fija (para que los 3 conteos por producto queden
+// alineados verticalmente entre filas). Si el número es 0, muestra "—".
+const CHIP_TONE = {
+  slate: 'text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-700/50',
+  emerald: 'text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/40',
+  brand: 'text-brand-600 dark:text-brand-300 bg-brand-50 dark:bg-brand-900/30',
+};
+function ChipCell({ n, label, tone }) {
+  if (!n) return <span className="text-center text-xs text-gray-300 dark:text-gray-600 select-none">—</span>;
+  return <span className={`block text-center text-[10.5px] font-bold px-1 py-1 rounded-full whitespace-nowrap ${CHIP_TONE[tone]}`}>{n} {label}</span>;
+}
+
 export default function CreativaDashboard({ addToast }) {
   const [, force] = useState(0);
   const [monthKey, setMonthKey] = useState(() => monthKeyOf());
@@ -142,14 +154,14 @@ export default function CreativaDashboard({ addToast }) {
           return (
             <div key={p.nombre} className="border-t border-gray-100 dark:border-gray-700/60 first:border-t-0">
               <button onClick={() => toggleProd(p.nombre)}
-                className={`w-full flex items-center gap-2.5 px-4 py-3 text-left transition ${open ? 'bg-gray-50 dark:bg-gray-900/30' : 'hover:bg-gray-50 dark:hover:bg-gray-700/30'}`}>
-                <ChevronDown size={15} className={`text-gray-400 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
-                <span className="font-bold text-sm text-gray-900 dark:text-gray-100 truncate">{p.nombre}</span>
-                <span className="ml-auto flex items-center gap-1.5 flex-wrap justify-end shrink-0">
-                  {p.porHacer > 0 && <span className="text-[11px] font-bold px-2 py-0.5 rounded-full text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-700/50">{p.porHacer} por hacer</span>}
-                  {p.entregadas > 0 && <span className="text-[11px] font-bold px-2 py-0.5 rounded-full text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/40">{p.entregadas} entregada{p.entregadas === 1 ? '' : 's'}</span>}
-                  {p.listas.length > 0 && <span className="text-[11px] font-bold px-2 py-0.5 rounded-full text-brand-600 dark:text-brand-300 bg-brand-50 dark:bg-brand-900/30">{p.listas.length} lista{p.listas.length === 1 ? '' : 's'}</span>}
+                className={`w-full grid items-center gap-2 px-4 py-3 text-left transition grid-cols-[minmax(0,1fr)_80px_94px_64px] ${open ? 'bg-gray-50 dark:bg-gray-900/30' : 'hover:bg-gray-50 dark:hover:bg-gray-700/30'}`}>
+                <span className="flex items-center gap-2 min-w-0">
+                  <ChevronDown size={15} className={`text-gray-400 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+                  <span className="font-bold text-sm text-gray-900 dark:text-gray-100 truncate">{p.nombre}</span>
                 </span>
+                <ChipCell n={p.porHacer} label="por hacer" tone="slate" />
+                <ChipCell n={p.entregadas} label={p.entregadas === 1 ? 'entregada' : 'entregadas'} tone="emerald" />
+                <ChipCell n={p.listas.length} label={p.listas.length === 1 ? 'lista' : 'listas'} tone="brand" />
               </button>
               {open && (
                 <div className="bg-gray-50/60 dark:bg-gray-900/20 border-t border-gray-100 dark:border-gray-700/60">

@@ -209,8 +209,33 @@ export default function CreativaDashboard({ addToast }) {
         </div>
         {personas.length === 0 ? (
           <p className="text-sm text-gray-400 px-4 py-6 text-center">No hay pagos en {monthLabel(monthKey).toLowerCase()} todavía. El pago se cuenta cuando un producto queda aprobado.</p>
-        ) : (
-          <div className="overflow-x-auto">
+        ) : (<>
+          {/* Mobile: tarjetas apiladas por persona (la tabla scrollea feo en el celu). */}
+          <div className="sm:hidden divide-y divide-gray-100 dark:divide-gray-700/60">
+            {personas.map(p => (
+              <div key={p.persona} className="flex items-center gap-3 px-4 py-3">
+                <span className={`w-9 h-9 rounded-lg ${avColor(p.persona)} text-white flex items-center justify-center text-sm font-bold uppercase shrink-0`}>{p.persona.charAt(0)}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="font-bold text-sm text-gray-900 dark:text-gray-100 truncate">{p.persona}</div>
+                  <div className="text-[11px] text-gray-400">{p.completados} completos · total {fmtPago(p.total)}</div>
+                </div>
+                <div className="text-right shrink-0">
+                  {p.pendiente > 0 ? (
+                    <>
+                      <div className="font-mono tabular-nums font-bold text-amber-600 dark:text-amber-400 text-sm">{fmtPago(p.pendiente)}</div>
+                      <button onClick={() => pagarMes(p)} className="mt-1 inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition">
+                        <Check size={11} /> Pagar mes
+                      </button>
+                    </>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 dark:text-emerald-400"><Check size={12} /> Al día</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="overflow-x-auto hidden sm:block">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-[11px] font-bold uppercase tracking-wide text-gray-400 dark:text-gray-500 border-b border-gray-200 dark:border-gray-700">
@@ -262,7 +287,7 @@ export default function CreativaDashboard({ addToast }) {
               </tfoot>
             </table>
           </div>
-        )}
+        </>)}
         <p className="text-[10px] text-gray-400 dark:text-gray-500 px-4 py-2 border-t border-gray-100 dark:border-gray-700/60">
           Pago mensual por persona. "Pagar mes" salda todo lo pendiente del mes de esa persona.
         </p>

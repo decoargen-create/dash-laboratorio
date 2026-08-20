@@ -1700,9 +1700,7 @@ function IntegranteSelector({ a, team = [], personas = [], onTeamChange, addToas
                     {it.hasAccess ? (it.email || 'con login') : `${it.cards} tarjeta${it.cards !== 1 ? 's' : ''}`}
                   </div>
                 </div>
-                {it.hasAccess ? (
-                  <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/40 rounded-full px-2 py-0.5 shrink-0">🔑 con acceso</span>
-                ) : (
+                {!it.hasAccess && (
                   <>
                     <span className="text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-800 rounded-full px-2 py-0.5 shrink-0">sin acceso</span>
                     <button onClick={e => { e.stopPropagation(); startGive(it); }}
@@ -1740,9 +1738,6 @@ function IntegranteSelector({ a, team = [], personas = [], onTeamChange, addToas
           — Sin asignar —
         </button>
       </div>
-      <p className="text-[11px] text-gray-400 mt-1.5">
-        El integrante <b>con acceso</b> entra a la app y ve esta tarjeta en su tablero. <b>Sin acceso</b> es solo un nombre (para asignar y para los pagos) — dale acceso cuando quieras.
-      </p>
     </div>
   );
 }

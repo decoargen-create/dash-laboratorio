@@ -297,6 +297,9 @@ function hashIdx(name) {
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
   return h % PERSONA_PALETTE.length;
 }
+// Colores FIJOS por persona (a pedido): tienen prioridad sobre el hash y reservan
+// ese color para que nadie más lo use. Clave = nombre en minúsculas.
+const COLOR_OVERRIDE = { dai: 'rose' };
 // Registro de colores por persona: cada persona recibe un color DISTINTO
 // (resolviendo colisiones del hash), así dos personas no comparten color mientras
 // queden colores libres. registrarColoresPersonas() lo llena con la lista completa.
@@ -306,11 +309,19 @@ function registrarColoresPersonas(names) {
     .sort((a, b) => a.localeCompare(b, 'es'));
   const usados = new Set();
   const map = {};
+  // 1) Overrides primero: fijan y reservan su color.
   for (const n of uniq) {
-    let idx = hashIdx(n.toLowerCase()), tries = 0;
+    const ov = COLOR_OVERRIDE[n.trim().toLowerCase()];
+    if (ov && PERSONA_PALETTE.includes(ov)) { map[n.toLowerCase()] = ov; usados.add(ov); }
+  }
+  // 2) El resto: por hash, evitando los colores ya usados.
+  for (const n of uniq) {
+    const k = n.toLowerCase();
+    if (map[k]) continue;
+    let idx = hashIdx(k), tries = 0;
     while (usados.has(PERSONA_PALETTE[idx]) && tries < PERSONA_PALETTE.length) { idx = (idx + 1) % PERSONA_PALETTE.length; tries++; }
     const color = PERSONA_PALETTE[idx];
-    usados.add(color); map[n.toLowerCase()] = color;
+    usados.add(color); map[k] = color;
   }
   for (const k in _colorPersona) delete _colorPersona[k];
   Object.assign(_colorPersona, map);

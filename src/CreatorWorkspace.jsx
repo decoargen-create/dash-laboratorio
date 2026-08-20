@@ -20,7 +20,7 @@ import {
   resumenVideosPorProducto, VIDEOS_POR_PRODUCTO,
 } from './produccionStore.js';
 import { CreativosSection, subirParaTarjeta, VIDEO_ACCEPT } from './produccionUpload.jsx';
-import { numerarDuplicados } from './produccionCalc.js';
+import { numerarDuplicados, columnaEfectiva } from './produccionCalc.js';
 
 const ESTADO_BADGE = {
   porhacer: 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-200',
@@ -43,6 +43,7 @@ const COLS_CREATOR = [
   { key: 'revision', label: 'En revisión', dot: 'bg-amber-400' },
   { key: 'aprobado', label: 'Aprobado', dot: 'bg-emerald-500' },
   { key: 'publicado', label: 'Publicado', dot: 'bg-violet-500' },
+  { key: 'archivado', label: 'Archivado', dot: 'bg-gray-400' },
 ];
 
 // Tarjeta compacta del tablero — se toca para entrar al detalle. Trae el mismo
@@ -223,6 +224,7 @@ export default function CreatorWorkspace({ user, onLogout, addToast, darkMode, t
   const [, force] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [detailId, setDetailId] = useState(null); // tarjeta abierta en el detalle
+  const [mostrarArch, setMostrarArch] = useState(false); // columna Archivado (oculta por defecto)
 
   useEffect(() => subscribeProduccion(() => force(x => x + 1)), []);
 
@@ -412,11 +414,24 @@ export default function CreatorWorkspace({ user, onLogout, addToast, darkMode, t
                 </div>
 
                 {/* Tablero por estado (como lo ve el admin). Tocá una tarjeta para
-                    ver la consigna y subir los videos. */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                {COLS_CREATOR.map(col => {
+                    ver la consigna y subir los videos. Lo publicado hace +48h se
+                    muestra solo en Archivado (columnaEfectiva). */}
+                {(() => {
+                  const now = Date.now();
+                  const nArch = allCards.filter(a => columnaEfectiva(a, now) === 'archivado').length;
+                  const colsVis = mostrarArch ? COLS_CREATOR : COLS_CREATOR.filter(c => c.key !== 'archivado');
+                  return (
+                <>
+                <div className="flex justify-end">
+                  <button onClick={() => setMostrarArch(v => !v)}
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold rounded-lg border transition ${mostrarArch ? 'border-gray-400 text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-700' : 'border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'}`}>
+                    📦 {mostrarArch ? 'Ocultar archivado' : 'Archivado'}{nArch > 0 ? ` · ${nArch}` : ''}
+                  </button>
+                </div>
+                <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 ${mostrarArch ? 'lg:grid-cols-5' : 'lg:grid-cols-4'}`}>
+                {colsVis.map(col => {
                   const cards = allCards
-                    .filter(a => a.estado === col.key)
+                    .filter(a => columnaEfectiva(a, now) === col.key)
                     .sort((x, y) => (y.weekKey || '').localeCompare(x.weekKey || '') || (x.productoNombre || '').localeCompare(y.productoNombre || '', 'es'));
                   return (
                     <div key={col.key} className="rounded-2xl bg-gray-100/70 dark:bg-gray-800/40 border border-gray-200 dark:border-gray-700/60 p-2.5">
@@ -434,6 +449,9 @@ export default function CreatorWorkspace({ user, onLogout, addToast, darkMode, t
                   );
                 })}
                 </div>
+                </>
+                );
+                })()}
               </div>
             )}
           </div>

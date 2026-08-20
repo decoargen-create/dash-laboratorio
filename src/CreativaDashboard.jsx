@@ -1,36 +1,44 @@
-// Área creativa — Dashboard del mes.
-// Resumen de lo que hay que pagarle al equipo creativo: total del mes, ya
-// pagado, pendiente, y el detalle por persona (semana por semana) con un botón
-// para marcar cada semana como pagada. Los montos respetan el switch ARS/USD.
+// Área creativa — Resumen del mes.
 //
-// El "operativo" (asignar, repartir, subir) vive en Producción; esto es la
-// vista de plata/resumen.
+// Workspace para PUBLICAR y seguir los pagos. Dos bloques:
+//   1. Por producto: cuántas tarjetas hay por hacer / entregadas / listas para
+//      publicar. Al abrir un producto se ven sus tarjetas listas, cada una con
+//      acceso directo al Drive y un botón "Publicar" (la marca como Publicado).
+//   2. Pagos del mes: por persona (total / pagado / pendiente) con "Pagar mes".
+//
+// El operativo (asignar, repartir, subir) vive en Producción; esto es la vista
+// de publicación + plata.
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Wallet, ChevronDown, Check, Clock, CheckCircle2, Users, Film, TrendingUp, Rocket, ExternalLink, Table2, UploadCloud } from 'lucide-react';
+import { Wallet, ChevronDown, Check, Clock, CheckCircle2, Film, Rocket, ExternalLink, Users } from 'lucide-react';
 import {
   monthKeyOf, monthLabel, allMonthKeys, monthlySummary, setWeekPaid,
-  weekLabel, subscribeProduccion, weeksInMonth, listAssignments, paymentSummary,
-  weekNumber, weekRange, esCompleto, allWeekKeys, updateAssignment,
+  weekLabel, subscribeProduccion, weeksInMonth, listAssignments, updateAssignment,
 } from './produccionStore.js';
-
-// Nombre de la carpeta de Drive de una tarjeta: "<Persona> - sem d-m" (igual que
-// lo arma el server), para mostrarlo en la cola "Para subir".
-function folderName(persona, weekKey) {
-  const p = (persona || 'Equipo').trim() || 'Equipo';
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(weekKey || '')) return p;
-  const [, m, d] = weekKey.split('-');
-  return `${p} - sem ${Number(d)}-${Number(m)}`;
-}
-import { probeDrive } from './produccionUpload.jsx';
 import { fmtMoney, toUSD, subscribeMoney } from './moneyStore.js';
 
 const fmtPago = (ars) => fmtMoney(toUSD(ars, 'ARS'));
 
+// Color estable del avatar según el nombre (para reconocer a la persona).
+const AV = ['bg-brand-500', 'bg-emerald-500', 'bg-sky-500', 'bg-violet-500', 'bg-amber-500', 'bg-rose-500', 'bg-teal-500'];
+function avColor(name) {
+  let h = 0; const s = String(name || '');
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return AV[h % AV.length];
+}
+
+const ESTADO_BADGE = {
+  aprobado: 'text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/40',
+  revision: 'text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/40',
+};
+
 export default function CreativaDashboard({ addToast }) {
   const [, force] = useState(0);
   const [monthKey, setMonthKey] = useState(() => monthKeyOf());
-  const [expanded, setExpanded] = useState(null);
+  const [expandedProd, setExpandedProd] = useState(() => new Set());
+  const toggleProd = (nombre) => setExpandedProd(prev => {
+    const n = new Set(prev); n.has(nombre) ? n.delete(nombre) : n.add(nombre); return n;
+  });
 
   useEffect(() => {
     const un1 = subscribeProduccion(() => force(x => x + 1));
@@ -45,95 +53,50 @@ export default function CreativaDashboard({ addToast }) {
   }, [monthKey]); // eslint-disable-line
 
   const { personas, totals } = monthlySummary(monthKey);
-  const conPendiente = personas.filter(p => p.pendiente > 0);
 
-  // ── Grilla semanal tipo Excel: filas = personas, columnas = Semana N ──
-  const [gridMode, setGridMode] = useState('money'); // 'money' | 'videos'
-  const grid = useMemo(() => {
-    const weeks = weeksInMonth(monthKey); // weekKeys del mes con asignaciones
-    const porSemana = weeks.map(wk => ({ wk, rows: paymentSummary(wk) }));
-    const set = new Set();
-    porSemana.forEach(w => w.rows.forEach(r => set.add(r.persona)));
-    const filas = [...set].sort((a, b) => a.localeCompare(b, 'es')).map(persona => {
-      const cel = {}; let money = 0, comp = 0;
-      weeks.forEach(wk => {
-        const r = (porSemana.find(w => w.wk === wk)?.rows || []).find(x => x.persona === persona);
-        cel[wk] = { money: r?.totalArs || 0, comp: r?.completados || 0 };
-        money += cel[wk].money; comp += cel[wk].comp;
-      });
-      return { persona, cel, money, comp };
-    });
-    const colTot = {};
-    weeks.forEach(wk => { colTot[wk] = filas.reduce((s, f) => ({ money: s.money + f.cel[wk].money, comp: s.comp + f.cel[wk].comp }), { money: 0, comp: 0 }); });
-    return { weeks, filas, colTot };
-  }, [monthKey]); // eslint-disable-line
-
-  // ── KPIs de producción del mes (aprobados / publicados / en curso) ──
-  const prodKpis = useMemo(() => {
-    const asigs = weeksInMonth(monthKey).flatMap(wk => listAssignments(wk));
-    return {
-      aprobados: asigs.filter(a => esCompleto(a.estado)).length,
-      publicados: asigs.filter(a => a.estado === 'publicado').length,
-      enCurso: asigs.filter(a => a.estado === 'porhacer' || a.estado === 'revision').length,
-      videos: asigs.reduce((n, a) => n + (a.archivos?.length || 0), 0),
-    };
-  }, [monthKey]); // eslint-disable-line
-
-  // ── Links de Drive por producto del mes ──
-  const [driveRoot, setDriveRoot] = useState(null);
-  useEffect(() => { let dead = false; probeDrive().then(d => { if (!dead && d?.configured) setDriveRoot(d.rootLink); }); return () => { dead = true; }; }, []);
-  const productosDrive = useMemo(() => {
-    const asigs = weeksInMonth(monthKey).flatMap(wk => listAssignments(wk));
-    const byProd = new Map();
-    asigs.forEach(a => {
-      const nombre = a.productoNombre || 'Producto';
-      const folder = (a.archivos || []).find(f => f.folderLink)?.folderLink;
-      const cur = byProd.get(nombre) || { nombre, folder: null, subidos: 0 };
-      cur.subidos += (a.archivos?.length || 0);
-      if (folder && !cur.folder) cur.folder = folder;
-      byProd.set(nombre, cur);
-    });
-    return [...byProd.values()].filter(p => p.subidos > 0).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
-  }, [monthKey]); // eslint-disable-line
-
-  const pagarSemana = (weekKey, persona, paid) => {
-    setWeekPaid(weekKey, persona, paid);
-    if (paid) addToast?.({ type: 'success', message: `${persona} — ${weekLabel(weekKey).toLowerCase()} marcada como pagada` });
-  };
-  const pagarTodoPersona = (p) => {
-    p.semanas.filter(s => !s.paid).forEach(s => setWeekPaid(s.weekKey, p.persona, true));
-    addToast?.({ type: 'success', message: `Todo lo pendiente de ${p.persona} marcado como pagado` });
-  };
-
-  // ── "Para subir a la plataforma": creativos ya entregados (con videos en
-  // Drive) listos para que los bajes y los subas a los ads. Incluye APROBADOS
-  // (listos) y EN REVISIÓN (todavía sin aprobar, pero se pueden subir igual) —
-  // cada uno marcado con su estado. Se calcula en cada render (no memoizar): al
-  // marcar uno subido, updateAssignment re-renderiza y la fila desaparece sola.
-  const paraSubir = [];
-  for (const wk of allWeekKeys()) {
-    for (const a of listAssignments(wk)) {
-      if (a.estado !== 'aprobado' && a.estado !== 'revision') continue;
+  // ── Por producto (del mes). Sin useMemo: se recalcula por render, así al
+  // marcar una tarjeta como publicada desaparece de "listas" al instante. ──
+  //   entregadas = publicadas (o archivadas);
+  //   listas     = aprobado/revisión con al menos 1 video (listas para publicar);
+  //   por hacer  = el resto (asignadas − entregadas − listas).
+  const asigsMes = weeksInMonth(monthKey).flatMap(wk => listAssignments(wk));
+  const productos = (() => {
+    const by = new Map();
+    for (const a of asigsMes) {
+      const nombre = (a.productoNombre || '').trim() || 'Sin producto';
+      if (!by.has(nombre)) by.set(nombre, { nombre, asignadas: 0, entregadas: 0, listas: [] });
+      const p = by.get(nombre);
+      p.asignadas++;
       const videos = (a.archivos || []).length;
-      if (videos === 0) continue; // sin videos no hay nada para subir
-      paraSubir.push({
-        id: a.id,
-        producto: a.productoNombre || 'Producto',
-        estado: a.estado, // 'aprobado' | 'revision'
-        carpeta: folderName(a.persona, wk),
-        videos,
-        folderLink: (a.archivos || []).find(f => f.folderLink)?.folderLink || null,
-      });
+      if (a.estado === 'publicado' || a.estado === 'archivado') p.entregadas++;
+      else if ((a.estado === 'aprobado' || a.estado === 'revision') && videos > 0) {
+        p.listas.push({
+          id: a.id, persona: (a.persona || '').trim() || 'Sin asignar', estado: a.estado, videos,
+          folderLink: (a.archivos || []).find(f => f.folderLink)?.folderLink || null,
+        });
+      }
     }
-  }
-  // Aprobados primero (listos), después los de revisión; dentro, por producto.
-  paraSubir.sort((x, y) =>
-    (x.estado === y.estado ? 0 : x.estado === 'aprobado' ? -1 : 1) ||
-    x.producto.localeCompare(y.producto, 'es'));
+    return [...by.values()]
+      .map(p => ({
+        ...p, porHacer: p.asignadas - p.entregadas - p.listas.length,
+        listas: p.listas.sort((x, y) => (x.estado === y.estado ? 0 : x.estado === 'aprobado' ? -1 : 1) || x.persona.localeCompare(y.persona, 'es')),
+      }))
+      .sort((a, b) => b.listas.length - a.listas.length || b.asignadas - a.asignadas || a.nombre.localeCompare(b.nombre, 'es'));
+  })();
+  const mesKpis = {
+    tarjetas: asigsMes.length,
+    entregadas: productos.reduce((s, p) => s + p.entregadas, 0),
+    revision: asigsMes.filter(a => a.estado === 'revision').length,
+    listas: productos.reduce((s, p) => s + p.listas.length, 0),
+  };
 
-  const marcarSubido = (row) => {
-    updateAssignment(row.id, { estado: 'publicado' });
-    addToast?.({ type: 'success', message: `${row.producto} marcado como subido 🚀 (pasó a Publicado)` });
+  const pagarMes = (p) => {
+    p.semanas.filter(s => !s.paid).forEach(s => setWeekPaid(s.weekKey, p.persona, true));
+    addToast?.({ type: 'success', message: `${p.persona} — el mes quedó pagado` });
+  };
+  const marcarPublicado = (c) => {
+    updateAssignment(c.id, { estado: 'publicado' });
+    addToast?.({ type: 'success', message: `🚀 Publicado — ${c.persona}` });
   };
 
   return (
@@ -145,7 +108,7 @@ export default function CreativaDashboard({ addToast }) {
         </div>
         <div>
           <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Resumen del mes</h2>
-          <p className="text-xs text-gray-500 dark:text-gray-400">Pagos del equipo creativo — pendientes y detalle.</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Publicá lo que está listo y seguí los pagos.</p>
         </div>
         <div className="ml-auto relative">
           <select value={monthKey} onChange={e => setMonthKey(e.target.value)}
@@ -156,336 +119,141 @@ export default function CreativaDashboard({ addToast }) {
         </div>
       </div>
 
-      {/* Para subir a la plataforma — cola de lo aprobado en Drive, listo para
-          que lo bajes y lo subas a los ads. Tu agenda: entrás, ves, subís. */}
-      {paraSubir.length > 0 && (
-        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
-          <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-100 dark:border-gray-700/60">
-            <UploadCloud size={15} className="text-brand-500" />
-            <span className="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Para subir a la plataforma</span>
-            <span className="ml-auto text-xs font-bold text-brand-600 dark:text-brand-400">{paraSubir.length} pendiente{paraSubir.length !== 1 ? 's' : ''}</span>
-          </div>
-          <div className="divide-y divide-gray-100 dark:divide-gray-700/60">
-            {paraSubir.map(row => (
-              <div key={row.id} className="flex items-center gap-3 px-4 py-2.5">
-                <button onClick={() => marcarSubido(row)} title="Marcar como subido a la plataforma"
-                  className="w-5 h-5 shrink-0 rounded-md border-2 border-gray-300 dark:border-gray-500 text-transparent hover:text-white hover:bg-emerald-500 hover:border-emerald-500 flex items-center justify-center transition">
-                  <Check size={13} />
-                </button>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-gray-800 dark:text-gray-100 truncate">{row.producto}</span>
-                    <span className={`shrink-0 text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${
-                      row.estado === 'aprobado'
-                        ? 'text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/40'
-                        : 'text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/40'
-                    }`}>
-                      {row.estado === 'aprobado' ? '✓ Aprobado' : '👀 En revisión'}
-                    </span>
-                  </div>
-                  <div className="text-[11px] text-gray-400 dark:text-gray-500 truncate">{row.carpeta} · {row.videos} video{row.videos !== 1 ? 's' : ''}</div>
-                </div>
-                {row.folderLink ? (
-                  <a href={row.folderLink} target="_blank" rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-xs font-bold text-brand-600 dark:text-brand-300 hover:underline shrink-0">
-                    <ExternalLink size={13} /> Abrir Drive
-                  </a>
-                ) : (
-                  <span className="text-[10px] text-gray-400 shrink-0" title="Se subió a AdsLab (antes de conectar Drive)">AdsLab</span>
-                )}
-              </div>
-            ))}
-          </div>
-          <div className="px-4 py-2 text-[10px] text-gray-400 dark:text-gray-500 border-t border-gray-100 dark:border-gray-700/60">
-            Creativos con videos en Drive, listos para bajar y subir a los ads. Incluye <b>aprobados</b> y <b>en revisión</b>. Al marcarlos subidos pasan a <b>Publicado</b>.
-          </div>
-        </div>
-      )}
-
       {/* KPIs */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <KpiCard icon={TrendingUp} label="A pagar (mes)" value={fmtPago(totals.total)} tone="brand" />
-        <KpiCard icon={Clock} label="Pendiente" value={fmtPago(totals.pendiente)} tone={totals.pendiente > 0 ? 'amber' : 'gray'} />
-        <KpiCard icon={CheckCircle2} label="Pagado" value={fmtPago(totals.pagado)} tone="emerald" />
-        <KpiCard icon={Film} label="Productos completos" value={String(totals.completados)} tone="gray" />
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <KpiCard icon={Film} label="Tarjetas" value={String(mesKpis.tarjetas)} tone="gray" />
+        <KpiCard icon={CheckCircle2} label="Entregadas" value={String(mesKpis.entregadas)} tone="emerald" />
+        <KpiCard icon={Clock} label="En revisión" value={String(mesKpis.revision)} tone={mesKpis.revision > 0 ? 'amber' : 'gray'} />
+        <KpiCard icon={Rocket} label="Listas p/ publicar" value={String(mesKpis.listas)} tone="brand" />
+        <KpiCard icon={Wallet} label="Pendiente" value={fmtPago(totals.pendiente)} tone={totals.pendiente > 0 ? 'amber' : 'gray'} />
       </div>
 
-      {/* KPIs de PRODUCCIÓN del mes */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <KpiCard icon={CheckCircle2} label="Aprobados (mes)" value={String(prodKpis.aprobados)} tone="emerald" />
-        <KpiCard icon={Rocket} label="Publicados (mes)" value={String(prodKpis.publicados)} tone="brand" />
-        <KpiCard icon={Clock} label="En curso" value={String(prodKpis.enCurso)} tone={prodKpis.enCurso > 0 ? 'amber' : 'gray'} />
-        <KpiCard icon={Film} label="Videos subidos" value={String(prodKpis.videos)} tone="gray" />
-      </div>
-
-      {/* GRILLA SEMANAL tipo Excel: personas × Semana 1..N + Total */}
-      {grid.filas.length > 0 && (
-        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
-          <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-100 dark:border-gray-700/60">
-            <Table2 size={15} className="text-brand-500" />
-            <span className="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Grilla del mes · por persona y semana</span>
-            <div className="ml-auto inline-flex rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden text-[11px] font-bold">
-              <button onClick={() => setGridMode('money')} className={`px-2.5 py-1 ${gridMode === 'money' ? 'bg-brand-600 text-white' : 'text-gray-500 dark:text-gray-300'}`}>$</button>
-              <button onClick={() => setGridMode('videos')} className={`px-2.5 py-1 ${gridMode === 'videos' ? 'bg-brand-600 text-white' : 'text-gray-500 dark:text-gray-300'}`}>videos</button>
+      {/* POR PRODUCTO */}
+      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
+        <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-100 dark:border-gray-700/60">
+          <Film size={15} className="text-brand-500" />
+          <span className="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Por producto</span>
+          <span className="ml-auto text-[11px] text-gray-400">tocá un producto para ver sus tarjetas</span>
+        </div>
+        {productos.length === 0 ? (
+          <p className="text-sm text-gray-400 px-4 py-6 text-center">No hay tarjetas en {monthLabel(monthKey).toLowerCase()} todavía.</p>
+        ) : productos.map(p => {
+          const open = expandedProd.has(p.nombre);
+          return (
+            <div key={p.nombre} className="border-t border-gray-100 dark:border-gray-700/60 first:border-t-0">
+              <button onClick={() => toggleProd(p.nombre)}
+                className={`w-full flex items-center gap-2.5 px-4 py-3 text-left transition ${open ? 'bg-gray-50 dark:bg-gray-900/30' : 'hover:bg-gray-50 dark:hover:bg-gray-700/30'}`}>
+                <ChevronDown size={15} className={`text-gray-400 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+                <span className="font-bold text-sm text-gray-900 dark:text-gray-100 truncate">{p.nombre}</span>
+                <span className="ml-auto flex items-center gap-1.5 flex-wrap justify-end shrink-0">
+                  {p.porHacer > 0 && <span className="text-[11px] font-bold px-2 py-0.5 rounded-full text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-700/50">{p.porHacer} por hacer</span>}
+                  {p.entregadas > 0 && <span className="text-[11px] font-bold px-2 py-0.5 rounded-full text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/40">{p.entregadas} entregada{p.entregadas === 1 ? '' : 's'}</span>}
+                  {p.listas.length > 0 && <span className="text-[11px] font-bold px-2 py-0.5 rounded-full text-brand-600 dark:text-brand-300 bg-brand-50 dark:bg-brand-900/30">{p.listas.length} lista{p.listas.length === 1 ? '' : 's'}</span>}
+                </span>
+              </button>
+              {open && (
+                <div className="bg-gray-50/60 dark:bg-gray-900/20 border-t border-gray-100 dark:border-gray-700/60">
+                  {p.listas.length === 0 ? (
+                    <p className="text-xs text-gray-400 px-4 py-3">No hay tarjetas listas para publicar de este producto (están por hacer o ya entregadas).</p>
+                  ) : p.listas.map(c => (
+                    <div key={c.id} className="flex items-center gap-3 px-4 py-2.5 border-t border-dashed border-gray-200 dark:border-gray-700/60 first:border-t-0">
+                      <span className={`w-7 h-7 rounded-lg ${avColor(c.persona)} text-white flex items-center justify-center text-xs font-bold uppercase shrink-0`}>{c.persona.charAt(0)}</span>
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-gray-800 dark:text-gray-100 leading-tight">{c.persona}</div>
+                        <div className="text-[11px] text-gray-400">{c.videos} video{c.videos === 1 ? '' : 's'}</div>
+                      </div>
+                      <span className={`text-[9.5px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full shrink-0 ${ESTADO_BADGE[c.estado]}`}>
+                        {c.estado === 'aprobado' ? '✓ Aprobado' : '👀 Revisión'}
+                      </span>
+                      <div className="ml-auto flex items-center gap-2 shrink-0">
+                        {c.folderLink ? (
+                          <a href={c.folderLink} target="_blank" rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-xs font-bold text-brand-600 dark:text-brand-300 hover:underline">
+                            <ExternalLink size={12} /> Drive
+                          </a>
+                        ) : (
+                          <span className="text-[10px] text-gray-400" title="Se subió a AdsLab (antes de conectar Drive)">AdsLab</span>
+                        )}
+                        <button onClick={() => marcarPublicado(c)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-extrabold text-white bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 rounded-lg transition shadow-sm">
+                          <Rocket size={12} /> Publicar
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-          </div>
+          );
+        })}
+      </div>
+
+      {/* PAGOS DEL MES */}
+      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
+        <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-100 dark:border-gray-700/60">
+          <Wallet size={15} className="text-brand-500" />
+          <span className="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Pagos del mes</span>
+          {totals.pendiente > 0 && <span className="ml-auto text-[11px] font-bold text-amber-600 dark:text-amber-400">{fmtPago(totals.pendiente)} pendiente</span>}
+        </div>
+        {personas.length === 0 ? (
+          <p className="text-sm text-gray-400 px-4 py-6 text-center">No hay pagos en {monthLabel(monthKey).toLowerCase()} todavía. El pago se cuenta cuando un producto queda aprobado.</p>
+        ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-[11px] font-bold uppercase tracking-wide text-gray-400 dark:text-gray-500 border-b border-gray-200 dark:border-gray-700">
-                  <th className="text-left px-4 py-2.5 sticky left-0 bg-white dark:bg-gray-800">Persona</th>
-                  {grid.weeks.map(wk => (
-                    <th key={wk} className="text-right px-3 py-2.5 whitespace-nowrap" title={weekRange(wk)}>Sem {weekNumber(wk)}</th>
-                  ))}
-                  <th className="text-right px-4 py-2.5">Total</th>
+                  <th className="text-left px-4 py-2.5">Persona</th>
+                  <th className="text-center px-3 py-2.5">Completos</th>
+                  <th className="text-right px-3 py-2.5">Total mes</th>
+                  <th className="text-right px-3 py-2.5">Pagado</th>
+                  <th className="text-right px-3 py-2.5">Pendiente</th>
+                  <th className="text-right px-4 py-2.5" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-700/60">
-                {grid.filas.map(f => (
-                  <tr key={f.persona} className="hover:bg-gray-50 dark:hover:bg-gray-700/30">
-                    <td className="px-4 py-2 font-semibold text-gray-800 dark:text-gray-100 sticky left-0 bg-white dark:bg-gray-800">{f.persona}</td>
-                    {grid.weeks.map(wk => {
-                      const c = f.cel[wk];
-                      const v = gridMode === 'money' ? c.money : c.comp;
-                      return <td key={wk} className={`text-right px-3 py-2 tabular-nums ${v > 0 ? 'text-gray-700 dark:text-gray-200' : 'text-gray-300 dark:text-gray-600'}`}>{v > 0 ? (gridMode === 'money' ? fmtPago(c.money) : c.comp) : '·'}</td>;
-                    })}
-                    <td className="text-right px-4 py-2 font-mono tabular-nums font-bold text-gray-900 dark:text-white">{gridMode === 'money' ? fmtPago(f.money) : f.comp}</td>
+                {personas.map(p => (
+                  <tr key={p.persona} className="hover:bg-gray-50 dark:hover:bg-gray-700/30">
+                    <td className="px-4 py-2.5">
+                      <span className="inline-flex items-center gap-2 font-bold text-gray-900 dark:text-gray-100">
+                        <span className={`w-7 h-7 rounded-lg ${avColor(p.persona)} text-white flex items-center justify-center text-xs font-bold uppercase shrink-0`}>{p.persona.charAt(0)}</span>
+                        {p.persona}
+                      </span>
+                    </td>
+                    <td className="text-center px-3 py-2.5 tabular-nums font-semibold text-gray-700 dark:text-gray-200">{p.completados}</td>
+                    <td className="text-right px-3 py-2.5 font-mono tabular-nums font-bold text-gray-800 dark:text-gray-100">{fmtPago(p.total)}</td>
+                    <td className="text-right px-3 py-2.5 font-mono tabular-nums text-emerald-600 dark:text-emerald-400">{p.pagado > 0 ? fmtPago(p.pagado) : '—'}</td>
+                    <td className="text-right px-3 py-2.5">
+                      {p.pendiente > 0
+                        ? <span className="font-mono tabular-nums font-bold text-amber-600 dark:text-amber-400">{fmtPago(p.pendiente)}</span>
+                        : <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 dark:text-emerald-400"><Check size={12} /> Al día</span>}
+                    </td>
+                    <td className="text-right px-4 py-2.5">
+                      {p.pendiente > 0 && (
+                        <button onClick={() => pagarMes(p)}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition">
+                          <Check size={13} /> Pagar mes
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
               <tfoot>
                 <tr className="border-t border-gray-200 dark:border-gray-700 bg-gray-50/60 dark:bg-gray-900/30 font-bold">
-                  <td className="px-4 py-2.5 text-[11px] uppercase tracking-wide text-gray-400 sticky left-0 bg-gray-50 dark:bg-gray-900/60">Total</td>
-                  {grid.weeks.map(wk => {
-                    const c = grid.colTot[wk];
-                    return <td key={wk} className="text-right px-3 py-2.5 font-mono tabular-nums text-gray-700 dark:text-gray-200">{gridMode === 'money' ? fmtPago(c.money) : c.comp}</td>;
-                  })}
-                  <td className="text-right px-4 py-2.5 font-mono tabular-nums text-brand-600 dark:text-brand-400">{gridMode === 'money' ? fmtPago(totals.total) : totals.completados}</td>
+                  <td className="px-4 py-2.5 text-[11px] uppercase tracking-wide text-gray-400">Total</td>
+                  <td className="text-center px-3 py-2.5 tabular-nums text-gray-700 dark:text-gray-200">{totals.completados}</td>
+                  <td className="text-right px-3 py-2.5 font-mono tabular-nums text-gray-900 dark:text-gray-100">{fmtPago(totals.total)}</td>
+                  <td className="text-right px-3 py-2.5 font-mono tabular-nums text-emerald-600 dark:text-emerald-400">{fmtPago(totals.pagado)}</td>
+                  <td className="text-right px-3 py-2.5 font-mono tabular-nums text-amber-600 dark:text-amber-400">{totals.pendiente > 0 ? fmtPago(totals.pendiente) : '—'}</td>
+                  <td />
                 </tr>
               </tfoot>
             </table>
           </div>
-        </div>
-      )}
-
-      {/* LINKS de Drive de los productos del mes */}
-      {(productosDrive.length > 0 || driveRoot) && (
-        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <Film size={15} className="text-brand-500" />
-            <span className="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Creativos en Drive</span>
-            {driveRoot && (
-              <a href={driveRoot} target="_blank" rel="noopener noreferrer"
-                className="ml-auto inline-flex items-center gap-1 text-xs font-bold text-brand-600 dark:text-brand-300 hover:underline">
-                <ExternalLink size={13} /> Abrir Drive
-              </a>
-            )}
-          </div>
-          {productosDrive.length === 0 ? (
-            <p className="text-xs text-gray-400">Todavía no hay creativos subidos este mes.</p>
-          ) : (
-            <div className="grid sm:grid-cols-2 gap-2">
-              {productosDrive.map(p => (
-                <div key={p.nombre} className="flex items-center gap-2 rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2 text-sm">
-                  <Film size={14} className="text-emerald-500 shrink-0" />
-                  <span className="flex-1 truncate text-gray-800 dark:text-gray-100" title={p.nombre}>{p.nombre}</span>
-                  <span className="text-[11px] tabular-nums text-gray-400">{p.subidos}</span>
-                  {p.folder
-                    ? <a href={p.folder} target="_blank" rel="noopener noreferrer" title="Carpeta en Drive" className="text-brand-500 hover:text-brand-600"><ExternalLink size={14} /></a>
-                    : <span className="text-[10px] text-gray-400" title="Se subió a AdsLab (antes de conectar Drive)">AdsLab</span>}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {personas.length === 0 ? (
-        <div className="border border-dashed border-gray-300 dark:border-gray-700 rounded-xl p-10 text-center text-gray-400 dark:text-gray-500">
-          <Wallet size={26} className="mx-auto mb-2 opacity-60" />
-          <p className="text-sm">No hay productos aprobados en {monthLabel(monthKey).toLowerCase()} todavía.</p>
-          <p className="text-xs mt-1">El pago se cuenta cuando un producto queda <b>aprobado</b> en Producción.</p>
-        </div>
-      ) : (
-        <>
-          {/* Aviso de pendientes */}
-          {conPendiente.length > 0 && (
-            <div className="flex items-center gap-2 text-sm bg-amber-50 dark:bg-amber-900/15 border border-amber-200 dark:border-amber-900/40 rounded-lg px-3 py-2 text-amber-800 dark:text-amber-300">
-              <Clock size={15} />
-              <span>Tenés <b>{fmtPago(totals.pendiente)}</b> pendiente con {conPendiente.map(p => p.persona).join(', ')}.</span>
-            </div>
-          )}
-
-          {/* Tarjetas por persona — resumen de un vistazo (anillo de pago,
-              a-pagar, pendiente, "Pagar todo"). El detalle semana a semana
-              sigue en la tabla de abajo. */}
-          <div>
-            <div className="flex items-center gap-2 mb-2 px-1">
-              <Users size={14} className="text-brand-500" />
-              <span className="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Por persona</span>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {personas.map(p => (
-                <PersonaPayCard key={p.persona} p={p} fmt={fmtPago} onPagarTodo={pagarTodoPersona} />
-              ))}
-            </div>
-          </div>
-
-          {/* Detalle por persona — formato TABLA (pedido del user), con fila
-              expandible para el detalle semana por semana. */}
-          <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-[11px] font-bold uppercase tracking-wide text-gray-400 dark:text-gray-500 border-b border-gray-200 dark:border-gray-700">
-                    <th className="text-left px-4 py-2.5">Persona</th>
-                    <th className="text-center px-3 py-2.5">Completos</th>
-                    <th className="text-center px-3 py-2.5">Sem.</th>
-                    <th className="text-right px-3 py-2.5">Total</th>
-                    <th className="text-right px-3 py-2.5">Pagado</th>
-                    <th className="text-right px-3 py-2.5">Pendiente</th>
-                    <th className="w-10" aria-label="detalle" />
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100 dark:divide-gray-700/60">
-                  {personas.map(p => {
-                    const open = expanded === p.persona;
-                    return (
-                      <React.Fragment key={p.persona}>
-                        <tr onClick={() => setExpanded(open ? null : p.persona)}
-                          className="cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/40 transition">
-                          <td className="px-4 py-2.5">
-                            <span className="inline-flex items-center gap-2 font-bold text-gray-900 dark:text-gray-100">
-                              <span className="w-7 h-7 rounded-lg bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center text-brand-600 dark:text-brand-300 shrink-0">
-                                <Users size={14} />
-                              </span>
-                              {p.persona}
-                            </span>
-                          </td>
-                          <td className="text-center px-3 py-2.5 tabular-nums font-semibold text-gray-700 dark:text-gray-200">{p.completados}</td>
-                          <td className="text-center px-3 py-2.5 tabular-nums text-gray-500 dark:text-gray-400">{p.semanas.length}</td>
-                          <td className="text-right px-3 py-2.5 font-mono tabular-nums font-bold text-gray-800 dark:text-gray-100">{fmtPago(p.total)}</td>
-                          <td className="text-right px-3 py-2.5 font-mono tabular-nums text-emerald-600 dark:text-emerald-400">{p.pagado > 0 ? fmtPago(p.pagado) : '—'}</td>
-                          <td className="text-right px-3 py-2.5">
-                            {p.pendiente > 0
-                              ? <span className="font-mono tabular-nums font-bold text-amber-600 dark:text-amber-400">{fmtPago(p.pendiente)}</span>
-                              : <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 dark:text-emerald-400"><Check size={12} /> Al día</span>}
-                          </td>
-                          <td className="text-center pr-3">
-                            <ChevronDown size={15} className={`inline text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} />
-                          </td>
-                        </tr>
-                        {open && (
-                          <tr>
-                            <td colSpan={7} className="px-4 py-3 bg-gray-50/60 dark:bg-gray-900/30">
-                              <div className="space-y-2">
-                                {p.semanas.map(s => (
-                                  <div key={s.weekKey} className="flex items-center gap-3 text-sm flex-wrap">
-                                    <span className="font-semibold text-gray-700 dark:text-gray-200 min-w-[150px]">{weekLabel(s.weekKey)}</span>
-                                    <span className="text-xs text-gray-500 dark:text-gray-400">
-                                      {s.completados} × $42k{s.bonus > 0 ? ` + objetivo ${fmtPago(s.bonus)}` : ''}
-                                    </span>
-                                    <span className="ml-auto font-mono tabular-nums font-semibold text-gray-800 dark:text-gray-100">{fmtPago(s.total)}</span>
-                                    {s.paid ? (
-                                      <button onClick={() => pagarSemana(s.weekKey, p.persona, false)}
-                                        className="inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-md bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 hover:bg-emerald-200 transition" title="Marcar como no pagada">
-                                        <Check size={12} /> Pagada
-                                      </button>
-                                    ) : (
-                                      <button onClick={() => pagarSemana(s.weekKey, p.persona, true)}
-                                        className="text-xs font-bold px-2.5 py-1 rounded-md bg-brand-600 text-white hover:bg-brand-700 transition">
-                                        Marcar pagada
-                                      </button>
-                                    )}
-                                  </div>
-                                ))}
-                                {p.pendiente > 0 && (
-                                  <div className="flex justify-end pt-1">
-                                    <button onClick={() => pagarTodoPersona(p)}
-                                      className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition">
-                                      <CheckCircle2 size={14} /> Pagar todo lo pendiente ({fmtPago(p.pendiente)})
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </React.Fragment>
-                    );
-                  })}
-                </tbody>
-                <tfoot>
-                  <tr className="border-t border-gray-200 dark:border-gray-700 bg-gray-50/60 dark:bg-gray-900/30 font-bold">
-                    <td className="px-4 py-2.5 text-xs uppercase tracking-wide text-gray-400">Total del mes</td>
-                    <td className="text-center px-3 py-2.5 tabular-nums text-gray-700 dark:text-gray-200">{totals.completados}</td>
-                    <td />
-                    <td className="text-right px-3 py-2.5 font-mono tabular-nums text-gray-900 dark:text-gray-100">{fmtPago(totals.total)}</td>
-                    <td className="text-right px-3 py-2.5 font-mono tabular-nums text-emerald-600 dark:text-emerald-400">{fmtPago(totals.pagado)}</td>
-                    <td className="text-right px-3 py-2.5 font-mono tabular-nums text-amber-600 dark:text-amber-400">{totals.pendiente > 0 ? fmtPago(totals.pendiente) : '—'}</td>
-                    <td />
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          </div>
-
-          <p className="text-[10px] text-gray-400 dark:text-gray-500 px-1">
-            $42.000 por producto completo y aprobado + objetivo semanal ($24k/$30k/$36k por 3/4/5 completos). El pago se salda por semana. Marcá una semana como pagada cuando le transferís al agente.
-          </p>
-        </>
-      )}
-    </div>
-  );
-}
-
-// Tarjeta de pago por persona — resumen de un vistazo: anillo con cuánto de lo
-// que ganó ya está pagado, completos del mes, a-pagar / pagado / pendiente, y
-// botón "Pagar todo". El detalle semana a semana sigue en la tabla de abajo.
-function PersonaPayCard({ p, fmt, onPagarTodo }) {
-  const bonus = p.semanas.reduce((s, x) => s + (x.bonus || 0), 0);
-  const pctPaid = p.total > 0 ? Math.round((p.pagado / p.total) * 100) : 100;
-  const alDia = p.pendiente <= 0;
-  const R = 19, C = 2 * Math.PI * R; // circunferencia del anillo
-  const off = C * (1 - Math.min(1, Math.max(0, pctPaid / 100)));
-  const ringColor = alDia ? '#34d399' : '#fbbf24';
-  return (
-    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
-      <div className="flex items-center gap-3 mb-3">
-        <div className="relative w-[46px] h-[46px] shrink-0">
-          <svg width="46" height="46" viewBox="0 0 46 46" className="-rotate-90">
-            <circle cx="23" cy="23" r={R} fill="none" stroke="currentColor" strokeWidth="5" className="text-gray-200 dark:text-gray-700" />
-            <circle cx="23" cy="23" r={R} fill="none" stroke={ringColor} strokeWidth="5" strokeLinecap="round"
-              strokeDasharray={C} strokeDashoffset={off} />
-          </svg>
-          <span className="absolute inset-0 flex items-center justify-center text-[11px] font-bold tabular-nums"
-            style={{ color: ringColor }}>
-            {alDia ? '✓' : `${pctPaid}%`}
-          </span>
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{p.persona}</p>
-          <p className="text-[11px] text-gray-500 dark:text-gray-400">
-            {p.completados} completo{p.completados !== 1 ? 's' : ''}{bonus > 0 ? ` · bonus ${fmt(bonus)}` : ''}
-          </p>
-        </div>
-      </div>
-      <div className="space-y-1 text-[13px]">
-        <div className="flex justify-between"><span className="text-gray-500 dark:text-gray-400">A pagar</span><span className="font-mono tabular-nums font-bold text-gray-900 dark:text-gray-100">{fmt(p.total)}</span></div>
-        <div className="flex justify-between"><span className="text-gray-500 dark:text-gray-400">Pagado</span><span className="font-mono tabular-nums text-emerald-600 dark:text-emerald-400">{p.pagado > 0 ? fmt(p.pagado) : '—'}</span></div>
-        <div className="flex justify-between"><span className="text-gray-500 dark:text-gray-400">Pendiente</span><span className={`font-mono tabular-nums font-bold ${alDia ? 'text-gray-400 dark:text-gray-500' : 'text-amber-600 dark:text-amber-400'}`}>{alDia ? '—' : fmt(p.pendiente)}</span></div>
-      </div>
-      <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700/60">
-        {alDia ? (
-          <div className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400">
-            <CheckCircle2 size={14} /> Al día
-          </div>
-        ) : (
-          <button onClick={() => onPagarTodo(p)}
-            className="w-full inline-flex items-center justify-center gap-1.5 text-xs font-bold px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition">
-            <CheckCircle2 size={14} /> Pagar todo ({fmt(p.pendiente)})
-          </button>
         )}
+        <p className="text-[10px] text-gray-400 dark:text-gray-500 px-4 py-2 border-t border-gray-100 dark:border-gray-700/60">
+          Pago mensual por persona. "Pagar mes" salda todo lo pendiente del mes de esa persona.
+        </p>
       </div>
     </div>
   );

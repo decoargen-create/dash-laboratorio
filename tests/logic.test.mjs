@@ -40,12 +40,17 @@ eq('Panchito ganado (4 compl + bono)', 4 * pagoProductoDeCfg({ pagoProducto: 420
 // ─────────── NUMERAR DUPLICADOS ───────────
 console.log('\nNUMERAR DUPLICADOS:');
 const dupCards = [
-  { id: 'a', productoNombre: 'Cepillo', weekKey: '2026-08-17', createdAt: '2026-08-17T10:00' },
-  { id: 'b', productoNombre: 'Cepillo', weekKey: '2026-08-17', createdAt: '2026-08-17T11:00' },
-  { id: 'c', productoNombre: 'Colageno', weekKey: '2026-08-17', createdAt: '2026-08-17T10:00' },
+  { id: 'a', productoNombre: 'Cepillo', persona: 'Fran', weekKey: '2026-08-17', createdAt: '2026-08-17T10:00' },
+  { id: 'b', productoNombre: 'Cepillo', persona: 'Fran', weekKey: '2026-08-17', createdAt: '2026-08-17T11:00' },
+  { id: 'c', productoNombre: 'Colageno', persona: 'Fran', weekKey: '2026-08-17', createdAt: '2026-08-17T10:00' },
 ];
-eq('2 Cepillo misma semana → #1 y #2', numerarDuplicados(dupCards), { a: 1, b: 2 });
+eq('Fran con 2 Cepillo → #1 y #2', numerarDuplicados(dupCards), { a: 1, b: 2 });
 eq('producto único NO se numera', numerarDuplicados([{ id: 'x', productoNombre: 'Solo', weekKey: '2026-08-17' }]), {});
+// Mismo producto pero PERSONAS distintas → NO se numera (no son duplicados de una persona)
+eq('Cepillo de Fran y de Wanda NO se numeran', numerarDuplicados([
+  { id: 'a', productoNombre: 'Cepillo', persona: 'Fran', weekKey: '2026-08-17' },
+  { id: 'b', productoNombre: 'Cepillo', persona: 'Wanda', weekKey: '2026-08-17' },
+]), {});
 
 // ─────────── RESUMEN VIDEOS POR PRODUCTO ───────────
 console.log('\nVIDEOS + TARJETAS POR PRODUCTO:');

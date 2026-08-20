@@ -34,7 +34,10 @@ export function bonusDeCfg(cfg, completados) {
 export function numerarDuplicados(cards) {
   const groups = {};
   for (const a of (cards || [])) {
-    const k = `${a.weekKey}|${(a.productoNombre || '').trim().toLowerCase()}`;
+    // Agrupa por semana + PERSONA + producto: solo numera cuando la MISMA persona
+    // tiene el mismo producto 2+ veces (no cruza personas distintas).
+    const per = (a.persona || '').trim().toLowerCase();
+    const k = `${a.weekKey}|${per}|${(a.productoNombre || '').trim().toLowerCase()}`;
     (groups[k] = groups[k] || []).push(a);
   }
   const out = {};

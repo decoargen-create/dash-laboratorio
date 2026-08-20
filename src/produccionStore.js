@@ -610,9 +610,15 @@ export function winnersDeProducto(productoId, productoNombre) {
 // en cada una y la ve el editor). Devuelve cuántas tarjetas tocó.
 export function setWinnersProducto(productoId, productoNombre, winners) {
   const arr = Array.isArray(winners) ? winners : [];
+  const target = JSON.stringify(arr);
   let n = 0;
   for (const a of read()) {
-    if (mismoProducto(a, productoId, productoNombre)) { updateAssignment(a.id, { winners: arr }); n++; }
+    // Solo tocamos las tarjetas que REALMENTE cambian (evita bumpear updatedAt en
+    // tarjetas sin cambios, que reiniciaría su reloj de auto-archivo, y evita un
+    // storm de writes a la nube).
+    if (mismoProducto(a, productoId, productoNombre) && JSON.stringify(a.winners || []) !== target) {
+      updateAssignment(a.id, { winners: arr }); n++;
+    }
   }
   return n;
 }
@@ -826,12 +832,17 @@ export function findOrCreateAssignment({ weekKey, productoId, productoNombre, pe
   if (!weekKey || !per) return null;
   const pid = productoId != null ? String(productoId) : null;
   const arr = read();
+  // Comparación NORMALIZADA (trim + lowercase) para persona y nombre de producto:
+  // así "Cepillo" y "cepillo " no crean una segunda tarjeta del mismo producto
+  // (lo que duplicaría el conteo de pago).
+  const perN = per.toLowerCase();
+  const nomN = (productoNombre || '').trim().toLowerCase();
   const found = arr.find(a =>
     a.weekKey === weekKey &&
-    a.persona === per &&
+    (a.persona || '').trim().toLowerCase() === perN &&
     (pid != null
       ? String(a.productoId) === pid
-      : (a.productoNombre || '') === (productoNombre || '')));
+      : (a.productoNombre || '').trim().toLowerCase() === nomN));
   if (found) return found;
   return addAssignment({ weekKey, productoId, productoNombre, persona: per, tipo });
 }

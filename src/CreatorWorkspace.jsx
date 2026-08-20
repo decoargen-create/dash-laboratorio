@@ -201,7 +201,7 @@ function CreatorCardDetail({ a, num, onClose, addToast }) {
 
           {/* Creativos: subir/ver videos (misma sección que ve el admin). Trae su
               propio header "CREATIVOS" + link a la carpeta de Drive + dropzone. */}
-          <CreativosSection a={a} addToast={addToast} canDelete />
+          <CreativosSection a={a} addToast={addToast} canDelete readOnly={!puedeMover} />
         </div>
 
         <div className="border-t border-gray-100 dark:border-gray-800 px-5 py-3 bg-gray-50/60 dark:bg-gray-900/40">

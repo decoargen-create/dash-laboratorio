@@ -17,7 +17,7 @@ import {
 import {
   ESTADOS, ESTADO_LABELS, VIDEOS_POR_PRODUCTO, weekKeyOf, weekLabel, weekRange, allWeekKeys,
   listAssignments, addAssignment, updateAssignment, removeAssignment, assignPersona,
-  assignCreator, subscribeProduccion, esCompleto, bonusObjetivo, inversionPorProducto,
+  assignCreator, subscribeProduccion, esCompleto, bonusObjetivo, bonusDe, inversionPorProducto,
   getRole, entregasNuevas, ultimaSubidaTs, personasEnTarjetas, resumenVideosPorProducto,
   resyncDesdeNube, vaciarTodo, setMaterialLinkProducto, probarDiscord,
   loadNotifConfig, saveNotifConfig, toggleWinner, winnersDeProducto, pagoProductoDe,
@@ -402,6 +402,18 @@ function fmtDur(ms) {
 // Panel VERTICAL por persona: una fila por creativo con asignados, por hacer,
 // en revisión y objetivo (aprobados/asignados) + su ritmo (tiempo prom).
 // Las clases grid-cols van LITERALES (Tailwind no genera clases interpoladas).
+// Estado del bono de UNA persona según sus completados y SU config de pago
+// (no todos tienen bono): { tiene } ya lo alcanzó · { faltan:n } tiene esquema
+// pero todavía no llega · { sin } no tiene bono configurado (no se muestra).
+function bonoInfo(persona, completados) {
+  if (bonusDe(persona, completados) > 0) return { tiene: true };
+  if (bonusDe(persona, completados + 50) <= 0) return { sin: true };
+  for (let c = completados + 1; c <= completados + 50; c++) {
+    if (bonusDe(persona, c) > 0) return { faltan: c - completados };
+  }
+  return { sin: true };
+}
+
 function ResumenSemana({ asigs, filtroSinAsignar = false, onToggleSinAsignar, onPickPersona, activePersonas = [] }) {
   const { rows, sinAsignar, total, totals } = useMemo(() => {
     const now = Date.now();
@@ -430,7 +442,7 @@ function ResumenSemana({ asigs, filtroSinAsignar = false, onToggleSinAsignar, on
     const rows = Object.values(by).map(s => ({
       ...s,
       avg: s.tiempos.length ? s.tiempos.reduce((x, y) => x + y, 0) / s.tiempos.length : null,
-      bonus: bonusObjetivo(s.completos),
+      bono: bonoInfo(s.persona, s.completos),
     })).sort((a, b) => b.asignados - a.asignados);
     // Totales del equipo (el "resumen de los 3 juntos" arriba de las tarjetas).
     const totals = {
@@ -487,7 +499,6 @@ function ResumenSemana({ asigs, filtroSinAsignar = false, onToggleSinAsignar, on
         <div className="flex gap-3 p-3 overflow-x-auto">
           {rows.map((s, idx) => {
             const pct = s.asignados ? Math.round((s.completos / s.asignados) * 100) : 0;
-            const faltaBonus = Math.max(0, 3 - s.completos);
             const esMVP = idx === 0 && s.completos > 0;
             const copyPct = pct >= 100 ? 'objetivo cumplido ✨'
               : pct >= 80 ? `¡a un paso! (${pct}%)`
@@ -536,11 +547,14 @@ function ResumenSemana({ asigs, filtroSinAsignar = false, onToggleSinAsignar, on
                   ))}
                 </div>
 
-                {/* Pie: bonus + ritmo */}
+                {/* Pie: bono (según la config de CADA persona; si no tiene bono
+                    configurado, no se muestra) + ritmo */}
                 <div className="flex items-center justify-between border-t border-gray-200/60 dark:border-white/10 pt-2 text-[11px]">
-                  {s.bonus > 0
+                  {s.bono?.tiene
                     ? <span className="font-extrabold text-emerald-600 dark:text-emerald-400">🎯 ¡Bonus!</span>
-                    : <span className="text-gray-400">{faltaBonus} más y hay bonus 🎯</span>}
+                    : s.bono?.faltan
+                    ? <span className="text-gray-400">{s.bono.faltan} más y hay bonus 🎯</span>
+                    : <span />}
                   <span className="flex items-center gap-2 text-gray-400 tabular-nums">
                     {s.avg != null && <span title="Tiempo prom. a aprobado">⏱ {fmtDur(s.avg)}</span>}
                     {s.trabadas > 0 && <span className="text-amber-600 dark:text-amber-400 font-bold" title="Trabadas +24h en revisión">🐢 {s.trabadas}</span>}
@@ -720,7 +734,17 @@ export default function ProduccionSection({ addToast }) {
     e.preventDefault();
     setDragOver(null);
     const id = e.dataTransfer.getData('text/prod-id');
-    if (id) updateAssignment(id, { estado: colKey });
+    if (!id) return;
+    // Solo se archiva lo ya publicado/aprobado (sino una tarjeta sin terminar
+    // contaría como completa para el pago). El auto-archivo de 48h ya respeta esto.
+    if (colKey === 'archivado') {
+      const card = asigs.find(a => a.id === id);
+      if (card && card.estado !== 'publicado' && card.estado !== 'aprobado') {
+        addToast?.({ type: 'warning', message: 'Solo se archiva lo que ya está publicado o aprobado.' });
+        return;
+      }
+    }
+    updateAssignment(id, { estado: colKey });
   };
 
   return (
@@ -1254,7 +1278,7 @@ function KanbanCard({ a, num, personas, team = [], onOpen, onAssign, addToast })
           {moveMenu && (
             <div className="absolute right-0 top-6 z-20 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl p-1 flex flex-col gap-0.5 min-w-[130px]">
               <span className="text-[9.5px] font-bold uppercase text-gray-400 px-2 pt-1">Mover a</span>
-              {ESTADOS.map(e => (
+              {ESTADOS.filter(e => e !== 'archivado' || a.estado === 'publicado' || a.estado === 'aprobado').map(e => (
                 <button key={e} onClick={() => { updateAssignment(a.id, { estado: e }); setMoveMenu(false); }}
                   className={`text-left text-xs font-semibold px-2 py-1 rounded whitespace-nowrap ${a.estado === e ? 'bg-brand-50 dark:bg-brand-900/30 text-brand-600 dark:text-brand-300' : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200'}`}>
                   {a.estado === e ? '✓ ' : ''}{ESTADO_LABELS[e]}
@@ -2083,7 +2107,7 @@ function CardDetailModal({ a, personas, team = [], onClose, addToast, onTeamChan
           <div>
             <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Estado</span>
             <div className="flex flex-wrap gap-1">
-              {ESTADOS.map(e => (
+              {ESTADOS.filter(e => e !== 'archivado' || a.estado === 'publicado' || a.estado === 'aprobado').map(e => (
                 <button key={e} onClick={() => updateAssignment(a.id, { estado: e })}
                   className={`text-[11px] font-bold px-2 py-1 rounded-md transition ${a.estado === e ? 'bg-brand-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200'}`}>
                   {ESTADO_LABELS[e]}

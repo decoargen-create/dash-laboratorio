@@ -58,9 +58,40 @@ export function resumenVideosPorProducto(cards) {
     by[k].subidos += (a.archivos?.length || 0);
     by[k].target += VIDEOS_POR_PRODUCTO;
     by[k].tarjetas++;
-    if (a.estado === 'publicado') by[k].entregadas++;   // entregada = publicada
+    if (a.estado === 'publicado' || a.estado === 'archivado') by[k].entregadas++;   // entregada = publicada (o archivada)
   }
   return Object.values(by)
     .map(x => ({ ...x, faltan: Math.max(0, x.target - x.subidos), pendientes: x.tarjetas - x.entregadas }))
     .sort((x, y) => y.pendientes - x.pendientes || y.faltan - x.faltan || x.producto.localeCompare(y.producto, 'es'));
+}
+
+// Auto-archivo: una tarjeta publicada hace más de 48h se muestra en "Archivado".
+export const AUTO_ARCHIVE_MS = 48 * 60 * 60 * 1000;
+
+// Momento (epoch ms) en que la tarjeta entró a "publicado", del historial; si no
+// hay, cae a updatedAt. 0 si no se puede determinar.
+export function publicadoTs(a) {
+  const hist = a?.historial || [];
+  for (let i = hist.length - 1; i >= 0; i--) {
+    const e = hist[i];
+    if (e?.tipo === 'estado' && e?.to === 'publicado' && e?.ts) {
+      const t = Date.parse(e.ts);
+      if (!Number.isNaN(t)) return t;
+    }
+  }
+  const u = a?.updatedAt ? Date.parse(a.updatedAt) : NaN;
+  return Number.isNaN(u) ? 0 : u;
+}
+
+// Columna donde MOSTRAR la tarjeta: 'archivado' si su estado ya es archivado, o
+// si está publicada hace +48h (auto-archivo, solo visual — el estado guardado
+// sigue siendo 'publicado', así no pierde el conteo de pago). Si no, su estado.
+export function columnaEfectiva(a, nowMs) {
+  const est = (a && a.estado) || 'porhacer';
+  if (est === 'archivado') return 'archivado';
+  if (est === 'publicado') {
+    const ts = publicadoTs(a);
+    if (ts && (nowMs - ts) > AUTO_ARCHIVE_MS) return 'archivado';
+  }
+  return est;
 }

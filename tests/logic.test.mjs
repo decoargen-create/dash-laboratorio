@@ -9,6 +9,7 @@ import {
   PAGO_POR_PRODUCTO, VIDEOS_POR_PRODUCTO, DEFAULT_BONUS_TRAMOS,
   bonusObjetivo, pagoProductoDeCfg, bonusDeCfg,
   numerarDuplicados, resumenVideosPorProducto,
+  columnaEfectiva, AUTO_ARCHIVE_MS,
 } from '../src/produccionCalc.js';
 import {
   clean, abreviarProducto, shortId, cardFolderName, finalFileName,
@@ -60,6 +61,18 @@ const kit = [
   { productoNombre: 'Kit Inicial', estado: 'porhacer', archivos: [] },
 ];
 eq('Kit Inicial: 3 tarjetas, 1 entregada, 2 pendientes', (({ tarjetas, entregadas, pendientes }) => ({ tarjetas, entregadas, pendientes }))(resumenVideosPorProducto(kit)[0]), { tarjetas: 3, entregadas: 1, pendientes: 2 });
+// Archivado también cuenta como entregada
+eq('archivado cuenta como entregada', resumenVideosPorProducto([{ productoNombre: 'X', estado: 'archivado', archivos: [] }])[0].entregadas, 1);
+
+// ─────────── AUTO-ARCHIVO (publicado +48h) ───────────
+console.log('\nAUTO-ARCHIVO:');
+const now = 1_000_000_000_000;
+const pubHace = (ms) => ({ estado: 'publicado', historial: [{ tipo: 'estado', to: 'publicado', ts: new Date(now - ms).toISOString() }] });
+eq('publicado hace 10h → sigue en publicado', columnaEfectiva(pubHace(10 * 3600e3), now), 'publicado');
+eq('publicado hace 49h → archivado', columnaEfectiva(pubHace(49 * 3600e3), now), 'archivado');
+eq('justo en 48h → todavía publicado (no supera)', columnaEfectiva(pubHace(AUTO_ARCHIVE_MS), now), 'publicado');
+eq('estado archivado → archivado', columnaEfectiva({ estado: 'archivado' }, now), 'archivado');
+eq('en revisión → revisión (no lo toca)', columnaEfectiva({ estado: 'revision' }, now), 'revision');
 
 // ─────────── NOMENCLATURA DRIVE ───────────
 console.log('\nNOMENCLATURA DRIVE:');

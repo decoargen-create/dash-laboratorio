@@ -12,7 +12,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Film, Plus, X, Trash2, ChevronDown, UploadCloud, Loader2, CheckCircle2,
   AlertTriangle, ExternalLink, FileText, GripVertical, Users, History, Search, ArrowLeftRight,
-  Bell, BellRing, Inbox, Eye, RefreshCw, Calendar, Filter, FolderOpen, Download, Star,
+  Bell, BellRing, Inbox, Eye, RefreshCw, Calendar, Filter, FolderOpen, Download, Star, Settings,
 } from 'lucide-react';
 import {
   ESTADOS, ESTADO_LABELS, VIDEOS_POR_PRODUCTO, weekKeyOf, weekLabel, weekRange, allWeekKeys,
@@ -23,6 +23,7 @@ import {
   loadNotifConfig, saveNotifConfig, toggleWinner, winnersDeProducto, pagoProductoDe,
 } from './produccionStore.js';
 import { CreativosSection, subirParaTarjeta, VIDEO_ACCEPT, probeDrive } from './produccionUpload.jsx';
+import { numerarDuplicados, columnaEfectiva } from './produccionCalc.js';
 import { listTeam, createMember, removeMember } from './produccionTeam.js';
 import { driveStatus, connectDrive, disconnectDrive } from './produccionDrive.js';
 import TeamModal from './TeamModal.jsx';
@@ -287,6 +288,7 @@ const COLS = [
   { key: 'revision', emoji: '👀', dot: 'bg-amber-400', text: 'text-amber-600 dark:text-amber-400', hdr: 'bg-amber-100/70 dark:bg-amber-900/20', empty: '👀 Nada en revisión — todo al día' },
   { key: 'aprobado', emoji: '✅', dot: 'bg-emerald-500', text: 'text-emerald-600 dark:text-emerald-400', hdr: 'bg-emerald-100/70 dark:bg-emerald-900/20', empty: '✅ Acá caen los aprobados' },
   { key: 'publicado', emoji: '🚀', dot: 'bg-violet-500', text: 'text-violet-600 dark:text-violet-400', hdr: 'bg-violet-100/70 dark:bg-violet-900/20', empty: '🚀 Listos para despegar' },
+  { key: 'archivado', emoji: '📦', dot: 'bg-gray-400', text: 'text-gray-500 dark:text-gray-400', hdr: 'bg-gray-200/60 dark:bg-gray-700/40', empty: '📦 Nada archivado' },
 ];
 
 const PERSONA_PALETTE = ['amber', 'violet', 'sky', 'emerald', 'rose', 'indigo', 'teal'];
@@ -400,7 +402,7 @@ function fmtDur(ms) {
 // Panel VERTICAL por persona: una fila por creativo con asignados, por hacer,
 // en revisión y objetivo (aprobados/asignados) + su ritmo (tiempo prom).
 // Las clases grid-cols van LITERALES (Tailwind no genera clases interpoladas).
-function ResumenSemana({ asigs, filtroSinAsignar = false, onToggleSinAsignar }) {
+function ResumenSemana({ asigs, filtroSinAsignar = false, onToggleSinAsignar, onPickPersona, activePersonas = [] }) {
   const { rows, sinAsignar, total, totals } = useMemo(() => {
     const now = Date.now();
     const by = {};
@@ -492,8 +494,11 @@ function ResumenSemana({ asigs, filtroSinAsignar = false, onToggleSinAsignar }) 
               : pct === 0 ? 'arrancando la semana'
               : `${pct}% del objetivo`;
             return (
-              <div key={s.persona}
-                className="relative min-w-[218px] max-w-[270px] flex-1 rounded-2xl border border-pink-200/50 dark:border-white/10 bg-gradient-to-br from-pink-500/10 via-violet-500/5 to-transparent p-3 flex flex-col gap-2.5 transition hover:-translate-y-0.5 hover:shadow-lg hover:shadow-pink-900/10">
+              <div key={s.persona} role="button" tabIndex={0}
+                onClick={() => onPickPersona?.(s.persona)}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPickPersona?.(s.persona); } }}
+                title={activePersonas.includes(s.persona) ? `Quitar el filtro de ${s.persona}` : `Ver solo las tarjetas de ${s.persona}`}
+                className={`relative min-w-[218px] max-w-[270px] flex-1 rounded-2xl border bg-gradient-to-br from-pink-500/10 via-violet-500/5 to-transparent p-3 flex flex-col gap-2.5 transition cursor-pointer hover:-translate-y-0.5 hover:shadow-lg hover:shadow-pink-900/10 ${activePersonas.includes(s.persona) ? 'border-brand-400 ring-2 ring-brand-300 dark:ring-brand-700' : 'border-pink-200/50 dark:border-white/10'}`}>
                 {esMVP && (
                   <span className="absolute -top-2 right-3 text-[10px] font-black uppercase tracking-wide bg-gradient-to-r from-amber-400 to-yellow-500 text-amber-950 rounded-full px-2 py-0.5 shadow" title="La persona con más aprobados de la semana">
                     👑 MVP
@@ -566,6 +571,16 @@ export default function ProduccionSection({ addToast }) {
   const [vaciando, setVaciando] = useState(false);
   const [showNotif, setShowNotif] = useState(false);
   const [showBuscar, setShowBuscar] = useState(false);
+  const [ajustesOpen, setAjustesOpen] = useState(false);
+  const ajustesRef = useRef(null);
+  useEffect(() => {
+    if (!ajustesOpen) return;
+    const onDoc = (e) => { if (ajustesRef.current && !ajustesRef.current.contains(e.target)) setAjustesOpen(false); };
+    const onKey = (e) => { if (e.key === 'Escape') setAjustesOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
+  }, [ajustesOpen]);
   const [resyncing, setResyncing] = useState(false);
   const [team, setTeam] = useState([]);
   const [detailId, setDetailId] = useState(null);
@@ -682,10 +697,24 @@ export default function ProduccionSection({ addToast }) {
     return list;
   }, [asigs, soloSinAsignar, filtroProducto, filtroPersona]);
   const byCol = useMemo(() => {
-    const m = { porhacer: [], revision: [], aprobado: [], publicado: [] };
-    for (const a of asigsBoard) (m[a.estado] || m.porhacer).push(a);
+    const m = { porhacer: [], revision: [], aprobado: [], publicado: [], archivado: [] };
+    const now = Date.now();
+    // columnaEfectiva manda lo publicado hace +48h a "archivado" (auto-archivo).
+    for (const a of asigsBoard) (m[columnaEfectiva(a, now)] || m.porhacer).push(a);
     return m;
   }, [asigsBoard]);
+  // La columna "Archivado" está oculta por defecto; el toggle la muestra.
+  const [mostrarArchivado, setMostrarArchivado] = useState(() => {
+    try { return localStorage.getItem('adslab-prod-archivado') === '1'; } catch { return false; }
+  });
+  const toggleArchivado = () => setMostrarArchivado(v => {
+    const n = !v; try { localStorage.setItem('adslab-prod-archivado', n ? '1' : '0'); } catch {}
+    return n;
+  });
+  const colsVisibles = mostrarArchivado ? COLS : COLS.filter(c => c.key !== 'archivado');
+  // Numeración de duplicados: si una persona tiene el mismo producto 2+ veces en
+  // la semana, cada tarjeta lleva #1, #2… (igual que en el tablero del editor).
+  const numMap = useMemo(() => numerarDuplicados(asigs), [asigs]);
 
   const onDrop = (e, colKey) => {
     e.preventDefault();
@@ -722,46 +751,62 @@ export default function ProduccionSection({ addToast }) {
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:border-brand-400 hover:text-brand-600 dark:hover:text-brand-300 transition shadow-sm">
             <Search size={14} /> Buscar videos
           </button>
-          <button onClick={() => setConfirmResync(true)} disabled={resyncing}
-            title="Re-sincronizar: descarta el tablero local y lo vuelve a traer de la nube (útil si quedó una tarjeta fantasma que no sincronizó)"
-            className="inline-flex items-center justify-center w-8 h-8 text-gray-500 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition shadow-sm disabled:opacity-50">
-            <RefreshCw size={14} className={resyncing ? 'animate-spin' : ''} />
-          </button>
-          <button onClick={() => setShowNotif(true)}
-            title="Avisos de Discord: configurar qué transiciones avisan, a quién mencionar, y probar."
-            className="inline-flex items-center justify-center w-8 h-8 text-gray-500 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:text-indigo-600 hover:border-indigo-300 dark:hover:border-indigo-800 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition shadow-sm">
-            <Bell size={14} />
-          </button>
-          <button onClick={() => setConfirmVaciar(true)} disabled={vaciando}
-            title="Vaciar TODO: borra todas las tarjetas, la config de pagos y las cuentas del equipo. Deja la producción en cero para arrancar de nuevo."
-            className="inline-flex items-center justify-center w-8 h-8 text-gray-400 dark:text-gray-500 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:text-red-600 hover:border-red-300 dark:hover:border-red-800 hover:bg-red-50 dark:hover:bg-red-900/20 transition shadow-sm disabled:opacity-50">
-            <Trash2 size={14} className={vaciando ? 'animate-pulse' : ''} />
-          </button>
-          {drive.rootLink && (
-            <a href={drive.rootLink} target="_blank" rel="noopener noreferrer"
-              title="Abrir la carpeta de creativos en Google Drive (todos los productos)"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition shadow-sm">
-              <ExternalLink size={14} /> Drive
-            </a>
-          )}
-          {drive.connected ? (
-            <span title={`Drive conectado como ${drive.email || 'tu cuenta'} — clic para desconectar`}
-              onClick={onDisconnectDrive}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800 rounded-lg cursor-pointer hover:bg-emerald-100 transition" >
-              <CheckCircle2 size={14} /> Drive OK
-            </span>
-          ) : (
-            <button onClick={onConnectDrive} disabled={drive.connecting}
-              title="Conectar tu Google Drive para que los videos se suban ahí (cualquier tamaño)"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-r from-pink-500 to-rose-500 rounded-lg hover:from-pink-600 hover:to-rose-600 transition shadow-sm disabled:opacity-60">
-              {drive.connecting ? <Loader2 size={14} className="animate-spin" /> : <ExternalLink size={14} />}
-              {drive.connecting ? 'Conectando…' : 'Conectar Drive'}
+          {/* Ajustes: todo lo de configuración (equipo, Drive, avisos, sync) en
+              un solo menú, para dejar el header con lo mínimo del día a día. */}
+          <div className="relative" ref={ajustesRef}>
+            <button onClick={() => setAjustesOpen(o => !o)} title="Ajustes: equipo, Drive, avisos y más"
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition shadow-sm border ${ajustesOpen ? 'border-brand-400 text-brand-600 dark:text-brand-300 bg-brand-50 dark:bg-brand-900/20' : 'text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700'}`}>
+              <Settings size={14} /> Ajustes
+              <ChevronDown size={12} className={`transition ${ajustesOpen ? 'rotate-180' : ''}`} />
             </button>
-          )}
-          <button onClick={() => setShowTeam(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition shadow-sm">
-            <Users size={14} /> Equipo
-          </button>
+            {ajustesOpen && (
+              <div className="absolute right-0 top-full mt-1 z-40 w-64 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl p-1.5">
+                <button onClick={() => { setShowTeam(true); setAjustesOpen(false); }}
+                  className="w-full flex items-center gap-2.5 text-left text-sm font-semibold px-2.5 py-2 rounded-lg text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition">
+                  <Users size={15} className="text-gray-400" /> Equipo y pagos
+                </button>
+                <button onClick={() => { setShowNotif(true); setAjustesOpen(false); }}
+                  className="w-full flex items-center gap-2.5 text-left text-sm font-semibold px-2.5 py-2 rounded-lg text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition">
+                  <Bell size={15} className="text-gray-400" /> Avisos de Discord
+                </button>
+
+                <div className="my-1 border-t border-gray-100 dark:border-gray-800" />
+                {drive.connected ? (
+                  <>
+                    <div className="flex items-center gap-2 px-2.5 py-1.5 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+                      <CheckCircle2 size={14} /> Drive conectado{drive.email ? ` · ${drive.email}` : ''}
+                    </div>
+                    {drive.rootLink && (
+                      <a href={drive.rootLink} target="_blank" rel="noopener noreferrer" onClick={() => setAjustesOpen(false)}
+                        className="w-full flex items-center gap-2.5 text-left text-sm font-semibold px-2.5 py-2 rounded-lg text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition">
+                        <ExternalLink size={15} className="text-gray-400" /> Abrir carpeta de Drive
+                      </a>
+                    )}
+                    <button onClick={() => { onDisconnectDrive(); setAjustesOpen(false); }}
+                      className="w-full flex items-center gap-2.5 text-left text-sm font-semibold px-2.5 py-2 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition">
+                      <X size={15} className="text-gray-400" /> Desconectar Drive
+                    </button>
+                  </>
+                ) : (
+                  <button onClick={() => { onConnectDrive(); setAjustesOpen(false); }} disabled={drive.connecting}
+                    className="w-full flex items-center gap-2.5 text-left text-sm font-semibold px-2.5 py-2 rounded-lg text-pink-600 dark:text-pink-300 hover:bg-pink-50 dark:hover:bg-pink-900/20 transition disabled:opacity-60">
+                    {drive.connecting ? <Loader2 size={15} className="animate-spin" /> : <ExternalLink size={15} />}
+                    {drive.connecting ? 'Conectando…' : 'Conectar Drive'}
+                  </button>
+                )}
+
+                <div className="my-1 border-t border-gray-100 dark:border-gray-800" />
+                <button onClick={() => { setConfirmResync(true); setAjustesOpen(false); }} disabled={resyncing}
+                  className="w-full flex items-center gap-2.5 text-left text-sm font-semibold px-2.5 py-2 rounded-lg text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition disabled:opacity-50">
+                  <RefreshCw size={15} className={`text-gray-400 ${resyncing ? 'animate-spin' : ''}`} /> Re-sincronizar
+                </button>
+                <button onClick={() => { setConfirmVaciar(true); setAjustesOpen(false); }} disabled={vaciando}
+                  className="w-full flex items-center gap-2.5 text-left text-sm font-semibold px-2.5 py-2 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition disabled:opacity-50">
+                  <Trash2 size={15} /> Vaciar todo
+                </button>
+              </div>
+            )}
+          </div>
           <button onClick={() => setShowAdd(true)}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-brand-700 rounded-lg hover:from-brand-600 hover:to-brand-800 transition shadow-sm">
             <Plus size={14} /> Agregar producto
@@ -817,9 +862,12 @@ export default function ProduccionSection({ addToast }) {
           onOpen={(wk, id) => { setWeekKey(wk); setDetailId(id); }} />
       )}
 
-      {/* Resumen de la semana: carga por persona + objetivo */}
+      {/* Resumen de la semana: carga por persona + objetivo. Clic en una persona
+          filtra el tablero por ella (toggle). */}
       <ResumenSemana asigs={asigs} filtroSinAsignar={soloSinAsignar}
-        onToggleSinAsignar={() => setSoloSinAsignar(v => !v)} />
+        onToggleSinAsignar={() => setSoloSinAsignar(v => !v)}
+        activePersonas={filtroPersona}
+        onPickPersona={(p) => setFiltroPersona(prev => prev.includes(p) ? prev.filter(x => x !== p) : [p])} />
 
       {/* Aviso de filtro activo */}
       {soloSinAsignar && (
@@ -907,6 +955,13 @@ export default function ProduccionSection({ addToast }) {
               </button>
             </>
           )}
+          {/* Toggle de la columna Archivado (oculta por defecto). Muestra el
+              contador de lo que hay archivado (auto-archivo a las 48h). */}
+          <button onClick={toggleArchivado}
+            title="Mostrar/ocultar la columna Archivado (lo publicado hace +48h se archiva solo)"
+            className={`ml-auto inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold rounded-lg border transition ${mostrarArchivado ? 'border-gray-400 text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-700' : 'border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'}`}>
+            📦 {mostrarArchivado ? 'Ocultar' : 'Archivado'}{(byCol.archivado?.length || 0) > 0 ? ` · ${byCol.archivado.length}` : ''}
+          </button>
         </div>
       )}
 
@@ -914,8 +969,8 @@ export default function ProduccionSection({ addToast }) {
           estiran para llenar el alto de la pantalla (se adapta al viewport con
           vh, así no queda un vacío gigante debajo); en pantallas chicas cae a
           scroll horizontal. */}
-      <div className="flex items-stretch gap-3 overflow-x-auto pb-2 lg:grid lg:grid-cols-4 lg:overflow-visible lg:min-h-[calc(100vh-18rem)]">
-        {COLS.map(col => {
+      <div className={`flex items-stretch gap-3 overflow-x-auto pb-2 lg:grid lg:overflow-visible lg:min-h-[calc(100vh-18rem)] ${mostrarArchivado ? 'lg:grid-cols-5' : 'lg:grid-cols-4'}`}>
+        {colsVisibles.map(col => {
           const cards = byCol[col.key] || [];
           return (
             <div key={col.key}
@@ -933,7 +988,7 @@ export default function ProduccionSection({ addToast }) {
                   scrollea DENTRO de la columna (no empuja toda la página). */}
               <div className="flex flex-col gap-2 flex-1 min-h-[60px] lg:overflow-y-auto">
                 {cards.map(a => (
-                  <KanbanCard key={a.id} a={a} personas={personas} team={team} addToast={addToast}
+                  <KanbanCard key={a.id} a={a} num={numMap[a.id]} personas={personas} team={team} addToast={addToast}
                     onOpen={() => setDetailId(a.id)}
                     onAssign={(p) => assignPersona(a.id, p)} />
                 ))}
@@ -1020,7 +1075,7 @@ function fmtSpeed(bps) {
   return `${Math.max(1, Math.round(bps / 1024))} KB/s`;
 }
 
-function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
+function KanbanCard({ a, num, personas, team = [], onOpen, onAssign, addToast }) {
   const [menu, setMenu] = useState(false);
   const [menuQ, setMenuQ] = useState('');
   const [moveMenu, setMoveMenu] = useState(false);
@@ -1107,7 +1162,7 @@ function KanbanCard({ a, personas, team = [], onOpen, onAssign, addToast }) {
       {/* Título grande + persona a la derecha (como el mock del Estudio) */}
       <div className="flex items-start gap-1.5">
         <GripVertical size={14} className="text-gray-300 dark:text-gray-600 mt-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition cursor-grab active:cursor-grabbing" />
-        <span className="text-sm font-extrabold tracking-tight text-gray-900 dark:text-white leading-snug flex-1 min-w-0 line-clamp-2 break-words" title={a.productoNombre}>{a.productoNombre || 'Producto'}</span>
+        <span className="text-sm font-extrabold tracking-tight text-gray-900 dark:text-white leading-snug flex-1 min-w-0 line-clamp-2 break-words" title={a.productoNombre}>{a.productoNombre || 'Producto'}{num ? <span className="text-brand-500"> #{num}</span> : ''}</span>
         <div className="relative shrink-0 flex items-center gap-1" onClick={e => e.stopPropagation()}>
           {/* Aviso compacto: etiqueta sin cuenta → nadie la ve en su tablero */}
           {a.persona && !a.creatorId && (

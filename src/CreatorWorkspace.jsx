@@ -11,7 +11,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Film, LogOut, Moon, Sun, RefreshCw, CheckCircle2, Clock, ChevronDown, ChevronRight, Sparkles, ExternalLink, AlertTriangle, Wallet, X, FileText, UploadCloud, Loader2, FolderOpen,
+  Film, LogOut, Moon, Sun, RefreshCw, CheckCircle2, Clock, ChevronDown, ChevronRight, Sparkles, ExternalLink, AlertTriangle, Wallet, X, FileText, UploadCloud, Loader2, FolderOpen, Star,
 } from 'lucide-react';
 import {
   subscribeProduccion, allWeekKeys, listAssignments, weekLabel, weekKeyOf,
@@ -162,6 +162,27 @@ function CreatorCardDetail({ a, num, onClose, addToast }) {
             <div className="rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-3 py-2.5">
               <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase text-amber-700 dark:text-amber-300 mb-1"><AlertTriangle size={12} /> Hay que corregir</div>
               <p className="text-sm text-amber-800 dark:text-amber-200 whitespace-pre-wrap">{a.nota}</p>
+            </div>
+          )}
+
+          {/* Winners de referencia: los creativos que vendieron de este producto,
+              para inspirarte / renovarlos. */}
+          {(a.winners || []).length > 0 && (
+            <div className="rounded-lg border border-amber-300 dark:border-amber-800/70 bg-amber-50/60 dark:bg-amber-900/15 px-3 py-2.5">
+              <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase text-amber-700 dark:text-amber-300 mb-1.5">
+                <Star size={12} fill="currentColor" /> Winners de referencia · {a.winners.length}
+              </div>
+              <div className="space-y-1.5">
+                {a.winners.map(w => (
+                  <a key={w.driveId || w.link || w.name} href={w.link || '#'} target="_blank" rel="noopener noreferrer"
+                    className={`flex items-center gap-2 rounded-md bg-white/70 dark:bg-gray-800/50 px-2.5 py-1.5 ${w.link ? 'hover:bg-white dark:hover:bg-gray-800 transition' : 'pointer-events-none opacity-70'}`}>
+                    <Star size={11} className="text-amber-500 shrink-0" fill="currentColor" />
+                    <span className="flex-1 min-w-0 truncate text-xs font-medium text-gray-800 dark:text-gray-100" title={w.name}>{w.name}</span>
+                    {w.link && <ExternalLink size={12} className="text-amber-600 dark:text-amber-400 shrink-0" />}
+                  </a>
+                ))}
+              </div>
+              <p className="text-[10px] text-amber-700/70 dark:text-amber-400/70 mt-1.5">Esto es lo que funcionó — usalo de base para renovar.</p>
             </div>
           )}
 

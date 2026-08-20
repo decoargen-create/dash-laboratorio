@@ -52,6 +52,8 @@ let _histCloud = false;
 // _histCloud: si es false, el link de material se guarda local pero NO se manda
 // a la nube (para no romper writes cuando la migración todavía no se aplicó).
 let _materialCloud = false;
+// Ídem `winners` (migración 0030).
+let _winnersCloud = false;
 // Contador de escrituras locales. Sirve para que un hydrate/refetch NO pise un
 // cambio optimista que ocurrió mientras traíamos la data de la nube.
 let _writeSeq = 0;
@@ -141,6 +143,7 @@ function rowToLocal(r) {
     brief: r.brief || '',
     nota: r.nota || '',
     materialLink: r.material_link || '',
+    winners: Array.isArray(r.winners) ? r.winners : [],
     pagado: !!r.pagado,
     archivos: Array.isArray(r.archivos) ? r.archivos : [],
     historial: Array.isArray(r.historial) ? r.historial : [],
@@ -174,6 +177,8 @@ function localToRow(a) {
   if (_histCloud) row.historial = Array.isArray(a.historial) ? a.historial : [];
   // Ídem con material_link (migración 0028).
   if (_materialCloud) row.material_link = a.materialLink || '';
+  // Ídem winners (migración 0030).
+  if (_winnersCloud) row.winners = Array.isArray(a.winners) ? a.winners : [];
   return row;
 }
 
@@ -293,6 +298,11 @@ async function hydrate() {
       const probe = await supabase.from(TABLE).select('material_link').limit(1);
       _materialCloud = !probe.error;
     } catch { _materialCloud = false; }
+    // Ídem `winners` (migración 0030).
+    try {
+      const probe = await supabase.from(TABLE).select('winners').limit(1);
+      _winnersCloud = !probe.error;
+    } catch { _winnersCloud = false; }
 
     const seqBefore = _writeSeq;
     const { data, error } = await supabase.from(TABLE).select('*');
@@ -570,6 +580,60 @@ export function setMaterialLinkProducto(productoId, productoNombre, url) {
   return n;
 }
 
+// ── Winners por producto ─────────────────────────────────────────────────────
+// Un winner es un video que vendió, marcado como material de referencia. Se
+// guarda por producto (copiado a todas sus tarjetas, como materialLink) para que
+// el editor asignado lo vea. Identidad del winner: driveId, o link, o nombre.
+const winnerKey = (w) => String(w?.driveId || w?.link || w?.name || '').trim().toLowerCase();
+const mismoProducto = (a, productoId, productoNombre) => {
+  const pid = productoId != null ? String(productoId) : null;
+  return pid != null ? String(a.productoId) === pid
+    : (a.productoNombre || '').trim().toLowerCase() === (productoNombre || '').trim().toLowerCase();
+};
+
+// Winners de un producto: unión (dedup) de los winners de todas sus tarjetas,
+// más recientes primero.
+export function winnersDeProducto(productoId, productoNombre) {
+  const seen = new Set(); const out = [];
+  for (const a of read()) {
+    if (!mismoProducto(a, productoId, productoNombre)) continue;
+    for (const w of (a.winners || [])) {
+      const k = winnerKey(w);
+      if (k && !seen.has(k)) { seen.add(k); out.push(w); }
+    }
+  }
+  return out.sort((x, y) => (y.ts || 0) - (x.ts || 0));
+}
+
+// Escribe la lista de winners en TODAS las tarjetas del producto (así queda igual
+// en cada una y la ve el editor). Devuelve cuántas tarjetas tocó.
+export function setWinnersProducto(productoId, productoNombre, winners) {
+  const arr = Array.isArray(winners) ? winners : [];
+  let n = 0;
+  for (const a of read()) {
+    if (mismoProducto(a, productoId, productoNombre)) { updateAssignment(a.id, { winners: arr }); n++; }
+  }
+  return n;
+}
+
+export function esWinner(rec, productoId, productoNombre) {
+  const k = winnerKey(rec);
+  return winnersDeProducto(productoId, productoNombre).some(w => winnerKey(w) === k);
+}
+
+// Marca/desmarca un video como winner del producto. `rec` = { name, link,
+// driveId, fecha, ts }. Devuelve el nuevo estado (true = quedó marcado).
+export function toggleWinner(rec, productoId, productoNombre) {
+  const k = winnerKey(rec);
+  const actuales = winnersDeProducto(productoId, productoNombre);
+  const estaba = actuales.some(w => winnerKey(w) === k);
+  const nuevos = estaba
+    ? actuales.filter(w => winnerKey(w) !== k)
+    : [{ name: rec.name || 'video', link: rec.link || null, driveId: rec.driveId || null, fecha: rec.fecha || '', ts: rec.ts || 0 }, ...actuales];
+  setWinnersProducto(productoId, productoNombre, nuevos);
+  return !estaba;
+}
+
 export function addAssignment({ weekKey, productoId, productoNombre, persona, creatorId = null, tipo = 'renovado', brief = '', materialLink = '' }) {
   const per = (persona || '').trim();
   // persona es opcional: una tarjeta puede quedar "sin asignar" hasta que se le
@@ -577,8 +641,10 @@ export function addAssignment({ weekKey, productoId, productoNombre, persona, cr
   if (!weekKey) return null;
   const arr = read().slice();
   // El link de material es por producto: si no lo pasan, lo heredamos de otra
-  // tarjeta del mismo producto.
+  // tarjeta del mismo producto. Los winners también son por producto → los
+  // heredamos, así una tarjeta nueva de Cepillo ya trae sus winners de referencia.
   const material = (materialLink || '').trim() || materialLinkDeProducto(productoId, productoNombre);
+  const winnersHeredados = winnersDeProducto(productoId, productoNombre);
   const nueva = {
     id: genId(),
     weekKey,
@@ -594,6 +660,7 @@ export function addAssignment({ weekKey, productoId, productoNombre, persona, cr
     brief: brief || '',
     nota: '',
     materialLink: material,
+    winners: winnersHeredados,
     pagado: false,
     archivos: [],
     historial: [nuevoEvento('creacion')],

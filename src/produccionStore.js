@@ -226,6 +226,16 @@ function markUnsynced(id, bad) {
   if (bad) { if (!_unsynced.has(id)) { _unsynced.add(id); persistUnsynced(); } }
   else if (_unsynced.delete(id)) { persistUnsynced(); }
 }
+// Ids BORRADAS localmente cuyo DELETE a la nube falló. Persistido: así el hydrate
+// no las resucita y se reintenta el delete (sino un borrado que falló por red
+// reaparecía en el próximo refetch).
+const DELETED_KEY = 'adslab-produccion-deleted-v1';
+let _deleted = (() => { try { return new Set(JSON.parse(localStorage.getItem(DELETED_KEY) || '[]')); } catch { return new Set(); } })();
+function persistDeleted() { try { localStorage.setItem(DELETED_KEY, JSON.stringify([..._deleted])); } catch {} }
+function markDeleted(id, bad) {
+  if (bad) { if (!_deleted.has(id)) { _deleted.add(id); persistDeleted(); } }
+  else if (_deleted.delete(id)) { persistDeleted(); }
+}
 function emitSyncError(msg) {
   try { window.dispatchEvent(new CustomEvent('viora:produccion-sync-error', { detail: { message: msg || 'error' } })); } catch {}
 }
@@ -269,8 +279,14 @@ async function doPushRow(id, evento = null, opts = {}) {
 async function doPushDelete(id) {
   if (!cloudReady() || _role !== 'admin') return;
   const { error } = await supabase.from(TABLE).delete().eq('id', id);
-  if (error) { console.warn('[produccion] delete:', error.message); emitSyncError(error.message); }
-  else markUnsynced(id, false);
+  if (error) {
+    console.warn('[produccion] delete:', error.message);
+    markDeleted(id, true); // recordamos que hay que reintentar el delete
+    emitSyncError(error.message);
+  } else {
+    markUnsynced(id, false);
+    markDeleted(id, false);
+  }
 }
 
 // Devuelve true solo si el upsert confirmó OK (para no marcar la migración
@@ -316,21 +332,32 @@ async function hydrate() {
 
     const cloud = (data || []).map(rowToLocal);
     if (cloud.length > 0) {
-      const cloudIds = new Set(cloud.map(r => r.id));
-      // Las que ya aparecen en la nube dejaron de estar "sin sincronizar".
-      for (const id of [..._unsynced]) if (cloudIds.has(id)) markUnsynced(id, false);
-      // Filas locales que FALLARON al subir (marcadas) y NO están en la nube: las
-      // conservamos y reintentamos, en vez de descartarlas (sino se perdían). Las
-      // borradas remotamente NO están marcadas → se dejan ir (no se resucitan).
-      // Solo aplica al admin (el creator no crea filas).
-      const keep = (_role === 'admin')
-        ? readLocalRaw().filter(a => _unsynced.has(a.id) && !cloudIds.has(a.id))
-        : [];
-      if (keep.length > 0) {
-        pushMany(keep).then(ok => { if (ok) keep.forEach(a => markUnsynced(a.id, false)); }).catch(() => {});
-        write([...cloud, ...keep]);
-      } else {
-        write(cloud);
+      const cloudById = new Map(cloud.map(r => [r.id, r]));
+      const localById = new Map(readLocalRaw().map(r => [r.id, r]));
+      // Merge reconciliando lo que NO llegó a la nube (solo admin; el creator no
+      // crea/borra filas). Reglas:
+      //   - _deleted (delete que falló) → se saca de la nube y se reintenta borrar.
+      //   - _unsynced (insert/update que falló) → gana la versión LOCAL (no la pisa
+      //     la nube) y se reintenta el push. Si no está en la nube (insert), se agrega.
+      // Un cambio que SÍ sincronizó ya se limpió de _unsynced en el push OK, así
+      // que acá toma la versión de la nube normalmente.
+      const esAdmin = _role === 'admin';
+      const merged = [];
+      for (const r of cloud) {
+        if (esAdmin && _deleted.has(r.id)) continue;
+        if (esAdmin && _unsynced.has(r.id) && localById.has(r.id)) merged.push(localById.get(r.id));
+        else merged.push(r);
+      }
+      if (esAdmin) {
+        for (const id of _unsynced) {
+          if (!cloudById.has(id) && !_deleted.has(id) && localById.has(id)) merged.push(localById.get(id));
+        }
+      }
+      write(merged);
+      // Reintentamos los pendientes (fire & forget; si vuelven a fallar, siguen marcados).
+      if (esAdmin) {
+        for (const id of _unsynced) if (localById.has(id)) pushRow(id);
+        for (const id of [..._deleted]) pushDelete(id);
       }
     } else {
       const local = readLocalRaw();
@@ -363,8 +390,10 @@ export function refreshProduccion() { return hydrate(); }
 // descarta cambios locales que todavía no llegaron al server.
 export async function resyncDesdeNube() {
   _unsynced = new Set();
+  _deleted = new Set();
   try {
     localStorage.removeItem(UNSYNCED_KEY);
+    localStorage.removeItem(DELETED_KEY);
     localStorage.removeItem(MIGRATED_KEY);
     localStorage.removeItem(MIGRATED_KEY + '-pagos');
   } catch {}
@@ -399,11 +428,13 @@ export async function vaciarTodo() {
   _pagos = {};
   _pagoConfig = {};
   _unsynced = new Set();
+  _deleted = new Set();
   try {
     localStorage.setItem(KEY, '[]');
     localStorage.removeItem(PAGOS_KEY);
     localStorage.removeItem(PAGOS_CONFIG_KEY);
     localStorage.removeItem(UNSYNCED_KEY);
+    localStorage.removeItem(DELETED_KEY);
     localStorage.removeItem(MIGRATED_KEY);
     localStorage.removeItem(MIGRATED_KEY + '-pagos');
   } catch {}

@@ -12,7 +12,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Film, Plus, X, Trash2, ChevronDown, UploadCloud, Loader2, CheckCircle2,
   AlertTriangle, ExternalLink, FileText, GripVertical, Users, History, Search, ArrowLeftRight,
-  Bell, BellRing, Inbox, Eye, RefreshCw, Calendar, Filter, FolderOpen,
+  Bell, BellRing, Inbox, Eye, RefreshCw, Calendar, Filter, FolderOpen, Download,
 } from 'lucide-react';
 import {
   ESTADOS, ESTADO_LABELS, VIDEOS_POR_PRODUCTO, weekKeyOf, weekLabel, weekRange, allWeekKeys,
@@ -565,6 +565,7 @@ export default function ProduccionSection({ addToast }) {
   const [confirmVaciar, setConfirmVaciar] = useState(false);
   const [vaciando, setVaciando] = useState(false);
   const [showNotif, setShowNotif] = useState(false);
+  const [showBuscar, setShowBuscar] = useState(false);
   const [resyncing, setResyncing] = useState(false);
   const [team, setTeam] = useState([]);
   const [detailId, setDetailId] = useState(null);
@@ -716,6 +717,11 @@ export default function ProduccionSection({ addToast }) {
             </select>
             <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
           </div>
+          <button onClick={() => setShowBuscar(true)}
+            title="Buscar videos: por nombre del video, producto, persona o fecha — con link directo a Drive."
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:border-brand-400 hover:text-brand-600 dark:hover:text-brand-300 transition shadow-sm">
+            <Search size={14} /> Buscar videos
+          </button>
           <button onClick={() => setConfirmResync(true)} disabled={resyncing}
             title="Re-sincronizar: descarta el tablero local y lo vuelve a traer de la nube (útil si quedó una tarjeta fantasma que no sincronizó)"
             className="inline-flex items-center justify-center w-8 h-8 text-gray-500 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition shadow-sm disabled:opacity-50">
@@ -954,6 +960,9 @@ export default function ProduccionSection({ addToast }) {
       )}
       {showNotif && (
         <NotifConfigModal team={team} onClose={() => setShowNotif(false)} addToast={addToast} />
+      )}
+      {showBuscar && (
+        <VideoSearchModal onClose={() => setShowBuscar(false)} />
       )}
       <ConfirmDialog
         open={confirmResync}
@@ -1737,6 +1746,102 @@ function IntegranteSelector({ a, team = [], personas = [], onTeamChange, addToas
           }`}>
           — Sin asignar —
         </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Buscador de videos: barre TODOS los creativos subidos (de todas las semanas)
+// y filtra por nombre del video, producto, persona o fecha. Cada resultado trae
+// el link directo a Drive (ver / descargar). Sirve para encontrar rápido un
+// winner y volver a iterarlo.
+function VideoSearchModal({ onClose }) {
+  useEscape(onClose);
+  const [query, setQuery] = useState('');
+  const index = useMemo(() => {
+    const recs = [];
+    for (const wk of allWeekKeys()) {
+      for (const a of listAssignments(wk)) {
+        for (const f of (a.archivos || [])) {
+          const producto = a.productoNombre || 'Sin producto';
+          const persona = a.persona || 'Sin asignar';
+          const fecha = weekLabel(a.weekKey);
+          recs.push({
+            key: `${a.id}:${f.ts}`,
+            name: f.name || 'video',
+            producto, persona, fecha,
+            estado: a.estado,
+            destino: f.destino,
+            link: f.link || f.folderLink || null,
+            driveId: f.driveId || null,
+            sizeMB: f.sizeMB || null,
+            ts: parseInt(String(f.ts || '').split('-')[0], 10) || 0,
+            hay: `${f.name} ${producto} ${persona} ${fecha}`.toLowerCase(),
+          });
+        }
+      }
+    }
+    return recs.sort((x, y) => y.ts - x.ts);
+  }, []);
+
+  const toks = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const results = toks.length ? index.filter(r => toks.every(t => r.hay.includes(t))) : index;
+  const shown = results.slice(0, 80);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-2xl my-6 bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center gap-2 px-5 py-4 border-b border-gray-100 dark:border-gray-800">
+          <Search size={18} className="text-brand-500" />
+          <div className="flex-1">
+            <h3 className="text-base font-bold text-gray-900 dark:text-gray-100 leading-tight">Buscar videos</h3>
+            <p className="text-[11px] text-gray-400">Por nombre del video, producto, persona o fecha — con link a Drive.</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+        </div>
+
+        <div className="px-5 pt-4 pb-2">
+          <div className="relative">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+            <input autoFocus value={query} onChange={e => setQuery(e.target.value)}
+              placeholder="Ej: [c9][Ponzio][14-8][broll]  ·  Cepillo  ·  14-8"
+              className="w-full pl-9 pr-3 py-2.5 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500" />
+          </div>
+          <p className="text-[11px] text-gray-400 mt-2">{results.length} video{results.length === 1 ? '' : 's'}{results.length > 80 ? ' · mostrando 80' : ''}</p>
+        </div>
+
+        <div className="max-h-[58vh] overflow-y-auto border-t border-gray-100 dark:border-gray-800">
+          {shown.length === 0 ? (
+            <div className="px-5 py-10 text-center text-sm text-gray-400">
+              {index.length === 0 ? 'Todavía no hay videos subidos.' : 'Ningún video coincide con la búsqueda.'}
+            </div>
+          ) : shown.map(r => (
+            <div key={r.key} className="flex items-center gap-3 px-5 py-2.5 border-t border-gray-100 dark:border-gray-800 first:border-t-0 hover:bg-gray-50 dark:hover:bg-gray-800/40 transition">
+              <Film size={15} className={`shrink-0 ${r.destino === 'drive' ? 'text-emerald-500' : 'text-gray-400'}`} />
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold text-gray-800 dark:text-gray-100 truncate" title={r.name}>{r.name}</div>
+                <div className="text-[11px] text-gray-400 truncate">{r.producto} · {r.persona} · {r.fecha}{r.sizeMB ? ` · ${r.sizeMB}MB` : ''}</div>
+              </div>
+              {r.destino === 'drive' && r.link ? (
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <a href={r.link} target="_blank" rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-brand-600 dark:text-brand-300 border border-brand-300 dark:border-brand-700 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/20 transition">
+                    <ExternalLink size={12} /> Abrir
+                  </a>
+                  {r.driveId && (
+                    <a href={`https://drive.google.com/uc?export=download&id=${r.driveId}`} target="_blank" rel="noopener noreferrer"
+                      title="Descargar el video" aria-label="Descargar"
+                      className="inline-flex items-center justify-center w-8 h-8 text-gray-500 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:text-brand-600 hover:border-brand-400 transition">
+                      <Download size={13} />
+                    </a>
+                  )}
+                </div>
+              ) : (
+                <span className="shrink-0 text-[10px] font-bold text-gray-400 bg-gray-100 dark:bg-gray-700 rounded-full px-2 py-1">En AdsLab</span>
+              )}
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

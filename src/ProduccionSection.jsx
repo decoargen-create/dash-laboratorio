@@ -2028,8 +2028,8 @@ function CardDetailModal({ a, personas, team = [], onClose, addToast, onTeamChan
         </div>
 
         <div className="p-5 space-y-5 max-h-[70vh] overflow-y-auto">
-          {/* Asignar a — selector UNIFICADO de integrante (persona + cuenta). */}
-          <IntegranteSelector a={a} team={team} personas={personas} onTeamChange={onTeamChange} addToast={addToast} />
+          {/* La asignación se hace desde la tarjeta del tablero (tocando la
+              etiqueta de persona), no acá — para que el detalle sea más corto. */}
 
           {/* Estado */}
           <div>

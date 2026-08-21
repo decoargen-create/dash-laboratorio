@@ -11,7 +11,7 @@
 
 import React, { useEffect, useState } from 'react';
 import {
-  Film, LogOut, Moon, Sun, RefreshCw, CheckCircle2, Clock, Sparkles, ExternalLink, AlertTriangle, Wallet, X, FileText, FolderOpen, Star,
+  Film, LogOut, RefreshCw, CheckCircle2, Clock, Sparkles, ExternalLink, AlertTriangle, Wallet, X, FileText, FolderOpen, Star,
 } from 'lucide-react';
 import {
   subscribeProduccion, allWeekKeys, listAssignments, weekLabel, weekKeyOf,
@@ -263,10 +263,6 @@ export default function CreatorWorkspace({ user, onLogout, addToast, darkMode, t
             <button onClick={doRefresh} title="Actualizar"
               className="p-2 rounded-lg text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800 transition">
               <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
-            </button>
-            <button onClick={toggleDarkMode} title="Tema"
-              className="p-2 rounded-lg text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800 transition">
-              {darkMode ? <Sun size={16} /> : <Moon size={16} />}
             </button>
             <button onClick={onLogout} title="Salir"
               className="p-2 rounded-lg text-gray-500 hover:text-red-600 dark:text-gray-400 dark:hover:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition">

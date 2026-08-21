@@ -87,14 +87,11 @@ export default async function handler(req, res) {
     return respondJSON(res, 200, { ok: true, role: 'admin', promoted: true });
   }
 
-  // De acá en más TODO (list/create/remove/reset) exige ser admin. El dueño ya se
-  // auto-promueve al loguearse (ensure-admin de arriba), así que esto no lo
-  // bloquea; sí evita que un signup cualquiera (role 'user'/null) gestione el
-  // equipo — antes alcanzaba con NO ser editor, lo que abría el endpoint a
-  // cualquier cuenta autenticada.
-  if (role !== 'admin') {
-    return respondJSON(res, 403, { error: 'Necesitás ser admin para gestionar el equipo. Recargá la app (el dueño se auto-promueve) y reintentá.' });
-  }
+  // NOTA: acá NO exigimos role='admin'. En esta base el dueño puede tener role
+  // 'user'/null (la RLS de Producción va por owner_id, no por admin) y NO siempre
+  // es el admin global (ya hay otro), así que exigir admin lo dejaría afuera de la
+  // gestión de su propio equipo. El único gate es "no ser editor" (arriba). El
+  // scope-por-dueño real requiere agregar owner_id al roster (pendiente).
 
   // ---- Listar el equipo ----
   if (action === 'list') {

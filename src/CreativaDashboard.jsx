@@ -49,7 +49,7 @@ const CHIP_TONE = {
 function ChipCell({ n, label, tone, active }) {
   if (!n) return <span className={`text-center text-xs select-none ${active ? 'text-gray-400' : 'text-gray-300 dark:text-gray-600'}`}>—</span>;
   const t = CHIP_TONE[tone] || CHIP_TONE.slate;
-  return <span className={`block text-center text-[10.5px] font-bold px-1 py-1 rounded-full whitespace-nowrap ${active ? t.on : t.off}`}>{n} {label}</span>;
+  return <span className={`block text-center text-[10px] font-bold px-1 py-1 rounded-full whitespace-nowrap ${active ? t.on : t.off}`}>{n} {label}</span>;
 }
 
 // Metadata de cada filtro de estado (label + tono para el chip resaltado).
@@ -215,7 +215,7 @@ export default function CreativaDashboard({ addToast }) {
           return (
             <div key={p.nombre} className="border-t border-gray-100 dark:border-gray-700/60 first:border-t-0">
               <button onClick={() => toggleProd(p.nombre)}
-                className={`w-full grid items-center gap-1.5 px-4 py-3 text-left transition grid-cols-[minmax(0,1fr)_58px_66px_54px_66px] ${open ? 'bg-gray-50 dark:bg-gray-900/30' : 'hover:bg-gray-50 dark:hover:bg-gray-700/30'}`}>
+                className={`w-full grid items-center gap-1 px-4 py-3 text-left transition grid-cols-[minmax(0,1fr)_repeat(4,68px)] ${open ? 'bg-gray-50 dark:bg-gray-900/30' : 'hover:bg-gray-50 dark:hover:bg-gray-700/30'}`}>
                 <span className="flex items-center gap-2 min-w-0">
                   <ChevronDown size={15} className={`text-gray-400 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
                   <span className="font-bold text-sm text-gray-900 dark:text-gray-100 truncate">{p.nombre}</span>

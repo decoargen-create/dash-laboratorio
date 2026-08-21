@@ -6,7 +6,7 @@ import {
 import {
   Menu, LogOut, Home, ShoppingCart, Package, Users, AlertCircle, CreditCard,
   UserCheck, TrendingUp, Plus, Filter, Eye, Edit2, Trash2, Calendar, DollarSign,
-  Moon, Sun, ChevronDown, ChevronRight, Search, X, Command, Check, Bell,
+  ChevronDown, ChevronRight, Search, X, Command, Check, Bell,
   AlignJustify, LayoutGrid, LayoutGrid as LayoutGridIcon, Columns3, Sparkles, Bot, Zap, Activity, FileText, Settings, Loader2, Calculator, Copy, Save, RotateCcw, Target, Play, Inbox, BarChart3, Instagram, SlidersHorizontal, ClipboardList, AlertTriangle, Trophy, Bookmark, Film, Wallet
 } from 'lucide-react';
 import { VioraLogo, VioraMark, AdsLabLogo, AdsLabMark } from './logo.jsx';
@@ -1646,26 +1646,16 @@ function AppShell({ onExit }) {
   const dismissBgAnalysis = () => {
     setBgAnalysis(null);
   };
-  const [darkMode, setDarkMode] = useState(() => {
-    if (typeof window === 'undefined') return false;
-    const stored = localStorage.getItem('dash-dark-mode');
-    if (stored !== null) return stored === 'true';
-    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-  });
-
+  // AdsLab es SIEMPRE modo oscuro — se sacó el modo claro. Dejamos darkMode fijo
+  // en true (muchos componentes lo reciben por prop) y el toggle como no-op para
+  // no romper esas firmas; los botones de cambiar tema ya no se renderizan.
+  const darkMode = true;
   useEffect(() => {
-    const root = document.documentElement;
-    if (darkMode) {
-      root.classList.add('dark');
-    } else {
-      root.classList.remove('dark');
-    }
-    // Safari private mode tira QuotaExceededError aunque setItem sea trivial
-    // → safeSetItem evita que el toggle del dark mode crashee la app.
-    safeSetItem('dash-dark-mode', String(darkMode));
-  }, [darkMode]);
-
-  const toggleDarkMode = () => setDarkMode(prev => !prev);
+    document.documentElement.classList.add('dark');
+    // Safari private mode tira QuotaExceededError → safeSetItem no crashea.
+    safeSetItem('dash-dark-mode', 'true');
+  }, []);
+  const toggleDarkMode = () => {};
 
   // Personalización de apariencia — tamaño de texto, fuente y color del menú.
   // Cada una se persiste y se aplica al root de la app.
@@ -2767,14 +2757,6 @@ function LoginScreen({ onLogin, onSessionAuth, darkMode, toggleDarkMode }) {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-pink-50 to-rose-50 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center p-4 relative">
-      <button
-        onClick={toggleDarkMode}
-        className="absolute top-4 right-4 p-2 rounded-lg bg-white/80 dark:bg-gray-800/80 hover:bg-white dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 shadow transition"
-        title={darkMode ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
-        aria-label="Toggle dark mode"
-      >
-        {darkMode ? <Sun size={20} /> : <Moon size={20} />}
-      </button>
       <div className="w-full max-w-md bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-8">
         <div className="text-center mb-8 flex flex-col items-center">
           <AdsLabLogo size="md" variant={darkMode ? 'light' : 'default'} />
@@ -8737,17 +8719,6 @@ function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, textSize, set
           accentColor={accentColor}
           setAccentColor={setAccentColor}
         />
-        <button
-          onClick={toggleDarkMode}
-          className="p-2 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 transition-all duration-200 hover:scale-105 active:scale-95 shrink-0"
-          title={darkMode ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
-          aria-label="Toggle dark mode"
-        >
-          <div className="relative w-5 h-5">
-            <Sun size={20} className={`absolute inset-0 transition-all duration-500 ${darkMode ? 'opacity-100 rotate-0 scale-100' : 'opacity-0 -rotate-90 scale-50'}`} />
-            <Moon size={20} className={`absolute inset-0 transition-all duration-500 ${darkMode ? 'opacity-0 rotate-90 scale-50' : 'opacity-100 rotate-0 scale-100'}`} />
-          </div>
-        </button>
       </div>
     </header>
   );

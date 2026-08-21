@@ -20,11 +20,8 @@
       // del render para evitar flash de tema/tamaño viejo.
       (function () {
         try {
-          var stored = localStorage.getItem('dash-dark-mode');
-          var isDark = stored === null
-            ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)
-            : stored === 'true';
-          if (isDark) document.documentElement.classList.add('dark');
+          // AdsLab es siempre modo oscuro (se sacó el modo claro).
+          document.documentElement.classList.add('dark');
           var de = document.documentElement;
           var sz = localStorage.getItem('dash-text-size') || 'mediano';
           de.style.zoom = ({ chico: 1, mediano: 1.1, grande: 1.22 })[sz] || 1.1;

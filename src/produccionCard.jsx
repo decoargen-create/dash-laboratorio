@@ -256,9 +256,11 @@ export default function TarjetaProduccion({ a, num, personas = [], team = [], on
           <Film size={12} className="text-emerald-500" /><b className="text-gray-700 dark:text-gray-200">{subidos}</b>/{VIDEOS_POR_PRODUCTO} videos
         </span>
         {subidos > 0 && (
-          <b className={`tabular-nums ${aprob >= subidos ? 'text-emerald-500' : 'text-gray-400'}`} title="Aprobados sobre subidos">
-            {aprob}/{subidos}{aprob >= subidos ? ' ✓' : ''}
-          </b>
+          <span className={`inline-flex items-center gap-1 tabular-nums ${aprob >= subidos ? 'text-emerald-500' : 'text-gray-400'}`}
+            title={`${aprob} de ${subidos} videos subidos están aprobados`}>
+            <CheckCircle2 size={12} />
+            <b>{aprob}/{subidos}</b> aprob.
+          </span>
         )}
         {a.brief?.trim() && <FileText size={12} className="text-gray-400" title="Tiene brief" />}
         {(a.nota || '').trim() && (

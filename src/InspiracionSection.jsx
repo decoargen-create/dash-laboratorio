@@ -81,17 +81,36 @@ const SCRAPE_CONCURRENCY = 3;
 async function fetchWithTimeout(url, opts = {}, ms = 310000) {
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), ms);
+  const started = Date.now();
   try {
     return await fetch(url, { ...opts, signal: ac.signal });
+  } catch (e) {
+    // fetch() rechaza SIN respuesta en dos casos que hay que distinguir:
+    //  - abort del cliente (pasamos los `ms`) → timeout;
+    //  - TypeError "Failed to fetch" / "Load failed" → la conexión se cayó antes
+    //    de recibir respuesta (blip de red, o el edge/gateway cortó una request
+    //    larga). Anotamos los segundos que tardó: un fallo RÁPIDO (crash/cold
+    //    start) se ve distinto de uno LENTO (request larga cortada).
+    const secs = Math.round((Date.now() - started) / 1000);
+    if (ac.signal.aborted) {
+      const to = new Error(`El servidor no respondió en ${secs}s y se cortó la conexión.`);
+      to.isTimeout = true; to.elapsedSec = secs; throw to;
+    }
+    const ne = new Error(`No se pudo conectar con el servidor tras ${secs}s (la conexión se cayó antes de recibir respuesta).`);
+    ne.isNetwork = true; ne.elapsedSec = secs; ne.cause = e; throw ne;
   } finally {
     clearTimeout(timer);
   }
 }
 
-// Llama a apify-ingest y, si da TIMEOUT (Vercel mata la función a los 300s en
-// marcas muy grandes), REINTENTA UNA VEZ con menos ads (el hint retryWithLimit
-// del server, o la mitad). Así el scrape se auto-cura en vez de fallar con 0
-// ads. Devuelve el data parseado (ok) o throwea con el error/sugerencia.
+// Llama a apify-ingest con dos capas de auto-cura:
+//  1) FALLO DE RED ("Failed to fetch"): la conexión se cae sin respuesta. Si fue
+//     rápido (blip del edge), reintenta 2 veces con backoff corto y el mismo
+//     payload. Antes esto fallaba de una con el críptico "Failed to fetch".
+//  2) TIMEOUT del server (marcas enormes que no entran en los 300s de Vercel):
+//     reintenta UNA vez con menos ads (hint retryWithLimit del server, o la
+//     mitad). Devuelve el data parseado (ok) o throwea con un error CLARO
+//     (incluye los segundos que tardó, para diagnosticar sin abrir DevTools).
 async function scrapeApifyWithRetry(payload, { onRetry } = {}) {
   const attempt = async (p) => {
     const resp = await fetchWithTimeout('/api/marketing/apify-ingest', {
@@ -109,17 +128,32 @@ async function scrapeApifyWithRetry(payload, { onRetry } = {}) {
     }
     return data;
   };
+  // Capa 1: reintenta fallos de red RÁPIDOS (<120s). Si ya se comió >120s, el
+  // problema es la request larga (no un blip) → no insistimos, propagamos.
+  const NET_RETRIES = 2;
+  const attemptWithNetRetry = async (p) => {
+    for (let i = 0; ; i++) {
+      try { return await attempt(p); }
+      catch (err) {
+        const retriable = err?.isNetwork && (err.elapsedSec == null || err.elapsedSec < 120);
+        if (!retriable || i >= NET_RETRIES) throw err;
+        await new Promise(r => setTimeout(r, 1500 * (i + 1)));
+      }
+    }
+  };
   try {
-    return await attempt(payload);
+    return await attemptWithNetRetry(payload);
   } catch (err) {
     const msg = String(err?.message || '');
-    const isTimeout = err?.httpStatus === 504
+    const isTimeout = err?.httpStatus === 504 || err?.isTimeout
       || /timeout|tardó más|crashe[oó]|FUNCTION_INVOCATION_TIMEOUT|Internal Server Error/i.test(msg);
     const curLimit = Number(payload.limit) || 500;
     const nextLimit = Math.max(150, Number(err?.retryWithLimit) || Math.floor(curLimit / 2));
+    // Capa 2: si fue timeout (server o cliente) y pedimos muchos ads, reintenta
+    // con menos (que también reintenta blips de red vía attemptWithNetRetry).
     if (isTimeout && curLimit > 200 && nextLimit < curLimit) {
       onRetry?.(nextLimit);
-      return await attempt({ ...payload, limit: nextLimit });
+      return await attemptWithNetRetry({ ...payload, limit: nextLimit });
     }
     throw err;
   }

@@ -1361,7 +1361,14 @@ function AppShell({ onExit }) {
       const { data: { session } } = await supabase.auth.getSession();
       setSupabaseUser(session?.user || null);
     })();
-    return onAuthChange(({ user }) => setSupabaseUser(user));
+    // Solo deslogueamos ante un SIGNED_OUT REAL (logout explícito o refresh
+    // token inválido). Ignoramos los `null` transitorios de otros eventos
+    // (p. ej. un token refresh que falló por un blip de red): antes cualquiera
+    // de esos nulls sacaba al usuario a la pantalla de login constantemente.
+    return onAuthChange(({ event, user }) => {
+      if (event === 'SIGNED_OUT') { setSupabaseUser(null); return; }
+      if (user) setSupabaseUser(user);
+    });
   }, []);
 
   // Hidratación inicial — async porque IndexedDB.

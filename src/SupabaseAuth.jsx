@@ -9,6 +9,28 @@ import React, { useState, useEffect } from 'react';
 import { Mail, Lock, LogIn, UserPlus, AlertCircle, Loader2, KeyRound, Send } from 'lucide-react';
 import { supabase, onAuthChange } from './supabase.js';
 
+// Normaliza errores de Supabase Auth a un mensaje claro en español. Supabase a
+// veces devuelve un error cuyo .message es inútil ("{}", "[object Object]",
+// vacío) o de red — sin esto se veía literalmente "{}" en la pantalla de login.
+function authErrorMessage(err) {
+  const raw = typeof err === 'string' ? err
+    : (err && typeof err.message === 'string' && err.message) ? err.message
+    : (err && typeof err.error_description === 'string' && err.error_description) ? err.error_description
+    : (err && typeof err.msg === 'string' && err.msg) ? err.msg : '';
+  const s = (raw || '').trim();
+  const low = s.toLowerCase();
+  const inutil = !s || s === '{}' || low === '[object object]' || low === 'undefined' || low === 'null';
+  if (err?.name === 'AuthRetryableFetchError' || /failed to fetch|networkerror|network error|load failed|fetch failed/i.test(low))
+    return 'No pude conectar con el servidor. Revisá tu conexión e intentá de nuevo.';
+  if (/invalid login credentials|invalid credentials|invalid grant/i.test(low)) return 'Email o contraseña incorrectos.';
+  if (/email not confirmed/i.test(low)) return 'Tenés que confirmar tu email antes de entrar. Revisá tu bandeja (y spam).';
+  if (/already registered|already exists|user already/i.test(low)) return 'Ese email ya tiene una cuenta. Probá entrar o recuperar la contraseña.';
+  if (/rate limit|too many|for security purposes|over_.*_rate/i.test(low)) return 'Demasiados intentos. Esperá un momento y reintentá.';
+  if (/password/.test(low) && /(6|at least|short|weak)/.test(low)) return 'La contraseña tiene que tener al menos 6 caracteres.';
+  if (inutil) return 'No se pudo completar. Reintentá en un momento.';
+  return s;
+}
+
 export default function SupabaseAuthScreen({ onLoggedIn }) {
   const [mode, setMode] = useState('login'); // 'login' | 'signup' | 'forgot' | 'reset'
   const [email, setEmail] = useState('');
@@ -91,7 +113,7 @@ export default function SupabaseAuthScreen({ onLoggedIn }) {
         if (error) throw error;
       }
     } catch (err) {
-      setError(err?.message || 'Error de auth');
+      setError(authErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -197,18 +219,9 @@ export default function SupabaseAuthScreen({ onLoggedIn }) {
         </form>
 
         <div className="mt-4 text-center space-y-1">
-          {/* Link entre login y signup */}
-          {(mode === 'login' || mode === 'signup') && (
-            <div>
-              <button
-                type="button"
-                onClick={() => { setMode(m => m === 'login' ? 'signup' : 'login'); setError(null); setSuccess(null); }}
-                className="text-[11px] text-white/50 hover:text-white/80 transition"
-              >
-                {mode === 'login' ? '¿No tenés cuenta? Crear una' : '¿Ya tenés cuenta? Entrar'}
-              </button>
-            </div>
-          )}
+          {/* App privada: NO se ofrece crear cuenta. El alta de usuarios la hace
+              el dueño (Supabase → Auth, o el panel de Equipo). Además conviene
+              desactivar "Allow new users to sign up" en Supabase. */}
           {/* Link a forgot password — solo desde login */}
           {mode === 'login' && (
             <div>

@@ -22,7 +22,10 @@ import {
   Package, Target, Play, Check, Loader2, AlertTriangle, ChevronRight, ChevronDown,
   Plus, X, Sparkles, Link2, Search, Clock, Inbox, Trash2, Upload, Download, Activity,
   LayoutGrid, List as ListIcon, BarChart3, Copy, Pencil, MoreHorizontal, Users, History,
+  Plug,
 } from 'lucide-react';
+// Conexión con Meta: estado compartido con el botón del header.
+import { useMetaConnections, openMetaConnect, authHeaders as metaAuthHeaders } from './MetaConnect.jsx';
 
 // Etiquetas legibles para los "kind" de gasto.
 const KIND_LABELS = {
@@ -1433,8 +1436,12 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     addToast?.({ type: 'success', message: 'Links actualizados. Re-scrapeá para traer los ads correctos.' });
   };
 
-  // Meta ad account picker
-  const [metaConnected, setMetaConnected] = useState(null); // null = unknown, bool = checked
+  // Meta ad account picker. Las conexiones vienen del hook compartido: sirve
+  // tanto para las guardadas en DB (meta_connections, multi-cuenta) como para
+  // la legacy de cookie — antes esto miraba solo /api/meta/me (cookie) y la
+  // card quedaba muerta si conectabas por token/OAuth con Supabase activo.
+  const { connections: metaConnections } = useMetaConnections();
+  const metaConnected = metaConnections.length > 0;
   const [availableAccounts, setAvailableAccounts] = useState([]);
   const [loadingAccounts, setLoadingAccounts] = useState(false);
   const [loadingAds, setLoadingAds] = useState(false);
@@ -1629,25 +1636,36 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     });
   };
 
-  // Chequeo rápido de conexión Meta al montar — solo para habilitar/deshabilitar la card.
-  useEffect(() => {
-    let abort = false;
-    fetch('/api/meta/me')
-      .then(r => r.json())
-      .then(d => { if (!abort) setMetaConnected(!!d.connected); })
-      .catch(() => { if (!abort) setMetaConnected(false); });
-    return () => { abort = true; };
-  }, []);
-
-  // Cargar lista de ad accounts disponibles (llama cuando el user abre el picker).
+  // Cargar lista de ad accounts disponibles (llama cuando el user abre el
+  // picker). Junta las cuentas de TODAS las conexiones y se acuerda de cuál
+  // conexión trajo cada una (connId) para después pedir los ads con ese token.
   const loadAdAccounts = async () => {
     setLoadingAccounts(true);
     try {
-      const r = await fetch('/api/meta/ad-accounts');
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
-      setAvailableAccounts(d.accounts || []);
-      if ((d.accounts || []).length === 0) {
+      const headers = await metaAuthHeaders(false);
+      // Una conexión con token vencido no puede tapar a las que sí andan:
+      // juntamos lo que trajo cada una y avisamos aparte de las que fallaron.
+      const perConn = await Promise.all(metaConnections.map(async (conn) => {
+        const qs = conn.id && conn.id !== '__cookie__' ? `?connection_id=${encodeURIComponent(conn.id)}` : '';
+        try {
+          const r = await fetch(`/api/meta/ad-accounts${qs}`, { headers });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+          return {
+            accounts: (d.accounts || []).map(a => ({ ...a, connId: conn.id, connLabel: conn.label })),
+            error: null,
+          };
+        } catch (err) {
+          return { accounts: [], error: `${conn.label}: ${err.message}` };
+        }
+      }));
+      const accounts = perConn.flatMap(r => r.accounts);
+      const fallidas = perConn.map(r => r.error).filter(Boolean);
+      setAvailableAccounts(accounts);
+      if (fallidas.length > 0) {
+        addToast?.({ type: 'warning', message: `No pude leer ${fallidas.length === 1 ? 'una conexión' : `${fallidas.length} conexiones`} — ${fallidas.join(' · ')}` });
+      }
+      if (accounts.length === 0 && fallidas.length === 0) {
         addToast?.({ type: 'info', message: 'No se encontraron cuentas publicitarias activas en tu Meta.' });
       }
     } catch (err) {
@@ -1661,8 +1679,9 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   const selectAccount = async (acc) => {
     setLoadingAds(true);
     try {
-      const url = `/api/meta/ads-with-insights?account_id=${encodeURIComponent(acc.id)}&limit=50&date_preset=last_7d`;
-      const r = await fetch(url);
+      let url = `/api/meta/ads-with-insights?account_id=${encodeURIComponent(acc.id)}&limit=50&date_preset=last_7d`;
+      if (acc.connId && acc.connId !== '__cookie__') url += `&connection_id=${encodeURIComponent(acc.connId)}`;
+      const r = await fetch(url, { headers: await metaAuthHeaders(false) });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
       const metaAcc = {
@@ -4084,10 +4103,16 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         badge={metaAccount ? `${metaAccount.ads?.length || 0} ads activos` : null}
       >
         {!metaConnected ? (
-          <p className="text-xs text-gray-500 dark:text-gray-400 italic">
-            Conectá Meta arriba para elegir la cuenta publicitaria del producto.
-            Es opcional — sin esto solo analizamos competencia, no tus propios creativos.
-          </p>
+          <div className="space-y-2">
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Conectá tu cuenta publicitaria para elegir cuál usar en este producto.
+              Es opcional — sin esto solo analizamos competencia, no tus propios creativos.
+            </p>
+            <button onClick={openMetaConnect}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-[#1877F2] rounded-md hover:bg-[#0f6ae0] shadow-sm transition">
+              <Plug size={12} /> Conectar cuenta publicitaria
+            </button>
+          </div>
         ) : metaAccount ? (
           <div className="space-y-2">
             <div className="flex items-center gap-2 text-xs flex-wrap">
@@ -4258,6 +4283,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                     <span className="font-semibold text-gray-900 dark:text-gray-100 flex-1">{acc.name}</span>
                     <span className="text-[10px] text-gray-500">{acc.currency}</span>
                     {acc.business && <span className="text-[10px] text-gray-400">· {acc.business}</span>}
+                    {acc.connLabel && <span className="text-[10px] text-gray-400">· {acc.connLabel}</span>}
                     {loadingAds && <Loader2 size={12} className="animate-spin text-brand-500" />}
                   </button>
                 </li>

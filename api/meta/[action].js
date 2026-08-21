@@ -457,11 +457,14 @@ function ymd(d) {
 // iteraciones sobre creativos que están fatigando.
 async function handleAdsWithInsights(req, res) {
   if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
-  const session = readMetaCookie(req);
-  if (!session?.accessToken) return respondJSON(res, 401, { error: 'Meta no conectado' });
 
   const origin = getOrigin(req);
   const url = new URL(req.url, origin);
+  // Acepta ?connection_id (conexiones guardadas en meta_connections) además
+  // de la cookie legacy — es lo que usa el picker de cuenta en Productos.
+  const { token, error, status } = await resolveAccessToken(req, url);
+  if (!token) return respondJSON(res, status || 401, { error: error || 'Meta no conectado' });
+
   const accountId = url.searchParams.get('account_id');
   const limit = Math.min(Number(url.searchParams.get('limit') || 50), 100);
 
@@ -479,7 +482,7 @@ async function handleAdsWithInsights(req, res) {
 
   try {
     // Un solo call a Graph API con dos expansiones de insights.
-    const data = await graphGet(`${accountId}/ads`, session.accessToken, {
+    const data = await graphGet(`${accountId}/ads`, token, {
       fields: [
         'id,name,status,effective_status,created_time,updated_time',
         `campaign{id,name,objective}`,

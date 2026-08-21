@@ -22,18 +22,19 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Zap, Check, Loader2, Trash2, AlertCircle, RefreshCw, ExternalLink,
-  TrendingUp, KeyRound, ChevronDown, Search, Plus, X, HelpCircle, Clock, ShieldCheck,
+  Check, Loader2, Trash2, AlertCircle, RefreshCw, ExternalLink,
+  TrendingUp, ChevronDown, Search, Plus,
 } from 'lucide-react';
-import { supabase } from './supabase.js';
+// El form de conexión (OAuth + token) vive en MetaConnect.jsx — lo comparte
+// con el botón "Conectar cuenta" del header.
+import {
+  DB_MODE, authHeaders, ConnectTokenForm, connectMetaToken, deleteMetaConnection,
+  useMetaConnections,
+} from './MetaConnect.jsx';
 
-const TOKEN_HELP_URL = 'https://developers.facebook.com/tools/explorer/';
-const SYS_USERS_URL = 'https://business.facebook.com/settings/system-users';
 const LS_PRESET = 'adslab-campanas-date-preset';
 const LS_ACCT_PREFIX = 'adslab-campanas-acct-';
 
-// Con Supabase configurado usamos conexiones persistidas en DB (multi-cuenta).
-const DB_MODE = !!supabase;
 
 const PRESETS = [
   { value: 'today', label: 'Hoy' },
@@ -45,22 +46,6 @@ const PRESETS = [
   { value: 'last_month', label: 'Mes pasado' },
   { value: 'maximum', label: 'Histórico' },
 ];
-
-// Headers con el JWT de Supabase (para que el backend identifique al dueño de
-// las conexiones). En modo cookie no hace falta, pero mandarlo no molesta.
-async function authHeaders(json = false) {
-  let token = '';
-  try {
-    if (supabase) {
-      const { data: { session } } = await supabase.auth.getSession();
-      token = session?.access_token || '';
-    }
-  } catch {}
-  return {
-    ...(json ? { 'Content-Type': 'application/json' } : {}),
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
-}
 
 // --- helpers de formato ---
 
@@ -94,238 +79,6 @@ function StatusBadge({ status }) {
   return <span className={`px-2 py-0.5 text-[10px] font-bold rounded ${cls}`}>{label}</span>;
 }
 
-// ========================================================================
-// Botón "Conectar con Facebook" (OAuth) — el flujo estilo Ads Uploader.
-// Solo aparece si la app de Meta está configurada en el server
-// (META_APP_ID + META_APP_SECRET). Cada user de AdsLab que lo usa conecta
-// SU Meta: el callback guarda la conexión a su nombre en meta_connections.
-// Mientras la app no pase App Review, solo cuentas con rol en la app pueden
-// usarlo; post-review, cualquier colega/cliente.
-// ========================================================================
-function OAuthConnectButton() {
-  const [configured, setConfigured] = useState(null); // null = cargando
-  const [starting, setStarting] = useState(false);
-  const [error, setError] = useState(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch('/api/meta/oauth-config')
-      .then(r => r.json())
-      .then(d => { if (!cancelled) setConfigured(!!d.configured); })
-      .catch(() => { if (!cancelled) setConfigured(false); });
-    return () => { cancelled = true; };
-  }, []);
-
-  const start = async () => {
-    setStarting(true); setError(null);
-    try {
-      const resp = await fetch('/api/meta/connect-url', {
-        method: 'POST',
-        headers: await authHeaders(true),
-        body: JSON.stringify({ returnTo: '/' }),
-      });
-      const data = await resp.json().catch(() => ({}));
-      if (!resp.ok || !data.url) throw new Error(data.error || `HTTP ${resp.status}`);
-      window.location.href = data.url; // → consent screen de Meta
-    } catch (err) {
-      setError(err.message);
-      setStarting(false);
-    }
-  };
-
-  if (configured === false || configured === null) return null; // sin app → solo token
-
-  return (
-    <div className="mb-4">
-      <button
-        type="button" onClick={start} disabled={starting}
-        className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-bold text-white bg-[#1877F2] rounded-lg hover:bg-[#0f6ae0] shadow-sm transition disabled:opacity-50"
-      >
-        {starting ? <Loader2 size={15} className="animate-spin" /> : <Zap size={15} />}
-        Conectar con Facebook
-      </button>
-      {error && (
-        <p className="mt-2 text-[11px] text-red-600 dark:text-red-400">{error}</p>
-      )}
-      <div className="flex items-center gap-3 mt-4">
-        <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
-        <span className="text-[10px] text-gray-400 uppercase tracking-wider">o pegá un token</span>
-        <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
-      </div>
-    </div>
-  );
-}
-
-// ========================================================================
-// Form de conexión por token
-// ========================================================================
-function ConnectTokenForm({ onConnect, onCancel, canCancel }) {
-  const [token, setToken] = useState('');
-  const [label, setLabel] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(null);
-  const [guide, setGuide] = useState('quick'); // 'quick' | 'permanent'
-
-  const submit = async (e) => {
-    e?.preventDefault();
-    const t = token.trim();
-    if (!t) { setError('Pegá un access token.'); return; }
-    setBusy(true); setError(null);
-    try {
-      await onConnect({ accessToken: t, label: label.trim() });
-      setToken(''); setLabel('');
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="bg-gradient-to-br from-[#E7F3FF] to-white dark:from-brand-900/20 dark:to-gray-800/60 border border-[#1877F2]/20 dark:border-brand-800 rounded-2xl p-6 shadow-sm">
-      <div className="flex items-center gap-3 mb-4">
-        <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-[#0668E1] to-[#1877F2] flex items-center justify-center text-white shadow-sm shrink-0">
-          <KeyRound size={20} />
-        </div>
-        <div className="flex-1 min-w-0">
-          <h3 className="text-base font-bold text-gray-900 dark:text-gray-100">Conectar cuenta publicitaria</h3>
-          <p className="text-xs text-gray-600 dark:text-gray-300">
-            Pegá un Access Token de Meta. Sirve para tu cuenta o la de cualquier persona que te dé acceso.
-          </p>
-        </div>
-        {canCancel && (
-          <button onClick={onCancel} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition shrink-0" aria-label="Cancelar">
-            <X size={16} />
-          </button>
-        )}
-      </div>
-
-      <OAuthConnectButton />
-
-      <form onSubmit={submit} className="space-y-3">
-        <div>
-          <label className="block text-[11px] font-bold text-gray-700 dark:text-gray-300 mb-1 uppercase tracking-wider">
-            Etiqueta <span className="font-normal normal-case text-gray-400">(para reconocerla — ej. "Cliente X")</span>
-          </label>
-          <input
-            type="text" value={label} onChange={e => setLabel(e.target.value)}
-            placeholder="Cuenta de…"
-            className="w-full px-3 py-2 text-xs bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-          />
-        </div>
-        <div>
-          <label className="block text-[11px] font-bold text-gray-700 dark:text-gray-300 mb-1 uppercase tracking-wider">
-            Access Token
-          </label>
-          <textarea
-            value={token} onChange={e => setToken(e.target.value)}
-            placeholder="EAAB..." rows={3} spellCheck={false}
-            className="w-full px-3 py-2 text-xs font-mono bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none break-all"
-          />
-        </div>
-
-        {error && (
-          <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex items-start gap-2">
-            <AlertCircle size={15} className="text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
-            <p className="text-xs text-red-700 dark:text-red-300 break-words">{error}</p>
-          </div>
-        )}
-
-        <button
-          type="submit" disabled={busy}
-          className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-bold text-white bg-gradient-to-br from-[#0668E1] to-[#1877F2] rounded-lg hover:from-[#0556BE] hover:to-[#1668D8] shadow-sm transition disabled:opacity-50"
-        >
-          {busy ? <Loader2 size={15} className="animate-spin" /> : <Zap size={15} />}
-          Conectar
-        </button>
-      </form>
-
-      {/* Guía paso a paso para conseguir el token */}
-      <div className="mt-5 bg-white/80 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
-        <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2">
-          <HelpCircle size={16} className="text-brand-600 dark:text-brand-400 shrink-0" />
-          <p className="text-sm font-bold text-gray-900 dark:text-gray-100">¿Cómo consigo el token? Te guío</p>
-        </div>
-
-        {/* Tabs de método */}
-        <div className="flex gap-1 px-4 pt-3">
-          <button
-            type="button" onClick={() => setGuide('quick')}
-            className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-t-lg border-b-2 transition ${
-              guide === 'quick'
-                ? 'text-brand-600 dark:text-brand-400 border-brand-500'
-                : 'text-gray-500 dark:text-gray-400 border-transparent hover:text-gray-700 dark:hover:text-gray-200'
-            }`}
-          >
-            <Clock size={13} /> Rápido (para probar)
-          </button>
-          <button
-            type="button" onClick={() => setGuide('permanent')}
-            className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-t-lg border-b-2 transition ${
-              guide === 'permanent'
-                ? 'text-brand-600 dark:text-brand-400 border-brand-500'
-                : 'text-gray-500 dark:text-gray-400 border-transparent hover:text-gray-700 dark:hover:text-gray-200'
-            }`}
-          >
-            <ShieldCheck size={13} /> Permanente (recomendado)
-          </button>
-        </div>
-
-        <div className="p-4 pt-3">
-          {guide === 'quick' ? (
-            <>
-              <a
-                href={TOKEN_HELP_URL} target="_blank" rel="noreferrer"
-                className="inline-flex items-center gap-1.5 px-3 py-2 mb-3 text-xs font-bold text-white bg-gradient-to-br from-[#0668E1] to-[#1877F2] rounded-lg hover:from-[#0556BE] hover:to-[#1668D8] transition shadow-sm"
-              >
-                Abrir Graph API Explorer <ExternalLink size={12} />
-              </a>
-              <ol className="space-y-2.5">
-                <GuideStep n={1}>En la ventana que se abre, a la derecha buscá <strong>“Permissions”</strong> (Permisos) y agregá <code className="font-mono bg-gray-100 dark:bg-gray-800 px-1 rounded">ads_read</code> y <code className="font-mono bg-gray-100 dark:bg-gray-800 px-1 rounded">ads_management</code>.</GuideStep>
-                <GuideStep n={2}>Click en el botón azul <strong>“Generate Access Token”</strong>. Te va a pedir iniciar sesión en Facebook y aprobar.</GuideStep>
-                <GuideStep n={3}>Se genera un texto largo que arranca con <code className="font-mono bg-gray-100 dark:bg-gray-800 px-1 rounded">EAAB…</code>. Copialo entero.</GuideStep>
-                <GuideStep n={4}>Volvé acá, pegalo en <strong>“Access Token”</strong> y tocá <strong>Conectar</strong>. ✅</GuideStep>
-              </ol>
-              <div className="mt-3 flex items-start gap-2 text-[11px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-2.5">
-                <Clock size={13} className="shrink-0 mt-0.5" />
-                <span>Este token dura ~1 a 2 horas — perfecto para probar ya. Cuando se venza, generás otro igual, o pasás al método <strong>Permanente</strong>.</span>
-              </div>
-            </>
-          ) : (
-            <>
-              <a
-                href={SYS_USERS_URL} target="_blank" rel="noreferrer"
-                className="inline-flex items-center gap-1.5 px-3 py-2 mb-3 text-xs font-bold text-white bg-gradient-to-br from-[#0668E1] to-[#1877F2] rounded-lg hover:from-[#0556BE] hover:to-[#1668D8] transition shadow-sm"
-              >
-                Abrir Configuración del negocio <ExternalLink size={12} />
-              </a>
-              <ol className="space-y-2.5">
-                <GuideStep n={1}>En <strong>Usuarios → Usuarios del sistema</strong>, creá uno (botón <strong>“Agregar”</strong>) o usá uno existente.</GuideStep>
-                <GuideStep n={2}>Asignale la <strong>cuenta publicitaria</strong> a trackear (en “Agregar activos” → Cuentas publicitarias → acceso total). Para la cuenta de otra persona, primero pedile que te la comparta con tu Business Manager.</GuideStep>
-                <GuideStep n={3}>Click en <strong>“Generar nuevo token”</strong>, elegí tu app, y marcá los permisos <code className="font-mono bg-gray-100 dark:bg-gray-800 px-1 rounded">ads_read</code> y <code className="font-mono bg-gray-100 dark:bg-gray-800 px-1 rounded">ads_management</code>.</GuideStep>
-                <GuideStep n={4}>Copiá el token y pegalo acá. <strong>Este no expira</strong> y ve todas las cuentas compartidas. ✅</GuideStep>
-              </ol>
-            </>
-          )}
-        </div>
-
-        <p className="px-4 pb-3 text-[11px] text-gray-500 dark:text-gray-500">
-          🔒 El token se guarda {DB_MODE ? 'cifrado en el servidor (tabla protegida)' : 'en una cookie HttpOnly del servidor'} — nunca queda accesible desde el navegador.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-// Paso numerado de la guía.
-function GuideStep({ n, children }) {
-  return (
-    <li className="flex items-start gap-2.5">
-      <span className="shrink-0 w-5 h-5 rounded-full bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 text-[11px] font-bold flex items-center justify-center mt-0.5">{n}</span>
-      <span className="text-xs text-gray-700 dark:text-gray-300 leading-relaxed">{children}</span>
-    </li>
-  );
-}
 
 // ========================================================================
 // Tabla de campañas
@@ -591,50 +344,24 @@ function ConnectionPanel({ connection, addToast }) {
 // Componente principal — maneja la lista de conexiones
 // ========================================================================
 export default function CampanasTracker({ addToast }) {
-  const [boot, setBoot] = useState({ loading: true });
-  const [connections, setConnections] = useState([]);
+  // La lista de conexiones es compartida con el botón del header: si conectás
+  // desde ahí (o desde otra sección), esta vista se entera sola.
+  const { connections, loading, error, reload } = useMetaConnections();
   const [activeConnId, setActiveConnId] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
 
-  const reload = useCallback(async () => {
-    if (DB_MODE) {
-      const r = await fetch('/api/meta/connections', { headers: await authHeaders(false) });
-      const d = await r.json();
-      const conns = (d.connections || []).map(c => ({
-        id: c.id, label: c.label, metaUserName: c.meta_user_name,
-      }));
-      setConnections(conns);
-      setActiveConnId(prev => (conns.find(c => c.id === prev) ? prev : (conns[0]?.id || '')));
-      setShowAddForm(conns.length === 0);
-    } else {
-      // Modo cookie: una sola conexión sintética según /api/meta/me.
-      const r = await fetch('/api/meta/me');
-      const d = await r.json();
-      if (d.connected) {
-        setConnections([{ id: '__cookie__', label: d.user?.name || 'Cuenta Meta', metaUserName: d.user?.name }]);
-        setActiveConnId('__cookie__');
-        setShowAddForm(false);
-      } else {
-        setConnections([]); setActiveConnId(''); setShowAddForm(true);
-      }
-    }
-  }, []);
+  // Mantener válida la conexión activa cuando cambia la lista.
+  useEffect(() => {
+    setActiveConnId(prev => (connections.find(c => c.id === prev) ? prev : (connections[0]?.id || '')));
+    if (connections.length > 0) setShowAddForm(false);
+  }, [connections]);
 
   useEffect(() => {
-    (async () => {
-      try { await reload(); } catch (err) { addToast?.({ type: 'error', message: err.message }); }
-      finally { setBoot({ loading: false }); }
-    })();
-  }, [reload, addToast]);
+    if (error) addToast?.({ type: 'error', message: error });
+  }, [error, addToast]);
 
   const handleConnect = async ({ accessToken, label }) => {
-    const r = await fetch('/api/meta/connect-token', {
-      method: 'POST',
-      headers: await authHeaders(true),
-      body: JSON.stringify({ accessToken, label }),
-    });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error || 'No se pudo conectar.');
+    const d = await connectMetaToken({ accessToken, label });
     addToast?.({ type: 'success', message: `Conectado a Meta como ${d.user?.name || d.user?.id}` });
     await reload();
     if (d.connection?.id) setActiveConnId(d.connection.id);
@@ -644,13 +371,7 @@ export default function CampanasTracker({ addToast }) {
   const handleDelete = async (conn) => {
     if (!window.confirm(`¿Eliminar la conexión "${conn.label}"? Vas a tener que volver a pegar el token para usarla.`)) return;
     try {
-      if (conn.id === '__cookie__') {
-        await fetch('/api/meta/disconnect', { method: 'POST' });
-      } else {
-        await fetch(`/api/meta/connections?connection_id=${encodeURIComponent(conn.id)}`, {
-          method: 'DELETE', headers: await authHeaders(false),
-        });
-      }
+      await deleteMetaConnection(conn.id);
       addToast?.({ type: 'info', message: 'Conexión eliminada.' });
       await reload();
     } catch (err) {
@@ -672,7 +393,7 @@ export default function CampanasTracker({ addToast }) {
     </div>
   );
 
-  if (boot.loading) {
+  if (loading) {
     return (
       <div className="max-w-6xl mx-auto space-y-5">
         {header}

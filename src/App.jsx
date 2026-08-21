@@ -30,6 +30,7 @@ import InspiracionSection from './InspiracionSection.jsx';
 import WinnersGlobalSection from './WinnersGlobalSection.jsx';
 import ConsultoriaSection from './Consultoria.jsx';
 import CampanasTracker from './CampanasTracker.jsx';
+import { MetaConnectButton } from './MetaConnect.jsx';
 import ProduccionSection from './ProduccionSection.jsx';
 import CreativaDashboard from './CreativaDashboard.jsx';
 import { PipelineRunProvider } from './PipelineRunContext.jsx';
@@ -2394,6 +2395,8 @@ function AppShell({ onExit }) {
           accentColor={accentColor}
           setAccentColor={setAccentColor}
           onOpenMobileMenu={() => setMobileMenuOpen(true)}
+          showMetaConnect={currentPlatform === 'marketing' && currentUser.role === 'admin'}
+          addToast={addToast}
         />
 
         <SelfHealingBanner />
@@ -8669,7 +8672,7 @@ function AppearanceMenu({ textSize, setTextSize, uiFont, setUiFont, accentColor,
   );
 }
 
-function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, textSize, setTextSize, uiFont, setUiFont, accentColor, setAccentColor, onOpenMobileMenu, bgTasks = [] }) {
+function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, textSize, setTextSize, uiFont, setUiFont, accentColor, setAccentColor, onOpenMobileMenu, bgTasks = [], showMetaConnect = false, addToast }) {
   const [scrolled, setScrolled] = useState(false);
   const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform);
 
@@ -8708,6 +8711,9 @@ function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, textSize, set
         </div>
       </div>
       <div className="flex items-center gap-2 shrink-0">
+        {/* Conectar cuenta publicitaria de Meta — accesible desde cualquier
+            sección de AdsLab, no solo desde Meta Ads → Campañas. */}
+        {showMetaConnect && <MetaConnectButton addToast={addToast} />}
         <SyncStatusBadge />
         <ActivityBell />
         <BalanceBar />

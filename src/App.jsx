@@ -2104,18 +2104,21 @@ function AppShell({ onExit }) {
         let role = 'admin';
         try {
           if (supabase) {
-            const { data } = await supabase.from('profiles').select('role').eq('id', supabaseUser.id).maybeSingle();
+            // Con timeout: si la red está lenta, NO bloqueamos el ingreso. Ante
+            // la duda entramos como admin (comportamiento previo). Antes, si esta
+            // consulta se colgaba, el usuario quedaba trabado en el login pese a
+            // haber logueado bien.
+            const rolePromise = supabase.from('profiles').select('role').eq('id', supabaseUser.id).maybeSingle();
+            const timeout = new Promise(res => setTimeout(() => res({ data: null }), 4000));
+            const { data } = await Promise.race([rolePromise, timeout]);
             if (data?.role === 'creator') role = 'creator';
           }
         } catch { /* ante la duda, admin (comportamiento previo) */ }
-        // Si NO es creator, la app lo trata como admin. Aseguramos que su
-        // profiles.role sea 'admin' en la base (bootstrap del primer dueño), sino
-        // la RLS de Producción le rechaza las escrituras y sus asignaciones no
-        // llegan a los editores. Idempotente; si falla, seguimos igual.
-        if (role !== 'creator') {
-          try { await ensureAppAdmin(); } catch { /* no bloqueante */ }
-        }
         if (cancelled) return;
+        // Bootstrap del dueño como admin en la base (idempotente) — en SEGUNDO
+        // PLANO. Nunca debe frenar el ingreso: antes iba con `await` y un cuelgue
+        // de red te dejaba afuera de la app.
+        if (role !== 'creator') { ensureAppAdmin().catch(() => {}); }
         setCurrentUser({
           role,
           name: supabaseUser.user_metadata?.display_name || supabaseUser.email?.split('@')[0] || 'Usuario',

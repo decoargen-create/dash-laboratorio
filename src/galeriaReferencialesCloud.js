@@ -40,10 +40,18 @@ if (typeof window !== 'undefined' && supabase) {
 }
 export async function isCloudReady() {
   if (!supabase) return false;
-  if (_cloudReadyCache !== null) return _cloudReadyCache;
-  const user = await getCurrentUser();
-  _cloudReadyCache = !!user;
-  return _cloudReadyCache;
+  // Un `true` cacheado es seguro (rápido). Pero un `false`/`null` NO lo damos por
+  // bueno: lo re-verificamos contra la sesión REAL (getSession lee de
+  // localStorage, es instantáneo y no depende de la red). Antes, un SIGNED_OUT
+  // transitorio (un refresh de token que falló por un blip de red) dejaba el
+  // cache en `false` y la galería se saltaba la nube PARA SIEMPRE → mostraba solo
+  // la caché local (2 items, "0 activos") aunque el usuario siguiera logueado.
+  if (_cloudReadyCache === true) return true;
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    _cloudReadyCache = !!session?.user;
+  } catch { /* error de red: no ensuciamos el cache */ }
+  return _cloudReadyCache === true;
 }
 
 // Re-firma signed URLs justo antes de descargar. Las URLs generadas al

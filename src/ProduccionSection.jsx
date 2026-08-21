@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import {
   ESTADOS, ESTADO_LABELS, VIDEOS_POR_PRODUCTO, weekKeyOf, weekLabel, weekRange, allWeekKeys,
-  listAssignments, addAssignment, updateAssignment, removeAssignment, assignPersona,
+  listAssignments, addAssignment, updateAssignment, removeAssignment,
   assignCreator, subscribeProduccion, esCompleto, bonusObjetivo, bonusDe, inversionPorProducto,
   getRole, entregasNuevas, ultimaSubidaTs, personasEnTarjetas, resumenVideosPorProducto,
   resyncDesdeNube, vaciarTodo, setMaterialLinkProducto, probarDiscord,

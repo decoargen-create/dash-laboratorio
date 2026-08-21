@@ -180,6 +180,8 @@ export async function subirParaTarjeta(a, fileList, { onProgress, addToast } = {
     folderId: (a.archivos || []).find(f => f.folderId)?.folderId || null,
   };
   const eraPorHacer = a.estado === 'porhacer';
+  const yaTenia = a.archivos?.length || 0;
+  const objetivo = a.videosTotal || VIDEOS_POR_PRODUCTO;
   let ok = 0, dest = null, driveWarn = null;
   // Progreso GLOBAL por bytes (barra + % + ETA + velocidad). Todas las subidas a
   // Drive van por el relay en chunks → reportan bytes reales; el fallback a
@@ -205,8 +207,11 @@ export async function subirParaTarjeta(a, fileList, { onProgress, addToast } = {
     catch (err) { addToast?.({ type: 'error', message: `"${files[i].name}": ${err.message}` }); }
     sentBefore += (files[i].size || 0);
   }
-  if (ok > 0 && eraPorHacer) updateAssignment(a.id, { estado: 'revision' });
-  if (ok > 0) addToast?.({ type: 'success', message: `${ok} video${ok > 1 ? 's' : ''} → ${dest === 'drive' ? 'Google Drive' : 'AdsLab'}${eraPorHacer ? ' · pasó a En revisión' : ''}` });
+  // Regla: recién pasa a "En revisión" cuando se completan los N videos (no con el
+  // primero). Antes se movía con ok>0, lo que la mandaba a revisión incompleta.
+  const completo = eraPorHacer && (yaTenia + ok) >= objetivo;
+  if (completo) updateAssignment(a.id, { estado: 'revision' });
+  if (ok > 0) addToast?.({ type: 'success', message: `${ok} video${ok > 1 ? 's' : ''} → ${dest === 'drive' ? 'Google Drive' : 'AdsLab'}${completo ? ' · pasó a En revisión' : ''}` });
   if (driveWarn) addToast?.({ type: 'warning', message: `⚠ Drive falló (${driveWarn}) — se guardó en AdsLab. Pasale este texto a Claude.` });
   return { ok };
 }

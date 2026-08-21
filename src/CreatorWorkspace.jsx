@@ -9,9 +9,9 @@
 // La data ya viene acotada por la RLS (el store solo trae sus filas), así que
 // leemos del store como siempre.
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  Film, LogOut, Moon, Sun, RefreshCw, CheckCircle2, Clock, ChevronDown, ChevronRight, Sparkles, ExternalLink, AlertTriangle, Wallet, X, FileText, UploadCloud, Loader2, FolderOpen, Star,
+  Film, LogOut, Moon, Sun, RefreshCw, CheckCircle2, Clock, Sparkles, ExternalLink, AlertTriangle, Wallet, X, FileText, FolderOpen, Star,
 } from 'lucide-react';
 import {
   subscribeProduccion, allWeekKeys, listAssignments, weekLabel, weekKeyOf,

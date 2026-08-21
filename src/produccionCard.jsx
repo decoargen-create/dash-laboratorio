@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import {
   updateAssignment, assignCreator, removeAssignment, personasEnTarjetas,
-  getRole, VIDEOS_POR_PRODUCTO, ESTADO_LABELS, ESTADOS,
+  VIDEOS_POR_PRODUCTO, ESTADO_LABELS, ESTADOS,
 } from './produccionStore.js';
 import { subirParaTarjeta, VIDEO_ACCEPT } from './produccionUpload.jsx';
 import { personaColor, CHIP_CLS, CARD_TINT, CARD_STRIPE } from './produccionColors.js';
@@ -109,16 +109,22 @@ export default function TarjetaProduccion({ a, num, personas = [], team = [], on
   const tintCls = CARD_TINT[_pcol] || '';
   const stripeCls = CARD_STRIPE[_pcol] || '';
 
-  // ¿Tiene entregas nuevas que el admin todavía no miró? (misma marca local que
-  // el aviso "Entregas nuevas"). Muestra un puntito "🆕 nuevo" en la tarjeta.
-  const tieneNuevo = caps.newBadge && getRole() === 'admin' && (() => {
+  // "nuevo": la tarjeta tuvo ACTIVIDAD en las últimas 24 h — o se subió un
+  // creativo, o cambió de estado (se movió de columna). Se apaga solo pasadas
+  // las 24 h (se recalcula en cada render con Date.now()). La creación de la
+  // tarjeta no cuenta (es tipo 'creacion', no un cambio de estado).
+  const tieneNuevo = caps.newBadge && (() => {
     try {
-      const n = parseInt(localStorage.getItem('adslab-produccion-entregas-vistas-v1'), 10);
-      const vistas = Number.isFinite(n) ? n : 0;
-      return (a.archivos || []).some(f => {
-        const t = parseInt(String(f?.ts || '').split('-')[0], 10);
-        return Number.isFinite(t) && t > vistas;
-      });
+      const now = Date.now();
+      const DENTRO_24H = (t) => Number.isFinite(t) && t > 0 && (now - t) < 24 * 3600 * 1000;
+      // 1) Creativo subido hace < 24 h (ts de archivo = "ms-sufijo").
+      const subidoReciente = (a.archivos || []).some(f =>
+        DENTRO_24H(parseInt(String(f?.ts || '').split('-')[0], 10)));
+      if (subidoReciente) return true;
+      // 2) Cambió de estado hace < 24 h (evento de historial tipo 'estado', ts ISO).
+      const ultimoCambioEstado = (a.historial || [])
+        .reduce((max, e) => (e?.tipo === 'estado' && e?.ts) ? Math.max(max, Date.parse(e.ts) || 0) : max, 0);
+      return DENTRO_24H(ultimoCambioEstado);
     } catch { return false; }
   })();
 
@@ -162,10 +168,12 @@ export default function TarjetaProduccion({ a, num, personas = [], team = [], on
       className={`group relative bg-white dark:bg-gray-800 border rounded-xl p-2.5 shadow-sm hover:shadow-lg hover:shadow-pink-500/10 hover:-translate-y-0.5 transition cursor-pointer ${tintCls} ${(menu || moveMenu) ? 'z-30' : ''} ${trabada ? 'border-amber-400/80 dark:border-amber-500/60 hover:border-amber-500' : 'border-gray-200 dark:border-gray-700 hover:border-pink-300 dark:hover:border-pink-700/70'}`}>
       {/* Barra lateral con el color de la persona (identificación rápida). */}
       {stripeCls && <span className={`absolute inset-y-0 left-0 w-1 rounded-l-xl ${stripeCls}`} aria-hidden="true" />}
-      {/* Puntito "nuevo": el equipo subió algo que el admin no miró todavía. */}
+      {/* Badge "nuevo": actividad de las últimas 24 h. Sobresale del borde de la
+          tarjeta (con ring del color de fondo para que se despegue) y se ve
+          completo — la columna tiene padding-top para que no lo recorte. */}
       {tieneNuevo && (
-        <span className="absolute -top-1.5 -right-1.5 z-20 text-[9px] font-bold text-white bg-rose-500 rounded-full px-1.5 py-0.5 shadow-md"
-          title="El equipo subió creativos nuevos que todavía no miraste">🆕 nuevo</span>
+        <span className="absolute -top-2.5 -right-1 z-20 text-[10px] font-extrabold uppercase tracking-wide text-white bg-rose-500 rounded-full px-2 py-0.5 shadow-md ring-2 ring-gray-50 dark:ring-gray-800"
+          title="Actividad en las últimas 24 h">nuevo</span>
       )}
       {/* Título grande + persona a la derecha (como el mock del Estudio) */}
       <div className="flex items-start gap-1.5">

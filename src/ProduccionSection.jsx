@@ -996,7 +996,7 @@ export default function ProduccionSection({ addToast }) {
               </div>
               {/* La lista crece para ocupar la columna; si hay muchas tarjetas,
                   scrollea DENTRO de la columna (no empuja toda la página). */}
-              <div className="flex flex-col gap-2 flex-1 min-h-[60px] lg:overflow-y-auto">
+              <div className="flex flex-col gap-2 flex-1 min-h-[60px] pt-2 lg:overflow-y-auto">
                 {cards.map(a => (
                   <TarjetaProduccion key={a.id} a={a} num={numMap[a.id]} personas={personas} team={team} addToast={addToast}
                     caps={CAPS_ADMIN}

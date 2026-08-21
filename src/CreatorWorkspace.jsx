@@ -19,8 +19,10 @@ import {
   monthKeyOf, monthLabel, weeksInMonth, pagoProductoDe, bonusDe,
   resumenVideosPorProducto, VIDEOS_POR_PRODUCTO,
 } from './produccionStore.js';
-import { CreativosSection, subirParaTarjeta, VIDEO_ACCEPT } from './produccionUpload.jsx';
+import { CreativosSection } from './produccionUpload.jsx';
 import { numerarDuplicados, columnaEfectiva } from './produccionCalc.js';
+import TarjetaProduccion, { CAPS_EDITOR } from './produccionCard.jsx';
+import { registrarColoresPersonas } from './produccionColors.js';
 
 const ESTADO_BADGE = {
   porhacer: 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-200',
@@ -45,73 +47,6 @@ const COLS_CREATOR = [
   { key: 'publicado', label: 'Publicado', dot: 'bg-violet-500' },
   { key: 'archivado', label: 'Archivado', dot: 'bg-gray-400' },
 ];
-
-// Tarjeta compacta del tablero — se toca para entrar al detalle. Trae el mismo
-// botón "Subir" que el admin (subida directa a la tarjeta, sin abrir el detalle).
-function CreatorMiniCard({ a, num, onOpen, addToast }) {
-  const nSubidos = (a.archivos || []).length;
-  const corregir = (a.nota || '').trim().length > 0;
-  const conBrief = (a.brief || '').trim().length > 0;
-  const puedeSubir = a.estado === 'porhacer' || a.estado === 'revision';
-  const fileRef = useRef(null);
-  const [prog, setProg] = useState(null);
-  const onPick = async (fileList) => {
-    setProg({ i: 0, total: 0, pct: 0 });
-    try { await subirParaTarjeta(a, fileList, { addToast, onProgress: (p) => setProg(p) }); }
-    finally { setProg(null); }
-  };
-  return (
-    <div role="button" tabIndex={0} onClick={onOpen}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); } }}
-      className="w-full text-left rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 shadow-sm hover:border-pink-300 dark:hover:border-pink-700 hover:shadow-md transition cursor-pointer">
-      <div className="flex items-start gap-2">
-        <h3 className="font-bold text-sm text-gray-900 dark:text-white leading-tight flex-1 min-w-0 line-clamp-2">
-          {a.productoNombre || 'Producto'}{num ? <span className="text-brand-500"> #{num}</span> : ''}
-        </h3>
-        <ChevronRight size={15} className="text-gray-300 shrink-0 mt-0.5" />
-      </div>
-      <p className="text-[10px] uppercase tracking-wide text-gray-400 dark:text-gray-500 mt-1">{a.tipo === 'testeo' ? 'Testeo' : 'Renovado'} · {weekLabel(a.weekKey)}</p>
-      <div className="flex items-center gap-2 mt-2 flex-wrap text-[10px] font-semibold">
-        {corregir && <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400"><AlertTriangle size={10} /> Corregir</span>}
-        <span className="inline-flex items-center gap-1 text-gray-500 dark:text-gray-400"><Film size={11} className="text-emerald-500" /><b className="text-gray-700 dark:text-gray-200">{nSubidos}</b>/{VIDEOS_POR_PRODUCTO} videos</span>
-        {conBrief && <span className="inline-flex items-center gap-1 text-brand-600 dark:text-brand-300"><FileText size={10} /> Consigna</span>}
-        {(a.materialLink || '').trim() && (
-          <a href={a.materialLink.trim()} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
-            title="Material del producto en Drive"
-            className="inline-flex items-center gap-1 text-pink-600 dark:text-pink-300 hover:underline"><FolderOpen size={10} /> Material</a>
-        )}
-      </div>
-      {/* Subir directo (mismo botón que ve el admin). El wrapper corta el click
-          para no abrir el detalle al tocar el botón / elegir archivos. */}
-      {puedeSubir && (
-        <div className="mt-2.5" onClick={(e) => e.stopPropagation()}>
-          {prog ? (
-            <div>
-              <div className="flex items-center justify-between text-[11px] font-bold text-brand-600 dark:text-brand-400 mb-1">
-                <span className="inline-flex items-center gap-1 tabular-nums">
-                  <Loader2 size={11} className="animate-spin" />
-                  {Math.round((prog.pct || 0) * 100)}%{prog.total > 1 ? ` · ${prog.i + 1}/${prog.total}` : ''}
-                </span>
-                <span className="text-gray-400 dark:text-gray-500 tabular-nums">subiendo…</span>
-              </div>
-              <div className="h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
-                <div className="h-full rounded-full bg-gradient-to-r from-brand-500 to-brand-400 transition-all" style={{ width: `${Math.round((prog.pct || 0) * 100)}%` }} />
-              </div>
-            </div>
-          ) : (
-            <button onClick={(e) => { e.stopPropagation(); fileRef.current?.click(); }}
-              className="w-full inline-flex items-center justify-center gap-1 px-2 py-1.5 text-xs font-extrabold text-white bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 rounded-lg transition shadow-sm">
-              <UploadCloud size={13} /> Subir
-            </button>
-          )}
-          <input ref={fileRef} type="file" accept={VIDEO_ACCEPT} multiple hidden
-            onClick={(e) => e.stopPropagation()}
-            onChange={(e) => { const fl = Array.from(e.target.files || []); e.target.value = ''; onPick(fl); }} />
-        </div>
-      )}
-    </div>
-  );
-}
 
 // Detalle de la tarjeta para el editor: la CONSIGNA del producto (lo que el
 // admin le quiere pasar), los cambios pedidos, y la zona para subir los videos.
@@ -269,6 +204,9 @@ export default function CreatorWorkspace({ user, onLogout, addToast, darkMode, t
   const totalCards = grupos.reduce((n, g) => n + g.cards.length, 0);
   const allCards = grupos.flatMap(g => g.cards);
   const numMap = numerarDuplicados(allCards);
+  // Registrar los colores de las personas visibles, para que la tarjeta se tinte
+  // con el mismo criterio que en el tablero del admin.
+  registrarColoresPersonas(allCards.map(a => a.persona));
   const detailCard = allCards.find(a => a.id === detailId) || null;
 
   // Resumen motivador de la semana (aprobados + cuánto falta para el bonus) +
@@ -461,7 +399,7 @@ export default function CreatorWorkspace({ user, onLogout, addToast, darkMode, t
                       <div className="space-y-2 min-h-[44px]">
                         {cards.length === 0
                           ? <p className="text-[11px] text-gray-400 dark:text-gray-600 text-center py-3">—</p>
-                          : cards.map(a => <CreatorMiniCard key={a.id} a={a} num={numMap[a.id]} onOpen={() => setDetailId(a.id)} addToast={addToast} />)}
+                          : cards.map(a => <TarjetaProduccion key={a.id} a={a} num={numMap[a.id]} caps={CAPS_EDITOR} onOpen={() => setDetailId(a.id)} addToast={addToast} />)}
                       </div>
                     </div>
                   );

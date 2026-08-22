@@ -73,12 +73,13 @@ function fmtSpeed(bps) {
 }
 
 // Badge de persona (avatar con inicial + nombre), tintado con su color.
-export const PersonaBadge = ({ persona }) => (
-  <span className={`inline-flex items-center gap-1.5 rounded-full pl-1 pr-2.5 py-0.5 ${CHIP_CLS[personaColor(persona)]}`}>
+export const PersonaBadge = ({ persona, num }) => (
+  <span className={`inline-flex items-center gap-1.5 rounded-full pl-1 pr-2 py-0.5 ${CHIP_CLS[personaColor(persona)]}`}>
     <span className="w-5 h-5 rounded-full bg-black/20 flex items-center justify-center text-[11px] font-black uppercase">
       {(persona || '?').charAt(0)}
     </span>
     <span className="text-[12px] font-extrabold">{persona || 'Sin asignar'}</span>
+    {num ? <span className="inline-flex items-center justify-center min-w-[16px] h-[16px] px-1 rounded-full bg-black/25 text-[10px] font-black leading-none" title={`Tarjeta ${num} de esta persona`}>{num}</span> : null}
   </span>
 );
 
@@ -180,7 +181,7 @@ export default function TarjetaProduccion({ a, num, personas = [], team = [], on
         {caps.draggable
           ? <GripVertical size={14} className="text-gray-300 dark:text-gray-600 mt-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition cursor-grab active:cursor-grabbing" />
           : <span className="w-3.5 flex-shrink-0" aria-hidden="true" />}
-        <span className="text-sm font-extrabold tracking-tight text-gray-900 dark:text-white leading-snug flex-1 min-w-0 line-clamp-2 break-words" title={a.productoNombre}>{a.productoNombre || 'Producto'}{num ? <span className="text-brand-500"> #{num}</span> : ''}</span>
+        <span className="text-sm font-extrabold tracking-tight text-gray-900 dark:text-white leading-snug flex-1 min-w-0 line-clamp-2 break-words" title={a.productoNombre}>{a.productoNombre || 'Producto'}</span>
         {caps.reassign ? (
           <div className="relative shrink-0 flex items-center gap-1" onClick={e => e.stopPropagation()}>
             {/* Aviso compacto: etiqueta sin cuenta → nadie la ve en su tablero */}
@@ -190,7 +191,7 @@ export default function TarjetaProduccion({ a, num, personas = [], team = [], on
               </span>
             )}
             <span onClick={() => setMenu(v => !v)} className="cursor-pointer">
-              <PersonaBadge persona={a.persona} />
+              <PersonaBadge persona={a.persona} num={num} />
             </span>
             {menu && (
               <div className="absolute right-0 top-8 z-10 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl p-1 flex flex-col gap-0.5 min-w-[140px]"
@@ -241,7 +242,7 @@ export default function TarjetaProduccion({ a, num, personas = [], team = [], on
             )}
           </div>
         ) : (
-          <span className="shrink-0"><PersonaBadge persona={a.persona} /></span>
+          <span className="shrink-0"><PersonaBadge persona={a.persona} num={num} /></span>
         )}
       </div>
 

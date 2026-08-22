@@ -29,15 +29,15 @@ export function bonusDeCfg(cfg, completados) {
   return monto;
 }
 
-// Numera los duplicados del mismo producto en la misma semana → { id: n } (solo
-// si hay 2+). Diferencia "Cepillo #1 / #2 / #3" asignados a la misma persona.
+// Numera las tarjetas de una MISMA persona en la misma semana → { id: n } (solo
+// si tiene 2+). Así el stack de una persona se lee "Panchito 1 / 2 / 3…" de un
+// vistazo, sin importar el producto. No cruza personas distintas.
 export function numerarDuplicados(cards) {
   const groups = {};
   for (const a of (cards || [])) {
-    // Agrupa por semana + PERSONA + producto: solo numera cuando la MISMA persona
-    // tiene el mismo producto 2+ veces (no cruza personas distintas).
     const per = (a.persona || '').trim().toLowerCase();
-    const k = `${a.weekKey}|${per}|${(a.productoNombre || '').trim().toLowerCase()}`;
+    if (!per) continue; // sin persona no numeramos (no hay a quién contarle)
+    const k = `${a.weekKey}|${per}`;
     (groups[k] = groups[k] || []).push(a);
   }
   const out = {};

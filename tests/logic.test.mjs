@@ -42,12 +42,15 @@ console.log('\nNUMERAR DUPLICADOS:');
 const dupCards = [
   { id: 'a', productoNombre: 'Cepillo', persona: 'Fran', weekKey: '2026-08-17', createdAt: '2026-08-17T10:00' },
   { id: 'b', productoNombre: 'Cepillo', persona: 'Fran', weekKey: '2026-08-17', createdAt: '2026-08-17T11:00' },
-  { id: 'c', productoNombre: 'Colageno', persona: 'Fran', weekKey: '2026-08-17', createdAt: '2026-08-17T10:00' },
+  { id: 'c', productoNombre: 'Colageno', persona: 'Fran', weekKey: '2026-08-17', createdAt: '2026-08-17T12:00' },
 ];
-eq('Fran con 2 Cepillo → #1 y #2', numerarDuplicados(dupCards), { a: 1, b: 2 });
-eq('producto único NO se numera', numerarDuplicados([{ id: 'x', productoNombre: 'Solo', weekKey: '2026-08-17' }]), {});
-// Mismo producto pero PERSONAS distintas → NO se numera (no son duplicados de una persona)
-eq('Cepillo de Fran y de Wanda NO se numeran', numerarDuplicados([
+// Ahora numera TODAS las tarjetas de una persona en la semana (sin importar el
+// producto), por orden de creación → Fran 1, 2, 3.
+eq('Fran con 3 tarjetas → 1,2,3 por persona', numerarDuplicados(dupCards), { a: 1, b: 2, c: 3 });
+eq('una sola tarjeta de la persona NO se numera', numerarDuplicados([{ id: 'x', productoNombre: 'Solo', persona: 'Fran', weekKey: '2026-08-17' }]), {});
+eq('sin persona NO se numera', numerarDuplicados([{ id: 'x', productoNombre: 'Solo', weekKey: '2026-08-17' }]), {});
+// PERSONAS distintas, 1 tarjeta cada una → NO se numera (cada una es única)
+eq('Fran y Wanda con 1 c/u NO se numeran', numerarDuplicados([
   { id: 'a', productoNombre: 'Cepillo', persona: 'Fran', weekKey: '2026-08-17' },
   { id: 'b', productoNombre: 'Cepillo', persona: 'Wanda', weekKey: '2026-08-17' },
 ]), {});

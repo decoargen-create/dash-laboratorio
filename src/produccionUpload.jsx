@@ -15,7 +15,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Film, X, UploadCloud, Loader2, AlertTriangle, ExternalLink } from 'lucide-react';
 import { supabase, getCurrentUser } from './supabase.js';
-import { addArchivos, removeArchivo, updateAssignment, VIDEOS_POR_PRODUCTO } from './produccionStore.js';
+import { addArchivos, removeArchivo, updateAssignment, setCorreccionVideo, VIDEOS_POR_PRODUCTO } from './produccionStore.js';
 
 const BUCKET = 'creativos';
 
@@ -219,10 +219,12 @@ export async function subirParaTarjeta(a, fileList, { onProgress, addToast } = {
 // Sección de creativos dentro de una tarjeta: lista de archivos ya subidos +
 // dropzone + cola de subida. `canDelete` controla si se puede quitar un archivo
 // ya subido (el admin sí; un creator también puede borrar los suyos).
-export function CreativosSection({ a, addToast, canDelete = true, readOnly = false }) {
+export function CreativosSection({ a, addToast, canDelete = true, readOnly = false, canReview = false }) {
   const [files, setFiles] = useState([]); // { file, id, status, destino?, msg? }
   const [busy, setBusy] = useState(false);
   const [drag, setDrag] = useState(false);
+  const [corrEdit, setCorrEdit] = useState(null); // ts del video cuya corrección se edita
+  const [corrText, setCorrText] = useState('');
   const inputRef = useRef(null);
   const folderLink = (a.archivos || []).find(f => f.folderLink)?.folderLink;
   // ¿Todos los archivos cayeron a AdsLab? (pueden ser de ANTES de conectar Drive)
@@ -329,21 +331,64 @@ export function CreativosSection({ a, addToast, canDelete = true, readOnly = fal
         )}
       </div>
 
-      {/* Archivos ya subidos */}
+      {/* Archivos ya subidos — numerados (Video 1, 2, 3…) con corrección por video */}
       {(a.archivos?.length > 0) && (
         <div className="space-y-1 mb-2">
-          {a.archivos.map(f => (
-            <div key={f.ts} className="flex items-center gap-2 text-xs bg-gray-50 dark:bg-gray-800 rounded px-2.5 py-1.5">
-              <Film size={12} className="text-emerald-500 flex-shrink-0" />
-              <span className="truncate flex-1 text-gray-700 dark:text-gray-200" title={f.name}>{f.name}</span>
-              <span className="text-[10px] uppercase font-bold text-gray-400">{f.destino === 'drive' ? 'Drive' : 'AdsLab'}</span>
-              {f.link && <a href={f.link} target="_blank" rel="noopener noreferrer" title="Ver en Drive" className="text-brand-500 hover:text-brand-600"><ExternalLink size={11} /></a>}
-              {!f.link && f.storagePath && (
-                <button onClick={() => verVideo(f)} title="Ver el video (AdsLab)" className="text-brand-500 hover:text-brand-600"><ExternalLink size={11} /></button>
+          {a.archivos.map((f, idx) => {
+            const corr = f.correccion?.texto ? f.correccion : null;
+            const editing = corrEdit === f.ts;
+            const nVid = idx + 1;
+            return (
+            <div key={f.ts}>
+              <div className={`flex items-center gap-2 text-xs rounded px-2.5 py-1.5 ${corr ? 'bg-amber-50 dark:bg-amber-900/20 ring-1 ring-amber-300 dark:ring-amber-800/60' : 'bg-gray-50 dark:bg-gray-800'}`}>
+                <span className="shrink-0 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 text-[10px] font-black tabular-nums" title={`Video ${nVid}`}>{nVid}</span>
+                <Film size={12} className="text-emerald-500 flex-shrink-0" />
+                <span className="truncate flex-1 text-gray-700 dark:text-gray-200" title={f.name}>{f.name}</span>
+                <span className="text-[10px] uppercase font-bold text-gray-400">{f.destino === 'drive' ? 'Drive' : 'AdsLab'}</span>
+                {f.link && <a href={f.link} target="_blank" rel="noopener noreferrer" title="Ver en Drive" className="text-brand-500 hover:text-brand-600"><ExternalLink size={11} /></a>}
+                {!f.link && f.storagePath && (
+                  <button onClick={() => verVideo(f)} title="Ver el video (AdsLab)" className="text-brand-500 hover:text-brand-600"><ExternalLink size={11} /></button>
+                )}
+                {canReview && !readOnly && (
+                  <button onClick={() => { setCorrText(corr?.texto || ''); setCorrEdit(editing ? null : f.ts); }}
+                    title={corr ? `Editar la corrección del Video ${nVid}` : `Pedir corrección del Video ${nVid}`}
+                    className={`inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded transition ${corr ? 'text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/40' : 'text-gray-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20'}`}>
+                    ✎ {corr ? 'Corrección' : 'Corregir'}
+                  </button>
+                )}
+                {canDelete && !readOnly && <button onClick={() => removeArchivo(a.id, f.ts)} className="text-gray-300 hover:text-red-500"><X size={12} /></button>}
+              </div>
+
+              {/* Corrección pedida — visible para todos (el editor la ve read-only) */}
+              {corr && !editing && (
+                <div className="ml-6 mt-0.5 mb-1 flex gap-1.5 items-start bg-amber-50 dark:bg-amber-900/20 border-l-2 border-amber-400 rounded-r px-2.5 py-1.5">
+                  <AlertTriangle size={11} className="text-amber-500 shrink-0 mt-0.5" />
+                  <div className="text-[11px] text-amber-800 dark:text-amber-200 min-w-0">
+                    <b>Corrección (Video {nVid}):</b> <span className="whitespace-pre-wrap break-words">{corr.texto}</span>
+                    {corr.por && <span className="block text-[9.5px] text-amber-600/70 dark:text-amber-400/60 mt-0.5">pedido por {corr.por}</span>}
+                  </div>
+                </div>
               )}
-              {canDelete && !readOnly && <button onClick={() => removeArchivo(a.id, f.ts)} className="text-gray-300 hover:text-red-500"><X size={12} /></button>}
+
+              {/* Editor inline (solo quien revisa) */}
+              {editing && (
+                <div className="ml-6 mt-0.5 mb-1 bg-white dark:bg-gray-900 border border-amber-300 dark:border-amber-800 rounded-lg p-2">
+                  <div className="text-[10px] font-bold uppercase text-amber-700 dark:text-amber-300 mb-1">✎ Corrección para el Video {nVid}</div>
+                  <textarea value={corrText} onChange={e => setCorrText(e.target.value)} autoFocus rows={2}
+                    placeholder="Qué hay que cambiar de este video…"
+                    className="w-full text-xs bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded p-2 focus:outline-none focus:ring-1 focus:ring-amber-500 text-gray-800 dark:text-gray-100 resize-y" />
+                  <div className="flex gap-1.5 justify-end mt-1.5">
+                    {corr && <button onClick={() => { setCorreccionVideo(a.id, f.ts, ''); setCorrEdit(null); addToast?.({ type: 'info', message: `Corrección del Video ${nVid} quitada` }); }}
+                      className="text-[11px] font-bold px-2 py-1 rounded text-gray-500 hover:text-red-500">Quitar</button>}
+                    <button onClick={() => setCorrEdit(null)} className="text-[11px] font-bold px-2 py-1 rounded text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700">Cancelar</button>
+                    <button onClick={() => { const t = corrText.trim(); if (!t) { setCorrEdit(null); return; } setCorreccionVideo(a.id, f.ts, t); setCorrEdit(null); addToast?.({ type: 'success', message: `Corrección pedida en el Video ${nVid}` }); }}
+                      className="text-[11px] font-extrabold px-2.5 py-1 rounded text-white bg-amber-500 hover:bg-amber-600">Pedir corrección</button>
+                  </div>
+                </div>
+              )}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

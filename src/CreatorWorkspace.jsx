@@ -102,12 +102,23 @@ function CreatorCardDetail({ a, num, onClose, addToast }) {
               <ExternalLink size={14} className="text-pink-500 shrink-0" />
             </a>
           )}
-          {(a.nota || '').trim() && (
-            <div className="rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-3 py-2.5">
-              <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase text-amber-700 dark:text-amber-300 mb-1"><AlertTriangle size={12} /> Hay que corregir</div>
-              <p className="text-sm text-amber-800 dark:text-amber-200 whitespace-pre-wrap">{a.nota}</p>
-            </div>
-          )}
+          {(() => {
+            const corrs = (a.archivos || [])
+              .map((f, i) => ({ n: i + 1, texto: f.correccion?.texto, por: f.correccion?.por }))
+              .filter(c => c.texto);
+            if (corrs.length === 0 && !(a.nota || '').trim()) return null;
+            return (
+              <div className="rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-3 py-2.5">
+                <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase text-amber-700 dark:text-amber-300 mb-1.5"><AlertTriangle size={12} /> Hay que corregir{corrs.length ? ` · ${corrs.length} video${corrs.length === 1 ? '' : 's'}` : ''}</div>
+                {corrs.map(c => (
+                  <div key={c.n} className="text-sm text-amber-800 dark:text-amber-200 mb-1.5 last:mb-0">
+                    <span className="font-bold">Video {c.n}:</span> <span className="whitespace-pre-wrap break-words">{c.texto}</span>
+                  </div>
+                ))}
+                {(a.nota || '').trim() && <p className="text-sm text-amber-800 dark:text-amber-200 whitespace-pre-wrap mt-1">{a.nota}</p>}
+              </div>
+            );
+          })()}
 
           {/* Winners de referencia: los creativos que vendieron de este producto,
               para inspirarte / renovarlos. */}

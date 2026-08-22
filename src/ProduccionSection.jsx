@@ -1882,7 +1882,7 @@ function CardDetailModal({ a, personas, team = [], onClose, addToast, onTeamChan
           </div>
 
           {/* Creativos */}
-          <CreativosSection a={a} addToast={addToast} />
+          <CreativosSection a={a} addToast={addToast} canReview />
 
           {/* Videos aprobados (sobre los subidos) + Aprobar todos */}
           {(() => {

@@ -902,6 +902,25 @@ export function removeArchivo(id, ts) {
   pushRow(id);
 }
 
+// Pide (o limpia) una corrección sobre un VIDEO puntual (por su ts). La
+// corrección viaja DENTRO del archivo (f.correccion = { texto, por, ts }) para
+// que se sincronice como el resto de los videos (pushRow completo, sin
+// skipArchivos). texto vacío/blanco = limpiar la corrección de ese video.
+export function setCorreccionVideo(id, ts, texto) {
+  const arr = read().slice();
+  const i = arr.findIndex(a => a.id === id);
+  if (i === -1) return;
+  const txt = (texto || '').trim();
+  const archivos = (arr[i].archivos || []).map(f => {
+    if (f.ts !== ts) return f;
+    if (!txt) { const { correccion, ...rest } = f; return rest; }
+    return { ...f, correccion: { texto: txt, por: _actorName || 'Equipo', ts: new Date().toISOString() } };
+  });
+  arr[i] = { ...arr[i], archivos, updatedAt: new Date().toISOString() };
+  write(arr);
+  pushRow(id);
+}
+
 // ── Config de pago POR PERSONA (monto por producto + tramos de bono) ─────────
 // Sin config para una persona → se usan los defaults globales (PAGO_POR_PRODUCTO
 // + bonusObjetivo). El dueño la edita en "Equipo"; se guarda en la tabla

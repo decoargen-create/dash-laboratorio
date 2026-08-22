@@ -264,11 +264,16 @@ export default function TarjetaProduccion({ a, num, personas = [], team = [], on
           </span>
         )}
         {a.brief?.trim() && <FileText size={12} className="text-gray-400" title="Tiene brief" />}
-        {(a.nota || '').trim() && (
-          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-600 dark:text-amber-400" title="Se pidió corregir esta tarjeta">
-            <AlertTriangle size={11} /> Corregir
-          </span>
-        )}
+        {(() => {
+          const nCorr = (a.archivos || []).filter(f => f.correccion?.texto).length;
+          if (!nCorr && !(a.nota || '').trim()) return null;
+          return (
+            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-600 dark:text-amber-400"
+              title={nCorr ? `${nCorr} video${nCorr === 1 ? '' : 's'} con corrección pedida` : 'Se pidió corregir esta tarjeta'}>
+              <AlertTriangle size={11} /> Corregir{nCorr ? ` · ${nCorr}` : ''}
+            </span>
+          );
+        })()}
         {(a.materialLink || '').trim() && (
           <a href={a.materialLink.trim()} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
             title="Abrir la carpeta de material del producto en Drive"

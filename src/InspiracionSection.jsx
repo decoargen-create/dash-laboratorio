@@ -2457,7 +2457,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     if (!producto) return;
     // POST-REFACTOR: c.ads inline está stripped. Usamos compAdsByCompId
     // (hidratado desde IDB) para encontrar los ads seleccionados.
-    const adsAGenerar = [];
+    const adsAGenerarRaw = [];
     const adsCompetidores = (producto.competidores || []).flatMap(c =>
       (compAdsByCompId[c.id] || c.ads || [])
         .filter(a => seleccionados.has(a.id))
@@ -2470,7 +2470,15 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         .filter(a => seleccionados.has(a.id))
         .map(a => ({ brandNombre, ad: a }));
     });
-    adsAGenerar.push(...adsCompetidores, ...adsCustom);
+    adsAGenerarRaw.push(...adsCompetidores, ...adsCustom);
+    // Dedupe por ad.id (mismo motivo que en handleBulkCrear: un ad puede
+    // matchear en dos fuentes y se adaptaría/gastaría 2 veces).
+    const vistosAdapt = new Set();
+    const adsAGenerar = adsAGenerarRaw.filter(({ ad }) => {
+      if (!ad?.id || vistosAdapt.has(ad.id)) return false;
+      vistosAdapt.add(ad.id);
+      return true;
+    });
     if (adsAGenerar.length === 0) return;
     const costoAprox = (adsAGenerar.length * 0.005).toFixed(3);
     if (!window.confirm(`Convertir ${adsAGenerar.length} ads en ideas para la Bandeja de ${producto.nombre}. Cada ad genera ~3-5 ideas. Costo: ~$${costoAprox} (Claude Haiku). ¿Seguir?`)) return;
@@ -2577,7 +2585,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     // POST-REFACTOR IDB: c.ads inline está stripped — usar compAdsByCompId
     // (hidratado desde IDB). Sin esto el bulk-create fallaba silencioso
     // post-reload: ningún ad de competidor matchaba los seleccionados.
-    const adsAGenerar = [];
+    const adsAGenerarRaw = [];
     const adsCompetidores = (producto.competidores || []).flatMap(c =>
       (compAdsByCompId[c.id] || c.ads || [])
         .filter(a => seleccionados.has(a.id) && (a.imageUrls?.length || 0) > 0)
@@ -2590,7 +2598,22 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         .filter(a => seleccionados.has(a.id))
         .map(a => ({ brandNombre, ad: a }));
     });
-    adsAGenerar.push(...adsCompetidores, ...adsCustom);
+    adsAGenerarRaw.push(...adsCompetidores, ...adsCustom);
+
+    // DEDUPE por ad.id — CAUSA RAÍZ del runaway. Un mismo ad puede matchear
+    // en dos lados: el mismo ad scrapeado bajo dos competidores, o presente en
+    // compAdsByCompId Y en adsByBrand. Sin dedupe, adsAGenerar.length quedaba
+    // MAYOR que seleccionados.size y el bulk generaba el MISMO ad varias veces
+    // → el user seleccionó ~40 y le salieron ~300 creativos (y $ de más). El
+    // confirm ya cuenta ids únicos (seleccionados.size × nVar), así que la
+    // barra tiene que contar exactamente lo mismo.
+    const vistosBulk = new Set();
+    const adsAGenerar = adsAGenerarRaw.filter(({ ad }) => {
+      if (!ad?.id || vistosBulk.has(ad.id)) return false;
+      vistosBulk.add(ad.id);
+      return true;
+    });
+    if (adsAGenerar.length === 0) { finishBulk(); return; }
 
     // Inicializar barra de progreso del bulk (en el store global). La barra
     // visualmente vive en App.jsx via BulkProgressBar — sobrevive cambios de
@@ -2607,41 +2630,52 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       })),
     });
 
-    // FIRE-ALL-AT-ONCE — disparamos crearReferencialDeAd para TODOS los ads
-    // al toque. Cada uno internamente dispara CALL #1 (vision + plan) y
-    // después de su CALL #1, dispara CALLS #2..N en paralelo. Net effect:
-    // en ~75s todas las requests de variations 2..N están en flight server-side.
-    //
-    // Si el user cierra la pestaña después de eso (~80s), Vercel sigue
-    // procesándolas y el cloud-save automático server-side las guarda en
-    // marketing_creativos. Aparecen en Galería al volver.
-    //
-    // Antes era sequential workers (concurrency=1) que tardaba 40+ min para
-    // 8 ads × 4 vars. Ahora es ~5 min para lo mismo, y resiliente al cierre.
-    // Marcamos todos como 'doing' en el store (las requests están disparándose
-    // de a una pero en background — UX-wise el user ve que ya arrancó todo).
     patchBulk(prev => prev ? ({
       ...prev,
       adsList: prev.adsList.map(x => ({ ...x, status: 'doing' })),
     }) : prev);
 
-    // Toast de aviso — el user puede cerrar la pestaña tranquilo después.
+    // CONCURRENCIA ACOTADA (pool). Antes disparábamos TODOS los ads de una
+    // (fire-all-at-once). Con muchos ads el browser sólo abre ~6 conexiones por
+    // host: el resto quedaba encolado y, si esperaba más de 330s en la cola, el
+    // AbortController lo cancelaba → cascada de timeouts y la barra "colgada"
+    // sin terminar nunca (justo lo que reportó el user). Ahora corremos un pool:
+    // unos pocos ads a la vez (cada ad dispara nVar fetches), la barra avanza
+    // parejo y no hay cola infinita. Apuntamos a ~6 fetches concurrentes.
+    // Los ads in-flight igual cloud-savean si cerrás la pestaña; lo ideal es
+    // dejarla abierta hasta que la barra termine.
+    const POOL = Math.max(1, Math.min(6, Math.floor(6 / nVarBulk) || 1));
+
+    // Toast de aviso — decí exactamente qué va a generar y que espere la barra.
     addToast?.({
       type: 'info',
-      message: `${adsAGenerar.length} ads disparados en paralelo. En ~80s todas las variantes estarán generándose server-side — podés cerrar la pestaña y volver: el cloud save sigue.`,
+      message: `Generando ${adsAGenerar.length} ads (${adsAGenerar.length * nVarBulk} imágenes) de a ${POOL} por vez. Dejá esta pestaña abierta hasta que la barra termine.`,
     });
 
     // skipCategoryWarn: el chequeo por-ad mostraría N confirms en el bulk.
-    // El aviso agregado ya se mostró antes del startBulk (más abajo en el
-    // código, computado como bulkMismatchCount).
-    const promises = adsAGenerar.map(({ brandNombre, ad }, i) =>
-      crearReferencialDeAd(brandNombre, ad, { skipCategoryWarn: true, silentExecution: true }).then(ok => {
+    // El aviso agregado ya se mostró antes del startBulk (bulkMismatchNote).
+    // El pool consume adsAGenerar por índice atómico (nextIdx++ es race-free en
+    // JS single-thread). El .catch garantiza que cada ad SIEMPRE reporte
+    // finished aunque crearReferencialDeAd rechace (p.ej. getProductoImagen
+    // tira) — sin esto Promise.all rechazaba, el throw salteaba el finally y
+    // finishBulk() nunca corría → barra pegada para siempre.
+    let nextIdx = 0;
+    const worker = async () => {
+      while (true) {
+        const i = nextIdx++;
+        if (i >= adsAGenerar.length) return;
+        const { brandNombre, ad } = adsAGenerar[i];
+        let ok = false;
+        try {
+          ok = await crearReferencialDeAd(brandNombre, ad, { skipCategoryWarn: true, silentExecution: true });
+        } catch (err) {
+          console.warn(`bulk crear ad ${ad?.id} lanzó:`, err?.message || err);
+          ok = false;
+        }
         reportAdFinished(i, { ok, errorBrand: ok ? null : brandNombre });
-        return ok;
-      })
-    );
-
-      await Promise.all(promises);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(POOL, adsAGenerar.length) }, () => worker()));
     } finally {
       // Cierra el try abierto arriba (post-confirm) → libera el lock pase lo
       // que pase (éxito, error, o cuelgue de red server-side).

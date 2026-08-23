@@ -130,6 +130,50 @@ export function useMetaConnections() {
   return { connections, loading, error, reload };
 }
 
+// Hook: todas las cuentas publicitarias accesibles, juntando las de cada
+// conexión. Cada cuenta se queda con el connId que la trajo — es lo que
+// después hay que mandar para pedirle métricas con el token correcto.
+// Una conexión con token vencido no tapa a las demás: se reporta aparte.
+export function useMetaAdAccounts(connections) {
+  const [accounts, setAccounts] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [errors, setErrors] = useState([]);
+
+  const reload = useCallback(async () => {
+    if (!connections || connections.length === 0) {
+      setAccounts([]); setErrors([]); return [];
+    }
+    setLoading(true);
+    try {
+      const headers = await authHeaders(false);
+      const perConn = await Promise.all(connections.map(async (conn) => {
+        const qs = conn.id && conn.id !== '__cookie__' ? `?connection_id=${encodeURIComponent(conn.id)}` : '';
+        try {
+          const r = await fetch(`/api/meta/ad-accounts${qs}`, { headers });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+          return {
+            accounts: (d.accounts || []).map(a => ({ ...a, connId: conn.id, connLabel: conn.label })),
+            error: null,
+          };
+        } catch (err) {
+          return { accounts: [], error: `${conn.label}: ${err.message}` };
+        }
+      }));
+      const list = perConn.flatMap(r => r.accounts);
+      setAccounts(list);
+      setErrors(perConn.map(r => r.error).filter(Boolean));
+      return list;
+    } finally {
+      setLoading(false);
+    }
+  }, [connections]);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  return { accounts, loading, errors, reload };
+}
+
 // ========================================================================
 // Botón "Conectar con Facebook" (OAuth) — el flujo estilo Ads Uploader.
 // Solo aparece si la app de Meta está configurada en el server

@@ -15,6 +15,7 @@ import {
   clean, abreviarProducto, shortId, cardFolderName, finalFileName,
   nombreBase, nombrePublicado,
 } from '../api/produccion/_naming.js';
+import { parseFunnel, deriveFunnelRates, pickAction } from '../api/meta/_funnel.js';
 
 let pass = 0, fail = 0;
 const eq = (name, got, exp) => {
@@ -99,6 +100,50 @@ eq('agregar PUBLICADO', nombrePublicado(cf, true), `${cf} PUBLICADO`);
 eq('sacar PUBLICADO', nombrePublicado(`${cf} PUBLICADO`, false), cf);
 eq('re-publicar NO duplica sufijo', nombrePublicado(`${cf} PUBLICADO`, true), `${cf} PUBLICADO`);
 eq('nombreBase saca convención vieja "— PUBLICADO"', nombreBase(`${cf} — PUBLICADO`), cf);
+
+
+// ─────────── EMBUDO DE COMPRA (Meta insights) ───────────
+console.log('\nEMBUDO DE COMPRA:');
+// Fila cruda como la devuelve Meta en {account}/insights?level=campaign.
+const filaMeta = {
+  campaign_id: '123', campaign_name: 'Test', spend: '500', impressions: '100000',
+  clicks: '2000', ctr: '2', cpc: '0.25', cpm: '5', reach: '80000', frequency: '1.25',
+  inline_link_clicks: '1000',
+  actions: [
+    { action_type: 'link_click', value: '1000' },
+    { action_type: 'landing_page_view', value: '800' },
+    { action_type: 'add_to_cart', value: '200' },
+    { action_type: 'offsite_conversion.fb_pixel_add_to_cart', value: '190' },
+    { action_type: 'initiate_checkout', value: '50' },
+    { action_type: 'purchase', value: '25' },
+  ],
+  action_values: [{ action_type: 'purchase', value: '2000' }],
+};
+const f = parseFunnel(filaMeta);
+eq('pasos del embudo', [f.linkClicks, f.landingPageViews, f.addToCart, f.initiateCheckout, f.purchases], [1000, 800, 200, 50, 25]);
+eq('add_to_cart NO suma el alias del pixel (se solapan)', f.addToCart, 200);
+eq('revenue sale de action_values', f.revenue, 2000);
+eq('ROAS = 2000/500', f.roas, 4);
+eq('CPA = 500/25', f.cpa, 20);
+eq('ticket promedio = 2000/25', f.aov, 80);
+eq('CTR de enlace = 1000/100000', f.linkCtr, 1);
+eq('% que carga la landing = 800/1000', f.lpvRate, 80);
+eq('% carrito = 200/800', f.atcRate, 25);
+eq('conversión global = 25/1000', f.conversionRate, 2.5);
+eq('costo por click al enlace = 500/1000', f.costPerLinkClick, 0.5);
+// Sin datos no explota ni divide por cero.
+const vacio = parseFunnel({ spend: '0', impressions: '0' });
+eq('cuenta sin actividad → ceros, no NaN', [vacio.roas, vacio.cpa, vacio.conversionRate, vacio.linkCtr], [0, 0, 0, 0]);
+eq('parseFunnel(null) → null', parseFunnel(null), null);
+// Alias: si no viene el genérico, cae al del pixel.
+eq('cae al alias del pixel cuando falta el genérico',
+  pickAction([{ action_type: 'offsite_conversion.fb_pixel_purchase', value: '7' }], ['purchase', 'offsite_conversion.fb_pixel_purchase']), 7);
+// Los totales de la cuenta se recalculan sobre las SUMAS (no promedian ratios):
+// dos campañas, una gasta 100 y trae 1 compra, otra gasta 900 y trae 29.
+const totales = deriveFunnelRates({ spend: 1000, impressions: 200000, linkClicks: 2000, landingPageViews: 1500, addToCart: 300, initiateCheckout: 90, purchases: 30, revenue: 5000 });
+eq('CPA de la cuenta = 1000/30', Number(totales.cpa.toFixed(2)), 33.33);
+eq('ROAS de la cuenta = 5000/1000', totales.roas, 5);
+eq('conversión de la cuenta = 30/2000', totales.conversionRate, 1.5);
 
 // ─────────── RESUMEN ───────────
 console.log(`\n${'─'.repeat(40)}\nRESULTADO: ${pass} ✅   ${fail} ❌\n`);

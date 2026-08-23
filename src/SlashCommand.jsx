@@ -9,7 +9,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Search, ArrowRight, LayoutGrid, Package, Inbox, Trophy,
-  Bookmark, Sparkles, FileText, Activity, X, Command,
+  Bookmark, Sparkles, FileText, Activity, X, Command, Filter,
 } from 'lucide-react';
 
 const SECTION_ACTIONS = [
@@ -18,6 +18,7 @@ const SECTION_ACTIONS = [
   { id: 'go-bandeja', label: 'Ir a Bandeja de ideas', section: 'mk-bandeja', icon: Inbox, keywords: ['bandeja', 'ideas', 'inbox'] },
   { id: 'go-winners', label: 'Ir a Winners', section: 'mk-winners', icon: Trophy, keywords: ['winners', 'ganadores'] },
   { id: 'go-meta', label: 'Ir a Meta Ads', section: 'mk-meta', icon: Sparkles, keywords: ['meta', 'campañas', 'insights', 'facebook'] },
+  { id: 'go-metricas', label: 'Ir a Métricas (embudo)', section: 'mk-metricas', icon: Filter, keywords: ['metricas', 'métricas', 'embudo', 'funnel', 'kpi', 'conversion', 'roas', 'cpa'] },
   { id: 'go-copy', label: 'Generador de copy', section: 'mk-copy', icon: FileText, keywords: ['copy', 'generador', 'texto', 'meta ads'] },
 ];
 

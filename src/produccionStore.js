@@ -564,6 +564,15 @@ export function weekRange(weekKey) {
 export function listAssignments(weekKey) {
   return read().filter(a => a.weekKey === weekKey);
 }
+// TODAS las tarjetas (todas las semanas). El tablero ya NO se parte por semana:
+// muestra todo junto (el auto-archivo de lo publicado hace +48h lo mantiene
+// limpio). La semana solo importa para el PAGO, que sigue agrupando por weekKey.
+// Orden: semana más nueva primero, luego por nombre de producto.
+export function listAllAssignments() {
+  return read().slice().sort((a, b) =>
+    (b.weekKey || '').localeCompare(a.weekKey || '') ||
+    (a.productoNombre || '').localeCompare(b.productoNombre || '', 'es'));
+}
 export function allWeekKeys() {
   return [...new Set(read().map(a => a.weekKey))].sort().reverse();
 }

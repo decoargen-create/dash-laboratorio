@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import {
   ESTADOS, ESTADO_LABELS, VIDEOS_POR_PRODUCTO, weekKeyOf, weekLabel, weekRange, allWeekKeys,
-  listAssignments, addAssignment, updateAssignment, removeAssignment,
+  listAssignments, listAllAssignments, addAssignment, updateAssignment, removeAssignment,
   assignCreator, subscribeProduccion, esCompleto, bonusObjetivo, bonusDe, inversionPorProducto,
   getRole, entregasNuevas, ultimaSubidaTs, personasEnTarjetas, resumenVideosPorProducto,
   resyncDesdeNube, vaciarTodo, setMaterialLinkProducto, probarDiscord,
@@ -536,14 +536,12 @@ function readProductos() {
 }
 
 export default function ProduccionSection({ addToast }) {
-  const [dataVersion, force] = useState(0);
+  const [, force] = useState(0);
   const [productos] = useState(() => readProductos());
-  const [weekKey, setWeekKey] = useState(() => weekKeyOf());
-  // ¿El user ya eligió una semana a mano? Si sí, no la pisamos con el auto-salto.
-  const userPickedWeek = useRef(false);
-  const autoWeekDone = useRef(false);
-  // Cambiar de semana desde la UI marca la elección como manual.
-  const pickWeek = (wk) => { userPickedWeek.current = true; setWeekKey(wk); };
+  // El tablero NO se parte por semana: muestra TODAS las tarjetas juntas. La
+  // semana solo se usa para crear productos nuevos (van a la semana actual) y
+  // para el pago (que sigue agrupando por semana en Finanzas/Equipo).
+  const weekKey = weekKeyOf();
   const [showAdd, setShowAdd] = useState(false);
   const [showTeam, setShowTeam] = useState(false);
   const [confirmResync, setConfirmResync] = useState(false);
@@ -577,24 +575,6 @@ export default function ProduccionSection({ addToast }) {
     const un = subscribeProduccion(() => force(x => x + 1));
     return un;
   }, []);
-
-  // Semana por defecto INTELIGENTE. Al montar arrancamos en la semana actual,
-  // pero la nube hidrata async: si cuando llega la data la semana actual está
-  // VACÍA y hay una semana anterior con tarjetas, saltamos a esa. Así, cuando
-  // arranca una semana nueva, el tablero NO aparece vacío (parecía que se había
-  // perdido todo) — muestra el trabajo en curso de la última semana con carga.
-  // Se hace UNA sola vez y solo si el user no eligió semana a mano.
-  useEffect(() => {
-    if (autoWeekDone.current || userPickedWeek.current) return;
-    const semanasConTarjetas = allWeekKeys(); // desc; solo las que tienen asignaciones
-    if (semanasConTarjetas.length === 0) return; // todavía no hidrató (o de verdad no hay nada)
-    // Si la semana actual ya tiene tarjetas, la dejamos y listo.
-    if (listAssignments(weekKey).length > 0) { autoWeekDone.current = true; return; }
-    // Vacía → mostramos la semana más reciente que sí tiene tarjetas.
-    const masReciente = semanasConTarjetas[0];
-    if (masReciente && masReciente !== weekKey) setWeekKey(masReciente);
-    autoWeekDone.current = true;
-  }, [dataVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Cargamos el equipo (creators) para poder asignar tarjetas a una cuenta.
   // Si la carga FALLA (ej: falta SUPABASE_SERVICE_ROLE_KEY en el server), lo
@@ -653,15 +633,12 @@ export default function ProduccionSection({ addToast }) {
     catch (e) { addToast?.({ type: 'error', message: e.message }); }
   };
 
-  const semanas = useMemo(() => {
-    const keys = new Set(allWeekKeys());
-    keys.add(weekKeyOf());
-    return [...keys].sort().reverse();
-  }, [weekKey]); // eslint-disable-line
-
-  const asigs = listAssignments(weekKey);
+  // Tablero = TODAS las tarjetas (todas las semanas). asigsSemana = solo la
+  // semana actual, para el modal "Agregar producto" (así un producto renovado
+  // que ya está en OTRA semana igual se puede volver a agregar esta semana).
+  const asigs = listAllAssignments();
+  const asigsSemana = listAssignments(weekKey);
   const detail = asigs.find(a => a.id === detailId) || null;
-  const nAprobSemana = asigs.filter(a => esCompleto(a.estado)).length;
 
   const personas = useMemo(() => {
     const set = new Set(EQUIPO_DEFAULT);
@@ -704,6 +681,10 @@ export default function ProduccionSection({ addToast }) {
     for (const a of asigsBoard) (m[columnaEfectiva(a, now)] || m.porhacer).push(a);
     return m;
   }, [asigsBoard]);
+  // Resumen del header: "en producción" = tarjetas activas (sin las archivadas),
+  // "aprobados" = aprobado + publicado que todavía están en el tablero.
+  const nActivos = byCol.porhacer.length + byCol.revision.length + byCol.aprobado.length + byCol.publicado.length;
+  const nAprob = byCol.aprobado.length + byCol.publicado.length;
   // La columna "Archivado" está oculta por defecto; el toggle la muestra.
   const [mostrarArchivado, setMostrarArchivado] = useState(() => {
     try { return localStorage.getItem('adslab-prod-archivado') === '1'; } catch { return false; }
@@ -758,19 +739,12 @@ export default function ProduccionSection({ addToast }) {
         <div>
           <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Producción</h2>
           <p className="text-xs text-gray-500 dark:text-gray-400">
-            {asigs.length === 0
-              ? 'Armá la semana: agregá productos y repartilos 🎬'
-              : <>{asigs.length} en juego · <b className="text-emerald-600 dark:text-emerald-400">{nAprobSemana} aprobado{nAprobSemana === 1 ? '' : 's'}</b> esta semana {nAprobSemana > 0 ? '🔥' : '🎬'}</>}
+            {nActivos === 0
+              ? 'Agregá productos y repartilos 🎬'
+              : <>{nActivos} en producción · <b className="text-emerald-600 dark:text-emerald-400">{nAprob} aprobado{nAprob === 1 ? '' : 's'}</b> {nAprob > 0 ? '🔥' : '🎬'}</>}
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2 flex-wrap">
-          <div className="relative">
-            <select value={weekKey} onChange={e => pickWeek(e.target.value)}
-              className="appearance-none pl-3 pr-8 py-1.5 text-sm font-semibold bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500">
-              {semanas.map(wk => <option key={wk} value={wk}>{weekLabel(wk)}{wk === weekKeyOf() ? ' (esta semana)' : ''}</option>)}
-            </select>
-            <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-          </div>
           <button onClick={() => setShowBuscar(true)}
             title="Buscar videos: por nombre del video, producto, persona o fecha — con link directo a Drive."
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:border-brand-400 hover:text-brand-600 dark:hover:text-brand-300 transition shadow-sm">
@@ -1037,7 +1011,7 @@ export default function ProduccionSection({ addToast }) {
       </div>
 
       {showAdd && (
-        <AgregarProductoModal productos={productos} personas={personas} team={team} asigs={asigs} weekKey={weekKey}
+        <AgregarProductoModal productos={productos} personas={personas} team={team} asigs={asigsSemana} weekKey={weekKey}
           onClose={() => setShowAdd(false)} addToast={addToast} />
       )}
       {detail && (

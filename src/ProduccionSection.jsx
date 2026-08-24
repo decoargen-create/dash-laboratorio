@@ -536,9 +536,14 @@ function readProductos() {
 }
 
 export default function ProduccionSection({ addToast }) {
-  const [, force] = useState(0);
+  const [dataVersion, force] = useState(0);
   const [productos] = useState(() => readProductos());
   const [weekKey, setWeekKey] = useState(() => weekKeyOf());
+  // ¿El user ya eligió una semana a mano? Si sí, no la pisamos con el auto-salto.
+  const userPickedWeek = useRef(false);
+  const autoWeekDone = useRef(false);
+  // Cambiar de semana desde la UI marca la elección como manual.
+  const pickWeek = (wk) => { userPickedWeek.current = true; setWeekKey(wk); };
   const [showAdd, setShowAdd] = useState(false);
   const [showTeam, setShowTeam] = useState(false);
   const [confirmResync, setConfirmResync] = useState(false);
@@ -572,6 +577,24 @@ export default function ProduccionSection({ addToast }) {
     const un = subscribeProduccion(() => force(x => x + 1));
     return un;
   }, []);
+
+  // Semana por defecto INTELIGENTE. Al montar arrancamos en la semana actual,
+  // pero la nube hidrata async: si cuando llega la data la semana actual está
+  // VACÍA y hay una semana anterior con tarjetas, saltamos a esa. Así, cuando
+  // arranca una semana nueva, el tablero NO aparece vacío (parecía que se había
+  // perdido todo) — muestra el trabajo en curso de la última semana con carga.
+  // Se hace UNA sola vez y solo si el user no eligió semana a mano.
+  useEffect(() => {
+    if (autoWeekDone.current || userPickedWeek.current) return;
+    const semanasConTarjetas = allWeekKeys(); // desc; solo las que tienen asignaciones
+    if (semanasConTarjetas.length === 0) return; // todavía no hidrató (o de verdad no hay nada)
+    // Si la semana actual ya tiene tarjetas, la dejamos y listo.
+    if (listAssignments(weekKey).length > 0) { autoWeekDone.current = true; return; }
+    // Vacía → mostramos la semana más reciente que sí tiene tarjetas.
+    const masReciente = semanasConTarjetas[0];
+    if (masReciente && masReciente !== weekKey) setWeekKey(masReciente);
+    autoWeekDone.current = true;
+  }, [dataVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Cargamos el equipo (creators) para poder asignar tarjetas a una cuenta.
   // Si la carga FALLA (ej: falta SUPABASE_SERVICE_ROLE_KEY en el server), lo
@@ -742,7 +765,7 @@ export default function ProduccionSection({ addToast }) {
         </div>
         <div className="ml-auto flex items-center gap-2 flex-wrap">
           <div className="relative">
-            <select value={weekKey} onChange={e => setWeekKey(e.target.value)}
+            <select value={weekKey} onChange={e => pickWeek(e.target.value)}
               className="appearance-none pl-3 pr-8 py-1.5 text-sm font-semibold bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500">
               {semanas.map(wk => <option key={wk} value={wk}>{weekLabel(wk)}{wk === weekKeyOf() ? ' (esta semana)' : ''}</option>)}
             </select>

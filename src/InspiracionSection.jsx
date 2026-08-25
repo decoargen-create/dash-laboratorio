@@ -2128,9 +2128,18 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     }
     // Pasamos producto como fallback — cross-device, localStorage puede no
     // tener producto.fotoUrl todavía pero el cloud sí.
-    const prodImg = await getProductoImagen(producto.id, producto);
+    // TIMEOUT: getProductoImagen no tiene límite propio; si su fetch al cloud se
+    // cuelga, el ad quedaba colgado (y en un bulk POOL=1 congelaba TODO). 45s y
+    // fallamos este ad; el pool sigue con el resto.
+    let prodImg = null;
+    try {
+      prodImg = await Promise.race([
+        getProductoImagen(producto.id, producto),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('foto-producto-timeout')), 45000)),
+      ]);
+    } catch { prodImg = null; }
     if (!prodImg) {
-      addToast?.({ type: 'error', message: 'Cargá la foto del producto en Setup primero.' });
+      addToast?.({ type: 'error', message: 'No pude cargar la foto del producto (¿está en Setup?). Reintentá.' });
       return false;
     }
     setCreandoAdIds(prev => new Set(prev).add(ad.id));
@@ -2659,6 +2668,13 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     // finished aunque crearReferencialDeAd rechace (p.ej. getProductoImagen
     // tira) — sin esto Promise.all rechazaba, el throw salteaba el finally y
     // finishBulk() nunca corría → barra pegada para siempre.
+    // WATCHDOG por ad: crearReferencialDeAd tiene timeout en los fetch (330s)
+    // pero NO en otros await (getProductoImagen, getSession…). Si uno de esos se
+    // cuelga, con POOL=1 el pool queda congelado y la barra NO termina nunca (le
+    // pasó al user: 14 min sin avanzar). Con esto, si un ad tarda más de
+    // AD_TIMEOUT_MS lo damos por fallido y seguimos con el resto — sus fetches
+    // in-flight igual cloud-savean si llegan a terminar.
+    const AD_TIMEOUT_MS = 600000; // 10 min por ad (holgado; solo mata cuelgues reales)
     let nextIdx = 0;
     const worker = async () => {
       while (true) {
@@ -2666,11 +2682,17 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         if (i >= adsAGenerar.length) return;
         const { brandNombre, ad } = adsAGenerar[i];
         let ok = false;
+        let watchdog;
         try {
-          ok = await crearReferencialDeAd(brandNombre, ad, { skipCategoryWarn: true, silentExecution: true });
+          ok = await Promise.race([
+            crearReferencialDeAd(brandNombre, ad, { skipCategoryWarn: true, silentExecution: true }),
+            new Promise((_, rej) => { watchdog = setTimeout(() => rej(new Error('ad-timeout-10min')), AD_TIMEOUT_MS); }),
+          ]);
         } catch (err) {
-          console.warn(`bulk crear ad ${ad?.id} lanzó:`, err?.message || err);
+          console.warn(`bulk crear ad ${ad?.id} falló/timeout:`, err?.message || err);
           ok = false;
+        } finally {
+          clearTimeout(watchdog);
         }
         reportAdFinished(i, { ok, errorBrand: ok ? null : brandNombre });
       }

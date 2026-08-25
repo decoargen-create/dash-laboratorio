@@ -433,7 +433,9 @@ function ResumenSemana({ asigs, filtroSinAsignar = false, onToggleSinAsignar, on
     <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/60 overflow-hidden">
       {/* Resumen del EQUIPO (todos juntos) */}
       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-100 dark:border-gray-700/60 flex-wrap">
-        <span className="text-[11px] font-bold uppercase tracking-wide text-gray-400 mr-auto">Semana del equipo</span>
+        <span className="text-[11px] font-bold uppercase tracking-wide text-gray-400 mr-auto">
+          Equipo · esta semana <span className="normal-case text-gray-400/80">({weekRange(weekKeyOf())})</span>
+        </span>
         <div className="flex items-center gap-1.5 flex-wrap">
           {/* Los contadores por estado (asignados/por hacer/revisión/aprobados) se
               sacaron: ya están en las columnas del tablero. Acá queda el detalle
@@ -860,8 +862,12 @@ export default function ProduccionSection({ addToast }) {
       })()}
 
       {/* Resumen de la semana: carga por persona + objetivo. Clic en una persona
-          filtra el tablero por ella (toggle). */}
-      <ResumenSemana asigs={asigs} filtroSinAsignar={soloSinAsignar}
+          filtra el tablero por ella (toggle). USA asigsSemana (semana actual), NO
+          asigs (todas): el bono/objetivo/MVP son SEMANALES — con todas las semanas
+          (+archivadas) el "completos" crecía infinito y el bono figuraba siempre
+          alcanzado. El tablero sí muestra todas las semanas; este resumen es el
+          del período de pago actual. */}
+      <ResumenSemana asigs={asigsSemana} filtroSinAsignar={soloSinAsignar}
         onToggleSinAsignar={() => setSoloSinAsignar(v => !v)}
         activePersonas={filtroPersona}
         onPickPersona={(p) => setFiltroPersona(prev => prev.includes(p) ? prev.filter(x => x !== p) : [p])} />

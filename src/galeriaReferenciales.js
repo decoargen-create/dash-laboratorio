@@ -14,6 +14,7 @@ import {
   isCloudReady,
   saveReferencialCloud,
   getReferencialesByProductoCloud,
+  getReferencialDetalleCloud,
   countReferencialesByProductoCloud,
   countReferencialesAllProductosCloud,
   getUsedAdIdsForProductoCloud,
@@ -222,6 +223,17 @@ export async function getReferencialesByProducto(productoId, opts = {}) {
   if (!includeArchived) merged = merged.filter(it => !it.archivado);
   merged.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
   return merged;
+}
+
+// Detalle pesado (prompt + skeleton) de un creativo, on-demand al abrirlo. La
+// lista viene liviana (sin esos campos) para no traer megas al render; cuando el
+// user abre un creativo cargamos su prompt/skeleton para el panel "cómo se generó".
+export async function getReferencialDetalle(id) {
+  if (!id) return {};
+  const cloud = await isCloudReady();
+  if (!cloud) return {};
+  try { return await getReferencialDetalleCloud(id); }
+  catch { return {}; }
 }
 
 export async function countReferencialesByProducto(productoId) {

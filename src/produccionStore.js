@@ -798,7 +798,7 @@ async function renombrarPublicado(folderId, published) {
 // 'nuevo' (producto recién creado) o un estado ('revision'|'aprobado'|
 // 'publicado'). El server decide, según la config del dueño, a qué canal
 // (webhook) manda y a quién menciona. Acá solo pasamos el contexto.
-async function notificarEventoDiscord(a, event, from) {
+async function notificarEventoDiscord(a, event, from, extra = {}) {
   if (!supabase) return;
   try {
     const { data: { session } } = await supabase.auth.getSession();
@@ -814,6 +814,8 @@ async function notificarEventoDiscord(a, event, from) {
         from: from || '',
         to: event === 'nuevo' ? '' : event,
         actor: _actorName || '',
+        // Detalle opcional (ej: el texto de la corrección pedida).
+        ...(extra && extra.detalle ? { detalle: String(extra.detalle) } : {}),
         // Link a la carpeta de Drive de la tarjeta (donde están los videos), para
         // entrar directo desde Discord. Puede no existir si no se subió nada.
         folderLink: (a.archivos || []).find(f => f.folderLink)?.folderLink || '',
@@ -928,6 +930,10 @@ export function setCorreccionVideo(id, ts, texto) {
   arr[i] = { ...arr[i], archivos, updatedAt: new Date().toISOString() };
   write(arr);
   pushRow(id);
+  // Aviso a Discord (canal 'correccion'): antes pedir una corrección era 100%
+  // silencioso. Solo cuando se SETEA (no al limpiar). Fire & forget; el server
+  // decide si hay webhook y a quién menciona.
+  if (txt) notificarEventoDiscord(arr[i], 'correccion', null, { detalle: txt });
 }
 
 // ── Config de pago POR PERSONA (monto por producto + tramos de bono) ─────────

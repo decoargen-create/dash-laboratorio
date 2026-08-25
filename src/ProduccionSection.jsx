@@ -1644,17 +1644,23 @@ function VideoSearchModal({ onClose, addToast }) {
 // Se guarda por dueño en la nube (produccion_notif_config).
 const EVENTOS_NOTIF = [
   { key: 'nuevo', label: 'Producto nuevo', emoji: '🆕', hint: 'Al crear una tarjeta/producto' },
+  { key: 'porhacer', label: 'Por hacer', emoji: '📋', hint: 'Cuando una tarjeta entra a Por hacer' },
   { key: 'revision', label: 'En revisión', emoji: '👀', hint: 'Cuando una tarjeta pasa a revisión' },
+  { key: 'correccion', label: 'Corrección pedida', emoji: '✏️', hint: 'Cuando se pide corregir un video' },
   { key: 'aprobado', label: 'Listo para publicar', emoji: '✅', hint: 'Cuando una tarjeta se aprueba' },
   { key: 'publicado', label: 'Publicado', emoji: '🚀', hint: 'Cuando una tarjeta se publica' },
 ];
+// Cada evento: si avisa (on), a qué canal (webhook), a quién mencionar
+// (contactos = ids del roster de abajo) y, opcional, IDs/roles crudos (mentions).
+const evtDefault = () => ({ on: true, webhook: '', mentions: '', contactos: [] });
 const DEFAULT_NOTIF = {
   eventos: {
-    nuevo: { on: true, webhook: '', mentions: '' },
-    revision: { on: true, webhook: '', mentions: '' },
-    aprobado: { on: true, webhook: '', mentions: '' },
-    publicado: { on: true, webhook: '', mentions: '' },
+    nuevo: evtDefault(), porhacer: evtDefault(), revision: evtDefault(),
+    correccion: evtDefault(), aprobado: evtDefault(), publicado: evtDefault(),
   },
+  // Roster de personas para etiquetar (nombre + Discord ID), definido una vez y
+  // reutilizado por columna. [{ id, nombre, discordId }]
+  contactos: [],
 };
 
 function NotifConfigModal({ team = [], onClose, addToast }) {
@@ -1668,16 +1674,31 @@ function NotifConfigModal({ team = [], onClose, addToast }) {
     loadNotifConfig().then(c => {
       if (!alive) return;
       const ev = c?.eventos || c?.estados;   // soporta shape viejo
-      if (ev) {
-        const merged = {};
-        for (const e of EVENTOS_NOTIF) merged[e.key] = { ...DEFAULT_NOTIF.eventos[e.key], ...(ev[e.key] || {}) };
-        setCfg({ eventos: merged });
-      }
+      const merged = {};
+      for (const e of EVENTOS_NOTIF) merged[e.key] = { ...evtDefault(), ...((ev && ev[e.key]) || {}) };
+      const contactos = Array.isArray(c?.contactos) ? c.contactos : [];
+      setCfg({ eventos: merged, contactos });
       setLoading(false);
     });
     return () => { alive = false; };
   }, []);
-  const setEvento = (key, patch) => setCfg(c => ({ eventos: { ...c.eventos, [key]: { ...c.eventos[key], ...patch } } }));
+  const setEvento = (key, patch) => setCfg(c => ({ ...c, eventos: { ...c.eventos, [key]: { ...c.eventos[key], ...patch } } }));
+  // Roster de personas para etiquetar (reutilizable por todas las columnas).
+  const contactos = cfg.contactos || [];
+  const addContacto = () => setCfg(c => ({ ...c, contactos: [...(c.contactos || []), { id: `ct${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, nombre: '', discordId: '' }] }));
+  const setContacto = (id, patch) => setCfg(c => ({ ...c, contactos: (c.contactos || []).map(x => x.id === id ? { ...x, ...patch } : x) }));
+  const delContacto = (id) => setCfg(c => ({
+    ...c,
+    contactos: (c.contactos || []).filter(x => x.id !== id),
+    // También lo sacamos de la selección de cada columna.
+    eventos: Object.fromEntries(Object.entries(c.eventos).map(([k, ev]) => [k, { ...ev, contactos: (ev.contactos || []).filter(cid => cid !== id) }])),
+  }));
+  const toggleEventContacto = (evKey, cid) => setCfg(c => {
+    const ev = c.eventos[evKey] || evtDefault();
+    const cur = new Set(ev.contactos || []);
+    if (cur.has(cid)) cur.delete(cid); else cur.add(cid);
+    return { ...c, eventos: { ...c.eventos, [evKey]: { ...ev, contactos: [...cur] } } };
+  });
   const guardar = async () => {
     setSaving(true);
     const { error } = await saveNotifConfig(cfg);
@@ -1711,8 +1732,37 @@ function NotifConfigModal({ team = [], onClose, addToast }) {
             <div className="flex items-center gap-2 text-sm text-gray-400 py-6 justify-center"><Loader2 size={16} className="animate-spin" /> Cargando…</div>
           ) : (
             <>
+              {/* ① Roster: personas para etiquetar (nombre + Discord ID), una vez. */}
+              <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-3">
+                <div className="flex items-center gap-2">
+                  <Users size={14} className="text-indigo-500" />
+                  <div className="text-sm font-bold text-gray-800 dark:text-gray-100">Personas para etiquetar</div>
+                </div>
+                <p className="text-[10px] text-gray-400 mt-0.5 mb-2">Cargalas una vez. Después elegís a quién avisar en cada columna, sin volver a pegar IDs.</p>
+                <div className="space-y-1.5">
+                  {contactos.length === 0 && <p className="text-[11px] text-gray-400 italic">Todavía no cargaste personas.</p>}
+                  {contactos.map(ct => (
+                    <div key={ct.id} className="flex items-center gap-1.5">
+                      <input value={ct.nombre} onChange={x => setContacto(ct.id, { nombre: x.target.value })}
+                        placeholder="Nombre (ej: Vanessa)"
+                        className="flex-1 min-w-0 px-2.5 py-1.5 text-xs bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                      <input value={ct.discordId} onChange={x => setContacto(ct.id, { discordId: x.target.value.trim() })}
+                        placeholder="Discord ID (ej: 1234567…)"
+                        className="flex-1 min-w-0 px-2.5 py-1.5 text-xs font-mono bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                      <button onClick={() => delContacto(ct.id)} title="Quitar" className="p-1.5 text-gray-400 hover:text-red-500 shrink-0"><Trash2 size={14} /></button>
+                    </div>
+                  ))}
+                </div>
+                <button onClick={addContacto} className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-indigo-600 dark:text-indigo-300 hover:underline">
+                  <Plus size={13} /> Agregar persona
+                </button>
+              </div>
+
+              {/* ② Un aviso por columna: canal + a quién etiquetar (del roster). */}
+              <div className="text-[11px] font-bold uppercase tracking-wide text-gray-400 pt-1">Aviso por columna</div>
               {EVENTOS_NOTIF.map(e => {
-                const ev = cfg.eventos[e.key] || { on: true, webhook: '', mentions: '' };
+                const ev = cfg.eventos[e.key] || evtDefault();
+                const sel = new Set(ev.contactos || []);
                 return (
                   <div key={e.key} className={`rounded-xl border p-3 transition ${ev.on ? 'border-gray-200 dark:border-gray-700' : 'border-gray-100 dark:border-gray-800 opacity-60'}`}>
                     <div className="flex items-center gap-2">
@@ -1729,18 +1779,33 @@ function NotifConfigModal({ team = [], onClose, addToast }) {
                     <input type="url" value={ev.webhook} onChange={x => setEvento(e.key, { webhook: x.target.value })} disabled={!ev.on}
                       placeholder="Webhook del canal (https://discord.com/api/webhooks/…)"
                       className="mt-2 w-full px-2.5 py-1.5 text-xs bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50" />
-                    <input type="text" value={ev.mentions} onChange={x => setEvento(e.key, { mentions: x.target.value })} disabled={!ev.on}
-                      placeholder="IDs de Discord a @mencionar (coma). Ej: 123…, 456…"
-                      className="mt-1.5 w-full px-2.5 py-1.5 text-xs bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50" />
+                    <div className={`mt-2 ${ev.on ? '' : 'opacity-50 pointer-events-none'}`}>
+                      <div className="text-[10px] font-semibold text-gray-400 mb-1">Etiquetar a</div>
+                      {contactos.length === 0 ? (
+                        <p className="text-[11px] text-gray-400 italic">Agregá personas arriba para poder elegirlas.</p>
+                      ) : (
+                        <div className="flex flex-wrap gap-1.5">
+                          {contactos.map(ct => {
+                            const on = sel.has(ct.id);
+                            const nom = (ct.nombre || '').trim() || 'sin nombre';
+                            return (
+                              <button key={ct.id} type="button" onClick={() => toggleEventContacto(e.key, ct.id)}
+                                className={`px-2.5 py-1 rounded-full text-[11px] font-bold border transition ${on ? 'bg-indigo-500 border-indigo-500 text-white' : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-indigo-400'}`}>
+                                {on ? '✓ ' : ''}{nom}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 );
               })}
               <details className="text-[11px] text-gray-500 dark:text-gray-400">
-                <summary className="cursor-pointer font-semibold">Cómo obtener el webhook de un canal y el ID de una persona</summary>
+                <summary className="cursor-pointer font-semibold">Cómo obtener el webhook y el Discord ID</summary>
                 <div className="mt-1.5 space-y-1 pl-1">
-                  <p><b>Webhook</b>: en Discord, engranaje del canal → Integraciones → Webhooks → Nuevo webhook → Copiar URL. Un canal distinto por evento.</p>
-                  <p><b>ID de persona</b>: Ajustes → Avanzado → Modo desarrollador. Después clic derecho sobre la persona → Copiar ID de usuario. Varias, separadas por coma. Para un rol, <b>&amp;</b> antes del ID.</p>
-                  <p>Si dejás un webhook vacío, ese evento cae al canal global (si está configurado en Vercel).</p>
+                  <p><b>Webhook</b>: en Discord, engranaje del canal → Integraciones → Webhooks → Nuevo webhook → Copiar URL. Un canal distinto por columna (o dejalo vacío para el canal global).</p>
+                  <p><b>Discord ID</b>: Ajustes de Discord → Avanzado → Modo desarrollador. Clic derecho sobre la persona → Copiar ID de usuario, y pegalo en "Personas para etiquetar". Para un <b>rol</b>, poné <b>&amp;</b> antes del ID (ej: &amp;123…).</p>
                 </div>
               </details>
             </>

@@ -2551,9 +2551,17 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     if (!producto) return;
     // Pasamos producto como fallback para que getProductoImagen pueda fallback
     // a producto.fotoUrl del cloud si localStorage aún no sincronizó.
-    const prodImg = await getProductoImagen(producto.id, producto);
+    // Con timeout de 45s: si el fetch al cloud se cuelga, mostramos error en vez
+    // de dejar el botón "Generar" muerto sin abrir el confirm.
+    let prodImg = null;
+    try {
+      prodImg = await Promise.race([
+        getProductoImagen(producto.id, producto),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('foto-producto-timeout')), 45000)),
+      ]);
+    } catch { prodImg = null; }
     if (!prodImg) {
-      addToast?.({ type: 'error', message: 'Cargá la foto del producto en Setup primero.' });
+      addToast?.({ type: 'error', message: 'No pude cargar la foto del producto (¿está en Setup?). Reintentá.' });
       return;
     }
     // Costo: $0.18/imagen (high) × 2 variantes + ~$0.005 vision (Haiku) por ad

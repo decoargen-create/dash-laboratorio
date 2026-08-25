@@ -830,7 +830,8 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
   const [filtroEstado, setFiltroEstado] = useState('all');     // 'all' | 'pending' | 'downloaded'
   const [filtroVariante, setFiltroVariante] = useState('all'); // 'all' | 'reference' | 'rebrand' | 'tight' | 'medium' | 'loose'
   const [filtroOrigen, setFiltroOrigen] = useState('all');     // 'all' | 'inspiracion' | 'bandeja-idea'
-  // Búsqueda libre por texto — matchea sourceBrand, sourceHeadline, variantStyle.
+  // Búsqueda libre por texto — matchea sourceBrand, sourceHeadline, variantStyle
+  // (el prompt ya no viaja en la lista liviana).
   const [searchQuery, setSearchQuery] = useState('');
   const [zipping, setZipping] = useState(false);
   // Iteración de winner en curso — bloquea el botón y muestra progreso.
@@ -858,7 +859,9 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
     if (filtroOrigen === 'bandeja-idea' && it.sourceType !== 'bandeja-idea') return false;
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
-      const haystack = [it.sourceBrand, it.sourceHeadline, it.variantStyle, it.prompt]
+      // it.prompt ya NO viene en la lista (columnas livianas) → no lo incluimos
+      // para no dar la falsa impresión de que se busca por prompt.
+      const haystack = [it.sourceBrand, it.sourceHeadline, it.variantStyle]
         .filter(Boolean).join(' ').toLowerCase();
       if (!haystack.includes(q)) return false;
     }
@@ -1269,7 +1272,7 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0 flex-wrap">
-            {/* Búsqueda libre — matchea brand, headline, variante, prompt. */}
+            {/* Búsqueda libre — matchea brand, headline, variante. */}
             <div className="relative">
               <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
               <input

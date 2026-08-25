@@ -730,7 +730,12 @@ export default function ProduccionSection({ addToast }) {
   };
 
   return (
-    <div className="max-w-full space-y-4">
+    // Ancho máximo + centrado: en monitores grandes (ej. 37") el tablero NO se
+    // estira a lo ancho (las tarjetas quedaban gigantes y perdían el formato).
+    // Con el tope, la tarjeta mantiene su proporción (~la del 13") en toda
+    // pantalla y el tablero se centra con aire a los costados. El tablero del
+    // editor ya está acotado (max-w-4xl); esto empareja el del admin.
+    <div className="max-w-[1500px] mx-auto space-y-4">
       {/* Header */}
       <div className="flex items-center gap-3 flex-wrap">
         <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white shadow-sm">

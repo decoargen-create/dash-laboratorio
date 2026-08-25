@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import JSZip from 'jszip';
 import {
-  getReferencialesByProducto, deleteReferencial, patchReferenciales,
+  getReferencialesByProducto, getReferencialDetalle, deleteReferencial, patchReferenciales,
   archiveReferencial, countReferencialesByProducto,
   markAsWinner, unmarkWinner, refreshSignedUrls,
 } from './galeriaReferenciales.js';
@@ -792,6 +792,9 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
   // Form de marcar como winner — guardamos el creativo a marcar.
   const [winnerFormItem, setWinnerFormItem] = useState(null);
   const [selected, setSelected] = useState(null);
+  // Detalle pesado (prompt + skeleton) del creativo abierto — se pide on-demand
+  // porque la lista viene liviana (sin esos campos) para no traer megas al render.
+  const [selDetail, setSelDetail] = useState(null); // { id, prompt, skeleton }
   const [cargando, setCargando] = useState(true);
   const [showDebug, setShowDebug] = useState(false);
   // Vista: 'grid' | 'list' | 'table'. Persistida.
@@ -861,6 +864,16 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
     }
     return true;
   });
+
+  // Al abrir un creativo, si no trae prompt/skeleton (lista liviana), los pedimos
+  // para el panel "cómo se generó". Items de IDB ya los traen → no pide nada.
+  useEffect(() => {
+    if (!selected?.id) { setSelDetail(null); return; }
+    if (selected.prompt != null || selected.skeleton != null) { setSelDetail(null); return; }
+    let alive = true;
+    getReferencialDetalle(selected.id).then(d => { if (alive) setSelDetail({ id: selected.id, ...d }); });
+    return () => { alive = false; };
+  }, [selected]);
 
   const refresh = () => {
     setCargando(true);
@@ -1497,7 +1510,7 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
       {/* Lightbox */}
       {selected && (
         <Lightbox
-          item={selected}
+          item={selDetail && selDetail.id === selected.id ? { ...selected, ...selDetail } : selected}
           imgSrc={blobUrls.get(selected.id) || ''}
           onClose={() => { setSelected(null); setShowDebug(false); }}
           showDebug={showDebug}

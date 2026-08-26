@@ -45,16 +45,32 @@ import { deriveFunnelRates } from '../api/meta/_funnel.js';
 // Las claves siguen diciendo "testeos" a propósito: renombrarlas le borraría
 // la cuenta y el período elegidos a quien ya venía usando el tablero.
 const LS_ACCOUNT = 'adslab-testeos-account';
-const LS_PRESET = 'adslab-testeos-preset';
+const LS_PRESET = 'adslab-testeos-preset';          // ventana de las cohortes
+const LS_PRESET_EMBUDO = 'adslab-metricas-preset';  // ventana del embudo
 
-// El embudo se mira en ventanas cortas (¿cómo viene hoy?) y las cohortes en
-// ventanas largas (¿cómo rindió la tanda del 11/8?). Al unificar la sección,
-// la lista tiene que cubrir las dos.
-const PRESETS = [
+// El período NO es uno solo para toda la sección, y esto costó entenderlo:
+//
+//   · Hoy mira siempre el día de hoy — el endpoint pide `today` aparte, sin
+//     importar qué diga ningún selector.
+//   · Prospectadores mira una ventana fija (la de las reglas, 7 días).
+//   · El embudo se mira en ventanas cortas: ¿cómo viene hoy?
+//   · Las cohortes necesitan una ventana LARGA: con "hoy" la tabla de semanas
+//     queda vacía, porque las campañas del 11/8 no gastaron nada hoy.
+//
+// Antes había un solo selector global. Elegir "Hoy" ahí no cambiaba nada en la
+// pestaña Hoy (que ya era de hoy) y en cambio vaciaba las semanas. Ahora cada
+// pestaña manda sobre su propia ventana y las que no tienen nada que elegir
+// muestran cuál usan, en vez de un desplegable que no hace nada.
+const PRESETS_EMBUDO = [
   { value: 'today', label: 'Hoy' },
   { value: 'yesterday', label: 'Ayer' },
   { value: 'last_7d', label: 'Últimos 7 días' },
   { value: 'last_14d', label: 'Últimos 14 días' },
+  { value: 'last_30d', label: 'Últimos 30 días' },
+  { value: 'this_month', label: 'Este mes' },
+  { value: 'last_month', label: 'Mes pasado' },
+];
+const PRESETS_COHORTES = [
   { value: 'last_30d', label: 'Últimos 30 días' },
   { value: 'last_90d', label: 'Últimos 90 días' },
   { value: 'this_month', label: 'Este mes' },
@@ -1047,7 +1063,20 @@ export default function MetricasSection({ addToast }) {
   const [productos] = useState(() => readProductos());
 
   const [accountId, setAccountId] = useState(() => { try { return localStorage.getItem(LS_ACCOUNT) || ''; } catch { return ''; } });
-  const [preset, setPreset] = useState(() => { try { return localStorage.getItem(LS_PRESET) || 'last_90d'; } catch { return 'last_90d'; } });
+  const [preset, setPreset] = useState(() => {
+    try {
+      const v = localStorage.getItem(LS_PRESET);
+      return PRESETS_COHORTES.some(p => p.value === v) ? v : 'last_90d';
+    } catch { return 'last_90d'; }
+  });
+  // El embudo arranca en HOY: es la pregunta que uno se hace varias veces al
+  // día ("¿cómo viene el día?"), no una ventana histórica.
+  const [presetEmbudo, setPresetEmbudo] = useState(() => {
+    try {
+      const v = localStorage.getItem(LS_PRESET_EMBUDO);
+      return PRESETS_EMBUDO.some(p => p.value === v) ? v : 'today';
+    } catch { return 'today'; }
+  });
   const [productoId, setProductoId] = useState('');
   const [tab, setTab] = useState('hoy');
   // En estas cuentas los testeos son CBO: el presupuesto vive en la campaña,
@@ -1072,6 +1101,9 @@ export default function MetricasSection({ addToast }) {
   const [embudo, setEmbudo] = useState(null);
   const [embudoCargando, setEmbudoCargando] = useState(false);
   const [embudoError, setEmbudoError] = useState(null);
+  // Sube de a uno con "Refrescar": sin esto el botón recargaba las campañas y
+  // dejaba el embudo con los números de hace un rato.
+  const [recargaEmbudo, setRecargaEmbudo] = useState(0);
 
   const account = accounts.find(a => a.id === accountId) || null;
   const currency = account?.currency || null;
@@ -1084,6 +1116,7 @@ export default function MetricasSection({ addToast }) {
   }, [accounts, accountId]);
   useEffect(() => { try { if (accountId) localStorage.setItem(LS_ACCOUNT, accountId); } catch {} }, [accountId]);
   useEffect(() => { try { localStorage.setItem(LS_PRESET, preset); } catch {} }, [preset]);
+  useEffect(() => { try { localStorage.setItem(LS_PRESET_EMBUDO, presetEmbudo); } catch {} }, [presetEmbudo]);
 
   // Las reglas son POR CUENTA y viven en Supabase. Se pinta primero la caché
   // local (instantáneo) y después manda lo que diga la nube.
@@ -1173,7 +1206,7 @@ export default function MetricasSection({ addToast }) {
     setEmbudoCargando(true); setEmbudoError(null);
     (async () => {
       try {
-        let url = `/api/meta/funnel-insights?account_id=${encodeURIComponent(account.id)}&date_preset=${encodeURIComponent(preset)}`;
+        let url = `/api/meta/funnel-insights?account_id=${encodeURIComponent(account.id)}&date_preset=${encodeURIComponent(presetEmbudo)}`;
         if (account.connId && account.connId !== '__cookie__') url += `&connection_id=${encodeURIComponent(account.connId)}`;
         const r = await fetch(url, { headers: await authHeaders(false) });
         const d = await r.json().catch(() => ({}));
@@ -1186,7 +1219,7 @@ export default function MetricasSection({ addToast }) {
       }
     })();
     return () => { vivo = false; };
-  }, [tab, account, preset]);
+  }, [tab, account, presetEmbudo, recargaEmbudo]);
 
   // Filtro por producto sobre los anuncios (las campañas las filtra el core).
   // Solo los productos que REALMENTE tienen campañas en esta cuenta. Mostrar
@@ -1290,6 +1323,16 @@ export default function MetricasSection({ addToast }) {
     );
   }
 
+  // Qué ventana de tiempo corresponde a la pestaña abierta. Las que no eligen
+  // nada lo dicen en vez de mostrar un desplegable que no hace nada.
+  const ventana = tab === 'hoy'
+    ? { fija: true, label: 'Hoy' }
+    : tab === 'prosp'
+      ? { fija: true, label: `Últimos ${cfg.ventanaProspDias} días` }
+      : tab === 'embudo'
+        ? { fija: false, valor: presetEmbudo, set: setPresetEmbudo, opciones: PRESETS_EMBUDO }
+        : { fija: false, valor: preset, set: setPreset, opciones: PRESETS_COHORTES };
+
   const TABS = [
     { id: 'hoy', label: 'Hoy — qué pausar', icon: Gauge },
     { id: 'embudo', label: 'Embudo de compra', icon: Filter },
@@ -1311,10 +1354,17 @@ export default function MetricasSection({ addToast }) {
           </select>
           <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
         </div>
-        <select value={preset} onChange={e => setPreset(e.target.value)}
-          className="px-2.5 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500">
-          {PRESETS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
-        </select>
+        {ventana.fija ? (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400"
+            title="Esta pestaña mira siempre esta ventana — no hay nada que elegir.">
+            <Clock size={12} /> {ventana.label}
+          </span>
+        ) : (
+          <select value={ventana.valor} onChange={e => ventana.set(e.target.value)}
+            className="px-2.5 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1877F2]">
+            {ventana.opciones.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+          </select>
+        )}
         {productosEnCuenta.length > 0 && (
           <div className="flex items-center gap-1 flex-wrap">
             <button onClick={() => setProductoId('')}
@@ -1336,7 +1386,7 @@ export default function MetricasSection({ addToast }) {
             Ningún producto reconocido en esta cuenta — cargá sus palabras en <b>Reglas</b>.
           </span>
         )}
-        <button onClick={() => account && load(account, preset)} disabled={!account || loading}
+        <button onClick={() => { if (!account) return; load(account, preset); setRecargaEmbudo(n => n + 1); }} disabled={!account || loading}
           className="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition disabled:opacity-50">
           <RefreshCw size={12} className={loading ? 'animate-spin' : ''} /> Refrescar
         </button>

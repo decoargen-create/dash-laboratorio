@@ -87,11 +87,11 @@ export function reportAdFinished(adIndex, { ok, errorBrand }) {
   const next = { ..._state };
   next.completed = (_state.completed || 0) + 1;
   next.currentIdx = Math.min((_state.currentIdx || 0) + 1, _state.total - 1);
-  next.adDurations = [..._state.adDurations, Date.now() - _state.startedAt];
+  next.adDurations = [...(_state.adDurations || []), Date.now() - _state.startedAt];
   next.adsList = (_state.adsList || []).map((x, i) =>
     i === adIndex ? { ...x, status: ok ? 'done' : 'error' } : x
   );
-  if (!ok && errorBrand) next.errors = [..._state.errors, errorBrand];
+  if (!ok && errorBrand) next.errors = [...(_state.errors || []), errorBrand];
   _state = next;
   persist();
   emit();

@@ -142,7 +142,10 @@ export default async function handler(req, res) {
     // Releemos por si cambió mientras subíamos (subida puede tardar).
     const { data: fresh } = await svc.from('produccion_asignaciones').select('archivos').eq('id', cardId).maybeSingle();
     const base = Array.isArray(fresh?.archivos) ? fresh.archivos : archivos;
-    const nuevos = base.map(f => (f && f.ts === archivo.ts) ? nuevo : f);
+    // Identificamos el archivo por storagePath (clave ÚNICA y ya validada), NO
+    // por ts: los videos viejos de AdsLab se guardaron con ts:0 (rec.ts||0), así
+    // que matchear por ts colapsaría TODOS los ts:0 en uno → pérdida de datos.
+    const nuevos = base.map(f => (f && f.storagePath === storagePath) ? nuevo : f);
     const { error: upErr } = await svc.from('produccion_asignaciones')
       .update({ archivos: nuevos, updated_at: new Date().toISOString() })
       .eq('id', cardId);

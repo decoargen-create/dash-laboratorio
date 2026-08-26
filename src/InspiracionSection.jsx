@@ -35,6 +35,7 @@ import { getProductoImagen, getAccentColor } from './productoImagen.js';
 import { saveReferencial, getUsedAdIdsForProducto } from './galeriaReferenciales.js';
 import { startBulk, patchBulk, reportAdFinished, finishBulk, clearBulk, subscribeBulk } from './bulkProgressStore.js';
 import { withGenSlot, TARGET_INFLIGHT } from './genConcurrency.js';
+import BulkConfirmModal from './BulkConfirmModal.jsx';
 import { cacheAdImagesBatch, getCachedAdImageUrl, getCachedAdImageDataUrl } from './adImagesStore.js';
 import { checkAdProductMismatch } from './adDomainCheck.js';
 import { startExecution, updateExecution, finishExecution } from './executionsStore.js';
@@ -1633,6 +1634,9 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   }, [seleccionados]);
   const [creandoAdIds, setCreandoAdIds] = useState(new Set());
   const [showGenOpts, setShowGenOpts] = useState(false);
+  // Modal de confirmación del bulk (diseño Panel). { data, resolve } — la
+  // promesa se resuelve con true/false según lo que toque el user.
+  const [bulkConfirmReq, setBulkConfirmReq] = useState(null);
   // Set de sourceAdIds que ya fueron usados para generar creativos en este
   // producto — viene de la galería. Se refresca al toque cuando guardamos un
   // nuevo referencial (evento viora:referencial-saved).
@@ -2731,11 +2735,10 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       quality: genOpts.quality, size: genOpts.size, pool: POOL, visionAds,
     });
     const sizeLabel = genOpts.size === '1024x1536' ? '1024×1536 portrait' : genOpts.size === '1024x1024' ? '1024×1024 1:1' : '2048×2048 1:1';
-    const cacheNote = visionAds < seleccionados.size ? ` (${seleccionados.size - visionAds} con skeleton cacheado)` : '';
     // Chequeo agregado de cruce de categoría (bug Femflora): cuántos de los
     // ads seleccionados parecen de otra categoría que el producto. Un solo
     // aviso, no N confirms.
-    let bulkMismatchNote = '';
+    let mismCount = 0;
     try {
       const selAds = [];
       for (const c of (producto.competidores || [])) {
@@ -2744,16 +2747,33 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       for (const lista of Object.values(adsByBrand)) {
         for (const a of (lista || [])) if (seleccionados.has(a.id)) selAds.push(a);
       }
-      const mism = selAds.filter(a => checkAdProductMismatch(producto, a).mismatch).length;
-      if (mism > 0) {
-        bulkMismatchNote = `\n\n⚠ ${mism} de los ${selAds.length} ads parecen de otra categoría que "${producto.nombre}". El creativo se re-ancla al producto pero la inspiración visual puede salir rara.`;
-      }
+      mismCount = selAds.filter(a => checkAdProductMismatch(producto, a).mismatch).length;
     } catch {}
-    if (!window.confirm(
-      `Generar ${nVarBulk} variante${nVarBulk !== 1 ? 's' : ''} ${sizeLabel} ${genOpts.quality} por cada uno de los ${seleccionados.size} ads${cacheNote} → ${total} imágenes total, ~$${costoEstimado.toFixed(2)}.\n\n` +
-      `Tiempo estimado: ${fmtDur(etaSecs)} (corren ${POOL} ad${POOL !== 1 ? 's' : ''} a la vez).\n` +
-      `Dejá esta pestaña abierta: lo que ya salió se guarda solo en el cloud, pero los ads que todavía no arrancaron NO se disparan si cerrás.${bulkMismatchNote}\n\n¿Seguir?`
-    )) return;
+    // Confirmación con el modal propio (BulkConfirmModal, diseño Panel) en
+    // vez del window.confirm del navegador: gasto en ARS con el dólar cripto
+    // en vivo, desglose imágenes/estrategia/cacheados, tiempo real y el aviso
+    // de categoría cruzada. La promesa resuelve true/false.
+    const okBulk = await new Promise(resolve => setBulkConfirmReq({
+      resolve,
+      data: {
+        productoNombre: producto.nombre,
+        nAds: seleccionados.size,
+        nVar: nVarBulk,
+        total,
+        sizeLabel,
+        quality: genOpts.quality,
+        costoEstimado,
+        costoPorImagen,
+        costoImagenes: total * costoPorImagen,
+        costoVision: visionAds * 0.07,
+        visionAds,
+        cachedAds: seleccionados.size - visionAds,
+        etaSecs,
+        pool: POOL,
+        mismCount,
+      },
+    }));
+    if (!okBulk) return;
 
     // Recién acá tomamos el lock — DESPUÉS del confirm (si cancelás no queda
     // trabado) y con try/finally alrededor de TODO el cuerpo async. Si algo
@@ -4162,6 +4182,14 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           </div>
         );
       })()}
+
+      {/* Modal de confirmación del bulk — reemplaza el window.confirm */}
+      {bulkConfirmReq && (
+        <BulkConfirmModal
+          data={bulkConfirmReq.data}
+          onClose={(ok) => { bulkConfirmReq.resolve(ok); setBulkConfirmReq(null); }}
+        />
+      )}
 
       {/* Modal de board picker — aparece cuando el user clickea "Guardar" sobre un ad */}
       <BoardPickerModal

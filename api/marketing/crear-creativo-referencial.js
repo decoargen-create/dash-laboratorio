@@ -1601,6 +1601,8 @@ export default async function handler(req, res) {
     ajusteUsuario,
     skeletonCached,  // Si el frontend ya tiene el skeleton del ad cacheado,
                      // lo pasa y nos saltamos Vision (ahorra ~$0.005 + 5-10s).
+    planOnly,        // Corré SÓLO el Strategist y devolvé el plan, sin generar
+                     // ninguna imagen. Ver el bloque planOnly más abajo.
   } = body || {};
   const ajuste = (typeof ajusteUsuario === 'string' ? ajusteUsuario : '').trim().slice(0, 500);
 
@@ -1710,6 +1712,37 @@ export default async function handler(req, res) {
       skeleton = result.skeleton;
       visionCost += result.cost || 0;
       visionModel = MODEL_VISION_FALLBACK;
+    }
+
+    // PLAN-ONLY — cortamos acá, antes de tocar gpt-image-2.
+    //
+    // Por qué existe: el Strategist y la imagen #1 compartían la MISMA
+    // invocación serverless, que muere a los 300s. Con 2048x2048 high la
+    // imagen sola tarda 200-250s, así que sumarle el Strategist adelante
+    // dejaba la primera imagen de cada ad al borde del kill de Vercel — y
+    // 2048 high es justamente la config de máxima calidad.
+    //
+    // Separándolos, el plan se calcula en su propia invocación (rápida) y
+    // DESPUÉS cada imagen arranca con los 290s enteros para ella. Además el
+    // frontend puede planificar todos los ads en paralelo primero y recién
+    // ahí disparar todas las imágenes, sin la serialización de "la #1 va
+    // sola" — que existía sólo para poblar este plan.
+    //
+    // El plan que sale de acá es idéntico al que salía antes: mismo modelo,
+    // mismo prompt, mismo nPlan. Cambia cuándo se calcula, no qué se calcula.
+    if (planOnly) {
+      return respondJSON(res, 200, {
+        planOnly: true,
+        plan,
+        skeleton,
+        strategist: !!plan,
+        strategistError,
+        skeletonFromCache,
+        visionModel,
+        imagenes: [],
+        cost: { openai: 0, anthropic: visionCost },
+        generatedAt: new Date().toISOString(),
+      });
     }
 
     // Variables del fallback legacy. Antes estaban declaradas con `var` DENTRO

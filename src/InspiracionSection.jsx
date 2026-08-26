@@ -1681,17 +1681,15 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     };
     return TABLE[quality]?.[size] ?? 95;
   };
-  // ETA del bulk. La forma real del run es: por cada ad, UNA llamada sola
-  // (Strategist + imagen 1) y después las nVar-1 restantes en paralelo. Los
-  // ads corren de a POOL. O sea: ceil(ads/POOL) tandas × (1 llamada + 1 ola).
+  // ETA del bulk. La forma del run es: una fase de planificación (todos los
+  // Strategist en paralelo, una sola vez) y después ceil(ads/POOL) tandas,
+  // donde cada ad dispara sus nVar variantes juntas. La tanda tarda lo que la
+  // variante MÁS lenta, con un poco de margen por jitter y rate limits.
   const estimateBulkSecs = ({ nAds, nVar, quality, size, pool, visionAds = 0 }) => {
     const perCall = secsPerImage(quality, size);
-    const strategist = visionAds > 0 ? 25 : 0; // Sonnet planifica las nVar variaciones
-    // La ola paralela tarda lo que la MÁS lenta de las nVar-1, un poco peor
-    // que una sola llamada por jitter y algún retry de rate limit.
-    const wave = nVar > 1 ? perCall * 1.25 : 0;
-    const perAd = perCall + strategist + wave;
-    return Math.round(Math.ceil(nAds / Math.max(1, pool)) * perAd);
+    const planFase = visionAds > 0 ? 35 : 0; // Opus 5 Strategist, en paralelo
+    const tanda = perCall * (nVar > 1 ? 1.25 : 1);
+    return Math.round(planFase + Math.ceil(nAds / Math.max(1, pool)) * tanda);
   };
   const fmtDur = (secs) => (secs < 90 ? `~${Math.round(secs)}s` : `~${Math.round(secs / 60)} min`);
   // Cache de skeletons extraídos por Vision — { [adId]: skeleton }. Si
@@ -2136,7 +2134,78 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   //   • Falla 1 → las otras 3 siguen funcionando.
   //   • Progreso real (1/4, 2/4, ...).
   //   • Mismo costo de Sonnet ($0.04 una vez) gracias al cache.
-  const crearReferencialDeAd = async (brandNombre, ad, { skipCategoryWarn = false, silentExecution = false } = {}) => {
+  // Corre SÓLO el Strategist para un ad y devuelve el plan, sin generar
+  // ninguna imagen (planOnly en el backend). Sirve para planificar todos los
+  // ads de un bulk en paralelo ANTES de empezar a generar: cada plan tarda
+  // segundos, y una vez que están, las nVar variantes de cada ad se disparan
+  // todas juntas en vez de esperar a que la #1 traiga el plan.
+  const planearAd = async (ad, prodImg, nVar) => {
+    const refImageUrl = ad.imageUrls?.[0];
+    const refImageData = await getCachedAdImageDataUrl(ad.id).catch(() => null);
+    if (!refImageUrl && !refImageData) return null;
+    let authToken = '';
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      authToken = session?.access_token || '';
+    } catch {}
+    // 120s: es una sola llamada al Strategist, no genera imagen. Si tarda más
+    // que esto algo se colgó — mejor seguir sin plan (el ad lo calcula solo
+    // por el camino viejo) que frenar todo el bulk.
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 120000);
+    try {
+      const resp = await withGenSlot(() => fetch('/api/marketing/crear-creativo-referencial', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
+        },
+        body: JSON.stringify({
+          planOnly: true,
+          n: 1,
+          nPlan: nVar,
+          producto: {
+            id: producto.id,
+            nombre: producto.nombre,
+            descripcion: producto.descripcion,
+            research: producto.docs?.research,
+            formato: producto.formato || '',
+            medidas: producto.medidas || '',
+            ofertasReales: producto.ofertasReales || '',
+            offerBrief: producto.ofertasReales || producto.docs?.offerBrief || '',
+          },
+          inspiracion: {
+            brandNombre: '',
+            adId: ad.id,
+            body: ad.body, headline: ad.headline,
+            formato: ad.formato,
+            analysis: ad.analysis || null,
+            visual: ad.visual || null,
+          },
+          inspiracionImageUrl: refImageUrl,
+          inspiracionImagenData: refImageData || undefined,
+          productoImagen: prodImg,
+          accentColor: getAccentColor(producto.id, producto) || '',
+        }),
+        signal: ac.signal,
+      }));
+      const data = await parseJsonOrThrow(resp, 'crear-creativo-referencial (plan)');
+      if (!resp.ok) throw new Error(stringifyApiError(data.error) || `HTTP ${resp.status}`);
+      logCostsFromResponse(data, `crear-creativo-referencial · plan · ${ad.id}`, { productoId: producto?.id });
+      if (data.plan) {
+        upsertSkeleton(skelKey(ad.id), data.plan);
+        return data.plan;
+      }
+      return null;
+    } catch (err) {
+      console.warn(`plan de ${ad.id} falló:`, err?.message || err);
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  const crearReferencialDeAd = async (brandNombre, ad, { skipCategoryWarn = false, silentExecution = false, planPrecargado = null } = {}) => {
     if (!producto) return false;
     // RED DE SEGURIDAD (bug Femflora): si el ad de referencia parece de otra
     // categoría (pies/uñas/cara) que el producto (íntimo/etc.), avisamos ANTES
@@ -2376,93 +2445,108 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       }));
       updateExecution(execId, { stage: `Generando 1/${nVar}…` });
 
-      // CALL #1 — solo, para obtener el plan y poblar el cache.
-      let cachedPlan = skeletonCache[skelKey(ad.id)] || null;
-      const firstData = await doCall(0, cachedPlan);
       const totalCostAccum = { openai: 0, anthropic: 0 };
-      const c1 = logCostsFromResponse(firstData, `crear-creativo-referencial · ${brandNombre} · 1/${nVar}`, { productoId: producto?.id });
-      totalCostAccum.openai += c1?.openai || 0;
-      totalCostAccum.anthropic += c1?.anthropic || 0;
-
-      // Si el Strategist no devolvió plan, el backend degrada a un skeleton de
-      // Haiku: se pierde la estrategia, los badges adaptados y la divergencia
-      // progresiva entre variantes. El estático igual sale, pero sale peor —
-      // y antes eso pasaba en silencio. Avisamos para que sepas por qué esa
-      // tanda quedó floja y puedas regenerarla.
-      if (firstData.strategist === false && !firstData.skeletonFromCache) {
-        console.warn('[crear-creativo-referencial] strategist degradado:', firstData.strategistError);
-        addToast?.({
-          type: 'warning',
-          message: `${brandNombre}: sin plan del strategist (${firstData.strategistError || 'motivo desconocido'}) — las variantes salen con menos dirección creativa.`,
-        });
-      }
-
-      const newPlan = firstData.plan || cachedPlan;
-      if (newPlan && !firstData.skeletonFromCache) {
-        upsertSkeleton(skelKey(ad.id), newPlan);
-        cachedPlan = newPlan;
-      } else if (cachedPlan == null && firstData.skeleton) {
-        upsertSkeleton(skelKey(ad.id), firstData.skeleton);
-      }
-
-      await saveOne(firstData, 0, newPlan);
-      // Limpiar ref del base64 inmediatamente — sin esto Chrome lo mantiene
-      // ~5-15MB en heap hasta el siguiente GC. Con 4 imágenes seguidas
-      // el renderer crashea (Código de error: 5).
-      if (firstData.imagenes) firstData.imagenes.length = 0;
-      let completed = 1;
+      // planPrecargado gana sobre el state: upsertSkeleton escribe con
+      // setSkeletonCache, así que un plan recién calculado en la fase de
+      // planificación del bulk TODAVÍA no está en esta closure. Leerlo del
+      // state acá haría que cada ad recalculara el plan que ya tenía.
+      let cachedPlan = planPrecargado || skeletonCache[skelKey(ad.id)] || null;
+      let completed = 0;
       let failed = 0;
-      setProgressById(prev => ({
-        ...prev,
-        [ad.id]: { ...prev[ad.id], stage: `generando ${completed}/${nVar}` },
-      }));
+      let planDeCache = false;
 
-      // CALLS #2..N — PARALELO (fire-all-at-once) para que sobrevivan al
-      // cierre de pestaña. Cada call genera 1 imagen y el servidor la guarda
-      // en cloud automáticamente (con auth token). Si el user cierra,
-      // Vercel no mata las serverless functions in-flight → las imágenes
-      // terminan en Galería igual.
-      //
-      // Nota memoria: con cloud-save funcionando (auth presente), las
-      // imágenes NO se acumulan en heap del browser — server las guarda y
-      // devuelve solo metadata. Si fallback IDB local (sin auth), el peor
-      // caso es N base64s simultáneos en heap (~15MB × N).
-      if (nVar > 1) {
-        const restPromises = Array.from({ length: nVar - 1 }, (_, i) => {
-          const idx = i + 1;
-          return doCall(idx, cachedPlan)
-            .then(async data => {
-              await saveOne(data, idx, cachedPlan);
-              const c = logCostsFromResponse(data, `crear-creativo-referencial · ${brandNombre} · ${idx + 1}/${nVar}`, { productoId: producto?.id });
-              totalCostAccum.openai += c?.openai || 0;
-              totalCostAccum.anthropic += c?.anthropic || 0;
-              if (data.imagenes) data.imagenes.length = 0;
-              return { ok: true, idx };
-            })
-            .catch(err => {
-              console.warn(`Variación ${idx + 1}/${nVar} de ${brandNombre} falló:`, err.message);
-              return { ok: false, idx, error: err.message };
-            });
-        });
-        // Reporter de progreso a medida que terminan (sin bloquear el flow).
-        restPromises.forEach(p => p.then(res => {
-          if (res.ok) completed++; else failed++;
-          if (mountedRef.current) {
-            setProgressById(prev => ({
-              ...prev,
-              [ad.id]: { ...(prev[ad.id] || {}), stage: `generando ${completed}/${nVar}${failed ? ` (${failed} ✗)` : ''}` },
-            }));
-            updateExecution(execId, { stage: `Generando ${completed}/${nVar}…` });
-          }
+      const bump = (ok) => {
+        if (ok) completed++; else failed++;
+        if (!mountedRef.current) return;
+        setProgressById(prev => ({
+          ...prev,
+          [ad.id]: { ...(prev[ad.id] || {}), stage: `generando ${completed}/${nVar}${failed ? ` (${failed} ✗)` : ''}` },
         }));
-        await Promise.all(restPromises);
+        updateExecution(execId, { stage: `Generando ${completed}/${nVar}…` });
+      };
+
+      // Genera UNA variante con el plan ya resuelto. Cada call devuelve 1
+      // imagen y el server la guarda en cloud (con auth token), así que si
+      // cerrás la pestaña las que ya salieron igual llegan a Galería.
+      const runOne = async (idx, plan) => {
+        const data = await doCall(idx, plan);
+        await saveOne(data, idx, plan);
+        const c = logCostsFromResponse(data, `crear-creativo-referencial · ${brandNombre} · ${idx + 1}/${nVar}`, { productoId: producto?.id });
+        totalCostAccum.openai += c?.openai || 0;
+        totalCostAccum.anthropic += c?.anthropic || 0;
+        // Limpiar ref del base64 inmediatamente — sin esto Chrome lo mantiene
+        // ~5-15MB en heap hasta el siguiente GC. Con 4 imágenes seguidas el
+        // renderer crashea (Código de error: 5).
+        if (data.imagenes) data.imagenes.length = 0;
+      };
+
+      // ¿Ya tenemos el plan completo del Strategist para este ad — del cache,
+      // o de la fase de planificación del bulk? Entonces las nVar variantes
+      // son independientes entre sí y van TODAS al mismo tiempo.
+      //
+      // La llamada #1 iba sola SÓLO porque era la que producía el plan. Con el
+      // plan hecho esa serialización no compra nada: costaba una tanda entera
+      // de generación (95-215s según size) por cada ad, y encima metía el
+      // Strategist adentro del mismo handler de 300s que la imagen — que es lo
+      // que ponía en riesgo a 2048x2048 high, la config de máxima calidad.
+      const tienePlan = !!(cachedPlan?.strategy
+        && Array.isArray(cachedPlan?.variations)
+        && cachedPlan.variations.length >= nVar);
+
+      let desdeIdx = 0;
+      if (tienePlan) {
+        planDeCache = true;
+      } else {
+        // Sin plan: la #1 va sola, lo produce y puebla el cache.
+        const firstData = await doCall(0, cachedPlan);
+        const c1 = logCostsFromResponse(firstData, `crear-creativo-referencial · ${brandNombre} · 1/${nVar}`, { productoId: producto?.id });
+        totalCostAccum.openai += c1?.openai || 0;
+        totalCostAccum.anthropic += c1?.anthropic || 0;
+        planDeCache = !!firstData.skeletonFromCache;
+
+        // Si el Strategist no devolvió plan, el backend degrada a un skeleton
+        // de Haiku: se pierde la estrategia, los badges adaptados y la
+        // divergencia progresiva entre variantes. El estático igual sale, pero
+        // sale peor — y antes eso pasaba en silencio.
+        if (firstData.strategist === false && !firstData.skeletonFromCache) {
+          console.warn('[crear-creativo-referencial] strategist degradado:', firstData.strategistError);
+          addToast?.({
+            type: 'warning',
+            message: `${brandNombre}: sin plan del strategist (${firstData.strategistError || 'motivo desconocido'}) — las variantes salen con menos dirección creativa.`,
+          });
+        }
+
+        const newPlan = firstData.plan || cachedPlan;
+        if (newPlan && !firstData.skeletonFromCache) {
+          upsertSkeleton(skelKey(ad.id), newPlan);
+          cachedPlan = newPlan;
+        } else if (cachedPlan == null && firstData.skeleton) {
+          upsertSkeleton(skelKey(ad.id), firstData.skeleton);
+        }
+
+        await saveOne(firstData, 0, newPlan);
+        if (firstData.imagenes) firstData.imagenes.length = 0;
+        bump(true);
+        desdeIdx = 1;
       }
+
+      // El resto (o todas, si ya había plan) en paralelo. El semáforo global
+      // de genConcurrency.js es el que decide cuántas salen de verdad a la vez.
+      const idxs = Array.from({ length: nVar - desdeIdx }, (_, i) => i + desdeIdx);
+      await Promise.all(idxs.map(idx =>
+        runOne(idx, cachedPlan)
+          .then(() => bump(true))
+          .catch(err => {
+            console.warn(`Variación ${idx + 1}/${nVar} de ${brandNombre} falló:`, err.message);
+            bump(false);
+          })
+      ));
 
       setProgressById(prev => ({
         ...prev,
         [ad.id]: { ...prev[ad.id], stage: 'done' },
       }));
-      const cacheNote = firstData.skeletonFromCache ? ' (plan cacheado)' : '';
+      const cacheNote = planDeCache ? ' (plan cacheado)' : '';
       const failNote = failed > 0 ? ` (${failed} fallaron)` : '';
       const msg = `${completed}/${nVar} variaciones generadas${failNote}${cacheNote}`;
       addToast?.({ type: failed > 0 ? 'warning' : 'success', message: msg });
@@ -2723,8 +2807,38 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       adsList: prev.adsList.map(x => ({ ...x, status: 'doing' })),
     }) : prev);
 
-    // POOL y etaSecs se calcularon arriba, antes del confirm, para poder
-    // mostrarte la ETA real. El semáforo de genConcurrency.js es la red de
+    // FASE 1 — PLANIFICAR. Corremos el Strategist de todos los ads que no
+    // tengan plan, en paralelo y sin generar una sola imagen. Son llamadas de
+    // segundos, y cuando terminan cada ad puede disparar sus nVar variantes
+    // todas juntas en vez de esperar a que la #1 traiga el plan.
+    //
+    // Ojo con el cache: upsertSkeleton escribe con setSkeletonCache (state de
+    // React), así que los planes recién calculados NO están todavía en la
+    // closure de crearReferencialDeAd. Por eso los llevamos en este Map y los
+    // pasamos explícitos como planPrecargado.
+    const planesPorAd = new Map();
+    const sinPlan = adsAGenerar.filter(({ ad }) => {
+      const p = skeletonCache[skelKey(ad.id)];
+      const completo = !!(p?.strategy && Array.isArray(p?.variations) && p.variations.length >= nVarBulk);
+      if (completo) planesPorAd.set(ad.id, p);
+      return !completo;
+    });
+    if (sinPlan.length > 0) {
+      addToast?.({ type: 'info', message: `Planificando ${sinPlan.length} ad${sinPlan.length !== 1 ? 's' : ''} antes de generar…` });
+      await Promise.all(sinPlan.map(async ({ ad }) => {
+        const plan = await planearAd(ad, prodImg, nVarBulk);
+        if (plan) planesPorAd.set(ad.id, plan);
+      }));
+      const fallaron = sinPlan.length - sinPlan.filter(({ ad }) => planesPorAd.has(ad.id)).length;
+      if (fallaron > 0) {
+        // No abortamos: esos ads generan igual por el camino viejo (la #1 se
+        // encarga del plan). Sólo van a tardar más.
+        addToast?.({ type: 'warning', message: `${fallaron} ad${fallaron !== 1 ? 's' : ''} sin plan previo — se planifican sobre la marcha.` });
+      }
+    }
+
+    // FASE 2 — GENERAR. POOL y etaSecs se calcularon arriba, antes del
+    // confirm, para poder mostrarte la ETA real. El semáforo de genConcurrency.js es la red de
     // seguridad: aunque dispares un creativo individual mientras el bulk
     // corre, el total de fetches en vuelo nunca pasa TARGET_INFLIGHT.
     addToast?.({
@@ -2760,7 +2874,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         let watchdog;
         try {
           ok = await Promise.race([
-            crearReferencialDeAd(brandNombre, ad, { skipCategoryWarn: true, silentExecution: true }),
+            crearReferencialDeAd(brandNombre, ad, { skipCategoryWarn: true, silentExecution: true, planPrecargado: planesPorAd.get(ad.id) || null }),
             new Promise((_, rej) => { watchdog = setTimeout(() => rej(new Error('ad-timeout-10min')), AD_TIMEOUT_MS); }),
           ]);
         } catch (err) {

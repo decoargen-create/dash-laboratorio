@@ -240,7 +240,7 @@ export async function subirParaTarjeta(a, fileList, { onProgress, addToast } = {
   const eraPorHacer = a.estado === 'porhacer';
   const yaTenia = a.archivos?.length || 0;
   const objetivo = a.videosTotal || VIDEOS_POR_PRODUCTO;
-  let ok = 0, dest = null, driveWarn = null, yaEstaban = 0, versionNueva = 0;
+  let ok = 0, dest = 'drive', driveWarn = null, yaEstaban = 0, versionNueva = 0;
   // Progreso GLOBAL por bytes (barra + % + ETA + velocidad). Todas las subidas a
   // Drive van por el relay en chunks → reportan bytes reales; el fallback a
   // AdsLab no reporta chunks, así que ahí la barra salta al terminar el archivo.
@@ -395,7 +395,7 @@ export function CreativosSection({ a, addToast, canDelete = true, readOnly = fal
       const eraPorHacer = a.estado === 'porhacer';
       const yaTenia = a.archivos?.length || 0;
       const objetivo = a.videosTotal || VIDEOS_POR_PRODUCTO;
-      let ok = 0, dest = null, driveWarn = null, yaEstaban = 0, versionNueva = 0;
+      let ok = 0, dest = 'drive', driveWarn = null, yaEstaban = 0, versionNueva = 0;
       for (const item of files) {
         if (item.status === 'ok') continue;
         setFiles(prev => prev.map(f => f.id === item.id ? { ...f, status: 'subiendo' } : f));

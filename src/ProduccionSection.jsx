@@ -16,7 +16,7 @@ import {
   FolderTree,
 } from 'lucide-react';
 import {
-  ESTADOS, ESTADO_LABELS, VIDEOS_POR_PRODUCTO, weekKeyOf, weekLabel, weekRange, allWeekKeys,
+  ESTADOS, ESTADO_LABELS, VIDEOS_POR_PRODUCTO, weekKeyOf, weekLabel, allWeekKeys,
   listAssignments, listAllAssignments, addAssignment, updateAssignment, removeAssignment,
   assignCreator, subscribeProduccion, esCompleto, bonusObjetivo, bonusDe, inversionPorProducto,
   getRole, entregasNuevas, ultimaSubidaTs, personasEnTarjetas, resumenVideosPorProducto,
@@ -624,7 +624,7 @@ export default function ProduccionSection({ addToast }) {
         working: s?.working ?? (p?.configured === true ? true : (p?.transient ? false : null)),
         email: s?.email || p?.email || null,
       }));
-    });
+    }).catch(() => { /* probeDrive puede rechazar por red — no rompemos el estado */ });
   };
   useEffect(refreshDrive, []);
   // Diagnóstico de las credenciales OAuth (leído de /api/diag, público). Sirve
@@ -711,7 +711,10 @@ export default function ProduccionSection({ addToast }) {
     allWeekKeys().forEach(wk => listAssignments(wk).forEach(a => { if (a.persona) set.add(a.persona); }));
     productos.forEach(p => { const r = (p.responsable || '').trim(); if (r) set.add(r); });
     return [...set];
-  }, [weekKey, productos]); // eslint-disable-line
+    // Depende de `asigs`: weekKey es const (día) y productos es one-shot, así que
+    // sin asigs el memo quedaba congelado y no tomaba personas de tarjetas nuevas
+    // (colores stale / no aparecían para reasignar).
+  }, [asigs, productos]); // eslint-disable-line
   // Asigna un color DISTINTO a cada persona (así Wanda y Dai no comparten color).
   // Sumamos las cuentas del equipo para cubrir a todos, no solo a los de esta semana.
   registrarColoresPersonas([...personas, ...team.map(m => m.display_name || m.email)]);

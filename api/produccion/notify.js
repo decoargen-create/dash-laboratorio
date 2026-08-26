@@ -140,9 +140,14 @@ export default async function handler(req, res) {
   const evCfg = eventos?.[event];
   if (evCfg && evCfg.on === false) return respondJSON(res, 200, { sent: false, reason: 'evento-apagado' });
 
-  // Canal: el propio del evento, o el global como fallback.
-  const url = (evCfg?.webhook && String(evCfg.webhook).trim()) || envWebhook;
-  if (!url) return respondJSON(res, 200, { sent: false, reason: 'no-webhook' });
+  // Canal: el propio del evento, o el global como fallback. Validamos que el
+  // webhook del evento sea REALMENTE de Discord (igual que el path de prueba);
+  // sin esto un dueño podía apuntar a una URL interna y el server le pegaba
+  // (SSRF). El env global es de confianza (lo configuramos nosotros).
+  const evWebhook = String(evCfg?.webhook || '').trim();
+  const evWebhookOk = /^https:\/\/(discord\.com|discordapp\.com)\/api\/webhooks\//i.test(evWebhook);
+  const url = (evWebhook && evWebhookOk) ? evWebhook : envWebhook;
+  if (!url) return respondJSON(res, 200, { sent: false, reason: (evWebhook && !evWebhookOk) ? 'webhook-invalido' : 'no-webhook' });
 
   const menciones = mentionsForEvent(config, evCfg);
   const prod = String(body.productoNombre || 'Producto').slice(0, 240);

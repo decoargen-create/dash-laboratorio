@@ -86,8 +86,22 @@ eq('abreviar "Cepillo Drenaje Linfatico" → CDL', abreviarProducto('Cepillo Dre
 eq('abreviar salta conectores "Crema de la Noche" → CN', abreviarProducto('Crema de la Noche'), 'CN');
 eq('abreviar 1 palabra "Colageno" → Colageno', abreviarProducto('Colageno'), 'Colageno');
 eq('shortId prodasig-…-vdagn → vdagn', shortId('prodasig-1787025026325-vdagn'), 'vdagn');
-eq('cardFolder "Cepillo Facial [Francisco][13-8]"', cardFolderName('Cepillo Facial', 'Francisco', '2026-08-13'), 'Cepillo Facial [Francisco][13-8]');
+eq('cardFolder sin cardId (convención vieja)', cardFolderName('Cepillo Facial', 'Francisco', '2026-08-13'), 'Cepillo Facial [Francisco][13-8]');
 eq('cardFolder sin persona → [Equipo]', cardFolderName('Colageno', '', '2026-08-05'), 'Colageno [Equipo][5-8]');
+// UNA CARPETA POR TARJETA: dos tarjetas del mismo producto + misma persona +
+// misma semana son entregas DISTINTAS (el tablero las numera #1/#2). Antes
+// generaban el mismo nombre y Drive las fusionaba: 9 + 9 = 18 videos juntos.
+eq('cardFolder con cardId lleva el token de la tarjeta',
+  cardFolderName('Cepillo Facial', 'Francisco', '2026-08-13', 'prodasig-1787025026325-vdagn'),
+  'Cepillo Facial [Francisco][13-8][vdagn]');
+const carpetaA = cardFolderName('Cepillo Facial', 'Francisco', '2026-08-13', 'prodasig-1787025026325-vdagn');
+const carpetaB = cardFolderName('Cepillo Facial', 'Francisco', '2026-08-13', 'prodasig-1787025099999-k2m7p');
+eq('dos tarjetas iguales NO comparten carpeta', carpetaA !== carpetaB, true);
+eq('la misma tarjeta siempre da la misma carpeta (estable entre probe y subida)',
+  cardFolderName('Cepillo Facial', 'Francisco', '2026-08-13', 'prodasig-1787025026325-vdagn'), carpetaA);
+// El sufijo PUBLICADO sigue siendo idempotente sobre el nombre nuevo.
+eq('PUBLICADO sobre la carpeta con token', nombrePublicado(carpetaA, true), 'Cepillo Facial [Francisco][13-8][vdagn] PUBLICADO');
+eq('despublicar vuelve al nombre exacto', nombrePublicado(nombrePublicado(carpetaA, true), false), carpetaA);
 eq('clean saca caracteres inválidos', clean('Ana/Bea:1'), 'Ana Bea 1');
 // finalFileName con reloj inyectado (17:05:30 UTC = 14:05:30 AR) → determinista
 const fixed = new Date('2026-08-17T17:05:30Z');

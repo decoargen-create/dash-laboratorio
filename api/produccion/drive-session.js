@@ -65,7 +65,7 @@ export default async function handler(req, res) {
           const personaFolder = await driveEnsureFolder(ctx.token, prodFolder, clean(body.persona, 'Equipo'));
           out.personaLink = `https://drive.google.com/drive/folders/${personaFolder}`;
           if (!out.cardLink && body.cardId) {
-            const cardFolder = await driveEnsureFolder(ctx.token, personaFolder, cardFolderName(body.productoNombre, body.persona, body.weekKey));
+            const cardFolder = await driveEnsureFolder(ctx.token, personaFolder, cardFolderName(body.productoNombre, body.persona, body.weekKey, body.cardId));
             out.cardLink = `https://drive.google.com/drive/folders/${cardFolder}`;
           }
         }
@@ -88,15 +88,18 @@ export default async function handler(req, res) {
     const rootId = ctx.rootId;
 
     // Carpeta de la tarjeta. Si ya la tenemos (subidas previas), la reusamos por
-    // ID — así no depende del nombre, que pudo renombrarse a "… — PUBLICADO".
-    // Si no, armamos la ruta: <raíz>/<Producto>/<Persona>/<sem d-m · id>/.
+    // ID — así no depende del nombre, que pudo renombrarse a "… PUBLICADO".
+    // Si no, armamos la ruta:
+    //   <raíz "Creativos AdsLab">/<Producto>/<Persona>/<Producto [Persona][d-m][id]>/
+    // El [id] al final es lo que hace que cada TARJETA tenga su carpeta: sin
+    // eso, dos tarjetas del mismo producto/persona/semana compartían carpeta.
     let subFolder;
     if (body.folderId) {
       subFolder = body.folderId;
     } else {
       const prodFolder = await driveEnsureFolder(token, rootId, clean(productoNombre, 'Producto'));
       const personaFolder = await driveEnsureFolder(token, prodFolder, clean(persona, 'Equipo'));
-      subFolder = await driveEnsureFolder(token, personaFolder, cardFolderName(productoNombre, persona, weekKey));
+      subFolder = await driveEnsureFolder(token, personaFolder, cardFolderName(productoNombre, persona, weekKey, body.cardId));
     }
 
     // Respetamos el nombre TAL CUAL se sube (el equipo ya usa su convención, ej:

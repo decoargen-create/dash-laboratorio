@@ -46,6 +46,7 @@ import { deriveFunnelRates } from '../api/meta/_funnel.js';
 // la cuenta y el período elegidos a quien ya venía usando el tablero.
 const LS_ACCOUNT = 'adslab-testeos-account';
 const LS_PRESET = 'adslab-testeos-preset';          // ventana de las cohortes
+const LS_PRESET_MIGRADO = 'adslab-testeos-preset-v2';
 const LS_PRESET_EMBUDO = 'adslab-metricas-preset';  // ventana del embudo
 
 // El período NO es uno solo para toda la sección, y esto costó entenderlo:
@@ -1066,8 +1067,18 @@ export default function MetricasSection({ addToast }) {
   const [preset, setPreset] = useState(() => {
     try {
       const v = localStorage.getItem(LS_PRESET);
-      return PRESETS_COHORTES.some(p => p.value === v) ? v : 'last_90d';
-    } catch { return 'last_90d'; }
+      // El default pasó de 90 a 30 días. Como el valor se persiste en cada
+      // render, todo el que ya abrió el tablero tiene 'last_90d' guardado y no
+      // hay forma de distinguir "lo elegí" de "me lo dejó el default viejo".
+      // Se corrige una sola vez, marcando que ya se hizo: si después elegís 90
+      // a propósito, se respeta.
+      if (v === 'last_90d' && !localStorage.getItem(LS_PRESET_MIGRADO)) {
+        localStorage.setItem(LS_PRESET_MIGRADO, '1');
+        return 'last_30d';
+      }
+      localStorage.setItem(LS_PRESET_MIGRADO, '1');
+      return PRESETS_COHORTES.some(p => p.value === v) ? v : 'last_30d';
+    } catch { return 'last_30d'; }
   });
   // El embudo arranca en HOY: es la pregunta que uno se hace varias veces al
   // día ("¿cómo viene el día?"), no una ventana histórica.

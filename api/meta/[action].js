@@ -1665,7 +1665,7 @@ async function handleFunnelInsights(req, res) {
 // con src/testeosCore.js. Así, al mover un umbral, el tablero se recalcula al
 // instante sin volver a pegarle a Meta.
 //
-// Query: account_id, connection_id?, date_preset? (campañas, default last_90d)
+// Query: account_id, connection_id?, date_preset? (campañas, default last_30d)
 async function handleTestingInsights(req, res) {
   if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
 
@@ -1678,8 +1678,8 @@ async function handleTestingInsights(req, res) {
   if (!accountId) return respondJSON(res, 400, { error: 'Falta account_id (con prefijo act_)' });
 
   const allowed = ['last_7d', 'last_14d', 'last_30d', 'last_90d', 'this_month', 'last_month', 'maximum'];
-  let preset = url.searchParams.get('date_preset') || 'last_90d';
-  if (!allowed.includes(preset)) preset = 'last_90d';
+  let preset = url.searchParams.get('date_preset') || 'last_30d';
+  if (!allowed.includes(preset)) preset = 'last_30d';
 
   // Campos de insights que alimentan el embudo y las reglas.
   const INS = 'impressions,clicks,ctr,cpc,cpm,spend,reach,frequency,actions,action_values';

@@ -41,8 +41,19 @@ import {
 } from './_safety.js';
 
 const MODEL_IMAGE = 'gpt-image-2';
-const MODEL_STRATEGIST = 'claude-sonnet-4-6';
-const MODEL_VISION_FALLBACK = 'claude-haiku-4-5-20251001';
+// STRATEGIST — el modelo que MIRA el ad de referencia y planifica las N
+// variaciones (composición, escala real del producto, adaptación de ofertas,
+// divergencia progresiva tight→loose). Es la pieza que define la calidad
+// creativa del estático: gpt-image-2 sólo ejecuta lo que este plan dice.
+// Por eso acá va el modelo más capaz, no el más barato.
+//
+// Por qué Opus 5 y NO Fable 5: Fable tiene thinking siempre activo y turnos
+// que pueden correr varios minutos, y esta llamada vive DENTRO del mismo
+// handler de 300s que después genera la imagen (95-215s según size/quality).
+// Un Strategist lento acá no mejora el estático: se come el budget y hace
+// fallar la imagen. Opus 5 da el salto de calidad de plan sin ese riesgo.
+const MODEL_STRATEGIST = 'claude-opus-5';
+const MODEL_VISION_FALLBACK = 'claude-haiku-4-5';
 // Default 1024×1024 — quality/precio óptimo. 2048×2048 era ~4x más caro
 // (~$0.65/imagen vs $0.18 a 1024) y la diferencia visual en feed de Meta
 // es marginal: a 1024 ya se ve nítido y baja el costo por variante a un
@@ -767,13 +778,22 @@ REGLAS:
   try {
     const resp = await client.messages.create({
       model: MODEL_STRATEGIST,
-      // Los tokens de thinking (2000) cuentan DENTRO de max_tokens, así que con
-      // 4000 fijo quedaban <2000 para el JSON visible. Con N variaciones (cada
-      // una con execution_diff + scene_notes) el JSON superaba ese techo, se
-      // cortaba, parseJSON tiraba y el flujo caía al fallback Haiku (perdiendo
-      // estrategia + badges). Escalamos con n para dejar margen real.
+      // Con N variaciones (cada una con execution_diff + scene_notes) el JSON
+      // crece, y si no entra se corta, parseJSON tira y el flujo cae al
+      // fallback Haiku (perdiendo estrategia + badges). Escalamos con n.
       max_tokens: Math.min(16000, 6000 + n * 700),
-      thinking: { type: 'enabled', budget_tokens: 2000 },
+      // thinking ADAPTIVE — Claude decide cuánto pensar. El `budget_tokens`
+      // que había acá está DEPRECADO en 4.6 y devuelve 400 en Opus 5 / Sonnet
+      // 5 / Fable 5. Y un 400 en esta llamada no explota: lo come el catch de
+      // abajo y el pipeline degrada callado a skeleton Haiku. O sea que
+      // dejarlo puesto no era "un warning", era perder el Strategist entero
+      // sin que nadie se entere.
+      thinking: { type: 'adaptive' },
+      // effort medium: la tarea es leer una imagen y devolver un JSON
+      // estructurado, no razonar un problema abierto. Medium mantiene la
+      // latencia cerca de la que tenía Sonnet y deja el budget del handler
+      // para la imagen, que es lo que de verdad tarda.
+      output_config: { effort: 'medium' },
       system,
       messages: [{
         role: 'user',
@@ -811,8 +831,11 @@ REGLAS:
       return { plan: null, cost: anthropicCost(resp.usage, MODEL_STRATEGIST) };
     }
   } catch (err) {
+    // Devolvemos el motivo, no sólo null. Sin esto un 400 por un parámetro mal
+    // puesto (o un rate limit) se veía igual que "el modelo no encontró plan":
+    // el creativo salía por el camino degradado y en la galería parecía normal.
     console.warn('planStrategyAndVariations falló:', err.message);
-    return { plan: null, cost: 0 };
+    return { plan: null, cost: 0, error: err?.message || 'strategist falló' };
   }
 }
 
@@ -1578,6 +1601,8 @@ export default async function handler(req, res) {
     ajusteUsuario,
     skeletonCached,  // Si el frontend ya tiene el skeleton del ad cacheado,
                      // lo pasa y nos saltamos Vision (ahorra ~$0.005 + 5-10s).
+    planOnly,        // Corré SÓLO el Strategist y devolvé el plan, sin generar
+                     // ninguna imagen. Ver el bloque planOnly más abajo.
   } = body || {};
   const ajuste = (typeof ajusteUsuario === 'string' ? ajusteUsuario : '').trim().slice(0, 500);
 
@@ -1652,6 +1677,7 @@ export default async function handler(req, res) {
     let visionCost = 0;
     let skeletonFromCache = false;
     let visionModel = null;
+    let strategistError = null;
     const skeletonHasFullPlan = skeletonCached?.strategy && Array.isArray(skeletonCached?.variations);
 
     if (skeletonCached && typeof skeletonCached === 'object' && skeletonHasFullPlan) {
@@ -1674,6 +1700,8 @@ export default async function handler(req, res) {
         plan = stratResult.plan;
         skeleton = plan.visual;
         visionModel = MODEL_STRATEGIST;
+      } else {
+        strategistError = stratResult.error || 'el strategist no devolvió un plan usable';
       }
       visionCost += stratResult.cost || 0;
     }
@@ -1684,6 +1712,37 @@ export default async function handler(req, res) {
       skeleton = result.skeleton;
       visionCost += result.cost || 0;
       visionModel = MODEL_VISION_FALLBACK;
+    }
+
+    // PLAN-ONLY — cortamos acá, antes de tocar gpt-image-2.
+    //
+    // Por qué existe: el Strategist y la imagen #1 compartían la MISMA
+    // invocación serverless, que muere a los 300s. Con 2048x2048 high la
+    // imagen sola tarda 200-250s, así que sumarle el Strategist adelante
+    // dejaba la primera imagen de cada ad al borde del kill de Vercel — y
+    // 2048 high es justamente la config de máxima calidad.
+    //
+    // Separándolos, el plan se calcula en su propia invocación (rápida) y
+    // DESPUÉS cada imagen arranca con los 290s enteros para ella. Además el
+    // frontend puede planificar todos los ads en paralelo primero y recién
+    // ahí disparar todas las imágenes, sin la serialización de "la #1 va
+    // sola" — que existía sólo para poblar este plan.
+    //
+    // El plan que sale de acá es idéntico al que salía antes: mismo modelo,
+    // mismo prompt, mismo nPlan. Cambia cuándo se calcula, no qué se calcula.
+    if (planOnly) {
+      return respondJSON(res, 200, {
+        planOnly: true,
+        plan,
+        skeleton,
+        strategist: !!plan,
+        strategistError,
+        skeletonFromCache,
+        visionModel,
+        imagenes: [],
+        cost: { openai: 0, anthropic: visionCost },
+        generatedAt: new Date().toISOString(),
+      });
     }
 
     // Variables del fallback legacy. Antes estaban declaradas con `var` DENTRO
@@ -1976,8 +2035,9 @@ export default async function handler(req, res) {
       n: imagenes.length,
       aspectRatio,
       model: MODEL_IMAGE,
-      visionModel,           // 'claude-sonnet-4-6' | 'claude-haiku-4-5-...' | null
+      visionModel,           // 'claude-opus-5' | 'claude-haiku-4-5' | null
       strategist: !!plan,    // true si usamos el pipeline strategist
+      strategistError,       // por qué NO hubo plan (si degradamos a Haiku)
       skeleton,              // visual skeleton (compat con cache viejo)
       plan,                  // plan completo del strategist (null si no aplica)
       skeletonFromCache,

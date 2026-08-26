@@ -14,6 +14,7 @@
 import crypto from 'node:crypto';
 import { getUserIdFromAuth, getUserRole, saveGoogleOAuth, getGoogleOAuth, deleteGoogleOAuth } from '../marketing/_supabase-server.js';
 import { oauthConfigured, oauthConsentUrl, oauthExchangeCode } from '../actas/_google.js';
+import { getDriveContext } from './_drive-ctx.js';
 
 function respondJSON(res, status, obj) {
   res.status(status).setHeader('Content-Type', 'application/json');
@@ -115,7 +116,20 @@ export default async function handler(req, res) {
 
   if (action === 'status') {
     const conn = await getGoogleOAuth();
-    return respondJSON(res, 200, { connected: !!conn, email: conn?.email || null, configured: true });
+    if (!conn) return respondJSON(res, 200, { connected: false, working: false, email: null, configured: true });
+    // Estado POSTA: no basta con que exista la conexión guardada — verificamos
+    // que el permiso REALMENTE funcione (getDriveContext refresca el token y
+    // toca Drive). Si el permiso venció (típico en apps en "Testing", 7 días),
+    // connected=true pero working=false → el front lo muestra en ámbar.
+    let working = false;
+    try { const ctx = await getDriveContext(); working = !!(ctx && !ctx.failed); } catch { working = false; }
+    return respondJSON(res, 200, {
+      connected: true,
+      working,
+      reason: working ? null : 'permiso-vencido',
+      email: conn.email || null,
+      configured: true,
+    });
   }
 
   if (action === 'disconnect') {

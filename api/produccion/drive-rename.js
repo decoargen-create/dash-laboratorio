@@ -29,7 +29,7 @@ export default async function handler(req, res) {
   if (!folderId) return respondJSON(res, 400, { error: 'Falta folderId.' });
 
   const ctx = await getDriveContext();
-  if (!ctx) return respondJSON(res, 200, { configured: false });
+  if (!ctx || ctx.failed) return respondJSON(res, 200, { configured: false });
 
   try {
     const token = ctx.token;

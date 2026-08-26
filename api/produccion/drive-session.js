@@ -44,16 +44,18 @@ export default async function handler(req, res) {
   // rootLink = la carpeta raíz de creativos, para entrar a ver todo.
   if (body.probe) {
     const ctx = await getDriveContext();
+    const usable = !!(ctx && !ctx.failed);
     const out = {
-      configured: !!ctx,
-      mode: ctx?.mode || null,
-      email: ctx?.email || null,
-      rootLink: ctx ? `https://drive.google.com/drive/folders/${ctx.rootId}` : null,
+      configured: usable,
+      ...(ctx?.failed ? { transient: true, reason: 'drive-oauth-transitorio' } : {}),
+      mode: usable ? ctx.mode : null,
+      email: (ctx && ctx.email) || null,
+      rootLink: usable ? `https://drive.google.com/drive/folders/${ctx.rootId}` : null,
     };
     // Si el probe viene con un producto, aseguramos su carpeta y devolvemos el
     // link directo — así el detalle ofrece "carpeta de Drive" aunque la tarjeta
     // todavía no tenga videos subidos a Drive.
-    if (ctx && body.productoNombre) {
+    if (usable && body.productoNombre) {
       try {
         // Si la tarjeta ya tiene carpeta (folderId), linkeamos directo a esa.
         if (body.folderId) {
@@ -81,6 +83,12 @@ export default async function handler(req, res) {
   const ctx = await getDriveContext();
   if (!ctx) {
     return respondJSON(res, 200, { configured: false, reason: 'drive-no-conectado' });
+  }
+  if (ctx.failed) {
+    // Drive está conectado pero el OAuth falló transitoriamente (ya se reintentó
+    // 3× del lado del server). NO usamos la service account (403 sin quota, que
+    // mandaba todo a AdsLab). Que el front reintente / lo diga claro.
+    return respondJSON(res, 200, { configured: false, reason: 'drive-oauth-transitorio', error: 'Drive está conectado pero Google no respondió en este momento. Reintentá en unos segundos.' });
   }
 
   try {

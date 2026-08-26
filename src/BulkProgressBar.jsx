@@ -7,6 +7,11 @@
 //   • imágenes procesadas del total (ads × variantes por ad)
 //   • gasto acumulado estimado (USD → ARS con el dólar cripto)
 //
+// El pie decía "Podés cerrar la pestaña, sigue solo" — sólo era cierto para
+// las requests YA en vuelo (el backend las cloud-savea con el token). El loop
+// del pool vive en el browser: los ads que todavía no arrancaron no se
+// disparan nunca si cerrás. Ahora el copy dice la verdad.
+//
 // Durante un bulk las cards por-ad del ExecutionsTray se suprimen
 // (silentExecution), así el user ve SOLO esta barra.
 //
@@ -78,7 +83,7 @@ export default function BulkProgressBar({ state, onClose }) {
         <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1.5">
           {isDone
             ? <>Terminó{nErr > 0 ? ` · ${nErr} fallaron` : ''} — revisá la galería 🎬</>
-            : <>Podés cerrar la pestaña, sigue solo{nErr > 0 ? ` · ${nErr} con error` : ''}</>}
+            : <>Dejá la pestaña abierta hasta el final{nErr > 0 ? ` · ${nErr} con error` : ''}</>}
         </p>
       </div>
     </div>

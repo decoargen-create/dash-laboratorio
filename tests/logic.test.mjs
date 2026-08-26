@@ -21,7 +21,7 @@ import { repararTarjetas, carpetaDestinoDe } from '../api/produccion/_repair-cor
 import {
   CFG_DEFAULT, cfgPara, roasBreakeven, fechaDelNombre, lunesDe, tipoDeCampana,
   productoDeCampana, veredicto, cohortesSemanales, esProspectador,
-  rondaDeOptimizacion, promediosDelDia, linkMeta, evaluarPausa,
+  rondaDeOptimizacion, promediosDelDia, linkMeta, evaluarPausa, CONDICIONES_PAUSA,
   semanaMadura, fusionarConFotos, cohortesParaCongelar, fotoDeCohorte,
 } from '../src/testeosCore.js';
 import { DEMO } from '../src/testeosDemo.js';
@@ -487,6 +487,71 @@ eq('prender algo cuyo padre sigue apagado no dice Activa',
   entregaDe({ id: 'a', effectiveStatus: 'CAMPAIGN_PAUSED' }, { a: 'ACTIVE' }).label, 'Campaña desactivada');
 eq('conjunto apagado, igual',
   entregaDe({ id: 'a', effectiveStatus: 'ADSET_PAUSED' }, { a: 'ACTIVE' }).label, 'Conjunto desactivado');
+
+
+// ─────────── CRITERIOS CONFIGURABLES DE LA RONDA ───────────
+console.log('\nCRITERIOS DE LA RONDA:');
+const candidatoBase = {
+  id: 'x', name: 'Aceite 22/8 [CBO]', dailyBudget: 100000, nivelPresupuesto: 'campaña',
+  insights: { spend: 40000, revenue: 20000, roas: 0.5, purchases: 3, addToCart: 2, initiateCheckout: 1, impressions: 5000 },
+};
+const promCaros = { costoPorATC: 1000, costoPorCheckout: 1000 };
+const cfgBase = { ...CFG_DEFAULT, pisoGastoPausar: 25000, roasMaxPausar: 1.5, sobrePromedioPct: 25 };
+
+eq('con las cuatro condiciones de siempre, es candidato',
+  evaluarPausa(candidatoBase, promCaros, cfgBase).candidato, true);
+
+// Tope de compras: no pausar algo que ya está vendiendo.
+eq('con tope de 2 compras, 3 compras lo salva',
+  evaluarPausa(candidatoBase, promCaros, { ...cfgBase, condicionesPausar: ['piso', 'roas', 'atc', 'checkout', 'compras'], maxComprasPausar: 2 }).candidato, false);
+eq('con tope de 5 compras, 3 compras no lo salva',
+  evaluarPausa(candidatoBase, promCaros, { ...cfgBase, condicionesPausar: ['piso', 'roas', 'atc', 'checkout', 'compras'], maxComprasPausar: 5 }).candidato, true);
+eq('sin tope, la condición de compras nunca bloquea',
+  evaluarPausa(candidatoBase, promCaros, { ...cfgBase, condicionesPausar: ['piso', 'roas', 'atc', 'checkout', 'compras'] }).candidato, true);
+
+// Apagar una condición: si el pixel no manda pago iniciado, esa condición da
+// siempre en rojo y marcaría todo. Apagada, deja de decidir.
+const sinCheckout = { ...candidatoBase, insights: { ...candidatoBase.insights, initiateCheckout: 0 } };
+eq('con checkout encendido, el evento faltante lo marca',
+  evaluarPausa(sinCheckout, promCaros, cfgBase).candidato, true);
+eq('apagando checkout, deja de contar',
+  evaluarPausa(sinCheckout, promCaros, { ...cfgBase, condicionesPausar: ['piso', 'roas', 'checkout'].filter(k => k !== 'checkout') }).candidato, true);
+eq('la condición apagada se sigue MOSTRANDO para poder ver el número',
+  evaluarPausa(candidatoBase, promCaros, { ...cfgBase, condicionesPausar: ['piso', 'roas'] }).condiciones.length,
+  CONDICIONES_PAUSA.length);
+eq('pero marcada como que no cuenta',
+  evaluarPausa(candidatoBase, promCaros, { ...cfgBase, condicionesPausar: ['piso', 'roas'] }).condiciones.find(c => c.clave === 'atc').cuenta, false);
+// Una lista vacía no puede significar "todo es candidato".
+eq('sin ninguna condición encendida se vuelve a las de siempre',
+  evaluarPausa({ ...candidatoBase, insights: { ...candidatoBase.insights, spend: 10 } }, promCaros, { ...cfgBase, condicionesPausar: [] }).candidato, false);
+
+// El ROAS de corte de CADA producto, no uno global. Con breakeven 0.3 para el
+// aceite, un ROAS de 0.5 ya no es para pausar; con el corte general de 1.5 sí.
+const cfgPorProducto = { ...cfgBase, porProducto: { aceite: { roasBreakeven: 0.3 } } };
+const prodsRonda = [{ id: 'aceite', nombre: 'Aceite', alias: ['aceite'] }];
+const conResolver = rondaDeOptimizacion([candidatoBase], {
+  cfg: cfgBase, ahora: HOY,
+  cfgDeItem: (i) => { const p = productoDeCampana(i.name, prodsRonda, cfgPorProducto); return p ? cfgPara(cfgPorProducto, p.id) : null; },
+});
+eq('cada fila se juzga con el breakeven de su producto',
+  conResolver.candidatos.length, 0);
+eq('y deja registro de con qué reglas se la juzgó',
+  conResolver.evaluados[0].cfgUsada.roasMaxPausar, 0.3);
+// Sin resolver, se comporta igual que antes: un solo corte para todos.
+// Ojo: la ronda saca el promedio de la cuenta de los ítems que recibe, así que
+// con UNA sola fila nada puede estar "por encima del promedio" — es ella misma.
+// Va acompañada de una barata que baje el promedio.
+const barata = {
+  id: 'y', name: 'Crema 22/8 [CBO]', dailyBudget: 100000, nivelPresupuesto: 'campaña',
+  insights: { spend: 30000, revenue: 90000, roas: 3, purchases: 20, addToCart: 300, initiateCheckout: 200, impressions: 9000 },
+};
+eq('sin resolver por producto, sigue el corte general',
+  rondaDeOptimizacion([candidatoBase, barata], { cfg: cfgBase, ahora: HOY }).candidatos.map(c => c.id), ['x']);
+eq('con el breakeven del aceite en 0.3, esa misma fila deja de ser candidata',
+  rondaDeOptimizacion([candidatoBase, barata], {
+    cfg: cfgBase, ahora: HOY,
+    cfgDeItem: (i) => { const pr = productoDeCampana(i.name, prodsRonda, cfgPorProducto); return pr ? cfgPara(cfgPorProducto, pr.id) : null; },
+  }).candidatos.length, 0);
 
 
 // ─────────── RESUMEN ───────────

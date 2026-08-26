@@ -33,7 +33,7 @@ import {
   useMetaConnections, useMetaAdAccounts, authHeaders, openMetaConnect,
 } from './MetaConnect.jsx';
 import {
-  CFG_DEFAULT, cfgPara, cohortesSemanales, rondaDeOptimizacion, esProspectador,
+  CFG_DEFAULT, CONDICIONES_PAUSA, cfgPara, cohortesSemanales, rondaDeOptimizacion, esProspectador,
   productoDeCampana, linkMeta, FORMULAS,
   fusionarConFotos, cohortesParaCongelar, fotoDeCohorte,
 } from './testeosCore.js';
@@ -175,8 +175,8 @@ const MetaLink = ({ nivel, ids, accountId, desde, hasta, children, solid }) => (
 // ========================================================================
 
 // El interruptor de una fila, igual que en el Administrador de anuncios: a la
-// izquierda del nombre, y lo que se ve es el ESTADO, no la acción. Prendido a
-// la derecha y en verde; apagado a la izquierda y en gris.
+// izquierda del nombre, y lo que se ve es el ESTADO, no la acción. Activo a
+// la derecha y en azul de Meta (#1877F2); desactivado a la izquierda y gris.
 //
 // Cuando no sabemos el estado (Meta no lo devolvió) se dibuja un hueco del
 // mismo ancho en vez del switch: si no, las filas de esa tanda quedan
@@ -190,9 +190,9 @@ function SwitchEstado({ estado, trabajando, onCambiar }) {
       onClick={e => { e.stopPropagation(); onCambiar(prendido ? 'PAUSED' : 'ACTIVE'); }}
       disabled={trabajando}
       title={prendido ? 'Desactivar en Meta' : 'Activar en Meta'}
-      className={`relative inline-flex items-center w-[30px] h-[17px] shrink-0 rounded-full transition-colors disabled:cursor-wait focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-1 dark:focus:ring-offset-gray-800 ${
+      className={`relative inline-flex items-center w-[30px] h-[17px] shrink-0 rounded-full transition-colors disabled:cursor-wait focus:outline-none focus:ring-2 focus:ring-[#1877F2] focus:ring-offset-1 dark:focus:ring-offset-gray-800 ${
         trabajando ? 'bg-gray-300 dark:bg-gray-600'
-          : prendido ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-gray-300 dark:bg-gray-600 hover:bg-gray-400 dark:hover:bg-gray-500'}`}>
+          : prendido ? 'bg-[#1877F2] hover:bg-[#0f6ae0]' : 'bg-gray-300 dark:bg-gray-600 hover:bg-gray-400 dark:hover:bg-gray-500'}`}>
       <span className={`absolute top-[2px] w-[13px] h-[13px] rounded-full bg-white shadow-sm transition-all grid place-items-center ${
         prendido ? 'left-[15px]' : 'left-[2px]'}`}>
         {trabajando && <Loader2 size={9} className="animate-spin text-gray-500" />}
@@ -231,8 +231,8 @@ function ConfirmarTanda({ abierto, items, currency, onCancelar, onConfirmar }) {
             <AlertTriangle size={16} />
           </span>
           <div className="min-w-0">
-            <h4 className="text-sm font-bold text-gray-900 dark:text-gray-100">Pausar {items.length} en Meta</h4>
-            <p className="text-[11px] text-gray-500 dark:text-gray-400">Se pausan de verdad, ahora. Podés volver a prenderlas desde acá mismo.</p>
+            <h4 className="text-sm font-bold text-gray-900 dark:text-gray-100">Desactivar {items.length} en Meta</h4>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400">Se desactivan en Meta, ahora. Podés volver a activarlas desde acá mismo.</p>
           </div>
         </div>
         <ul className="max-h-56 overflow-y-auto px-4 py-2.5 space-y-1">
@@ -257,7 +257,7 @@ function ConfirmarTanda({ abierto, items, currency, onCancelar, onConfirmar }) {
           </button>
           <button onClick={onConfirmar}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-red-600 rounded-lg hover:bg-red-700 transition">
-            <Pause size={12} /> Pausar {items.length}
+            <Pause size={12} /> Desactivar {items.length}
           </button>
         </div>
       </div>
@@ -265,13 +265,147 @@ function ConfirmarTanda({ abierto, items, currency, onCancelar, onConfirmar }) {
   );
 }
 
+// Los criterios de la ronda, editables sin salir de la pestaña.
+//
+// Estaban solo en "Reglas de la tienda", que es donde se configura la cuenta
+// entera. Pero el momento en que uno se pregunta "¿por qué me marcó ESTA?" es
+// mirando la tabla, no dos pestañas más allá: tener que irse y volver hacía
+// que en la práctica nadie tocara los umbrales.
+//
+// Escribe en el mismo perfil que Reglas — se guarda por cuenta y en la nube.
+function Criterios({ cfg, cfgRaw, setCfg, productos, productoId, currency, abierto, onToggle }) {
+  const num = (k, valor) => setCfg(c => ({ ...c, [k]: valor === '' ? null : Number(valor) }));
+  const activas = Array.isArray(cfgRaw?.condicionesPausar) && cfgRaw.condicionesPausar.length
+    ? cfgRaw.condicionesPausar : CFG_DEFAULT.condicionesPausar;
+  const alternar = (clave) => setCfg(c => {
+    const actuales = Array.isArray(c.condicionesPausar) && c.condicionesPausar.length
+      ? c.condicionesPausar : CFG_DEFAULT.condicionesPausar;
+    return { ...c, condicionesPausar: actuales.includes(clave)
+      ? actuales.filter(x => x !== clave) : [...actuales, clave] };
+  });
+  const setBk = (pid, valor) => setCfg(c => ({
+    ...c,
+    porProducto: { ...(c.porProducto || {}), [pid]: { ...(c.porProducto?.[pid] || {}), roasBreakeven: valor === '' ? null : Number(valor) } },
+  }));
+
+  const input = "w-full px-2 py-1 text-xs font-mono bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md focus:outline-none focus:ring-2 focus:ring-[#1877F2]";
+  const Campo = ({ label, sufijo, children }) => (
+    <label className="grid gap-1">
+      <span className="text-[9px] font-bold uppercase tracking-[.08em] text-gray-400">{label}</span>
+      <span className="flex items-center gap-1.5">{children}{sufijo && <span className="text-[10px] text-gray-400 shrink-0">{sufijo}</span>}</span>
+    </label>
+  );
+
+  // Un resumen de una línea para cuando está cerrado: se lee sin abrir nada.
+  const resumen = `ROAS < ${fmtR(cfg.roasMaxPausar)} · gastó ≥ ${fmtM(cfg.pisoGastoPausar, currency)} · costos ${cfg.sobrePromedioPct}% sobre el promedio${cfg.maxComprasPausar != null ? ` · hasta ${cfg.maxComprasPausar} compras` : ''}`;
+
+  return (
+    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
+      <button onClick={onToggle} className="w-full flex items-center gap-2 px-3.5 py-2.5 text-left hover:bg-gray-50 dark:hover:bg-gray-900/40 transition">
+        <SlidersHorizontal size={13} className="text-gray-400 shrink-0" />
+        <span className="text-[12px] font-bold text-gray-900 dark:text-gray-100 shrink-0">Criterios para desactivar</span>
+        <span className="text-[10.5px] text-gray-400 truncate">{resumen}</span>
+        {abierto ? <ChevronDown size={13} className="ml-auto text-gray-400 shrink-0" /> : <ChevronRight size={13} className="ml-auto text-gray-400 shrink-0" />}
+      </button>
+
+      {abierto && (
+        <div className="px-3.5 pb-3.5 pt-1 space-y-3 border-t border-gray-100 dark:border-gray-700/60">
+          <p className="text-[11px] text-gray-500 dark:text-gray-400">
+            Una campaña se marca para desactivar cuando cumple <b>todas</b> las condiciones encendidas. Se guarda por cuenta y en la nube — es el mismo perfil que <b>Reglas de la tienda</b>.
+          </p>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+            <Campo label="Importe gastado mínimo" sufijo={currency || ''}>
+              <input type="number" className={input} value={cfgRaw?.pisoGastoPausar ?? ''} onChange={e => num('pisoGastoPausar', e.target.value)} />
+            </Campo>
+            <Campo label="ROAS de corte">
+              <input type="number" step="0.1" className={input} value={cfgRaw?.roasMaxPausar ?? ''} onChange={e => num('roasMaxPausar', e.target.value)} />
+            </Campo>
+            <Campo label="Sobre el promedio" sufijo="%">
+              <input type="number" className={input} value={cfgRaw?.sobrePromedioPct ?? ''} onChange={e => num('sobrePromedioPct', e.target.value)} />
+            </Campo>
+            <Campo label="Compras como máximo">
+              <input type="number" className={input} placeholder="sin tope" value={cfgRaw?.maxComprasPausar ?? ''} onChange={e => num('maxComprasPausar', e.target.value)} />
+            </Campo>
+          </div>
+
+          <div>
+            <p className="text-[9px] font-bold uppercase tracking-[.08em] text-gray-400 mb-1.5">Qué condiciones cuentan</p>
+            <div className="flex flex-wrap gap-1.5">
+              {CONDICIONES_PAUSA.map(c => {
+                const on = activas.includes(c.clave);
+                return (
+                  <button key={c.clave} onClick={() => alternar(c.clave)} title={c.ayuda}
+                    className={`px-2 py-1 text-[10.5px] font-semibold rounded-full border transition ${
+                      on ? 'bg-[#1877F2]/10 border-[#1877F2]/40 text-[#1877F2] dark:text-[#93BBFB]'
+                         : 'bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-400 line-through'}`}>
+                    {c.label}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-[10px] text-gray-400 mt-1.5">
+              Una condición apagada se sigue viendo en el detalle de cada fila, pero no decide. Útil si el pixel no reporta un evento: si no llega ningún «pago iniciado», esa condición da siempre en rojo y marca todo.
+            </p>
+          </div>
+
+          {productos.length > 0 && (
+            <div>
+              <p className="text-[9px] font-bold uppercase tracking-[.08em] text-gray-400 mb-1.5">ROAS de equilibrio por producto</p>
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
+                {productos.map(p => {
+                  const suyo = cfgPara(cfgRaw, p.id);
+                  const propio = cfgRaw?.porProducto?.[p.id]?.roasBreakeven;
+                  return (
+                    <label key={p.id} className="flex items-center gap-2 px-2 py-1 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700">
+                      <span className="text-[11px] text-gray-600 dark:text-gray-300 truncate flex-1" title={p.nombre}>{p.nombre}</span>
+                      <input type="number" step="0.1" placeholder={fmtR(cfg.roasMaxPausar)}
+                        className="w-14 px-1.5 py-0.5 text-[11px] font-mono text-right bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded focus:outline-none focus:ring-2 focus:ring-[#1877F2]"
+                        value={propio ?? ''} onChange={e => setBk(p.id, e.target.value)} />
+                      {propio == null && suyo.roasBreakeven == null && (
+                        <span className="text-[9px] text-gray-400 shrink-0" title="Sin breakeven propio usa el ROAS de corte general">gral.</span>
+                      )}
+                    </label>
+                  );
+                })}
+              </div>
+              <p className="text-[10px] text-gray-400 mt-1.5">
+                Cada campaña se juzga con el ROAS de equilibrio de <b>su</b> producto. El que quede vacío usa el corte general.
+                {productoId && <> Estás filtrando por un producto, pero esto vale para todos.</>}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ========================================================================
 // Pestaña: HOY (ronda de optimización)
 // ========================================================================
-export function VistaHoy({ ads, cfg, currency, accountId, onWhy, nivel, setNivel, cambios, trabajando, onEstado, onRecalcular }) {
+export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisibles, productoId, currency, accountId, onWhy, nivel, setNivel, cambios, trabajando, onEstado, onRecalcular }) {
   const [abierto, setAbierto] = useState(null);
   const [confirmando, setConfirmando] = useState(null);
-  const r = useMemo(() => rondaDeOptimizacion(ads, { cfg }), [ads, cfg]);
+  const [verCriterios, setVerCriterios] = useState(false);
+
+  // Cada fila se juzga con el perfil de SU producto: el ROAS de equilibrio del
+  // cepillo no es el de la crema. Antes toda la ronda usaba un corte global y
+  // el breakeven por producto solo pesaba si además filtrabas por ese producto.
+  const cfgDeItem = useMemo(() => {
+    if (!cfgRaw || !productos?.length) return null;
+    const cache = new Map();
+    return (item) => {
+      const nombre = item?.campaignName || item?.name;
+      if (!cache.has(nombre)) {
+        const p = productoDeCampana(nombre, productos, cfgRaw);
+        cache.set(nombre, p ? cfgPara(cfgRaw, p.id) : null);
+      }
+      return cache.get(nombre);
+    };
+  }, [cfgRaw, productos]);
+
+  const r = useMemo(() => rondaDeOptimizacion(ads, { cfg, cfgDeItem }), [ads, cfg, cfgDeItem]);
   const esCampana = nivel === 'campaigns';
 
   const selectorNivel = (
@@ -290,6 +424,9 @@ export function VistaHoy({ ads, cfg, currency, accountId, onWhy, nivel, setNivel
     return (
       <div className="space-y-3">
         <div className="flex justify-end">{selectorNivel}</div>
+        <Criterios cfg={cfg} cfgRaw={cfgRaw} setCfg={setCfg} productos={productosVisibles}
+          productoId={productoId} currency={currency}
+          abierto={verCriterios} onToggle={() => setVerCriterios(v => !v)} />
         <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-10 text-center">
           <Clock size={24} className="mx-auto text-gray-300 dark:text-gray-600 mb-2" />
           <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Todavía no hay entrega hoy</p>
@@ -334,6 +471,10 @@ export function VistaHoy({ ads, cfg, currency, accountId, onWhy, nivel, setNivel
         </div>
       )}
 
+      <Criterios cfg={cfg} cfgRaw={cfgRaw} setCfg={setCfg} productos={productosVisibles}
+        productoId={productoId} currency={currency}
+        abierto={verCriterios} onToggle={() => setVerCriterios(v => !v)} />
+
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-2">
         <Kpi label="Plata en juego" value={fmtM(r.plataEnJuego, currency)} tone="bad"
           sub={r.plataRedirigible > 0 && r.ahorroPotencial > 0
@@ -370,7 +511,7 @@ export function VistaHoy({ ads, cfg, currency, accountId, onWhy, nivel, setNivel
             {pausables.length > 0 && (
               <button onClick={() => setConfirmando(pausables)}
                 className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10.5px] font-bold whitespace-nowrap text-white bg-red-600 hover:bg-red-700 transition">
-                <Pause size={9} /> Pausar {pausables.length}
+                <Pause size={9} /> Desactivar {pausables.length}
               </button>
             )}
             {r.aPausar.length > 0 && (
@@ -387,11 +528,11 @@ export function VistaHoy({ ads, cfg, currency, accountId, onWhy, nivel, setNivel
                 <th className="text-left font-bold px-3.5 py-2">{esCampana ? 'Campaña' : 'Anuncio'}</th>
                 <th className="text-left font-bold px-2 py-2">Entrega</th>
                 <th className="text-left font-bold px-2 py-2">Veredicto</th>
-                <th className="text-right font-bold px-2 py-2">Gasto</th>
-                <th className="text-right font-bold px-2 py-2">ROAS</th>
-                <th className="text-right font-bold px-2 py-2">Carrito</th>
-                <th className="text-right font-bold px-2 py-2">Pago</th>
-                <th className="text-right font-bold px-2 py-2">Presup.</th>
+                <th className="text-right font-bold px-2 py-2" title="Lo que Meta llama «Importe gastado»">Importe gastado</th>
+                <th className="text-right font-bold px-2 py-2" title="Lo que Meta llama «ROAS de compras»">ROAS de compras</th>
+                <th className="text-right font-bold px-2 py-2" title="Costo por agregar al carrito">Costo p/ carrito</th>
+                <th className="text-right font-bold px-2 py-2" title="Costo por pago iniciado">Costo p/ pago</th>
+                <th className="text-right font-bold px-2 py-2">Presupuesto</th>
                 <th className="text-right font-bold px-2 py-2">En juego</th>
                 <th className="px-2 py-2" />
               </tr>
@@ -452,17 +593,24 @@ export function VistaHoy({ ads, cfg, currency, accountId, onWhy, nivel, setNivel
                       <tr><td colSpan={10} className="bg-gray-50/60 dark:bg-gray-900/40 px-3.5 py-3">
                         <div className="pl-5 space-y-1.5">
                           {p.condiciones.map((c, n) => (
-                            <div key={n} className="flex items-start gap-2 text-[11.5px]">
+                            <div key={n} className={`flex items-start gap-2 text-[11.5px] ${c.cuenta === false ? 'opacity-45' : ''}`}>
                               <span className={`w-[15px] h-[15px] rounded-full grid place-items-center text-[9px] font-bold shrink-0 mt-px ${
-                                c.ok ? 'bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400' : 'bg-gray-200 dark:bg-gray-700 text-gray-400'}`}>
-                                {c.ok ? '✓' : '·'}
+                                c.cuenta === false ? 'bg-gray-200 dark:bg-gray-700 text-gray-400'
+                                  : c.ok ? 'bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400' : 'bg-gray-200 dark:bg-gray-700 text-gray-400'}`}>
+                                {c.cuenta === false ? '–' : c.ok ? '✓' : '·'}
                               </span>
-                              <span className="text-gray-600 dark:text-gray-300">{c.texto}</span>
+                              <span className="text-gray-600 dark:text-gray-300">
+                                {c.texto}
+                                {c.cuenta === false && <span className="text-gray-400"> · apagada en los criterios</span>}
+                              </span>
                             </div>
                           ))}
                           <p className="text-[11px] text-gray-500 dark:text-gray-400 border-l-2 border-gray-200 dark:border-gray-700 pl-2.5 mt-2 flex items-center gap-1.5 flex-wrap">
                             {p.motivoAccion || 'No cumple las cuatro condiciones: no es candidato.'}
                             {p.compartido && <span className="text-gray-400">· presupuesto compartido a nivel {p.nivelPresupuesto || 'campaña'}</span>}
+                            {a.cfgUsada?.roasMaxPausar != null && a.cfgUsada.roasMaxPausar !== cfg.roasMaxPausar && (
+                              <span className="text-gray-400">· juzgada con el ROAS de equilibrio de su producto ({fmtR(a.cfgUsada.roasMaxPausar)})</span>
+                            )}
                             <Why k="plataEnRiesgo" cfg={cfg} currency={currency} onOpen={onWhy} datos={{ ...p, gastoHoy: i.spend }} />
                           </p>
                         </div>
@@ -661,8 +809,8 @@ function VistaProspectadores({ ads, cfg, currency, accountId, onWhy, cambios, tr
               <th className="text-right font-bold px-2 py-2">Frecuencia</th>
               <th className="text-right font-bold px-2 py-2">Alcance</th>
               <th className="text-right font-bold px-2 py-2">Compras</th>
-              <th className="text-right font-bold px-2 py-2">ROAS</th>
-              <th className="text-right font-bold px-2 py-2">Gasto 7d</th>
+              <th className="text-right font-bold px-2 py-2" title="Lo que Meta llama «ROAS de compras»">ROAS de compras</th>
+              <th className="text-right font-bold px-2 py-2" title="Importe gastado en los últimos 7 días">Importe gastado 7d</th>
               <th className="px-2 py-2" />
             </tr>
           </thead>
@@ -1227,7 +1375,9 @@ export default function MetricasSection({ addToast }) {
       ) : (
         <>
           {tab === 'hoy' && <VistaHoy
-            ads={itemsHoy} cfg={cfg} currency={currency} accountId={accountId} onWhy={setWhy}
+            ads={itemsHoy} cfg={cfg} cfgRaw={cfgRaw} setCfg={setCfgRaw}
+            productos={productos} productosVisibles={productosEnCuenta} productoId={productoId}
+            currency={currency} accountId={accountId} onWhy={setWhy}
             nivel={nivelHoy} setNivel={setNivelHoy}
             cambios={cambios} trabajando={trabajando}
             onEstado={({ items, status }) => aplicarEstado({ level: nivelHoy === 'campaigns' ? 'campaign' : 'ad', items, status })}

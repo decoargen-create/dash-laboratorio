@@ -16,7 +16,7 @@ import {
   nombreBase, nombrePublicado,
 } from '../api/produccion/_naming.js';
 import { parseFunnel, deriveFunnelRates, pickAction } from '../api/meta/_funnel.js';
-import { validarPedido, mismaCuenta, resumirResultados, inverso, estadoVisible, MAX_IDS } from '../api/meta/_estado.js';
+import { validarPedido, mismaCuenta, resumirResultados, inverso, estadoVisible, entregaDe, MAX_IDS } from '../api/meta/_estado.js';
 import { repararTarjetas, carpetaDestinoDe } from '../api/produccion/_repair-core.js';
 import {
   CFG_DEFAULT, cfgPara, roasBreakeven, fechaDelNombre, lunesDe, tipoDeCampana,
@@ -470,6 +470,23 @@ eq('el cambio local pisa lo que trajo Meta', estadoVisible({ id: 'a', status: 'A
 eq('sin estado conocido no hay botón', estadoVisible({ id: 'a' }, {}), null);
 eq('deshacer un pausado lo prende', inverso('PAUSED'), 'ACTIVE');
 eq('deshacer un prendido lo pausa', inverso('ACTIVE'), 'PAUSED');
+
+// La columna Entrega no es el interruptor: dice si Meta lo está entregando.
+eq('activa entrega', entregaDe({ id: 'a', effectiveStatus: 'ACTIVE' }, {}).label, 'Activa');
+eq('en revisión no entrega todavía', entregaDe({ id: 'a', effectiveStatus: 'PENDING_REVIEW' }, {}).tono, 'warn');
+eq('rechazado se marca en rojo', entregaDe({ id: 'a', effectiveStatus: 'DISAPPROVED' }, {}).tono, 'bad');
+eq('sin nada que mostrar, celda vacía', entregaDe({ id: 'a' }, {}), null);
+eq('un estado que no conocemos se muestra tal cual en vez de inventar',
+  entregaDe({ id: 'a', effectiveStatus: 'ALGO_NUEVO' }, {}), { label: 'ALGO_NUEVO', tono: 'mute' });
+// Lo que acabamos de hacer manda sobre lo que Meta contó hace un rato.
+eq('recién pausado ya dice Desactivada',
+  entregaDe({ id: 'a', effectiveStatus: 'ACTIVE' }, { a: 'PAUSED' }).label, 'Desactivada');
+// Pero prender un anuncio colgado de una campaña apagada NO lo pone a entregar:
+// decir "Activa" ahí te deja esperando un gasto que no va a llegar.
+eq('prender algo cuyo padre sigue apagado no dice Activa',
+  entregaDe({ id: 'a', effectiveStatus: 'CAMPAIGN_PAUSED' }, { a: 'ACTIVE' }).label, 'Campaña desactivada');
+eq('conjunto apagado, igual',
+  entregaDe({ id: 'a', effectiveStatus: 'ADSET_PAUSED' }, { a: 'ACTIVE' }).label, 'Conjunto desactivado');
 
 
 // ─────────── RESUMEN ───────────

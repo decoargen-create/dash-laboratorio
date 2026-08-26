@@ -39,7 +39,7 @@ import {
 } from './testeosCore.js';
 import { cargarCfg, guardarCfg, cargarFotos, guardarFotos, leerCfgLocal } from './testeosStore.js';
 import { VistaEmbudo } from './EmbudoVista.jsx';
-import { cambiarEstado, inverso, estadoVisible } from './testeosAcciones.js';
+import { cambiarEstado, inverso, estadoVisible, entregaDe } from './testeosAcciones.js';
 import { deriveFunnelRates } from '../api/meta/_funnel.js';
 
 // Las claves siguen diciendo "testeos" a propósito: renombrarlas le borraría
@@ -174,28 +174,46 @@ const MetaLink = ({ nivel, ids, accountId, desde, hasta, children, solid }) => (
 // Prender / pausar
 // ========================================================================
 
-// El interruptor de una fila. Muestra el lado CONTRARIO al estado actual,
-// porque es un botón de acción y no un indicador: si la campaña está
-// corriendo, lo que se puede hacer es pausarla.
+// El interruptor de una fila, igual que en el Administrador de anuncios: a la
+// izquierda del nombre, y lo que se ve es el ESTADO, no la acción. Prendido a
+// la derecha y en verde; apagado a la izquierda y en gris.
 //
-// Cuando no sabemos el estado (Meta no lo devolvió) el botón no se dibuja: un
-// botón que dice "Pausar" sobre algo ya pausado es peor que no tener botón.
-function BotonEstado({ estado, trabajando, onCambiar, compacto }) {
-  if (!estado) return null;
-  const pausar = estado === 'ACTIVE';
-  const Icono = pausar ? Pause : Play;
+// Cuando no sabemos el estado (Meta no lo devolvió) se dibuja un hueco del
+// mismo ancho en vez del switch: si no, las filas de esa tanda quedan
+// corridas media pulgada respecto de las demás.
+function SwitchEstado({ estado, trabajando, onCambiar }) {
+  if (!estado) return <span className="inline-block w-[30px] shrink-0" aria-hidden="true" />;
+  const prendido = estado === 'ACTIVE';
   return (
     <button
-      onClick={e => { e.stopPropagation(); onCambiar(pausar ? 'PAUSED' : 'ACTIVE'); }}
+      role="switch" aria-checked={prendido}
+      onClick={e => { e.stopPropagation(); onCambiar(prendido ? 'PAUSED' : 'ACTIVE'); }}
       disabled={trabajando}
-      title={pausar ? 'Pausar en Meta' : 'Volver a prender en Meta'}
-      className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10.5px] font-bold whitespace-nowrap transition disabled:opacity-50 disabled:cursor-wait ${
-        pausar
-          ? 'border border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30'
-          : 'border border-emerald-300 dark:border-emerald-800 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/30'}`}>
-      {trabajando ? <Loader2 size={9} className="animate-spin" /> : <Icono size={9} />}
-      {!compacto && (pausar ? 'Pausar' : 'Prender')}
+      title={prendido ? 'Desactivar en Meta' : 'Activar en Meta'}
+      className={`relative inline-flex items-center w-[30px] h-[17px] shrink-0 rounded-full transition-colors disabled:cursor-wait focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-1 dark:focus:ring-offset-gray-800 ${
+        trabajando ? 'bg-gray-300 dark:bg-gray-600'
+          : prendido ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-gray-300 dark:bg-gray-600 hover:bg-gray-400 dark:hover:bg-gray-500'}`}>
+      <span className={`absolute top-[2px] w-[13px] h-[13px] rounded-full bg-white shadow-sm transition-all grid place-items-center ${
+        prendido ? 'left-[15px]' : 'left-[2px]'}`}>
+        {trabajando && <Loader2 size={9} className="animate-spin text-gray-500" />}
+      </span>
     </button>
+  );
+}
+
+// La columna "Entrega" del Ads Manager. El interruptor dice si vos la
+// prendiste; esto dice si Meta la está entregando, que no es lo mismo: en
+// revisión, rechazada o colgada de una campaña apagada, el switch está en
+// verde y no se gasta un peso.
+function Entrega({ item, cambios }) {
+  const e = entregaDe(item, cambios);
+  if (!e) return null;
+  const punto = { ok: 'bg-emerald-500', warn: 'bg-amber-500', bad: 'bg-red-500', mute: 'bg-gray-400' }[e.tono] || 'bg-gray-400';
+  const texto = { ok: 'text-emerald-600 dark:text-emerald-400', warn: 'text-amber-600 dark:text-amber-400', bad: 'text-red-600 dark:text-red-400', mute: 'text-gray-500 dark:text-gray-400' }[e.tono] || '';
+  return (
+    <span className={`inline-flex items-center gap-1.5 text-[11px] font-semibold whitespace-nowrap ${texto}`}>
+      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${punto}`} /> {e.label}
+    </span>
   );
 }
 
@@ -367,6 +385,7 @@ export function VistaHoy({ ads, cfg, currency, accountId, onWhy, nivel, setNivel
             <thead>
               <tr className="bg-gray-50 dark:bg-gray-900/50 text-gray-400 text-[9.5px] uppercase tracking-wider">
                 <th className="text-left font-bold px-3.5 py-2">{esCampana ? 'Campaña' : 'Anuncio'}</th>
+                <th className="text-left font-bold px-2 py-2">Entrega</th>
                 <th className="text-left font-bold px-2 py-2">Veredicto</th>
                 <th className="text-right font-bold px-2 py-2">Gasto</th>
                 <th className="text-right font-bold px-2 py-2">ROAS</th>
@@ -390,8 +409,13 @@ export function VistaHoy({ ads, cfg, currency, accountId, onWhy, nivel, setNivel
                     <tr onClick={() => setAbierto(open ? null : a.id)}
                       className={`cursor-pointer transition ${open ? 'bg-gray-50 dark:bg-gray-900/40' : 'hover:bg-gray-50 dark:hover:bg-gray-900/30'} ${
                         estadoVisible(a, cambios) === 'PAUSED' ? 'opacity-55' : ''}`}>
-                      <td className="px-3.5 py-2 max-w-[260px]">
+                      <td className="px-3.5 py-2 max-w-[280px]">
                         <div className="flex items-center gap-2">
+                          <SwitchEstado
+                            estado={estadoVisible(a, cambios)}
+                            trabajando={!!trabajando?.[a.id]}
+                            onCambiar={(status) => onEstado({ items: [a], status })}
+                          />
                           {open ? <ChevronDown size={13} className="text-brand-500 shrink-0" /> : <ChevronRight size={13} className="text-gray-400 shrink-0" />}
                           <span className="min-w-0">
                             <span className="block font-semibold text-gray-900 dark:text-gray-100 truncate">{a.name}</span>
@@ -399,6 +423,7 @@ export function VistaHoy({ ads, cfg, currency, accountId, onWhy, nivel, setNivel
                           </span>
                         </div>
                       </td>
+                      <td className="px-2 py-2"><Entrega item={a} cambios={cambios} /></td>
                       <td className="px-2 py-2"><Pill tone={tone}>{label}</Pill></td>
                       <td className="px-2 py-2 text-right tabular-nums font-semibold text-gray-900 dark:text-gray-100">{fmtM(i.spend, currency)}</td>
                       <td className={`px-2 py-2 text-right tabular-nums font-semibold ${i.roas >= p.cortes?.roasMaxPausar ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>{fmtR(i.roas)}</td>
@@ -421,19 +446,10 @@ export function VistaHoy({ ads, cfg, currency, accountId, onWhy, nivel, setNivel
                           </span>
                         )}
                       </td>
-                      <td className="px-2 py-2">
-                        <div className="flex items-center gap-1 justify-end">
-                          <BotonEstado
-                            estado={estadoVisible(a, cambios)}
-                            trabajando={!!trabajando?.[a.id]}
-                            onCambiar={(status) => onEstado({ items: [a], status })}
-                          />
-                          <MetaLink nivel={nivel} ids={[a.id]} accountId={accountId}>Meta</MetaLink>
-                        </div>
-                      </td>
+                      <td className="px-2 py-2 text-right"><MetaLink nivel={nivel} ids={[a.id]} accountId={accountId}>Meta</MetaLink></td>
                     </tr>
                     {open && (
-                      <tr><td colSpan={9} className="bg-gray-50/60 dark:bg-gray-900/40 px-3.5 py-3">
+                      <tr><td colSpan={10} className="bg-gray-50/60 dark:bg-gray-900/40 px-3.5 py-3">
                         <div className="pl-5 space-y-1.5">
                           {p.condiciones.map((c, n) => (
                             <div key={n} className="flex items-start gap-2 text-[11.5px]">
@@ -611,7 +627,7 @@ function VistaSemanas({ campaigns, cfg, productos, productoId, currency, account
 // ========================================================================
 // Pestaña: PROSPECTADORES
 // ========================================================================
-function VistaProspectadores({ ads, cfg, currency, accountId, onWhy }) {
+function VistaProspectadores({ ads, cfg, currency, accountId, onWhy, cambios, trabajando, onEstado }) {
   const [abierto, setAbierto] = useState(null);
   const lista = useMemo(() => ads
     .map(a => ({ ...a, ...esProspectador(a.insights, cfg) }))
@@ -640,6 +656,7 @@ function VistaProspectadores({ ads, cfg, currency, accountId, onWhy }) {
           <thead>
             <tr className="bg-gray-50 dark:bg-gray-900/50 text-gray-400 text-[9.5px] uppercase tracking-wider">
               <th className="text-left font-bold px-3.5 py-2">Anuncio</th>
+              <th className="text-left font-bold px-2 py-2">Entrega</th>
               <th className="text-left font-bold px-2 py-2">Veredicto</th>
               <th className="text-right font-bold px-2 py-2">Frecuencia</th>
               <th className="text-right font-bold px-2 py-2">Alcance</th>
@@ -655,9 +672,15 @@ function VistaProspectadores({ ads, cfg, currency, accountId, onWhy }) {
               return (
                 <React.Fragment key={a.id}>
                   <tr onClick={() => setAbierto(open ? null : a.id)}
-                    className={`cursor-pointer transition ${open ? 'bg-gray-50 dark:bg-gray-900/40' : 'hover:bg-gray-50 dark:hover:bg-gray-900/30'}`}>
-                    <td className="px-3.5 py-2 max-w-[260px]">
+                    className={`cursor-pointer transition ${open ? 'bg-gray-50 dark:bg-gray-900/40' : 'hover:bg-gray-50 dark:hover:bg-gray-900/30'} ${
+                      estadoVisible(a, cambios) === 'PAUSED' ? 'opacity-55' : ''}`}>
+                    <td className="px-3.5 py-2 max-w-[280px]">
                       <div className="flex items-center gap-2">
+                        <SwitchEstado
+                          estado={estadoVisible(a, cambios)}
+                          trabajando={!!trabajando?.[a.id]}
+                          onCambiar={(status) => onEstado?.({ items: [a], status })}
+                        />
                         {open ? <ChevronDown size={13} className="text-brand-500 shrink-0" /> : <ChevronRight size={13} className="text-gray-400 shrink-0" />}
                         <span className="min-w-0">
                           <span className="block font-semibold text-gray-900 dark:text-gray-100 truncate">{a.name}</span>
@@ -665,6 +688,7 @@ function VistaProspectadores({ ads, cfg, currency, accountId, onWhy }) {
                         </span>
                       </div>
                     </td>
+                    <td className="px-2 py-2"><Entrega item={a} cambios={cambios} /></td>
                     <td className="px-2 py-2">{a.es ? <Pill tone="ok">Prospectador</Pill> : <Pill tone="mute">No</Pill>}</td>
                     <td className={`px-2 py-2 text-right tabular-nums font-semibold ${i.frequency > 0 && i.frequency <= cfg.maxFrecuenciaProsp ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>{fmtR(i.frequency)}</td>
                     <td className="px-2 py-2 text-right tabular-nums text-gray-600 dark:text-gray-300">{fmtN(i.reach)}</td>
@@ -674,7 +698,7 @@ function VistaProspectadores({ ads, cfg, currency, accountId, onWhy }) {
                     <td className="px-2 py-2 text-right"><MetaLink nivel="ads" ids={[a.id]} accountId={accountId}>Meta</MetaLink></td>
                   </tr>
                   {open && (
-                    <tr><td colSpan={8} className="bg-gray-50/60 dark:bg-gray-900/40 px-3.5 py-3">
+                    <tr><td colSpan={9} className="bg-gray-50/60 dark:bg-gray-900/40 px-3.5 py-3">
                       <div className="pl-5 space-y-1.5">
                         {a.checks.map((c, n) => (
                           <div key={n} className="flex items-start gap-2 text-[11.5px]">
@@ -1228,7 +1252,11 @@ export default function MetricasSection({ addToast }) {
             )
           )}
           {tab === 'semanas' && <VistaSemanas campaigns={data.campaigns} cfg={cfgRaw} productos={productos} productoId={productoId || null} currency={currency} accountId={accountId} onWhy={setWhy} fotos={fotos} />}
-          {tab === 'prosp' && <VistaProspectadores ads={ads7d} cfg={cfg} currency={currency} accountId={accountId} onWhy={setWhy} />}
+          {tab === 'prosp' && <VistaProspectadores
+            ads={ads7d} cfg={cfg} currency={currency} accountId={accountId} onWhy={setWhy}
+            cambios={cambios} trabajando={trabajando}
+            onEstado={({ items, status }) => aplicarEstado({ level: 'ad', items, status })}
+          />}
           {tab === 'reglas' && <VistaReglas campaigns={data.campaigns} cfg={cfgRaw} setCfg={setCfgRaw} productos={productos} currency={currency} onWhy={setWhy} origen={origenCfg} />}
         </>
       )}

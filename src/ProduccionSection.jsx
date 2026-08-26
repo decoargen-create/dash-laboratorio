@@ -405,7 +405,6 @@ function ResumenSemana({ asigs, filtroSinAsignar = false, onToggleSinAsignar, on
     const rows = Object.values(by).map(s => ({
       ...s,
       avg: s.tiempos.length ? s.tiempos.reduce((x, y) => x + y, 0) / s.tiempos.length : null,
-      bono: bonoInfo(s.persona, s.completos),
     })).sort((a, b) => b.asignados - a.asignados);
     // Totales del equipo (el "resumen de los 3 juntos" arriba de las tarjetas).
     const totals = {
@@ -512,14 +511,11 @@ function ResumenSemana({ asigs, filtroSinAsignar = false, onToggleSinAsignar, on
                   ))}
                 </div>
 
-                {/* Pie: bono (según la config de CADA persona; si no tiene bono
-                    configurado, no se muestra) + ritmo */}
+                {/* Pie: ritmo (tiempo prom. a aprobado + trabadas). El BONO va en
+                    Finanzas/Equipo, que es por semana; acá el resumen es de todas
+                    las semanas (operativo), así que mostrarlo confundía sobre el pago. */}
                 <div className="flex items-center justify-between border-t border-gray-200/60 dark:border-white/10 pt-2 text-[11px]">
-                  {s.bono?.tiene
-                    ? <span className="font-extrabold text-emerald-600 dark:text-emerald-400">🎯 ¡Bonus!</span>
-                    : s.bono?.faltan
-                    ? <span className="text-gray-400">{s.bono.faltan} más y hay bonus 🎯</span>
-                    : <span />}
+                  <span />
                   <span className="flex items-center gap-2 text-gray-400 tabular-nums">
                     {s.avg != null && <span title="Tiempo prom. a aprobado">⏱ {fmtDur(s.avg)}</span>}
                     {s.trabadas > 0 && <span className="text-amber-600 dark:text-amber-400 font-bold" title="Trabadas +24h en revisión">🐢 {s.trabadas}</span>}

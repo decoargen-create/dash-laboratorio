@@ -100,6 +100,9 @@ export default async function handler(req, res) {
 
   const ctx = await getDriveContext();
   if (!ctx) return respondJSON(res, 200, { configured: false, reason: 'drive-no-conectado' });
+  // OAuth conectado pero Google no respondió (ver _drive-ctx): no reparamos con
+  // la service account — no ve las mismas carpetas y movería a cualquier lado.
+  if (ctx.failed) return respondJSON(res, 200, { configured: false, transient: true, reason: 'drive-oauth-transitorio' });
 
   try {
     const { cards: detalle, totales } = await repararTarjetas(cards, {

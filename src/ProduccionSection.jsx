@@ -637,7 +637,12 @@ export default function ProduccionSection({ addToast }) {
       const r = await analizarCarpetas((p) => setRepar(s => s && { ...s, ...p }));
       if (r.configured === false) {
         setRepar(null);
-        addToast?.({ type: 'error', message: 'Drive no está conectado — conectalo desde Ajustes antes de reparar.' });
+        addToast?.({
+          type: 'error',
+          message: r.transient
+            ? 'Google no está respondiendo ahora mismo — probá de nuevo en un minuto.'
+            : 'Drive no está conectado — conectalo desde Ajustes antes de reparar.',
+        });
         return;
       }
       setRepar({ fase: 'confirmar', analisis: r });

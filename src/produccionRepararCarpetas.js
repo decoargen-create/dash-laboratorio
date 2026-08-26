@@ -70,7 +70,7 @@ async function recorrer(tarjetas, dryRun, onProgress) {
   for (let i = 0; i < tarjetas.length; i += LOTE) {
     const lote = tarjetas.slice(i, i + LOTE);
     const d = await llamar(lote, dryRun);
-    if (d.configured === false) return { configured: false, reason: d.reason };
+    if (d.configured === false) return { configured: false, reason: d.reason, transient: !!d.transient };
     resultado.cards.push(...(d.cards || []));
     for (const k of Object.keys(resultado.totales)) resultado.totales[k] += d.totales?.[k] || 0;
     onProgress?.({ hechas: Math.min(i + LOTE, tarjetas.length), total: tarjetas.length });

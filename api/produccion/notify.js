@@ -19,10 +19,12 @@ import { getUserIdFromAuth, getServiceClient } from '../marketing/_supabase-serv
 
 // Presentación por evento (color Discord decimal + emoji + frase).
 const EVENT_META = {
-  nuevo:     { color: 0x3B82F6, emoji: '🆕', desc: 'Nuevo producto para producir' },
-  revision:  { color: 0xF59E0B, emoji: '👀', desc: 'Pasó a **En revisión**' },
-  aprobado:  { color: 0x10B981, emoji: '✅', desc: 'Listo para publicar (**Aprobado**)' },
-  publicado: { color: 0x8B5CF6, emoji: '🚀', desc: 'Pasó a **Publicado**' },
+  nuevo:      { color: 0x3B82F6, emoji: '🆕', desc: 'Nuevo producto para producir' },
+  porhacer:   { color: 0xF43F5E, emoji: '📋', desc: 'Entró a **Por hacer**' },
+  revision:   { color: 0xF59E0B, emoji: '👀', desc: 'Pasó a **En revisión**' },
+  correccion: { color: 0xEF4444, emoji: '✏️', desc: 'Se pidió una **corrección**' },
+  aprobado:   { color: 0x10B981, emoji: '✅', desc: 'Listo para publicar (**Aprobado**)' },
+  publicado:  { color: 0x8B5CF6, emoji: '🚀', desc: 'Pasó a **Publicado**' },
 };
 
 function respondJSON(res, status, obj) {
@@ -53,14 +55,25 @@ async function resolveTarjeta(cardId) {
   } catch { return { ownerId: null, creatorId: null }; }
 }
 
-// Config de avisos de un dueño (service-role). Shape nuevo { eventos } o viejo { estados }.
-async function getEventosConfig(ownerId) {
+// Config completa de avisos de un dueño (service-role). Devuelve el objeto
+// config entero: { eventos|estados, contactos:[{id,nombre,discordId}] }.
+async function getNotifConfig(ownerId) {
   try {
     const svc = getServiceClient();
     if (!svc || !ownerId) return null;
     const { data } = await svc.from('produccion_notif_config').select('config').eq('owner_id', ownerId).maybeSingle();
-    return data?.config?.eventos || data?.config?.estados || null;
+    return data?.config || null;
   } catch { return null; }
+}
+
+// A quién @mencionar en un evento: resuelve los contactos elegidos (ids del
+// roster → su discordId) y suma los IDs/roles crudos legacy (evCfg.mentions).
+function mentionsForEvent(config, evCfg) {
+  const roster = Array.isArray(config?.contactos) ? config.contactos : [];
+  const byId = new Map(roster.map(c => [c && c.id, c]));
+  const fromContactos = (Array.isArray(evCfg?.contactos) ? evCfg.contactos : [])
+    .map(cid => byId.get(cid)?.discordId).filter(Boolean);
+  return parseMentions([...fromContactos, String(evCfg?.mentions || '')].join(', '));
 }
 
 // Postea un embed (con menciones opcionales en content) a UN webhook.
@@ -122,7 +135,8 @@ export default async function handler(req, res) {
   if (ownerId && userId !== ownerId && userId !== creatorId) {
     return respondJSON(res, 403, { sent: false, reason: 'sin-acceso-a-la-tarjeta' });
   }
-  const eventos = await getEventosConfig(ownerId || userId);
+  const config = await getNotifConfig(ownerId || userId);
+  const eventos = config?.eventos || config?.estados || null;
   const evCfg = eventos?.[event];
   if (evCfg && evCfg.on === false) return respondJSON(res, 200, { sent: false, reason: 'evento-apagado' });
 
@@ -130,17 +144,19 @@ export default async function handler(req, res) {
   const url = (evCfg?.webhook && String(evCfg.webhook).trim()) || envWebhook;
   if (!url) return respondJSON(res, 200, { sent: false, reason: 'no-webhook' });
 
-  const menciones = parseMentions(evCfg?.mentions);
+  const menciones = mentionsForEvent(config, evCfg);
   const prod = String(body.productoNombre || 'Producto').slice(0, 240);
   const per = String(body.persona || '').trim().slice(0, 80);
   const who = String(body.actor || '').trim().slice(0, 80);
+  const detalle = String(body.detalle || '').trim().slice(0, 500);
   // Link a la carpeta de Drive (solo si es una URL de Drive válida).
   const folderLink = String(body.folderLink || '').trim();
   const driveOk = /^https:\/\/(drive|docs)\.google\.com\//i.test(folderLink);
 
   const fields = [];
   if (per) fields.push({ name: 'Persona', value: per, inline: true });
-  if (who) fields.push({ name: event === 'nuevo' ? 'Creó' : 'Movió', value: who, inline: true });
+  if (who) fields.push({ name: event === 'nuevo' ? 'Creó' : event === 'correccion' ? 'Pidió' : 'Movió', value: who, inline: true });
+  if (event === 'correccion' && detalle) fields.push({ name: 'Qué corregir', value: detalle, inline: false });
   if (driveOk) fields.push({ name: 'Videos', value: `[📁 Abrir carpeta de Drive](${folderLink})`, inline: false });
 
   const embed = {

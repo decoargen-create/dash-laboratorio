@@ -40,10 +40,18 @@ if (typeof window !== 'undefined' && supabase) {
 }
 export async function isCloudReady() {
   if (!supabase) return false;
-  if (_cloudReadyCache !== null) return _cloudReadyCache;
-  const user = await getCurrentUser();
-  _cloudReadyCache = !!user;
-  return _cloudReadyCache;
+  // Un `true` cacheado es seguro (rápido). Pero un `false`/`null` NO lo damos por
+  // bueno: lo re-verificamos contra la sesión REAL (getSession lee de
+  // localStorage, es instantáneo y no depende de la red). Antes, un SIGNED_OUT
+  // transitorio (un refresh de token que falló por un blip de red) dejaba el
+  // cache en `false` y la galería se saltaba la nube PARA SIEMPRE → mostraba solo
+  // la caché local (2 items, "0 activos") aunque el usuario siguiera logueado.
+  if (_cloudReadyCache === true) return true;
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    _cloudReadyCache = !!session?.user;
+  } catch { /* error de red: no ensuciamos el cache */ }
+  return _cloudReadyCache === true;
 }
 
 // Re-firma signed URLs justo antes de descargar. Las URLs generadas al
@@ -162,8 +170,10 @@ function rowToRef(row) {
     sourceType: row.source_type,
     variantIndex: row.variant_index,
     variantStyle: row.variant_style,
-    prompt: row.prompt,
-    skeleton: row.skeleton,
+    // prompt/skeleton NO vienen en la query de lista (columnas ligeras) — se
+    // cargan on-demand. `?? null` para no dejar undefined si la fila no los trae.
+    prompt: row.prompt ?? null,
+    skeleton: row.skeleton ?? null,
     model: row.model,
     visionModel: row.vision_model,
     size: row.size,
@@ -194,9 +204,16 @@ export async function getReferencialesByProductoCloud(productoId, opts = {}) {
   const user = await getCurrentUser();
   if (!user) return [];
 
+  // Columnas LIGERAS para la grilla. NO traemos `prompt` (~12KB/fila) ni
+  // `skeleton` (jsonb): juntos eran ~3MB en un producto con cientos de creativos
+  // y el select('*') fallaba/timeouteaba → la grilla quedaba VACÍA aunque el
+  // contador (head-count) diera 58. Prompt/skeleton se cargan on-demand al abrir
+  // un creativo (getReferencialDetalleCloud). El resto de features (regenerar,
+  // iterar, winner) no necesitan esos dos campos.
+  const LIST_COLS = 'id,user_id,producto_id,source_ad_id,source_brand,source_image_url,source_headline,source_type,variant_index,variant_style,model,vision_model,size,size_fallback,quality,storage_path,image_url,mime_type,descargada,descargada_at,archivado,archivado_at,created_at,updated_at,winner,winner_at,winner_metrics';
   let query = supabase
     .from('marketing_creativos')
-    .select('*')
+    .select(LIST_COLS)
     .eq('producto_id', String(productoId))
     .order('created_at', { ascending: false });
   if (!includeArchived) query = query.eq('archivado', false);
@@ -231,6 +248,21 @@ export async function getReferencialesByProductoCloud(productoId, opts = {}) {
     }
   }
   return items;
+}
+
+// Detalle pesado de UN creativo (prompt + skeleton), cargado on-demand al abrir
+// el creativo — así la lista se mantiene liviana. Devuelve {} si no está.
+export async function getReferencialDetalleCloud(id) {
+  if (!supabase || !id) return {};
+  try {
+    const { data, error } = await supabase
+      .from('marketing_creativos')
+      .select('prompt, skeleton')
+      .eq('id', id)
+      .maybeSingle();
+    if (error) { console.warn('[galería cloud] detalle:', error.message); return {}; }
+    return { prompt: data?.prompt ?? null, skeleton: data?.skeleton ?? null };
+  } catch (e) { console.warn('[galería cloud] detalle ex:', e?.message || e); return {}; }
 }
 
 // Lista TODOS los winners del usuario, de TODOS sus productos (galería global

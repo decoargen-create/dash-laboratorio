@@ -51,6 +51,9 @@ export default function BulkProgressBar({ state, onClose }) {
           </span>
           <span className="flex-1 min-w-0 text-[11px] text-gray-600 dark:text-gray-300 tabular-nums truncate">
             {isDone ? `${doneImgs} imágenes listas` : `${doneImgs}/${totalImgs} imágenes`}
+            {!isDone && imagesPerAd > 1 && (
+              <span className="text-gray-400 dark:text-gray-500"> ({total} ads × {imagesPerAd})</span>
+            )}
             {(spentUsd > 0) && (
               <>
                 <span className="text-gray-400 dark:text-gray-500 mx-1.5">·</span>

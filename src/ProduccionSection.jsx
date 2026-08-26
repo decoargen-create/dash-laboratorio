@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import {
   ESTADOS, ESTADO_LABELS, VIDEOS_POR_PRODUCTO, weekKeyOf, weekLabel, weekRange, allWeekKeys,
-  listAssignments, addAssignment, updateAssignment, removeAssignment,
+  listAssignments, listAllAssignments, addAssignment, updateAssignment, removeAssignment,
   assignCreator, subscribeProduccion, esCompleto, bonusObjetivo, bonusDe, inversionPorProducto,
   getRole, entregasNuevas, ultimaSubidaTs, personasEnTarjetas, resumenVideosPorProducto,
   resyncDesdeNube, vaciarTodo, setMaterialLinkProducto, probarDiscord,
@@ -435,7 +435,9 @@ function ResumenSemana({ asigs, filtroSinAsignar = false, onToggleSinAsignar, on
     <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/60 overflow-hidden">
       {/* Resumen del EQUIPO (todos juntos) */}
       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-100 dark:border-gray-700/60 flex-wrap">
-        <span className="text-[11px] font-bold uppercase tracking-wide text-gray-400 mr-auto">Semana del equipo</span>
+        <span className="text-[11px] font-bold uppercase tracking-wide text-gray-400 mr-auto">
+          Equipo · esta semana <span className="normal-case text-gray-400/80">({weekRange(weekKeyOf())})</span>
+        </span>
         <div className="flex items-center gap-1.5 flex-wrap">
           {/* Los contadores por estado (asignados/por hacer/revisión/aprobados) se
               sacaron: ya están en las columnas del tablero. Acá queda el detalle
@@ -540,7 +542,10 @@ function readProductos() {
 export default function ProduccionSection({ addToast }) {
   const [, force] = useState(0);
   const [productos] = useState(() => readProductos());
-  const [weekKey, setWeekKey] = useState(() => weekKeyOf());
+  // El tablero NO se parte por semana: muestra TODAS las tarjetas juntas. La
+  // semana solo se usa para crear productos nuevos (van a la semana actual) y
+  // para el pago (que sigue agrupando por semana en Finanzas/Equipo).
+  const weekKey = weekKeyOf();
   const [showAdd, setShowAdd] = useState(false);
   const [showTeam, setShowTeam] = useState(false);
   const [confirmResync, setConfirmResync] = useState(false);
@@ -672,15 +677,12 @@ export default function ProduccionSection({ addToast }) {
     catch (e) { addToast?.({ type: 'error', message: e.message }); }
   };
 
-  const semanas = useMemo(() => {
-    const keys = new Set(allWeekKeys());
-    keys.add(weekKeyOf());
-    return [...keys].sort().reverse();
-  }, [weekKey]); // eslint-disable-line
-
-  const asigs = listAssignments(weekKey);
+  // Tablero = TODAS las tarjetas (todas las semanas). asigsSemana = solo la
+  // semana actual, para el modal "Agregar producto" (así un producto renovado
+  // que ya está en OTRA semana igual se puede volver a agregar esta semana).
+  const asigs = listAllAssignments();
+  const asigsSemana = listAssignments(weekKey);
   const detail = asigs.find(a => a.id === detailId) || null;
-  const nAprobSemana = asigs.filter(a => esCompleto(a.estado)).length;
 
   const personas = useMemo(() => {
     const set = new Set(EQUIPO_DEFAULT);
@@ -723,6 +725,10 @@ export default function ProduccionSection({ addToast }) {
     for (const a of asigsBoard) (m[columnaEfectiva(a, now)] || m.porhacer).push(a);
     return m;
   }, [asigsBoard]);
+  // Resumen del header: "en producción" = tarjetas activas (sin las archivadas),
+  // "aprobados" = aprobado + publicado que todavía están en el tablero.
+  const nActivos = byCol.porhacer.length + byCol.revision.length + byCol.aprobado.length + byCol.publicado.length;
+  const nAprob = byCol.aprobado.length + byCol.publicado.length;
   // La columna "Archivado" está oculta por defecto; el toggle la muestra.
   const [mostrarArchivado, setMostrarArchivado] = useState(() => {
     try { return localStorage.getItem('adslab-prod-archivado') === '1'; } catch { return false; }
@@ -768,7 +774,12 @@ export default function ProduccionSection({ addToast }) {
   };
 
   return (
-    <div className="max-w-full space-y-4">
+    // Ancho máximo + centrado: en monitores grandes (ej. 37") el tablero NO se
+    // estira a lo ancho (las tarjetas quedaban gigantes y perdían el formato).
+    // Con el tope, la tarjeta mantiene su proporción (~la del 13") en toda
+    // pantalla y el tablero se centra con aire a los costados. El tablero del
+    // editor ya está acotado (max-w-4xl); esto empareja el del admin.
+    <div className="max-w-[1500px] mx-auto space-y-4">
       {/* Header */}
       <div className="flex items-center gap-3 flex-wrap">
         <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white shadow-sm">
@@ -777,19 +788,12 @@ export default function ProduccionSection({ addToast }) {
         <div>
           <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Producción</h2>
           <p className="text-xs text-gray-500 dark:text-gray-400">
-            {asigs.length === 0
-              ? 'Armá la semana: agregá productos y repartilos 🎬'
-              : <>{asigs.length} en juego · <b className="text-emerald-600 dark:text-emerald-400">{nAprobSemana} aprobado{nAprobSemana === 1 ? '' : 's'}</b> esta semana {nAprobSemana > 0 ? '🔥' : '🎬'}</>}
+            {nActivos === 0
+              ? 'Agregá productos y repartilos 🎬'
+              : <>{nActivos} en producción · <b className="text-emerald-600 dark:text-emerald-400">{nAprob} aprobado{nAprob === 1 ? '' : 's'}</b> {nAprob > 0 ? '🔥' : '🎬'}</>}
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2 flex-wrap">
-          <div className="relative">
-            <select value={weekKey} onChange={e => setWeekKey(e.target.value)}
-              className="appearance-none pl-3 pr-8 py-1.5 text-sm font-semibold bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500">
-              {semanas.map(wk => <option key={wk} value={wk}>{weekLabel(wk)}{wk === weekKeyOf() ? ' (esta semana)' : ''}</option>)}
-            </select>
-            <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-          </div>
           <button onClick={() => setShowBuscar(true)}
             title="Buscar videos: por nombre del video, producto, persona o fecha — con link directo a Drive."
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:border-brand-400 hover:text-brand-600 dark:hover:text-brand-300 transition shadow-sm">
@@ -905,8 +909,12 @@ export default function ProduccionSection({ addToast }) {
       })()}
 
       {/* Resumen de la semana: carga por persona + objetivo. Clic en una persona
-          filtra el tablero por ella (toggle). */}
-      <ResumenSemana asigs={asigs} filtroSinAsignar={soloSinAsignar}
+          filtra el tablero por ella (toggle). USA asigsSemana (semana actual), NO
+          asigs (todas): el bono/objetivo/MVP son SEMANALES — con todas las semanas
+          (+archivadas) el "completos" crecía infinito y el bono figuraba siempre
+          alcanzado. El tablero sí muestra todas las semanas; este resumen es el
+          del período de pago actual. */}
+      <ResumenSemana asigs={asigsSemana} filtroSinAsignar={soloSinAsignar}
         onToggleSinAsignar={() => setSoloSinAsignar(v => !v)}
         activePersonas={filtroPersona}
         onPickPersona={(p) => setFiltroPersona(prev => prev.includes(p) ? prev.filter(x => x !== p) : [p])} />
@@ -1061,7 +1069,7 @@ export default function ProduccionSection({ addToast }) {
       </div>
 
       {showAdd && (
-        <AgregarProductoModal productos={productos} personas={personas} team={team} asigs={asigs} weekKey={weekKey}
+        <AgregarProductoModal productos={productos} personas={personas} team={team} asigs={asigsSemana} weekKey={weekKey}
           onClose={() => setShowAdd(false)} addToast={addToast} />
       )}
       {detail && (
@@ -1800,17 +1808,23 @@ function VideoSearchModal({ onClose, addToast }) {
 // Se guarda por dueño en la nube (produccion_notif_config).
 const EVENTOS_NOTIF = [
   { key: 'nuevo', label: 'Producto nuevo', emoji: '🆕', hint: 'Al crear una tarjeta/producto' },
+  { key: 'porhacer', label: 'Por hacer', emoji: '📋', hint: 'Cuando una tarjeta entra a Por hacer' },
   { key: 'revision', label: 'En revisión', emoji: '👀', hint: 'Cuando una tarjeta pasa a revisión' },
+  { key: 'correccion', label: 'Corrección pedida', emoji: '✏️', hint: 'Cuando se pide corregir un video' },
   { key: 'aprobado', label: 'Listo para publicar', emoji: '✅', hint: 'Cuando una tarjeta se aprueba' },
   { key: 'publicado', label: 'Publicado', emoji: '🚀', hint: 'Cuando una tarjeta se publica' },
 ];
+// Cada evento: si avisa (on), a qué canal (webhook), a quién mencionar
+// (contactos = ids del roster de abajo) y, opcional, IDs/roles crudos (mentions).
+const evtDefault = () => ({ on: true, webhook: '', mentions: '', contactos: [] });
 const DEFAULT_NOTIF = {
   eventos: {
-    nuevo: { on: true, webhook: '', mentions: '' },
-    revision: { on: true, webhook: '', mentions: '' },
-    aprobado: { on: true, webhook: '', mentions: '' },
-    publicado: { on: true, webhook: '', mentions: '' },
+    nuevo: evtDefault(), porhacer: evtDefault(), revision: evtDefault(),
+    correccion: evtDefault(), aprobado: evtDefault(), publicado: evtDefault(),
   },
+  // Roster de personas para etiquetar (nombre + Discord ID), definido una vez y
+  // reutilizado por columna. [{ id, nombre, discordId }]
+  contactos: [],
 };
 
 function NotifConfigModal({ team = [], onClose, addToast }) {
@@ -1824,16 +1838,31 @@ function NotifConfigModal({ team = [], onClose, addToast }) {
     loadNotifConfig().then(c => {
       if (!alive) return;
       const ev = c?.eventos || c?.estados;   // soporta shape viejo
-      if (ev) {
-        const merged = {};
-        for (const e of EVENTOS_NOTIF) merged[e.key] = { ...DEFAULT_NOTIF.eventos[e.key], ...(ev[e.key] || {}) };
-        setCfg({ eventos: merged });
-      }
+      const merged = {};
+      for (const e of EVENTOS_NOTIF) merged[e.key] = { ...evtDefault(), ...((ev && ev[e.key]) || {}) };
+      const contactos = Array.isArray(c?.contactos) ? c.contactos : [];
+      setCfg({ eventos: merged, contactos });
       setLoading(false);
     });
     return () => { alive = false; };
   }, []);
-  const setEvento = (key, patch) => setCfg(c => ({ eventos: { ...c.eventos, [key]: { ...c.eventos[key], ...patch } } }));
+  const setEvento = (key, patch) => setCfg(c => ({ ...c, eventos: { ...c.eventos, [key]: { ...c.eventos[key], ...patch } } }));
+  // Roster de personas para etiquetar (reutilizable por todas las columnas).
+  const contactos = cfg.contactos || [];
+  const addContacto = () => setCfg(c => ({ ...c, contactos: [...(c.contactos || []), { id: `ct${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, nombre: '', discordId: '' }] }));
+  const setContacto = (id, patch) => setCfg(c => ({ ...c, contactos: (c.contactos || []).map(x => x.id === id ? { ...x, ...patch } : x) }));
+  const delContacto = (id) => setCfg(c => ({
+    ...c,
+    contactos: (c.contactos || []).filter(x => x.id !== id),
+    // También lo sacamos de la selección de cada columna.
+    eventos: Object.fromEntries(Object.entries(c.eventos).map(([k, ev]) => [k, { ...ev, contactos: (ev.contactos || []).filter(cid => cid !== id) }])),
+  }));
+  const toggleEventContacto = (evKey, cid) => setCfg(c => {
+    const ev = c.eventos[evKey] || evtDefault();
+    const cur = new Set(ev.contactos || []);
+    if (cur.has(cid)) cur.delete(cid); else cur.add(cid);
+    return { ...c, eventos: { ...c.eventos, [evKey]: { ...ev, contactos: [...cur] } } };
+  });
   const guardar = async () => {
     setSaving(true);
     const { error } = await saveNotifConfig(cfg);
@@ -1867,8 +1896,37 @@ function NotifConfigModal({ team = [], onClose, addToast }) {
             <div className="flex items-center gap-2 text-sm text-gray-400 py-6 justify-center"><Loader2 size={16} className="animate-spin" /> Cargando…</div>
           ) : (
             <>
+              {/* ① Roster: personas para etiquetar (nombre + Discord ID), una vez. */}
+              <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-3">
+                <div className="flex items-center gap-2">
+                  <Users size={14} className="text-indigo-500" />
+                  <div className="text-sm font-bold text-gray-800 dark:text-gray-100">Personas para etiquetar</div>
+                </div>
+                <p className="text-[10px] text-gray-400 mt-0.5 mb-2">Cargalas una vez. Después elegís a quién avisar en cada columna, sin volver a pegar IDs.</p>
+                <div className="space-y-1.5">
+                  {contactos.length === 0 && <p className="text-[11px] text-gray-400 italic">Todavía no cargaste personas.</p>}
+                  {contactos.map(ct => (
+                    <div key={ct.id} className="flex items-center gap-1.5">
+                      <input value={ct.nombre} onChange={x => setContacto(ct.id, { nombre: x.target.value })}
+                        placeholder="Nombre (ej: Vanessa)"
+                        className="flex-1 min-w-0 px-2.5 py-1.5 text-xs bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                      <input value={ct.discordId} onChange={x => setContacto(ct.id, { discordId: x.target.value.trim() })}
+                        placeholder="Discord ID (ej: 1234567…)"
+                        className="flex-1 min-w-0 px-2.5 py-1.5 text-xs font-mono bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                      <button onClick={() => delContacto(ct.id)} title="Quitar" className="p-1.5 text-gray-400 hover:text-red-500 shrink-0"><Trash2 size={14} /></button>
+                    </div>
+                  ))}
+                </div>
+                <button onClick={addContacto} className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-indigo-600 dark:text-indigo-300 hover:underline">
+                  <Plus size={13} /> Agregar persona
+                </button>
+              </div>
+
+              {/* ② Un aviso por columna: canal + a quién etiquetar (del roster). */}
+              <div className="text-[11px] font-bold uppercase tracking-wide text-gray-400 pt-1">Aviso por columna</div>
               {EVENTOS_NOTIF.map(e => {
-                const ev = cfg.eventos[e.key] || { on: true, webhook: '', mentions: '' };
+                const ev = cfg.eventos[e.key] || evtDefault();
+                const sel = new Set(ev.contactos || []);
                 return (
                   <div key={e.key} className={`rounded-xl border p-3 transition ${ev.on ? 'border-gray-200 dark:border-gray-700' : 'border-gray-100 dark:border-gray-800 opacity-60'}`}>
                     <div className="flex items-center gap-2">
@@ -1885,18 +1943,33 @@ function NotifConfigModal({ team = [], onClose, addToast }) {
                     <input type="url" value={ev.webhook} onChange={x => setEvento(e.key, { webhook: x.target.value })} disabled={!ev.on}
                       placeholder="Webhook del canal (https://discord.com/api/webhooks/…)"
                       className="mt-2 w-full px-2.5 py-1.5 text-xs bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50" />
-                    <input type="text" value={ev.mentions} onChange={x => setEvento(e.key, { mentions: x.target.value })} disabled={!ev.on}
-                      placeholder="IDs de Discord a @mencionar (coma). Ej: 123…, 456…"
-                      className="mt-1.5 w-full px-2.5 py-1.5 text-xs bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50" />
+                    <div className={`mt-2 ${ev.on ? '' : 'opacity-50 pointer-events-none'}`}>
+                      <div className="text-[10px] font-semibold text-gray-400 mb-1">Etiquetar a</div>
+                      {contactos.length === 0 ? (
+                        <p className="text-[11px] text-gray-400 italic">Agregá personas arriba para poder elegirlas.</p>
+                      ) : (
+                        <div className="flex flex-wrap gap-1.5">
+                          {contactos.map(ct => {
+                            const on = sel.has(ct.id);
+                            const nom = (ct.nombre || '').trim() || 'sin nombre';
+                            return (
+                              <button key={ct.id} type="button" onClick={() => toggleEventContacto(e.key, ct.id)}
+                                className={`px-2.5 py-1 rounded-full text-[11px] font-bold border transition ${on ? 'bg-indigo-500 border-indigo-500 text-white' : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-indigo-400'}`}>
+                                {on ? '✓ ' : ''}{nom}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 );
               })}
               <details className="text-[11px] text-gray-500 dark:text-gray-400">
-                <summary className="cursor-pointer font-semibold">Cómo obtener el webhook de un canal y el ID de una persona</summary>
+                <summary className="cursor-pointer font-semibold">Cómo obtener el webhook y el Discord ID</summary>
                 <div className="mt-1.5 space-y-1 pl-1">
-                  <p><b>Webhook</b>: en Discord, engranaje del canal → Integraciones → Webhooks → Nuevo webhook → Copiar URL. Un canal distinto por evento.</p>
-                  <p><b>ID de persona</b>: Ajustes → Avanzado → Modo desarrollador. Después clic derecho sobre la persona → Copiar ID de usuario. Varias, separadas por coma. Para un rol, <b>&amp;</b> antes del ID.</p>
-                  <p>Si dejás un webhook vacío, ese evento cae al canal global (si está configurado en Vercel).</p>
+                  <p><b>Webhook</b>: en Discord, engranaje del canal → Integraciones → Webhooks → Nuevo webhook → Copiar URL. Un canal distinto por columna (o dejalo vacío para el canal global).</p>
+                  <p><b>Discord ID</b>: Ajustes de Discord → Avanzado → Modo desarrollador. Clic derecho sobre la persona → Copiar ID de usuario, y pegalo en "Personas para etiquetar". Para un <b>rol</b>, poné <b>&amp;</b> antes del ID (ej: &amp;123…).</p>
                 </div>
               </details>
             </>
@@ -2040,7 +2113,7 @@ function CardDetailModal({ a, personas, team = [], onClose, addToast, onTeamChan
           </div>
 
           {/* Creativos */}
-          <CreativosSection a={a} addToast={addToast} />
+          <CreativosSection a={a} addToast={addToast} canReview />
 
           {/* Videos aprobados (sobre los subidos) + Aprobar todos */}
           {(() => {

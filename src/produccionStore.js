@@ -564,6 +564,15 @@ export function weekRange(weekKey) {
 export function listAssignments(weekKey) {
   return read().filter(a => a.weekKey === weekKey);
 }
+// TODAS las tarjetas (todas las semanas). El tablero ya NO se parte por semana:
+// muestra todo junto (el auto-archivo de lo publicado hace +48h lo mantiene
+// limpio). La semana solo importa para el PAGO, que sigue agrupando por weekKey.
+// Orden: semana más nueva primero, luego por nombre de producto.
+export function listAllAssignments() {
+  return read().slice().sort((a, b) =>
+    (b.weekKey || '').localeCompare(a.weekKey || '') ||
+    (a.productoNombre || '').localeCompare(b.productoNombre || '', 'es'));
+}
 export function allWeekKeys() {
   return [...new Set(read().map(a => a.weekKey))].sort().reverse();
 }
@@ -789,7 +798,7 @@ async function renombrarPublicado(folderId, published) {
 // 'nuevo' (producto recién creado) o un estado ('revision'|'aprobado'|
 // 'publicado'). El server decide, según la config del dueño, a qué canal
 // (webhook) manda y a quién menciona. Acá solo pasamos el contexto.
-async function notificarEventoDiscord(a, event, from) {
+async function notificarEventoDiscord(a, event, from, extra = {}) {
   if (!supabase) return;
   try {
     const { data: { session } } = await supabase.auth.getSession();
@@ -805,6 +814,8 @@ async function notificarEventoDiscord(a, event, from) {
         from: from || '',
         to: event === 'nuevo' ? '' : event,
         actor: _actorName || '',
+        // Detalle opcional (ej: el texto de la corrección pedida).
+        ...(extra && extra.detalle ? { detalle: String(extra.detalle) } : {}),
         // Link a la carpeta de Drive de la tarjeta (donde están los videos), para
         // entrar directo desde Discord. Puede no existir si no se subió nada.
         folderLink: (a.archivos || []).find(f => f.folderLink)?.folderLink || '',
@@ -917,6 +928,29 @@ export function removeArchivo(id, ts) {
   arr[i] = { ...arr[i], archivos: (arr[i].archivos || []).filter(f => f.ts !== ts), updatedAt: new Date().toISOString() };
   write(arr);
   pushRow(id);
+}
+
+// Pide (o limpia) una corrección sobre un VIDEO puntual (por su ts). La
+// corrección viaja DENTRO del archivo (f.correccion = { texto, por, ts }) para
+// que se sincronice como el resto de los videos (pushRow completo, sin
+// skipArchivos). texto vacío/blanco = limpiar la corrección de ese video.
+export function setCorreccionVideo(id, ts, texto) {
+  const arr = read().slice();
+  const i = arr.findIndex(a => a.id === id);
+  if (i === -1) return;
+  const txt = (texto || '').trim();
+  const archivos = (arr[i].archivos || []).map(f => {
+    if (f.ts !== ts) return f;
+    if (!txt) { const { correccion, ...rest } = f; return rest; }
+    return { ...f, correccion: { texto: txt, por: _actorName || 'Equipo', ts: new Date().toISOString() } };
+  });
+  arr[i] = { ...arr[i], archivos, updatedAt: new Date().toISOString() };
+  write(arr);
+  pushRow(id);
+  // Aviso a Discord (canal 'correccion'): antes pedir una corrección era 100%
+  // silencioso. Solo cuando se SETEA (no al limpiar). Fire & forget; el server
+  // decide si hay webhook y a quién menciona.
+  if (txt) notificarEventoDiscord(arr[i], 'correccion', null, { detalle: txt });
 }
 
 // ── Config de pago POR PERSONA (monto por producto + tramos de bono) ─────────

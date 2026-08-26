@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import JSZip from 'jszip';
 import {
-  getReferencialesByProducto, deleteReferencial, patchReferenciales,
+  getReferencialesByProducto, getReferencialDetalle, deleteReferencial, patchReferenciales,
   archiveReferencial, countReferencialesByProducto,
   markAsWinner, unmarkWinner, refreshSignedUrls,
 } from './galeriaReferenciales.js';
@@ -792,6 +792,9 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
   // Form de marcar como winner — guardamos el creativo a marcar.
   const [winnerFormItem, setWinnerFormItem] = useState(null);
   const [selected, setSelected] = useState(null);
+  // Detalle pesado (prompt + skeleton) del creativo abierto — se pide on-demand
+  // porque la lista viene liviana (sin esos campos) para no traer megas al render.
+  const [selDetail, setSelDetail] = useState(null); // { id, prompt, skeleton }
   const [cargando, setCargando] = useState(true);
   const [showDebug, setShowDebug] = useState(false);
   // Vista: 'grid' | 'list' | 'table'. Persistida.
@@ -827,7 +830,8 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
   const [filtroEstado, setFiltroEstado] = useState('all');     // 'all' | 'pending' | 'downloaded'
   const [filtroVariante, setFiltroVariante] = useState('all'); // 'all' | 'reference' | 'rebrand' | 'tight' | 'medium' | 'loose'
   const [filtroOrigen, setFiltroOrigen] = useState('all');     // 'all' | 'inspiracion' | 'bandeja-idea'
-  // Búsqueda libre por texto — matchea sourceBrand, sourceHeadline, variantStyle.
+  // Búsqueda libre por texto — matchea sourceBrand, sourceHeadline, variantStyle
+  // (el prompt ya no viaja en la lista liviana).
   const [searchQuery, setSearchQuery] = useState('');
   const [zipping, setZipping] = useState(false);
   // Iteración de winner en curso — bloquea el botón y muestra progreso.
@@ -855,12 +859,24 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
     if (filtroOrigen === 'bandeja-idea' && it.sourceType !== 'bandeja-idea') return false;
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
-      const haystack = [it.sourceBrand, it.sourceHeadline, it.variantStyle, it.prompt]
+      // it.prompt ya NO viene en la lista (columnas livianas) → no lo incluimos
+      // para no dar la falsa impresión de que se busca por prompt.
+      const haystack = [it.sourceBrand, it.sourceHeadline, it.variantStyle]
         .filter(Boolean).join(' ').toLowerCase();
       if (!haystack.includes(q)) return false;
     }
     return true;
   });
+
+  // Al abrir un creativo, si no trae prompt/skeleton (lista liviana), los pedimos
+  // para el panel "cómo se generó". Items de IDB ya los traen → no pide nada.
+  useEffect(() => {
+    if (!selected?.id) { setSelDetail(null); return; }
+    if (selected.prompt != null || selected.skeleton != null) { setSelDetail(null); return; }
+    let alive = true;
+    getReferencialDetalle(selected.id).then(d => { if (alive) setSelDetail({ id: selected.id, ...d }); });
+    return () => { alive = false; };
+  }, [selected]);
 
   const refresh = () => {
     setCargando(true);
@@ -1256,7 +1272,7 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0 flex-wrap">
-            {/* Búsqueda libre — matchea brand, headline, variante, prompt. */}
+            {/* Búsqueda libre — matchea brand, headline, variante. */}
             <div className="relative">
               <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
               <input
@@ -1497,7 +1513,7 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
       {/* Lightbox */}
       {selected && (
         <Lightbox
-          item={selected}
+          item={selDetail && selDetail.id === selected.id ? { ...selected, ...selDetail } : selected}
           imgSrc={blobUrls.get(selected.id) || ''}
           onClose={() => { setSelected(null); setShowDebug(false); }}
           showDebug={showDebug}

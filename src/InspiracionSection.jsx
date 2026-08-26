@@ -1644,15 +1644,23 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   // pierdan entre sesiones.
   const [genOpts, setGenOpts] = useState(() => {
     try {
+      // Default recomendado: Portrait high × 4 variantes.
+      //   - Portrait (1024×1536): en feed/stories ocupa más pantalla que un
+      //     1:1 — mueve más el CTR que cualquier resolución extra. El 2K solo
+      //     existe en 1:1 y Meta igual comprime a ~1080px: queda para
+      //     regenerar a mano los ganadores que vivan fuera del feed.
+      //   - 4 variantes: el plan del Strategist va de réplica fiel a
+      //     creatividad libre; con 4 ya cubrís ese rango.
+      //   - high: siempre.
+      const RECOMENDADO = { n: 4, size: '1024x1536', quality: 'high', v: 2 };
       const raw = localStorage.getItem('adslab-marketing-gen-opts');
       const parsed = raw ? JSON.parse(raw) : null;
-      // MIGRACIÓN: si tenían cacheado 2048x2048 del default viejo, los
-      // bajamos a 1024x1024 — 2K tarda 150-250s en gpt-image-2 high y
-      // hace timeout de Vercel con cierta frecuencia. Quien quiera 2K
-      // explícito lo elige a mano en el selector.
-      if (parsed?.size === '2048x2048') parsed.size = '1024x1024';
-      return parsed || { n: 2, size: '1024x1024', quality: 'high' };
-    } catch { return { n: 2, size: '1024x1024', quality: 'high' }; }
+      // MIGRACIÓN v2 (one-shot): pisa lo persistido con el recomendado UNA
+      // vez. El `v: 2` queda guardado, así que lo que elijas a mano después
+      // (2K para un ganador, 6 variantes, etc.) sigue persistiendo normal.
+      if (!parsed || parsed.v !== 2) return RECOMENDADO;
+      return parsed;
+    } catch { return { n: 4, size: '1024x1536', quality: 'high', v: 2 }; }
   });
   useEffect(() => {
     try { localStorage.setItem('adslab-marketing-gen-opts', JSON.stringify(genOpts)); } catch {}

@@ -611,10 +611,19 @@ export default function ProduccionSection({ addToast }) {
 
   // Link a la carpeta raíz de Drive (para el botón "Drive" del header).
   // Estado de Drive: si funciona (rootLink) + si el OAuth del user está conectado.
-  const [drive, setDrive] = useState({ rootLink: null, connected: false, email: null, connecting: false });
+  const [drive, setDrive] = useState({ rootLink: null, connected: false, working: null, email: null, connecting: false });
   const refreshDrive = () => {
     Promise.all([probeDrive(), driveStatus()]).then(([p, s]) => {
-      setDrive(d => ({ ...d, rootLink: (p?.configured && p?.rootLink) || null, connected: !!s?.connected, email: s?.email || p?.email || null }));
+      // `connected` = existe la conexión guardada. `working` = el permiso REALMENTE
+      // funciona (el status ahora verifica el token con getDriveContext). Con
+      // connected && !working → el permiso venció y hay que reconectar.
+      setDrive(d => ({
+        ...d,
+        rootLink: (p?.configured && p?.rootLink) || null,
+        connected: !!s?.connected,
+        working: s?.working ?? (p?.configured === true ? true : (p?.transient ? false : null)),
+        email: s?.email || p?.email || null,
+      }));
     });
   };
   useEffect(refreshDrive, []);
@@ -826,9 +835,23 @@ export default function ProduccionSection({ addToast }) {
                 <div className="my-1 border-t border-gray-100 dark:border-gray-800" />
                 {drive.connected ? (
                   <>
-                    <div className="flex items-center gap-2 px-2.5 py-1.5 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
-                      <CheckCircle2 size={14} /> Drive conectado{drive.email ? ` · ${drive.email}` : ''}
-                    </div>
+                    {drive.working === false ? (
+                      <>
+                        <div className="flex items-start gap-2 px-2.5 py-1.5 text-[11px] font-bold text-amber-600 dark:text-amber-400">
+                          <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                          <span>Drive conectado pero el permiso NO está funcionando{drive.email ? ` (${drive.email})` : ''}. Reconectalo para poder subir a Drive.</span>
+                        </div>
+                        <button onClick={() => { onConnectDrive(); setAjustesOpen(false); }} disabled={drive.connecting}
+                          className="w-full flex items-center gap-2.5 text-left text-sm font-bold px-2.5 py-2 rounded-lg text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 hover:bg-amber-100 dark:hover:bg-amber-900/30 transition disabled:opacity-60">
+                          {drive.connecting ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
+                          {drive.connecting ? 'Reconectando…' : 'Reconectar Drive'}
+                        </button>
+                      </>
+                    ) : (
+                      <div className="flex items-center gap-2 px-2.5 py-1.5 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+                        <CheckCircle2 size={14} /> {drive.working === true ? 'Drive funcionando' : 'Drive conectado'}{drive.email ? ` · ${drive.email}` : ''}
+                      </div>
+                    )}
                     {drive.rootLink && (
                       <a href={drive.rootLink} target="_blank" rel="noopener noreferrer" onClick={() => setAjustesOpen(false)}
                         className="w-full flex items-center gap-2.5 text-left text-sm font-semibold px-2.5 py-2 rounded-lg text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition">

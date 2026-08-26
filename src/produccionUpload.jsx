@@ -15,7 +15,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Film, X, UploadCloud, Loader2, AlertTriangle, ExternalLink } from 'lucide-react';
 import { supabase, getCurrentUser } from './supabase.js';
-import { addArchivos, removeArchivo, updateAssignment, setCorreccionVideo, VIDEOS_POR_PRODUCTO } from './produccionStore.js';
+import { addArchivos, removeArchivo, updateAssignment, setCorreccionVideo, refreshProduccion, VIDEOS_POR_PRODUCTO } from './produccionStore.js';
 
 const BUCKET = 'creativos';
 
@@ -94,18 +94,8 @@ async function uploadViaRelay(file, sess, token, onBytes) {
   throw new Error('la sesión terminó sin confirmar el archivo');
 }
 
-async function uploadToSupabase(file, user, ext) {
-  const path = `${user.id}/produccion/pv-${uid()}.${ext}`;
-  const { error } = await supabase.storage.from(BUCKET).upload(path, file, {
-    contentType: file.type || 'video/mp4', upsert: true,
-  });
-  if (error) throw new Error(`Subida falló: ${error.message}`);
-  return { name: file.name, storagePath: path, destino: 'adslab', sizeMB: +(file.size / 1024 / 1024).toFixed(1), ts: uid() };
-}
-
 async function uploadOne(file, ctx, onBytes) {
-  const { user, token, weekKey, productoNombre, persona, cardId, folderId } = ctx;
-  const ext = (file.name.split('.').pop() || 'mp4').toLowerCase();
+  const { token, weekKey, productoNombre, persona, cardId, folderId } = ctx;
   const pedirSesion = async () => {
     const r = await fetch('/api/produccion/drive-session', {
       method: 'POST',
@@ -192,17 +182,18 @@ async function uploadOne(file, ctx, onBytes) {
       : `no configurado${sess.reason ? ` (${sess.reason})` : ''}${sess.error ? `: ${sess.error}` : ''}`;
   }
 
-  try {
-    const archivo = await uploadToSupabase(file, user, ext);
-    if (driveReason) archivo.driveError = driveReason;
-    return archivo;
-  } catch (e) {
-    // El fallback también falló (típico: video más grande que el límite del
-    // bucket). Armamos un error que cuente la historia completa.
-    const esTamano = /exceeded the maximum allowed size/i.test(e?.message || '');
-    const base = esTamano ? 'el video supera el límite de AdsLab (~50MB)' : (e?.message || 'error');
-    throw new Error(driveReason ? `${base} — y antes Drive falló (${driveReason})` : base);
+  // POLÍTICA "Drive o nada": el equipo necesita los videos SÍ o SÍ en Google
+  // Drive. Si no se pudo subir a Drive (ni con los reintentos), NO guardamos en
+  // AdsLab — tiramos error claro y el video NO se registra. El user reintenta o
+  // reconecta Drive. (Los videos viejos que YA están en AdsLab se rescatan con el
+  // botón "Mover a Drive".)
+  if (sess?.reason === 'drive-no-conectado') {
+    throw new Error('Google Drive no está conectado — el video NO se subió. Conectalo en Ajustes → Conectar Drive y reintentá.');
   }
+  if (sess?.reason === 'drive-oauth-transitorio') {
+    throw new Error('Google no respondió en este momento — el video NO se subió. Probá de nuevo en un minuto.');
+  }
+  throw new Error(`No se pudo subir a Google Drive — el video NO se guardó. Reintentá${driveReason ? ` (detalle: ${driveReason})` : ''}.`);
 }
 
 // Un video que YA estaba en Drive se anota en la tarjeta solo si esta no lo
@@ -293,6 +284,42 @@ export async function subirParaTarjeta(a, fileList, { onProgress, addToast } = {
   return { ok, yaEstaban };
 }
 
+// Mueve a Google Drive los videos de una tarjeta que quedaron en AdsLab (por un
+// hipo de Drive al subirse). Corre server-side (endpoint drive-migrate): el
+// service role lee el bucket por-usuario y sube al Drive del dueño; solo borra la
+// copia de AdsLab DESPUÉS de confirmar el archivo en Drive. Secuencial (una por
+// vez) para no pisar la fila de la tarjeta. El server actualiza el registro; acá
+// refrescamos al final.
+export async function moverArchivosADrive(a, { onProgress, addToast } = {}) {
+  const token = await getAuthToken();
+  const pendientes = (a.archivos || []).filter(f => f && f.destino !== 'drive' && f.storagePath);
+  if (pendientes.length === 0) { addToast?.({ type: 'info', message: 'No hay videos en AdsLab para mover.' }); return { ok: 0, fail: 0 }; }
+  let ok = 0, fail = 0, firstErr = null;
+  for (let i = 0; i < pendientes.length; i++) {
+    const f = pendientes[i];
+    onProgress?.({ i, total: pendientes.length, name: f.name });
+    try {
+      const r = await fetch('/api/produccion/drive-migrate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ cardId: a.id, storagePath: f.storagePath }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      ok++;
+    } catch (e) {
+      fail++; if (!firstErr) firstErr = e?.message || 'error';
+      console.warn(`[produccion] mover a Drive "${f.name}" falló:`, e?.message || e);
+    }
+  }
+  onProgress?.({ i: pendientes.length, total: pendientes.length, done: true });
+  // El server ya actualizó la fila (adslab→drive) — traemos los cambios.
+  try { await refreshProduccion(); } catch {}
+  if (ok > 0) addToast?.({ type: fail ? 'warning' : 'success', message: `${ok} video${ok > 1 ? 's' : ''} movido${ok > 1 ? 's' : ''} a Google Drive${fail ? ` · ${fail} fallaron` : ''}` });
+  if (fail > 0 && ok === 0) addToast?.({ type: 'error', message: `No pude mover a Drive: ${firstErr}` });
+  return { ok, fail };
+}
+
 // Sección de creativos dentro de una tarjeta: lista de archivos ya subidos +
 // dropzone + cola de subida. `canDelete` controla si se puede quitar un archivo
 // ya subido (el admin sí; un creator también puede borrar los suyos).
@@ -302,10 +329,22 @@ export function CreativosSection({ a, addToast, canDelete = true, readOnly = fal
   const [drag, setDrag] = useState(false);
   const [corrEdit, setCorrEdit] = useState(null); // ts del video cuya corrección se edita
   const [corrText, setCorrText] = useState('');
+  const [migrando, setMigrando] = useState(null); // { i, total, name } | null
   const inputRef = useRef(null);
   const folderLink = (a.archivos || []).find(f => f.folderLink)?.folderLink;
   // ¿Todos los archivos cayeron a AdsLab? (pueden ser de ANTES de conectar Drive)
   const soloAdslab = (a.archivos?.length > 0) && !folderLink && a.archivos.every(f => f.destino !== 'drive');
+  // Videos que quedaron en AdsLab y se pueden mover a Drive.
+  const adslabVideos = (a.archivos || []).filter(f => f && f.destino !== 'drive' && f.storagePath);
+  const moverADrive = async () => {
+    if (migrando || adslabVideos.length === 0) return;
+    const n = adslabVideos.length;
+    if (!window.confirm(`¿Mover ${n} video${n > 1 ? 's' : ''} de AdsLab a Google Drive? Se copian a la carpeta de la tarjeta y recién se sacan de AdsLab cuando se confirmó que quedaron en Drive.`)) return;
+    setMigrando({ i: 0, total: n, name: '' });
+    try {
+      await moverArchivosADrive(a, { addToast, onProgress: (p) => setMigrando(p.done ? null : p) });
+    } finally { setMigrando(null); }
+  };
 
   // Sondeo real al server: ¿Drive está conectado HOY? Así el cartel no miente
   // cuando la tarjeta solo tiene videos viejos de AdsLab.
@@ -402,11 +441,14 @@ export function CreativosSection({ a, addToast, canDelete = true, readOnly = fal
             ▶ carpeta de Drive <ExternalLink size={10} />
           </a>
         )}
-        {soloAdslab && drive?.configured === true && (
-          <span className="text-[11px] font-semibold text-gray-400 ml-1 cursor-help"
-            title="Estos videos se subieron antes de conectar Drive y quedaron en AdsLab (se ven con el ícono de cada archivo). Los videos NUEVOS van a la carpeta de Drive.">
-            ℹ estos son de antes (AdsLab) — los nuevos van a Drive ✓
-          </span>
+        {adslabVideos.length > 0 && drive?.configured === true && (
+          <button onClick={moverADrive} disabled={!!migrando}
+            title="Sube estos videos (que quedaron en AdsLab) a la carpeta de Drive de la tarjeta y los saca de AdsLab — recién cuando se confirmó que quedaron en Drive."
+            className="ml-1 inline-flex items-center gap-1 text-[11px] font-bold text-brand-600 dark:text-brand-300 border border-brand-300 dark:border-brand-700 rounded-md px-1.5 py-0.5 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition disabled:opacity-60">
+            {migrando
+              ? <><Loader2 size={11} className="animate-spin" /> Moviendo {Math.min(migrando.i + 1, migrando.total)}/{migrando.total}…</>
+              : <><UploadCloud size={11} /> Mover {adslabVideos.length} a Drive</>}
+          </button>
         )}
         {soloAdslab && drive?.configured === false && (
           <span className="text-[11px] font-bold text-amber-600 dark:text-amber-400 ml-1 cursor-help"

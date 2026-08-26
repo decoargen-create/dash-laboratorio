@@ -436,7 +436,7 @@ function ResumenSemana({ asigs, filtroSinAsignar = false, onToggleSinAsignar, on
       {/* Resumen del EQUIPO (todos juntos) */}
       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-100 dark:border-gray-700/60 flex-wrap">
         <span className="text-[11px] font-bold uppercase tracking-wide text-gray-400 mr-auto">
-          Equipo · esta semana <span className="normal-case text-gray-400/80">({weekRange(weekKeyOf())})</span>
+          Equipo · en producción
         </span>
         <div className="flex items-center gap-1.5 flex-wrap">
           {/* Los contadores por estado (asignados/por hacer/revisión/aprobados) se
@@ -696,6 +696,14 @@ export default function ProduccionSection({ addToast }) {
   // que ya está en OTRA semana igual se puede volver a agregar esta semana).
   const asigs = listAllAssignments();
   const asigsSemana = listAssignments(weekKey);
+  // Tarjetas ACTIVAS (todas las semanas, sin las archivadas) — para el resumen
+  // del equipo, así muestra a TODO el equipo con trabajo en curso (igual que el
+  // tablero unificado), no solo a quien tenga tarjeta en la semana actual. El
+  // pago exacto por semana vive en Finanzas/Equipo, no acá.
+  const asigsActivos = useMemo(() => {
+    const now = Date.now();
+    return asigs.filter(a => columnaEfectiva(a, now) !== 'archivado');
+  }, [asigs]); // eslint-disable-line react-hooks/exhaustive-deps
   const detail = asigs.find(a => a.id === detailId) || null;
 
   const personas = useMemo(() => {
@@ -936,13 +944,12 @@ export default function ProduccionSection({ addToast }) {
         );
       })()}
 
-      {/* Resumen de la semana: carga por persona + objetivo. Clic en una persona
-          filtra el tablero por ella (toggle). USA asigsSemana (semana actual), NO
-          asigs (todas): el bono/objetivo/MVP son SEMANALES — con todas las semanas
-          (+archivadas) el "completos" crecía infinito y el bono figuraba siempre
-          alcanzado. El tablero sí muestra todas las semanas; este resumen es el
-          del período de pago actual. */}
-      <ResumenSemana asigs={asigsSemana} filtroSinAsignar={soloSinAsignar}
+      {/* Resumen del equipo: carga por persona. Clic en una persona filtra el
+          tablero por ella (toggle). USA asigsActivos (todas las semanas SIN las
+          archivadas) para mostrar a TODO el equipo con trabajo en curso, igual que
+          el tablero unificado. Excluir las archivadas evita que el "completos"
+          crezca infinito. El pago exacto POR SEMANA vive en Finanzas/Equipo. */}
+      <ResumenSemana asigs={asigsActivos} filtroSinAsignar={soloSinAsignar}
         onToggleSinAsignar={() => setSoloSinAsignar(v => !v)}
         activePersonas={filtroPersona}
         onPickPersona={(p) => setFiltroPersona(prev => prev.includes(p) ? prev.filter(x => x !== p) : [p])} />
@@ -957,10 +964,12 @@ export default function ProduccionSection({ addToast }) {
         </div>
       )}
 
-      {/* Por producto (esta semana): cuántas TARJETAS faltan entregar (no cuenta
-          videos) + plata invertida. La barra mide tarjetas entregadas/total. */}
-      {asigs.length > 0 && (() => {
-        const resumen = resumenVideosPorProducto(asigs).map(r => {
+      {/* Por producto (en producción): cuántas TARJETAS faltan entregar (no cuenta
+          videos) + plata invertida. La barra mide tarjetas entregadas/total.
+          Usa asigsActivos (todas las semanas, sin archivadas) = igual que el
+          resumen del equipo y el tablero. */}
+      {asigsActivos.length > 0 && (() => {
+        const resumen = resumenVideosPorProducto(asigsActivos).map(r => {
           const invertido = asigs.reduce((s, a) => {
             const nombre = ((a.productoNombre || '').trim() || 'Sin nombre').toLowerCase();
             return (nombre === r.producto.toLowerCase() && esCompleto(a.estado)) ? s + pagoProductoDe(a.persona) : s;
@@ -973,7 +982,7 @@ export default function ProduccionSection({ addToast }) {
           <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
             <div className="flex items-center gap-2 mb-3">
               <Film size={15} className="text-emerald-500" />
-              <span className="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Por producto · esta semana</span>
+              <span className="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Por producto · en producción</span>
               {totalPend > 0 && (
                 <span className="text-[11px] font-bold text-amber-600 dark:text-amber-400 tabular-nums">· faltan entregar {totalPend}</span>
               )}

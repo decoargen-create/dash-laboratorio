@@ -10,7 +10,7 @@ import { resumirResultados } from '../api/meta/_estado.js';
 
 // Lo puro vive en _estado.js (compartido con el backend y testeado ahí); acá
 // se re-exporta para que la UI importe todo de un solo lugar.
-export { resumirResultados, inverso, estadoVisible } from '../api/meta/_estado.js';
+export { resumirResultados, inverso, estadoVisible, entregaDe, ENTREGA } from '../api/meta/_estado.js';
 
 // Cambia el estado de una o varias entidades. Devuelve siempre la misma
 // forma — { ok, resultados, resumen } — pase lo que pase, así quien llama no

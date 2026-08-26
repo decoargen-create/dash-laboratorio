@@ -109,3 +109,50 @@ export const inverso = (status) => (status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE');
 export function estadoVisible(item, cambios) {
   return cambios?.[item?.id] || item?.status || null;
 }
+
+// ── Entrega ─────────────────────────────────────────────────────────────
+//
+// Lo que el Administrador de anuncios muestra en la columna "Entrega". No es
+// lo mismo que el interruptor: un anuncio puede estar prendido y NO entregar
+// porque su campaña está apagada, porque está en revisión o porque lo
+// rechazaron. Mostrar solo el interruptor haría creer que está corriendo algo
+// que no gastó un peso en todo el día.
+//
+// Los textos son los de Meta en castellano, para que la fila diga lo mismo
+// que dice el Ads Manager cuando se abre al lado.
+export const ENTREGA = {
+  ACTIVE: { label: 'Activa', tono: 'ok' },
+  PAUSED: { label: 'Desactivada', tono: 'mute' },
+  CAMPAIGN_PAUSED: { label: 'Campaña desactivada', tono: 'mute' },
+  ADSET_PAUSED: { label: 'Conjunto desactivado', tono: 'mute' },
+  IN_PROCESS: { label: 'En proceso', tono: 'warn' },
+  PENDING_REVIEW: { label: 'En revisión', tono: 'warn' },
+  PREAPPROVED: { label: 'Aprobado provisoriamente', tono: 'warn' },
+  WITH_ISSUES: { label: 'Con problemas', tono: 'warn' },
+  PENDING_BILLING_INFO: { label: 'Falta info de pago', tono: 'bad' },
+  DISAPPROVED: { label: 'Rechazado', tono: 'bad' },
+  ARCHIVED: { label: 'Archivada', tono: 'mute' },
+  DELETED: { label: 'Eliminada', tono: 'mute' },
+};
+
+// Estados en los que la entrega la corta un PADRE, no la entidad misma.
+// Prender el anuncio no lo hace entregar: sigue colgado de la campaña.
+const PADRE_APAGADO = new Set(['CAMPAIGN_PAUSED', 'ADSET_PAUSED']);
+
+// Qué mostrar en la columna Entrega de una fila, teniendo en cuenta lo que
+// prendimos o pausamos en esta sesión (que Meta todavía no nos volvió a
+// contar). Devuelve null si no sabemos nada: mejor una celda vacía que una
+// etiqueta inventada.
+export function entregaDe(item, cambios) {
+  const efectivo = item?.effectiveStatus || item?.status || null;
+  const local = cambios?.[item?.id];
+
+  if (local) {
+    // Prender algo cuyo padre sigue apagado no lo pone a entregar. Decir
+    // "Activa" ahí sería mentira, y de las caras: te quedás esperando gasto
+    // que no va a llegar.
+    if (local === 'ACTIVE' && PADRE_APAGADO.has(efectivo)) return ENTREGA[efectivo];
+    return ENTREGA[local];
+  }
+  return efectivo ? (ENTREGA[efectivo] || { label: efectivo, tono: 'mute' }) : null;
+}

@@ -1651,6 +1651,165 @@ async function handleFunnelInsights(req, res) {
   }
 }
 
+// ========================================================================
+// Testeos — todo lo que necesita el tablero de KPIs en una sola llamada.
+//
+// Devuelve tres cosas distintas porque responden tres preguntas distintas:
+//   1. campaigns → cómo viene cada tanda de testeos (cohortes semanales).
+//   2. adsToday  → la ronda de optimización: qué pausar HOY.
+//   3. ads7d     → prospectadores: quién sigue trayendo gente nueva.
+//
+// El server NO clasifica nada: manda los números crudos normalizados y la
+// clasificación (qué es testeo, quién ganó, qué pausar) la hace el cliente
+// con src/testeosCore.js. Así, al mover un umbral, el tablero se recalcula al
+// instante sin volver a pegarle a Meta.
+//
+// Query: account_id, connection_id?, date_preset? (campañas, default last_90d)
+async function handleTestingInsights(req, res) {
+  if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
+
+  const origin = getOrigin(req);
+  const url = new URL(req.url, origin);
+  const { token, error, status } = await resolveAccessToken(req, url);
+  if (!token) return respondJSON(res, status || 401, { error: error || 'Meta no conectado' });
+
+  const accountId = url.searchParams.get('account_id');
+  if (!accountId) return respondJSON(res, 400, { error: 'Falta account_id (con prefijo act_)' });
+
+  const allowed = ['last_7d', 'last_14d', 'last_30d', 'last_90d', 'this_month', 'last_month', 'maximum'];
+  let preset = url.searchParams.get('date_preset') || 'last_90d';
+  if (!allowed.includes(preset)) preset = 'last_90d';
+
+  // Campos de insights que alimentan el embudo y las reglas.
+  const INS = 'impressions,clicks,ctr,cpc,cpm,spend,reach,frequency,actions,action_values';
+
+  const effectiveStatus = JSON.stringify([
+    'ACTIVE', 'PAUSED', 'IN_PROCESS', 'WITH_ISSUES', 'PENDING_REVIEW', 'DISAPPROVED', 'PREAPPROVED',
+  ]);
+
+  try {
+    // ── 1. Campañas con su acumulado del período ──
+    const campanas = [];
+    let after = null, guard = 0;
+    do {
+      const params = {
+        fields: `id,name,status,effective_status,daily_budget,lifetime_budget,created_time,insights.date_preset(${preset}){${INS}}`,
+        limit: 100,
+        effective_status: effectiveStatus,
+      };
+      if (after) params.after = after;
+      const d = await graphGet(`${accountId}/campaigns`, token, params);
+      for (const c of d.data || []) {
+        campanas.push({
+          id: c.id,
+          name: c.name,
+          status: c.status,
+          effectiveStatus: c.effective_status,
+          // Meta manda los presupuestos en centavos de la moneda de la cuenta.
+          dailyBudget: c.daily_budget != null ? Number(c.daily_budget) / 100 : null,
+          lifetimeBudget: c.lifetime_budget != null ? Number(c.lifetime_budget) / 100 : null,
+          createdTime: c.created_time,
+          insights: parseFunnel(c.insights?.data?.[0]) || null,
+        });
+      }
+      after = d.paging?.cursors?.after && d.paging?.next ? d.paging.cursors.after : null;
+      guard++;
+    } while (after && guard < 6);
+
+    // ── 2. Presupuestos de los conjuntos (para la plata en riesgo) ──
+    // En ABO el presupuesto vive en el conjunto, no en la campaña.
+    const adsets = new Map();
+    try {
+      let a2 = null, g2 = 0;
+      do {
+        const params = { fields: 'id,name,daily_budget,campaign_id', limit: 200 };
+        if (a2) params.after = a2;
+        const d = await graphGet(`${accountId}/adsets`, token, params);
+        for (const s of d.data || []) {
+          adsets.set(s.id, {
+            name: s.name,
+            campaignId: s.campaign_id,
+            dailyBudget: s.daily_budget != null ? Number(s.daily_budget) / 100 : null,
+          });
+        }
+        a2 = d.paging?.cursors?.after && d.paging?.next ? d.paging.cursors.after : null;
+        g2++;
+      } while (a2 && g2 < 6);
+    } catch (e) {
+      console.warn('meta/testing-insights adsets:', e.message);
+    }
+
+    const budgetPorCampana = new Map(campanas.map(c => [c.id, c.dailyBudget]));
+
+    // Trae insights a nivel anuncio para un período. Una sola llamada por
+    // período: {cuenta}/insights?level=ad devuelve una fila por anuncio.
+    const adsDe = async (datePreset) => {
+      const filas = [];
+      let a = null, g = 0;
+      do {
+        const params = {
+          level: 'ad',
+          date_preset: datePreset,
+          fields: `ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,${INS}`,
+          limit: 200,
+        };
+        if (a) params.after = a;
+        const d = await graphGet(`${accountId}/insights`, token, params);
+        for (const r of d.data || []) {
+          const conjunto = adsets.get(r.adset_id) || null;
+          filas.push({
+            id: r.ad_id,
+            name: r.ad_name,
+            adsetId: r.adset_id,
+            adsetName: r.adset_name,
+            campaignId: r.campaign_id,
+            campaignName: r.campaign_name,
+            // Presupuesto del padre: el del conjunto si es ABO, si no el de la
+            // campaña (CBO). Es contra esto que se mide lo que queda por gastar.
+            dailyBudget: conjunto?.dailyBudget ?? budgetPorCampana.get(r.campaign_id) ?? null,
+            nivelPresupuesto: conjunto?.dailyBudget != null ? 'conjunto' : 'campaña',
+            insights: parseFunnel(r),
+          });
+        }
+        a = d.paging?.cursors?.after && d.paging?.next ? d.paging.cursors.after : null;
+        g++;
+      } while (a && g < 6);
+      return filas;
+    };
+
+    // ── 3. Hoy (ronda de optimización) y últimos 7 días (prospectadores) ──
+    const [adsToday, ads7d] = await Promise.all([adsDe('today'), adsDe('last_7d')]);
+
+    // Gasto de hoy por padre: sirve para prorratear la plata en riesgo de un
+    // anuncio dentro de una campaña que reparte un presupuesto común.
+    const gastoPorPadre = {};
+    for (const ad of adsToday) {
+      const k = ad.nivelPresupuesto === 'conjunto' ? `as:${ad.adsetId}` : `c:${ad.campaignId}`;
+      gastoPorPadre[k] = (gastoPorPadre[k] || 0) + (ad.insights?.spend || 0);
+    }
+    for (const ad of adsToday) {
+      const k = ad.nivelPresupuesto === 'conjunto' ? `as:${ad.adsetId}` : `c:${ad.campaignId}`;
+      ad.parentKey = k;
+      ad.parentSpend = gastoPorPadre[k] || 0;
+    }
+
+    return respondJSON(res, 200, {
+      accountId,
+      datePreset: preset,
+      campaigns: campanas,
+      adsToday,
+      ads7d,
+      totales: {
+        campanas: campanas.length,
+        adsHoy: adsToday.length,
+        ads7d: ads7d.length,
+      },
+    });
+  } catch (err) {
+    return respondJSON(res, err.status || 502, { error: err.message });
+  }
+}
+
 // --- dispatcher ---
 
 const actions = {
@@ -1665,6 +1824,7 @@ const actions = {
   'ad-accounts': handleAdAccounts,
   'campaigns-insights': handleCampaignsInsights,
   'funnel-insights': handleFunnelInsights,
+  'testing-insights': handleTestingInsights,
   'ads-with-insights': handleAdsWithInsights,
   'ad-performance': handleAdPerformance,
   'ig-accounts': handleIgAccounts,

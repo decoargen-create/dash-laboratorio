@@ -20,7 +20,7 @@ import { repararTarjetas, carpetaDestinoDe } from '../api/produccion/_repair-cor
 import {
   CFG_DEFAULT, cfgPara, roasBreakeven, fechaDelNombre, lunesDe, tipoDeCampana,
   productoDeCampana, veredicto, cohortesSemanales, esProspectador,
-  rondaDeOptimizacion, promediosDelDia, linkMeta,
+  rondaDeOptimizacion, promediosDelDia, linkMeta, evaluarPausa,
 } from '../src/testeosCore.js';
 import { DEMO } from '../src/testeosDemo.js';
 
@@ -293,6 +293,17 @@ eq('nombre suelto → otra', tipo('Nueva campaña de Interacción'), 'otra');
 eq('producto Cepillo detectado', productoDeCampana('Cepillo 22/8 [CBO Videos]', DEMO.productos)?.id, 'p-cepillo');
 eq('producto Crema detectado', productoDeCampana('Crema 23/7 [CBO Video UGC 2]', DEMO.productos)?.id, 'p-crema');
 eq('sin producto reconocible → null', productoDeCampana('Nueva campaña de Interacción', DEMO.productos), null);
+// ALIAS: el nombre del producto puede no aparecer nunca en la campaña.
+const cfgAlias = { porProducto: { 'p-aceite': { alias: ['aceit', 'oil'] } } };
+const prods = [...DEMO.productos, { id: 'p-aceite', nombre: 'Aceite Corporal Relajante' }];
+eq('alias "aceit" asigna la campaña al producto',
+  productoDeCampana('ACEIT 12/8 [CBO Videos]', prods, cfgAlias)?.id, 'p-aceite');
+eq('el alias deja registrado que matcheó por alias',
+  productoDeCampana('ACEIT 12/8 [CBO Videos]', prods, cfgAlias)?.via, 'alias');
+eq('un alias le gana a la coincidencia por palabras',
+  productoDeCampana('Cepillo con aceit 12/8', prods, cfgAlias)?.id, 'p-aceite');
+eq('sin alias cargado sigue matcheando por el nombre',
+  productoDeCampana('Aceite Corporal 12/8', prods, {})?.id, 'p-aceite');
 
 console.log('\nTESTEOS · ROAS DE EQUILIBRIO:');
 eq('margen 40% → breakeven 2.5', roasBreakeven(40), 2.5);
@@ -355,6 +366,17 @@ eq('separa "pausar ahora" de "ya se gastó, dejalo correr"',
   [ronda.aPausar.map(c => c.id), ronda.dejarCorrer.map(c => c.id)], [['ad_2'], ['ad_3']]);
 eq('plata en riesgo = presupuesto − gastado', ronda.aPausar[0].pausa.restante, 19000);
 eq('el ahorro potencial suma solo los que conviene pausar', ronda.ahorroPotencial, 19000);
+// PRESUPUESTO COMPARTIDO (CBO): el presupuesto es de la campaña, no del
+// anuncio. Restarle a 50.000 solo lo que gastó ESTE anuncio daría 19.000 de
+// "ahorro" cuando en realidad la campaña ya lleva gastados 45.000 entre todos.
+const compartido = evaluarPausa(
+  { dailyBudget: 50000, parentSpend: 45000, nivelPresupuesto: 'campaña',
+    insights: { spend: 31000, roas: 0.6, addToCart: 6, initiateCheckout: 2, impressions: 88000 } },
+  { costoPorATC: 2046, costoPorCheckout: 4958 }, cfgPausa);
+eq('presupuesto compartido: se detecta', compartido.compartido, true);
+eq('consumo se mide sobre el gasto de todo lo que comparte el presupuesto', Math.round(compartido.consumidoPct), 90);
+// Quedan 5.000 y este anuncio se lleva el 69% del gasto → ~3.444, no 19.000.
+eq('plata en riesgo prorrateada, no inflada', Math.round(compartido.restante), 3444);
 eq('a las 12 del mediodía ya no es temprano', ronda.temprano, false);
 const temprano = rondaDeOptimizacion(DEMO.adsHoy, { cfg: cfgPausa, ahora: new Date('2026-08-26T12:00:00Z') });
 eq('a las 9 AM avisa que el día no maduró', temprano.temprano, true);

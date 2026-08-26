@@ -200,25 +200,49 @@ export function tipoDeCampana(nombre, cfg = CFG_DEFAULT, hoy = new Date()) {
 }
 
 // Qué producto es, cruzando el nombre de la campaña contra los productos que
-// ya están cargados en AdsLab. Gana el que coincide en más palabras (así
-// "Kit inicial" le gana a "Kit" cuando la campaña dice las dos).
-export function productoDeCampana(nombre, productos = []) {
+// ya están cargados en AdsLab.
+//
+// Dos formas de match, en este orden:
+//   1. ALIAS que cargó el equipo para ese producto ("aceit" → Aceite
+//      Corporal). Mandan sobre todo: el nombre real del producto puede no
+//      aparecer nunca en el nombre de la campaña, o aparecer abreviado.
+//   2. Las palabras del nombre del producto. Gana el que coincide en más
+//      ("Kit Inicial" le gana a "Kit" cuando la campaña dice las dos).
+export function productoDeCampana(nombre, productos = [], cfg = null) {
   const n = normalizar(nombre);
   const vacias = new Set(['de', 'del', 'la', 'el', 'los', 'las', 'y', 'con', 'para', 'por', 'a', 'en', 'kit']);
   let mejor = null;
+
   for (const p of productos) {
     const nom = typeof p === 'string' ? p : p?.nombre;
     if (!nom) continue;
+    const id = typeof p === 'string' ? nom : (p.id ?? nom);
+
+    // 1. Alias cargados a mano para este producto.
+    const alias = (cfg?.porProducto?.[id]?.alias || [])
+      .map(a => normalizar(a)).filter(Boolean);
+    const porAlias = alias.filter(a => n.includes(a));
+    if (porAlias.length > 0) {
+      // Puntaje alto: un alias explícito le gana a cualquier coincidencia de
+      // palabras. Entre dos alias, gana el más específico (el más largo).
+      const puntaje = 10000 + porAlias.join('').length;
+      if (!mejor || puntaje > mejor.puntaje) {
+        mejor = { id, nombre: nom, puntaje, aciertos: porAlias, via: 'alias' };
+      }
+      continue;
+    }
+
+    // 2. Palabras del nombre del producto.
     const tokens = normalizar(nom).split(' ').filter(t => t.length >= 3 && !vacias.has(t));
     if (tokens.length === 0) continue;
     const aciertos = tokens.filter(t => n.includes(t));
     if (aciertos.length === 0) continue;
     const puntaje = aciertos.length * 100 + aciertos.join('').length;
     if (!mejor || puntaje > mejor.puntaje) {
-      mejor = { id: typeof p === 'string' ? nom : (p.id ?? nom), nombre: nom, puntaje, aciertos };
+      mejor = { id, nombre: nom, puntaje, aciertos, via: 'nombre' };
     }
   }
-  return mejor ? { id: mejor.id, nombre: mejor.nombre, coincidio: mejor.aciertos } : null;
+  return mejor ? { id: mejor.id, nombre: mejor.nombre, coincidio: mejor.aciertos, via: mejor.via } : null;
 }
 
 // ── Veredicto de una campaña ─────────────────────────────────────────────
@@ -306,7 +330,7 @@ export function cohortesSemanales(campanas, { cfg = CFG_DEFAULT, productos = [],
   const enriquecidas = (campanas || []).map(c => {
     const tipo = tipoDeCampana(c.name, cfg, hoy);
     const fecha = fechaDelNombre(c.name, hoy);
-    const producto = productoDeCampana(c.name, productos);
+    const producto = productoDeCampana(c.name, productos, cfg);
     return {
       ...c,
       tipo: tipo.tipo,
@@ -441,11 +465,25 @@ export function evaluarPausa(item, promedios, cfg = CFG_DEFAULT) {
 
   const candidato = condiciones.every(c => c.ok);
 
-  // Plata en riesgo: lo que le queda por gastar hoy. Es lo que ahorrás si lo
-  // pausás ahora, y por eso ordena la lista.
+  // Plata en riesgo: lo que se deja de gastar si se pausa AHORA.
+  //
+  // Ojo con el presupuesto compartido: en una campaña CBO el presupuesto es de
+  // la campaña, no del anuncio. Restarle a ese presupuesto lo que gastó UN
+  // anuncio daría un número inflado (los otros anuncios también están
+  // gastando de ahí). Cuando el ítem trae `parentSpend` — el gasto de hoy de
+  // todo lo que comparte ese presupuesto — prorrateamos: de lo que queda,
+  // este anuncio se llevaría su porción actual.
   const presupuesto = item?.dailyBudget != null ? Number(item.dailyBudget) : null;
-  const restante = presupuesto != null ? Math.max(0, presupuesto - gasto) : null;
-  const consumidoPct = presupuesto > 0 ? (gasto / presupuesto) * 100 : null;
+  const gastoPadre = Number(item?.parentSpend || 0) || gasto;
+  const compartido = gastoPadre > gasto + 0.001;
+  const restantePadre = presupuesto != null ? Math.max(0, presupuesto - gastoPadre) : null;
+  const participacion = gastoPadre > 0 ? gasto / gastoPadre : 1;
+  const restante = restantePadre != null
+    ? (compartido ? restantePadre * participacion : restantePadre)
+    : null;
+  // El consumo se mide sobre el gasto de TODO lo que comparte el presupuesto:
+  // es lo que dice si todavía queda plata por quemar ahí.
+  const consumidoPct = presupuesto > 0 ? (gastoPadre / presupuesto) * 100 : null;
   const yaQuemado = consumidoPct != null && consumidoPct >= (cfg.consumoAltoPct || 100);
 
   return {
@@ -458,6 +496,10 @@ export function evaluarPausa(item, promedios, cfg = CFG_DEFAULT) {
     presupuesto,
     restante,
     consumidoPct,
+    compartido,
+    gastoPadre,
+    participacion,
+    nivelPresupuesto: item?.nivelPresupuesto || null,
     // Sin presupuesto conocido no podemos calcular el ahorro: no es motivo
     // para esconderlo, pero sí para no ponerlo arriba de todo.
     plataEnRiesgo: restante ?? 0,
@@ -468,8 +510,10 @@ export function evaluarPausa(item, promedios, cfg = CFG_DEFAULT) {
       : yaQuemado
         ? `ya consumió el ${Math.round(consumidoPct)}% del presupuesto: pausarlo no ahorra casi nada`
         : restante != null
-          ? `le quedan ${Math.round(restante)} por gastar hoy`
-          : 'sin presupuesto diario propio (está a nivel conjunto)',
+          ? (compartido
+            ? `le quedan ${Math.round(restante)} de su parte del presupuesto compartido`
+            : `le quedan ${Math.round(restante)} por gastar hoy`)
+          : 'sin presupuesto diario conocido',
   };
 }
 
@@ -568,9 +612,13 @@ export const FORMULAS = {
   },
   plataEnRiesgo: {
     label: 'Plata en riesgo',
-    formula: 'presupuesto diario − gastado hoy',
-    nota: 'Es lo que ahorrás si lo pausás AHORA, y por eso ordena la lista. Si ya consumió casi todo el presupuesto, pausarlo no ahorra nada: por eso esos van aparte como "dejalo correr".',
-    calculo: (d, f) => `${d.presupuesto != null ? f.money(d.presupuesto) : 'sin presupuesto propio'} − ${f.money(d.gastoHoy)} = ${d.restante != null ? f.money(d.restante) : '—'}`,
+    formula: 'presupuesto que queda × la parte que se lleva este anuncio',
+    nota: 'Es lo que se deja de gastar si lo pausás AHORA, y por eso ordena la lista. En una campaña CBO el presupuesto es de la campaña, no del anuncio: por eso se prorratea según cuánto del gasto de hoy se está llevando este anuncio. Si el presupuesto ya se consumió casi entero, pausarlo no ahorra nada — esos van aparte como "dejalo correr".',
+    calculo: (d, f) => d.presupuesto == null
+      ? 'sin presupuesto diario conocido'
+      : d.compartido
+        ? `(${f.money(d.presupuesto)} − ${f.money(d.gastoPadre)}) × ${(d.participacion * 100).toFixed(0)}% = ${f.money(d.restante)}`
+        : `${f.money(d.presupuesto)} − ${f.money(d.gastoHoy)} = ${f.money(d.restante)}`,
   },
   horaCorte: {
     label: 'Hora de corte',
@@ -587,6 +635,14 @@ export const FORMULAS = {
       : d.margenPct
         ? `1 ÷ ${d.margenPct}% = ${f.num(100 / d.margenPct, 2)}`
         : 'sin breakeven ni margen cargado — se usa el ROAS mínimo puesto a mano',
+  },
+  producto: {
+    label: 'De qué producto es',
+    formula: 'alias cargados del producto, o las palabras de su nombre',
+    nota: 'Meta no sabe de qué producto es una campaña: se deduce del nombre. Si el nombre de la campaña no dice el nombre del producto (o lo dice abreviado), cargás un alias — "aceit" para Aceite Corporal — y todas las campañas que lo contengan quedan asignadas a ese producto. El alias manda sobre la coincidencia de palabras.',
+    calculo: (d) => d.producto
+      ? `"${d.name}" → ${d.producto.nombre} (por ${d.producto.via === 'alias' ? 'alias' : 'nombre'}: ${(d.producto.coincidio || []).join(', ')})`
+      : `"${d.name}" → sin producto reconocido`,
   },
   cohorte: {
     label: 'Semana de la campaña',

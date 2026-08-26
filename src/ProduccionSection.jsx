@@ -13,6 +13,7 @@ import {
   Film, Plus, X, Trash2, ChevronDown, UploadCloud, Loader2, CheckCircle2,
   AlertTriangle, ExternalLink, FileText, GripVertical, Users, History, Search, ArrowLeftRight,
   Bell, BellRing, Inbox, Eye, RefreshCw, Calendar, Filter, FolderOpen, Download, Star, Settings,
+  FolderTree,
 } from 'lucide-react';
 import {
   ESTADOS, ESTADO_LABELS, VIDEOS_POR_PRODUCTO, weekKeyOf, weekLabel, weekRange, allWeekKeys,
@@ -28,6 +29,7 @@ import { registrarColoresPersonas, personaColor, CHIP_CLS } from './produccionCo
 import TarjetaProduccion, { CAPS_ADMIN } from './produccionCard.jsx';
 import { listTeam, createMember, removeMember } from './produccionTeam.js';
 import { driveStatus, connectDrive, disconnectDrive } from './produccionDrive.js';
+import { analizar as analizarCarpetas, reparar as repararCarpetas, tarjetasConVideosEnDrive } from './produccionRepararCarpetas.js';
 import TeamModal from './TeamModal.jsx';
 import ConfirmDialog from './ConfirmDialog.jsx';
 
@@ -548,6 +550,10 @@ export default function ProduccionSection({ addToast }) {
   const [showTeam, setShowTeam] = useState(false);
   const [confirmResync, setConfirmResync] = useState(false);
   const [confirmVaciar, setConfirmVaciar] = useState(false);
+  // Reparación de carpetas de Drive: primero analiza (sin tocar nada) y recién
+  // con el OK del user mueve los archivos. `repar` guarda el análisis y el
+  // progreso para mostrarlos en el diálogo.
+  const [repar, setRepar] = useState(null); // { fase:'analizando'|'confirmar'|'moviendo'|null, ...}
   const [vaciando, setVaciando] = useState(false);
   const [showNotif, setShowNotif] = useState(false);
   const [showBuscar, setShowBuscar] = useState(false);
@@ -623,6 +629,47 @@ export default function ProduccionSection({ addToast }) {
       .catch(() => {});
     return () => { alive = false; };
   }, []);
+  // Reparar carpetas: analiza primero (sin tocar Drive) y muestra el resultado
+  // para que el user confirme. Recién ahí mueve.
+  const onRepararCarpetas = async () => {
+    setRepar({ fase: 'analizando', hechas: 0, total: 0 });
+    try {
+      const r = await analizarCarpetas((p) => setRepar(s => s && { ...s, ...p }));
+      if (r.configured === false) {
+        setRepar(null);
+        addToast?.({
+          type: 'error',
+          message: r.transient
+            ? 'Google no está respondiendo ahora mismo — probá de nuevo en un minuto.'
+            : 'Drive no está conectado — conectalo desde Ajustes antes de reparar.',
+        });
+        return;
+      }
+      setRepar({ fase: 'confirmar', analisis: r });
+    } catch (e) {
+      setRepar(null);
+      addToast?.({ type: 'error', message: `No pude analizar las carpetas: ${e.message}` });
+    }
+  };
+
+  const onConfirmarReparar = async () => {
+    setRepar({ fase: 'moviendo', hechas: 0, total: 0 });
+    try {
+      const r = await repararCarpetas((p) => setRepar(s => s && { ...s, ...p }));
+      setRepar(null);
+      const t = r.totales || {};
+      addToast?.({
+        type: t.errores > 0 ? 'warning' : 'success',
+        message: t.movidos > 0
+          ? `${t.movidos} video${t.movidos > 1 ? 's' : ''} acomodado${t.movidos > 1 ? 's' : ''} en la carpeta de su tarjeta${t.errores > 0 ? ` · ${t.errores} con error` : ''}`
+          : 'Ya estaba todo en su carpeta — no hubo nada que mover.',
+      });
+    } catch (e) {
+      setRepar(null);
+      addToast?.({ type: 'error', message: `La reparación se cortó: ${e.message}` });
+    }
+  };
+
   const onConnectDrive = async () => {
     setDrive(d => ({ ...d, connecting: true }));
     let r;
@@ -788,6 +835,11 @@ export default function ProduccionSection({ addToast }) {
                         <ExternalLink size={15} className="text-gray-400" /> Abrir carpeta de Drive
                       </a>
                     )}
+                    <button onClick={() => { setAjustesOpen(false); onRepararCarpetas(); }}
+                      title="Deja UNA carpeta por tarjeta: mueve los videos de cada tarjeta a su propia carpeta. Primero te muestra qué haría."
+                      className="w-full flex items-center gap-2.5 text-left text-sm font-semibold px-2.5 py-2 rounded-lg text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition">
+                      <FolderTree size={15} className="text-gray-400" /> Reparar carpetas
+                    </button>
                     <button onClick={() => { onDisconnectDrive(); setAjustesOpen(false); }}
                       className="w-full flex items-center gap-2.5 text-left text-sm font-semibold px-2.5 py-2 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition">
                       <X size={15} className="text-gray-400" /> Desconectar Drive
@@ -1050,6 +1102,12 @@ export default function ProduccionSection({ addToast }) {
         }}
         onClose={() => setConfirmResync(false)}
       />
+      <RepararCarpetasModal
+        estado={repar}
+        onCancel={() => setRepar(null)}
+        onConfirm={onConfirmarReparar}
+      />
+
       <ConfirmDialog
         open={confirmVaciar}
         title="⚠️ ¿Vaciar TODO y empezar de cero?"
@@ -1080,6 +1138,111 @@ export default function ProduccionSection({ addToast }) {
 
 // ── Agregar productos (crea tarjetas en "Por hacer"). Multi-selección: podés
 // tildar varios productos y crearlos todos juntos con una sola vuelta.
+// ========================================================================
+// Modal de "Reparar carpetas": análisis → confirmación → progreso.
+// Nunca mueve nada sin que el user vea primero cuántos videos se tocan.
+// ========================================================================
+function RepararCarpetasModal({ estado, onCancel, onConfirm }) {
+  if (!estado) return null;
+  const { fase, hechas = 0, total = 0, analisis } = estado;
+  const t = analisis?.totales || {};
+  // Detalle por tarjeta (solo las que tienen algo para mover), con nombre.
+  const detalle = React.useMemo(() => {
+    if (!analisis) return [];
+    const porId = new Map(tarjetasConVideosEnDrive().map(c => [c.id, c]));
+    return (analisis.cards || [])
+      .filter(c => c.mover > 0)
+      .map(c => ({ ...c, card: porId.get(c.id) }))
+      .sort((a, b) => b.mover - a.mover);
+  }, [analisis]);
+
+  const trabajando = fase === 'analizando' || fase === 'moviendo';
+  const pct = total > 0 ? Math.round((hechas / total) * 100) : 0;
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
+      <div className="w-full max-w-lg bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-2xl overflow-hidden">
+        <div className="flex items-center gap-3 px-5 py-4 border-b border-gray-200 dark:border-gray-700">
+          <FolderTree size={18} className="text-brand-500 shrink-0" />
+          <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 flex-1">Reparar carpetas de Drive</h3>
+          {!trabajando && (
+            <button onClick={onCancel} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition" aria-label="Cerrar">
+              <X size={16} />
+            </button>
+          )}
+        </div>
+
+        <div className="p-5 space-y-4">
+          {trabajando ? (
+            <>
+              <div className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
+                <Loader2 size={16} className="animate-spin text-brand-500" />
+                {fase === 'analizando' ? 'Revisando dónde está cada video…' : 'Moviendo los videos a la carpeta de su tarjeta…'}
+              </div>
+              <div className="h-2 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+                <div className="h-full bg-brand-500 rounded-full transition-all duration-300" style={{ width: `${pct}%` }} />
+              </div>
+              <p className="text-[11px] text-gray-500 dark:text-gray-400">{hechas} de {total} tarjetas</p>
+              {fase === 'moviendo' && (
+                <p className="text-[11px] text-amber-600 dark:text-amber-400">No cierres la pestaña hasta que termine.</p>
+              )}
+            </>
+          ) : t.mover === 0 ? (
+            <>
+              <p className="text-sm text-gray-700 dark:text-gray-200">
+                Está todo en orden: los {t.yaOk || 0} video{(t.yaOk || 0) === 1 ? '' : 's'} de Drive ya están en la carpeta de su tarjeta.
+              </p>
+              <div className="flex justify-end">
+                <button onClick={onCancel} className="px-3 py-2 text-sm font-bold text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-800 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition">
+                  Cerrar
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-gray-700 dark:text-gray-200">
+                Voy a mover <b>{t.mover} video{t.mover === 1 ? '' : 's'}</b> de <b>{detalle.length} tarjeta{detalle.length === 1 ? '' : 's'}</b> a
+                la carpeta propia de cada una. {t.yaOk > 0 && <>Otros {t.yaOk} ya están bien y no se tocan. </>}
+                Solo se mueven los videos que cada tarjeta tiene registrados como suyos.
+              </p>
+
+              <ul className="max-h-52 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
+                {detalle.map(d => (
+                  <li key={d.id} className="flex items-center gap-2 px-3 py-2 text-xs">
+                    <span className="font-semibold text-gray-900 dark:text-gray-100 truncate flex-1">
+                      {d.card?.productoNombre || 'Tarjeta'}
+                      <span className="font-normal text-gray-400"> · {d.card?.persona || 'Equipo'}</span>
+                    </span>
+                    <span className="tabular-nums text-gray-500 dark:text-gray-400 shrink-0">{d.mover} video{d.mover === 1 ? '' : 's'}</span>
+                  </li>
+                ))}
+              </ul>
+
+              {t.errores > 0 && (
+                <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                  {t.errores} archivo{t.errores === 1 ? '' : 's'} no se pudieron leer (borrados de Drive o en la papelera). Se saltean.
+                </p>
+              )}
+              <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                No se borra ni se renombra nada: los archivos cambian de carpeta. Podés correrlo de nuevo cuando quieras.
+              </p>
+
+              <div className="flex justify-end gap-2">
+                <button onClick={onCancel} className="px-3 py-2 text-sm font-bold text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-800 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition">
+                  Cancelar
+                </button>
+                <button onClick={onConfirm} className="px-3 py-2 text-sm font-bold text-white bg-gradient-to-br from-brand-500 to-brand-700 rounded-lg hover:from-brand-600 hover:to-brand-800 transition shadow-sm">
+                  Mover {t.mover} video{t.mover === 1 ? '' : 's'}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AgregarProductoModal({ productos, personas, team = [], asigs, weekKey, onClose, addToast }) {
   useEscape(onClose);
   const [selected, setSelected] = useState(() => new Set());

@@ -62,17 +62,30 @@ export function finalFileName(filename, productoNombre, persona, now = new Date(
   return `${per} - ${selloAR(now)} - ${abrev}.${ext}`;
 }
 
-// Nombre de la carpeta de UNA tarjeta: "<Producto> [<Persona>][<d-m>]" (la
-// convención del equipo — NO separada por semana). Es la que se renombra a
+// Nombre de la carpeta de UNA tarjeta: "<Producto> [<Persona>][<d-m>][<id>]"
+// (la convención del equipo — NO separada por semana). Es la que se renombra a
 // "… PUBLICADO" cuando la tarjeta se publica. La fecha sale del weekKey (estable
 // por tarjeta, así probe y subida coinciden y no se duplican carpetas); si no
-// hay weekKey, usa la fecha de hoy. Ej: "Cepillo Facial [Francisco][13-8]".
-export function cardFolderName(productoNombre, persona, weekKey, now = new Date()) {
+// hay weekKey, usa la fecha de hoy.
+//
+// El token final es el shortId de la TARJETA y es lo que garantiza una carpeta
+// por tarjeta. Sin él, dos tarjetas del mismo producto + misma persona + misma
+// semana (que el tablero numera "#1 / #2" y son entregas distintas) generaban
+// el MISMO nombre: driveEnsureFolder encontraba la carpeta existente y los 9
+// videos de la segunda se apilaban sobre los 9 de la primera → 18 archivos en
+// una sola carpeta, y publicar una renombraba la de las dos.
+//
+// Ej: "Cepillo Facial [Francisco][13-8][vdagn]".
+//
+// Sin cardId cae al nombre viejo (sin el token). Eso mantiene compatibles a las
+// tarjetas que ya tienen carpeta creada con la convención anterior.
+export function cardFolderName(productoNombre, persona, weekKey, cardId = null, now = new Date()) {
   const prod = clean(productoNombre, 'Producto');
   const per = clean(persona, 'Equipo');
   const fecha = (weekKey && /^\d{4}-\d{2}-\d{2}$/.test(weekKey)) ? weekKey : hoyAR(now);
   const [, m, d] = fecha.split('-');
-  return `${prod} [${per}][${Number(d)}-${Number(m)}]`;
+  const base = `${prod} [${per}][${Number(d)}-${Number(m)}]`;
+  return cardId ? `${base}[${shortId(cardId)}]` : base;
 }
 
 // Nombre base de una carpeta (sin el sufijo PUBLICADO). Idempotente.

@@ -136,8 +136,32 @@ async function uploadOne(file, ctx, onBytes) {
 
   const armarArchivo = (meta) => {
     const link = meta.webViewLink || (meta.id ? `https://drive.google.com/file/d/${meta.id}/view` : sess.folderLink) || null;
-    return { name: sess.finalName || file.name, driveId: meta.id || null, link, folderLink: sess.folderLink || null, folderId: sess.folderId || null, destino: 'drive', sizeMB: +(file.size / 1024 / 1024).toFixed(1), ts: uid() };
+    return {
+      name: sess.finalName || file.name, driveId: meta.id || null, link,
+      folderLink: sess.folderLink || null, folderId: sess.folderId || null,
+      destino: 'drive', sizeMB: +(file.size / 1024 / 1024).toFixed(1), ts: uid(),
+      // Ya había otro con este nombre pero otro peso → es una versión nueva.
+      ...(sess.sameNameOtherSize ? { sameNameOtherSize: true } : {}),
+    };
   };
+
+  // El server detectó que ESE MISMO video (mismo nombre y mismo peso) ya está
+  // en la carpeta: no lo subimos de nuevo. Devolvemos el que ya existe marcado
+  // como `yaEstaba` — quien llama decide si lo registra en la tarjeta (cuando
+  // la tarjeta no lo tenía anotado) o lo saltea.
+  if (sess?.duplicate && sess.existing?.id) {
+    return {
+      name: sess.existing.name || file.name,
+      driveId: sess.existing.id,
+      link: sess.existing.link || null,
+      folderLink: sess.folderLink || null,
+      folderId: sess.folderId || null,
+      destino: 'drive',
+      sizeMB: +(file.size / 1024 / 1024).toFixed(1),
+      ts: uid(),
+      yaEstaba: true,
+    };
+  }
 
   // Guardamos el MOTIVO de cada intento fallido para el toast (diagnóstico).
   let driveReason = null;
@@ -181,6 +205,34 @@ async function uploadOne(file, ctx, onBytes) {
   }
 }
 
+// Un video que YA estaba en Drive se anota en la tarjeta solo si esta no lo
+// tenía registrado (mismo driveId o mismo nombre). Devuelve true si lo agregó.
+// Sin esto, reintentar una subida ya hecha sumaba una fila repetida a la
+// tarjeta aunque en Drive hubiera un solo archivo.
+function registrarSiFalta(a, archivo) {
+  const yaRegistrado = (a.archivos || []).some(f =>
+    (archivo.driveId && f.driveId === archivo.driveId) || f.name === archivo.name);
+  if (yaRegistrado) return false;
+  addArchivos(a.id, [archivo]);
+  return true;
+}
+
+// Toasts de la deduplicación: qué se salteó y qué entró como versión nueva.
+function avisarDuplicados({ yaEstaban, versionNueva, addToast }) {
+  if (yaEstaban > 0) {
+    addToast?.({
+      type: 'info',
+      message: `${yaEstaban} video${yaEstaban > 1 ? 's ya estaban' : ' ya estaba'} en la carpeta — no ${yaEstaban > 1 ? 'los' : 'lo'} volví a subir.`,
+    });
+  }
+  if (versionNueva > 0) {
+    addToast?.({
+      type: 'warning',
+      message: `${versionNueva} video${versionNueva > 1 ? 's tienen' : ' tiene'} el mismo nombre que otro de la carpeta pero distinto peso — ${versionNueva > 1 ? 'se subieron' : 'se subió'} como versión nueva.`,
+    });
+  }
+}
+
 // Sube una tanda de videos a una tarjeta y, si estaba en "Por hacer", la manda
 // sola a "En revisión" (así el equipo sube y de una queda para revisar).
 export async function subirParaTarjeta(a, fileList, { onProgress, addToast } = {}) {
@@ -197,7 +249,7 @@ export async function subirParaTarjeta(a, fileList, { onProgress, addToast } = {
   const eraPorHacer = a.estado === 'porhacer';
   const yaTenia = a.archivos?.length || 0;
   const objetivo = a.videosTotal || VIDEOS_POR_PRODUCTO;
-  let ok = 0, dest = null, driveWarn = null;
+  let ok = 0, dest = null, driveWarn = null, yaEstaban = 0, versionNueva = 0;
   // Progreso GLOBAL por bytes (barra + % + ETA + velocidad). Todas las subidas a
   // Drive van por el relay en chunks → reportan bytes reales; el fallback a
   // AdsLab no reporta chunks, así que ahí la barra salta al terminar el archivo.
@@ -216,7 +268,16 @@ export async function subirParaTarjeta(a, fileList, { onProgress, addToast } = {
     emit(i, 0);
     try {
       const archivo = await uploadOne(files[i], ctx, (sent) => emit(i, sent));
-      addArchivos(a.id, [archivo]); ok++; dest = archivo.destino;
+      if (archivo.yaEstaba) {
+        // El video ya estaba en la carpeta: no se volvió a subir. Solo lo
+        // anotamos si la tarjeta no lo tenía registrado (p. ej. se subió desde
+        // otra sesión), así el contador de la tarjeta refleja lo que hay.
+        yaEstaban++;
+        if (registrarSiFalta(a, archivo)) ok++;
+      } else {
+        addArchivos(a.id, [archivo]); ok++; dest = archivo.destino;
+        if (archivo.sameNameOtherSize) versionNueva++;
+      }
       if (!driveWarn && archivo.driveError) driveWarn = archivo.driveError;
     }
     catch (err) { addToast?.({ type: 'error', message: `"${files[i].name}": ${err.message}` }); }
@@ -227,8 +288,9 @@ export async function subirParaTarjeta(a, fileList, { onProgress, addToast } = {
   const completo = eraPorHacer && (yaTenia + ok) >= objetivo;
   if (completo) updateAssignment(a.id, { estado: 'revision' });
   if (ok > 0) addToast?.({ type: 'success', message: `${ok} video${ok > 1 ? 's' : ''} → ${dest === 'drive' ? 'Google Drive' : 'AdsLab'}${completo ? ' · pasó a En revisión' : ''}` });
+  avisarDuplicados({ yaEstaban, versionNueva, addToast });
   if (driveWarn) addToast?.({ type: 'warning', message: `⚠ Drive falló (${driveWarn}) — se guardó en AdsLab. Pasale este texto a Claude.` });
-  return { ok };
+  return { ok, yaEstaban };
 }
 
 // Sección de creativos dentro de una tarjeta: lista de archivos ya subidos +
@@ -294,14 +356,21 @@ export function CreativosSection({ a, addToast, canDelete = true, readOnly = fal
       const eraPorHacer = a.estado === 'porhacer';
       const yaTenia = a.archivos?.length || 0;
       const objetivo = a.videosTotal || VIDEOS_POR_PRODUCTO;
-      let ok = 0, dest = null, driveWarn = null;
+      let ok = 0, dest = null, driveWarn = null, yaEstaban = 0, versionNueva = 0;
       for (const item of files) {
         if (item.status === 'ok') continue;
         setFiles(prev => prev.map(f => f.id === item.id ? { ...f, status: 'subiendo' } : f));
         try {
           const archivo = await uploadOne(item.file, ctx);
+          if (archivo.yaEstaba) {
+            yaEstaban++;
+            if (registrarSiFalta(a, archivo)) ok++;
+            setFiles(prev => prev.map(f => f.id === item.id ? { ...f, status: 'ok', destino: 'drive', msg: 'ya estaba' } : f));
+            continue;
+          }
           addArchivos(a.id, [archivo]);
           ok++; dest = archivo.destino;
+          if (archivo.sameNameOtherSize) versionNueva++;
           if (!driveWarn && archivo.driveError) driveWarn = archivo.driveError;
           setFiles(prev => prev.map(f => f.id === item.id ? { ...f, status: 'ok', destino: archivo.destino } : f));
         } catch (err) {
@@ -313,6 +382,7 @@ export function CreativosSection({ a, addToast, canDelete = true, readOnly = fal
       const paso = eraPorHacer && completoAhora;
       if (paso) updateAssignment(a.id, { estado: 'revision' });
       if (ok > 0) addToast?.({ type: 'success', message: `${ok} video${ok > 1 ? 's' : ''} → ${dest === 'drive' ? 'Google Drive' : 'AdsLab'}${paso ? ' · completo, pasó a En revisión ✓' : (eraPorHacer ? ` · ${yaTenia + ok}/${objetivo}` : '')}` });
+      avisarDuplicados({ yaEstaban, versionNueva, addToast });
       if (driveWarn) addToast?.({ type: 'warning', message: `⚠ Drive falló (${driveWarn}) — se guardó en AdsLab. Pasale este texto a Claude.` });
       setFiles(prev => prev.filter(f => f.status !== 'ok'));
     } finally {

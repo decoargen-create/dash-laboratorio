@@ -47,7 +47,10 @@ META_APP_SECRET = <App Secret>
 (`AUTH_SECRET` ya debería existir; si no, generar uno: `openssl rand -hex 32`.)
 
 Redeploy. A partir de acá el botón **"Conectar con Facebook"** aparece
-solo en AdsLab → Meta Ads.
+dentro del modal de conexión de AdsLab (se abre desde el botón
+**"Conectar cuenta"** del header, presente en cualquier sección, o desde
+Meta Ads → Campañas). Sin estas env vars el modal igual funciona: queda
+solo el camino de pegar un Access Token.
 
 ## Fase 3 — Probar en modo desarrollo (mismo día)
 

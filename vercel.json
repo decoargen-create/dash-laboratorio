@@ -6,6 +6,7 @@
   "installCommand": "npm install",
   "functions": {
     "api/produccion/drive-chunk.js":    { "maxDuration": 60 },
+    "api/produccion/drive-repair.js":   { "maxDuration": 60 },
     "api/marketing/generate.js":        { "maxDuration": 300 },
     "api/marketing/apify-ingest.js":    { "maxDuration": 300 },
     "api/marketing/deep-analyze.js":    { "maxDuration": 240 },

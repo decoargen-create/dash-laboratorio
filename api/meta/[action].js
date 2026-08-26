@@ -14,6 +14,7 @@
 //   GET|POST /api/meta/disconnect → borra la cookie
 
 import crypto from 'node:crypto';
+import { parseFunnel, deriveFunnelRates } from './_funnel.js';
 import {
   META_API_VERSION, META_COOKIE_MAX_AGE, META_SCOPES,
   verifyState, signState, setMetaCookie, clearMetaCookie,
@@ -457,11 +458,14 @@ function ymd(d) {
 // iteraciones sobre creativos que están fatigando.
 async function handleAdsWithInsights(req, res) {
   if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
-  const session = readMetaCookie(req);
-  if (!session?.accessToken) return respondJSON(res, 401, { error: 'Meta no conectado' });
 
   const origin = getOrigin(req);
   const url = new URL(req.url, origin);
+  // Acepta ?connection_id (conexiones guardadas en meta_connections) además
+  // de la cookie legacy — es lo que usa el picker de cuenta en Productos.
+  const { token, error, status } = await resolveAccessToken(req, url);
+  if (!token) return respondJSON(res, status || 401, { error: error || 'Meta no conectado' });
+
   const accountId = url.searchParams.get('account_id');
   const limit = Math.min(Number(url.searchParams.get('limit') || 50), 100);
 
@@ -479,7 +483,7 @@ async function handleAdsWithInsights(req, res) {
 
   try {
     // Un solo call a Graph API con dos expansiones de insights.
-    const data = await graphGet(`${accountId}/ads`, session.accessToken, {
+    const data = await graphGet(`${accountId}/ads`, token, {
       fields: [
         'id,name,status,effective_status,created_time,updated_time',
         `campaign{id,name,objective}`,
@@ -1552,6 +1556,101 @@ async function handleCampaignsInsights(req, res) {
   }
 }
 
+// ========================================================================
+// Embudo de compra por campaña — el endpoint que alimenta la sección
+// "Métricas". A diferencia de campaigns-insights (que devuelve el total
+// plano del período), acá pedimos TODOS los pasos del funnel para poder
+// mostrar dónde se cae la gente:
+//
+//   impresiones → clicks al enlace → landing page views → add to cart
+//   → iniciar pago → compras
+//
+// Usamos {account}/insights con level=campaign en vez de expandir insights
+// dentro de /campaigns: una sola llamada devuelve una fila por campaña ya
+// agregada, y Meta la resuelve mucho más rápido.
+//
+// Query params:
+//   account_id     (obligatorio, con prefijo act_)
+//   date_preset    (opcional, default last_7d)
+//   connection_id  (opcional — conexión guardada; si no, cookie)
+async function handleFunnelInsights(req, res) {
+  if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
+
+  const origin = getOrigin(req);
+  const url = new URL(req.url, origin);
+  const { token, error, status } = await resolveAccessToken(req, url);
+  if (!token) return respondJSON(res, status || 401, { error: error || 'Meta no conectado' });
+
+  const accountId = url.searchParams.get('account_id');
+  if (!accountId) return respondJSON(res, 400, { error: 'Falta account_id (con prefijo act_)' });
+
+  const allowedPresets = [
+    'today', 'yesterday', 'last_7d', 'last_14d', 'last_30d',
+    'last_90d', 'this_month', 'last_month', 'maximum',
+  ];
+  let datePreset = url.searchParams.get('date_preset') || 'last_7d';
+  if (!allowedPresets.includes(datePreset)) datePreset = 'last_7d';
+
+  try {
+    const rows = [];
+    let next = null;
+    let guard = 0;
+    do {
+      const params = {
+        level: 'campaign',
+        date_preset: datePreset,
+        fields: [
+          'campaign_id', 'campaign_name', 'objective',
+          'impressions', 'clicks', 'spend', 'ctr', 'cpc', 'cpm', 'reach', 'frequency',
+          'inline_link_clicks', 'inline_link_click_ctr', 'cost_per_inline_link_click',
+          'actions', 'action_values', 'cost_per_action_type',
+        ].join(','),
+        limit: 100,
+      };
+      if (next) params.after = next;
+      const data = await graphGet(`${accountId}/insights`, token, params);
+      for (const r of data.data || []) rows.push(r);
+      next = data.paging?.cursors?.after && data.paging?.next ? data.paging.cursors.after : null;
+      guard++;
+    } while (next && guard < 5); // máx ~500 campañas
+
+    const campaigns = rows.map(r => ({
+      id: r.campaign_id,
+      name: r.campaign_name,
+      objective: r.objective || null,
+      funnel: parseFunnel(r),
+    }));
+    campaigns.sort((a, b) => (b.funnel?.spend || 0) - (a.funnel?.spend || 0));
+
+    // Totales de la cuenta: sumamos los crudos y recalculamos los ratios.
+    // Promediar ratios por campaña daría un número que no existe (una
+    // campaña de $2 pesaría igual que una de $2000).
+    const totals = campaigns.reduce((t, c) => {
+      const f = c.funnel;
+      if (!f) return t;
+      for (const k of ['spend', 'impressions', 'clicks', 'linkClicks', 'landingPageViews',
+        'addToCart', 'initiateCheckout', 'purchases', 'revenue']) {
+        t[k] += f[k] || 0;
+      }
+      return t;
+    }, {
+      spend: 0, impressions: 0, clicks: 0, linkClicks: 0, landingPageViews: 0,
+      addToCart: 0, initiateCheckout: 0, purchases: 0, revenue: 0,
+    });
+    Object.assign(totals, deriveFunnelRates(totals));
+
+    return respondJSON(res, 200, {
+      accountId,
+      datePreset,
+      total: campaigns.length,
+      totals,
+      campaigns,
+    });
+  } catch (err) {
+    return respondJSON(res, err.status || 502, { error: err.message });
+  }
+}
+
 // --- dispatcher ---
 
 const actions = {
@@ -1565,6 +1664,7 @@ const actions = {
   me: handleMe,
   'ad-accounts': handleAdAccounts,
   'campaigns-insights': handleCampaignsInsights,
+  'funnel-insights': handleFunnelInsights,
   'ads-with-insights': handleAdsWithInsights,
   'ad-performance': handleAdPerformance,
   'ig-accounts': handleIgAccounts,

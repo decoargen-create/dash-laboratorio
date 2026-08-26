@@ -106,19 +106,32 @@ async function uploadToSupabase(file, user, ext) {
 async function uploadOne(file, ctx, onBytes) {
   const { user, token, weekKey, productoNombre, persona, cardId, folderId } = ctx;
   const ext = (file.name.split('.').pop() || 'mp4').toLowerCase();
-  let sess = null;
-  try {
+  const pedirSesion = async () => {
     const r = await fetch('/api/produccion/drive-session', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: JSON.stringify({ productoNombre, persona, weekKey, cardId, folderId, filename: file.name, mimeType: file.type || 'video/mp4', size: file.size }),
     });
-    sess = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(sess.error || `HTTP ${r.status}`);
-  } catch (e) {
-    // Preservamos el motivo (antes se descartaba y el toast decía solo
-    // "no configurado", sin poder diagnosticar).
-    sess = { configured: false, error: e?.message || 'no se pudo abrir la subida' };
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    return j;
+  };
+  let sess = null;
+  for (let intento = 1; intento <= 2; intento++) {
+    try {
+      sess = await pedirSesion();
+    } catch (e) {
+      // Preservamos el motivo (antes se descartaba y el toast decía solo
+      // "no configurado", sin poder diagnosticar).
+      sess = { configured: false, error: e?.message || 'no se pudo abrir la subida' };
+    }
+    // Drive falló transitoriamente (OAuth): reintentamos UNA vez antes de
+    // resignarnos a AdsLab — queremos que TODO termine en Drive.
+    if (sess?.configured === false && sess?.reason === 'drive-oauth-transitorio' && intento < 2) {
+      await new Promise((r) => setTimeout(r, 2000));
+      continue;
+    }
+    break;
   }
 
   const armarArchivo = (meta) => {
@@ -150,7 +163,9 @@ async function uploadOne(file, ctx, onBytes) {
       console.warn('[produccion] Drive falló:', driveReason, '— cayendo a AdsLab');
     }
   } else if (sess && sess.configured === false) {
-    driveReason = `no configurado${sess.reason ? ` (${sess.reason})` : ''}${sess.error ? `: ${sess.error}` : ''}`;
+    driveReason = sess.reason === 'drive-oauth-transitorio'
+      ? `Drive conectado pero Google no respondió ahora${sess.error ? `: ${sess.error}` : ''}`
+      : `no configurado${sess.reason ? ` (${sess.reason})` : ''}${sess.error ? `: ${sess.error}` : ''}`;
   }
 
   try {

@@ -801,6 +801,28 @@ export default function TesteosSection({ addToast }) {
   useEffect(() => { if (account) load(account, preset); }, [account, preset, load]);
 
   // Filtro por producto sobre los anuncios (las campañas las filtra el core).
+  // Solo los productos que REALMENTE tienen campañas en esta cuenta. Mostrar
+  // todos los de AdsLab llenaba la barra de chips que no filtran nada (y que
+  // al tocarlos dejaban el tablero vacío). De paso, el número al lado dice
+  // cuántas campañas engancha cada uno: es la devolución de si el alias sirve.
+  const productosEnCuenta = useMemo(() => {
+    const cuenta = new Map();
+    for (const c of (data?.campaigns || [])) {
+      const p = productoDeCampana(c.name, productos, cfgRaw);
+      if (p) cuenta.set(p.id, (cuenta.get(p.id) || 0) + 1);
+    }
+    return productos
+      .filter(p => cuenta.has(p.id))
+      .map(p => ({ ...p, campanas: cuenta.get(p.id) }))
+      .sort((a, b) => b.campanas - a.campanas);
+  }, [data, productos, cfgRaw]);
+
+  // Si el producto elegido deja de tener campañas (cambiaste de cuenta o de
+  // período), volvemos a "Todos" en vez de mostrar un tablero vacío.
+  useEffect(() => {
+    if (productoId && !productosEnCuenta.some(p => p.id === productoId)) setProductoId('');
+  }, [productosEnCuenta, productoId]);
+
   const itemsHoy = useMemo(() => {
     const base = nivelHoy === 'campaigns' ? (data?.campaignsToday || []) : (data?.adsToday || []);
     return base.filter(a => !productoId || productoDeCampana(a.campaignName || a.name, productos, cfgRaw)?.id === productoId);
@@ -882,19 +904,26 @@ export default function TesteosSection({ addToast }) {
           className="px-2.5 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500">
           {PRESETS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
         </select>
-        {productos.length > 0 && (
+        {productosEnCuenta.length > 0 && (
           <div className="flex items-center gap-1 flex-wrap">
             <button onClick={() => setProductoId('')}
               className={`px-2.5 py-1 text-[11px] font-semibold rounded-full border transition ${!productoId ? 'bg-brand-50 dark:bg-brand-900/30 border-brand-300 dark:border-brand-700 text-brand-700 dark:text-brand-300' : 'bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-500'}`}>
               Todos
             </button>
-            {productos.slice(0, 6).map(p => (
+            {productosEnCuenta.map(p => (
               <button key={p.id} onClick={() => setProductoId(p.id)}
-                className={`px-2.5 py-1 text-[11px] font-semibold rounded-full border transition truncate max-w-[130px] ${productoId === p.id ? 'bg-brand-50 dark:bg-brand-900/30 border-brand-300 dark:border-brand-700 text-brand-700 dark:text-brand-300' : 'bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-500'}`}>
-                {p.nombre}
+                title={`${p.campanas} campaña${p.campanas === 1 ? '' : 's'} de ${p.nombre} en esta cuenta`}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold rounded-full border transition max-w-[170px] ${productoId === p.id ? 'bg-brand-50 dark:bg-brand-900/30 border-brand-300 dark:border-brand-700 text-brand-700 dark:text-brand-300' : 'bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-500'}`}>
+                <span className="truncate">{p.nombre}</span>
+                <span className="tabular-nums opacity-60">{p.campanas}</span>
               </button>
             ))}
           </div>
+        )}
+        {data && productosEnCuenta.length === 0 && productos.length > 0 && (
+          <span className="text-[11px] text-amber-600 dark:text-amber-400">
+            Ningún producto reconocido en esta cuenta — cargá sus palabras en <b>Reglas</b>.
+          </span>
         )}
         <button onClick={() => account && load(account, preset)} disabled={!account || loading}
           className="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition disabled:opacity-50">

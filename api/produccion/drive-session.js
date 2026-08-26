@@ -17,7 +17,7 @@
 // funciona aunque todavía no hayas conectado la carpeta de Drive.
 
 import { getUserIdFromAuth } from '../marketing/_supabase-server.js';
-import { driveEnsureFolder } from '../actas/_google.js';
+import { driveEnsureFolder, driveList } from '../actas/_google.js';
 import { getDriveContext } from './_drive-ctx.js';
 import { clean, cardFolderName } from './_naming.js';
 
@@ -108,6 +108,36 @@ export default async function handler(req, res) {
     const finalName = String(filename || '').replace(/[\r\n\t]+/g, ' ').trim() || 'video.mp4';
     const contentType = mimeType || 'video/mp4';
 
+    // ¿Ya está este video en la carpeta? Drive acepta sin chistar dos archivos
+    // con el mismo nombre, así que volver a subir la misma tanda (o reintentar
+    // después de un error que en realidad había terminado bien) duplicaba todo.
+    //
+    // Mismo nombre + mismo peso = es el mismo archivo → cortamos acá y el front
+    // lo saltea. Mismo nombre pero OTRO peso es una versión nueva: la dejamos
+    // pasar y avisamos, porque bloquearla sería peor que el duplicado.
+    // `force: true` sube igual (escotilla de escape si el equipo la necesita).
+    let sameNameOtherSize = false;
+    if (!body.force) {
+      try {
+        const q = `'${subFolder}' in parents and name='${finalName.replace(/'/g, "\\'")}' and trashed=false`;
+        const prev = await driveList(token, { q, fields: 'files(id,name,size,webViewLink)', pageSize: 5 });
+        const mismoPeso = (prev.files || []).find(f => size && Number(f.size) === Number(size));
+        if (mismoPeso) {
+          return respondJSON(res, 200, {
+            configured: true, duplicate: true,
+            existing: {
+              id: mismoPeso.id,
+              name: mismoPeso.name,
+              link: mismoPeso.webViewLink || `https://drive.google.com/file/d/${mismoPeso.id}/view`,
+            },
+            folderId: subFolder,
+            folderLink: `https://drive.google.com/drive/folders/${subFolder}`,
+          });
+        }
+        if ((prev.files || []).length > 0) sameNameOtherSize = true;
+      } catch { /* si el chequeo falla, subimos igual: nunca frena una subida */ }
+    }
+
     // Abrir la resumable session (con node:https crudo, no fetch: garantiza el
     // header Origin, que en el fetch de undici de Vercel se descartaba/rompía
     // y hacía fallar la apertura — la causa real de que todo cayera a AdsLab).
@@ -140,7 +170,13 @@ export default async function handler(req, res) {
     if (!sessionUri) return respondJSON(res, 502, { error: 'Drive no devolvió la URL de subida.' });
 
     const folderLink = `https://drive.google.com/drive/folders/${subFolder}`;
-    return respondJSON(res, 200, { configured: true, sessionUri, finalName, folderId: subFolder, folderLink, contentType, corsBound: false });
+    return respondJSON(res, 200, {
+      configured: true, sessionUri, finalName, folderId: subFolder, folderLink, contentType,
+      corsBound: false,
+      // Había otro archivo con este nombre pero distinto peso: es una versión
+      // nueva. Se sube, pero el front lo avisa para que nadie se confunda.
+      ...(sameNameOtherSize ? { sameNameOtherSize: true } : {}),
+    });
   } catch (err) {
     return respondJSON(res, 500, { error: `Error abriendo la subida a Drive: ${err.message}` });
   }

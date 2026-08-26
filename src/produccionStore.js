@@ -893,6 +893,23 @@ export function addArchivos(id, archivos) {
   return arr[i];
 }
 
+// Reapunta TODOS los archivos de Drive de una tarjeta a una carpeta nueva.
+// Lo usa la reparación de carpetas: después de mover los videos en Drive hay
+// que dejar registrado el folderId nuevo, si no la próxima subida vuelve a la
+// carpeta compartida vieja (que es la que la tarjeta tenía anotada).
+export function setArchivosFolder(id, { folderId, folderLink }) {
+  if (!folderId) return;
+  const arr = read().slice();
+  const i = arr.findIndex(a => a.id === id);
+  if (i === -1) return;
+  const archivos = (arr[i].archivos || []).map(f =>
+    f.destino === 'drive' ? { ...f, folderId, folderLink: folderLink || f.folderLink } : f);
+  arr[i] = { ...arr[i], archivos, updatedAt: new Date().toISOString() };
+  write(arr);
+  pushRow(id);
+  return arr[i];
+}
+
 export function removeArchivo(id, ts) {
   const arr = read().slice();
   const i = arr.findIndex(a => a.id === id);

@@ -4237,11 +4237,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                         <span className="flex-1 truncate font-semibold">{ad.creative?.title || ad.name}</span>
                         {ad.insights && (
                           <span className="text-[10px] text-gray-500 font-mono flex items-center gap-1.5" title={
-                            `CTR ${ad.insights.ctr.toFixed(2)}% · ROAS ${ad.insights.roas.toFixed(2)} · CPA $${ad.insights.cpa.toFixed(2)}${
+                            `CTR ${(ad.insights.ctr ?? 0).toFixed(2)}% · ROAS ${(ad.insights.roas ?? 0).toFixed(2)} · CPA $${(ad.insights.cpa ?? 0).toFixed(2)}${
                               ad.insights.thumbStopRate > 0 ? ` · thumb-stop ${ad.insights.thumbStopRate.toFixed(1)}%` : ''
                             }`
                           }>
-                            <span>CTR {(ad.insights.ctr).toFixed(2)}%</span>
+                            <span>CTR {(ad.insights.ctr ?? 0).toFixed(2)}%</span>
                             {fat.ctrChangePct != null && (
                               <span className={fat.ctrChangePct < 0 ? 'text-red-500' : 'text-emerald-500'}>
                                 ({fat.ctrChangePct > 0 ? '+' : ''}{fat.ctrChangePct}%)

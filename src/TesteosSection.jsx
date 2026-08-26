@@ -149,16 +149,34 @@ const MetaLink = ({ nivel, ids, accountId, desde, hasta, children, solid }) => (
 // ========================================================================
 // Pestaña: HOY (ronda de optimización)
 // ========================================================================
-function VistaHoy({ ads, cfg, currency, accountId, onWhy }) {
+function VistaHoy({ ads, cfg, currency, accountId, onWhy, nivel, setNivel }) {
   const [abierto, setAbierto] = useState(null);
   const r = useMemo(() => rondaDeOptimizacion(ads, { cfg }), [ads, cfg]);
+  const esCampana = nivel === 'campaigns';
+
+  const selectorNivel = (
+    <div className="inline-flex gap-0.5 p-0.5 rounded-lg bg-gray-100 dark:bg-gray-900 border border-gray-200 dark:border-gray-700">
+      {[{ id: 'campaigns', l: 'Campañas' }, { id: 'ads', l: 'Anuncios' }].map(o => (
+        <button key={o.id} onClick={() => setNivel(o.id)}
+          className={`px-2.5 py-1 text-[11px] font-bold rounded-md transition ${
+            nivel === o.id ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}>
+          {o.l}
+        </button>
+      ))}
+    </div>
+  );
 
   if (ads.length === 0) {
     return (
-      <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-10 text-center">
-        <Clock size={24} className="mx-auto text-gray-300 dark:text-gray-600 mb-2" />
-        <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Todavía no hay entrega hoy</p>
-        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Meta no devolvió ningún anuncio con datos de hoy en esta cuenta.</p>
+      <div className="space-y-3">
+        <div className="flex justify-end">{selectorNivel}</div>
+        <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-10 text-center">
+          <Clock size={24} className="mx-auto text-gray-300 dark:text-gray-600 mb-2" />
+          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Todavía no hay entrega hoy</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            Meta no devolvió {esCampana ? 'ninguna campaña' : 'ningún anuncio'} con datos de hoy en esta cuenta.
+          </p>
+        </div>
       </div>
     );
   }
@@ -175,9 +193,24 @@ function VistaHoy({ ads, cfg, currency, accountId, onWhy }) {
         </div>
       )}
 
+      {!esCampana && r.plataRedirigible > 0 && (
+        <div className="flex gap-2.5 items-start p-3 rounded-xl text-xs bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-blue-800 dark:text-blue-200">
+          <AlertCircle size={15} className="shrink-0 mt-0.5" />
+          <span>
+            Estás mirando <b>anuncios</b>, pero varios están dentro de campañas con presupuesto CBO: pausar uno ahí
+            no ahorra plata, la campaña gasta lo mismo repartido entre los que quedan. Sirve para redirigir hacia los
+            que venden. Si lo que querés es <b>bajar el gasto</b>, mirá el nivel <b>Campañas</b>.
+          </span>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-2">
-        <Kpi label="Plata en riesgo" value={fmtM(r.ahorroPotencial, currency)} tone="bad"
-          sub={`${r.aPausar.length} anuncio${r.aPausar.length === 1 ? '' : 's'} para pausar`}>
+        <Kpi label="Plata en juego" value={fmtM(r.plataEnJuego, currency)} tone="bad"
+          sub={r.plataRedirigible > 0 && r.ahorroPotencial > 0
+            ? `${fmtM(r.ahorroPotencial, currency)} se ahorra · ${fmtM(r.plataRedirigible, currency)} se redirige`
+            : r.plataRedirigible > 0
+              ? `se redirige a los otros anuncios (presupuesto de campaña)`
+              : `${r.aPausar.length} anuncio${r.aPausar.length === 1 ? '' : 's'} para pausar`}>
           <Why k="plataEnRiesgo" cfg={cfg} currency={currency} onOpen={onWhy}
             datos={r.aPausar[0]?.pausa ? { ...r.aPausar[0].pausa, gastoHoy: r.aPausar[0].insights.spend } : {}} />
         </Kpi>
@@ -201,27 +234,28 @@ function VistaHoy({ ads, cfg, currency, accountId, onWhy }) {
         <div className="flex items-center gap-2 px-3.5 py-2.5 border-b border-gray-100 dark:border-gray-700/60 flex-wrap">
           <h3 className="text-[13px] font-bold text-gray-900 dark:text-gray-100">Ronda de optimización</h3>
           <Why k="pausar" cfg={cfg} currency={currency} onOpen={onWhy} datos={{}} />
-          <span className="text-[10.5px] text-gray-400">ordenado por lo que se ahorra al pausar</span>
-          {r.aPausar.length > 0 && (
-            <span className="ml-auto">
-              <MetaLink nivel="ads" ids={r.aPausar.map(a => a.id)} accountId={accountId} solid>
-                Abrir los {r.aPausar.length} en Meta
+          <span className="text-[10.5px] text-gray-400">ordenado por la plata que está en juego</span>
+          <span className="ml-auto flex items-center gap-2">
+            {selectorNivel}
+            {r.aPausar.length > 0 && (
+              <MetaLink nivel={nivel} ids={r.aPausar.map(a => a.id)} accountId={accountId} solid>
+                Abrir {r.aPausar.length} en Meta
               </MetaLink>
-            </span>
-          )}
+            )}
+          </span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
               <tr className="bg-gray-50 dark:bg-gray-900/50 text-gray-400 text-[9.5px] uppercase tracking-wider">
-                <th className="text-left font-bold px-3.5 py-2">Anuncio</th>
+                <th className="text-left font-bold px-3.5 py-2">{esCampana ? 'Campaña' : 'Anuncio'}</th>
                 <th className="text-left font-bold px-2 py-2">Veredicto</th>
                 <th className="text-right font-bold px-2 py-2">Gasto</th>
                 <th className="text-right font-bold px-2 py-2">ROAS</th>
                 <th className="text-right font-bold px-2 py-2">Carrito</th>
                 <th className="text-right font-bold px-2 py-2">Pago</th>
                 <th className="text-right font-bold px-2 py-2">Presup.</th>
-                <th className="text-right font-bold px-2 py-2">En riesgo</th>
+                <th className="text-right font-bold px-2 py-2">En juego</th>
                 <th className="px-2 py-2" />
               </tr>
             </thead>
@@ -242,7 +276,7 @@ function VistaHoy({ ads, cfg, currency, accountId, onWhy }) {
                           {open ? <ChevronDown size={13} className="text-brand-500 shrink-0" /> : <ChevronRight size={13} className="text-gray-400 shrink-0" />}
                           <span className="min-w-0">
                             <span className="block font-semibold text-gray-900 dark:text-gray-100 truncate">{a.name}</span>
-                            <span className="block text-[10px] text-gray-400 truncate">{a.campaignName}</span>
+                            {!esCampana && <span className="block text-[10px] text-gray-400 truncate">{a.campaignName}</span>}
                           </span>
                         </div>
                       </td>
@@ -259,8 +293,16 @@ function VistaHoy({ ads, cfg, currency, accountId, onWhy }) {
                       </td>
                       <td className={`px-2 py-2 text-right tabular-nums font-bold ${p.accion === 'pausar' ? 'text-red-600 dark:text-red-400' : 'text-gray-400'}`}>
                         {p.restante != null ? fmtM(p.restante, currency) : '—'}
+                        {p.restante != null && p.accion === 'pausar' && (
+                          <span className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide"
+                            title={p.efecto === 'redirige'
+                              ? 'El presupuesto es de la campaña: pausarlo no ahorra, manda esa plata a los otros anuncios.'
+                              : 'El presupuesto es propio: pausarlo lo ahorra.'}>
+                            {p.efecto === 'redirige' ? 'se redirige' : 'se ahorra'}
+                          </span>
+                        )}
                       </td>
-                      <td className="px-2 py-2 text-right"><MetaLink nivel="ads" ids={[a.id]} accountId={accountId}>Meta</MetaLink></td>
+                      <td className="px-2 py-2 text-right"><MetaLink nivel={nivel} ids={[a.id]} accountId={accountId}>Meta</MetaLink></td>
                     </tr>
                     {open && (
                       <tr><td colSpan={9} className="bg-gray-50/60 dark:bg-gray-900/40 px-3.5 py-3">
@@ -276,7 +318,7 @@ function VistaHoy({ ads, cfg, currency, accountId, onWhy }) {
                           ))}
                           <p className="text-[11px] text-gray-500 dark:text-gray-400 border-l-2 border-gray-200 dark:border-gray-700 pl-2.5 mt-2 flex items-center gap-1.5 flex-wrap">
                             {p.motivoAccion || 'No cumple las cuatro condiciones: no es candidato.'}
-                            {p.compartido && <span className="text-gray-400">· presupuesto compartido a nivel {p.nivelPresupuesto}</span>}
+                            {p.compartido && <span className="text-gray-400">· presupuesto compartido a nivel {p.nivelPresupuesto || 'campaña'}</span>}
                             <Why k="plataEnRiesgo" cfg={cfg} currency={currency} onOpen={onWhy} datos={{ ...p, gastoHoy: i.spend }} />
                           </p>
                         </div>
@@ -679,6 +721,10 @@ export default function TesteosSection({ addToast }) {
   const [preset, setPreset] = useState(() => { try { return localStorage.getItem(LS_PRESET) || 'last_90d'; } catch { return 'last_90d'; } });
   const [productoId, setProductoId] = useState('');
   const [tab, setTab] = useState('hoy');
+  // En estas cuentas los testeos son CBO: el presupuesto vive en la campaña,
+  // así que el nivel donde la decisión de pausar realmente ahorra plata es
+  // campaña. Por eso arranca ahí.
+  const [nivelHoy, setNivelHoy] = useState('campaigns');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -728,8 +774,10 @@ export default function TesteosSection({ addToast }) {
   useEffect(() => { if (account) load(account, preset); }, [account, preset, load]);
 
   // Filtro por producto sobre los anuncios (las campañas las filtra el core).
-  const adsHoy = useMemo(() => (data?.adsToday || [])
-    .filter(a => !productoId || productoDeCampana(a.campaignName, productos, cfgRaw)?.id === productoId), [data, productoId, productos, cfgRaw]);
+  const itemsHoy = useMemo(() => {
+    const base = nivelHoy === 'campaigns' ? (data?.campaignsToday || []) : (data?.adsToday || []);
+    return base.filter(a => !productoId || productoDeCampana(a.campaignName || a.name, productos, cfgRaw)?.id === productoId);
+  }, [data, nivelHoy, productoId, productos, cfgRaw]);
   const ads7d = useMemo(() => (data?.ads7d || [])
     .filter(a => !productoId || productoDeCampana(a.campaignName, productos, cfgRaw)?.id === productoId), [data, productoId, productos, cfgRaw]);
 
@@ -840,7 +888,7 @@ export default function TesteosSection({ addToast }) {
         </div>
       ) : (
         <>
-          {tab === 'hoy' && <VistaHoy ads={adsHoy} cfg={cfg} currency={currency} accountId={accountId} onWhy={setWhy} />}
+          {tab === 'hoy' && <VistaHoy ads={itemsHoy} cfg={cfg} currency={currency} accountId={accountId} onWhy={setWhy} nivel={nivelHoy} setNivel={setNivelHoy} />}
           {tab === 'semanas' && <VistaSemanas campaigns={data.campaigns} cfg={cfgRaw} productos={productos} productoId={productoId || null} currency={currency} accountId={accountId} onWhy={setWhy} />}
           {tab === 'prosp' && <VistaProspectadores ads={ads7d} cfg={cfg} currency={currency} accountId={accountId} onWhy={setWhy} />}
           {tab === 'reglas' && <VistaReglas campaigns={data.campaigns} cfg={cfgRaw} setCfg={setCfgRaw} productos={productos} currency={currency} onWhy={setWhy} />}

@@ -377,6 +377,11 @@ eq('presupuesto compartido: se detecta', compartido.compartido, true);
 eq('consumo se mide sobre el gasto de todo lo que comparte el presupuesto', Math.round(compartido.consumidoPct), 90);
 // Quedan 5.000 y este anuncio se lleva el 69% del gasto → ~3.444, no 19.000.
 eq('plata en riesgo prorrateada, no inflada', Math.round(compartido.restante), 3444);
+// Y lo más importante: en CBO pausar NO ahorra, redirige.
+eq('presupuesto compartido → el efecto es redirigir, no ahorrar', compartido.efecto, 'redirige');
+eq('presupuesto propio → sí es ahorro', ronda.aPausar[0].pausa.efecto, 'ahorro');
+eq('los totales van separados: no se suma como ahorro lo que solo se redirige',
+  [ronda.ahorroPotencial, ronda.plataRedirigible], [19000, 0]);
 eq('a las 12 del mediodía ya no es temprano', ronda.temprano, false);
 const temprano = rondaDeOptimizacion(DEMO.adsHoy, { cfg: cfgPausa, ahora: new Date('2026-08-26T12:00:00Z') });
 eq('a las 9 AM avisa que el día no maduró', temprano.temprano, true);

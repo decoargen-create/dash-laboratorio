@@ -500,9 +500,15 @@ export function evaluarPausa(item, promedios, cfg = CFG_DEFAULT) {
     gastoPadre,
     participacion,
     nivelPresupuesto: item?.nivelPresupuesto || null,
-    // Sin presupuesto conocido no podemos calcular el ahorro: no es motivo
-    // para esconderlo, pero sí para no ponerlo arriba de todo.
+    // Sin presupuesto conocido no podemos calcular la plata en juego: no es
+    // motivo para esconderlo, pero sí para no ponerlo arriba de todo.
     plataEnRiesgo: restante ?? 0,
+    // QUÉ PASA REALMENTE al pausar:
+    //   'ahorro'   → el presupuesto es de este ítem: si lo pausás, no se gasta.
+    //   'redirige' → el presupuesto es compartido (CBO): la campaña va a
+    //                gastar lo mismo igual, repartido entre los que quedan.
+    //                No ahorrás; movés esa plata a los anuncios que sí venden.
+    efecto: compartido ? 'redirige' : 'ahorro',
     // "Pausar ahora ahorra" vs "ya se gastó, dejalo morir".
     accion: !candidato ? null : (yaQuemado ? 'dejar-correr' : 'pausar'),
     motivoAccion: !candidato
@@ -511,7 +517,7 @@ export function evaluarPausa(item, promedios, cfg = CFG_DEFAULT) {
         ? `ya consumió el ${Math.round(consumidoPct)}% del presupuesto: pausarlo no ahorra casi nada`
         : restante != null
           ? (compartido
-            ? `le quedan ${Math.round(restante)} de su parte del presupuesto compartido`
+            ? `de acá a fin del día se llevaría ${Math.round(restante)} del presupuesto de la campaña — pausarlo no lo ahorra, lo manda a los otros anuncios`
             : `le quedan ${Math.round(restante)} por gastar hoy`)
           : 'sin presupuesto diario conocido',
   };
@@ -534,7 +540,15 @@ export function rondaDeOptimizacion(items, { cfg = CFG_DEFAULT, ahora = new Date
     candidatos,
     aPausar: candidatos.filter(i => i.pausa.accion === 'pausar'),
     dejarCorrer: candidatos.filter(i => i.pausa.accion === 'dejar-correr'),
+    // Total en juego, separado por lo que realmente pasa al pausar. Sumarlos
+    // en un solo "ahorro" sería falso en cuentas con CBO.
     ahorroPotencial: candidatos
+      .filter(i => i.pausa.accion === 'pausar' && i.pausa.efecto === 'ahorro')
+      .reduce((s, i) => s + (i.pausa.plataEnRiesgo || 0), 0),
+    plataRedirigible: candidatos
+      .filter(i => i.pausa.accion === 'pausar' && i.pausa.efecto === 'redirige')
+      .reduce((s, i) => s + (i.pausa.plataEnRiesgo || 0), 0),
+    plataEnJuego: candidatos
       .filter(i => i.pausa.accion === 'pausar')
       .reduce((s, i) => s + (i.pausa.plataEnRiesgo || 0), 0),
     evaluados,
@@ -613,7 +627,7 @@ export const FORMULAS = {
   plataEnRiesgo: {
     label: 'Plata en riesgo',
     formula: 'presupuesto que queda × la parte que se lleva este anuncio',
-    nota: 'Es lo que se deja de gastar si lo pausás AHORA, y por eso ordena la lista. En una campaña CBO el presupuesto es de la campaña, no del anuncio: por eso se prorratea según cuánto del gasto de hoy se está llevando este anuncio. Si el presupuesto ya se consumió casi entero, pausarlo no ahorra nada — esos van aparte como "dejalo correr".',
+    nota: 'Es la plata que este anuncio se iba a llevar de acá a fin del día, y por eso ordena la lista. OJO con qué significa según dónde esté el presupuesto: si es propio del anuncio o del conjunto, pausarlo lo AHORRA. Si el presupuesto es de la campaña (CBO), la campaña va a gastar lo mismo igual repartido entre los que quedan: no ahorrás, REDIRIGÍS esa plata a los anuncios que sí venden. Por eso se prorratea según cuánto del gasto de hoy se está llevando este anuncio, y por eso los dos totales se muestran separados.',
     calculo: (d, f) => d.presupuesto == null
       ? 'sin presupuesto diario conocido'
       : d.compartido

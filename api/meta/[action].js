@@ -1777,8 +1777,41 @@ async function handleTestingInsights(req, res) {
       return filas;
     };
 
+    // Insights de HOY a nivel campaña. Es el nivel donde se decide de verdad
+    // cuando el presupuesto es CBO: pausar un anuncio adentro de una campaña
+    // no ahorra nada (la campaña gasta igual), pausar la campaña sí.
+    const campanasHoy = async () => {
+      const filas = [];
+      let a = null, g = 0;
+      do {
+        const params = {
+          level: 'campaign',
+          date_preset: 'today',
+          fields: `campaign_id,campaign_name,${INS}`,
+          limit: 200,
+        };
+        if (a) params.after = a;
+        const d = await graphGet(`${accountId}/insights`, token, params);
+        for (const r of d.data || []) {
+          filas.push({
+            id: r.campaign_id,
+            name: r.campaign_name,
+            campaignName: r.campaign_name,
+            dailyBudget: budgetPorCampana.get(r.campaign_id) ?? null,
+            nivelPresupuesto: 'campaña',
+            insights: parseFunnel(r),
+          });
+        }
+        a = d.paging?.cursors?.after && d.paging?.next ? d.paging.cursors.after : null;
+        g++;
+      } while (a && g < 6);
+      return filas;
+    };
+
     // ── 3. Hoy (ronda de optimización) y últimos 7 días (prospectadores) ──
-    const [adsToday, ads7d] = await Promise.all([adsDe('today'), adsDe('last_7d')]);
+    const [adsToday, ads7d, campaignsToday] = await Promise.all([
+      adsDe('today'), adsDe('last_7d'), campanasHoy(),
+    ]);
 
     // Gasto de hoy por padre: sirve para prorratear la plata en riesgo de un
     // anuncio dentro de una campaña que reparte un presupuesto común.
@@ -1797,10 +1830,12 @@ async function handleTestingInsights(req, res) {
       accountId,
       datePreset: preset,
       campaigns: campanas,
+      campaignsToday,
       adsToday,
       ads7d,
       totales: {
         campanas: campanas.length,
+        campanasHoy: campaignsToday.length,
         adsHoy: adsToday.length,
         ads7d: ads7d.length,
       },

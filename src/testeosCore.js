@@ -63,6 +63,10 @@ export const CFG_DEFAULT = {
   minComprasProsp: 2,
   minAlcanceProsp: 1000,
 
+  // Días que espera Meta para atribuir una compra al click. Mientras no
+  // pasen, los números de una cohorte siguen moviéndose.
+  diasAtribucion: 7,
+
   // ── Pausado (la ronda de optimización del día) ──
   // Se mira el día de HOY, no la ventana larga.
   roasMaxPausar: 1.5,           // por debajo de esto es candidato
@@ -386,6 +390,77 @@ export function cohortesSemanales(campanas, { cfg = CFG_DEFAULT, productos = [],
   return { filas, enriquecidas, descartadas: enriquecidas.filter(c => c.tipo !== 'testeo') };
 }
 
+// ── Fotos semanales (por qué el histórico no se puede leer en vivo) ─────
+//
+// Meta atribuye una compra hasta 7 días después del click. Eso significa que
+// los números de la semana pasada SIGUEN cambiando hoy. Si el tablero
+// consulta siempre en vivo, el histórico se reescribe solo: la semana que
+// ayer cerró en 32% mañana dice 38% y nadie puede decir cuál era el número.
+//
+// La solución es sacarle una foto a cada cohorte cuando MADURA — cuando ya
+// pasaron los días de atribución desde su último día — y de ahí en más
+// mostrar esa foto en vez de recalcular.
+
+// ¿Ya se puede congelar esta semana? El domingo de la cohorte + los días de
+// atribución tiene que haber quedado atrás.
+export function semanaMadura(lunes, { hoy = new Date(), cfg = CFG_DEFAULT } = {}) {
+  if (!lunes) return false;
+  const [y, m, d] = String(lunes).split('-').map(Number);
+  // Domingo de esa semana + los días que Meta tarda en atribuir.
+  const limite = Date.UTC(y, m - 1, d + 6 + (cfg.diasAtribucion ?? 7));
+  return hoy.getTime() >= limite;
+}
+
+// Qué se guarda de una cohorte. Solo lo que hace falta para reconstruir la
+// fila: nada de objetos gigantes de campañas.
+export function fotoDeCohorte(fila) {
+  return {
+    semana: fila.semana,
+    etiqueta: fila.etiqueta,
+    lanzadas: fila.lanzadas,
+    ganadoras: fila.ganadoras,
+    perdedoras: fila.perdedoras,
+    sinDatos: fila.sinDatos,
+    conVeredicto: fila.conVeredicto,
+    eficiencia: fila.eficiencia,
+    activas: fila.activas,
+    totales: fila.totales,
+    idsGanadoras: fila.idsGanadoras,
+    idsTodas: fila.idsTodas,
+  };
+}
+
+// Mezcla las cohortes calculadas en vivo con las fotos ya guardadas.
+// Donde hay foto, manda la foto (ese número ya está cerrado). Se marca cuál
+// es cuál para poder mostrarlo en la UI y explicar por qué no se mueve.
+//
+// `snapshots` es un mapa { [semana]: { datos, cerrada_at } }.
+export function fusionarConFotos(filas, snapshots = {}) {
+  return (filas || []).map(f => {
+    const snap = f.semana ? snapshots[f.semana] : null;
+    if (!snap?.datos) return { ...f, cerrada: false };
+    return {
+      ...f,
+      ...snap.datos,
+      // Los items son los de ahora: sirven para abrir el detalle y linkear a
+      // Meta aunque los totales estén congelados.
+      items: f.items,
+      cerrada: true,
+      cerradaAt: snap.cerrada_at || null,
+      // Guardamos lo vivo al lado por si algún día queremos mostrar la
+      // diferencia entre la foto y lo que dice Meta hoy.
+      envivo: { eficiencia: f.eficiencia, ganadoras: f.ganadoras, totales: f.totales },
+    };
+  });
+}
+
+// Cohortes que ya maduraron y todavía no tienen foto: son las que hay que
+// congelar. La semana en curso nunca entra.
+export function cohortesParaCongelar(filas, { hoy = new Date(), cfg = CFG_DEFAULT, snapshots = {} } = {}) {
+  return (filas || []).filter(f =>
+    f.semana && !snapshots[f.semana] && semanaMadura(f.semana, { hoy, cfg }));
+}
+
 // ── Ronda de optimización: qué pausar hoy ───────────────────────────────
 //
 // Replica la rutina manual: mirar el día de HOY, ordenar por ROAS, y bajar el
@@ -657,6 +732,14 @@ export const FORMULAS = {
     calculo: (d) => d.producto
       ? `"${d.name}" → ${d.producto.nombre} (por ${d.producto.via === 'alias' ? 'alias' : 'nombre'}: ${(d.producto.coincidio || []).join(', ')})`
       : `"${d.name}" → sin producto reconocido`,
+  },
+  foto: {
+    label: 'Semana cerrada',
+    formula: 'se congela cuando pasan los días de atribución desde el domingo',
+    nota: 'Meta atribuye una compra hasta 7 días después del click, así que los números de una semana siguen moviéndose durante días. Mientras eso pasa, la fila se calcula en vivo. Cuando la semana madura se le saca una foto y ese número queda fijo para siempre — si no, el histórico se reescribiría solo y nunca podrías decir en cuánto cerró la semana del 17/8. La foto guarda también con qué umbrales se sacó.',
+    calculo: (d) => d.cerrada
+      ? `cerrada el ${d.cerradaAt ? new Date(d.cerradaAt).toLocaleDateString('es-AR') : '—'} · ${d.eficiencia?.toFixed(0)}% de eficiencia`
+      : `todavía en vivo: la semana no maduró (faltan días de atribución)`,
   },
   cohorte: {
     label: 'Semana de la campaña',

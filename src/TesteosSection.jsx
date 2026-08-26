@@ -24,9 +24,10 @@ import {
 import {
   CFG_DEFAULT, cfgPara, cohortesSemanales, rondaDeOptimizacion, esProspectador,
   productoDeCampana, linkMeta, FORMULAS,
+  fusionarConFotos, cohortesParaCongelar, fotoDeCohorte,
 } from './testeosCore.js';
+import { cargarCfg, guardarCfg, cargarFotos, guardarFotos, leerCfgLocal } from './testeosStore.js';
 
-const LS_CFG = 'adslab-testeos-cfg-';        // + accountId
 const LS_ACCOUNT = 'adslab-testeos-account';
 const LS_PRESET = 'adslab-testeos-preset';
 
@@ -338,11 +339,12 @@ function VistaHoy({ ads, cfg, currency, accountId, onWhy, nivel, setNivel }) {
 // ========================================================================
 // Pestaña: SEMANAS (cohortes de testeo)
 // ========================================================================
-function VistaSemanas({ campaigns, cfg, productos, productoId, currency, accountId, onWhy }) {
+function VistaSemanas({ campaigns, cfg, productos, productoId, currency, accountId, onWhy, fotos }) {
   const [abierto, setAbierto] = useState(null);
-  const { filas } = useMemo(
-    () => cohortesSemanales(campaigns, { cfg, productos, productoId }),
-    [campaigns, cfg, productos, productoId]);
+  const filas = useMemo(() => {
+    const { filas: vivas } = cohortesSemanales(campaigns, { cfg, productos, productoId });
+    return fusionarConFotos(vivas, fotos || {});
+  }, [campaigns, cfg, productos, productoId, fotos]);
 
   if (filas.length === 0) {
     return (
@@ -396,7 +398,15 @@ function VistaSemanas({ campaigns, cfg, productos, productoId, currency, account
                       <div className="flex items-center gap-2">
                         {open ? <ChevronDown size={13} className="text-brand-500 shrink-0" /> : <ChevronRight size={13} className="text-gray-400 shrink-0" />}
                         <span>
-                          <span className="block font-semibold text-gray-900 dark:text-gray-100">Semana {f.etiqueta}</span>
+                          <span className="flex items-center gap-1.5">
+                            <span className="font-semibold text-gray-900 dark:text-gray-100">Semana {f.etiqueta}</span>
+                            {f.cerrada
+                              ? <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400"
+                                  title="Número congelado: la semana ya pasó los días de atribución de Meta.">CERRADA</span>
+                              : <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300"
+                                  title="Todavía sumando compras: Meta atribuye hasta 7 días después del click.">EN VIVO</span>}
+                            <Why k="foto" cfg={cfg} currency={currency} onOpen={onWhy} datos={f} />
+                          </span>
                           <span className="block text-[10px] text-gray-400">
                             {f.lanzadas} testeo{f.lanzadas === 1 ? '' : 's'} · {f.activas} sigue{f.activas === 1 ? '' : 'n'} prendida{f.activas === 1 ? '' : 's'}
                           </span>
@@ -548,7 +558,7 @@ function VistaProspectadores({ ads, cfg, currency, accountId, onWhy }) {
 // ========================================================================
 // Pestaña: REGLAS de la tienda
 // ========================================================================
-function VistaReglas({ campaigns, cfg, setCfg, productos, currency, onWhy }) {
+function VistaReglas({ campaigns, cfg, setCfg, productos, currency, onWhy, origen }) {
   const { enriquecidas } = useMemo(() => cohortesSemanales(campaigns, { cfg, productos }), [campaigns, cfg, productos]);
   const grupos = { testeo: [], excluida: [], 'sin-fecha': [], otra: [] };
   enriquecidas.forEach(c => { (grupos[c.tipo] || grupos.otra).push(c); });
@@ -591,12 +601,16 @@ function VistaReglas({ campaigns, cfg, setCfg, productos, currency, onWhy }) {
     <div className="space-y-3">
       <div className="flex gap-2.5 items-start p-3 rounded-xl text-xs bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-blue-800 dark:text-blue-200">
         <SlidersHorizontal size={15} className="shrink-0 mt-0.5" />
-        <span>Esto se guarda <b>por cuenta publicitaria</b>: otra tienda carga su nomenclatura y sus ROAS de equilibrio y el mismo tablero le sirve. Cambiá cualquier valor y mirá las otras pestañas — se recalcula al instante.</span>
+        <span>Esto se guarda <b>por cuenta publicitaria</b> y en la nube, así te sigue entre dispositivos: otra tienda carga su nomenclatura y sus ROAS de equilibrio y el mismo tablero le sirve. Cambiá cualquier valor y mirá las otras pestañas — se recalcula al instante.</span>
       </div>
 
       <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
         <div className="flex items-center gap-2 px-3.5 py-2.5 border-b border-gray-100 dark:border-gray-700/60">
           <h3 className="text-[13px] font-bold text-gray-900 dark:text-gray-100">Nomenclatura</h3>
+          {origen === 'local' && (
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300"
+              title="Todavía no se pudo guardar en la nube: por ahora vive solo en este navegador.">SOLO EN ESTE NAVEGADOR</span>
+          )}
           <Why k="testeo" cfg={cfg} currency={currency} onOpen={onWhy} datos={grupos.testeo[0] || {}} />
           <span className="text-[10.5px] text-gray-400">qué campañas entran como testeo</span>
         </div>
@@ -730,6 +744,8 @@ export default function TesteosSection({ addToast }) {
   const [error, setError] = useState(null);
   const [why, setWhy] = useState(null);
   const [cfgRaw, setCfgRaw] = useState(CFG_DEFAULT);
+  const [origenCfg, setOrigenCfg] = useState(null);   // 'nube' | 'local' | 'nuevo'
+  const [fotos, setFotos] = useState({});
 
   const account = accounts.find(a => a.id === accountId) || null;
   const currency = account?.currency || null;
@@ -743,17 +759,28 @@ export default function TesteosSection({ addToast }) {
   useEffect(() => { try { if (accountId) localStorage.setItem(LS_ACCOUNT, accountId); } catch {} }, [accountId]);
   useEffect(() => { try { localStorage.setItem(LS_PRESET, preset); } catch {} }, [preset]);
 
-  // Las reglas son POR CUENTA: cambiar de cuenta trae el perfil de esa tienda.
+  // Las reglas son POR CUENTA y viven en Supabase. Se pinta primero la caché
+  // local (instantáneo) y después manda lo que diga la nube.
   useEffect(() => {
     if (!accountId) return;
-    try {
-      const raw = localStorage.getItem(LS_CFG + accountId);
-      setCfgRaw(raw ? { ...CFG_DEFAULT, ...JSON.parse(raw) } : CFG_DEFAULT);
-    } catch { setCfgRaw(CFG_DEFAULT); }
-  }, [accountId]);
+    let vivo = true;
+    const local = leerCfgLocal(accountId);
+    setCfgRaw(local ? { ...CFG_DEFAULT, ...local } : CFG_DEFAULT);
+    cargarCfg(accountId).then(({ cfg: c, origen }) => {
+      if (!vivo) return;
+      if (c) setCfgRaw({ ...CFG_DEFAULT, ...c });
+      setOrigenCfg(origen);
+    });
+    cargarFotos(accountId, productoId || '').then(f => { if (vivo) setFotos(f); });
+    return () => { vivo = false; };
+  }, [accountId, productoId]);
+
+  // Guardado de reglas con debounce: mover un umbral no dispara un upsert por
+  // cada tecla.
   useEffect(() => {
-    if (!accountId) return;
-    try { localStorage.setItem(LS_CFG + accountId, JSON.stringify(cfgRaw)); } catch {}
+    if (!accountId || cfgRaw === CFG_DEFAULT) return;
+    const t = setTimeout(() => { guardarCfg(accountId, cfgRaw); }, 700);
+    return () => clearTimeout(t);
   }, [cfgRaw, accountId]);
 
   const load = useCallback(async (acct, datePreset) => {
@@ -780,6 +807,25 @@ export default function TesteosSection({ addToast }) {
   }, [data, nivelHoy, productoId, productos, cfgRaw]);
   const ads7d = useMemo(() => (data?.ads7d || [])
     .filter(a => !productoId || productoDeCampana(a.campaignName, productos, cfgRaw)?.id === productoId), [data, productoId, productos, cfgRaw]);
+
+  // Congelar las semanas que ya maduraron. Se hace solo, una vez por semana y
+  // por cuenta: a partir de ahí ese número deja de moverse aunque Meta siga
+  // atribuyendo compras viejas.
+  useEffect(() => {
+    if (!accountId || !data?.campaigns?.length) return;
+    const { filas } = cohortesSemanales(data.campaigns, { cfg: cfgRaw, productos, productoId: productoId || null });
+    const pendientes = cohortesParaCongelar(filas, { cfg, snapshots: fotos });
+    if (pendientes.length === 0) return;
+    const conFoto = pendientes.map(f => ({ semana: f.semana, foto: fotoDeCohorte(f) }));
+    guardarFotos(accountId, conFoto, cfgRaw, productoId || '').then(r => {
+      if (!r.guardadas) return;
+      setFotos(prev => {
+        const next = { ...prev };
+        for (const f of conFoto) next[f.semana] = { datos: f.foto, cerrada_at: new Date().toISOString() };
+        return next;
+      });
+    });
+  }, [accountId, data, cfgRaw, cfg, productos, productoId, fotos]);
 
   const header = (
     <div className="flex items-center gap-3">
@@ -889,9 +935,9 @@ export default function TesteosSection({ addToast }) {
       ) : (
         <>
           {tab === 'hoy' && <VistaHoy ads={itemsHoy} cfg={cfg} currency={currency} accountId={accountId} onWhy={setWhy} nivel={nivelHoy} setNivel={setNivelHoy} />}
-          {tab === 'semanas' && <VistaSemanas campaigns={data.campaigns} cfg={cfgRaw} productos={productos} productoId={productoId || null} currency={currency} accountId={accountId} onWhy={setWhy} />}
+          {tab === 'semanas' && <VistaSemanas campaigns={data.campaigns} cfg={cfgRaw} productos={productos} productoId={productoId || null} currency={currency} accountId={accountId} onWhy={setWhy} fotos={fotos} />}
           {tab === 'prosp' && <VistaProspectadores ads={ads7d} cfg={cfg} currency={currency} accountId={accountId} onWhy={setWhy} />}
-          {tab === 'reglas' && <VistaReglas campaigns={data.campaigns} cfg={cfgRaw} setCfg={setCfgRaw} productos={productos} currency={currency} onWhy={setWhy} />}
+          {tab === 'reglas' && <VistaReglas campaigns={data.campaigns} cfg={cfgRaw} setCfg={setCfgRaw} productos={productos} currency={currency} onWhy={setWhy} origen={origenCfg} />}
         </>
       )}
 

@@ -21,6 +21,7 @@ import {
   CFG_DEFAULT, cfgPara, roasBreakeven, fechaDelNombre, lunesDe, tipoDeCampana,
   productoDeCampana, veredicto, cohortesSemanales, esProspectador,
   rondaDeOptimizacion, promediosDelDia, linkMeta, evaluarPausa,
+  semanaMadura, fusionarConFotos, cohortesParaCongelar, fotoDeCohorte,
 } from '../src/testeosCore.js';
 import { DEMO } from '../src/testeosDemo.js';
 
@@ -393,6 +394,35 @@ eq('lleva la cuenta sin el prefijo act_', link.includes('act=123'), true);
 eq('lleva el rango de fechas', link.includes('date=2026-08-17_2026-08-23'), true);
 eq('a nivel anuncio usa el parámetro de anuncios',
   linkMeta({ accountId: '123', nivel: 'ads', ids: ['9'] }).includes('selected_ad_ids=9'), true);
+
+
+console.log('\nTESTEOS · FOTOS SEMANALES:');
+// La semana del 17/8 termina el domingo 23/8. Con 7 días de atribución,
+// recién madura el 30/8.
+const cfgFoto = { ...CFG_DEFAULT, diasAtribucion: 7 };
+eq('el 26/8 la semana del 17/8 TODAVÍA no maduró', semanaMadura('2026-08-17', { hoy: new Date('2026-08-26T12:00:00Z'), cfg: cfgFoto }), false);
+eq('el 30/8 ya maduró', semanaMadura('2026-08-17', { hoy: new Date('2026-08-30T12:00:00Z'), cfg: cfgFoto }), true);
+eq('la semana en curso nunca está madura', semanaMadura('2026-08-24', { hoy: new Date('2026-08-26T12:00:00Z'), cfg: cfgFoto }), false);
+eq('semanas viejas están maduras', semanaMadura('2026-07-20', { hoy: HOY, cfg: cfgFoto }), true);
+
+const cohHoy = cohortesSemanales(DEMO.campanas, { cfg: CFG_DEFAULT, productos: DEMO.productos, hoy: HOY });
+// Sin fotos guardadas: las viejas (20/7, 27/7, 3/8) hay que congelarlas; la
+// del 17/8 no, porque todavía está sumando compras.
+const aCongelar = cohortesParaCongelar(cohHoy.filas, { hoy: HOY, cfg: cfgFoto, snapshots: {} }).map(f => f.semana).sort();
+eq('congela solo las semanas maduras', aCongelar, ['2026-07-20', '2026-08-03', '2026-07-27'].sort());
+eq('no congela la semana que sigue sumando compras', aCongelar.includes('2026-08-17'), false);
+
+// Con una foto guardada, ese número manda sobre lo que diga Meta hoy.
+const snaps = { '2026-08-03': { datos: { ...fotoDeCohorte(cohHoy.filas.find(f => f.semana === '2026-08-03')), eficiencia: 50, ganadoras: 1 }, cerrada_at: '2026-08-17T10:00:00Z' } };
+const fusion = fusionarConFotos(cohHoy.filas, snaps);
+const cerrada = fusion.find(f => f.semana === '2026-08-03');
+eq('la semana con foto queda marcada como cerrada', cerrada.cerrada, true);
+eq('la foto manda sobre el cálculo en vivo', cerrada.eficiencia, 50);
+eq('igual conserva las campañas para poder abrirlas en Meta', cerrada.items.length > 0, true);
+eq('las semanas sin foto siguen en vivo', fusion.find(f => f.semana === '2026-08-17').cerrada, false);
+// Una foto ya guardada no se vuelve a congelar.
+eq('no re-congela lo que ya tiene foto',
+  cohortesParaCongelar(cohHoy.filas, { hoy: HOY, cfg: cfgFoto, snapshots: snaps }).map(f => f.semana).includes('2026-08-03'), false);
 
 // ─────────── RESUMEN ───────────
 console.log(`\n${'─'.repeat(40)}\nRESULTADO: ${pass} ✅   ${fail} ❌\n`);

@@ -7,7 +7,7 @@ import {
   Menu, LogOut, Home, ShoppingCart, Package, Users, AlertCircle, CreditCard,
   UserCheck, TrendingUp, Plus, Filter, Eye, Edit2, Trash2, Calendar, DollarSign,
   ChevronDown, ChevronRight, Search, X, Command, Check, Bell,
-  AlignJustify, LayoutGrid, LayoutGrid as LayoutGridIcon, Columns3, Sparkles, Bot, Zap, Activity, FileText, Settings, Loader2, Calculator, Copy, Save, RotateCcw, Target, Play, Inbox, BarChart3, Instagram, SlidersHorizontal, ClipboardList, AlertTriangle, Trophy, Bookmark, Film, Wallet, FlaskConical,
+  AlignJustify, LayoutGrid, LayoutGrid as LayoutGridIcon, Columns3, Sparkles, Bot, Zap, Activity, FileText, Settings, Loader2, Calculator, Copy, Save, RotateCcw, Target, Play, Inbox, BarChart3, Instagram, SlidersHorizontal, ClipboardList, AlertTriangle, Trophy, Bookmark, Film, Wallet, Gauge,
 } from 'lucide-react';
 import { VioraLogo, VioraMark, AdsLabLogo, AdsLabMark } from './logo.jsx';
 import { installDebugLog, exportDebugLog } from './debugLog.js';
@@ -1455,7 +1455,10 @@ function AppShell({ onExit }) {
         try { localStorage.removeItem('adslab-marketing-active-product'); } catch {}
         return 'mk-home';
       }
-      const saved = localStorage.getItem('adslab-last-section');
+      const guardada = localStorage.getItem('adslab-last-section');
+      // `mk-testeos` se fusionó con Métricas. Se traduce acá, en el arranque,
+      // y no en un efecto: así el header nunca pinta un título que ya no existe.
+      const saved = guardada === 'mk-testeos' ? 'mk-metricas' : guardada;
       // Si tenía una sección de Viora/Senydrop/MetaAds, defaulteamos a la
       // de Marketing. Lista de secciones válidas en las plataformas activas:
       const validSections = ['mk-home', 'mk-arranque', 'mk-bandeja', 'mk-copy', 'mk-meta', 'mk-metricas', 'mk-testeos',
@@ -1472,6 +1475,9 @@ function AppShell({ onExit }) {
   // título "Marketing · Competencia" desfasado del contenido.
   useEffect(() => {
     if (currentSection === 'mk-competencia') setCurrentSection('mk-arranque');
+    // `mk-testeos` se fusionó con Métricas: quien la tenía abierta (o guardada
+    // en localStorage) aterriza en la sección unificada, no en Home.
+    if (currentSection === 'mk-testeos') setCurrentSection('mk-metricas');
   }, [currentSection]);
   // El overlay del pipeline dispara este evento al terminar — lleva al user
   // directo a Marketing para ver los resultados.
@@ -1509,6 +1515,12 @@ function AppShell({ onExit }) {
     const id = Date.now() + Math.random();
     setToasts(prev => [...prev, { id, ...toast }]);
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), toast.duration || 3500);
+  }, []);
+
+  // Sacar un toast a mano: lo usa el botón de acción ("Deshacer"), que una vez
+  // clickeado no tiene sentido que siga ofreciéndose.
+  const dismissToast = useCallback((id) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
   }, []);
 
   // Puente global de toasts: componentes que no reciben addToast por prop (ej.
@@ -2166,7 +2178,7 @@ function AppShell({ onExit }) {
         {supabase
           ? <SupabaseAuthScreen onLoggedIn={setSupabaseUser} />
           : <LoginScreen onLogin={handleLogin} onSessionAuth={handleSessionAuth} darkMode={darkMode} toggleDarkMode={toggleDarkMode} />}
-        <ToastContainer toasts={toasts} />
+        <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       </>
     );
   }
@@ -2184,7 +2196,7 @@ function AppShell({ onExit }) {
           darkMode={darkMode}
           toggleDarkMode={toggleDarkMode}
         />
-        <ToastContainer toasts={toasts} />
+        <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       </>
     );
   }
@@ -2312,8 +2324,9 @@ function AppShell({ onExit }) {
               <NavSection title="Operación" sectionKey="mk-op" sidebarOpen={sidebarOpen}>
                 <NavItem icon={LayoutGridIcon} label="Home" section="mk-home" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                 <NavItem icon={BarChart3} label="Meta Ads" section="mk-meta" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                <NavItem icon={Filter} label="Métricas" section="mk-metricas" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                <NavItem icon={FlaskConical} label="Testeos" section="mk-testeos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                {/* Métricas y Testeos eran dos entradas que pedían lo mismo a
+                    la misma cuenta. Ahora es una sola sección con pestañas. */}
+                <NavItem icon={Gauge} label="Métricas" section="mk-metricas" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               </NavSection>
               <NavSection title="Creación de estáticos" sectionKey="mk-estaticos" sidebarOpen={sidebarOpen}>
                 <NavItem icon={Play} label="Productos" section="mk-arranque" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
@@ -2479,7 +2492,7 @@ function AppShell({ onExit }) {
       )}
 
       {/* Toast container */}
-      <ToastContainer toasts={toasts} />
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }
@@ -8777,7 +8790,7 @@ export function useCountUp(target, duration = 800) {
 
 // Container de toasts fijado abajo a la derecha. Cada toast desliza desde
 // la derecha con animación y se auto-destruye.
-function ToastContainer({ toasts }) {
+function ToastContainer({ toasts, onDismiss }) {
   return (
     // aria-live: los lectores de pantalla anuncian los toasts (antes eran
     // invisibles para accesibilidad). polite = no interrumpe; suficiente para
@@ -8801,7 +8814,20 @@ function ToastContainer({ toasts }) {
           }`}>
             {t.type === 'success' ? <Check size={14} /> : t.type === 'error' ? <X size={14} /> : t.type === 'warning' ? <AlertTriangle size={14} /> : <Bell size={14} />}
           </div>
-          <div className="flex-1 text-sm font-medium">{t.message}</div>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium">{t.message}</div>
+            {/* Acción opcional del toast — hoy la usa "Deshacer" de prender/
+                pausar campañas. Un cambio en la cuenta publicitaria mueve
+                plata de verdad: el arrepentimiento tiene que estar a un click,
+                no a "buscá cuál era y volvé a prenderla". */}
+            {t.accion && (
+              <button
+                onClick={() => { t.accion.onClick?.(); onDismiss?.(t.id); }}
+                className="mt-1 text-xs font-bold underline underline-offset-2 opacity-80 hover:opacity-100">
+                {t.accion.label}
+              </button>
+            )}
+          </div>
         </div>
       ))}
     </div>

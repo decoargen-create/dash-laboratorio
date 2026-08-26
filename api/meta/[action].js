@@ -15,6 +15,7 @@
 
 import crypto from 'node:crypto';
 import { parseFunnel, deriveFunnelRates } from './_funnel.js';
+import { validarPedido, mismaCuenta, NIVELES } from './_estado.js';
 import {
   META_API_VERSION, META_COOKIE_MAX_AGE, META_SCOPES,
   verifyState, signState, setMetaCookie, clearMetaCookie,
@@ -31,8 +32,8 @@ import {
 //     Requiere JWT de Supabase en Authorization para identificar al dueño.
 //   - cookie viora-meta-session → modo legacy single-token (sin Supabase).
 // Devuelve { token } o { error, status }.
-async function resolveAccessToken(req, url) {
-  const connId = url?.searchParams?.get('connection_id');
+async function resolveAccessToken(req, url, extraConnId = null) {
+  const connId = url?.searchParams?.get('connection_id') || extraConnId;
   if (connId) {
     const userId = await getUserIdFromAuth(req);
     if (!userId) return { error: 'No autenticado — falta sesión de Supabase', status: 401 };
@@ -1808,10 +1809,42 @@ async function handleTestingInsights(req, res) {
       return filas;
     };
 
+    // Estado de cada anuncio. Los insights NO lo traen: /insights devuelve
+    // rendimiento, no configuración. Sin esto la ronda no puede dibujar un
+    // botón de prender/pausar, porque no sabe de qué lado está el interruptor
+    // (ni distinguir "todavía anda" de "ya lo pausaste a media mañana", que
+    // igual aparece con gasto de hoy).
+    const estadosDeAnuncios = async () => {
+      const mapa = new Map();
+      try {
+        let a = null, g = 0;
+        do {
+          const params = { fields: 'id,status,effective_status', limit: 500, effective_status: effectiveStatus };
+          if (a) params.after = a;
+          const d = await graphGet(`${accountId}/ads`, token, params);
+          for (const ad of d.data || []) {
+            mapa.set(ad.id, { status: ad.status, effectiveStatus: ad.effective_status });
+          }
+          a = d.paging?.cursors?.after && d.paging?.next ? d.paging.cursors.after : null;
+          g++;
+        } while (a && g < 10);
+      } catch (e) {
+        // Sin estados la ronda sigue sirviendo para mirar; solo se queda sin
+        // los botones. No es motivo para tirar abajo toda la respuesta.
+        console.warn('meta/testing-insights estados de anuncios:', e.message);
+      }
+      return mapa;
+    };
+
     // ── 3. Hoy (ronda de optimización) y últimos 7 días (prospectadores) ──
-    const [adsToday, ads7d, campaignsToday] = await Promise.all([
-      adsDe('today'), adsDe('last_7d'), campanasHoy(),
+    const [adsToday, ads7d, campaignsToday, estadosAds] = await Promise.all([
+      adsDe('today'), adsDe('last_7d'), campanasHoy(), estadosDeAnuncios(),
     ]);
+
+    // Pegar el estado a cada fila. La campaña ya lo trae de la llamada 1.
+    const estadoCampana = new Map(campanas.map(c => [c.id, { status: c.status, effectiveStatus: c.effectiveStatus }]));
+    for (const c of campaignsToday) Object.assign(c, estadoCampana.get(c.id) || {});
+    for (const ad of [...adsToday, ...ads7d]) Object.assign(ad, estadosAds.get(ad.id) || {});
 
     // Gasto de hoy por padre: sirve para prorratear la plata en riesgo de un
     // anuncio dentro de una campaña que reparte un presupuesto común.
@@ -1845,6 +1878,75 @@ async function handleTestingInsights(req, res) {
   }
 }
 
+
+// Prende o pausa campañas, conjuntos o anuncios. ES EL ÚNICO ENDPOINT QUE
+// ESCRIBE EN LA CUENTA PUBLICITARIA — todo lo demás de este archivo lee.
+//
+// Antes de tocar nada se verifica que cada entidad viva en la cuenta que el
+// pedido dice. Sin ese chequeo, un id equivocado (o pegado de otra pestaña)
+// pausaría algo en OTRA cuenta del mismo usuario, y el toast diría que salió
+// todo bien. Es una llamada extra por entidad y vale la pena: son máximo 25.
+//
+// Las entidades se procesan de a una y en serie, cada una con su resultado.
+// Si la número 3 falla por permisos, las otras igual quedaron cambiadas y el
+// front sabe cuáles: un all-or-nothing acá sería mentira, porque Meta no da
+// transacciones.
+async function handleSetStatus(req, res) {
+  if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
+
+  let body;
+  try {
+    if (req.body && typeof req.body === 'object') body = req.body;
+    else {
+      const chunks = [];
+      for await (const c of req) chunks.push(c);
+      body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+    }
+  } catch {
+    return respondJSON(res, 400, { error: 'Body JSON inválido' });
+  }
+
+  const origin = getOrigin(req);
+  const url = new URL(req.url, origin);
+  const { token, error, status: authStatus } = await resolveAccessToken(req, url, body?.connection_id || null);
+  if (!token) return respondJSON(res, authStatus || 401, { error: error || 'Meta no conectado' });
+
+  const pedido = validarPedido(body);
+  if (!pedido.ok) return respondJSON(res, 400, { error: pedido.error });
+
+  const accountId = String(body.account_id || '').trim();
+  if (!accountId) return respondJSON(res, 400, { error: 'Falta account_id (con prefijo act_)' });
+
+  const nombreNivel = NIVELES[pedido.level].singular;
+  const resultados = [];
+
+  for (const id of pedido.ids) {
+    try {
+      // 1. ¿Existe y es de esta cuenta?
+      const actual = await graphGet(id, token, { fields: 'id,name,status,effective_status,account_id' });
+      if (!mismaCuenta(actual.account_id, accountId)) {
+        resultados.push({ id, ok: false, error: `Esa ${nombreNivel} no es de la cuenta ${accountId}.` });
+        continue;
+      }
+      // 2. Ya está como se pide: no gastamos una escritura al pedo.
+      if (actual.status === pedido.status) {
+        resultados.push({ id, ok: true, name: actual.name, status: actual.status, sinCambio: true });
+        continue;
+      }
+      // 3. El cambio.
+      await graphPost(id, token, { status: pedido.status });
+      resultados.push({ id, ok: true, name: actual.name, status: pedido.status, anterior: actual.status });
+    } catch (e) {
+      resultados.push({ id, ok: false, error: e.message || 'Error de Meta' });
+    }
+  }
+
+  // 207 cuando salió a medias: el front distingue "todo bien" de "revisá".
+  const fallaron = resultados.filter(r => !r.ok).length;
+  const code = fallaron === 0 ? 200 : (fallaron === resultados.length ? 502 : 207);
+  return respondJSON(res, code, { level: pedido.level, status: pedido.status, resultados });
+}
+
 // --- dispatcher ---
 
 const actions = {
@@ -1869,6 +1971,7 @@ const actions = {
   'run-creative-refresh': handleRunCreativeRefresh,
   'cron-creative-refresh': handleCronCreativeRefresh,
   'resolve-ig-url': handleResolveIgUrl,
+  'set-status': handleSetStatus,
 };
 
 export default async function handler(req, res) {

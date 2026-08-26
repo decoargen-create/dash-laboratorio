@@ -17,6 +17,13 @@ import {
 } from '../api/produccion/_naming.js';
 import { parseFunnel, deriveFunnelRates, pickAction } from '../api/meta/_funnel.js';
 import { repararTarjetas, carpetaDestinoDe } from '../api/produccion/_repair-core.js';
+import {
+  CFG_DEFAULT, cfgPara, roasBreakeven, fechaDelNombre, lunesDe, tipoDeCampana,
+  productoDeCampana, veredicto, cohortesSemanales, esProspectador,
+  rondaDeOptimizacion, promediosDelDia, linkMeta, evaluarPausa,
+  semanaMadura, fusionarConFotos, cohortesParaCongelar, fotoDeCohorte,
+} from '../src/testeosCore.js';
+import { DEMO } from '../src/testeosDemo.js';
 
 let pass = 0, fail = 0;
 const eq = (name, got, exp) => {
@@ -260,6 +267,162 @@ eq('reporta el archivo en papelera', conBasura.cards[0].errores.length, 1);
 eq('la carpeta destino de una publicada lleva PUBLICADO',
   carpetaDestinoDe({ ...tarjetaA, published: true }),
   'Cepillo Facial [Panchito][22-8][aaaaa] PUBLICADO');
+
+
+// ─────────── TESTEOS: nomenclatura ───────────
+console.log('\nTESTEOS · NOMENCLATURA:');
+const HOY = DEMO.hoy;
+eq('fecha "Cepillo 22/8 [CBO Videos]"', fechaDelNombre('Cepillo 22/8 [CBO Videos]', HOY), '2026-08-22');
+eq('fecha "Cepillo 27/7 [ABO BIDCAP 25 a 35]" (ignora el rango de edad)', fechaDelNombre('Cepillo 27/7 [ABO BIDCAP 25 a 35]', HOY), '2026-07-27');
+eq('fecha "Cepillo 5/8 [ABO Costcap 15 a 24]"', fechaDelNombre('Cepillo 5/8 [ABO Costcap 15 a 24]', HOY), '2026-08-05');
+eq('fecha con año "Crema 15.8.26"', fechaDelNombre('Crema 15.8.26', HOY), '2026-08-15');
+eq('sin fecha → null', fechaDelNombre('Crema [ABO BIDCAP 29 A 39]', HOY), null);
+eq('31/2 no existe → null', fechaDelNombre('Cepillo 31/2', HOY), null);
+// Un "28/12" mirado en enero es de diciembre PASADO, no del que viene.
+eq('sin año, no salta al futuro', fechaDelNombre('Cepillo 28/12', new Date('2027-01-10T12:00:00Z')), '2026-12-28');
+eq('semana lunes-domingo: 22/8 (sábado) → lunes 17/8', lunesDe('2026-08-22'), '2026-08-17');
+eq('lunes se queda en su lunes', lunesDe('2026-08-24'), '2026-08-24');
+eq('domingo cae en el lunes anterior', lunesDe('2026-08-23'), '2026-08-17');
+
+console.log('\nTESTEOS · CLASIFICACIÓN:');
+const tipo = (n) => tipoDeCampana(n, CFG_DEFAULT, HOY).tipo;
+eq('CBO + fecha → testeo', tipo('Cepillo 22/8 [CBO Videos]'), 'testeo');
+eq('ABO BIDCAP → excluida (escala)', tipo('Cepillo 27/7 [ABO BIDCAP 25 a 35]'), 'excluida');
+eq('ABO Costcap → excluida', tipo('Cepillo 5/8 [ABO Costcap 15 a 24]'), 'excluida');
+eq('CBO sin fecha → sin-fecha (no ensucia ninguna semana)', tipo('Cepillo [CBO Videos]'), 'sin-fecha');
+eq('nombre suelto → otra', tipo('Nueva campaña de Interacción'), 'otra');
+eq('producto Cepillo detectado', productoDeCampana('Cepillo 22/8 [CBO Videos]', DEMO.productos)?.id, 'p-cepillo');
+eq('producto Crema detectado', productoDeCampana('Crema 23/7 [CBO Video UGC 2]', DEMO.productos)?.id, 'p-crema');
+eq('sin producto reconocible → null', productoDeCampana('Nueva campaña de Interacción', DEMO.productos), null);
+// ALIAS: el nombre del producto puede no aparecer nunca en la campaña.
+const cfgAlias = { porProducto: { 'p-aceite': { alias: ['aceit', 'oil'] } } };
+const prods = [...DEMO.productos, { id: 'p-aceite', nombre: 'Aceite Corporal Relajante' }];
+eq('alias "aceit" asigna la campaña al producto',
+  productoDeCampana('ACEIT 12/8 [CBO Videos]', prods, cfgAlias)?.id, 'p-aceite');
+eq('el alias deja registrado que matcheó por alias',
+  productoDeCampana('ACEIT 12/8 [CBO Videos]', prods, cfgAlias)?.via, 'alias');
+eq('un alias le gana a la coincidencia por palabras',
+  productoDeCampana('Cepillo con aceit 12/8', prods, cfgAlias)?.id, 'p-aceite');
+eq('sin alias cargado sigue matcheando por el nombre',
+  productoDeCampana('Aceite Corporal 12/8', prods, {})?.id, 'p-aceite');
+
+console.log('\nTESTEOS · ROAS DE EQUILIBRIO:');
+eq('margen 40% → breakeven 2.5', roasBreakeven(40), 2.5);
+eq('margen 52% → breakeven ≈1.92', +roasBreakeven(52).toFixed(2), 1.92);
+eq('margen inválido → null', roasBreakeven(0), null);
+// El equipo anota el breakeven a mano por producto: ese manda sobre todo.
+const cfgCepillo = cfgPara(DEMO.perfil, 'p-cepillo');
+eq('usa el breakeven anotado del cepillo', cfgCepillo.roasMaxPausar, 1.9);
+eq('ganador exige colchón sobre el breakeven', cfgCepillo.minRoasGanador, 2.28);
+const cfgCrema = cfgPara(DEMO.perfil, 'p-crema');
+eq('otro producto, otro breakeven anotado', cfgCrema.roasMaxPausar, 2.6);
+// Si no lo anotaron pero cargaron el margen, se deriva.
+const cfgTiva = cfgPara(DEMO.perfil, 'p-tiva');
+eq('sin breakeven anotado lo deriva del margen (38% → 2,63)', cfgTiva.roasMaxPausar, 2.63);
+// Sin nada cargado para ese producto, cae al default de la tienda.
+eq('producto sin perfil propio usa el de la tienda', cfgPara(DEMO.perfil, 'p-kit').roasMaxPausar, 2.22);
+
+console.log('\nTESTEOS · VEREDICTO Y EFICIENCIA:');
+const v = (o) => veredicto(o, CFG_DEFAULT).estado;
+eq('4 compras y ROAS 1.5 → ganador', v({ impressions: 50000, spend: 100, purchases: 4, roas: 1.5 }), 'ganador');
+eq('ROAS alto pero 1 sola compra → perdedor', v({ impressions: 50000, spend: 100, purchases: 1, roas: 8 }), 'perdedor');
+eq('muchas compras con ROAS malo → perdedor', v({ impressions: 50000, spend: 100, purchases: 20, roas: 0.9 }), 'perdedor');
+eq('640 impresiones → sin datos (no fracasó, no tuvo chance)', v({ impressions: 640, spend: 2400, purchases: 0, roas: 0 }), 'sin-datos');
+
+const coh = cohortesSemanales(DEMO.campanas, { cfg: CFG_DEFAULT, productos: DEMO.productos, hoy: HOY });
+eq('las de escala quedan afuera de las cohortes', coh.filas.every(f => f.items.every(i => i.tipo === 'testeo')), true);
+eq('no cuenta las ABO como testeos', coh.filas.reduce((s, f) => s + f.lanzadas, 0), 7);
+const semana17 = coh.filas.find(f => f.semana === '2026-08-17');
+eq('semana del 17/8 agrupa sus 3 campañas', semana17.lanzadas, 3);
+eq('semana del 17/8: 1 ganadora', semana17.ganadoras, 1);
+eq('semana del 17/8: 1 perdedora', semana17.perdedoras, 1);
+eq('semana del 17/8: 1 sin datos', semana17.sinDatos, 1);
+// LA CUENTA CLAVE: 1 de 2 con veredicto = 50%, no 1 de 3 = 33%.
+eq('eficiencia = ganadoras ÷ las que tuvieron chance', Math.round(semana17.eficiencia), 50);
+eq('la cohorte sigue viva: cuenta las activas de hoy', semana17.activas, 1);
+eq('cohortes ordenadas de la más nueva a la más vieja', coh.filas[0].semana, '2026-08-17');
+// Filtro por producto.
+const cohCepillo = cohortesSemanales(DEMO.campanas, { cfg: CFG_DEFAULT, productos: DEMO.productos, productoId: 'p-cepillo', hoy: HOY });
+eq('filtrando por producto solo quedan sus testeos',
+  cohCepillo.filas.every(f => f.items.every(i => i.producto?.id === 'p-cepillo')), true);
+
+console.log('\nTESTEOS · PROSPECTADORES:');
+const prosp = DEMO.ads7d.filter(a => esProspectador(a.insights, CFG_DEFAULT).es).map(a => a.id);
+eq('detecta al de frecuencia baja que vende', prosp.includes('ad_5'), true);
+eq('descarta al que quema audiencia (frecuencia 2,6)', prosp.includes('ad_6'), false);
+eq('descarta al que llega a gente nueva pero no vende', prosp.includes('ad_7'), false);
+eq('descarta al de alcance chico', prosp.includes('ad_8'), false);
+eq('solo uno califica', prosp.length, 1);
+
+console.log('\nTESTEOS · RONDA DE OPTIMIZACIÓN (qué pausar):');
+const cfgPausa = { ...CFG_DEFAULT, pisoGastoPausar: 25000, roasMaxPausar: 1.5, sobrePromedioPct: 25 };
+const prom = promediosDelDia(DEMO.adsHoy);
+eq('promedio de la cuenta: costo por carrito sobre las SUMAS', Math.round(prom.costoPorATC), 2046);
+const ronda = rondaDeOptimizacion(DEMO.adsHoy, { cfg: cfgPausa, ahora: HOY });
+const ids = ronda.candidatos.map(c => c.id);
+eq('marca el que gasta y no convierte', ids.includes('ad_2'), true);
+eq('NO marca al que recién arrancó (gastó poco)', ids.includes('ad_4'), false);
+eq('NO marca al que anda bien', ids.includes('ad_5'), false);
+eq('separa "pausar ahora" de "ya se gastó, dejalo correr"',
+  [ronda.aPausar.map(c => c.id), ronda.dejarCorrer.map(c => c.id)], [['ad_2'], ['ad_3']]);
+eq('plata en riesgo = presupuesto − gastado', ronda.aPausar[0].pausa.restante, 19000);
+eq('el ahorro potencial suma solo los que conviene pausar', ronda.ahorroPotencial, 19000);
+// PRESUPUESTO COMPARTIDO (CBO): el presupuesto es de la campaña, no del
+// anuncio. Restarle a 50.000 solo lo que gastó ESTE anuncio daría 19.000 de
+// "ahorro" cuando en realidad la campaña ya lleva gastados 45.000 entre todos.
+const compartido = evaluarPausa(
+  { dailyBudget: 50000, parentSpend: 45000, nivelPresupuesto: 'campaña',
+    insights: { spend: 31000, roas: 0.6, addToCart: 6, initiateCheckout: 2, impressions: 88000 } },
+  { costoPorATC: 2046, costoPorCheckout: 4958 }, cfgPausa);
+eq('presupuesto compartido: se detecta', compartido.compartido, true);
+eq('consumo se mide sobre el gasto de todo lo que comparte el presupuesto', Math.round(compartido.consumidoPct), 90);
+// Quedan 5.000 y este anuncio se lleva el 69% del gasto → ~3.444, no 19.000.
+eq('plata en riesgo prorrateada, no inflada', Math.round(compartido.restante), 3444);
+// Y lo más importante: en CBO pausar NO ahorra, redirige.
+eq('presupuesto compartido → el efecto es redirigir, no ahorrar', compartido.efecto, 'redirige');
+eq('presupuesto propio → sí es ahorro', ronda.aPausar[0].pausa.efecto, 'ahorro');
+eq('los totales van separados: no se suma como ahorro lo que solo se redirige',
+  [ronda.ahorroPotencial, ronda.plataRedirigible], [19000, 0]);
+eq('a las 12 del mediodía ya no es temprano', ronda.temprano, false);
+const temprano = rondaDeOptimizacion(DEMO.adsHoy, { cfg: cfgPausa, ahora: new Date('2026-08-26T12:00:00Z') });
+eq('a las 9 AM avisa que el día no maduró', temprano.temprano, true);
+
+console.log('\nTESTEOS · LINK A META:');
+const link = linkMeta({ accountId: 'act_123', nivel: 'campaigns', ids: ['1', '2'], desde: '2026-08-17', hasta: '2026-08-23' });
+eq('abre el Ads Manager con las campañas seleccionadas', link.includes('selected_campaign_ids=1%2C2'), true);
+eq('lleva la cuenta sin el prefijo act_', link.includes('act=123'), true);
+eq('lleva el rango de fechas', link.includes('date=2026-08-17_2026-08-23'), true);
+eq('a nivel anuncio usa el parámetro de anuncios',
+  linkMeta({ accountId: '123', nivel: 'ads', ids: ['9'] }).includes('selected_ad_ids=9'), true);
+
+
+console.log('\nTESTEOS · FOTOS SEMANALES:');
+// La semana del 17/8 termina el domingo 23/8. Con 7 días de atribución,
+// recién madura el 30/8.
+const cfgFoto = { ...CFG_DEFAULT, diasAtribucion: 7 };
+eq('el 26/8 la semana del 17/8 TODAVÍA no maduró', semanaMadura('2026-08-17', { hoy: new Date('2026-08-26T12:00:00Z'), cfg: cfgFoto }), false);
+eq('el 30/8 ya maduró', semanaMadura('2026-08-17', { hoy: new Date('2026-08-30T12:00:00Z'), cfg: cfgFoto }), true);
+eq('la semana en curso nunca está madura', semanaMadura('2026-08-24', { hoy: new Date('2026-08-26T12:00:00Z'), cfg: cfgFoto }), false);
+eq('semanas viejas están maduras', semanaMadura('2026-07-20', { hoy: HOY, cfg: cfgFoto }), true);
+
+const cohHoy = cohortesSemanales(DEMO.campanas, { cfg: CFG_DEFAULT, productos: DEMO.productos, hoy: HOY });
+// Sin fotos guardadas: las viejas (20/7, 27/7, 3/8) hay que congelarlas; la
+// del 17/8 no, porque todavía está sumando compras.
+const aCongelar = cohortesParaCongelar(cohHoy.filas, { hoy: HOY, cfg: cfgFoto, snapshots: {} }).map(f => f.semana).sort();
+eq('congela solo las semanas maduras', aCongelar, ['2026-07-20', '2026-08-03', '2026-07-27'].sort());
+eq('no congela la semana que sigue sumando compras', aCongelar.includes('2026-08-17'), false);
+
+// Con una foto guardada, ese número manda sobre lo que diga Meta hoy.
+const snaps = { '2026-08-03': { datos: { ...fotoDeCohorte(cohHoy.filas.find(f => f.semana === '2026-08-03')), eficiencia: 50, ganadoras: 1 }, cerrada_at: '2026-08-17T10:00:00Z' } };
+const fusion = fusionarConFotos(cohHoy.filas, snaps);
+const cerrada = fusion.find(f => f.semana === '2026-08-03');
+eq('la semana con foto queda marcada como cerrada', cerrada.cerrada, true);
+eq('la foto manda sobre el cálculo en vivo', cerrada.eficiencia, 50);
+eq('igual conserva las campañas para poder abrirlas en Meta', cerrada.items.length > 0, true);
+eq('las semanas sin foto siguen en vivo', fusion.find(f => f.semana === '2026-08-17').cerrada, false);
+// Una foto ya guardada no se vuelve a congelar.
+eq('no re-congela lo que ya tiene foto',
+  cohortesParaCongelar(cohHoy.filas, { hoy: HOY, cfg: cfgFoto, snapshots: snaps }).map(f => f.semana).includes('2026-08-03'), false);
 
 // ─────────── RESUMEN ───────────
 console.log(`\n${'─'.repeat(40)}\nRESULTADO: ${pass} ✅   ${fail} ❌\n`);

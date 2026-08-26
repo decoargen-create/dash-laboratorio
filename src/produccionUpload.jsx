@@ -94,18 +94,8 @@ async function uploadViaRelay(file, sess, token, onBytes) {
   throw new Error('la sesión terminó sin confirmar el archivo');
 }
 
-async function uploadToSupabase(file, user, ext) {
-  const path = `${user.id}/produccion/pv-${uid()}.${ext}`;
-  const { error } = await supabase.storage.from(BUCKET).upload(path, file, {
-    contentType: file.type || 'video/mp4', upsert: true,
-  });
-  if (error) throw new Error(`Subida falló: ${error.message}`);
-  return { name: file.name, storagePath: path, destino: 'adslab', sizeMB: +(file.size / 1024 / 1024).toFixed(1), ts: uid() };
-}
-
 async function uploadOne(file, ctx, onBytes) {
-  const { user, token, weekKey, productoNombre, persona, cardId, folderId } = ctx;
-  const ext = (file.name.split('.').pop() || 'mp4').toLowerCase();
+  const { token, weekKey, productoNombre, persona, cardId, folderId } = ctx;
   const pedirSesion = async () => {
     const r = await fetch('/api/produccion/drive-session', {
       method: 'POST',
@@ -192,17 +182,18 @@ async function uploadOne(file, ctx, onBytes) {
       : `no configurado${sess.reason ? ` (${sess.reason})` : ''}${sess.error ? `: ${sess.error}` : ''}`;
   }
 
-  try {
-    const archivo = await uploadToSupabase(file, user, ext);
-    if (driveReason) archivo.driveError = driveReason;
-    return archivo;
-  } catch (e) {
-    // El fallback también falló (típico: video más grande que el límite del
-    // bucket). Armamos un error que cuente la historia completa.
-    const esTamano = /exceeded the maximum allowed size/i.test(e?.message || '');
-    const base = esTamano ? 'el video supera el límite de AdsLab (~50MB)' : (e?.message || 'error');
-    throw new Error(driveReason ? `${base} — y antes Drive falló (${driveReason})` : base);
+  // POLÍTICA "Drive o nada": el equipo necesita los videos SÍ o SÍ en Google
+  // Drive. Si no se pudo subir a Drive (ni con los reintentos), NO guardamos en
+  // AdsLab — tiramos error claro y el video NO se registra. El user reintenta o
+  // reconecta Drive. (Los videos viejos que YA están en AdsLab se rescatan con el
+  // botón "Mover a Drive".)
+  if (sess?.reason === 'drive-no-conectado') {
+    throw new Error('Google Drive no está conectado — el video NO se subió. Conectalo en Ajustes → Conectar Drive y reintentá.');
   }
+  if (sess?.reason === 'drive-oauth-transitorio') {
+    throw new Error('Google no respondió en este momento — el video NO se subió. Probá de nuevo en un minuto.');
+  }
+  throw new Error(`No se pudo subir a Google Drive — el video NO se guardó. Reintentá${driveReason ? ` (detalle: ${driveReason})` : ''}.`);
 }
 
 // Un video que YA estaba en Drive se anota en la tarjeta solo si esta no lo

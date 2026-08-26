@@ -73,7 +73,9 @@ export default async function handler(req, res) {
     if (!subFolder) {
       const prodFolder = await driveEnsureFolder(token, ctx.rootId, clean(card.producto_nombre, 'Producto'));
       const personaFolder = await driveEnsureFolder(token, prodFolder, clean(card.persona, 'Equipo'));
-      subFolder = await driveEnsureFolder(token, personaFolder, cardFolderName(card.producto_nombre, card.persona, card.week_key));
+      // cardId al final: cada TARJETA tiene su propia carpeta (fix de #438). Sin
+      // pasarlo, el video migrado caería en la carpeta vieja compartida.
+      subFolder = await driveEnsureFolder(token, personaFolder, cardFolderName(card.producto_nombre, card.persona, card.week_key, card.id));
     }
 
     // 4) Bajamos los bytes del bucket (service role → sin RLS).

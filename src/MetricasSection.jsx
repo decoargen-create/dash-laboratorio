@@ -23,10 +23,11 @@
 // Cada número trae su fórmula: el botón "i" abre qué cuenta se hizo y con qué
 // datos. La idea es poder auditar una métrica en vez de creerle.
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Loader2, RefreshCw, AlertCircle, ChevronDown, ChevronRight, Plug, X,
   FlaskConical, Radar, Gauge, SlidersHorizontal, ExternalLink, Clock, Filter,
+  Pause, Play, AlertTriangle,
 } from 'lucide-react';
 import {
   useMetaConnections, useMetaAdAccounts, authHeaders, openMetaConnect,
@@ -38,6 +39,7 @@ import {
 } from './testeosCore.js';
 import { cargarCfg, guardarCfg, cargarFotos, guardarFotos, leerCfgLocal } from './testeosStore.js';
 import { VistaEmbudo } from './EmbudoVista.jsx';
+import { cambiarEstado, inverso, estadoVisible } from './testeosAcciones.js';
 import { deriveFunnelRates } from '../api/meta/_funnel.js';
 
 // Las claves siguen diciendo "testeos" a propósito: renombrarlas le borraría
@@ -169,10 +171,88 @@ const MetaLink = ({ nivel, ids, accountId, desde, hasta, children, solid }) => (
 );
 
 // ========================================================================
+// Prender / pausar
+// ========================================================================
+
+// El interruptor de una fila. Muestra el lado CONTRARIO al estado actual,
+// porque es un botón de acción y no un indicador: si la campaña está
+// corriendo, lo que se puede hacer es pausarla.
+//
+// Cuando no sabemos el estado (Meta no lo devolvió) el botón no se dibuja: un
+// botón que dice "Pausar" sobre algo ya pausado es peor que no tener botón.
+function BotonEstado({ estado, trabajando, onCambiar, compacto }) {
+  if (!estado) return null;
+  const pausar = estado === 'ACTIVE';
+  const Icono = pausar ? Pause : Play;
+  return (
+    <button
+      onClick={e => { e.stopPropagation(); onCambiar(pausar ? 'PAUSED' : 'ACTIVE'); }}
+      disabled={trabajando}
+      title={pausar ? 'Pausar en Meta' : 'Volver a prender en Meta'}
+      className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10.5px] font-bold whitespace-nowrap transition disabled:opacity-50 disabled:cursor-wait ${
+        pausar
+          ? 'border border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30'
+          : 'border border-emerald-300 dark:border-emerald-800 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/30'}`}>
+      {trabajando ? <Loader2 size={9} className="animate-spin" /> : <Icono size={9} />}
+      {!compacto && (pausar ? 'Pausar' : 'Prender')}
+    </button>
+  );
+}
+
+// Confirmación para la tanda. Una fila sola se pausa de una — es reversible y
+// el toast trae "Deshacer" —, pero apagar seis campañas de un click merece ver
+// antes cuáles son: es la diferencia entre optimizar y apagar la cuenta.
+function ConfirmarTanda({ abierto, items, currency, onCancelar, onConfirmar }) {
+  if (!abierto) return null;
+  const plata = items.reduce((t, a) => t + (a.pausa?.efecto === 'ahorro' ? (a.pausa?.restante || 0) : 0), 0);
+  return (
+    <div className="fixed inset-0 z-[70] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={onCancelar}>
+      <div className="w-full max-w-md bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-2xl" onClick={e => e.stopPropagation()}>
+        <div className="flex items-start gap-3 px-4 py-3.5 border-b border-gray-100 dark:border-gray-700">
+          <span className="w-8 h-8 rounded-lg bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 grid place-items-center shrink-0">
+            <AlertTriangle size={16} />
+          </span>
+          <div className="min-w-0">
+            <h4 className="text-sm font-bold text-gray-900 dark:text-gray-100">Pausar {items.length} en Meta</h4>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400">Se pausan de verdad, ahora. Podés volver a prenderlas desde acá mismo.</p>
+          </div>
+        </div>
+        <ul className="max-h-56 overflow-y-auto px-4 py-2.5 space-y-1">
+          {items.map(a => (
+            <li key={a.id} className="flex items-center gap-2 text-[11.5px]">
+              <span className="w-1 h-1 rounded-full bg-red-400 shrink-0" />
+              <span className="truncate text-gray-700 dark:text-gray-300" title={a.name}>{a.name}</span>
+              <span className="ml-auto tabular-nums text-gray-400 shrink-0">{fmtM(a.insights?.spend, currency)}</span>
+            </li>
+          ))}
+        </ul>
+        {plata > 0 && (
+          <p className="px-4 pb-1 text-[11px] text-gray-500 dark:text-gray-400">
+            Deja de gastarse <b className="text-gray-700 dark:text-gray-200">{fmtM(plata, currency)}</b> de presupuesto propio.
+            Lo que está dentro de una campaña CBO se redirige, no se ahorra.
+          </p>
+        )}
+        <div className="flex gap-2 justify-end px-4 py-3 border-t border-gray-100 dark:border-gray-700">
+          <button onClick={onCancelar}
+            className="px-3 py-1.5 text-xs font-semibold text-gray-600 dark:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition">
+            Cancelar
+          </button>
+          <button onClick={onConfirmar}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-red-600 rounded-lg hover:bg-red-700 transition">
+            <Pause size={12} /> Pausar {items.length}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ========================================================================
 // Pestaña: HOY (ronda de optimización)
 // ========================================================================
-function VistaHoy({ ads, cfg, currency, accountId, onWhy, nivel, setNivel }) {
+export function VistaHoy({ ads, cfg, currency, accountId, onWhy, nivel, setNivel, cambios, trabajando, onEstado, onRecalcular }) {
   const [abierto, setAbierto] = useState(null);
+  const [confirmando, setConfirmando] = useState(null);
   const r = useMemo(() => rondaDeOptimizacion(ads, { cfg }), [ads, cfg]);
   const esCampana = nivel === 'campaigns';
 
@@ -205,6 +285,16 @@ function VistaHoy({ ads, cfg, currency, accountId, onWhy, nivel, setNivel }) {
 
   const filas = r.evaluados.slice().sort((a, b) =>
     (b.pausa.candidato - a.pausa.candidato) || ((b.pausa.plataEnRiesgo || 0) - (a.pausa.plataEnRiesgo || 0)));
+
+  // Los candidatos que TODAVÍA están prendidos. El botón de tanda se ofrece
+  // sobre estos: incluir las que ya pausaste haría que el contador mienta y
+  // que confirmar un "Pausar 6" pause 2.
+  const pausables = r.aPausar.filter(a => estadoVisible(a, cambios) === 'ACTIVE');
+
+  // Cuántas filas de esta vista cambiaron de estado en esta sesión. Los KPIs de
+  // arriba se calcularon con los datos que trajo Meta ANTES de esos cambios,
+  // así que hay que decirlo en vez de mostrar una plata en juego que ya no es.
+  const tocadas = filas.filter(a => cambios?.[a.id]).length;
 
   return (
     <div className="space-y-3">
@@ -259,6 +349,12 @@ function VistaHoy({ ads, cfg, currency, accountId, onWhy, nivel, setNivel }) {
           <span className="text-[10.5px] text-gray-400">ordenado por la plata que está en juego</span>
           <span className="ml-auto flex items-center gap-2">
             {selectorNivel}
+            {pausables.length > 0 && (
+              <button onClick={() => setConfirmando(pausables)}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10.5px] font-bold whitespace-nowrap text-white bg-red-600 hover:bg-red-700 transition">
+                <Pause size={9} /> Pausar {pausables.length}
+              </button>
+            )}
             {r.aPausar.length > 0 && (
               <MetaLink nivel={nivel} ids={r.aPausar.map(a => a.id)} accountId={accountId} solid>
                 Abrir {r.aPausar.length} en Meta
@@ -292,7 +388,8 @@ function VistaHoy({ ads, cfg, currency, accountId, onWhy, nivel, setNivel }) {
                 return (
                   <React.Fragment key={a.id}>
                     <tr onClick={() => setAbierto(open ? null : a.id)}
-                      className={`cursor-pointer transition ${open ? 'bg-gray-50 dark:bg-gray-900/40' : 'hover:bg-gray-50 dark:hover:bg-gray-900/30'}`}>
+                      className={`cursor-pointer transition ${open ? 'bg-gray-50 dark:bg-gray-900/40' : 'hover:bg-gray-50 dark:hover:bg-gray-900/30'} ${
+                        estadoVisible(a, cambios) === 'PAUSED' ? 'opacity-55' : ''}`}>
                       <td className="px-3.5 py-2 max-w-[260px]">
                         <div className="flex items-center gap-2">
                           {open ? <ChevronDown size={13} className="text-brand-500 shrink-0" /> : <ChevronRight size={13} className="text-gray-400 shrink-0" />}
@@ -324,7 +421,16 @@ function VistaHoy({ ads, cfg, currency, accountId, onWhy, nivel, setNivel }) {
                           </span>
                         )}
                       </td>
-                      <td className="px-2 py-2 text-right"><MetaLink nivel={nivel} ids={[a.id]} accountId={accountId}>Meta</MetaLink></td>
+                      <td className="px-2 py-2">
+                        <div className="flex items-center gap-1 justify-end">
+                          <BotonEstado
+                            estado={estadoVisible(a, cambios)}
+                            trabajando={!!trabajando?.[a.id]}
+                            onCambiar={(status) => onEstado({ items: [a], status })}
+                          />
+                          <MetaLink nivel={nivel} ids={[a.id]} accountId={accountId}>Meta</MetaLink>
+                        </div>
+                      </td>
                     </tr>
                     {open && (
                       <tr><td colSpan={9} className="bg-gray-50/60 dark:bg-gray-900/40 px-3.5 py-3">
@@ -352,7 +458,23 @@ function VistaHoy({ ads, cfg, currency, accountId, onWhy, nivel, setNivel }) {
             </tbody>
           </table>
         </div>
+        {tocadas > 0 && (
+          <div className="flex items-center gap-2 flex-wrap px-3.5 py-2 border-t border-gray-100 dark:border-gray-700/60 text-[11px] bg-amber-50/70 dark:bg-amber-900/20 text-amber-800 dark:text-amber-200">
+            <AlertTriangle size={12} className="shrink-0" />
+            <span>Cambiaste {tocadas} {tocadas === 1 ? 'de estado' : 'de estado'}. Los números de arriba son los que trajo Meta antes de eso.</span>
+            <button onClick={onRecalcular}
+              className="ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-bold border border-amber-300 dark:border-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/40 transition">
+              <RefreshCw size={10} /> Recalcular
+            </button>
+          </div>
+        )}
       </div>
+
+      <ConfirmarTanda
+        abierto={!!confirmando} items={confirmando || []} currency={currency}
+        onCancelar={() => setConfirmando(null)}
+        onConfirmar={() => { onEstado({ items: confirmando, status: 'PAUSED' }); setConfirmando(null); }}
+      />
     </div>
   );
 }
@@ -769,6 +891,12 @@ export default function MetricasSection({ addToast }) {
   const [fotos, setFotos] = useState({});
   // El embudo es otra llamada a Meta. Se pide recién cuando se abre la
   // pestaña, y se vuelve a pedir si cambió la cuenta o el período.
+  // Lo que prendimos o pausamos en esta sesión: id → 'ACTIVE' | 'PAUSED'.
+  // Manda por encima de lo que dijo Meta cuando se cargó el tablero, así el
+  // botón cambia de lado al instante en vez de esperar una recarga entera
+  // (varios segundos) para ver el efecto de un click.
+  const [cambios, setCambios] = useState({});
+  const [trabajando, setTrabajando] = useState({});
   const [embudo, setEmbudo] = useState(null);
   const [embudoCargando, setEmbudoCargando] = useState(false);
   const [embudoError, setEmbudoError] = useState(null);
@@ -808,6 +936,46 @@ export default function MetricasSection({ addToast }) {
     const t = setTimeout(() => { guardarCfg(accountId, cfgRaw); }, 700);
     return () => clearTimeout(t);
   }, [cfgRaw, accountId]);
+
+  // Cambiar de cuenta tira los cambios locales: son de otro tablero.
+  useEffect(() => { setCambios({}); }, [accountId]);
+
+  // Prende o pausa en Meta. Es la única acción de AdsLab que le cambia algo a
+  // la cuenta publicitaria, así que hace tres cosas que las lecturas no
+  // necesitan: marca las filas como "en curso" para que no se pueda clickear
+  // dos veces, aplica solo lo que Meta confirmó (si de 5 salieron 3, se
+  // repintan 3) y deja el deshacer a mano en el toast.
+  const aplicarRef = useRef(null);
+  const aplicarEstado = useCallback(async ({ level, items, status, esDeshacer = false }) => {
+    const lista = (items || []).filter(Boolean);
+    if (!lista.length || !accountId) return;
+    const ids = lista.map(i => i.id);
+
+    setTrabajando(prev => { const n = { ...prev }; for (const id of ids) n[id] = true; return n; });
+    const r = await cambiarEstado({ accountId, connId: account?.connId, level, ids, status });
+    setTrabajando(prev => { const n = { ...prev }; for (const id of ids) delete n[id]; return n; });
+
+    const salieron = new Set(r.resultados.filter(x => x.ok).map(x => x.id));
+    setCambios(prev => {
+      const n = { ...prev };
+      for (const id of salieron) n[id] = status;
+      return n;
+    });
+
+    // El deshacer se ofrece solo sobre lo que efectivamente cambió, y no se
+    // ofrece sobre un deshacer (si no, es un interruptor infinito en un toast).
+    const revertibles = lista.filter(i => salieron.has(i.id));
+    addToast?.({
+      type: r.resumen.tono,
+      message: r.resumen.mensaje,
+      duration: r.ok ? 7000 : 10000,
+      accion: !esDeshacer && revertibles.length ? {
+        label: 'Deshacer',
+        onClick: () => aplicarRef.current?.({ level, items: revertibles, status: inverso(status), esDeshacer: true }),
+      } : null,
+    });
+  }, [accountId, account, addToast]);
+  useEffect(() => { aplicarRef.current = aplicarEstado; }, [aplicarEstado]);
 
   const load = useCallback(async (acct, datePreset) => {
     if (!acct) return;
@@ -1034,7 +1202,13 @@ export default function MetricasSection({ addToast }) {
         </div>
       ) : (
         <>
-          {tab === 'hoy' && <VistaHoy ads={itemsHoy} cfg={cfg} currency={currency} accountId={accountId} onWhy={setWhy} nivel={nivelHoy} setNivel={setNivelHoy} />}
+          {tab === 'hoy' && <VistaHoy
+            ads={itemsHoy} cfg={cfg} currency={currency} accountId={accountId} onWhy={setWhy}
+            nivel={nivelHoy} setNivel={setNivelHoy}
+            cambios={cambios} trabajando={trabajando}
+            onEstado={({ items, status }) => aplicarEstado({ level: nivelHoy === 'campaigns' ? 'campaign' : 'ad', items, status })}
+            onRecalcular={() => account && load(account, preset)}
+          />}
           {tab === 'embudo' && (
             embudoError ? (
               <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl flex items-start gap-3">

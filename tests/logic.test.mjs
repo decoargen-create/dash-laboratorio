@@ -16,6 +16,7 @@ import {
   nombreBase, nombrePublicado,
 } from '../api/produccion/_naming.js';
 import { parseFunnel, deriveFunnelRates, pickAction } from '../api/meta/_funnel.js';
+import { validarPedido, mismaCuenta, resumirResultados, inverso, estadoVisible, MAX_IDS } from '../api/meta/_estado.js';
 import { repararTarjetas, carpetaDestinoDe } from '../api/produccion/_repair-core.js';
 import {
   CFG_DEFAULT, cfgPara, roasBreakeven, fechaDelNombre, lunesDe, tipoDeCampana,
@@ -423,6 +424,53 @@ eq('las semanas sin foto siguen en vivo', fusion.find(f => f.semana === '2026-08
 // Una foto ya guardada no se vuelve a congelar.
 eq('no re-congela lo que ya tiene foto',
   cohortesParaCongelar(cohHoy.filas, { hoy: HOY, cfg: cfgFoto, snapshots: snaps }).map(f => f.semana).includes('2026-08-03'), false);
+
+// ─────────── PRENDER / PAUSAR EN META (la única escritura) ───────────
+console.log('\nPRENDER / PAUSAR:');
+eq('pedido válido normaliza el estado a mayúsculas',
+  validarPedido({ level: 'campaign', ids: ['120210000000001'], status: 'paused' }),
+  { ok: true, level: 'campaign', ids: ['120210000000001'], status: 'PAUSED' });
+eq('acepta un id suelto además de la lista',
+  validarPedido({ level: 'ad', id: '120210000000002', status: 'ACTIVE' }).ids, ['120210000000002']);
+eq('deduplica ids repetidos',
+  validarPedido({ level: 'ad', ids: ['123456', '123456'], status: 'ACTIVE' }).ids, ['123456']);
+// El candado que importa: DELETED y ARCHIVED son valores válidos del mismo
+// campo en Meta y NO se pueden deshacer con otro click.
+eq('rechaza DELETED', validarPedido({ level: 'campaign', ids: ['123456'], status: 'DELETED' }).ok, false);
+eq('rechaza ARCHIVED', validarPedido({ level: 'campaign', ids: ['123456'], status: 'ARCHIVED' }).ok, false);
+eq('rechaza un nivel inventado', validarPedido({ level: 'cuenta', ids: ['123456'], status: 'PAUSED' }).ok, false);
+eq('rechaza un id que no es numérico', validarPedido({ level: 'ad', ids: ['act_123/insights'], status: 'PAUSED' }).ok, false);
+eq('rechaza la lista vacía', validarPedido({ level: 'ad', ids: [], status: 'PAUSED' }).ok, false);
+// Tope: una pausada masiva por accidente apaga la facturación del día.
+eq(`rechaza más de ${MAX_IDS} de una vez`,
+  validarPedido({ level: 'ad', ids: Array.from({ length: MAX_IDS + 1 }, (_, i) => String(1000000 + i)), status: 'PAUSED' }).ok, false);
+eq(`acepta exactamente ${MAX_IDS}`,
+  validarPedido({ level: 'ad', ids: Array.from({ length: MAX_IDS }, (_, i) => String(1000000 + i)), status: 'PAUSED' }).ok, true);
+
+// Meta devuelve el id de cuenta con y sin act_ según el endpoint.
+eq('act_123 y 123 son la misma cuenta', mismaCuenta('123456789', 'act_123456789'), true);
+eq('cuentas distintas no pasan', mismaCuenta('act_111', 'act_222'), false);
+eq('cuenta vacía nunca coincide', mismaCuenta('', ''), false);
+
+// Meta no da transacciones: una tanda puede salir a medias y el mensaje lo dice.
+eq('todo bien → success',
+  resumirResultados([{ id: '1', ok: true }, { id: '2', ok: true }], { level: 'campaign', status: 'PAUSED' }),
+  { total: 2, ok: 2, fallaron: 0, tono: 'success', mensaje: 'Pausé 2 campañas.' });
+eq('una sola va en singular',
+  resumirResultados([{ id: '1', ok: true }], { level: 'campaign', status: 'ACTIVE' }).mensaje, 'Prendí 1 campaña.');
+eq('a medias → warning y dice cuántas fallaron',
+  resumirResultados([{ id: '1', ok: true }, { id: '2', ok: false, error: 'sin permiso' }], { level: 'ad', status: 'PAUSED' }),
+  { total: 2, ok: 1, fallaron: 1, tono: 'warning', mensaje: 'Pausé 1 anuncio, 1 no se pudo: sin permiso' });
+eq('nada salió → error',
+  resumirResultados([{ id: '1', ok: false, error: 'token vencido' }], { level: 'campaign', status: 'PAUSED' }).tono, 'error');
+
+// El botón se dibuja con lo que dijo Meta, salvo que lo hayamos cambiado acá.
+eq('sin cambios locales manda lo que trajo Meta', estadoVisible({ id: 'a', status: 'ACTIVE' }, {}), 'ACTIVE');
+eq('el cambio local pisa lo que trajo Meta', estadoVisible({ id: 'a', status: 'ACTIVE' }, { a: 'PAUSED' }), 'PAUSED');
+eq('sin estado conocido no hay botón', estadoVisible({ id: 'a' }, {}), null);
+eq('deshacer un pausado lo prende', inverso('PAUSED'), 'ACTIVE');
+eq('deshacer un prendido lo pausa', inverso('ACTIVE'), 'PAUSED');
+
 
 // ─────────── RESUMEN ───────────
 console.log(`\n${'─'.repeat(40)}\nRESULTADO: ${pass} ✅   ${fail} ❌\n`);

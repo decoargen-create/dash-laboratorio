@@ -1516,6 +1516,12 @@ function AppShell({ onExit }) {
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), toast.duration || 3500);
   }, []);
 
+  // Sacar un toast a mano: lo usa el botón de acción ("Deshacer"), que una vez
+  // clickeado no tiene sentido que siga ofreciéndose.
+  const dismissToast = useCallback((id) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  }, []);
+
   // Puente global de toasts: componentes que no reciben addToast por prop (ej.
   // BalanceBar en el header) pueden disparar un toast con
   // window.dispatchEvent(new CustomEvent('viora:toast', { detail: {...} })).
@@ -2171,7 +2177,7 @@ function AppShell({ onExit }) {
         {supabase
           ? <SupabaseAuthScreen onLoggedIn={setSupabaseUser} />
           : <LoginScreen onLogin={handleLogin} onSessionAuth={handleSessionAuth} darkMode={darkMode} toggleDarkMode={toggleDarkMode} />}
-        <ToastContainer toasts={toasts} />
+        <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       </>
     );
   }
@@ -2189,7 +2195,7 @@ function AppShell({ onExit }) {
           darkMode={darkMode}
           toggleDarkMode={toggleDarkMode}
         />
-        <ToastContainer toasts={toasts} />
+        <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       </>
     );
   }
@@ -2484,7 +2490,7 @@ function AppShell({ onExit }) {
       )}
 
       {/* Toast container */}
-      <ToastContainer toasts={toasts} />
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }
@@ -8781,7 +8787,7 @@ export function useCountUp(target, duration = 800) {
 
 // Container de toasts fijado abajo a la derecha. Cada toast desliza desde
 // la derecha con animación y se auto-destruye.
-function ToastContainer({ toasts }) {
+function ToastContainer({ toasts, onDismiss }) {
   return (
     // aria-live: los lectores de pantalla anuncian los toasts (antes eran
     // invisibles para accesibilidad). polite = no interrumpe; suficiente para
@@ -8805,7 +8811,20 @@ function ToastContainer({ toasts }) {
           }`}>
             {t.type === 'success' ? <Check size={14} /> : t.type === 'error' ? <X size={14} /> : t.type === 'warning' ? <AlertTriangle size={14} /> : <Bell size={14} />}
           </div>
-          <div className="flex-1 text-sm font-medium">{t.message}</div>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium">{t.message}</div>
+            {/* Acción opcional del toast — hoy la usa "Deshacer" de prender/
+                pausar campañas. Un cambio en la cuenta publicitaria mueve
+                plata de verdad: el arrepentimiento tiene que estar a un click,
+                no a "buscá cuál era y volvé a prenderla". */}
+            {t.accion && (
+              <button
+                onClick={() => { t.accion.onClick?.(); onDismiss?.(t.id); }}
+                className="mt-1 text-xs font-bold underline underline-offset-2 opacity-80 hover:opacity-100">
+                {t.accion.label}
+              </button>
+            )}
+          </div>
         </div>
       ))}
     </div>

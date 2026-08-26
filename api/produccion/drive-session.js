@@ -17,7 +17,7 @@
 // funciona aunque todavía no hayas conectado la carpeta de Drive.
 
 import { getUserIdFromAuth } from '../marketing/_supabase-server.js';
-import { driveEnsureFolder, driveList } from '../actas/_google.js';
+import { driveEnsureFolder, driveList, driveIsAlive } from '../actas/_google.js';
 import { getDriveContext } from './_drive-ctx.js';
 import { clean, cardFolderName } from './_naming.js';
 
@@ -101,8 +101,12 @@ export default async function handler(req, res) {
     //   <raíz "Creativos AdsLab">/<Producto>/<Persona>/<Producto [Persona][d-m][id]>/
     // El [id] al final es lo que hace que cada TARJETA tenga su carpeta: sin
     // eso, dos tarjetas del mismo producto/persona/semana compartían carpeta.
+    // Si la tarjeta trae folderId lo reusamos, PERO sólo si esa carpeta sigue
+    // viva (no borrada en Drive). Si el user la mandó a la papelera, reconstruimos
+    // la ruta — sin esto las subidas a esa tarjeta fallaban para siempre ("Drive
+    // o nada") sin forma de recuperarse desde la UI.
     let subFolder;
-    if (body.folderId) {
+    if (body.folderId && await driveIsAlive(token, body.folderId)) {
       subFolder = body.folderId;
     } else {
       const prodFolder = await driveEnsureFolder(token, rootId, clean(productoNombre, 'Producto'));

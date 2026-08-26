@@ -13,7 +13,7 @@
 
 import { getUserIdFromAuth, getServiceClient } from '../marketing/_supabase-server.js';
 import { getDriveContext } from './_drive-ctx.js';
-import { driveEnsureFolder } from '../actas/_google.js';
+import { driveEnsureFolder, driveIsAlive } from '../actas/_google.js';
 import { clean, cardFolderName } from './_naming.js';
 
 export const config = { maxDuration: 300 };
@@ -68,8 +68,11 @@ export default async function handler(req, res) {
 
   try {
     // 3) Carpeta destino: reusamos la de la tarjeta si ya existe (otros videos ya
-    // en Drive), sino armamos la ruta <raíz>/<Producto>/<Persona>/<tarjeta>.
+    // en Drive) y sigue VIVA (no borrada en Drive) — sino el video migrado caería
+    // en una carpeta en la papelera que se auto-purga (pérdida). Si no sirve,
+    // armamos la ruta <raíz>/<Producto>/<Persona>/<tarjeta>.
     let subFolder = archivos.find(f => f && f.folderId)?.folderId || null;
+    if (subFolder && !(await driveIsAlive(token, subFolder))) subFolder = null;
     if (!subFolder) {
       const prodFolder = await driveEnsureFolder(token, ctx.rootId, clean(card.producto_nombre, 'Producto'));
       const personaFolder = await driveEnsureFolder(token, prodFolder, clean(card.persona, 'Equipo'));
@@ -139,20 +142,33 @@ export default async function handler(req, res) {
       ts: archivo.ts,
       ...(archivo.correccion ? { correccion: archivo.correccion } : {}),
     };
-    // Releemos por si cambió mientras subíamos (subida puede tardar).
-    const { data: fresh } = await svc.from('produccion_asignaciones').select('archivos').eq('id', cardId).maybeSingle();
-    const base = Array.isArray(fresh?.archivos) ? fresh.archivos : archivos;
-    // Identificamos el archivo por storagePath (clave ÚNICA y ya validada), NO
-    // por ts: los videos viejos de AdsLab se guardaron con ts:0 (rec.ts||0), así
-    // que matchear por ts colapsaría TODOS los ts:0 en uno → pérdida de datos.
-    const nuevos = base.map(f => (f && f.storagePath === storagePath) ? nuevo : f);
-    const { error: upErr } = await svc.from('produccion_asignaciones')
-      .update({ archivos: nuevos, updated_at: new Date().toISOString() })
-      .eq('id', cardId);
-    if (upErr) {
+    // Actualizamos la fila con OPTIMISTIC CONCURRENCY: releemos archivos+updated_at
+    // y sólo escribimos si updated_at NO cambió. Si otro proceso escribió en el
+    // medio (dos migraciones de la MISMA tarjeta a la vez), reintentamos con el
+    // estado fresco — así no nos pisamos ni revertimos otro archivo (era la
+    // carrera read-modify-write). Identificamos el archivo por storagePath (clave
+    // ÚNICA), NO por ts: los videos viejos comparten ts:0 → colapsaría en uno.
+    let wrote = false, lastErr = null;
+    for (let intento = 0; intento < 4 && !wrote; intento++) {
+      const { data: fresh } = await svc.from('produccion_asignaciones')
+        .select('archivos, updated_at').eq('id', cardId).maybeSingle();
+      const base = Array.isArray(fresh?.archivos) ? fresh.archivos : archivos;
+      const target = base.find(f => f && f.storagePath === storagePath);
+      // Ya no está como AdsLab (otro proceso lo migró/borró) → nada que reescribir.
+      if (!target || target.destino === 'drive') { wrote = true; break; }
+      const nuevos = base.map(f => (f && f.storagePath === storagePath) ? nuevo : f);
+      let q = svc.from('produccion_asignaciones')
+        .update({ archivos: nuevos, updated_at: new Date().toISOString() })
+        .eq('id', cardId);
+      if (fresh?.updated_at) q = q.eq('updated_at', fresh.updated_at); // solo si nadie escribió
+      const { data: upd, error: upErr } = await q.select('id');
+      if (upErr) { lastErr = upErr; break; }
+      if (Array.isArray(upd) && upd.length > 0) wrote = true; // escribió; sino → conflicto, reintenta
+    }
+    if (!wrote) {
       // El video YA está en Drive; solo falló actualizar el registro. NO borramos
       // AdsLab (así no queda huérfano) y avisamos para reintentar.
-      return respondJSON(res, 500, { error: `El video subió a Drive pero no pude actualizar la tarjeta: ${upErr.message}. Reintentá.` });
+      return respondJSON(res, 500, { error: `El video subió a Drive pero no pude actualizar la tarjeta${lastErr ? `: ${lastErr.message}` : ' (conflicto de escritura)'}. Reintentá.` });
     }
 
     // 8) Recién ahora borramos la copia de AdsLab (ya confirmada en Drive y con la

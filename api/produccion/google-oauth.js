@@ -133,8 +133,12 @@ export default async function handler(req, res) {
   }
 
   if (action === 'disconnect') {
+    // Desconectar borra la conexión de Drive de TODO el lab (destructivo) → solo
+    // admin. Antes bastaba con "no ser creator", así que un rol 'user' podía
+    // dejar sin Drive a todo el equipo. Conectar/reconectar sigue abierto a
+    // no-creators (no es destructivo y el dueño necesita poder reconectar).
     const role = await getUserRole(uid);
-    if (role === 'creator') return respondJSON(res, 403, { error: 'Un creator no puede desconectar Drive.' });
+    if (role !== 'admin') return respondJSON(res, 403, { error: 'Solo un admin puede desconectar Drive.' });
     await deleteGoogleOAuth(null); // borra la conexión lab-wide
     return respondJSON(res, 200, { ok: true, connected: false });
   }

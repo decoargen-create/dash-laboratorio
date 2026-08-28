@@ -62,3 +62,35 @@ export function stampAprobado(el) {
   el.appendChild(st);
   setTimeout(() => st.remove(), 1700);
 }
+
+// Vuelo FLIP de una tarjeta del tablero al cambiar de columna (dopamina ✨).
+// First: medimos dónde está la tarjeta. mutate() cambia el estado (React la
+// re-monta en la otra columna). Last: la medimos de nuevo. Invert+Play: la
+// arrancamos visualmente desde donde estaba y la dejamos viajar con CSS.
+// Doble requestAnimationFrame: el primero espera el commit de React, el
+// segundo garantiza que el transform inicial se pintó antes de animar.
+export function flipMove(cardId, mutate) {
+  const sel = `[data-prodcard-id="${cardId}"]`;
+  const el = document.querySelector(sel);
+  const first = el?.getBoundingClientRect();
+  mutate();
+  if (!motionOk() || !first) return;
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const nel = document.querySelector(sel);
+    if (!nel) return;
+    const last = nel.getBoundingClientRect();
+    const dx = first.left - last.left;
+    const dy = first.top - last.top;
+    if (Math.abs(dx) < 2 && Math.abs(dy) < 2) return;
+    nel.style.transition = 'none';
+    nel.style.transform = `translate(${dx}px, ${dy}px) scale(1.03)`;
+    nel.style.zIndex = '50';
+    nel.style.boxShadow = '0 18px 40px rgba(52,211,153,.35)';
+    requestAnimationFrame(() => {
+      nel.style.transition = 'transform .65s cubic-bezier(.3,.9,.3,1), box-shadow .65s ease';
+      nel.style.transform = '';
+      nel.style.boxShadow = '';
+      setTimeout(() => { nel.style.transition = ''; nel.style.zIndex = ''; }, 720);
+    });
+  }));
+}

@@ -24,6 +24,7 @@ import {
   VIDEOS_POR_PRODUCTO, ESTADO_LABELS, ESTADOS,
 } from './produccionStore.js';
 import { subirParaTarjeta, VIDEO_ACCEPT, aprobarTodosConCascada } from './produccionUpload.jsx';
+import { flipMove } from './produccionFx.js';
 import { personaColor, CHIP_CLS, CARD_TINT, CARD_STRIPE } from './produccionColors.js';
 import ConfirmDialog from './ConfirmDialog.jsx';
 
@@ -156,7 +157,7 @@ export default function TarjetaProduccion({ a, num, personas = [], team = [], on
   };
   const publicar = (e) => {
     e.stopPropagation();
-    updateAssignment(a.id, { estado: 'publicado' });
+    flipMove(a.id, () => updateAssignment(a.id, { estado: 'publicado' }));
     addToast?.({ type: 'success', message: `🚀 ${a.productoNombre} publicado — ¡a volar!` });
   };
 
@@ -165,7 +166,7 @@ export default function TarjetaProduccion({ a, num, personas = [], team = [], on
     : {};
 
   return (
-    <div {...dragProps} data-prodcard
+    <div {...dragProps} data-prodcard data-prodcard-id={a.id}
       onClick={() => onOpen?.()}
       className={`group relative bg-white dark:bg-gray-800 border rounded-xl p-2.5 shadow-sm hover:shadow-lg hover:shadow-pink-500/10 hover:-translate-y-0.5 transition cursor-pointer ${tintCls} ${(menu || moveMenu) ? 'z-30' : ''} ${trabada ? 'border-amber-400/80 dark:border-amber-500/60 hover:border-amber-500' : 'border-gray-200 dark:border-gray-700 hover:border-pink-300 dark:hover:border-pink-700/70'}`}>
       {/* Barra lateral con el color de la persona (identificación rápida). */}

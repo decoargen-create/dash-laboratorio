@@ -15,7 +15,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Film, X, UploadCloud, Loader2, AlertTriangle, ExternalLink, Check, CheckCircle2 } from 'lucide-react';
 import { supabase, getCurrentUser } from './supabase.js';
-import { sparksAt, motionOk, confettiAt, stampAprobado } from './produccionFx.js';
+import { sparksAt, motionOk, confettiAt, stampAprobado, flipMove } from './produccionFx.js';
 import { playBulkDoneChime } from './sounds.js';
 import { addArchivos, removeArchivo, replaceArchivo, clearCorregidoVideo, setAprobadoVideo, updateAssignment, setCorreccionVideo, refreshProduccion, VIDEOS_POR_PRODUCTO } from './produccionStore.js';
 
@@ -422,9 +422,14 @@ export function aprobarTodosConCascada(a, el, addToast) {
   return new Promise(resolve => {
     pendientes.forEach((f, i) => setTimeout(() => setAprobadoVideo(a.id, f.ts, true), i * paso));
     setTimeout(() => {
-      updateAssignment(a.id, { estado: 'aprobado' });
+      // Festejo sobre la posición actual…
       festejarAprobado(a, el, addToast);
-      resolve();
+      // …y a los 700ms la tarjeta VUELA a su columna nueva (FLIP). El sello
+      // ya se vio; el vuelo remata el momento.
+      setTimeout(() => {
+        flipMove(a.id, () => updateAssignment(a.id, { estado: 'aprobado' }));
+        resolve();
+      }, motionOk() ? 700 : 0);
     }, pendientes.length * paso + 60);
   });
 }

@@ -23,7 +23,7 @@ import {
   resyncDesdeNube, vaciarTodo, setMaterialLinkProducto, probarDiscord,
   loadNotifConfig, saveNotifConfig, toggleWinner, winnersDeProducto, pagoProductoDe,
 } from './produccionStore.js';
-import { CreativosSection, subirParaTarjeta, VIDEO_ACCEPT, probeDrive } from './produccionUpload.jsx';
+import { CreativosSection, subirParaTarjeta, VIDEO_ACCEPT, probeDrive, aprobarTodosConCascada, AnilloAprobados } from './produccionUpload.jsx';
 import { numerarDuplicados, columnaEfectiva } from './produccionCalc.js';
 import { registrarColoresPersonas, personaColor, CHIP_CLS } from './produccionColors.js';
 import TarjetaProduccion, { CAPS_ADMIN } from './produccionCard.jsx';
@@ -815,6 +815,21 @@ export default function ProduccionSection({ addToast }) {
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2 flex-wrap">
+          {/* Racha del día: tarjetas que pasaron a Aprobado HOY (por historial).
+              Gamificación mínima — se prende con la primera del día. */}
+          {(() => {
+            const hoy = new Date().toDateString();
+            const n = asigs.filter(x => (x.historial || []).some(e =>
+              e?.tipo === 'estado' && e?.to === 'aprobado' && e?.ts && new Date(e.ts).toDateString() === hoy
+            )).length;
+            if (n === 0) return null;
+            return (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-extrabold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-300/60 dark:border-amber-700/60 rounded-full"
+                title={`${n} tarjeta${n === 1 ? '' : 's'} aprobada${n === 1 ? '' : 's'} hoy`}>
+                🔥 {n} hoy
+              </span>
+            );
+          })()}
           <button onClick={() => setShowBuscar(true)}
             title="Buscar videos: por nombre del video, producto, persona o fecha — con link directo a Drive."
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:border-brand-400 hover:text-brand-600 dark:hover:text-brand-300 transition shadow-sm">
@@ -2045,10 +2060,10 @@ function CardDetailModal({ a, personas, team = [], onClose, addToast, onTeamChan
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto bg-black/50 backdrop-blur-sm" onClick={() => { saveAll(); onClose(); }}>
-      <div className="w-full max-w-2xl my-6 bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden" onClick={e => e.stopPropagation()}>
+      <div data-card-detail className="relative w-full max-w-2xl my-6 bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden" onClick={e => e.stopPropagation()}>
         {/* Header */}
-        <div className="flex items-start gap-2 px-5 py-4 border-b border-gray-100 dark:border-gray-800">
-          <Film size={18} className="text-brand-500 mt-0.5" />
+        <div className="flex items-start gap-3 px-5 py-4 border-b border-gray-100 dark:border-gray-800">
+          <AnilloAprobados a={a} />
           <div className="flex-1 min-w-0">
             <h3 className="text-base font-bold text-gray-900 dark:text-gray-100">{a.productoNombre || 'Producto'}</h3>
             <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
@@ -2163,10 +2178,11 @@ function CardDetailModal({ a, personas, team = [], onClose, addToast, onTeamChan
                   {/* Contador DERIVADO de los ✓ por video — los +/- manuales se
                       fueron: la aprobación se marca en cada fila de video, o
                       todas juntas con "Aprobar todos". */}
-                  <span className={`font-mono tabular-nums text-sm font-bold ${todo ? 'text-emerald-500' : 'text-gray-600 dark:text-gray-300'}`}>{aprob}/{subidos}</span>
+                  {/* Latido cuando falta 1 solo — invita a cerrar la tarjeta. */}
+                  <span className={`font-mono tabular-nums text-sm font-bold ${todo ? 'text-emerald-500' : aprob === subidos - 1 && subidos > 0 ? 'text-amber-500 fx-latido' : 'text-gray-600 dark:text-gray-300'}`}>{aprob}/{subidos}</span>
                   {subidos > 0 && (
                     <button
-                      onClick={() => { aprobarTodosVideos(a.id); updateAssignment(a.id, { estado: 'aprobado' }); addToast?.({ type: 'success', message: `Aprobado (${subidos}/${subidos}) — listo para publicar` }); }}
+                      onClick={(e) => { aprobarTodosConCascada(a, e.currentTarget.closest('[data-card-detail]'), addToast); }}
                       className={`ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition ${todo && !esCompleto(a.estado) ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm' : 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100'}`}>
                       <CheckCircle2 size={14} /> Aprobar todos
                     </button>

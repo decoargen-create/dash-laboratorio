@@ -15,9 +15,26 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Film, X, UploadCloud, Loader2, AlertTriangle, ExternalLink, Check, CheckCircle2 } from 'lucide-react';
 import { supabase, getCurrentUser } from './supabase.js';
+import { sparksAt, motionOk, confettiAt, stampAprobado, flipMove } from './produccionFx.js';
+import { playBulkDoneChime } from './sounds.js';
 import { addArchivos, removeArchivo, replaceArchivo, clearCorregidoVideo, setAprobadoVideo, updateAssignment, setCorreccionVideo, refreshProduccion, VIDEOS_POR_PRODUCTO } from './produccionStore.js';
 
 const BUCKET = 'creativos';
+
+// Logo real de Google Drive (tricolor) — elegido por el user: un ícono que se
+// sobreentiende solo, en lugar del "DRIVE" en texto.
+export function DriveLogo({ size = 14 }) {
+  return (
+    <svg width={size} height={Math.round(size * 0.9)} viewBox="0 0 87.3 78" aria-hidden="true">
+      <path fill="#0066da" d="m6.6 66.85 3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8h-27.5c0 1.55.4 3.1 1.2 4.5z" />
+      <path fill="#00ac47" d="m43.65 25-13.75-23.8c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44a9.06 9.06 0 0 0-1.2 4.5h27.5z" />
+      <path fill="#ea4335" d="m73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5h-27.502l5.852 11.5z" />
+      <path fill="#00832d" d="m43.65 25 13.75-23.8c-1.35-.8-2.9-1.2-4.5-1.2h-18.5c-1.6 0-3.15.45-4.5 1.2z" />
+      <path fill="#2684fc" d="m59.8 53h-32.3l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z" />
+      <path fill="#ffba00" d="m73.4 26.5-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3l-13.75 23.8 16.15 28h27.45c0-1.55-.4-3.1-1.2-4.5z" />
+    </svg>
+  );
+}
 
 // Aceptamos cualquier formato de video razonable. Lista amplia de extensiones
 // + el chequeo de MIME 'video/*' (aceptaVideo abajo) cubren prácticamente todo
@@ -331,7 +348,7 @@ export async function reemplazarVideo(a, viejo, file, { addToast } = {}) {
   const restantes = (a.archivos || []).filter(f => f.ts !== viejo.ts && f.correccion?.texto).length;
   const paso = a.estado === 'porhacer' && restantes === 0;
   if (paso) updateAssignment(a.id, { estado: 'revision' });
-  return { ok: true, paso, restantes, destino: archivo.destino, driveError: archivo.driveError || null };
+  return { ok: true, paso, restantes, destino: archivo.destino, driveError: archivo.driveError || null, nuevoTs: archivo.ts };
 }
 
 // Mueve a Google Drive los videos de una tarjeta que quedaron en AdsLab (por un
@@ -370,6 +387,71 @@ export async function moverArchivosADrive(a, { onProgress, addToast } = {}) {
   return { ok, fail };
 }
 
+// Festejo de "Aprobar todos" (elegido por el user: cascada + confeti + sello
+// + chime + toast con resumen). `el` es el contenedor donde estampar el sello
+// (tiene que poder ser position:relative). La CASCADA la hace el caller
+// aprobando de a uno con stagger; esto es el gran final.
+export function festejarAprobado(a, el, addToast) {
+  try {
+    if (el) {
+      el.style.position = el.style.position || 'relative';
+      confettiAt(el);
+      stampAprobado(el);
+    } else {
+      confettiAt(document.body);
+    }
+  } catch {}
+  playBulkDoneChime();
+  const subidos = a.archivos?.length || 0;
+  const nCorr = (a.archivos || []).filter(f => f.corregido).length;
+  const dias = a.createdAt ? Math.max(1, Math.round((Date.now() - Date.parse(a.createdAt)) / 86400000)) : null;
+  addToast?.({
+    type: 'success',
+    message: `🎉 ${a.productoNombre || 'Producto'} aprobado — ${subidos} video${subidos !== 1 ? 's' : ''} de ${a.persona || 'Equipo'}`
+      + (nCorr > 0 ? ` · ${nCorr} corrección${nCorr !== 1 ? 'es' : ''} resuelta${nCorr !== 1 ? 's' : ''}` : '')
+      + (dias ? ` · ciclo: ${dias} día${dias !== 1 ? 's' : ''}` : ''),
+  });
+}
+
+// Aprueba los videos pendientes DE A UNO con un pequeño stagger (la cascada
+// que eligió el user) y al final cambia el estado y festeja. Devuelve una
+// promesa que resuelve cuando terminó todo.
+export function aprobarTodosConCascada(a, el, addToast) {
+  const pendientes = (a.archivos || []).filter(f => !f.aprobado);
+  const paso = motionOk() ? 150 : 0;
+  return new Promise(resolve => {
+    pendientes.forEach((f, i) => setTimeout(() => setAprobadoVideo(a.id, f.ts, true), i * paso));
+    setTimeout(() => {
+      // Festejo sobre la posición actual…
+      festejarAprobado(a, el, addToast);
+      // …y a los 700ms la tarjeta VUELA a su columna nueva (FLIP). El sello
+      // ya se vio; el vuelo remata el momento.
+      setTimeout(() => {
+        flipMove(a.id, () => updateAssignment(a.id, { estado: 'aprobado' }));
+        resolve();
+      }, motionOk() ? 700 : 0);
+    }, pendientes.length * paso + 60);
+  });
+}
+
+// Anillo de progreso de aprobación — va en el header del detalle de la
+// tarjeta (admin y creator). Verde cónico según aprobados/subidos.
+export function AnilloAprobados({ a, size = 44 }) {
+  const subidos = a.archivos?.length || 0;
+  const aprob = Math.min((a.archivos || []).filter(f => f.aprobado).length || a.videosAprobados || 0, subidos);
+  const pct = subidos > 0 ? Math.round((aprob / subidos) * 100) : 0;
+  const inner = size - 10;
+  return (
+    <div className="rounded-full grid place-items-center shrink-0" title={`${aprob} de ${subidos} videos aprobados`}
+      style={{ width: size, height: size, background: `conic-gradient(#34d399 ${pct}%, rgba(127,140,170,.25) 0)` }}>
+      <div className="rounded-full bg-white dark:bg-gray-900 grid place-items-center font-extrabold tabular-nums text-gray-800 dark:text-gray-100"
+        style={{ width: inner, height: inner, fontSize: 10.5 }}>
+        {subidos > 0 ? `${aprob}/${subidos}` : '—'}
+      </div>
+    </div>
+  );
+}
+
 // Sección de creativos dentro de una tarjeta: lista de archivos ya subidos +
 // dropzone + cola de subida. `canDelete` controla si se puede quitar un archivo
 // ya subido (el admin sí; un creator también puede borrar los suyos).
@@ -385,6 +467,21 @@ export function CreativosSection({ a, addToast, canDelete = true, readOnly = fal
   // en el input oculto, y cuál se está reemplazando (spinner + deshabilitar).
   const [replaceTarget, setReplaceTarget] = useState(null); // { f, nVid }
   const [replacingTs, setReplacingTs] = useState(null);
+  // Efecto transitorio sobre una fila: { ts, kind: 'ok' | 'corr' | 'swap' }.
+  // Vive como state (no clases imperativas) porque el store re-renderiza la
+  // fila al cambiar — una clase puesta a mano en el DOM viejo se perdería.
+  const [fx, setFx] = useState(null);
+  const fireFx = (ts, kind) => {
+    setFx({ ts, kind });
+    setTimeout(() => setFx(cur => (cur && cur.ts === ts ? null : cur)), 900);
+  };
+  // Chispas del ✓: salen del botón ya re-renderizado (post-commit).
+  useEffect(() => {
+    if (fx?.kind === 'ok' && motionOk()) {
+      const btn = document.querySelector(`[data-okbtn="${fx.ts}"]`);
+      sparksAt(btn);
+    }
+  }, [fx]);
   const replaceInputRef = useRef(null);
 
   const onReplaceFile = async (file) => {
@@ -395,6 +492,7 @@ export function CreativosSection({ a, addToast, canDelete = true, readOnly = fal
     try {
       const r = await reemplazarVideo(a, target.f, file, { addToast });
       if (r?.ok) {
+        if (r.nuevoTs) fireFx(r.nuevoTs, 'swap');
         addToast?.({
           type: 'success',
           message: `Video ${target.nVid} reemplazado ✓${r.paso ? ' · la tarjeta volvió a En revisión'
@@ -549,7 +647,7 @@ export function CreativosSection({ a, addToast, canDelete = true, readOnly = fal
             const fixed = (!corr && f.corregido && (a.estado === 'porhacer' || a.estado === 'revision')) ? f.corregido : null;
             return (
             <div key={f.ts}>
-              <div className={`flex items-center gap-2 text-xs rounded px-2.5 py-1.5 ${corr ? 'bg-amber-50 dark:bg-amber-900/20 ring-1 ring-amber-300 dark:ring-amber-800/60' : fixed ? 'bg-emerald-50 dark:bg-emerald-900/20 ring-1 ring-emerald-300 dark:ring-emerald-800/60' : 'bg-gray-50 dark:bg-gray-800'}`}>
+              <div className={`flex items-center gap-2 text-xs rounded px-2.5 py-1.5 ${fx?.ts === f.ts && fx.kind === 'ok' ? 'fx-flash' : ''} ${fx?.ts === f.ts && fx.kind === 'corr' ? 'fx-pulse-amber' : ''} ${fx?.ts === f.ts && fx.kind === 'swap' ? 'fx-swapin' : ''} ${corr ? 'bg-amber-50 dark:bg-amber-900/20 ring-1 ring-amber-300 dark:ring-amber-800/60' : fixed ? 'bg-emerald-50 dark:bg-emerald-900/20 ring-1 ring-emerald-300 dark:ring-emerald-800/60' : 'bg-gray-50 dark:bg-gray-800'}`}>
                 <span className="shrink-0 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 text-[10px] font-black tabular-nums" title={`Video ${nVid}`}>{nVid}</span>
                 <Film size={12} className="text-emerald-500 flex-shrink-0" />
                 <span className="truncate flex-1 text-gray-700 dark:text-gray-200" title={f.name}>{f.name}</span>
@@ -558,33 +656,59 @@ export function CreativosSection({ a, addToast, canDelete = true, readOnly = fal
                     <Check size={10} /> Corregido
                   </span>
                 )}
-                <span className="text-[10px] uppercase font-bold text-gray-400">{f.destino === 'drive' ? 'Drive' : 'AdsLab'}</span>
-                {f.link && <a href={f.link} target="_blank" rel="noopener noreferrer" title="Ver en Drive" className="text-brand-500 hover:text-brand-600"><ExternalLink size={11} /></a>}
-                {!f.link && f.storagePath && (
-                  <button onClick={() => verVideo(f)} title="Ver el video (AdsLab)" className="text-brand-500 hover:text-brand-600"><ExternalLink size={11} /></button>
-                )}
-                {/* ✓ de aprobado: el revisor lo togglea; el resto (creador,
-                    tarjetas read-only) lo VE fijo — mismo ícono, sin acción. */}
-                {(!canReview || readOnly) && f.aprobado && (
-                  <span title={`Video ${nVid} aprobado por ${f.aprobado.por || 'el equipo'}`} className="text-emerald-500">
-                    <CheckCircle2 size={14} fill="currentColor" stroke="white" />
-                  </span>
-                )}
-                {canReview && !readOnly && (
-                  <button onClick={() => setAprobadoVideo(a.id, f.ts, !f.aprobado)}
-                    title={f.aprobado ? `Video ${nVid} aprobado por ${f.aprobado.por || 'Equipo'} — click para quitar` : `Aprobar el Video ${nVid}`}
-                    className={`transition ${f.aprobado ? 'text-emerald-500 hover:text-emerald-600' : 'text-gray-300 dark:text-gray-600 hover:text-emerald-500'}`}>
-                    <CheckCircle2 size={14} {...(f.aprobado ? { fill: 'currentColor', stroke: 'white' } : {})} />
-                  </button>
-                )}
-                {canReview && !readOnly && (
-                  <button onClick={() => { setCorrText(corr?.texto || ''); setCorrEdit(editing ? null : f.ts); }}
-                    title={corr ? `Editar la corrección del Video ${nVid}` : `Pedir corrección del Video ${nVid}`}
-                    className={`inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded transition ${corr ? 'text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/40' : 'text-gray-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20'}`}>
-                    ✎ {corr ? 'Corrección' : 'Corregir'}
-                  </button>
-                )}
-                {canDelete && !readOnly && <button onClick={() => removeArchivo(a.id, f.ts)} className="text-gray-300 hover:text-red-500"><X size={12} /></button>}
+                {/* Botonera "Todo íconos" (elegida por el user en el playground):
+                    4 celdas FIJAS → todas las filas quedan alineadas en columnas.
+                    Celda sin acción = span vacío del mismo ancho, nunca se omite. */}
+                <span className="shrink-0 grid grid-flow-col auto-cols-[26px] gap-1 items-center justify-items-center">
+                  {/* 1 · Ver el video (logo Drive real, o link firmado AdsLab) */}
+                  {f.link ? (
+                    <a href={f.link} target="_blank" rel="noopener noreferrer" title="Ver en Drive"
+                      className="w-[26px] h-[26px] rounded-lg inline-flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/10 transition">
+                      <DriveLogo size={14} />
+                    </a>
+                  ) : f.storagePath ? (
+                    <button onClick={() => verVideo(f)} title="Ver el video (AdsLab)"
+                      className="w-[26px] h-[26px] rounded-lg inline-flex items-center justify-center text-brand-500 hover:bg-black/5 dark:hover:bg-white/10 transition">
+                      <ExternalLink size={13} />
+                    </button>
+                  ) : <span />}
+                  {/* 2 · ✓ aprobar — revisor togglea; el resto lo ve fijo */}
+                  {canReview && !readOnly ? (
+                    <button data-okbtn={f.ts}
+                      onClick={() => {
+                        const activar = !f.aprobado;
+                        setAprobadoVideo(a.id, f.ts, activar);
+                        if (activar) fireFx(f.ts, 'ok');
+                      }}
+                      title={f.aprobado ? `Video ${nVid} aprobado por ${f.aprobado.por || 'Equipo'} — click para quitar` : `Aprobar el Video ${nVid}`}
+                      className={`relative w-[26px] h-[26px] rounded-lg inline-flex items-center justify-center transition ${fx?.ts === f.ts && fx.kind === 'ok' ? 'fx-pop' : ''} ${f.aprobado ? 'bg-emerald-500 text-white' : 'text-gray-300 dark:text-gray-600 hover:text-emerald-500 hover:bg-black/5 dark:hover:bg-white/10'}`}>
+                      <Check size={14} strokeWidth={3} />
+                    </button>
+                  ) : f.aprobado ? (
+                    <span title={`Video ${nVid} aprobado por ${f.aprobado.por || 'el equipo'}`}
+                      className="w-[26px] h-[26px] rounded-lg inline-flex items-center justify-center bg-emerald-500 text-white">
+                      <Check size={14} strokeWidth={3} />
+                    </span>
+                  ) : <span />}
+                  {/* 3 · ✎ corregir — revisor abre el editor; el resto lo ve fijo */}
+                  {canReview && !readOnly ? (
+                    <button onClick={() => { setCorrText(corr?.texto || ''); setCorrEdit(editing ? null : f.ts); }}
+                      title={corr ? `Editar la corrección del Video ${nVid}` : `Pedir corrección del Video ${nVid}`}
+                      className={`w-[26px] h-[26px] rounded-lg inline-flex items-center justify-center text-[13px] leading-none transition ${fx?.ts === f.ts && fx.kind === 'corr' ? 'fx-shake' : ''} ${corr ? 'bg-amber-400 text-amber-950' : 'text-gray-300 dark:text-gray-600 hover:text-amber-500 hover:bg-black/5 dark:hover:bg-white/10'}`}>
+                      ✎
+                    </button>
+                  ) : corr ? (
+                    <span title={`Corrección pedida en el Video ${nVid}`}
+                      className="w-[26px] h-[26px] rounded-lg inline-flex items-center justify-center text-[13px] leading-none bg-amber-400 text-amber-950">✎</span>
+                  ) : <span />}
+                  {/* 4 · ✕ quitar */}
+                  {canDelete && !readOnly ? (
+                    <button onClick={() => removeArchivo(a.id, f.ts)} title={`Quitar el Video ${nVid} de la tarjeta`}
+                      className="w-[26px] h-[26px] rounded-lg inline-flex items-center justify-center text-gray-300 dark:text-gray-600 hover:text-red-500 hover:bg-black/5 dark:hover:bg-white/10 transition">
+                      <X size={13} />
+                    </button>
+                  ) : <span />}
+                </span>
               </div>
 
               {/* Corrección pedida — visible para todos (el editor la ve read-only) */}
@@ -660,7 +784,7 @@ export function CreativosSection({ a, addToast, canDelete = true, readOnly = fal
                     {corr && <button onClick={() => { setCorreccionVideo(a.id, f.ts, ''); setCorrEdit(null); addToast?.({ type: 'info', message: `Corrección del Video ${nVid} quitada` }); }}
                       className="text-[11px] font-bold px-2 py-1 rounded text-gray-500 hover:text-red-500">Quitar</button>}
                     <button onClick={() => setCorrEdit(null)} className="text-[11px] font-bold px-2 py-1 rounded text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700">Cancelar</button>
-                    <button onClick={() => { const t = corrText.trim(); if (!t) { setCorrEdit(null); return; } setCorreccionVideo(a.id, f.ts, t); setCorrEdit(null); addToast?.({ type: 'success', message: `Corrección pedida en el Video ${nVid}` }); }}
+                    <button onClick={() => { const t = corrText.trim(); if (!t) { setCorrEdit(null); return; } setCorreccionVideo(a.id, f.ts, t); setCorrEdit(null); fireFx(f.ts, 'corr'); addToast?.({ type: 'success', message: `Corrección pedida en el Video ${nVid}` }); }}
                       className="text-[11px] font-extrabold px-2.5 py-1 rounded text-white bg-amber-500 hover:bg-amber-600">Pedir corrección</button>
                   </div>
                 </div>

@@ -23,7 +23,7 @@ import {
   updateAssignment, aprobarTodosVideos, assignCreator, removeAssignment, personasEnTarjetas,
   VIDEOS_POR_PRODUCTO, ESTADO_LABELS, ESTADOS,
 } from './produccionStore.js';
-import { subirParaTarjeta, VIDEO_ACCEPT } from './produccionUpload.jsx';
+import { subirParaTarjeta, VIDEO_ACCEPT, aprobarTodosConCascada } from './produccionUpload.jsx';
 import { personaColor, CHIP_CLS, CARD_TINT, CARD_STRIPE } from './produccionColors.js';
 import ConfirmDialog from './ConfirmDialog.jsx';
 
@@ -150,9 +150,9 @@ export default function TarjetaProduccion({ a, num, personas = [], team = [], on
 
   const aprobarTodos = (e) => {
     e.stopPropagation();
-    aprobarTodosVideos(a.id);
-    updateAssignment(a.id, { estado: 'aprobado' });
-    addToast?.({ type: 'success', message: `🎉 ¡${a.productoNombre} aprobado! (${subidos}/${subidos}) — listo para despegar` });
+    // Cascada + confeti + sello + chime + resumen (elegido en el playground).
+    // El sello se estampa sobre la tarjeta misma del tablero.
+    aprobarTodosConCascada(a, e.currentTarget.closest('[data-prodcard]'), addToast);
   };
   const publicar = (e) => {
     e.stopPropagation();
@@ -165,7 +165,7 @@ export default function TarjetaProduccion({ a, num, personas = [], team = [], on
     : {};
 
   return (
-    <div {...dragProps}
+    <div {...dragProps} data-prodcard
       onClick={() => onOpen?.()}
       className={`group relative bg-white dark:bg-gray-800 border rounded-xl p-2.5 shadow-sm hover:shadow-lg hover:shadow-pink-500/10 hover:-translate-y-0.5 transition cursor-pointer ${tintCls} ${(menu || moveMenu) ? 'z-30' : ''} ${trabada ? 'border-amber-400/80 dark:border-amber-500/60 hover:border-amber-500' : 'border-gray-200 dark:border-gray-700 hover:border-pink-300 dark:hover:border-pink-700/70'}`}>
       {/* Barra lateral con el color de la persona (identificación rápida). */}
@@ -258,9 +258,9 @@ export default function TarjetaProduccion({ a, num, personas = [], team = [], on
           <Film size={12} className="text-emerald-500" /><b className="text-gray-700 dark:text-gray-200">{subidos}</b>/{VIDEOS_POR_PRODUCTO} videos
         </span>
         {subidos > 0 && (
-          <span className={`inline-flex items-center gap-1 tabular-nums ${aprob >= subidos ? 'text-emerald-500' : 'text-gray-400'}`}
+          <span className={`inline-flex items-center gap-1 tabular-nums ${aprob >= subidos ? 'text-emerald-500' : aprob === subidos - 1 ? 'text-amber-500' : 'text-gray-400'}`}
             title={`${aprob} de ${subidos} videos subidos están aprobados`}>
-            <CheckCircle2 size={12} />
+            <CheckCircle2 size={12} className={aprob === subidos - 1 ? 'fx-latido' : ''} />
             <b>{aprob}/{subidos}</b> aprob.
           </span>
         )}

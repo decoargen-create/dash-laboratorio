@@ -240,3 +240,25 @@ body {
     linear-gradient(to right, rgba(255,255,255,0.06), rgba(0,0,0,0)) left center / 12px 100% no-repeat,
     linear-gradient(to left, rgba(255,255,255,0.06), rgba(0,0,0,0)) right center / 12px 100% no-repeat;
 }
+
+/* ===== Efectos de aprobación en Producción (ver produccionFx.js) ===== */
+.fx-pop { animation: fx-pop .45s cubic-bezier(.34,1.56,.64,1); }
+@keyframes fx-pop { 0% { transform: scale(.4); } 60% { transform: scale(1.3); } 100% { transform: scale(1); } }
+.fx-flash { animation: fx-flash .7s ease; }
+@keyframes fx-flash { 0% { background-color: rgba(52,211,153,.38); } 100% { background-color: transparent; } }
+.fx-shake { animation: fx-shake .4s ease; }
+@keyframes fx-shake { 0%,100% { transform: rotate(0); } 25% { transform: rotate(-13deg); } 75% { transform: rotate(13deg); } }
+.fx-pulse-amber { animation: fx-pulse-amber .9s ease 2; }
+@keyframes fx-pulse-amber { 0%,100% { box-shadow: inset 0 0 0 1px rgba(251,191,36,.4); } 50% { box-shadow: inset 0 0 0 3px #fbbf24; } }
+.fx-swapin { animation: fx-swapin .5s cubic-bezier(.34,1.4,.64,1); }
+@keyframes fx-swapin { 0% { opacity: 0; transform: translateX(20px); } 100% { opacity: 1; transform: none; } }
+.fx-latido { animation: fx-latido 1.1s ease infinite; display: inline-block; }
+@keyframes fx-latido { 0%,100% { transform: scale(1); } 50% { transform: scale(1.14); } }
+.fx-spark { position: absolute; left: 50%; top: 50%; width: 5px; height: 5px; border-radius: 99px; background: #34d399; pointer-events: none; z-index: 5; animation: fx-spark .55s ease-out forwards; }
+@keyframes fx-spark { 0% { transform: translate(0,0) scale(1); opacity: 1; } 100% { transform: translate(var(--dx), var(--dy)) scale(.2); opacity: 0; } }
+.fx-stamp { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 40; }
+.fx-stamp span { font-size: 28px; font-weight: 800; letter-spacing: .14em; color: #34d399; border: 3px solid #34d399; border-radius: 14px; padding: 8px 22px; background: rgba(12,17,31,.78); backdrop-filter: blur(2px); transform: rotate(-9deg) scale(3); opacity: 0; animation: fx-stamp .5s cubic-bezier(.2,1.4,.4,1) forwards; }
+@keyframes fx-stamp { 60% { transform: rotate(-9deg) scale(.95); opacity: 1; } 100% { transform: rotate(-9deg) scale(1); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .fx-pop, .fx-flash, .fx-shake, .fx-pulse-amber, .fx-swapin, .fx-latido, .fx-spark, .fx-stamp span { animation: none; }
+}

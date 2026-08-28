@@ -19,7 +19,7 @@ import {
   monthKeyOf, monthLabel, weeksInMonth, pagoProductoDe, bonusDe,
   resumenVideosPorProducto, VIDEOS_POR_PRODUCTO,
 } from './produccionStore.js';
-import { CreativosSection } from './produccionUpload.jsx';
+import { CreativosSection, AnilloAprobados } from './produccionUpload.jsx';
 import { numerarDuplicados, columnaEfectiva } from './produccionCalc.js';
 import TarjetaProduccion, { CAPS_EDITOR } from './produccionCard.jsx';
 import { registrarColoresPersonas } from './produccionColors.js';
@@ -77,8 +77,8 @@ function CreatorCardDetail({ a, num, onClose, addToast }) {
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto bg-black/50 backdrop-blur-sm" onClick={onClose}>
       <div className="w-full max-w-lg my-6 bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden" onClick={e => e.stopPropagation()}>
-        <div className="flex items-start gap-2 px-5 py-4 border-b border-gray-100 dark:border-gray-800">
-          <Film size={18} className="text-pink-500 mt-0.5" />
+        <div className="flex items-start gap-3 px-5 py-4 border-b border-gray-100 dark:border-gray-800">
+          <AnilloAprobados a={a} />
           <div className="flex-1 min-w-0">
             <h3 className="text-base font-bold text-gray-900 dark:text-gray-100 leading-tight">{a.productoNombre || 'Producto'}{num ? <span className="text-brand-500"> #{num}</span> : ''}</h3>
             <div className="flex items-center gap-2 mt-1 flex-wrap">

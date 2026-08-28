@@ -17,11 +17,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   GripVertical, AlertTriangle, Calendar, Film, FileText, FolderOpen, Trash2,
-  ChevronDown, Loader2, UploadCloud, CheckCircle2,
+  Loader2, UploadCloud, CheckCircle2,
 } from 'lucide-react';
 import {
   updateAssignment, aprobarTodosVideos, assignCreator, removeAssignment, personasEnTarjetas,
-  VIDEOS_POR_PRODUCTO, ESTADO_LABELS, ESTADOS,
+  VIDEOS_POR_PRODUCTO,
 } from './produccionStore.js';
 import { subirParaTarjeta, VIDEO_ACCEPT, aprobarTodosConCascada } from './produccionUpload.jsx';
 import { flipMove } from './produccionFx.js';
@@ -31,11 +31,6 @@ import ConfirmDialog from './ConfirmDialog.jsx';
 // Capacidades por rol.
 export const CAPS_ADMIN = { reassign: true, manage: true, approve: true, publish: true, draggable: true, newBadge: true };
 export const CAPS_EDITOR = { reassign: false, manage: false, approve: false, publish: false, draggable: false, newBadge: false };
-
-const ESTADO_DOT = {
-  porhacer: 'bg-slate-400', revision: 'bg-amber-400', aprobado: 'bg-emerald-500',
-  publicado: 'bg-violet-500', archivado: 'bg-gray-400',
-};
 
 // ── Fechas / velocidades (idénticas a las del tablero admin) ────────────────
 // Fecha de creación en corto: "17/8" (agrega el año si no es el actual). null si
@@ -87,7 +82,6 @@ export const PersonaBadge = ({ persona, num }) => (
 export default function TarjetaProduccion({ a, num, personas = [], team = [], onOpen, addToast, caps = CAPS_ADMIN }) {
   const [menu, setMenu] = useState(false);
   const [menuQ, setMenuQ] = useState('');
-  const [moveMenu, setMoveMenu] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
   const [prog, setProg] = useState(null); // { i, total } mientras sube
   const fileRef = useRef(null);
@@ -95,13 +89,13 @@ export default function TarjetaProduccion({ a, num, personas = [], team = [], on
   // Los menús desplegables se cierran con Esc o click en cualquier otro lado
   // (los clicks internos no llegan acá: los wrappers hacen stopPropagation).
   useEffect(() => {
-    if (!menu && !moveMenu) return;
-    const cerrar = () => { setMenu(false); setMoveMenu(false); setMenuQ(''); };
+    if (!menu) return;
+    const cerrar = () => { setMenu(false); setMenuQ(''); };
     const onKey = (e) => { if (e.key === 'Escape') cerrar(); };
     window.addEventListener('keydown', onKey);
     window.addEventListener('click', cerrar);
     return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('click', cerrar); };
-  }, [menu, moveMenu]);
+  }, [menu]);
 
   const subidos = a.archivos?.length || 0;
   const aprob = Math.min(a.videosAprobados || 0, subidos);
@@ -168,7 +162,7 @@ export default function TarjetaProduccion({ a, num, personas = [], team = [], on
   return (
     <div {...dragProps} data-prodcard data-prodcard-id={a.id}
       onClick={() => onOpen?.()}
-      className={`group relative bg-white dark:bg-gray-800 border rounded-xl p-2.5 shadow-sm hover:shadow-lg hover:shadow-pink-500/10 hover:-translate-y-0.5 transition cursor-pointer ${tintCls} ${(menu || moveMenu) ? 'z-30' : ''} ${trabada ? 'border-amber-400/80 dark:border-amber-500/60 hover:border-amber-500' : 'border-gray-200 dark:border-gray-700 hover:border-pink-300 dark:hover:border-pink-700/70'}`}>
+      className={`group relative bg-white dark:bg-gray-800 border rounded-xl p-2.5 shadow-sm hover:shadow-lg hover:shadow-pink-500/10 hover:-translate-y-0.5 transition cursor-pointer ${tintCls} ${menu ? 'z-30' : ''} ${trabada ? 'border-amber-400/80 dark:border-amber-500/60 hover:border-amber-500' : 'border-gray-200 dark:border-gray-700 hover:border-pink-300 dark:hover:border-pink-700/70'}`}>
       {/* Barra lateral con el color de la persona (identificación rápida). */}
       {stripeCls && <span className={`absolute inset-y-0 left-0 w-1 rounded-l-xl ${stripeCls}`} aria-hidden="true" />}
       {/* Badge "nuevo": actividad de las últimas 24 h. Sobresale del borde de la
@@ -284,34 +278,17 @@ export default function TarjetaProduccion({ a, num, personas = [], team = [], on
           </a>
         )}
         {trabada && <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400" title="Hace más de 24h que está en revisión">🐢 +24h</span>}
-        {/* Eliminar directo + mover de columna (punto de color + chevron) — solo admin */}
+        {/* Eliminar — solo admin. El dropdown "mover a" se fue (rediseño A,
+            elegido por el user): mover = arrastrar la tarjeta, y al aprobar
+            todo vuela sola. El tacho aparece al hover en desktop (es una
+            acción rara, no merece lugar fijo); en touch queda tenue visible
+            porque hover no existe. */}
         {caps.manage && (
-          <div className="relative ml-auto flex items-center gap-0.5" onClick={e => e.stopPropagation()}>
+          <div className="ml-auto" onClick={e => e.stopPropagation()}>
             <button onClick={() => setConfirmDel(true)} title="Eliminar tarjeta"
-              className="p-1 rounded-md text-gray-300 dark:text-gray-600 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition">
+              className="p-1 rounded-md text-gray-300 dark:text-gray-600 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100">
               <Trash2 size={12} />
             </button>
-            <button onClick={() => setMoveMenu(v => !v)} title={`${ESTADO_LABELS[a.estado]} — mover a…`}
-              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition">
-              <span className={`w-1.5 h-1.5 rounded-full ${ESTADO_DOT[a.estado] || ESTADO_DOT.porhacer}`} />
-              <ChevronDown size={10} />
-            </button>
-            {moveMenu && (
-              <div className="absolute right-0 top-6 z-20 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl p-1 flex flex-col gap-0.5 min-w-[130px]">
-                <span className="text-[9.5px] font-bold uppercase text-gray-400 px-2 pt-1">Mover a</span>
-                {ESTADOS.filter(e => e !== 'archivado' || a.estado === 'publicado' || a.estado === 'aprobado').map(e => (
-                  <button key={e} onClick={() => { updateAssignment(a.id, { estado: e }); setMoveMenu(false); }}
-                    className={`text-left text-xs font-semibold px-2 py-1 rounded whitespace-nowrap ${a.estado === e ? 'bg-brand-50 dark:bg-brand-900/30 text-brand-600 dark:text-brand-300' : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200'}`}>
-                    {a.estado === e ? '✓ ' : ''}{ESTADO_LABELS[e]}
-                  </button>
-                ))}
-                {/* Eliminar directo desde la tarjeta (con confirmación propia) */}
-                <button onClick={() => { setMoveMenu(false); setConfirmDel(true); }}
-                  className="text-left text-xs font-semibold px-2 py-1 rounded whitespace-nowrap text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 border-t border-gray-100 dark:border-gray-700 mt-0.5 inline-flex items-center gap-1">
-                  <Trash2 size={11} /> Eliminar tarjeta
-                </button>
-              </div>
-            )}
           </div>
         )}
       </div>

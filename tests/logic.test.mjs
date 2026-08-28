@@ -12,7 +12,7 @@ import {
   columnaEfectiva, AUTO_ARCHIVE_MS,
 } from '../src/produccionCalc.js';
 import {
-  clean, abreviarProducto, shortId, cardFolderName, finalFileName,
+  clean, abreviarProducto, shortId, cardFolderName,
   nombreBase, nombrePublicado,
 } from '../api/produccion/_naming.js';
 import { parseFunnel, deriveFunnelRates, pickAction } from '../api/meta/_funnel.js';
@@ -115,9 +115,6 @@ eq('la misma tarjeta siempre da la misma carpeta (estable entre probe y subida)'
 eq('PUBLICADO sobre la carpeta con token', nombrePublicado(carpetaA, true), 'Cepillo Facial [Francisco][13-8][vdagn] PUBLICADO');
 eq('despublicar vuelve al nombre exacto', nombrePublicado(nombrePublicado(carpetaA, true), false), carpetaA);
 eq('clean saca caracteres inválidos', clean('Ana/Bea:1'), 'Ana Bea 1');
-// finalFileName con reloj inyectado (17:05:30 UTC = 14:05:30 AR) → determinista
-const fixed = new Date('2026-08-17T17:05:30Z');
-eq('finalFileName "Fran - 2026-08-17 14.05.30 - CDL.mp4"', finalFileName('clip.MP4', 'Cepillo Drenaje Linfatico', 'Fran', fixed), 'Fran - 2026-08-17 14.05.30 - CDL.mp4');
 
 // ─────────── RENOMBRE PUBLICADO (idempotente, sin guion) ───────────
 console.log('\nRENOMBRE PUBLICADO:');

@@ -17,6 +17,7 @@ import {
 } from './produccionStore.js';
 import { fmtMoney, toUSD, subscribeMoney } from './moneyStore.js';
 import { columnaEfectiva } from './produccionCalc.js';
+import { CardDetailModal } from './ProduccionSection.jsx';
 
 const fmtPago = (ars) => fmtMoney(toUSD(ars, 'ARS'));
 
@@ -64,6 +65,9 @@ export default function CreativaDashboard({ addToast }) {
   const [, force] = useState(0);
   const [monthKey, setMonthKey] = useState(() => monthKeyOf());
   const [expandedProd, setExpandedProd] = useState(() => new Set());
+  // Acceso directo: id de la tarjeta abierta en el modal de detalle (el mismo de
+  // Producción). null = ninguna. Se abre tocando una tarjeta por-persona.
+  const [detailId, setDetailId] = useState(null);
   // Filtro por estado (los KPIs son clickeables). null = todo.
   const [filtroEstado, setFiltroEstado] = useState(null);
   const toggleFiltro = (v) => setFiltroEstado(prev => (prev === v ? null : v));
@@ -94,6 +98,10 @@ export default function CreativaDashboard({ addToast }) {
   //   listas      → aprobadas, listas para publicar;
   //   entregadas  → ya publicadas (o archivadas).
   const asigsMes = weeksInMonth(monthKey).flatMap(wk => listAssignments(wk));
+  // Tarjeta abierta en el modal (acceso directo). La buscamos en la lista viva del
+  // mes, así al aprobar/mover se re-renderiza con el estado nuevo (y se refleja en
+  // Producción, porque es el mismo store).
+  const detail = asigsMes.find(a => a.id === detailId) || null;
   const nowMs = Date.now();
   const productos = (() => {
     const by = new Map();
@@ -237,18 +245,22 @@ export default function CreativaDashboard({ addToast }) {
                     const badge = COL_BADGE[c.col] || COL_BADGE.porhacer;
                     const publicable = c.col === 'revision' || c.col === 'aprobado';
                     return (
-                      <div key={c.id} className="flex items-center gap-3 px-4 py-2.5 border-t border-dashed border-gray-200 dark:border-gray-700/60 first:border-t-0">
-                        <span className={`w-7 h-7 rounded-lg ${avColor(c.persona)} text-white flex items-center justify-center text-xs font-bold uppercase shrink-0`}>{c.persona.charAt(0)}</span>
-                        <div className="min-w-0">
-                          <div className="text-sm font-semibold text-gray-800 dark:text-gray-100 leading-tight truncate">{c.persona}</div>
-                          <div className="text-[11px] text-gray-400">{c.videos} video{c.videos === 1 ? '' : 's'}</div>
-                        </div>
-                        <span className={`text-[9.5px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full shrink-0 ${badge.cls}`}>
-                          {badge.txt}
-                        </span>
-                        <div className="ml-auto flex items-center gap-2 shrink-0">
+                      <div key={c.id} className="group flex items-center gap-3 px-4 py-2.5 border-t border-dashed border-gray-200 dark:border-gray-700/60 first:border-t-0 hover:bg-white dark:hover:bg-gray-800/40 transition">
+                        {/* Acceso directo: abre la MISMA tarjeta de Producción sin salir del Resumen. */}
+                        <button type="button" onClick={() => setDetailId(c.id)} title="Abrir la tarjeta (trabajar, mover, aprobar)"
+                          className="flex items-center gap-3 min-w-0 flex-1 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 rounded-lg -m-1 p-1">
+                          <span className={`w-7 h-7 rounded-lg ${avColor(c.persona)} text-white flex items-center justify-center text-xs font-bold uppercase shrink-0`}>{c.persona.charAt(0)}</span>
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold text-gray-800 dark:text-gray-100 leading-tight truncate group-hover:text-brand-600 dark:group-hover:text-brand-300 transition-colors">{c.persona}</div>
+                            <div className="text-[11px] text-gray-400">{c.videos} video{c.videos === 1 ? '' : 's'}</div>
+                          </div>
+                          <span className={`text-[9.5px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full shrink-0 ${badge.cls}`}>
+                            {badge.txt}
+                          </span>
+                        </button>
+                        <div className="flex items-center gap-2 shrink-0">
                           {c.folderLink ? (
-                            <a href={c.folderLink} target="_blank" rel="noopener noreferrer"
+                            <a href={c.folderLink} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
                               className="inline-flex items-center gap-1 text-xs font-bold text-brand-600 dark:text-brand-300 hover:underline">
                               <ExternalLink size={12} /> Drive
                             </a>
@@ -256,7 +268,7 @@ export default function CreativaDashboard({ addToast }) {
                             <span className="text-[10px] text-gray-400" title="Se subió a AdsLab (antes de conectar Drive)">AdsLab</span>
                           ) : null}
                           {publicable && (
-                            <button onClick={() => marcarPublicado(c)}
+                            <button onClick={(e) => { e.stopPropagation(); marcarPublicado(c); }}
                               className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-extrabold text-white bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 rounded-lg transition shadow-sm">
                               <Rocket size={12} /> Publicar
                             </button>
@@ -364,6 +376,12 @@ export default function CreativaDashboard({ addToast }) {
           Pago mensual por persona. "Pagar mes" salda todo lo pendiente del mes de esa persona.
         </p>
       </div>
+
+      {/* Acceso directo a la tarjeta de Producción — el MISMO modal, inline en el
+          Resumen. Trabajar / mover / aprobar acá se refleja en Producción (store global). */}
+      {detail && (
+        <CardDetailModal a={detail} onClose={() => setDetailId(null)} addToast={addToast} />
+      )}
     </div>
   );
 }

@@ -43,24 +43,12 @@ export function hoyAR(now = new Date()) {
   return now.toLocaleDateString('en-CA', { timeZone: TZ });
 }
 
-// Sello de subida en horario AR: 'YYYY-MM-DD HH.MM.SS' (fecha + hora con
-// segundos, así dos videos del mismo minuto no colisionan en el nombre).
-export function selloAR(now = new Date()) {
-  const fecha = now.toLocaleDateString('en-CA', { timeZone: TZ });
-  const hora = now.toLocaleTimeString('es-AR', { timeZone: TZ, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-  return `${fecha} ${hora.replace(/:/g, '.')}`;
-}
-
-// Nomenclatura del archivo: "<Persona> - <fecha subida> - <Producto abreviado>".
-// Autoexplicativo aunque el video se baje fuera de su carpeta (dice quién lo
-// hizo, cuándo lo subió y de qué producto es). Ej:
-// "Fran - 2026-08-17 14.05.30 - CDL.mp4".
-export function finalFileName(filename, productoNombre, persona, now = new Date()) {
-  const ext = (String(filename).split('.').pop() || 'mp4').toLowerCase().slice(0, 5);
-  const per = clean(persona, 'Equipo');
-  const abrev = abreviarProducto(productoNombre);
-  return `${per} - ${selloAR(now)} - ${abrev}.${ext}`;
-}
+// NOTA: el VIDEO se sube a Drive con su NOMBRE ORIGINAL tal cual (el equipo usa
+// su propia convención, ej. "[C1][Ponzio][15-08][…].mp4", y no la queremos
+// pisar) — vale para subidas normales, correcciones y migración. Antes vivía acá
+// una función finalFileName() que lo renombraba a "<Persona> - <fecha> - <abrev>";
+// se sacó a propósito para que nadie la reconecte. Lo único que se renombra es la
+// CARPETA de la tarjeta (sufijo PUBLICADO), nunca el archivo.
 
 // Nombre de la carpeta de UNA tarjeta: "<Producto> [<Persona>][<d-m>][<id>]"
 // (la convención del equipo — NO separada por semana). Es la que se renombra a

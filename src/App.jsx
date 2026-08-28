@@ -8727,7 +8727,7 @@ function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, textSize, set
           </button>
         )}
         <div className="min-w-0">
-          <h2 className="text-xl md:text-3xl font-bold text-gray-900 dark:text-gray-100 leading-tight truncate">{title}</h2>
+          <h2 className="text-lg md:text-xl font-bold text-gray-900 dark:text-gray-100 leading-tight truncate">{title}</h2>
           <p className="text-gray-500 dark:text-gray-400 text-xs md:text-sm truncate">{subtitle}</p>
         </div>
       </div>

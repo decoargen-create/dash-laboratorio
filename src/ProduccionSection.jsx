@@ -2044,7 +2044,10 @@ function NotifConfigModal({ team = [], onClose, addToast }) {
 
 // ── Detalle de la tarjeta (estilo Trello): persona, tipo, estado, brief a mano,
 // creativos (subida a Drive), y contador de videos aprobados.
-function CardDetailModal({ a, personas, team = [], onClose, addToast, onTeamChange }) {
+// Exportado para reusarlo como "acceso directo" desde el Resumen (CreativaDashboard):
+// abrir la MISMA tarjeta de Producción sin salir de esa pantalla. Los cambios se
+// propagan solos porque updateAssignment escribe en el store global.
+export function CardDetailModal({ a, personas, team = [], onClose, addToast, onTeamChange }) {
   const [brief, setBrief] = useState(a.brief || '');
   const [material, setMaterial] = useState(a.materialLink || '');
   const nFiles = a.archivos?.length || 0;
@@ -2060,9 +2063,9 @@ function CardDetailModal({ a, personas, team = [], onClose, addToast, onTeamChan
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto bg-black/50 backdrop-blur-sm" onClick={() => { saveAll(); onClose(); }}>
-      <div data-card-detail className="relative w-full max-w-2xl my-6 bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden" onClick={e => e.stopPropagation()}>
-        {/* Header */}
-        <div className="flex items-start gap-3 px-5 py-4 border-b border-gray-100 dark:border-gray-800">
+      <div data-card-detail className="relative w-full max-w-2xl my-6 flex flex-col max-h-[calc(100vh-3rem)] bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden" onClick={e => e.stopPropagation()}>
+        {/* Header (fijo) */}
+        <div className="shrink-0 flex items-start gap-3 px-5 py-4 border-b border-gray-100 dark:border-gray-800">
           <AnilloAprobados a={a} />
           <div className="flex-1 min-w-0">
             <h3 className="text-base font-bold text-gray-900 dark:text-gray-100">{a.productoNombre || 'Producto'}</h3>
@@ -2074,7 +2077,7 @@ function CardDetailModal({ a, personas, team = [], onClose, addToast, onTeamChan
           <button onClick={() => { saveAll(); onClose(); }} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
         </div>
 
-        <div className="p-5 space-y-5 max-h-[70vh] overflow-y-auto">
+        <div className="p-5 space-y-5 flex-1 min-h-0 overflow-y-auto">
           {/* La asignación se hace desde la tarjeta del tablero (tocando la
               etiqueta de persona), no acá — para que el detalle sea más corto. */}
 
@@ -2200,7 +2203,7 @@ function CardDetailModal({ a, personas, team = [], onClose, addToast, onTeamChan
           <HistorialTarjeta a={a} />
         </div>
 
-        <div className="flex items-center gap-2 px-5 py-3.5 border-t border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
+        <div className="shrink-0 flex items-center gap-2 px-5 py-3.5 border-t border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
           <button onClick={() => setDlg('eliminar')}
             className="inline-flex items-center gap-1.5 text-xs font-bold text-red-500 hover:text-red-600 transition">
             <Trash2 size={14} /> Eliminar tarjeta

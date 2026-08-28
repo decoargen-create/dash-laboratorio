@@ -8,9 +8,10 @@
 //   2. El browser hace un PUT del video directo a esa session URI (los bytes
 //      viajan browser → Google, nunca tocan Vercel).
 //
-// Nomenclatura y ubicación las decide el server (el equipo no tiene que
-// acordarse de nada): Producción / <Producto> / <Persona>, y el archivo se
-// renombra a un formato consistente.
+// La UBICACIÓN la decide el server (el equipo no tiene que acordarse de nada):
+// Producción / <Producto> / <Persona> / <carpeta de la tarjeta>. El NOMBRE del
+// video, en cambio, se respeta TAL CUAL se sube (no se renombra) — el equipo usa
+// su propia convención y no la pisamos.
 //
 // Si Drive no está configurado, devolvemos { configured:false } y el browser
 // cae a guardar en el bucket de AdsLab (Supabase) — así la subida siempre

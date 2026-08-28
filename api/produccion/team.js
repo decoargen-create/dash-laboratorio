@@ -101,7 +101,43 @@ export default async function handler(req, res) {
       .eq('role', 'creator')
       .order('created_at', { ascending: true });
     if (error) return respondJSON(res, 500, { error: error.message });
-    return respondJSON(res, 200, { ok: true, team: data || [] });
+    // Jerarquía del CALLER (owner-scoped): a cada miembro le colgamos su líder.
+    const { data: jer } = await supabase
+      .from('produccion_jerarquia')
+      .select('creator_id,lider_id')
+      .eq('owner_id', userId);
+    const liderDe = Object.fromEntries((jer || []).map(j => [j.creator_id, j.lider_id]));
+    const team = (data || []).map(m => ({ ...m, lider_id: liderDe[m.id] || null }));
+    return respondJSON(res, 200, { ok: true, team });
+  }
+
+  // ---- Organigrama: setear quién responde a quién ----
+  // { id, liderId } — liderId null/'' saca el líder. Un nivel: si el elegido
+  // como líder ya responde a la persona (A→B y B→A), se rechaza el ciclo.
+  if (action === 'set-lider') {
+    const id = (body.id || '').toString();
+    const liderId = body.liderId ? body.liderId.toString() : null;
+    if (!id) return respondJSON(res, 400, { error: 'Falta id.' });
+    if (liderId === id) return respondJSON(res, 400, { error: 'Nadie puede ser su propio líder.' });
+    if (!liderId) {
+      const { error } = await supabase.from('produccion_jerarquia')
+        .delete().eq('owner_id', userId).eq('creator_id', id);
+      if (error) return respondJSON(res, 500, { error: error.message });
+      return respondJSON(res, 200, { ok: true, lider_id: null });
+    }
+    // Ambos tienen que ser creators reales.
+    const { data: perfiles, error: pErr } = await supabase
+      .from('profiles').select('id').eq('role', 'creator').in('id', [id, liderId]);
+    if (pErr) return respondJSON(res, 500, { error: pErr.message });
+    if ((perfiles || []).length !== 2) return respondJSON(res, 400, { error: 'Las dos cuentas tienen que ser editores del equipo.' });
+    // Anti-ciclo (un nivel): el líder elegido no puede responder a esta persona.
+    const { data: ciclo } = await supabase.from('produccion_jerarquia')
+      .select('creator_id').eq('owner_id', userId).eq('creator_id', liderId).eq('lider_id', id).limit(1);
+    if ((ciclo || []).length > 0) return respondJSON(res, 400, { error: 'Ciclo: esa persona ya responde a este editor.' });
+    const { error } = await supabase.from('produccion_jerarquia')
+      .upsert({ owner_id: userId, creator_id: id, lider_id: liderId }, { onConflict: 'owner_id,creator_id' });
+    if (error) return respondJSON(res, 500, { error: error.message });
+    return respondJSON(res, 200, { ok: true, lider_id: liderId });
   }
 
   // ---- Crear la cuenta de un chico ----

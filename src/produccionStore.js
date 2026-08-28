@@ -759,11 +759,34 @@ export function updateAssignment(id, patch) {
     evento = nuevoEvento('estado', { from: before.estado, to: patch.estado });
   }
   const historial = evento ? [...(before.historial || []), evento] : before.historial;
-  arr[i] = { ...before, ...patch, historial, updatedAt: new Date().toISOString() };
+  // CONSISTENCIA TABLERO ↔ TARJETA: pasar la tarjeta a Aprobado/Publicado —
+  // arrastrándola o con cualquier botón — aprueba TODO su contenido. Sin esto,
+  // un pase manual "desde afuera" dejaba la tarjeta en la columna Aprobado
+  // diciendo "0/9 aprob." adentro (le pasó al user). Marcar el ✓ de cada video
+  // limpia además su corrección pendiente (aprobar gana), igual que
+  // setAprobadoVideo. La vuelta atrás (Aprobado → Revisión) NO desaprueba
+  // nada: eso es información real que el revisor puede querer conservar.
+  let archivosAprobados = null;
+  const pasaACompleto = patch.estado && patch.estado !== before.estado
+    && (patch.estado === 'aprobado' || patch.estado === 'publicado');
+  if (pasaACompleto && (before.archivos || []).some(f => !f.aprobado)) {
+    archivosAprobados = (before.archivos || []).map(f => {
+      if (f.aprobado) return f;
+      const { correccion, ...rest } = f;
+      return { ...rest, aprobado: { por: _actorName || 'Equipo', ts: new Date().toISOString() } };
+    });
+  }
+  arr[i] = {
+    ...before, ...patch, historial,
+    ...(archivosAprobados ? { archivos: archivosAprobados, videosAprobados: archivosAprobados.length } : {}),
+    updatedAt: new Date().toISOString(),
+  };
   write(arr);
-  // updateAssignment nunca modifica `archivos` (eso va por addArchivos/removeArchivo)
-  // → skipArchivos para no pisar los videos que el editor subió en paralelo.
-  pushRow(id, evento, { skipArchivos: true });
+  // updateAssignment normalmente NO toca `archivos` (eso va por addArchivos/
+  // removeArchivo) → skipArchivos para no pisar videos subidos en paralelo.
+  // EXCEPCIÓN: cuando el pase a Aprobado/Publicado acaba de marcar los ✓,
+  // la fila viaja completa — si no, los ✓ quedarían solo en este dispositivo.
+  pushRow(id, evento, { skipArchivos: !archivosAprobados });
   // Aviso a Discord del cambio de columna (fire & forget). Lo dispara quien hizo
   // el cambio (admin o editor); el server decide si hay webhook y si el estado
   // se notifica. Nunca frena la UI ni rompe si falla.

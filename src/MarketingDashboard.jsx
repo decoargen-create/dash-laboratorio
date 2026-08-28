@@ -135,7 +135,7 @@ export default function MarketingDashboard({ onNavigate }) {
           <Sparkles size={14} />
           <p className="text-[10px] font-bold uppercase tracking-wider">Tu workspace</p>
         </div>
-        <h2 className="text-xl md:text-3xl font-bold text-gray-900 dark:text-gray-100 leading-tight">
+        <h2 className="text-lg md:text-xl font-bold text-gray-900 dark:text-gray-100 leading-tight">
           {activeProducto
             ? <>Trabajando sobre <span className="text-brand-600 dark:text-brand-400">{activeProducto.nombre}</span></>
             : 'Bienvenido de vuelta'}
@@ -360,7 +360,7 @@ function StatCard({ icon, label, value, sub, tone = 'default', onClick }) {
         {icon}
         <p className="text-[10px] font-bold uppercase tracking-wider">{label}</p>
       </div>
-      <p className={`text-2xl md:text-3xl font-bold tabular-nums leading-none ${tones[tone] || tones.default}`}>
+      <p className={`text-xl md:text-2xl font-bold tabular-nums leading-none ${tones[tone] || tones.default}`}>
         <AnimatedCounter value={typeof value === 'number' ? value : 0} />
       </p>
       {sub && <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1">{sub}</p>}

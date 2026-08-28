@@ -185,6 +185,21 @@ export async function driveList(token, params) {
   return (await authedFetch(token, u)).json();
 }
 
+// ¿La carpeta/archivo existe y NO está en la papelera? Sirve para no reusar un
+// folderId guardado que el user borró en Drive (subir ahí fallaría o mandaría el
+// video a una carpeta que se auto-purga). Ante duda (404/error) → false.
+export async function driveIsAlive(token, fileId) {
+  if (!fileId) return false;
+  try {
+    const r = await fetch(`${DRIVE}/files/${fileId}?fields=id,trashed&supportsAllDrives=true`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!r.ok) return false;
+    const d = await r.json().catch(() => ({}));
+    return !!d.id && !d.trashed;
+  } catch { return false; }
+}
+
 // Exporta un Google Doc a texto plano.
 export async function driveExportDoc(token, fileId) {
   const u = `${DRIVE}/files/${fileId}/export?mimeType=text/plain&supportsAllDrives=true`;

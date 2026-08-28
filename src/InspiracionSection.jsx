@@ -2780,6 +2780,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     // tira error, o la app se pausa/cuelga a mitad, el finally igual libera el
     // lock y no queda pegado el "Ya hay un bulk corriendo".
     bulkRunningRef.current = true;
+    let barraIniciada = false; // ¿ya se mostró la barra (startBulk)? → hay que cerrarla sí o sí
     try {
     // Buscar los ad objects desde adsByBrand + de los competidores.
     // POST-REFACTOR IDB: c.ads inline está stripped — usar compAdsByCompId
@@ -2829,6 +2830,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         headline: x.ad.headline || x.ad.body?.slice(0, 60) || '',
       })),
     });
+    barraIniciada = true;
 
     patchBulk(prev => prev ? ({
       ...prev,
@@ -2903,7 +2905,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         try {
           ok = await Promise.race([
             crearReferencialDeAd(brandNombre, ad, { skipCategoryWarn: true, silentExecution: true, planPrecargado: planesPorAd.get(ad.id) || null }),
-            new Promise((_, rej) => { watchdog = setTimeout(() => rej(new Error('ad-timeout-10min')), AD_TIMEOUT_MS); }),
+            new Promise((_, rej) => { watchdog = setTimeout(() => rej(new Error('ad-timeout-15min')), AD_TIMEOUT_MS); }),
           ]);
         } catch (err) {
           console.warn(`bulk crear ad ${ad?.id} falló/timeout:`, err?.message || err);
@@ -2917,11 +2919,13 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     await Promise.all(Array.from({ length: Math.min(POOL, adsAGenerar.length) }, () => worker()));
     } finally {
       // Cierra el try abierto arriba (post-confirm) → libera el lock pase lo
-      // que pase (éxito, error, o cuelgue de red server-side).
+      // que pase (éxito, error, o cuelgue de red server-side). finishBulk() va
+      // ACÁ (no afuera): si algún throw se colara entre startBulk y el
+      // Promise.all, afuera se salteaba y la barra quedaba pegada para siempre.
       bulkRunningRef.current = false;
+      if (barraIniciada) finishBulk();
     }
 
-    finishBulk();
     if (!mountedRef.current) return; // user navegó fuera durante el bulk
     limpiarSeleccion();
     addToast?.({ type: 'success', message: 'Generación bulk completa — revisá la galería' });

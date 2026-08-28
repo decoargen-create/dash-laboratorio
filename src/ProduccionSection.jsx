@@ -16,7 +16,7 @@ import {
   FolderTree,
 } from 'lucide-react';
 import {
-  ESTADOS, ESTADO_LABELS, VIDEOS_POR_PRODUCTO, weekKeyOf, weekLabel, weekRange, allWeekKeys,
+  ESTADOS, ESTADO_LABELS, VIDEOS_POR_PRODUCTO, weekKeyOf, weekLabel, allWeekKeys,
   listAssignments, listAllAssignments, addAssignment, updateAssignment, removeAssignment,
   assignCreator, subscribeProduccion, esCompleto, bonusObjetivo, bonusDe, inversionPorProducto,
   getRole, entregasNuevas, ultimaSubidaTs, personasEnTarjetas, resumenVideosPorProducto,
@@ -405,7 +405,6 @@ function ResumenSemana({ asigs, filtroSinAsignar = false, onToggleSinAsignar, on
     const rows = Object.values(by).map(s => ({
       ...s,
       avg: s.tiempos.length ? s.tiempos.reduce((x, y) => x + y, 0) / s.tiempos.length : null,
-      bono: bonoInfo(s.persona, s.completos),
     })).sort((a, b) => b.asignados - a.asignados);
     // Totales del equipo (el "resumen de los 3 juntos" arriba de las tarjetas).
     const totals = {
@@ -436,7 +435,7 @@ function ResumenSemana({ asigs, filtroSinAsignar = false, onToggleSinAsignar, on
       {/* Resumen del EQUIPO (todos juntos) */}
       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-100 dark:border-gray-700/60 flex-wrap">
         <span className="text-[11px] font-bold uppercase tracking-wide text-gray-400 mr-auto">
-          Equipo · esta semana <span className="normal-case text-gray-400/80">({weekRange(weekKeyOf())})</span>
+          Equipo · en producción
         </span>
         <div className="flex items-center gap-1.5 flex-wrap">
           {/* Los contadores por estado (asignados/por hacer/revisión/aprobados) se
@@ -512,14 +511,11 @@ function ResumenSemana({ asigs, filtroSinAsignar = false, onToggleSinAsignar, on
                   ))}
                 </div>
 
-                {/* Pie: bono (según la config de CADA persona; si no tiene bono
-                    configurado, no se muestra) + ritmo */}
+                {/* Pie: ritmo (tiempo prom. a aprobado + trabadas). El BONO va en
+                    Finanzas/Equipo, que es por semana; acá el resumen es de todas
+                    las semanas (operativo), así que mostrarlo confundía sobre el pago. */}
                 <div className="flex items-center justify-between border-t border-gray-200/60 dark:border-white/10 pt-2 text-[11px]">
-                  {s.bono?.tiene
-                    ? <span className="font-extrabold text-emerald-600 dark:text-emerald-400">🎯 ¡Bonus!</span>
-                    : s.bono?.faltan
-                    ? <span className="text-gray-400">{s.bono.faltan} más y hay bonus 🎯</span>
-                    : <span />}
+                  <span />
                   <span className="flex items-center gap-2 text-gray-400 tabular-nums">
                     {s.avg != null && <span title="Tiempo prom. a aprobado">⏱ {fmtDur(s.avg)}</span>}
                     {s.trabadas > 0 && <span className="text-amber-600 dark:text-amber-400 font-bold" title="Trabadas +24h en revisión">🐢 {s.trabadas}</span>}
@@ -611,11 +607,20 @@ export default function ProduccionSection({ addToast }) {
 
   // Link a la carpeta raíz de Drive (para el botón "Drive" del header).
   // Estado de Drive: si funciona (rootLink) + si el OAuth del user está conectado.
-  const [drive, setDrive] = useState({ rootLink: null, connected: false, email: null, connecting: false });
+  const [drive, setDrive] = useState({ rootLink: null, connected: false, working: null, email: null, connecting: false });
   const refreshDrive = () => {
     Promise.all([probeDrive(), driveStatus()]).then(([p, s]) => {
-      setDrive(d => ({ ...d, rootLink: (p?.configured && p?.rootLink) || null, connected: !!s?.connected, email: s?.email || p?.email || null }));
-    });
+      // `connected` = existe la conexión guardada. `working` = el permiso REALMENTE
+      // funciona (el status ahora verifica el token con getDriveContext). Con
+      // connected && !working → el permiso venció y hay que reconectar.
+      setDrive(d => ({
+        ...d,
+        rootLink: (p?.configured && p?.rootLink) || null,
+        connected: !!s?.connected,
+        working: s?.working ?? (p?.configured === true ? true : (p?.transient ? false : null)),
+        email: s?.email || p?.email || null,
+      }));
+    }).catch(() => { /* probeDrive puede rechazar por red — no rompemos el estado */ });
   };
   useEffect(refreshDrive, []);
   // Diagnóstico de las credenciales OAuth (leído de /api/diag, público). Sirve
@@ -687,6 +692,14 @@ export default function ProduccionSection({ addToast }) {
   // que ya está en OTRA semana igual se puede volver a agregar esta semana).
   const asigs = listAllAssignments();
   const asigsSemana = listAssignments(weekKey);
+  // Tarjetas ACTIVAS (todas las semanas, sin las archivadas) — para el resumen
+  // del equipo, así muestra a TODO el equipo con trabajo en curso (igual que el
+  // tablero unificado), no solo a quien tenga tarjeta en la semana actual. El
+  // pago exacto por semana vive en Finanzas/Equipo, no acá.
+  const asigsActivos = useMemo(() => {
+    const now = Date.now();
+    return asigs.filter(a => columnaEfectiva(a, now) !== 'archivado');
+  }, [asigs]); // eslint-disable-line react-hooks/exhaustive-deps
   const detail = asigs.find(a => a.id === detailId) || null;
 
   const personas = useMemo(() => {
@@ -694,7 +707,10 @@ export default function ProduccionSection({ addToast }) {
     allWeekKeys().forEach(wk => listAssignments(wk).forEach(a => { if (a.persona) set.add(a.persona); }));
     productos.forEach(p => { const r = (p.responsable || '').trim(); if (r) set.add(r); });
     return [...set];
-  }, [weekKey, productos]); // eslint-disable-line
+    // Depende de `asigs`: weekKey es const (día) y productos es one-shot, así que
+    // sin asigs el memo quedaba congelado y no tomaba personas de tarjetas nuevas
+    // (colores stale / no aparecían para reasignar).
+  }, [asigs, productos]); // eslint-disable-line
   // Asigna un color DISTINTO a cada persona (así Wanda y Dai no comparten color).
   // Sumamos las cuentas del equipo para cubrir a todos, no solo a los de esta semana.
   registrarColoresPersonas([...personas, ...team.map(m => m.display_name || m.email)]);
@@ -826,9 +842,23 @@ export default function ProduccionSection({ addToast }) {
                 <div className="my-1 border-t border-gray-100 dark:border-gray-800" />
                 {drive.connected ? (
                   <>
-                    <div className="flex items-center gap-2 px-2.5 py-1.5 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
-                      <CheckCircle2 size={14} /> Drive conectado{drive.email ? ` · ${drive.email}` : ''}
-                    </div>
+                    {drive.working === false ? (
+                      <>
+                        <div className="flex items-start gap-2 px-2.5 py-1.5 text-[11px] font-bold text-amber-600 dark:text-amber-400">
+                          <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                          <span>Drive conectado pero el permiso NO está funcionando{drive.email ? ` (${drive.email})` : ''}. Reconectalo para poder subir a Drive.</span>
+                        </div>
+                        <button onClick={() => { onConnectDrive(); setAjustesOpen(false); }} disabled={drive.connecting}
+                          className="w-full flex items-center gap-2.5 text-left text-sm font-bold px-2.5 py-2 rounded-lg text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 hover:bg-amber-100 dark:hover:bg-amber-900/30 transition disabled:opacity-60">
+                          {drive.connecting ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
+                          {drive.connecting ? 'Reconectando…' : 'Reconectar Drive'}
+                        </button>
+                      </>
+                    ) : (
+                      <div className="flex items-center gap-2 px-2.5 py-1.5 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+                        <CheckCircle2 size={14} /> {drive.working === true ? 'Drive funcionando' : 'Drive conectado'}{drive.email ? ` · ${drive.email}` : ''}
+                      </div>
+                    )}
                     {drive.rootLink && (
                       <a href={drive.rootLink} target="_blank" rel="noopener noreferrer" onClick={() => setAjustesOpen(false)}
                         className="w-full flex items-center gap-2.5 text-left text-sm font-semibold px-2.5 py-2 rounded-lg text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition">
@@ -913,13 +943,12 @@ export default function ProduccionSection({ addToast }) {
         );
       })()}
 
-      {/* Resumen de la semana: carga por persona + objetivo. Clic en una persona
-          filtra el tablero por ella (toggle). USA asigsSemana (semana actual), NO
-          asigs (todas): el bono/objetivo/MVP son SEMANALES — con todas las semanas
-          (+archivadas) el "completos" crecía infinito y el bono figuraba siempre
-          alcanzado. El tablero sí muestra todas las semanas; este resumen es el
-          del período de pago actual. */}
-      <ResumenSemana asigs={asigsSemana} filtroSinAsignar={soloSinAsignar}
+      {/* Resumen del equipo: carga por persona. Clic en una persona filtra el
+          tablero por ella (toggle). USA asigsActivos (todas las semanas SIN las
+          archivadas) para mostrar a TODO el equipo con trabajo en curso, igual que
+          el tablero unificado. Excluir las archivadas evita que el "completos"
+          crezca infinito. El pago exacto POR SEMANA vive en Finanzas/Equipo. */}
+      <ResumenSemana asigs={asigsActivos} filtroSinAsignar={soloSinAsignar}
         onToggleSinAsignar={() => setSoloSinAsignar(v => !v)}
         activePersonas={filtroPersona}
         onPickPersona={(p) => setFiltroPersona(prev => prev.includes(p) ? prev.filter(x => x !== p) : [p])} />
@@ -934,10 +963,12 @@ export default function ProduccionSection({ addToast }) {
         </div>
       )}
 
-      {/* Por producto (esta semana): cuántas TARJETAS faltan entregar (no cuenta
-          videos) + plata invertida. La barra mide tarjetas entregadas/total. */}
-      {asigs.length > 0 && (() => {
-        const resumen = resumenVideosPorProducto(asigs).map(r => {
+      {/* Por producto (en producción): cuántas TARJETAS faltan entregar (no cuenta
+          videos) + plata invertida. La barra mide tarjetas entregadas/total.
+          Usa asigsActivos (todas las semanas, sin archivadas) = igual que el
+          resumen del equipo y el tablero. */}
+      {asigsActivos.length > 0 && (() => {
+        const resumen = resumenVideosPorProducto(asigsActivos).map(r => {
           const invertido = asigs.reduce((s, a) => {
             const nombre = ((a.productoNombre || '').trim() || 'Sin nombre').toLowerCase();
             return (nombre === r.producto.toLowerCase() && esCompleto(a.estado)) ? s + pagoProductoDe(a.persona) : s;
@@ -950,7 +981,7 @@ export default function ProduccionSection({ addToast }) {
           <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
             <div className="flex items-center gap-2 mb-3">
               <Film size={15} className="text-emerald-500" />
-              <span className="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Por producto · esta semana</span>
+              <span className="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Por producto · en producción</span>
               {totalPend > 0 && (
                 <span className="text-[11px] font-bold text-amber-600 dark:text-amber-400 tabular-nums">· faltan entregar {totalPend}</span>
               )}

@@ -74,7 +74,25 @@ export const CFG_DEFAULT = {
   pisoGastoPausar: 25000,       // en la moneda de la cuenta: debajo no tuvo chance
   horaMinimaPausar: 11,         // antes del mediodía el día no maduró (hora AR)
   consumoAltoPct: 90,           // si ya consumió esto del presupuesto, pausar no ahorra
+  // Cuántas compras como MÁXIMO puede tener para seguir siendo candidato.
+  // null = no se mira. Sirve para no pausar algo que está vendiendo aunque su
+  // ROAS del día venga flojo: cinco compras hoy es una señal, no un fracaso.
+  maxComprasPausar: null,
+  // Qué condiciones cuentan para marcar un candidato. Se puede apagar alguna:
+  // si el pixel no reporta InitiateCheckout, esa condición da "malo" siempre y
+  // ensucia la ronda entera. Editable desde la UI.
+  condicionesPausar: ['piso', 'roas', 'atc', 'checkout'],
 };
+
+// Las condiciones de la ronda, en orden, con el nombre que ve el usuario.
+// Vive acá porque la UI las dibuja y el núcleo las evalúa: una sola lista.
+export const CONDICIONES_PAUSA = [
+  { clave: 'piso', label: 'Gastó lo suficiente', ayuda: 'Debajo del piso no tuvo chance de vender.' },
+  { clave: 'roas', label: 'ROAS bajo el corte', ayuda: 'El corte es el ROAS de equilibrio del producto.' },
+  { clave: 'atc', label: 'Carrito caro', ayuda: 'Costo por agregar al carrito por encima del promedio de la cuenta.' },
+  { clave: 'checkout', label: 'Pago iniciado caro', ayuda: 'Costo por iniciar pago por encima del promedio de la cuenta.' },
+  { clave: 'compras', label: 'Pocas compras', ayuda: 'Opcional: no pausar algo que ya está vendiendo.' },
+];
 
 // ROAS de equilibrio: por debajo de esto, cada venta pierde plata.
 // Con 40% de margen bruto → 1 ÷ 0.40 = 2.5.
@@ -511,7 +529,10 @@ export function evaluarPausa(item, promedios, cfg = CFG_DEFAULT) {
   const atcMalo = costoATC == null ? gasto > 0 : (umbralATC != null && costoATC > umbralATC);
   const checkoutMalo = costoCheckout == null ? gasto > 0 : (umbralCheckout != null && costoCheckout > umbralCheckout);
 
-  const condiciones = [
+  const compras = Number(ins.purchases || 0);
+  const topeCompras = cfg.maxComprasPausar;
+
+  const todas = [
     {
       clave: 'piso',
       ok: gasto >= (cfg.pisoGastoPausar || 0),
@@ -536,9 +557,23 @@ export function evaluarPausa(item, promedios, cfg = CFG_DEFAULT) {
         ? 'ningún pago iniciado'
         : `costo por pago iniciado ${Math.round(costoCheckout)} vs ${umbralCheckout != null ? Math.round(umbralCheckout) : '—'} (promedio +${cfg.sobrePromedioPct}%)`,
     },
+    {
+      clave: 'compras',
+      ok: topeCompras == null ? true : compras <= topeCompras,
+      texto: topeCompras == null
+        ? `${compras} compras (no se mira)`
+        : `${compras} compras (tope ${topeCompras})`,
+    },
   ];
 
-  const candidato = condiciones.every(c => c.ok);
+  // Solo cuentan las condiciones encendidas en el perfil. Una condición
+  // apagada se sigue MOSTRANDO — para poder ver el número — pero no decide.
+  const activas = Array.isArray(cfg.condicionesPausar) && cfg.condicionesPausar.length
+    ? cfg.condicionesPausar
+    : CFG_DEFAULT.condicionesPausar;
+  const condiciones = todas.map(c => ({ ...c, cuenta: activas.includes(c.clave) }));
+
+  const candidato = condiciones.filter(c => c.cuenta).every(c => c.ok);
 
   // Plata en riesgo: lo que se deja de gastar si se pausa AHORA.
   //
@@ -600,9 +635,22 @@ export function evaluarPausa(item, promedios, cfg = CFG_DEFAULT) {
 
 // Lista completa de la ronda: ordena por plata en riesgo desc.
 // `temprano` avisa que el día todavía no maduró (antes de la hora mínima).
-export function rondaDeOptimizacion(items, { cfg = CFG_DEFAULT, ahora = new Date() } = {}) {
+export function rondaDeOptimizacion(items, { cfg = CFG_DEFAULT, ahora = new Date(), cfgDeItem = null } = {}) {
   const promedios = promediosDelDia(items);
-  const evaluados = (items || []).map(i => ({ ...i, pausa: evaluarPausa(i, promedios, cfg) }));
+  // Cada fila se juzga con las reglas de SU producto. El ROAS de equilibrio del
+  // cepillo no es el de la crema: con un solo corte global, o pausás de más en
+  // el de margen alto o de menos en el de margen bajo. `cfgDeItem` resuelve el
+  // perfil por fila; sin él (o si esa fila no cae en ningún producto) se usa
+  // el general, que es lo que había antes.
+  //
+  // Los promedios de la cuenta, en cambio, se calculan una sola vez sobre
+  // TODAS las filas: el punto de "caro" es caro comparado con el resto de la
+  // cuenta, no con los dos anuncios del mismo producto.
+  const reglasDe = (i) => (cfgDeItem ? (cfgDeItem(i) || cfg) : cfg);
+  const evaluados = (items || []).map(i => {
+    const suCfg = reglasDe(i);
+    return { ...i, cfgUsada: suCfg, pausa: evaluarPausa(i, promedios, suCfg) };
+  });
   const candidatos = evaluados
     .filter(i => i.pausa.candidato)
     .sort((a, b) => b.pausa.plataEnRiesgo - a.pausa.plataEnRiesgo);

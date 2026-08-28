@@ -15,7 +15,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Film, X, UploadCloud, Loader2, AlertTriangle, ExternalLink } from 'lucide-react';
 import { supabase, getCurrentUser } from './supabase.js';
-import { addArchivos, removeArchivo, updateAssignment, setCorreccionVideo, VIDEOS_POR_PRODUCTO } from './produccionStore.js';
+import { addArchivos, removeArchivo, replaceArchivo, updateAssignment, setCorreccionVideo, VIDEOS_POR_PRODUCTO } from './produccionStore.js';
 
 const BUCKET = 'creativos';
 
@@ -110,7 +110,7 @@ async function uploadOne(file, ctx, onBytes) {
     const r = await fetch('/api/produccion/drive-session', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      body: JSON.stringify({ productoNombre, persona, weekKey, cardId, folderId, filename: file.name, mimeType: file.type || 'video/mp4', size: file.size }),
+      body: JSON.stringify({ productoNombre, persona, weekKey, cardId, folderId, filename: file.name, mimeType: file.type || 'video/mp4', size: file.size, ...(ctx.force ? { force: true } : {}) }),
     });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
@@ -293,6 +293,48 @@ export async function subirParaTarjeta(a, fileList, { onProgress, addToast } = {
   return { ok, yaEstaban };
 }
 
+// Reemplaza UN video de la tarjeta por su versión corregida:
+//   1. Sube el archivo nuevo con force (el dedupe de drive-session no aplica:
+//      reemplazar ES subir algo que puede llamarse/pesar igual que lo que hay).
+//   2. Pisa la fila del viejo EN SU LUGAR (conserva el número de video) — el
+//      archivo nuevo entra sin `correccion`, o sea que salda el pedido.
+//   3. Manda el viejo a la papelera de Drive (best effort — si falla, el
+//      reemplazo en la tarjeta ya está hecho y solo queda un huérfano en la
+//      carpeta) o lo borra de AdsLab si era del fallback.
+//   4. Si la tarjeta estaba en "Por hacer" y no quedan correcciones
+//      pendientes, vuelve sola a "En revisión".
+export async function reemplazarVideo(a, viejo, file, { addToast } = {}) {
+  if (!aceptaVideo(file)) { addToast?.({ type: 'warning', message: 'Elegí un archivo de video.' }); return { ok: false }; }
+  const user = await getCurrentUser();
+  if (!user) { addToast?.({ type: 'error', message: 'Iniciá sesión de nuevo.' }); return { ok: false }; }
+  const token = await getAuthToken();
+  const ctx = {
+    user, token, weekKey: a.weekKey, productoNombre: a.productoNombre, persona: a.persona || 'Equipo',
+    cardId: a.id,
+    folderId: (a.archivos || []).find(f => f.folderId)?.folderId || viejo.folderId || null,
+    force: true,
+  };
+  const archivo = await uploadOne(file, ctx); // tira si falla — el caller muestra el error
+  replaceArchivo(a.id, viejo.ts, archivo);
+
+  // El viejo, afuera: papelera de Drive (recuperable 30 días) o storage AdsLab.
+  if (viejo.driveId) {
+    fetch('/api/produccion/drive-trash', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({ fileId: viejo.driveId }),
+    }).catch(() => {});
+  } else if (viejo.storagePath) {
+    supabase.storage.from(BUCKET).remove([viejo.storagePath]).catch(() => {});
+  }
+
+  // ¿Quedan correcciones en OTROS videos? (el del viejo quedó saldado)
+  const restantes = (a.archivos || []).filter(f => f.ts !== viejo.ts && f.correccion?.texto).length;
+  const paso = a.estado === 'porhacer' && restantes === 0;
+  if (paso) updateAssignment(a.id, { estado: 'revision' });
+  return { ok: true, paso, restantes, destino: archivo.destino, driveError: archivo.driveError || null };
+}
+
 // Sección de creativos dentro de una tarjeta: lista de archivos ya subidos +
 // dropzone + cola de subida. `canDelete` controla si se puede quitar un archivo
 // ya subido (el admin sí; un creator también puede borrar los suyos).
@@ -303,6 +345,33 @@ export function CreativosSection({ a, addToast, canDelete = true, readOnly = fal
   const [corrEdit, setCorrEdit] = useState(null); // ts del video cuya corrección se edita
   const [corrText, setCorrText] = useState('');
   const inputRef = useRef(null);
+  // Flujo "Reemplazar" (correcciones): a qué video va el archivo que se elija
+  // en el input oculto, y cuál se está reemplazando (spinner + deshabilitar).
+  const [replaceTarget, setReplaceTarget] = useState(null); // { f, nVid }
+  const [replacingTs, setReplacingTs] = useState(null);
+  const replaceInputRef = useRef(null);
+
+  const onReplaceFile = async (file) => {
+    const target = replaceTarget;
+    setReplaceTarget(null);
+    if (!file || !target) return;
+    setReplacingTs(target.f.ts);
+    try {
+      const r = await reemplazarVideo(a, target.f, file, { addToast });
+      if (r?.ok) {
+        addToast?.({
+          type: 'success',
+          message: `Video ${target.nVid} reemplazado ✓${r.paso ? ' · la tarjeta volvió a En revisión'
+            : r.restantes > 0 ? ` · falta${r.restantes > 1 ? 'n' : ''} ${r.restantes} corrección${r.restantes > 1 ? 'es' : ''}` : ''}`,
+        });
+        if (r.driveError) addToast?.({ type: 'warning', message: `⚠ Drive falló (${r.driveError}) — el reemplazo quedó en AdsLab.` });
+      }
+    } catch (err) {
+      addToast?.({ type: 'error', message: `No pude reemplazar el Video ${target.nVid}: ${err.message}` });
+    } finally {
+      setReplacingTs(null);
+    }
+  };
   const folderLink = (a.archivos || []).find(f => f.folderLink)?.folderLink;
   // ¿Todos los archivos cayeron a AdsLab? (pueden ser de ANTES de conectar Drive)
   const soloAdslab = (a.archivos?.length > 0) && !folderLink && a.archivos.every(f => f.destino !== 'drive');
@@ -446,12 +515,29 @@ export function CreativosSection({ a, addToast, canDelete = true, readOnly = fal
 
               {/* Corrección pedida — visible para todos (el editor la ve read-only) */}
               {corr && !editing && (
-                <div className="ml-6 mt-0.5 mb-1 flex gap-1.5 items-start bg-amber-50 dark:bg-amber-900/20 border-l-2 border-amber-400 rounded-r px-2.5 py-1.5">
-                  <AlertTriangle size={11} className="text-amber-500 shrink-0 mt-0.5" />
-                  <div className="text-[11px] text-amber-800 dark:text-amber-200 min-w-0">
-                    <b>Corrección (Video {nVid}):</b> <span className="whitespace-pre-wrap break-words">{corr.texto}</span>
-                    {corr.por && <span className="block text-[9.5px] text-amber-600/70 dark:text-amber-400/60 mt-0.5">pedido por {corr.por}</span>}
+                <div className="ml-6 mt-0.5 mb-1 bg-amber-50 dark:bg-amber-900/20 border-l-2 border-amber-400 rounded-r px-2.5 py-1.5">
+                  <div className="flex gap-1.5 items-start">
+                    <AlertTriangle size={11} className="text-amber-500 shrink-0 mt-0.5" />
+                    <div className="text-[11px] text-amber-800 dark:text-amber-200 min-w-0 flex-1">
+                      <b>Corrección (Video {nVid}):</b> <span className="whitespace-pre-wrap break-words">{corr.texto}</span>
+                      {corr.por && <span className="block text-[9.5px] text-amber-600/70 dark:text-amber-400/60 mt-0.5">pedido por {corr.por}</span>}
+                    </div>
                   </div>
+                  {/* Reemplazar: sube el corregido, pisa a este video en su lugar
+                      (mismo número), el viejo va a la papelera de Drive, y si no
+                      quedan correcciones la tarjeta vuelve sola a En revisión.
+                      NO hace falta borrar con la ✕ antes — eso era lo que
+                      generaba los "repetido"/"versión nueva" del dedupe. */}
+                  {!readOnly && (
+                    <button
+                      onClick={() => { setReplaceTarget({ f, nVid }); replaceInputRef.current?.click(); }}
+                      disabled={!!replacingTs}
+                      className="mt-1.5 ml-4 inline-flex items-center gap-1 text-[11px] font-extrabold px-2.5 py-1 rounded-lg text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 transition">
+                      {replacingTs === f.ts
+                        ? <><Loader2 size={11} className="animate-spin" /> Reemplazando…</>
+                        : <><UploadCloud size={11} /> Reemplazar por el corregido</>}
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -475,6 +561,13 @@ export function CreativosSection({ a, addToast, canDelete = true, readOnly = fal
             );
           })}
         </div>
+      )}
+
+      {/* Input oculto del flujo Reemplazar — vive FUERA del dropzone para que
+          su .click() programático no burbujee al onClick del dropzone (que
+          abriría el picker general encima del de reemplazo). */}
+      {!readOnly && (
+        <input ref={replaceInputRef} type="file" accept={VIDEO_ACCEPT} hidden onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; onReplaceFile(file); }} />
       )}
 
       {/* Dropzone — solo si la tarjeta es editable (no en aprobado/publicado

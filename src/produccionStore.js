@@ -921,6 +921,23 @@ export function setArchivosFolder(id, { folderId, folderLink }) {
   return arr[i];
 }
 
+// Reemplaza UN archivo de la tarjeta (por su ts) por otro, EN SU LUGAR — el
+// video conserva su número (Video 1/2/3…) en la lista. Lo usa el flujo
+// "Reemplazar" de correcciones: el archivo nuevo entra sin `correccion`, así
+// que el pedido de corrección del viejo queda saldado en el mismo acto.
+export function replaceArchivo(id, ts, archivo) {
+  const arr = read().slice();
+  const i = arr.findIndex(a => a.id === id);
+  if (i === -1) return;
+  arr[i] = {
+    ...arr[i],
+    archivos: (arr[i].archivos || []).map(f => (f.ts === ts ? archivo : f)),
+    updatedAt: new Date().toISOString(),
+  };
+  write(arr);
+  pushRow(id);
+}
+
 export function removeArchivo(id, ts) {
   const arr = read().slice();
   const i = arr.findIndex(a => a.id === id);

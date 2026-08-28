@@ -7,7 +7,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { X, UserPlus, Loader2, Trash2, KeyRound, Users, Mail, Copy, Check, Search, Wallet, Plus } from 'lucide-react';
-import { listTeam, createMember, resetPassword, removeMember } from './produccionTeam.js';
+import { listTeam, createMember, resetPassword, removeMember, setLider } from './produccionTeam.js';
 import { personasEnTarjetas, assignCreator, allWeekKeys, listAssignments, getPagoConfig, setPagoConfig, DEFAULT_BONUS_TRAMOS } from './produccionStore.js';
 import ConfirmDialog from './ConfirmDialog.jsx';
 
@@ -318,9 +318,41 @@ export default function TeamModal({ onClose, addToast }) {
                         {(m.display_name || m.email || '?').charAt(0)}
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="text-sm font-semibold text-gray-800 dark:text-gray-100 truncate">{m.display_name || m.email}</div>
+                        <div className="text-sm font-semibold text-gray-800 dark:text-gray-100 truncate">
+                          {m.display_name || m.email}
+                          {team.some(x => x.lider_id === m.id) && (
+                            <span className="ml-1.5 text-[9px] font-extrabold uppercase tracking-wide text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-900/30 border border-brand-300/50 dark:border-brand-700/50 rounded-full px-1.5 py-0.5 align-middle"
+                              title={`Líder de: ${team.filter(x => x.lider_id === m.id).map(x => x.display_name || x.email).join(', ')}`}>
+                              👑 líder
+                            </span>
+                          )}
+                        </div>
                         <div className="text-xs text-gray-400 truncate inline-flex items-center gap-1"><Mail size={10} /> {m.email}</div>
                       </div>
+                      {/* Organigrama: a quién responde. El líder ve las tarjetas
+                          de su gente en su propio panel (solo lectura). */}
+                      <label className="flex items-center gap-1 text-[10px] text-gray-400 shrink-0" title={`¿A quién responde ${m.display_name || m.email}? Su líder va a ver sus tarjetas en el panel propio.`}>
+                        <span className="hidden sm:inline font-bold uppercase">Responde a</span>
+                        <select
+                          value={m.lider_id || ''}
+                          onChange={async (e) => {
+                            const liderId = e.target.value || null;
+                            try {
+                              await setLider(m.id, liderId);
+                              const liderNombre = team.find(x => x.id === liderId);
+                              addToast?.({ type: 'success', message: liderId
+                                ? `${m.display_name || m.email} ahora responde a ${liderNombre?.display_name || liderNombre?.email}`
+                                : `${m.display_name || m.email} ya no responde a nadie` });
+                              reload();
+                            } catch (err) { addToast?.({ type: 'error', message: err.message }); }
+                          }}
+                          className="max-w-[110px] text-xs bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-brand-500 text-gray-700 dark:text-gray-200">
+                          <option value="">— nadie</option>
+                          {team.filter(x => x.id !== m.id).map(x => (
+                            <option key={x.id} value={x.id}>{x.display_name || x.email}</option>
+                          ))}
+                        </select>
+                      </label>
                       <button onClick={() => setPayOpen(o => o === m.id ? null : m.id)} title="Configurar pago"
                         className={`p-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 ${payOpen === m.id ? 'text-emerald-600' : 'text-gray-400 hover:text-emerald-600'}`}><Wallet size={15} /></button>
                       <button onClick={() => onReset(m)} title="Cambiar contraseña"

@@ -20,6 +20,7 @@ import {
   resumenVideosPorProducto, VIDEOS_POR_PRODUCTO,
 } from './produccionStore.js';
 import { CreativosSection, AnilloAprobados } from './produccionUpload.jsx';
+import { getCurrentUser } from './supabase.js';
 import { numerarDuplicados, columnaEfectiva } from './produccionCalc.js';
 import TarjetaProduccion, { CAPS_EDITOR } from './produccionCard.jsx';
 import { registrarColoresPersonas } from './produccionColors.js';
@@ -50,14 +51,16 @@ const COLS_CREATOR = [
 
 // Detalle de la tarjeta para el editor: la CONSIGNA del producto (lo que el
 // admin le quiere pasar), los cambios pedidos, y la zona para subir los videos.
-function CreatorCardDetail({ a, num, onClose, addToast }) {
+function CreatorCardDetail({ a, num, onClose, addToast, mia = true }) {
   useEffect(() => {
     const h = (e) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
   }, [onClose]);
 
-  const puedeMover = ESTADOS_CREATOR.includes(a.estado);
+  // Una tarjeta de TU GENTE (líder) se ve pero no se toca: la RPC del server
+  // solo acepta escrituras del creator asignado.
+  const puedeMover = mia && ESTADOS_CREATOR.includes(a.estado);
   const enRevision = a.estado === 'revision';
   const folderLink = (a.archivos || []).find(f => f.folderLink)?.folderLink;
   const brief = (a.brief || '').trim();
@@ -192,6 +195,15 @@ export default function CreatorWorkspace({ user, onLogout, addToast, darkMode, t
 
   useEffect(() => subscribeProduccion(() => force(x => x + 1)), []);
 
+  // uid REAL de Supabase Auth: separa "mis tarjetas" de las de MI GENTE. Un
+  // líder (organigrama en Equipo) recibe por RLS también las tarjetas de
+  // quienes le responden — las ve en su panel como solo-lectura, y su plata/
+  // bonus siguen contando SOLO lo propio. Hasta conocer el uid, todo cuenta
+  // como propio (para el editor común no cambia nada).
+  const [uid, setUid] = useState(null);
+  useEffect(() => { getCurrentUser().then(u => setUid(u?.id || null)).catch(() => {}); }, []);
+  const esMia = (a) => !uid || !a.creatorId || a.creatorId === uid;
+
   // Re-consulta al server cuando el editor vuelve a la pestaña y cada ~1 min.
   // Necesario porque una tarjeta recién asignada NO estaba en su vista (RLS), así
   // que el realtime no se la empuja: hay que re-fetchear para que aparezca sola.
@@ -222,7 +234,7 @@ export default function CreatorWorkspace({ user, onLogout, addToast, darkMode, t
 
   // Resumen motivador de la semana (aprobados + cuánto falta para el bonus) +
   // el avance propio (asignados / por hacer / en revisión).
-  const cardsSemana = listAssignments(thisWeek);
+  const cardsSemana = listAssignments(thisWeek).filter(esMia);
   const aprobadosSemana = cardsSemana.filter(a => esCompleto(a.estado)).length;
   const asignadosSemana = cardsSemana.length;
   const porHacerSemana = cardsSemana.filter(a => a.estado === 'porhacer').length;
@@ -235,7 +247,7 @@ export default function CreatorWorkspace({ user, onLogout, addToast, darkMode, t
   const monthKey = monthKeyOf();
   let completadosMes = 0, bonusMes = 0, videosMes = 0, ganadoProductos = 0;
   for (const wk of weeksInMonth(monthKey)) {
-    const cards = listAssignments(wk);
+    const cards = listAssignments(wk).filter(esMia);
     // Agrupamos por persona (normalmente una sola para el editor) para aplicar
     // su monto y bono propios.
     const byPer = {};
@@ -356,7 +368,7 @@ export default function CreatorWorkspace({ user, onLogout, addToast, darkMode, t
                     <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Videos por producto</h3>
                   </div>
                   <div className="space-y-2.5">
-                    {resumenVideosPorProducto(allCards).map(r => {
+                    {resumenVideosPorProducto(allCards.filter(esMia)).map(r => {
                       const pct = r.target > 0 ? Math.round((r.subidos / r.target) * 100) : 0;
                       return (
                         <div key={r.producto}>
@@ -406,7 +418,17 @@ export default function CreatorWorkspace({ user, onLogout, addToast, darkMode, t
                       <div className="space-y-2 min-h-[44px]">
                         {cards.length === 0
                           ? <p className="text-[11px] text-gray-400 dark:text-gray-600 text-center py-3">—</p>
-                          : cards.map(a => <TarjetaProduccion key={a.id} a={a} num={numMap[a.id]} caps={CAPS_EDITOR} onOpen={() => setDetailId(a.id)} addToast={addToast} />)}
+                          : cards.map(a => (
+                            <div key={a.id} className="relative">
+                              {!esMia(a) && (
+                                <span className="absolute -top-1.5 right-2 z-10 text-[8.5px] font-extrabold uppercase tracking-wide text-sky-700 dark:text-sky-300 bg-sky-100 dark:bg-sky-900/60 border border-sky-300/60 dark:border-sky-700/60 rounded-full px-1.5 py-0.5"
+                                  title={`Tarjeta de ${a.persona || 'tu equipo'} — la ves porque te responde a vos (solo lectura)`}>
+                                  👥 {a.persona || 'equipo'}
+                                </span>
+                              )}
+                              <TarjetaProduccion a={a} num={numMap[a.id]} caps={CAPS_EDITOR} onOpen={() => setDetailId(a.id)} addToast={addToast} />
+                            </div>
+                          ))}
                       </div>
                     </div>
                   );
@@ -421,7 +443,7 @@ export default function CreatorWorkspace({ user, onLogout, addToast, darkMode, t
       </main>
 
       {detailCard && (
-        <CreatorCardDetail a={detailCard} num={numMap[detailCard.id]} onClose={() => setDetailId(null)} addToast={addToast} />
+        <CreatorCardDetail a={detailCard} num={numMap[detailCard.id]} mia={esMia(detailCard)} onClose={() => setDetailId(null)} addToast={addToast} />
       )}
     </div>
   );

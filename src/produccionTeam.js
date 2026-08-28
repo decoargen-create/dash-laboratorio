@@ -33,3 +33,5 @@ export const createMember = (email, password, displayName) =>
   call('create', { email, password, displayName }).then(d => d.member);
 export const resetPassword = (id, password) => call('reset-password', { id, password });
 export const removeMember = (id) => call('remove', { id });
+// Organigrama: quién responde a quién. liderId null = sin líder.
+export const setLider = (id, liderId) => call('set-lider', { id, liderId });

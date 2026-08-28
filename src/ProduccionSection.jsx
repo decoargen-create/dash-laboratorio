@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import {
   ESTADOS, ESTADO_LABELS, VIDEOS_POR_PRODUCTO, weekKeyOf, weekLabel, allWeekKeys,
-  listAssignments, listAllAssignments, addAssignment, updateAssignment, removeAssignment,
+  listAssignments, listAllAssignments, addAssignment, updateAssignment, aprobarTodosVideos, removeAssignment,
   assignCreator, subscribeProduccion, esCompleto, bonusObjetivo, bonusDe, inversionPorProducto,
   getRole, entregasNuevas, ultimaSubidaTs, personasEnTarjetas, resumenVideosPorProducto,
   resyncDesdeNube, vaciarTodo, setMaterialLinkProducto, probarDiscord,
@@ -2160,24 +2160,20 @@ function CardDetailModal({ a, personas, team = [], onClose, addToast, onTeamChan
               <div>
                 <div className="flex items-center gap-3 flex-wrap">
                   <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400">Videos aprobados</span>
-                  <div className="flex items-center gap-1.5">
-                    <button onClick={() => updateAssignment(a.id, { videosAprobados: Math.max(0, aprob - 1) })}
-                      className="w-6 h-6 rounded bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 text-gray-500 font-bold leading-none">−</button>
-                    <span className="font-mono tabular-nums text-sm w-14 text-center">{aprob}/{subidos}</span>
-                    <button onClick={() => updateAssignment(a.id, { videosAprobados: Math.min(subidos, aprob + 1) })}
-                      disabled={aprob >= subidos}
-                      className="w-6 h-6 rounded bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 text-gray-500 font-bold leading-none disabled:opacity-40">+</button>
-                  </div>
+                  {/* Contador DERIVADO de los ✓ por video — los +/- manuales se
+                      fueron: la aprobación se marca en cada fila de video, o
+                      todas juntas con "Aprobar todos". */}
+                  <span className={`font-mono tabular-nums text-sm font-bold ${todo ? 'text-emerald-500' : 'text-gray-600 dark:text-gray-300'}`}>{aprob}/{subidos}</span>
                   {subidos > 0 && (
                     <button
-                      onClick={() => { updateAssignment(a.id, { videosAprobados: subidos, estado: 'aprobado' }); addToast?.({ type: 'success', message: `Aprobado (${subidos}/${subidos}) — listo para publicar` }); }}
+                      onClick={() => { aprobarTodosVideos(a.id); updateAssignment(a.id, { estado: 'aprobado' }); addToast?.({ type: 'success', message: `Aprobado (${subidos}/${subidos}) — listo para publicar` }); }}
                       className={`ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition ${todo && !esCompleto(a.estado) ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm' : 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100'}`}>
                       <CheckCircle2 size={14} /> Aprobar todos
                     </button>
                   )}
                 </div>
                 <p className="text-[11px] text-gray-400 mt-1.5">
-                  El total es la cantidad de videos subidos ({subidos}). "Aprobar todos" marca todo aprobado y pasa la tarjeta a <b>Aprobado</b> (lista para publicar).
+                  Aprobá video por video con el ✓ de cada fila (arriba), o todos juntos acá. "Aprobar todos" pasa la tarjeta a <b>Aprobado</b> (lista para publicar).
                 </p>
                 {esCompleto(a.estado) && <span className="mt-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1"><CheckCircle2 size={13} /> Cuenta para el pago</span>}
               </div>

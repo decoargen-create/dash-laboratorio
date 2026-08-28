@@ -929,9 +929,84 @@ export function replaceArchivo(id, ts, archivo) {
   const arr = read().slice();
   const i = arr.findIndex(a => a.id === id);
   if (i === -1) return;
+  // Si el reemplazo viene marcado como corrección cumplida (f.corregido), le
+  // estampamos QUIÉN la hizo — el actor lo conoce el store, no el uploader.
+  const conActor = archivo?.corregido && !archivo.corregido.por
+    ? { ...archivo, corregido: { ...archivo.corregido, por: _actorName || 'Equipo' } }
+    : archivo;
   arr[i] = {
     ...arr[i],
-    archivos: (arr[i].archivos || []).map(f => (f.ts === ts ? archivo : f)),
+    archivos: (arr[i].archivos || []).map(f => (f.ts === ts ? conActor : f)),
+    updatedAt: new Date().toISOString(),
+  };
+  write(arr);
+  pushRow(id);
+}
+
+// Aprobación POR VIDEO (la marca el revisor con el ✓ de cada fila). Al
+// aprobar se limpia cualquier corrección pendiente de ese video (aprobar
+// gana). El contador a.videosAprobados se DERIVA de estas marcas — es el
+// mismo campo numérico de siempre (videos_aprobados en la DB), así que los
+// bonos y resúmenes que lo leen siguen funcionando sin tocarse.
+export function setAprobadoVideo(id, ts, on) {
+  const arr = read().slice();
+  const i = arr.findIndex(a => a.id === id);
+  if (i === -1) return;
+  const archivos = (arr[i].archivos || []).map(f => {
+    if (f.ts !== ts) return f;
+    if (on) {
+      const { correccion, ...rest } = f;
+      return { ...rest, aprobado: { por: _actorName || 'Equipo', ts: new Date().toISOString() } };
+    }
+    const { aprobado, ...rest } = f;
+    return rest;
+  });
+  arr[i] = {
+    ...arr[i],
+    archivos,
+    videosAprobados: archivos.filter(f => f.aprobado).length,
+    updatedAt: new Date().toISOString(),
+  };
+  write(arr);
+  pushRow(id);
+}
+
+// Marca TODOS los videos subidos como aprobados (botón "Aprobar todos").
+// No toca el estado de la tarjeta — eso lo decide el caller vía
+// updateAssignment (que además dispara el aviso de Discord del cambio).
+export function aprobarTodosVideos(id) {
+  const arr = read().slice();
+  const i = arr.findIndex(a => a.id === id);
+  if (i === -1) return;
+  const archivos = (arr[i].archivos || []).map(f => {
+    if (f.aprobado) return f;
+    const { correccion, ...rest } = f;
+    return { ...rest, aprobado: { por: _actorName || 'Equipo', ts: new Date().toISOString() } };
+  });
+  arr[i] = {
+    ...arr[i],
+    archivos,
+    videosAprobados: archivos.length,
+    updatedAt: new Date().toISOString(),
+  };
+  write(arr);
+  pushRow(id);
+}
+
+// Saca la marca verde "Corregido" de un video (la usa quien revisa con el
+// botón "Visto"). La marca también deja de mostrarse sola al aprobar la
+// tarjeta — esto es para limpiarla antes si el revisor ya lo chequeó.
+export function clearCorregidoVideo(id, ts) {
+  const arr = read().slice();
+  const i = arr.findIndex(a => a.id === id);
+  if (i === -1) return;
+  arr[i] = {
+    ...arr[i],
+    archivos: (arr[i].archivos || []).map(f => {
+      if (f.ts !== ts || !f.corregido) return f;
+      const { corregido, ...rest } = f;
+      return rest;
+    }),
     updatedAt: new Date().toISOString(),
   };
   write(arr);

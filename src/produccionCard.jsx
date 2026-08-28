@@ -20,7 +20,7 @@ import {
   ChevronDown, Loader2, UploadCloud, CheckCircle2,
 } from 'lucide-react';
 import {
-  updateAssignment, assignCreator, removeAssignment, personasEnTarjetas,
+  updateAssignment, aprobarTodosVideos, assignCreator, removeAssignment, personasEnTarjetas,
   VIDEOS_POR_PRODUCTO, ESTADO_LABELS, ESTADOS,
 } from './produccionStore.js';
 import { subirParaTarjeta, VIDEO_ACCEPT } from './produccionUpload.jsx';
@@ -150,7 +150,8 @@ export default function TarjetaProduccion({ a, num, personas = [], team = [], on
 
   const aprobarTodos = (e) => {
     e.stopPropagation();
-    updateAssignment(a.id, { videosAprobados: subidos, estado: 'aprobado' });
+    aprobarTodosVideos(a.id);
+    updateAssignment(a.id, { estado: 'aprobado' });
     addToast?.({ type: 'success', message: `🎉 ¡${a.productoNombre} aprobado! (${subidos}/${subidos}) — listo para despegar` });
   };
   const publicar = (e) => {

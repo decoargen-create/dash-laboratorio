@@ -13,9 +13,9 @@
 // creator van por la RPC produccion_creator_update; para un admin, directo.
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Film, X, UploadCloud, Loader2, AlertTriangle, ExternalLink } from 'lucide-react';
+import { Film, X, UploadCloud, Loader2, AlertTriangle, ExternalLink, Check, CheckCircle2 } from 'lucide-react';
 import { supabase, getCurrentUser } from './supabase.js';
-import { addArchivos, removeArchivo, replaceArchivo, updateAssignment, setCorreccionVideo, refreshProduccion, VIDEOS_POR_PRODUCTO } from './produccionStore.js';
+import { addArchivos, removeArchivo, replaceArchivo, clearCorregidoVideo, setAprobadoVideo, updateAssignment, setCorreccionVideo, refreshProduccion, VIDEOS_POR_PRODUCTO } from './produccionStore.js';
 
 const BUCKET = 'creativos';
 
@@ -306,6 +306,14 @@ export async function reemplazarVideo(a, viejo, file, { addToast } = {}) {
     force: true,
   };
   const archivo = await uploadOne(file, ctx); // tira si falla — el caller muestra el error
+  // Marca verde "Corregido" para quien revisa: guarda qué se pedía y cuándo se
+  // reemplazó. El store le estampa quién (conoce el actor). Se muestra mientras
+  // la tarjeta está en Por hacer / En revisión; al aprobar desaparece sola.
+  archivo.corregido = {
+    nota: viejo.correccion?.texto || null,
+    de: viejo.name || null,
+    ts: new Date().toISOString(),
+  };
   replaceArchivo(a.id, viejo.ts, archivo);
 
   // El viejo, afuera: papelera de Drive (recuperable 30 días) o storage AdsLab.
@@ -534,16 +542,40 @@ export function CreativosSection({ a, addToast, canDelete = true, readOnly = fal
             const corr = f.correccion?.texto ? f.correccion : null;
             const editing = corrEdit === f.ts;
             const nVid = idx + 1;
+            // Marca verde "Corregido": el video es un reemplazo y nadie pidió
+            // una corrección NUEVA sobre él (el ámbar le gana al verde). Solo
+            // mientras la tarjeta sigue en el ciclo por hacer/revisión — al
+            // aprobar, la marca ya cumplió su función y no se muestra más.
+            const fixed = (!corr && f.corregido && (a.estado === 'porhacer' || a.estado === 'revision')) ? f.corregido : null;
             return (
             <div key={f.ts}>
-              <div className={`flex items-center gap-2 text-xs rounded px-2.5 py-1.5 ${corr ? 'bg-amber-50 dark:bg-amber-900/20 ring-1 ring-amber-300 dark:ring-amber-800/60' : 'bg-gray-50 dark:bg-gray-800'}`}>
+              <div className={`flex items-center gap-2 text-xs rounded px-2.5 py-1.5 ${corr ? 'bg-amber-50 dark:bg-amber-900/20 ring-1 ring-amber-300 dark:ring-amber-800/60' : fixed ? 'bg-emerald-50 dark:bg-emerald-900/20 ring-1 ring-emerald-300 dark:ring-emerald-800/60' : 'bg-gray-50 dark:bg-gray-800'}`}>
                 <span className="shrink-0 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 text-[10px] font-black tabular-nums" title={`Video ${nVid}`}>{nVid}</span>
                 <Film size={12} className="text-emerald-500 flex-shrink-0" />
                 <span className="truncate flex-1 text-gray-700 dark:text-gray-200" title={f.name}>{f.name}</span>
+                {fixed && (
+                  <span className="shrink-0 inline-flex items-center gap-0.5 text-[10px] font-extrabold text-emerald-600 dark:text-emerald-400 border border-emerald-400/50 rounded-full px-2 py-0.5">
+                    <Check size={10} /> Corregido
+                  </span>
+                )}
                 <span className="text-[10px] uppercase font-bold text-gray-400">{f.destino === 'drive' ? 'Drive' : 'AdsLab'}</span>
                 {f.link && <a href={f.link} target="_blank" rel="noopener noreferrer" title="Ver en Drive" className="text-brand-500 hover:text-brand-600"><ExternalLink size={11} /></a>}
                 {!f.link && f.storagePath && (
                   <button onClick={() => verVideo(f)} title="Ver el video (AdsLab)" className="text-brand-500 hover:text-brand-600"><ExternalLink size={11} /></button>
+                )}
+                {/* ✓ de aprobado: el revisor lo togglea; el resto (creador,
+                    tarjetas read-only) lo VE fijo — mismo ícono, sin acción. */}
+                {(!canReview || readOnly) && f.aprobado && (
+                  <span title={`Video ${nVid} aprobado por ${f.aprobado.por || 'el equipo'}`} className="text-emerald-500">
+                    <CheckCircle2 size={14} fill="currentColor" stroke="white" />
+                  </span>
+                )}
+                {canReview && !readOnly && (
+                  <button onClick={() => setAprobadoVideo(a.id, f.ts, !f.aprobado)}
+                    title={f.aprobado ? `Video ${nVid} aprobado por ${f.aprobado.por || 'Equipo'} — click para quitar` : `Aprobar el Video ${nVid}`}
+                    className={`transition ${f.aprobado ? 'text-emerald-500 hover:text-emerald-600' : 'text-gray-300 dark:text-gray-600 hover:text-emerald-500'}`}>
+                    <CheckCircle2 size={14} {...(f.aprobado ? { fill: 'currentColor', stroke: 'white' } : {})} />
+                  </button>
                 )}
                 {canReview && !readOnly && (
                   <button onClick={() => { setCorrText(corr?.texto || ''); setCorrEdit(editing ? null : f.ts); }}
@@ -580,6 +612,40 @@ export function CreativosSection({ a, addToast, canDelete = true, readOnly = fal
                         : <><UploadCloud size={11} /> Reemplazar por el corregido</>}
                     </button>
                   )}
+                </div>
+              )}
+
+              {/* Caja espejo "Corregido" — la contracara verde del aviso ámbar:
+                  qué se pedía, quién lo reemplazó y cuándo, link al nuevo y
+                  "Visto" para que el revisor la archive antes de aprobar. */}
+              {fixed && !editing && (
+                <div className="ml-6 mt-0.5 mb-1 bg-emerald-50 dark:bg-emerald-900/20 border-l-2 border-emerald-500 rounded-r px-2.5 py-1.5">
+                  <div className="text-[11px] text-emerald-800 dark:text-emerald-200 min-w-0">
+                    <b className="inline-flex items-center gap-1"><Check size={11} /> Corregido (Video {nVid})</b>
+                    {fixed.nota && <> — se pedía: <span className="italic text-emerald-700/80 dark:text-emerald-300/70 whitespace-pre-wrap break-words">"{fixed.nota}"</span></>}
+                    <span className="block text-[9.5px] text-emerald-600/70 dark:text-emerald-400/60 mt-0.5">
+                      reemplazado{fixed.por ? ` por ${fixed.por}` : ''}{fixed.ts ? ` · ${new Date(fixed.ts).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}` : ''}
+                    </span>
+                  </div>
+                  <div className="flex gap-1.5 mt-1.5">
+                    {f.link ? (
+                      <a href={f.link} target="_blank" rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-[10.5px] font-extrabold px-2.5 py-1 rounded-lg text-white bg-emerald-600 hover:bg-emerald-700 transition">
+                        ▶ Ver el nuevo
+                      </a>
+                    ) : f.storagePath ? (
+                      <button onClick={() => verVideo(f)}
+                        className="inline-flex items-center gap-1 text-[10.5px] font-extrabold px-2.5 py-1 rounded-lg text-white bg-emerald-600 hover:bg-emerald-700 transition">
+                        ▶ Ver el nuevo
+                      </button>
+                    ) : null}
+                    {canReview && (
+                      <button onClick={() => { clearCorregidoVideo(a.id, f.ts); addToast?.({ type: 'info', message: `Marca de corregido del Video ${nVid} archivada` }); }}
+                        className="inline-flex items-center gap-1 text-[10.5px] font-bold px-2.5 py-1 rounded-lg text-emerald-700 dark:text-emerald-300 border border-emerald-400/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition">
+                        Visto ✓
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
 

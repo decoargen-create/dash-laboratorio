@@ -2051,12 +2051,25 @@ export function CardDetailModal({ a, personas, team = [], onClose, addToast, onT
   const [brief, setBrief] = useState(a.brief || '');
   const [material, setMaterial] = useState(a.materialLink || '');
   const nFiles = a.archivos?.length || 0;
+  // Correcciones YA escritas video por video. Si hay al menos una, "Pedir
+  // cambios" devuelve la tarjeta a Por hacer DIRECTO (sin volver a pedir una
+  // nota general): esas correcciones puntuales ya son el detalle que ve el
+  // creativo (y cada una ya avisó por Discord al escribirse).
+  const nCorr = (a.archivos || []).filter(f => f.correccion?.texto).length;
 
   const saveBrief = () => { if (brief !== (a.brief || '')) updateAssignment(a.id, { brief }); };
   // El link de material es POR PRODUCTO: lo copiamos a todas las tarjetas del
   // mismo producto (así el editor lo ve en cualquiera de ellas).
   const saveMaterial = () => { const v = material.trim(); if (v !== (a.materialLink || '')) setMaterialLinkProducto(a.productoId, a.productoNombre, v); };
   const saveAll = () => { saveBrief(); saveMaterial(); };
+  // Devolver a Por hacer usando las correcciones ya escritas por video — sin
+  // diálogo (el reviewer ya anotó lo que hay que corregir en cada video).
+  const devolverParaCorregir = () => {
+    saveAll();
+    updateAssignment(a.id, { estado: 'porhacer' });
+    addToast?.({ type: 'success', message: `Devuelta para corregir — ${nCorr} corrección${nCorr === 1 ? '' : 'es'} marcada${nCorr === 1 ? '' : 's'}.` });
+    onClose();
+  };
   // Diálogos propios (reemplazan window.confirm/prompt): 'eliminar' | 'cambios'.
   const [dlg, setDlg] = useState(null);
   useEscape(() => { if (dlg) return; saveAll(); onClose(); }); // Esc = guardar brief y cerrar (salvo diálogo abierto)
@@ -2208,9 +2221,12 @@ export function CardDetailModal({ a, personas, team = [], onClose, addToast, onT
             className="inline-flex items-center gap-1.5 text-xs font-bold text-red-500 hover:text-red-600 transition">
             <Trash2 size={14} /> Eliminar tarjeta
           </button>
-          <button onClick={() => setDlg('cambios')}
+          <button onClick={() => (nCorr > 0 ? devolverParaCorregir() : setDlg('cambios'))}
+            title={nCorr > 0
+              ? `Devolver a «Por hacer» con las ${nCorr} correcciones ya escritas — sin pedir otra nota`
+              : 'Devolver al creativo con una nota de qué corregir'}
             className="ml-auto inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/30 hover:bg-amber-200 dark:hover:bg-amber-900/50 rounded-lg transition">
-            <AlertTriangle size={14} /> Pedir cambios
+            <AlertTriangle size={14} /> {nCorr > 0 ? `Devolver para corregir · ${nCorr}` : 'Pedir cambios'}
           </button>
           <button onClick={() => { saveAll(); onClose(); }} className="px-4 py-2 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition">Listo</button>
         </div>

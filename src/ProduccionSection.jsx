@@ -1296,6 +1296,10 @@ function AgregarProductoModal({ productos, personas, team = [], asigs, weekKey, 
   // key = id de cuenta del equipo, o "p:Nombre" para etiquetas sin cuenta.
   const [counts, setCounts] = useState(() => new Map());
   const [q, setQ] = useState('');
+  // Paso de confirmación: al tocar "Crear" mostramos un resumen (producto +
+  // reparto por persona + total) para que quien carga VALIDE antes de crear.
+  // Evita crear tarjetas de más o con el producto equivocado.
+  const [confirming, setConfirming] = useState(false);
 
   const yaEnSemana = useMemo(() => new Set(asigs.map(a => String(a.productoId))), [asigs]);
   const filtrados = useMemo(() => {
@@ -1347,14 +1351,77 @@ function AgregarProductoModal({ productos, personas, team = [], asigs, weekKey, 
     onClose();
   };
 
+  // Datos para el paso de confirmación: producto(s) elegidos + reparto por persona.
+  const productosSel = [...selected].map(id => productos.find(p => String(p.id) === id)).filter(Boolean);
+  const targetsInfo = targets.map(([key, c]) => {
+    const m = team.find(t => t.id === key);
+    return { key, nombre: m ? (m.display_name || m.email) : key.slice(2), c };
+  });
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={onClose}>
       <div className="w-full max-w-md bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="flex items-center gap-2 px-5 py-3.5 border-b border-gray-100 dark:border-gray-800">
           <Plus size={16} className="text-brand-500" />
-          <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Agregar productos a la semana</h3>
+          <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">{confirming ? 'Revisá antes de crear' : 'Agregar productos a la semana'}</h3>
           <button onClick={onClose} className="ml-auto text-gray-400 hover:text-gray-600"><X size={18} /></button>
         </div>
+
+        {/* ── Paso 2: confirmación (resumen para validar antes de crear) ── */}
+        {confirming && (<>
+          <div className="p-5 space-y-4">
+            <div className="text-center py-1">
+              <div className="text-3xl font-extrabold text-brand-600 dark:text-brand-400 tabular-nums leading-none">{totalTarjetas}</div>
+              <div className="text-sm text-gray-600 dark:text-gray-300 mt-1">tarjeta{totalTarjetas === 1 ? '' : 's'} nueva{totalTarjetas === 1 ? '' : 's'} para <b>{weekLabel(weekKey)}</b></div>
+            </div>
+            <div>
+              <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Producto{productosSel.length === 1 ? '' : 's'}</span>
+              <div className="flex flex-wrap gap-1.5">
+                {productosSel.map(p => (
+                  <span key={p.id} className="text-xs font-bold px-2.5 py-1 rounded-md bg-brand-100 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300">{p.nombre}</span>
+                ))}
+              </div>
+            </div>
+            <div>
+              <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">{targetsInfo.length ? 'Reparto' : 'Asignación'}</span>
+              <div className="rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-100 dark:divide-gray-800 max-h-48 overflow-y-auto">
+                {productosSel.flatMap(p => (
+                  targetsInfo.length
+                    ? targetsInfo.map(t => (
+                      <div key={`${p.id}-${t.key}`} className="flex items-center gap-2 px-3 py-2 text-sm">
+                        <span className="font-semibold text-gray-800 dark:text-gray-100 truncate max-w-[42%]">{p.nombre}</span>
+                        <span className="text-gray-400 shrink-0">→</span>
+                        <span className={`text-[11px] font-bold px-2 py-0.5 rounded shrink-0 ${CHIP_CLS[personaColor(t.nombre)]}`}>{t.nombre}</span>
+                        <span className="ml-auto text-xs font-bold tabular-nums text-gray-700 dark:text-gray-200 whitespace-nowrap">{t.c} tarjeta{t.c === 1 ? '' : 's'}</span>
+                      </div>
+                    ))
+                    : (
+                      <div key={p.id} className="flex items-center gap-2 px-3 py-2 text-sm">
+                        <span className="font-semibold text-gray-800 dark:text-gray-100 truncate max-w-[55%]">{p.nombre}</span>
+                        <span className="text-gray-400 shrink-0">→</span>
+                        <span className="text-[11px] text-gray-500 dark:text-gray-400 italic shrink-0">sin asignar</span>
+                        <span className="ml-auto text-xs font-bold tabular-nums text-gray-700 dark:text-gray-200 whitespace-nowrap">1 tarjeta</span>
+                      </div>
+                    )
+                ))}
+              </div>
+            </div>
+            <p className="text-[11px] text-amber-600 dark:text-amber-400 flex items-start gap-1.5">
+              <AlertTriangle size={13} className="mt-px shrink-0" /> Revisá que el producto y las personas sean correctos — al confirmar se crean de una.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 px-5 py-3.5 border-t border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
+            <button onClick={() => setConfirming(false)}
+              className="inline-flex items-center gap-1 px-3 py-2 text-sm font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition">← Volver</button>
+            <button onClick={crear}
+              className="ml-auto inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition">
+              <CheckCircle2 size={15} /> Sí, crear {totalTarjetas} tarjeta{totalTarjetas === 1 ? '' : 's'}
+            </button>
+          </div>
+        </>)}
+
+        {/* ── Paso 1: edición (elegir producto + personas) ── */}
+        {!confirming && (<>
         <div className="p-5 space-y-4">
           <div>
             <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">
@@ -1433,11 +1500,12 @@ function AgregarProductoModal({ productos, personas, team = [], asigs, weekKey, 
               }).join(' + ')})
             </span>
           )}
-          <button onClick={crear} disabled={selected.size === 0}
+          <button onClick={() => setConfirming(true)} disabled={selected.size === 0}
             className="ml-auto inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed">
             <Plus size={15} /> Crear {selected.size > 0 ? `${totalTarjetas} ` : ''}tarjeta{totalTarjetas === 1 ? '' : 's'}
           </button>
         </div>
+        </>)}
       </div>
     </div>
   );

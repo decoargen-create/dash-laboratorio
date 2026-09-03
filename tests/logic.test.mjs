@@ -551,6 +551,72 @@ eq('con el breakeven del aceite en 0.3, esa misma fila deja de ser candidata',
   }).candidatos.length, 0);
 
 
+// ─────────── FACTURACIÓN ───────────
+console.log('\nFACTURACIÓN:');
+{
+  const {
+    mesKey, inicioVentana, listaMeses, comprobantesEnVentana,
+    reporteMensual, reportePorCliente, topeRestante, resumenParaMail,
+  } = await import('../src/facturacionCalc.js');
+
+  eq('mesKey de una fecha', mesKey('2026-08-15'), '2026-08');
+  eq('mesKey tolera basura', [mesKey(null), mesKey('nope')], ['', '']);
+  // "Comprobantes emitidos de acá once meses para atrás": la ventana de 11
+  // meses incluye el mes actual, o sea que arranca 10 meses antes.
+  eq('ventana de 11 meses desde sep-2026', inicioVentana(new Date('2026-09-03T00:00:00'), 11), '2025-11');
+  eq('ventana de 1 mes = el mes actual', inicioVentana(new Date('2026-09-03T00:00:00'), 1), '2026-09');
+  eq('ventana que cruza enero', inicioVentana(new Date('2026-02-10T00:00:00'), 3), '2025-12');
+  eq('listaMeses cruza el año', listaMeses('2025-11', '2026-01'), ['2025-11', '2025-12', '2026-01']);
+  eq('listaMeses invertida = vacía', listaMeses('2026-03', '2026-01'), []);
+
+  const ventas = [
+    { id: 1, fecha: '2026-08-10', clienteId: 1, montoTotal: 500000, estado: 'despachado' },
+    { id: 2, fecha: '2026-08-20', clienteId: 1, montoTotal: 500000, estado: 'abonado' },
+    { id: 3, fecha: '2026-09-01', clienteId: 2, montoTotal: 300000, estado: 'consulta-recibida' },
+    { id: 4, fecha: '2025-01-05', clienteId: 1, montoTotal: 100000, estado: 'despachado' },
+    { id: 5, fecha: '', clienteId: 3, montoTotal: 999999, estado: 'despachado' },
+  ];
+  const clientes = [{ id: 1, nombre: 'Lucas Motas' }, { id: 2, nombre: 'Pirulitas' }];
+
+  eq('ventana filtra viejas y sin fecha',
+    comprobantesEnVentana(ventas, { desdeKey: '2025-11', hastaKey: '2026-09' }).map(o => o.id), [1, 2, 3]);
+  eq('soloFacturables saca consultas',
+    comprobantesEnVentana(ventas, { desdeKey: '2025-11', hastaKey: '2026-09', soloFacturables: true }).map(o => o.id), [1, 2]);
+  eq('sin piso entra el histórico completo (menos sin fecha)',
+    comprobantesEnVentana(ventas, { hastaKey: '2026-09' }).map(o => o.id), [1, 2, 3, 4]);
+
+  const enVentana = comprobantesEnVentana(ventas, { desdeKey: '2026-07', hastaKey: '2026-09' });
+  eq('mensual rellena meses sin movimiento',
+    reporteMensual(enVentana, { desdeKey: '2026-07', hastaKey: '2026-09' }),
+    [
+      { mes: '2026-07', total: 0, cantidad: 0 },
+      { mes: '2026-08', total: 1000000, cantidad: 2 },
+      { mes: '2026-09', total: 300000, cantidad: 1 },
+    ]);
+
+  const porCliente = reportePorCliente(enVentana, clientes);
+  eq('por cliente ordena por total y trae última fecha',
+    porCliente.map(r => [r.nombre, r.total, r.cantidad, r.ultimaFecha]),
+    [['Lucas Motas', 1000000, 2, '2026-08-20'], ['Pirulitas', 300000, 1, '2026-09-01']]);
+
+  // Tope estilo "lo topeo a 113": con 6 ya facturados quedan 107 disponibles.
+  eq('tope con disponible', topeRestante(6000000, 113000000),
+    { tope: 113000000, restante: 107000000, pctUsado: 5, excedido: false });
+  eq('tope excedido', topeRestante(120, 100).excedido, true);
+  eq('sin tope → sin alerta', topeRestante(999, 0), { tope: null, restante: null, pctUsado: null, excedido: false });
+
+  const mail = resumenParaMail({
+    titulo: 'Reporte',
+    porCliente,
+    conceptos: { 2: 'Servicios' },
+    totalGeneral: 1300000,
+    cantidadGeneral: 3,
+  });
+  eq('mail: concepto default Comercial', mail.includes('Con Lucas Motas — Comercial: $1.000.000 (2 comprobantes)'), true);
+  eq('mail: concepto custom y singular', mail.includes('Con Pirulitas — Servicios: $300.000 (1 comprobante)'), true);
+  eq('mail: total general arriba', mail.includes('Total facturado: $1.300.000 (3 comprobantes)'), true);
+}
+
 // ─────────── RESUMEN ───────────
 console.log(`\n${'─'.repeat(40)}\nRESULTADO: ${pass} ✅   ${fail} ❌\n`);
 process.exit(fail === 0 ? 0 : 1);

@@ -58,6 +58,10 @@ import { ensureAppAdmin } from './produccionTeam.js';
 import { initMoneySync, teardownMoneySync } from './moneyStore.js';
 import CreatorWorkspace from './CreatorWorkspace.jsx';
 import { generateCSV, downloadCSV, parseCSV, toNumber, toBool } from './csv.js';
+import {
+  mesKey, inicioVentana, comprobantesEnVentana, reporteMensual,
+  reportePorCliente, topeRestante, resumenParaMail, ESTADOS_FACTURABLES,
+} from './facturacionCalc.js';
 import { loadVioraState, saveVioraState, clearVioraState, createBackup } from './vioraStorage.js';
 import { safeSetItem } from './safeStorage.js';
 
@@ -1066,6 +1070,348 @@ function ResultadoCard({ label, value, sub, color }) {
       <p className="text-[10px] font-bold uppercase tracking-wider opacity-70 mb-0.5">{label}</p>
       <p className="text-base font-bold tabular-nums">{value}</p>
       {sub && <p className="text-[10px] opacity-60 mt-0.5">{sub}</p>}
+    </div>
+  );
+}
+
+// Sección Facturación (Finanzas): reporte de comprobantes emitidos.
+// Nació de la necesidad de, antes de emitir más facturas a un cliente,
+// ver su histórico ("cuánto lleva facturado este ser humano") en una
+// ventana móvil de meses, más un reporte global para detallar por mail.
+// - Ventana por defecto: últimos 11 meses (incluye el mes actual).
+// - Tope opcional por cliente: muestra disponible y alerta al acercarse.
+// - Concepto por cliente (default "Comercial") para el resumen del mail.
+// Topes y conceptos se guardan en localStorage (config local del admin,
+// no viaja con el export de la base).
+function FacturacionSection({ state, addToast }) {
+  const CFG_KEY = 'adslab-facturacion-cfg-v1';
+  const PERIODOS = [
+    { meses: 3, label: '3 meses' },
+    { meses: 6, label: '6 meses' },
+    { meses: 11, label: '11 meses' },
+    { meses: 12, label: '12 meses' },
+    { meses: 0, label: 'Todo' },
+  ];
+
+  const [meses, setMeses] = useState(11);
+  const [soloFacturables, setSoloFacturables] = useState(false);
+  const [cfg, setCfg] = useState(() => {
+    try {
+      const raw = localStorage.getItem(CFG_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      return { topes: parsed?.topes || {}, conceptos: parsed?.conceptos || {} };
+    } catch { return { topes: {}, conceptos: {} }; }
+  });
+
+  useEffect(() => {
+    try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); } catch {}
+  }, [cfg]);
+
+  const hoy = new Date();
+  // Mes actual en hora local (toISOString es UTC y a la noche saltaría de mes)
+  const hastaKey = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}`;
+  const desdeKey = meses > 0 ? inicioVentana(hoy, meses) : null;
+
+  const comprobantes = useMemo(
+    () => comprobantesEnVentana(state.sales, { desdeKey, hastaKey, soloFacturables }),
+    [state.sales, desdeKey, hastaKey, soloFacturables]
+  );
+  const mensual = useMemo(() => {
+    // Sin piso ("Todo") la serie arranca en el primer mes con movimiento.
+    const primer = desdeKey || (comprobantes.length
+      ? comprobantes.map(o => mesKey(o.fecha)).sort()[0]
+      : hastaKey);
+    return reporteMensual(comprobantes, { desdeKey: primer, hastaKey });
+  }, [comprobantes, desdeKey, hastaKey]);
+  const porCliente = useMemo(
+    () => reportePorCliente(comprobantes, state.clients),
+    [comprobantes, state.clients]
+  );
+
+  const totalFacturado = comprobantes.reduce((s, o) => s + (Number(o.montoTotal) || 0), 0);
+  const mesesConMovimiento = mensual.filter(m => m.cantidad > 0).length;
+  const promedioMensual = mesesConMovimiento > 0 ? totalFacturado / mesesConMovimiento : 0;
+  const maxMes = Math.max(1, ...mensual.map(m => m.total));
+
+  const f = (n) => `$${Math.round(n || 0).toLocaleString('es-AR')}`;
+  const labelMes = (k) => new Date(k + '-01').toLocaleDateString('es-ES', { month: 'short', year: '2-digit' });
+  const periodoLabel = meses > 0 ? `últimos ${meses} meses` : 'todo el histórico';
+
+  const setTope = (clienteId, value) => {
+    setCfg(prev => {
+      const topes = { ...prev.topes };
+      const n = parseFloat(value);
+      if (Number.isFinite(n) && n > 0) topes[clienteId] = n;
+      else delete topes[clienteId];
+      return { ...prev, topes };
+    });
+  };
+  const setConcepto = (clienteId, value) => {
+    setCfg(prev => {
+      const conceptos = { ...prev.conceptos };
+      if (value && value.trim()) conceptos[clienteId] = value;
+      else delete conceptos[clienteId];
+      return { ...prev, conceptos };
+    });
+  };
+
+  const handleCopiarMail = () => {
+    const texto = resumenParaMail({
+      titulo: `Reporte de facturación — ${periodoLabel} (al ${hoy.toLocaleDateString('es-AR')})`,
+      porCliente,
+      conceptos: cfg.conceptos,
+      totalGeneral: totalFacturado,
+      cantidadGeneral: comprobantes.length,
+    });
+    const done = () => addToast?.({ type: 'success', message: 'Resumen copiado — listo para pegar en el mail' });
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(texto).then(done).catch(() => {
+        addToast?.({ type: 'error', message: 'No se pudo copiar al portapapeles' });
+      });
+    } else {
+      addToast?.({ type: 'error', message: 'El navegador no permite copiar al portapapeles' });
+    }
+  };
+
+  const handleExportPorCliente = () => {
+    const rows = porCliente.map(row => {
+      const t = topeRestante(row.total, cfg.topes[row.clienteId]);
+      return {
+        cliente: row.nombre,
+        concepto: cfg.conceptos[row.clienteId] || 'Comercial',
+        comprobantes: row.cantidad,
+        total: row.total,
+        ultimaFecha: row.ultimaFecha,
+        tope: t.tope ?? '',
+        disponible: t.restante ?? '',
+      };
+    });
+    downloadCSV(`facturacion-por-cliente-${hastaKey}.csv`, generateCSV(rows, [
+      { key: 'cliente', label: 'cliente' },
+      { key: 'concepto', label: 'concepto' },
+      { key: 'comprobantes', label: 'comprobantes' },
+      { key: 'total', label: 'totalFacturado' },
+      { key: 'ultimaFecha', label: 'ultimaFecha' },
+      { key: 'tope', label: 'tope' },
+      { key: 'disponible', label: 'disponible' },
+    ]));
+    addToast?.({ type: 'success', message: 'CSV por cliente descargado' });
+  };
+
+  const handleExportDetalle = () => {
+    const rows = [...comprobantes]
+      .sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''))
+      .map(o => ({
+        fecha: o.fecha,
+        cliente: state.clients.find(c => c.id === o.clienteId)?.nombre || `Cliente #${o.clienteId}`,
+        producto: state.products.find(p => p.id === o.productoId)?.nombre || '',
+        cantidad: o.cantidad,
+        monto: o.montoTotal || 0,
+        estado: ORDER_STATE_LABELS[o.estado] || o.estado || '',
+      }));
+    downloadCSV(`facturacion-detalle-${hastaKey}.csv`, generateCSV(rows, [
+      { key: 'fecha', label: 'fecha' },
+      { key: 'cliente', label: 'cliente' },
+      { key: 'producto', label: 'producto' },
+      { key: 'cantidad', label: 'cantidad' },
+      { key: 'monto', label: 'monto' },
+      { key: 'estado', label: 'estado' },
+    ]));
+    addToast?.({ type: 'success', message: 'CSV de comprobantes descargado' });
+  };
+
+  const detalle = useMemo(
+    () => [...comprobantes].sort((a, b) => (b.fecha || '').localeCompare(a.fecha || '')),
+    [comprobantes]
+  );
+
+  return (
+    <div className="space-y-6 max-w-6xl mx-auto">
+      {/* Filtros de período + acciones */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          {PERIODOS.map(p => (
+            <button
+              key={p.meses}
+              onClick={() => setMeses(p.meses)}
+              className={`px-3 py-1.5 rounded-full text-xs font-semibold transition ${meses === p.meses
+                ? 'bg-pink-600 text-white shadow'
+                : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:opacity-80'}`}
+            >
+              {p.label}
+            </button>
+          ))}
+          <label className="flex items-center gap-1.5 ml-2 text-xs text-gray-600 dark:text-gray-300 cursor-pointer select-none" title={`Cuenta solo órdenes en estados: ${ESTADOS_FACTURABLES.join(', ')}`}>
+            <input
+              type="checkbox"
+              checked={soloFacturables}
+              onChange={(e) => setSoloFacturables(e.target.checked)}
+              className="rounded border-gray-300 text-pink-600 focus:ring-pink-500"
+            />
+            Solo abonadas en adelante
+          </label>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={handleCopiarMail} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:border-pink-400 transition" title="Copia un resumen en texto plano con el detalle por cliente">
+            <Copy size={14} /> Copiar resumen para mail
+          </button>
+          <button onClick={handleExportPorCliente} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:border-pink-400 transition">
+            <FileText size={14} /> CSV por cliente
+          </button>
+          <button onClick={handleExportDetalle} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:border-pink-400 transition">
+            <FileText size={14} /> CSV detalle
+          </button>
+        </div>
+      </div>
+
+      {/* KPIs del período */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+        <ResultadoCard label={`Facturado (${periodoLabel})`} value={f(totalFacturado)} color="emerald" />
+        <ResultadoCard label="Comprobantes emitidos" value={String(comprobantes.length)} color="sky" />
+        <ResultadoCard label="Promedio mensual" value={f(promedioMensual)} sub={`sobre ${mesesConMovimiento} ${mesesConMovimiento === 1 ? 'mes' : 'meses'} con movimiento`} color="gray" />
+        <ResultadoCard label="Clientes con facturación" value={String(porCliente.length)} color="amber" />
+      </div>
+
+      {/* Serie mensual con barras simples (sin chart lib, consistente con el
+          estilo mate de la app). El mes en curso siempre aparece aunque dé 0. */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-5">
+        <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 mb-4">Facturación por mes</h3>
+        <div className="space-y-2">
+          {mensual.map(m => (
+            <div key={m.mes} className="flex items-center gap-3 text-xs">
+              <span className="w-16 shrink-0 text-gray-500 dark:text-gray-400 capitalize">{labelMes(m.mes)}</span>
+              <div className="flex-1 h-4 rounded bg-gray-100 dark:bg-gray-700 overflow-hidden">
+                <div
+                  className="h-full rounded bg-gradient-to-r from-pink-500 to-rose-400 transition-all"
+                  style={{ width: `${Math.round((m.total / maxMes) * 100)}%` }}
+                />
+              </div>
+              <span className="w-24 shrink-0 text-right font-semibold tabular-nums text-gray-900 dark:text-gray-100">{f(m.total)}</span>
+              <span className="w-14 shrink-0 text-right text-gray-400 tabular-nums">{m.cantidad} comp.</span>
+            </div>
+          ))}
+          {mensual.length === 0 && (
+            <p className="text-xs text-gray-500 dark:text-gray-400">Sin comprobantes en el período.</p>
+          )}
+        </div>
+      </div>
+
+      {/* Histórico por cliente: lo primero a mirar antes de emitir más
+          facturas a alguien. Tope y concepto editables inline. */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Histórico por cliente ({periodoLabel})</h3>
+          <p className="text-[11px] text-gray-500 dark:text-gray-400">El tope es opcional: si lo cargás, te muestra cuánto disponible queda.</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-left text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
+                <th className="py-2 pr-2 font-semibold">Cliente</th>
+                <th className="py-2 px-2 font-semibold text-right">Comprobantes</th>
+                <th className="py-2 px-2 font-semibold text-right">Total facturado</th>
+                <th className="py-2 px-2 font-semibold">Última factura</th>
+                <th className="py-2 px-2 font-semibold text-right">Tope</th>
+                <th className="py-2 px-2 font-semibold">Uso del tope</th>
+                <th className="py-2 px-2 font-semibold text-right">Disponible</th>
+                <th className="py-2 pl-2 font-semibold">Concepto (mail)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {porCliente.map(row => {
+                const t = topeRestante(row.total, cfg.topes[row.clienteId]);
+                const alerta = t.tope != null && (t.excedido || t.pctUsado >= 90);
+                return (
+                  <tr key={row.clienteId} className={`border-b border-gray-100 dark:border-gray-700/50 ${alerta ? 'bg-red-50/60 dark:bg-red-900/10' : ''}`}>
+                    <td className="py-2 pr-2 font-semibold text-gray-900 dark:text-gray-100">{row.nombre}</td>
+                    <td className="py-2 px-2 text-right tabular-nums">{row.cantidad}</td>
+                    <td className="py-2 px-2 text-right font-bold tabular-nums text-emerald-600 dark:text-emerald-400">{f(row.total)}</td>
+                    <td className="py-2 px-2 text-gray-500 dark:text-gray-400 tabular-nums">{row.ultimaFecha || '—'}</td>
+                    <td className="py-2 px-2 text-right">
+                      <input
+                        type="number"
+                        min="0"
+                        placeholder="—"
+                        value={cfg.topes[row.clienteId] ?? ''}
+                        onChange={(e) => setTope(row.clienteId, e.target.value)}
+                        className="w-28 px-2 py-1 text-right text-xs rounded border border-gray-200 dark:border-gray-600 bg-transparent dark:text-gray-100 focus:border-pink-500 focus:outline-none tabular-nums"
+                        title="Tope de facturación para este cliente (opcional)"
+                      />
+                    </td>
+                    <td className="py-2 px-2 min-w-[110px]">
+                      {t.tope != null ? (
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 h-2 rounded-full bg-gray-100 dark:bg-gray-700 overflow-hidden">
+                            <div
+                              className={`h-full transition-all ${t.excedido ? 'bg-red-500' : t.pctUsado >= 90 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                              style={{ width: `${Math.min(100, t.pctUsado)}%` }}
+                            />
+                          </div>
+                          <span className={`tabular-nums text-[11px] ${alerta ? 'font-bold text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'}`}>{t.pctUsado}%</span>
+                        </div>
+                      ) : <span className="text-gray-400 dark:text-gray-500">—</span>}
+                    </td>
+                    <td className={`py-2 px-2 text-right font-semibold tabular-nums ${t.excedido ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-gray-100'}`}>
+                      {t.restante != null ? f(t.restante) : '—'}
+                    </td>
+                    <td className="py-2 pl-2">
+                      <input
+                        type="text"
+                        placeholder="Comercial"
+                        value={cfg.conceptos[row.clienteId] ?? ''}
+                        onChange={(e) => setConcepto(row.clienteId, e.target.value)}
+                        className="w-28 px-2 py-1 text-xs rounded border border-gray-200 dark:border-gray-600 bg-transparent dark:text-gray-100 focus:border-pink-500 focus:outline-none"
+                        title='Cómo se detalla en el mail: "Con {cliente} fue {concepto}"'
+                      />
+                    </td>
+                  </tr>
+                );
+              })}
+              {porCliente.length === 0 && (
+                <tr><td colSpan={8} className="py-6 text-center text-gray-500 dark:text-gray-400">Sin facturación en el período seleccionado.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Detalle de comprobantes emitidos en la ventana, más reciente primero */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-5">
+        <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 mb-4">Comprobantes emitidos ({detalle.length})</h3>
+        <div className="overflow-x-auto max-h-96 overflow-y-auto">
+          <table className="w-full text-xs">
+            <thead className="sticky top-0 bg-white dark:bg-gray-800">
+              <tr className="text-left text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
+                <th className="py-2 pr-2 font-semibold">Fecha</th>
+                <th className="py-2 px-2 font-semibold">Cliente</th>
+                <th className="py-2 px-2 font-semibold">Producto</th>
+                <th className="py-2 px-2 font-semibold text-right">Cant.</th>
+                <th className="py-2 px-2 font-semibold text-right">Monto</th>
+                <th className="py-2 pl-2 font-semibold">Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {detalle.map(o => (
+                <tr key={o.id} className="border-b border-gray-100 dark:border-gray-700/50">
+                  <td className="py-2 pr-2 text-gray-500 dark:text-gray-400 tabular-nums">{o.fecha}</td>
+                  <td className="py-2 px-2 font-semibold text-gray-900 dark:text-gray-100">{state.clients.find(c => c.id === o.clienteId)?.nombre || `Cliente #${o.clienteId}`}</td>
+                  <td className="py-2 px-2 text-gray-600 dark:text-gray-300">{state.products.find(p => p.id === o.productoId)?.nombre || '—'}</td>
+                  <td className="py-2 px-2 text-right tabular-nums">{o.cantidad}</td>
+                  <td className="py-2 px-2 text-right font-bold tabular-nums">{f(o.montoTotal)}</td>
+                  <td className="py-2 pl-2">
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${ORDER_STATE_STYLES[o.estado] || ORDER_STATE_STYLES['consulta-recibida']}`}>
+                      {ORDER_STATE_LABELS[o.estado] || o.estado || '—'}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+              {detalle.length === 0 && (
+                <tr><td colSpan={6} className="py-6 text-center text-gray-500 dark:text-gray-400">Sin comprobantes en el período.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }
@@ -2291,6 +2637,7 @@ function AppShell({ onExit }) {
               </NavSection>
               <NavSection title="Finanzas" sectionKey="vi-fin" sidebarOpen={sidebarOpen}>
                 <NavItem icon={CreditCard} label="Comisiones" section="comisiones" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                <NavItem icon={FileText} label="Facturación" section="facturacion" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                 <NavItem icon={Calculator} label="Calculadora" section="calculadora" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               </NavSection>
               <NavSection title="Análisis" sectionKey="vi-an" sidebarOpen={sidebarOpen} defaultOpen={false}>
@@ -2426,6 +2773,7 @@ function AppShell({ onExit }) {
           {currentUser.role === 'admin' && currentPlatform === 'viora' && currentSection === 'comisiones' && <ComisionesSection state={state} dispatch={dispatch} onUpdateMentor={handleUpdateMentor} onAddMentor={handleAddMentor} onRemoveMentor={handleRemoveMentor} getMentorStats={getMentorStats} filterMentor={filterMentor} setFilterMentor={setFilterMentor} />}
           {/* La sección "Equipo" (mentores) se unificó adentro de Comisiones */}
           {currentUser.role === 'admin' && currentPlatform === 'viora' && currentSection === 'mentores' && <ComisionesSection state={state} dispatch={dispatch} onUpdateMentor={handleUpdateMentor} onAddMentor={handleAddMentor} onRemoveMentor={handleRemoveMentor} getMentorStats={getMentorStats} filterMentor={filterMentor} setFilterMentor={setFilterMentor} />}
+          {currentUser.role === 'admin' && currentPlatform === 'viora' && currentSection === 'facturacion' && <FacturacionSection state={state} addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'viora' && currentSection === 'calculadora' && <CalculadoraSection state={state} addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'viora' && currentSection === 'datos' && <DatosSection state={state} dispatch={dispatch} addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'senydrop' && currentSection === 'seny-productos' && <BocetosSection addToast={addToast} />}
@@ -8303,6 +8651,7 @@ function getSectionTitle(user, section) {
     clientes: 'Clientes',
     comisiones: 'Comisiones y Partners',
     mentores: 'Comisiones y Partners', // fallback: sección vieja cae al mismo lugar
+    facturacion: 'Facturación y Reportes',
     calculadora: 'Calculadora de Proyección',
     datos: 'Datos (Export / Import)',
     'seny-productos': 'Productos · Senydrop',

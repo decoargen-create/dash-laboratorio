@@ -2337,9 +2337,9 @@ function AppShell({ onExit }) {
                 <NavItem icon={Wallet} label="Resumen" section="mk-creativa-dash" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                 <NavItem icon={Film} label="Producción" section="mk-produccion" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               </NavSection>
-              <NavSection title="Finanzas" sectionKey="mk-fin" sidebarOpen={sidebarOpen}>
-                <NavItem icon={DollarSign} label="Gastos del stack" section="mk-gastos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              </NavSection>
+              {/* "Finanzas → Gastos del stack" salió del menú (pedido del user):
+                  la sección sigue viva y se llega desde las stats de saldo del
+                  pie del sidebar (SidebarStats → onNavGastos). */}
             </>
           )}
           {currentUser.role === 'admin' && currentPlatform === 'consultoria' && (

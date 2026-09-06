@@ -35,6 +35,7 @@ import MetricasSection from './MetricasSection.jsx';
 import TesteosSection from './TesteosSection.jsx';
 import ProduccionSection from './ProduccionSection.jsx';
 import CreativaDashboard from './CreativaDashboard.jsx';
+import LandingsSection from './LandingsSection.jsx';
 import { PipelineRunProvider } from './PipelineRunContext.jsx';
 import PipelineRunOverlay from './PipelineRunOverlay.jsx';
 import ExecutionsTray from './ExecutionsTray.jsx';
@@ -1462,7 +1463,7 @@ function AppShell({ onExit }) {
       // Si tenía una sección de Viora/Senydrop/MetaAds, defaulteamos a la
       // de Marketing. Lista de secciones válidas en las plataformas activas:
       const validSections = ['mk-home', 'mk-arranque', 'mk-bandeja', 'mk-copy', 'mk-meta', 'mk-metricas', 'mk-testeos',
-        'mk-inspiracion', 'mk-winners', 'mk-produccion', 'mk-creativa-dash', 'mk-gastos', 'mk-docs', 'con-acta'];
+        'mk-inspiracion', 'mk-winners', 'mk-produccion', 'mk-landings', 'mk-creativa-dash', 'mk-gastos', 'mk-docs', 'con-acta'];
       return validSections.includes(saved) ? saved : 'mk-home';
     } catch { return 'mk-home'; }
   });
@@ -2336,6 +2337,7 @@ function AppShell({ onExit }) {
               <NavSection title="Área creativa" sectionKey="mk-creativa" sidebarOpen={sidebarOpen}>
                 <NavItem icon={Wallet} label="Resumen" section="mk-creativa-dash" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                 <NavItem icon={Film} label="Producción" section="mk-produccion" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                <NavItem icon={ClipboardList} label="Landings" section="mk-landings" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               </NavSection>
               {/* "Finanzas → Gastos del stack" salió del menú (pedido del user):
                   la sección sigue viva y se llega desde las stats de saldo del
@@ -2446,6 +2448,7 @@ function AppShell({ onExit }) {
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-winners' && <WinnersGlobalSection addToast={addToast} onGoToSection={setCurrentSection} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-creativa-dash' && <CreativaDashboard addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-produccion' && <ProduccionSection addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-landings' && <LandingsSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-gastos' && <GastosStackSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-docs' && (
             <MarketingSection
@@ -8321,6 +8324,7 @@ function getSectionTitle(user, section) {
     'mk-inspiracion': 'Marketing · Inspiración',
     'mk-winners': 'Marketing · Winners',
     'mk-produccion': 'Marketing · Producción',
+    'mk-landings': 'Marketing · Landings',
     'mk-creativa-dash': 'Marketing · Área creativa',
     'mk-gastos': 'Marketing · Gastos del stack',
     'con-acta': 'Consultoría · Acta de reunión',

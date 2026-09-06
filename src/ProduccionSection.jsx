@@ -23,7 +23,7 @@ import {
   resyncDesdeNube, vaciarTodo, setMaterialLinkProducto, probarDiscord,
   loadNotifConfig, saveNotifConfig, toggleWinner, winnersDeProducto, pagoProductoDe,
 } from './produccionStore.js';
-import { CreativosSection, subirParaTarjeta, VIDEO_ACCEPT, probeDrive, aprobarTodosConCascada, AnilloAprobados } from './produccionUpload.jsx';
+import { CreativosSection, subirParaTarjeta, VIDEO_ACCEPT, probeDrive, aprobarTodosConCascada, AnilloAprobados, getAuthToken } from './produccionUpload.jsx';
 import { numerarDuplicados, columnaEfectiva } from './produccionCalc.js';
 import { registrarColoresPersonas, personaColor, CHIP_CLS } from './produccionColors.js';
 import TarjetaProduccion, { CAPS_ADMIN } from './produccionCard.jsx';
@@ -1805,10 +1805,49 @@ function IntegranteSelector({ a, team = [], personas = [], onTeamChange, addToas
 // y filtra por nombre del video, producto, persona o fecha. Cada resultado trae
 // el link directo a Drive (ver / descargar). Sirve para encontrar rápido un
 // winner y volver a iterarlo.
+// Carpeta histórica de Drive (pre-plataforma): el equipo manejaba los
+// creativos ahí antes del tablero, y hay winners viejos que nunca pasaron por
+// una tarjeta. El buscador la lista como segunda fuente ("archivo") para
+// poder marcarlos. Se puede cambiar con localStorage 'adslab-legacy-folder'.
+const LEGACY_FOLDER_DEFAULT = '17fTEVlc4IfxtAN1mfNmBbAwclChW2SI0';
+const legacyFolderId = () => {
+  try { return localStorage.getItem('adslab-legacy-folder') || LEGACY_FOLDER_DEFAULT; }
+  catch { return LEGACY_FOLDER_DEFAULT; }
+};
+
 function VideoSearchModal({ onClose, addToast }) {
   useEscape(onClose);
   const [query, setQuery] = useState('');
   const [bump, setBump] = useState(0);
+  // Archivo histórico: { status: 'cargando'|'ok'|'error', files, truncated }
+  const [legacy, setLegacy] = useState({ status: 'cargando', files: [], truncated: false });
+  // ★ sobre un video del archivo: no sabemos de qué producto es → se abre un
+  // picker con los productos del tablero. pickFor = key del video en cuestión.
+  const [pickFor, setPickFor] = useState(null);
+  const [pickQ, setPickQ] = useState('');
+  useEffect(() => {
+    let dead = false;
+    (async () => {
+      try {
+        const token = await getAuthToken();
+        const r = await fetch('/api/produccion/drive-legacy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+          body: JSON.stringify({ folderId: legacyFolderId() }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (dead) return;
+        if (!r.ok || j.configured === false || !Array.isArray(j.files)) {
+          setLegacy({ status: 'error', files: [], truncated: false, motivo: j.error || (j.configured === false ? 'Drive no conectado' : `HTTP ${r.status}`) });
+          return;
+        }
+        setLegacy({ status: 'ok', files: j.files, truncated: !!j.truncated });
+      } catch (e) {
+        if (!dead) setLegacy({ status: 'error', files: [], truncated: false, motivo: e?.message || 'error' });
+      }
+    })();
+    return () => { dead = true; };
+  }, []);
   const index = useMemo(() => {
     const recs = [];
     for (const wk of allWeekKeys()) {
@@ -1835,6 +1874,47 @@ function VideoSearchModal({ onClose, addToast }) {
     return recs.sort((x, y) => y.ts - x.ts);
   }, []);
 
+  // Videos del archivo histórico como registros del buscador. Sin producto ni
+  // persona conocidos — el producto se elige al marcarlo winner. La ruta de la
+  // subcarpeta entra al texto buscable (buscar "tiva" encuentra su carpeta).
+  const legacyRecs = useMemo(() => (legacy.files || []).map(f => ({
+    key: `legacy:${f.id}`,
+    name: f.name || 'video',
+    producto: '', productoId: null,
+    persona: '', fecha: f.fecha ? new Date(f.fecha).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit' }) : '',
+    estado: null, destino: 'drive',
+    link: f.link, driveId: f.id, sizeMB: f.sizeMB,
+    ts: f.fecha ? Date.parse(f.fecha) || 0 : 0,
+    legacy: true, folder: f.folder,
+    hay: `${f.name} ${f.folder || ''} archivo`.toLowerCase(),
+  })), [legacy.files]);
+
+  // Productos del tablero (para el picker del archivo): únicos, con id si lo hay.
+  const productosTablero = useMemo(() => {
+    const m = new Map();
+    for (const wk of allWeekKeys()) for (const a of listAssignments(wk)) {
+      const nom = (a.productoNombre || '').trim();
+      if (!nom) continue;
+      const k = a.productoId != null ? String(a.productoId) : nom.toLowerCase();
+      if (!m.has(k)) m.set(k, { productoId: a.productoId ?? null, nombre: nom });
+    }
+    return [...m.values()].sort((x, y) => x.nombre.localeCompare(y.nombre, 'es'));
+  }, []);
+
+  // ¿Este video del archivo ya es winner de algún producto? (para pintar la
+  // estrella y para poder DESmarcarlo sin conocer el producto de antemano.)
+  const productoDeWinner = (r) => {
+    const wkey = String(r.driveId || r.link || r.name || '').trim().toLowerCase();
+    for (const wk of allWeekKeys()) for (const a of listAssignments(wk)) {
+      for (const w of (a.winners || [])) {
+        if (String(w?.driveId || w?.link || w?.name || '').trim().toLowerCase() === wkey) {
+          return { productoId: a.productoId ?? null, nombre: a.productoNombre || '' };
+        }
+      }
+    }
+    return null;
+  };
+
   // Claves de winners por producto (para pintar la estrella). Se recalcula al
   // marcar/desmarcar (bump).
   const winnerKeys = useMemo(() => {
@@ -1853,9 +1933,31 @@ function VideoSearchModal({ onClose, addToast }) {
     addToast?.({ type: quedo ? 'success' : 'info', message: quedo ? `★ Marcado winner de ${r.producto}` : `Quitado de winners de ${r.producto}` });
   };
 
+  const todo = useMemo(() => [...index, ...legacyRecs].sort((x, y) => y.ts - x.ts), [index, legacyRecs]);
   const toks = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  const results = toks.length ? index.filter(r => toks.every(t => r.hay.includes(t))) : index;
+  const results = toks.length ? todo.filter(r => toks.every(t => r.hay.includes(t))) : todo;
   const shown = results.slice(0, 80);
+
+  // ★ en un video del archivo: si ya es winner lo saca (del producto donde
+  // esté); si no, abre el picker de producto.
+  const onToggleLegacy = (r) => {
+    const dueño = productoDeWinner(r);
+    if (dueño) {
+      toggleWinner(r, dueño.productoId, dueño.nombre);
+      setBump(n => n + 1);
+      addToast?.({ type: 'info', message: `Quitado de winners de ${dueño.nombre}` });
+      return;
+    }
+    setPickQ('');
+    setPickFor(k => (k === r.key ? null : r.key));
+  };
+  const marcarLegacy = (r, p) => {
+    toggleWinner(r, p.productoId, p.nombre);
+    setBump(n => n + 1);
+    setPickFor(null);
+    addToast?.({ type: 'success', message: `★ Marcado winner de ${p.nombre}` });
+  };
+  const esWinLegacy = (r) => !!productoDeWinner(r);
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto bg-black/50 backdrop-blur-sm" onClick={onClose}>
@@ -1876,7 +1978,12 @@ function VideoSearchModal({ onClose, addToast }) {
               placeholder="Ej: [c9][Ponzio][14-8][broll]  ·  Cepillo  ·  14-8"
               className="w-full pl-9 pr-3 py-2.5 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500" />
           </div>
-          <p className="text-[11px] text-gray-400 mt-2">{results.length} video{results.length === 1 ? '' : 's'}{results.length > 80 ? ' · mostrando 80' : ''}</p>
+          <p className="text-[11px] text-gray-400 mt-2">
+            {results.length} video{results.length === 1 ? '' : 's'}{results.length > 80 ? ' · mostrando 80' : ''}
+            {legacy.status === 'cargando' && <span className="text-sky-500"> · 📁 cargando el archivo histórico…</span>}
+            {legacy.status === 'ok' && <span className="text-sky-500"> · 📁 {legacy.files.length} del archivo{legacy.truncated ? ' (parcial — carpeta muy grande)' : ''}</span>}
+            {legacy.status === 'error' && <span className="text-amber-500"> · 📁 archivo no disponible ({legacy.motivo})</span>}
+          </p>
         </div>
 
         <div className="max-h-[58vh] overflow-y-auto border-t border-gray-100 dark:border-gray-800">
@@ -1886,16 +1993,48 @@ function VideoSearchModal({ onClose, addToast }) {
             </div>
           ) : shown.map(r => (
             <div key={r.key} className="flex items-center gap-3 px-5 py-2.5 border-t border-gray-100 dark:border-gray-800 first:border-t-0 hover:bg-gray-50 dark:hover:bg-gray-800/40 transition">
-              <Film size={15} className={`shrink-0 ${r.destino === 'drive' ? 'text-emerald-500' : 'text-gray-400'}`} />
+              <Film size={15} className={`shrink-0 ${r.legacy ? 'text-sky-500' : r.destino === 'drive' ? 'text-emerald-500' : 'text-gray-400'}`} />
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-semibold text-gray-800 dark:text-gray-100 truncate" title={r.name}>{r.name}</div>
-                <div className="text-[11px] text-gray-400 truncate">{r.producto} · {r.persona} · {r.fecha}{r.sizeMB ? ` · ${r.sizeMB}MB` : ''}</div>
+                <div className="text-[11px] text-gray-400 truncate">
+                  {r.legacy
+                    ? <><span className="font-bold text-sky-600 dark:text-sky-400">📁 archivo</span> · {r.folder}{r.fecha ? ` · ${r.fecha}` : ''}{r.sizeMB ? ` · ${r.sizeMB}MB` : ''}{(() => { const d = productoDeWinner(r); return d ? <span className="text-amber-500 font-bold"> · ★ {d.nombre}</span> : null; })()}</>
+                    : <>{r.producto} · {r.persona} · {r.fecha}{r.sizeMB ? ` · ${r.sizeMB}MB` : ''}</>}
+                </div>
               </div>
-              <div className="flex items-center gap-1.5 shrink-0">
-                <button onClick={() => onToggleWin(r)} title={esWin(r) ? 'Quitar de winners' : 'Marcar como winner'}
-                  className={`inline-flex items-center justify-center w-8 h-8 rounded-lg border transition ${esWin(r) ? 'text-amber-500 border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-800' : 'text-gray-400 border-gray-300 dark:border-gray-600 hover:text-amber-500 hover:border-amber-300'}`}>
-                  <Star size={14} fill={esWin(r) ? 'currentColor' : 'none'} />
+              <div className="flex items-center gap-1.5 shrink-0 relative">
+                <button onClick={() => (r.legacy ? onToggleLegacy(r) : onToggleWin(r))}
+                  title={r.legacy
+                    ? (esWinLegacy(r) ? 'Quitar de winners' : 'Marcar como winner (elegís el producto)')
+                    : (esWin(r) ? 'Quitar de winners' : 'Marcar como winner')}
+                  className={`inline-flex items-center justify-center w-8 h-8 rounded-lg border transition ${(r.legacy ? esWinLegacy(r) : esWin(r)) ? 'text-amber-500 border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-800' : 'text-gray-400 border-gray-300 dark:border-gray-600 hover:text-amber-500 hover:border-amber-300'}`}>
+                  <Star size={14} fill={(r.legacy ? esWinLegacy(r) : esWin(r)) ? 'currentColor' : 'none'} />
                 </button>
+                {/* Picker de producto — un winner vive EN las tarjetas de un
+                    producto, y un video del archivo no dice de cuál es. */}
+                {pickFor === r.key && (
+                  <div className="absolute right-0 top-9 z-20 w-56 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl p-2" onClick={e => e.stopPropagation()}>
+                    <div className="text-[10px] font-bold uppercase text-gray-400 px-1 pb-1">¿Winner de qué producto?</div>
+                    {productosTablero.length > 6 && (
+                      <input autoFocus value={pickQ} onChange={e => setPickQ(e.target.value)} placeholder="Buscar producto…"
+                        className="w-full mb-1 px-2 py-1 text-xs bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500" />
+                    )}
+                    <div className="max-h-44 overflow-y-auto">
+                      {productosTablero
+                        .filter(p => !pickQ.trim() || p.nombre.toLowerCase().includes(pickQ.trim().toLowerCase()))
+                        .map(p => (
+                          <button key={p.productoId ?? p.nombre} onClick={() => marcarLegacy(r, p)}
+                            className="w-full text-left text-xs font-semibold px-2 py-1.5 rounded-md hover:bg-amber-50 dark:hover:bg-amber-900/20 text-gray-700 dark:text-gray-200">
+                            ★ {p.nombre}
+                          </button>
+                        ))}
+                      {productosTablero.length === 0 && (
+                        <p className="text-[11px] text-gray-400 px-2 py-1.5">No hay productos en el tablero — el winner se guarda en las tarjetas del producto, creá una primero.</p>
+                      )}
+                    </div>
+                    <button onClick={() => setPickFor(null)} className="w-full mt-1 text-[11px] font-bold text-gray-400 hover:text-gray-600 py-1">Cancelar</button>
+                  </div>
+                )}
                 {r.destino === 'drive' && r.link ? (
                   <>
                     <a href={r.link} target="_blank" rel="noopener noreferrer"

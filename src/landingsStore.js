@@ -142,7 +142,7 @@ function mutateItems(landingId, fn) {
 export function addItem(landingId, { texto, prioridad = '' }) {
   mutateItems(landingId, items => {
     const orden = items.length ? Math.max(...items.map(i => i.orden || 0)) + 1 : 0;
-    items.push({ id: uid('it'), texto: texto || '', prioridad: prioridad || '', hecho: false, orden, imagenes: [], links: [], ts: new Date().toISOString() });
+    items.push({ id: uid('it'), texto: texto || '', prioridad: prioridad || '', hecho: false, archivado: false, orden, imagenes: [], links: [], ts: new Date().toISOString() });
     return items;
   });
 }
@@ -152,8 +152,18 @@ export function updateItem(landingId, itemId, patch) {
 export function removeItem(landingId, itemId) {
   mutateItems(landingId, items => items.filter(i => i.id !== itemId));
 }
+// Marca/desmarca "hecho". El ítem NO se mueve: queda tachado en su lugar. Al
+// desmarcarlo también sale de archivado (vuelve a la lista activa).
 export function toggleItem(landingId, itemId) {
-  mutateItems(landingId, items => items.map(i => i.id === itemId ? { ...i, hecho: !i.hecho, hechoAt: !i.hecho ? new Date().toISOString() : null } : i));
+  mutateItems(landingId, items => items.map(i => {
+    if (i.id !== itemId) return i;
+    const hecho = !i.hecho;
+    return { ...i, hecho, hechoAt: hecho ? new Date().toISOString() : null, archivado: hecho ? i.archivado : false };
+  }));
+}
+// Archiva/restaura: recién acá el ítem se va al grupo colapsado "Archivados".
+export function archiveItem(landingId, itemId, val = true) {
+  mutateItems(landingId, items => items.map(i => i.id === itemId ? { ...i, archivado: val, hecho: val ? true : i.hecho, archivadoAt: val ? new Date().toISOString() : null } : i));
 }
 // Reordena SOLO los pendientes según orderedIds; los hechos conservan su orden.
 export function reorderItems(landingId, orderedIds) {
@@ -206,11 +216,12 @@ export function progresoDe(l) {
   const done = items.filter(i => i.hecho).length;
   return { done, total: items.length, pct: items.length ? Math.round(done / items.length * 100) : 0 };
 }
-// Pendientes ordenados por orden manual (drag) y, a igual orden, por prioridad.
-const PRIO_RANK = { alta: 2, media: 1, '': 0 };
+// ACTIVOS = todo lo no archivado (pendientes + hechos que quedan tachados en su
+// lugar), en el orden manual (drag). ARCHIVADOS = lo que mandaste al grupo
+// colapsado. Los hechos NO se reordenan solos: quedan donde estaban.
 export function itemsOrdenados(l) {
   const items = ((l && l.items) || []).map(i => ({ ...i }));
-  const pend = items.filter(i => !i.hecho).sort((a, b) => (a.orden - b.orden) || (PRIO_RANK[b.prioridad || ''] - PRIO_RANK[a.prioridad || '']));
-  const done = items.filter(i => i.hecho);
-  return { pend, done };
+  const activos = items.filter(i => !i.archivado).sort((a, b) => (a.orden || 0) - (b.orden || 0));
+  const archivados = items.filter(i => i.archivado).sort((a, b) => String(b.archivadoAt || '').localeCompare(String(a.archivadoAt || '')));
+  return { activos, archivados };
 }

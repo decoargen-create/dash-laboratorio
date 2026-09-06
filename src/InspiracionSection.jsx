@@ -32,6 +32,7 @@ import { logCostsFromResponse } from './costsStore.js';
 import { authHeaders } from './authFetch.js';
 import { addGeneratedIdeas } from './bandejaStore.js';
 import { getProductoImagen, getAccentColor } from './productoImagen.js';
+import { friendlyAIError } from './aiError.js';
 import { saveReferencial, getUsedAdIdsForProducto } from './galeriaReferenciales.js';
 import { startBulk, patchBulk, reportAdFinished, finishBulk, clearBulk, subscribeBulk } from './bulkProgressStore.js';
 import { withGenSlot, TARGET_INFLIGHT } from './genConcurrency.js';
@@ -2101,7 +2102,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       finishExecution(execId, { ok: true, message: msg, cost });
       return { ideas, cost };
     } catch (err) {
-      addToast?.({ type: 'error', message: `No pude adaptar: ${err.message}` });
+      addToast?.({ type: 'error', message: `No pude adaptar: ${friendlyAIError(err.message)}` });
       finishExecution(execId, { ok: false, message: err.message || 'Error' });
       throw err;
     } finally {
@@ -2524,7 +2525,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           console.warn('[crear-creativo-referencial] strategist degradado:', firstData.strategistError);
           addToast?.({
             type: 'warning',
-            message: `${brandNombre}: sin plan del strategist (${firstData.strategistError || 'motivo desconocido'}) — las variantes salen con menos dirección creativa.`,
+            message: `${brandNombre}: ${friendlyAIError(firstData.strategistError)} — las variantes salen con menos dirección creativa.`,
           });
         }
 
@@ -2579,7 +2580,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         ...prev,
         [ad.id]: { ...prev[ad.id], stage: 'error', error: err?.message || 'Error' },
       }));
-      addToast?.({ type: 'error', message: `No pude generar: ${err.message}` });
+      addToast?.({ type: 'error', message: `No pude generar: ${friendlyAIError(err.message)}` });
       finishExecution(execId, { ok: false, message: err.message || 'Error' });
       playErrorTone();
       // ANTES borrábamos el error a los 5s — pero generar tarda 30-60s, el

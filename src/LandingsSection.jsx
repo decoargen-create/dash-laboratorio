@@ -13,9 +13,9 @@ import {
 import {
   initLandings, subscribeLandings, listLandings, getLanding,
   createLanding, updateLanding, deleteLanding,
-  addItem, updateItem, removeItem, toggleItem, reorderItems,
+  addItem, updateItem, removeItem, toggleItem, archiveItem, reorderItems,
   addItemLink, removeItemLink, uploadItemImage, removeItemImage,
-  progresoDe, itemsOrdenados, ESTADOS_LANDING, ESTADO_LANDING_LABEL,
+  progresoDe, itemsOrdenados,
 } from './landingsStore.js';
 
 function readProductos() {
@@ -113,7 +113,9 @@ function LandingCard({ l, open, onToggle, addToast }) {
           </div>
         </div>
         <div className="flex flex-col items-end gap-1.5 shrink-0">
-          <span className={`text-[9.5px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${ESTADO_PILL[l.estado] || ESTADO_PILL.revision}`}>{ESTADO_LANDING_LABEL[l.estado] || 'En revisión'}</span>
+          {prog.total > 0 && prog.done === prog.total && (
+            <span className="text-[9.5px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/40">✓ Completa</span>
+          )}
           {l.editor && <span className="text-[11px] text-gray-500 dark:text-gray-400">✎ {l.editor}</span>}
         </div>
       </button>
@@ -123,11 +125,11 @@ function LandingCard({ l, open, onToggle, addToast }) {
 }
 
 function LandingDetail({ l, addToast }) {
-  const [hideDone, setHideDone] = useState(true);
+  const [hideArch, setHideArch] = useState(true);
   const [nuevo, setNuevo] = useState('');
   const [nuevoPrio, setNuevoPrio] = useState('');
   const [dragId, setDragId] = useState(null);
-  const { pend, done } = itemsOrdenados(l);
+  const { activos, archivados } = itemsOrdenados(l);
 
   const agregar = () => {
     const t = nuevo.trim(); if (!t) return;
@@ -137,7 +139,7 @@ function LandingDetail({ l, addToast }) {
 
   const onDrop = (overId) => {
     if (!dragId || dragId === overId) { setDragId(null); return; }
-    const ids = pend.map(i => i.id);
+    const ids = activos.map(i => i.id);
     const from = ids.indexOf(dragId), to = ids.indexOf(overId);
     if (from < 0 || to < 0) { setDragId(null); return; }
     ids.splice(to, 0, ids.splice(from, 1)[0]);
@@ -147,16 +149,8 @@ function LandingDetail({ l, addToast }) {
 
   return (
     <div className="border-t border-gray-100 dark:border-gray-700/60 bg-gray-50/60 dark:bg-gray-900/20">
-      {/* Barra de estado + editor + link */}
+      {/* Barra: editor + link (sin estados — es un checklist simple, tipo Google Tasks) */}
       <div className="flex items-center gap-2 flex-wrap px-4 py-3 border-b border-gray-100 dark:border-gray-700/50">
-        <div className="flex gap-1">
-          {ESTADOS_LANDING.map(e => (
-            <button key={e} onClick={() => updateLanding(l.id, { estado: e })}
-              className={`text-[11px] font-bold px-2 py-1 rounded-md transition ${l.estado === e ? 'bg-brand-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200'}`}>
-              {ESTADO_LANDING_LABEL[e]}
-            </button>
-          ))}
-        </div>
         <input value={l.editor || ''} onChange={e => updateLanding(l.id, { editor: e.target.value })}
           placeholder="✎ editor…"
           className="w-28 px-2.5 py-1.5 text-xs bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
@@ -191,15 +185,15 @@ function LandingDetail({ l, addToast }) {
 
       {/* Checklist */}
       <div className="px-4 py-3 space-y-1.5">
-        {pend.length === 0 && done.length === 0 && (
+        {activos.length === 0 && archivados.length === 0 && (
           <p className="text-xs text-gray-400 py-4 text-center">Sin cambios cargados. Agregá el primero arriba.</p>
         )}
-        {pend.length === 0 && done.length > 0 && (
-          <p className="text-xs text-emerald-600 dark:text-emerald-400 py-2 text-center font-semibold">🎉 ¡Todo hecho! No queda nada pendiente.</p>
+        {activos.length === 0 && archivados.length > 0 && (
+          <p className="text-xs text-emerald-600 dark:text-emerald-400 py-2 text-center font-semibold">🎉 ¡Todo archivado! No queda nada en la lista.</p>
         )}
 
-        {/* Pendientes (arrastrables) */}
-        {pend.map(it => (
+        {/* Activos: pendientes + hechos (tachados, quedan en su lugar). Arrastrables. */}
+        {activos.map(it => (
           <div key={it.id}
             draggable
             onDragStart={() => setDragId(it.id)}
@@ -210,15 +204,15 @@ function LandingDetail({ l, addToast }) {
           </div>
         ))}
 
-        {/* Hechos (colapsados) */}
-        {done.length > 0 && (
+        {/* Archivados (colapsados) */}
+        {archivados.length > 0 && (
           <div className="pt-1">
-            <button onClick={() => setHideDone(v => !v)}
+            <button onClick={() => setHideArch(v => !v)}
               className="w-full flex items-center gap-2 py-2 border-t border-dashed border-gray-200 dark:border-gray-700/60 text-[10.5px] font-mono font-semibold uppercase tracking-wide text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
-              <Check size={12} /> Hechos · {done.length}
-              <ChevronDown size={13} className={`ml-auto transition-transform ${hideDone ? '-rotate-90' : ''}`} />
+              <Check size={12} /> Archivados · {archivados.length}
+              <ChevronDown size={13} className={`ml-auto transition-transform ${hideArch ? '-rotate-90' : ''}`} />
             </button>
-            {!hideDone && done.map(it => <ItemRow key={it.id} l={l} it={it} addToast={addToast} />)}
+            {!hideArch && archivados.map(it => <ItemRow key={it.id} l={l} it={it} addToast={addToast} archived />)}
           </div>
         )}
       </div>
@@ -226,7 +220,7 @@ function LandingDetail({ l, addToast }) {
   );
 }
 
-function ItemRow({ l, it, addToast, draggable = false }) {
+function ItemRow({ l, it, addToast, draggable = false, archived = false }) {
   const [editing, setEditing] = useState(false);
   const [txt, setTxt] = useState(it.texto);
   const [addingLink, setAddingLink] = useState(false);
@@ -285,6 +279,11 @@ function ItemRow({ l, it, addToast, draggable = false }) {
           {!it.hecho && !editing && (
             <button onClick={() => setEditing(true)} className="text-[11px] font-semibold text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition">Editar</button>
           )}
+          {archived ? (
+            <button onClick={() => archiveItem(l.id, it.id, false)} className="inline-flex items-center gap-1 text-[11px] font-semibold text-brand-600 dark:text-brand-300 hover:underline transition">↩ Restaurar</button>
+          ) : it.hecho ? (
+            <button onClick={() => archiveItem(l.id, it.id, true)} className="inline-flex items-center gap-1 text-[11px] font-semibold text-gray-500 dark:text-gray-400 hover:text-brand-600 dark:hover:text-brand-300 transition">Archivar</button>
+          ) : null}
           <button onClick={() => removeItem(l.id, it.id)} className="text-[11px] font-semibold text-gray-400 hover:text-red-500 transition">Borrar</button>
           <input ref={fileRef} type="file" accept="image/*" onChange={subirImg} className="hidden" />
         </div>

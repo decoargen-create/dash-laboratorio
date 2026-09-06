@@ -55,7 +55,7 @@ export const aceptaVideo = (f) => (f?.type || '').startsWith('video/') || VIDEO_
 
 export const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
-async function getAuthToken() {
+export async function getAuthToken() {
   try { const { data: { session } } = await supabase.auth.getSession(); return session?.access_token || ''; }
   catch { return ''; }
 }

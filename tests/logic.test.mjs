@@ -9,7 +9,7 @@ import {
   PAGO_POR_PRODUCTO, VIDEOS_POR_PRODUCTO, DEFAULT_BONUS_TRAMOS,
   bonusObjetivo, pagoProductoDeCfg, bonusDeCfg,
   numerarDuplicados, resumenVideosPorProducto,
-  columnaEfectiva, AUTO_ARCHIVE_MS,
+  columnaEfectiva, AUTO_ARCHIVE_MS, monthOfWeek,
 } from '../src/produccionCalc.js';
 import {
   clean, abreviarProducto, shortId, cardFolderName,
@@ -550,6 +550,15 @@ eq('con el breakeven del aceite en 0.3, esa misma fila deja de ser candidata',
     cfgDeItem: (i) => { const pr = productoDeCampana(i.name, prodsRonda, cfgPorProducto); return pr ? cfgPara(cfgPorProducto, pr.id) : null; },
   }).candidatos.length, 0);
 
+
+
+// ── monthOfWeek: el mes de una semana es el de su DOMINGO (entrega) ────────
+console.log('\nMES DE ENTREGA (monthOfWeek):');
+eq('semana 31/8 → entrega 6/9 → septiembre', monthOfWeek('2026-08-31'), '2026-09');
+eq('semana 24/8 → entrega 30/8 → agosto', monthOfWeek('2026-08-24'), '2026-08');
+eq('semana 28/9 → entrega 4/10 → octubre', monthOfWeek('2026-09-28'), '2026-10');
+eq('semana 29/12/2025 → entrega 4/1 → enero 2026', monthOfWeek('2025-12-29'), '2026-01');
+eq('weekKey inválido → vacío', monthOfWeek(''), '');
 
 // ─────────── RESUMEN ───────────
 console.log(`\n${'─'.repeat(40)}\nRESULTADO: ${pass} ✅   ${fail} ❌\n`);

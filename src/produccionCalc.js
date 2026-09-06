@@ -98,3 +98,18 @@ export function columnaEfectiva(a, nowMs) {
   }
   return est;
 }
+
+// Mes al que pertenece una semana del tablero: el de su DOMINGO (el día que
+// se ENTREGA), no el de su lunes. Pedido del dueño: "no es cuando se asigna
+// sino cuando se entrega" — la semana del lunes 31/8 al domingo 6/9 es
+// trabajo que se entrega en septiembre, así que cuenta en septiembre.
+// Atribuir la semana ENTERA a un mes (en vez de partirla por tarjeta) mantiene
+// atómico el pago semanal: cada semana se liquida completa en un solo mes.
+// weekKey = 'YYYY-MM-DD' del lunes; aritmética en UTC para no depender del TZ.
+export function monthOfWeek(weekKey) {
+  if (!weekKey || typeof weekKey !== 'string') return '';
+  const [y, m, d] = weekKey.split('-').map(Number);
+  if (!y || !m || !d) return '';
+  const domingo = new Date(Date.UTC(y, m - 1, d + 6));
+  return `${domingo.getUTCFullYear()}-${String(domingo.getUTCMonth() + 1).padStart(2, '0')}`;
+}

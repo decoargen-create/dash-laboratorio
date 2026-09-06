@@ -1825,6 +1825,30 @@ function VideoSearchModal({ onClose, addToast }) {
   // picker con los productos del tablero. pickFor = key del video en cuestión.
   const [pickFor, setPickFor] = useState(null);
   const [pickQ, setPickQ] = useState('');
+  // Búsqueda DIRECTA en todo Drive por nombre (plan B: si un video viejo no
+  // está en el listado del archivo — carpeta gigante, otra carpeta — Google lo
+  // encuentra igual). Se dispara a pedido con el botón, no en cada tecla.
+  const [driveSearch, setDriveSearch] = useState({ status: 'idle', files: [], q: '' });
+  const buscarEnDrive = async () => {
+    const q = query.trim();
+    if (q.length < 2) { addToast?.({ type: 'warning', message: 'Escribí parte del nombre primero.' }); return; }
+    setDriveSearch({ status: 'cargando', files: [], q });
+    try {
+      const token = await getAuthToken();
+      const r = await fetch('/api/produccion/drive-search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ q }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !Array.isArray(j.files)) throw new Error(j.error || `HTTP ${r.status}`);
+      setDriveSearch({ status: 'ok', files: j.files, q });
+      if (j.files.length === 0) addToast?.({ type: 'info', message: `Drive no encontró videos con "${q}".` });
+    } catch (e) {
+      setDriveSearch({ status: 'error', files: [], q });
+      addToast?.({ type: 'error', message: `Buscar en Drive falló: ${e.message}` });
+    }
+  };
   useEffect(() => {
     let dead = false;
     (async () => {
@@ -1933,7 +1957,21 @@ function VideoSearchModal({ onClose, addToast }) {
     addToast?.({ type: quedo ? 'success' : 'info', message: quedo ? `★ Marcado winner de ${r.producto}` : `Quitado de winners de ${r.producto}` });
   };
 
-  const todo = useMemo(() => [...index, ...legacyRecs].sort((x, y) => y.ts - x.ts), [index, legacyRecs]);
+  const driveRecs = useMemo(() => {
+    const vistos = new Set([...index, ...legacyRecs].map(r => r.driveId).filter(Boolean));
+    return (driveSearch.files || []).filter(f => !vistos.has(f.id)).map(f => ({
+      key: `dsearch:${f.id}`,
+      name: f.name || 'video',
+      producto: '', productoId: null, persona: '',
+      fecha: f.fecha ? new Date(f.fecha).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit' }) : '',
+      estado: null, destino: 'drive',
+      link: f.link, driveId: f.id, sizeMB: f.sizeMB,
+      ts: f.fecha ? Date.parse(f.fecha) || 0 : 0,
+      legacy: true, folder: 'encontrado en Drive',
+      hay: `${f.name} drive`.toLowerCase(),
+    }));
+  }, [driveSearch.files, index, legacyRecs]);
+  const todo = useMemo(() => [...index, ...legacyRecs, ...driveRecs].sort((x, y) => y.ts - x.ts), [index, legacyRecs, driveRecs]);
   const toks = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const results = toks.length ? todo.filter(r => toks.every(t => r.hay.includes(t))) : todo;
   const shown = results.slice(0, 80);
@@ -1975,14 +2013,23 @@ function VideoSearchModal({ onClose, addToast }) {
           <div className="relative">
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
             <input autoFocus value={query} onChange={e => setQuery(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') buscarEnDrive(); }}
               placeholder="Ej: [c9][Ponzio][14-8][broll]  ·  Cepillo  ·  14-8"
-              className="w-full pl-9 pr-3 py-2.5 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500" />
+              className="w-full pl-9 pr-32 py-2.5 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500" />
+            {/* Plan B: preguntarle a Google por el nombre, esté donde esté el
+                archivo. Enter también lo dispara. */}
+            <button onClick={buscarEnDrive} disabled={driveSearch.status === 'cargando'}
+              title="Buscar este nombre en TODO tu Drive (no solo lo listado)"
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-extrabold rounded-lg text-white bg-brand-600 hover:bg-brand-700 disabled:opacity-50 transition">
+              {driveSearch.status === 'cargando' ? <Loader2 size={12} className="animate-spin" /> : '🔍'} en Drive
+            </button>
           </div>
           <p className="text-[11px] text-gray-400 mt-2">
             {results.length} video{results.length === 1 ? '' : 's'}{results.length > 80 ? ' · mostrando 80' : ''}
             {legacy.status === 'cargando' && <span className="text-sky-500"> · 📁 cargando el archivo histórico…</span>}
             {legacy.status === 'ok' && <span className="text-sky-500"> · 📁 {legacy.files.length} del archivo{legacy.truncated ? ' (parcial — carpeta muy grande)' : ''}</span>}
             {legacy.status === 'error' && <span className="text-amber-500"> · 📁 archivo no disponible ({legacy.motivo})</span>}
+            {driveSearch.status === 'ok' && driveSearch.files.length > 0 && <span className="text-brand-500"> · 🔍 {driveSearch.files.length} de Drive para "{driveSearch.q}"</span>}
           </p>
         </div>
 

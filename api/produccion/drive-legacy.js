@@ -18,9 +18,14 @@ function respondJSON(res, status, obj) {
   res.end(JSON.stringify(obj));
 }
 
-const MAX_CARPETAS = 150;
-const MAX_ARCHIVOS = 2000;
-const MAX_PROFUNDIDAD = 4;
+// Topes generosos (la carpeta histórica del user tiene años de material) con
+// un presupuesto de TIEMPO como corte real: mejor devolver 45s de listado
+// parcial que morir en el timeout de Vercel sin devolver nada.
+const MAX_CARPETAS = 500;
+const MAX_ARCHIVOS = 5000;
+const MAX_PROFUNDIDAD = 6;
+const BUDGET_MS = 45000;
+const PARALELO = 6; // carpetas listadas a la vez
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
@@ -41,16 +46,15 @@ export default async function handler(req, res) {
   const token = ctx.token;
 
   try {
+    const t0 = Date.now();
     const files = [];
-    // BFS: [{ id, path, depth }]
-    const cola = [{ id: folderId, path: '', depth: 0 }];
     let carpetas = 0;
     let truncated = false;
 
-    while (cola.length > 0) {
-      if (carpetas >= MAX_CARPETAS || files.length >= MAX_ARCHIVOS) { truncated = true; break; }
-      const { id, path, depth } = cola.shift();
-      carpetas++;
+    // Lista UNA carpeta completa (con paginación). Devuelve las subcarpetas
+    // encontradas para el siguiente nivel del BFS.
+    const listarCarpeta = async ({ id, path, depth }) => {
+      const sub = [];
       let pageToken = null;
       do {
         const params = {
@@ -63,7 +67,7 @@ export default async function handler(req, res) {
         if (data?.error) throw new Error(data.error.message || 'Drive rechazó el listado');
         for (const f of (data.files || [])) {
           if (f.mimeType === 'application/vnd.google-apps.folder') {
-            if (depth < MAX_PROFUNDIDAD) cola.push({ id: f.id, path: path ? `${path} / ${f.name}` : f.name, depth: depth + 1 });
+            if (depth < MAX_PROFUNDIDAD) sub.push({ id: f.id, path: path ? `${path} / ${f.name}` : f.name, depth: depth + 1 });
             else truncated = true;
             continue;
           }
@@ -79,10 +83,22 @@ export default async function handler(req, res) {
           });
         }
         pageToken = data.nextPageToken || null;
-      } while (pageToken && files.length < MAX_ARCHIVOS);
+      } while (pageToken && files.length < MAX_ARCHIVOS && Date.now() - t0 < BUDGET_MS);
+      return sub;
+    };
+
+    // BFS por niveles, PARALELO adentro de cada nivel (antes era secuencial y
+    // una carpeta con muchas subcarpetas moría en el timeout sin devolver nada).
+    let nivel = [{ id: folderId, path: '', depth: 0 }];
+    while (nivel.length > 0) {
+      if (Date.now() - t0 > BUDGET_MS || carpetas >= MAX_CARPETAS || files.length >= MAX_ARCHIVOS) { truncated = true; break; }
+      const tanda = nivel.splice(0, Math.min(PARALELO, MAX_CARPETAS - carpetas));
+      carpetas += tanda.length;
+      const subs = await Promise.all(tanda.map(listarCarpeta));
+      nivel.push(...subs.flat());
     }
 
-    return respondJSON(res, 200, { ok: true, configured: true, files, carpetas, truncated });
+    return respondJSON(res, 200, { ok: true, configured: true, files, carpetas, truncated, ms: Date.now() - t0 });
   } catch (err) {
     return respondJSON(res, 502, { error: err?.message || 'No pude listar la carpeta de Drive.' });
   }

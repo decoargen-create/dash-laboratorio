@@ -22,8 +22,7 @@
 import { supabase } from './supabase.js';
 import {
   PAGO_POR_PRODUCTO, VIDEOS_POR_PRODUCTO, DEFAULT_BONUS_TRAMOS,
-  bonusObjetivo, pagoProductoDeCfg, bonusDeCfg, resumenVideosPorProducto,
-} from './produccionCalc.js';
+  bonusObjetivo, pagoProductoDeCfg, bonusDeCfg, resumenVideosPorProducto, monthOfWeek } from './produccionCalc.js';
 // Re-exportamos la lógica pura para no romper a quien la importaba desde acá.
 export { PAGO_POR_PRODUCTO, VIDEOS_POR_PRODUCTO, DEFAULT_BONUS_TRAMOS, bonusObjetivo, resumenVideosPorProducto };
 
@@ -1351,10 +1350,16 @@ export function setWeekPaid(weekKey, persona, paid = true) {
   pushPago(weekKey, persona, paid);
 }
 
-// Mes (horario AR) → 'YYYY-MM'. Una semana pertenece al mes de su lunes.
+// Mes (horario AR) → 'YYYY-MM'. Una semana pertenece al mes de su DOMINGO —
+// el día que se ENTREGA (ver monthOfWeek en produccionCalc.js). Ojo: para
+// "el mes actual" igual usamos la fecha de HOY: si hoy cae en una semana que
+// entrega el mes que viene, esa semana ya aparece bajo el mes que viene.
 export function monthKeyOf(date = new Date()) {
-  const s = date.toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
-  return s.slice(0, 7);
+  // El "mes actual" sigue a la SEMANA en curso (que pertenece al mes de su
+  // domingo de entrega). Ej: sábado 6/9 → semana del lunes 31/8 → entrega el
+  // domingo 6/9 → mes actual = septiembre. Así el selector por defecto
+  // siempre muestra la semana que se está trabajando.
+  return monthOfWeek(weekKeyOf(date)) || date.toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).slice(0, 7);
 }
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 export function monthLabel(monthKey) {
@@ -1363,11 +1368,11 @@ export function monthLabel(monthKey) {
   return `${MESES[m - 1]} ${y}`;
 }
 export function allMonthKeys() {
-  const set = new Set(read().map(a => (a.weekKey || '').slice(0, 7)).filter(Boolean));
+  const set = new Set(read().map(a => monthOfWeek(a.weekKey)).filter(Boolean));
   return [...set].sort().reverse();
 }
 export function weeksInMonth(monthKey) {
-  return [...new Set(read().filter(a => (a.weekKey || '').slice(0, 7) === monthKey).map(a => a.weekKey))].sort();
+  return [...new Set(read().filter(a => monthOfWeek(a.weekKey) === monthKey).map(a => a.weekKey))].sort();
 }
 
 // Resumen del mes por persona: total a pagar, pagado, pendiente, y el detalle

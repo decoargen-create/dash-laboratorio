@@ -28,6 +28,7 @@ import { BarChart3 } from 'lucide-react';
 import { SkeletonGrid } from './Skeleton.jsx';
 import EmptyState from './EmptyState.jsx';
 import { getCachedCreativoUrl } from './creativoImgCache.js';
+import { signThumbUrl } from './galeriaReferencialesCloud.js';
 
 function fmtDate(iso) {
   if (!iso) return '';
@@ -56,6 +57,10 @@ function base64ToBlob(b64, mimeType = 'image/png') {
 // el renderer (Chrome "Código de error 5" — out of memory). Blob URLs
 // dejan los bytes en un solo Blob compartido y el browser los decodifica
 // on-demand cuando el <img> es visible.
+// Cuántos creativos se muestran por "página". El resto se carga con "Cargar
+// más" / al scrollear → así no se bajan cientos de imágenes al abrir la galería.
+const PAGE_SIZE = 24;
+
 function useBlobUrls(items) {
   const [map, setMap] = useState(() => new Map());
 
@@ -90,6 +95,14 @@ function useBlobUrls(items) {
       (async () => {
         const results = await Promise.all(cloudItems.map(async (it) => {
           try {
+            // 1) MINIATURA transformada (liviana) para la grilla. Se cachea con
+            //    key propia (#thumb) para no pisar el full-res del cache.
+            const thumbSigned = await signThumbUrl(it.storagePath);
+            if (thumbSigned) {
+              const turl = await getCachedCreativoUrl(it.storagePath + '#thumb', thumbSigned);
+              if (turl) return [it.id, turl];
+            }
+            // 2) Fallback: full-res (si el plan no soporta transformaciones).
             const url = await getCachedCreativoUrl(it.storagePath, it.imageUrl);
             return url ? [it.id, url] : null;
           } catch { return null; }
@@ -843,6 +856,7 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
   // ⚠️ visibleItems TIENE que estar acá arriba (antes del useEffect de
   // keyboard nav que lo usa en su dep array). Estaba abajo en línea 935
   // y producía TDZ "Cannot access 'N' before initialization" en prod.
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const visibleItems = items.filter(it => {
     if (panel === 'winners' && !it.winner) return false;
     if (panel === 'archivados' && !it.archivado) return false;
@@ -867,6 +881,11 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
     }
     return true;
   });
+
+  // Paginado: solo mostramos (y bajamos imágenes de) los primeros N. "Cargar
+  // más" sube el tope. Reset cuando cambian filtros/panel/búsqueda o los items.
+  const shownItems = visibleItems.slice(0, visibleCount);
+  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [panel, filtroEstado, filtroVariante, filtroOrigen, searchQuery, items]);
 
   // Al abrir un creativo, si no trae prompt/skeleton (lista liviana), los pedimos
   // para el panel "cómo se generó". Items de IDB ya los traen → no pide nada.
@@ -908,7 +927,7 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
   // Blob URLs por item — se revoca el set anterior al regenerar.
   // SIN esto, cada <img src="data:..."> hacía Chrome decodificar PNG 2K en
   // RAM (5-15MB cada uno) y crashear el renderer con 50+ creativos.
-  const blobUrls = useBlobUrls(items);
+  const blobUrls = useBlobUrls(shownItems);
   useEffect(() => {
     return () => {
       for (const url of blobUrls.values()) {
@@ -1440,16 +1459,26 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
               />
             )
           ) : viewMode === 'grid' ? (
-            <GalleryGridView items={visibleItems} blobUrls={blobUrls} seleccionados={seleccionados} selectedOrder={selectedOrder}
+            <GalleryGridView items={shownItems} blobUrls={blobUrls} seleccionados={seleccionados} selectedOrder={selectedOrder}
               onToggleSelect={toggleSeleccion} onOpen={setSelected} onArchive={handleArchive} onToggleWinner={handleToggleWinner} cols={gridCols} />
           ) : viewMode === 'list' ? (
-            <GalleryListView items={visibleItems} blobUrls={blobUrls} seleccionados={seleccionados} selectedOrder={selectedOrder}
+            <GalleryListView items={shownItems} blobUrls={blobUrls} seleccionados={seleccionados} selectedOrder={selectedOrder}
               onToggleSelect={toggleSeleccion} onOpen={setSelected}
               onDownload={handleSingleDownload} onToggleDescargada={toggleDescargadaFlag} onArchive={handleArchive} onDelete={handleDelete} onToggleWinner={handleToggleWinner} />
           ) : (
-            <GalleryTableView items={visibleItems} blobUrls={blobUrls} seleccionados={seleccionados} selectedOrder={selectedOrder}
+            <GalleryTableView items={shownItems} blobUrls={blobUrls} seleccionados={seleccionados} selectedOrder={selectedOrder}
               onToggleSelect={toggleSeleccion} onOpen={setSelected}
               onDownload={handleSingleDownload} onToggleDescargada={toggleDescargadaFlag} onArchive={handleArchive} onDelete={handleDelete} onToggleWinner={handleToggleWinner} />
+          )}
+          {/* Cargar más — el resto de los creativos se muestran de a PAGE_SIZE.
+              Solo cuando hay una vista de grilla/lista/tabla y quedan items. */}
+          {!cargando && panel !== 'reportes' && shownItems.length < visibleItems.length && (
+            <div className="flex justify-center py-5">
+              <button onClick={() => setVisibleCount(c => c + PAGE_SIZE)}
+                className="px-4 py-2 text-sm font-bold text-brand-600 dark:text-brand-300 border border-brand-300 dark:border-brand-700 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/20 transition">
+                Cargar más · {visibleItems.length - shownItems.length} restantes
+              </button>
+            </div>
           )}
         </div>
 

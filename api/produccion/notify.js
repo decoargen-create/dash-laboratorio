@@ -157,11 +157,20 @@ export default async function handler(req, res) {
   // Link a la carpeta de Drive (solo si es una URL de Drive válida).
   const folderLink = String(body.folderLink || '').trim();
   const driveOk = /^https:\/\/(drive|docs)\.google\.com\//i.test(folderLink);
+  // Link DIRECTO a la tarjeta en AdsLab (abre esa tarjeta puntual). Es un link
+  // que se muestra para clickear (no lo fetchea el server) — validamos http(s).
+  const cardUrl = String(body.cardUrl || '').trim();
+  const cardUrlOk = /^https?:\/\//i.test(cardUrl);
+  // Semana de la tarjeta (YYYY-MM-DD) → DD/MM para contexto.
+  const weekKey = String(body.weekKey || '').trim();
+  const semana = /^\d{4}-\d{2}-\d{2}$/.test(weekKey) ? `${Number(weekKey.slice(8, 10))}/${Number(weekKey.slice(5, 7))}` : '';
 
   const fields = [];
   if (per) fields.push({ name: 'Persona', value: per, inline: true });
   if (who) fields.push({ name: event === 'nuevo' ? 'Creó' : event === 'correccion' ? 'Pidió' : 'Movió', value: who, inline: true });
+  if (semana) fields.push({ name: 'Semana', value: semana, inline: true });
   if (event === 'correccion' && detalle) fields.push({ name: 'Qué corregir', value: detalle, inline: false });
+  if (cardUrlOk) fields.push({ name: 'Tarjeta', value: `[👉 Abrir esta tarjeta en AdsLab](${cardUrl})`, inline: false });
   if (driveOk) fields.push({ name: 'Videos', value: `[📁 Abrir carpeta de Drive](${folderLink})`, inline: false });
 
   const embed = {
@@ -171,7 +180,9 @@ export default async function handler(req, res) {
     fields,
     timestamp: new Date().toISOString(),
   };
-  if (driveOk) embed.url = folderLink;   // hace clickeable el título
+  // Título clickeable → preferimos el link directo a la tarjeta; si no, a Drive.
+  if (cardUrlOk) embed.url = cardUrl;
+  else if (driveOk) embed.url = folderLink;
 
   const out = await postDiscord(url, embed, menciones);
   return respondJSON(res, out.sent ? 200 : 502, out);

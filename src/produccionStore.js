@@ -836,6 +836,11 @@ async function notificarEventoDiscord(a, event, from, extra = {}) {
         from: from || '',
         to: event === 'nuevo' ? '' : event,
         actor: _actorName || '',
+        // Link DIRECTO a la tarjeta en AdsLab (abre esa tarjeta puntual, no el
+        // tablero entero) → para que el editor sepa exactamente cuál es.
+        cardUrl: (typeof window !== 'undefined' && a.id) ? `${window.location.origin}/?prod=${encodeURIComponent(a.id)}` : '',
+        // Semana de la tarjeta, como contexto extra en el aviso.
+        weekKey: a.weekKey || '',
         // Detalle opcional (ej: el texto de la corrección pedida).
         ...(extra && extra.detalle ? { detalle: String(extra.detalle) } : {}),
         // Link a la carpeta de Drive de la tarjeta (donde están los videos), para
@@ -1058,7 +1063,11 @@ export function setCorreccionVideo(id, ts, texto) {
     if (!txt) { const { correccion, ...rest } = f; return rest; }
     return { ...f, correccion: { texto: txt, por: _actorName || 'Equipo', ts: new Date().toISOString() } };
   });
-  arr[i] = { ...arr[i], archivos, updatedAt: new Date().toISOString() };
+  // Si se pide una corrección sobre una tarjeta YA terminada (aprobada/publicada/
+  // archivada), la REABRIMOS a "Por hacer" para que caiga en la cola del editor
+  // (antes quedaba enterrada en su columna con un badge y "no aparecía").
+  const reabrir = !!txt && ['aprobado', 'publicado', 'archivado'].includes(arr[i].estado);
+  arr[i] = { ...arr[i], archivos, ...(reabrir ? { estado: 'porhacer' } : {}), updatedAt: new Date().toISOString() };
   write(arr);
   pushRow(id);
   // Aviso a Discord (canal 'correccion'): antes pedir una corrección era 100%

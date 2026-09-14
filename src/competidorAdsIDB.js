@@ -25,6 +25,7 @@
 //   { ads: [...], total: N, winners: M, lastAdsCheck: ISO, ts: epoch }
 
 import { supabase, getCurrentUser } from './supabase.js';
+import { uploadConReintento } from './uploadRetry.js';
 import { logEvent } from './debugLog.js';
 
 const DB_NAME = 'adslab-competidor-ads-v1';
@@ -50,9 +51,7 @@ async function uploadAdsToCloud(productoId, competidorId, payload) {
     }
     const path = cloudPath(user.id, productoId, competidorId);
     const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
-    const { error } = await supabase.storage
-      .from(BUCKET)
-      .upload(path, blob, { contentType: 'application/json', upsert: true });
+    const { error } = await uploadConReintento(BUCKET, path, blob, { contentType: 'application/json', upsert: true });
     if (error) {
       console.warn('[competidorAdsIDB] cloud upload falló:', error.message);
       // SILENT FAIL FIX: antes el error se tiraba a la basura y el caller

@@ -12,6 +12,7 @@
 // el user está logueado.
 
 import { supabase, getCurrentUser } from './supabase.js';
+import { uploadConReintento } from './uploadRetry.js';
 
 const BUCKET = 'creativos';
 
@@ -94,12 +95,10 @@ async function uploadImageToBucket(userId, refId, imageBase64, mimeType) {
   if (!supabase) throw new Error('Supabase no configurado');
   const blob = base64ToBlob(imageBase64, mimeType || 'image/png');
   const path = `${userId}/${refId}.png`;
-  const { error } = await supabase.storage
-    .from(BUCKET)
-    .upload(path, blob, {
-      contentType: mimeType || 'image/png',
-      upsert: true, // si re-subimos con el mismo id, sobreescribir
-    });
+  const { error } = await uploadConReintento(BUCKET, path, blob, {
+    contentType: mimeType || 'image/png',
+    upsert: true, // si re-subimos con el mismo id, sobreescribir
+  });
   if (error) throw new Error(`Upload a Storage falló: ${error.message}`);
   const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(path);
   const publicUrl = pub?.publicUrl;

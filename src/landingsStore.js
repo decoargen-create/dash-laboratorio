@@ -11,6 +11,7 @@
 
 import { supabase, getCurrentUser } from './supabase.js';
 import { comprimirImagen } from './productoImagen.js';
+import { uploadConReintento } from './uploadRetry.js';
 
 const TABLE = 'landings';
 const BUCKET = 'landing-refs';
@@ -193,7 +194,7 @@ export async function uploadItemImage(landingId, itemId, file) {
   const dataUrl = await comprimirImagen(file, 1400, 0.85);
   const blob = dataUrlToBlob(dataUrl);
   const path = `${_user}/${landingId}/${itemId}-${Date.now()}.jpg`;
-  const { error } = await supabase.storage.from(BUCKET).upload(path, blob, { contentType: 'image/jpeg', upsert: true });
+  const { error } = await uploadConReintento(BUCKET, path, blob, { contentType: 'image/jpeg', upsert: true });
   if (error) throw new Error(error.message);
   const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(path);
   const img = { path, url: pub?.publicUrl || '', name: file.name || 'imagen.jpg' };

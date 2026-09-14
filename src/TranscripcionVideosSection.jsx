@@ -20,6 +20,7 @@ import {
   ScrollText, Film, CheckSquare, Square, BadgeCheck, Undo2,
 } from 'lucide-react';
 import { supabase, getCurrentUser } from './supabase.js';
+import { uploadConReintento } from './uploadRetry.js';
 import { notifyMarketingChange } from './useMarketingSync.js';
 import { parseJsonOrThrow } from './apiHelpers.js';
 
@@ -224,9 +225,8 @@ export default function TranscripcionVideosSection({ addToast, forcedProductoId,
     try {
       // 1. SUBIR al bucket (directo del browser — sin pasar por Vercel, que
       //    tiene límite de body 4.5MB).
-      const { error: upErr } = await supabase.storage.from(BUCKET).upload(storagePath, file, {
+      const { error: upErr } = await uploadConReintento(BUCKET, storagePath, file, {
         contentType: file.type || 'video/mp4',
-        upsert: true,
       });
       if (upErr) throw new Error(`Upload falló: ${upErr.message}`);
 

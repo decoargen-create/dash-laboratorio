@@ -17,6 +17,7 @@
 // cross-device. localStorage se mantiene como fallback de migración.
 
 import { supabase, getCurrentUser } from './supabase.js';
+import { uploadConReintento } from './uploadRetry.js';
 import { logEvent } from './debugLog.js';
 
 const DB_NAME = 'adslab-producto-imagenes';
@@ -188,9 +189,7 @@ async function uploadFotoToCloud(productoId, dataUrl) {
     // el primer segmento pasa a ser 'producto-fotos' y RLS rechaza el upload
     // (fallaba en silencio → la foto nunca llegaba al cloud).
     const path = `${user.id}/producto-fotos/${String(productoId)}.jpg`;
-    const { error } = await supabase.storage
-      .from(BUCKET)
-      .upload(path, blob, { contentType: blob.type || 'image/jpeg', upsert: true });
+    const { error } = await uploadConReintento(BUCKET, path, blob, { contentType: blob.type || 'image/jpeg', upsert: true });
     if (error) {
       console.warn('[productoImagen] cloud upload falló:', error.message);
       logEvent({

@@ -1487,6 +1487,21 @@ function AppShell({ onExit }) {
     window.addEventListener('adslab-goto-marketing', onGoto);
     return () => window.removeEventListener('adslab-goto-marketing', onGoto);
   }, []);
+  // Deep-link a una tarjeta de Producción: la notificación de Discord manda
+  // `?prod=<cardId>`. Al abrir la app con ese param (siendo admin), vamos directo
+  // al tablero; ProduccionSection se encarga de abrir esa tarjeta puntual.
+  const deepLinkDone = useRef(false);
+  useEffect(() => {
+    if (deepLinkDone.current) return;
+    try {
+      const pid = new URLSearchParams(window.location.search).get('prod');
+      if (pid && currentUser?.role === 'admin') {
+        deepLinkDone.current = true;
+        setCurrentPlatform('marketing');
+        setCurrentSection('mk-produccion');
+      }
+    } catch {}
+  }, [currentUser]);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   // Cada vez que cambia el estado del sidebar, avisamos a otros componentes
   // (ProductTabs en Arranque.jsx) para que oculten su nav redundante cuando

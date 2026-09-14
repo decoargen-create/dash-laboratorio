@@ -570,6 +570,7 @@ export default function ProduccionSection({ addToast }) {
   // Filtro rápido: mostrar solo las tarjetas sin repartir (click en el chip
   // "N sin asignar" del resumen).
   const [soloSinAsignar, setSoloSinAsignar] = useState(false);
+  const [soloCorrecciones, setSoloCorrecciones] = useState(false);
   // Filtros multi-selección: arrays de productos y personas elegidos (vacío = todos).
   const [filtroProducto, setFiltroProducto] = useState([]);
   const [filtroPersona, setFiltroPersona] = useState([]);
@@ -702,6 +703,26 @@ export default function ProduccionSection({ addToast }) {
   }, [asigs]); // eslint-disable-line react-hooks/exhaustive-deps
   const detail = asigs.find(a => a.id === detailId) || null;
 
+  // Deep-link: abrir la tarjeta que vino en ?prod=<id> (link de la notif de
+  // Discord). Espera a que las tarjetas estén cargadas; abre una sola vez y
+  // limpia el param para no reabrir en cada render.
+  const openedFromUrlRef = useRef(false);
+  useEffect(() => {
+    if (openedFromUrlRef.current) return;
+    let pid = null;
+    try { pid = new URLSearchParams(window.location.search).get('prod'); } catch {}
+    if (!pid) { openedFromUrlRef.current = true; return; }
+    if (asigs.some(a => a.id === pid)) {
+      openedFromUrlRef.current = true;
+      setDetailId(pid);
+      try {
+        const p = new URLSearchParams(window.location.search); p.delete('prod');
+        const q = p.toString();
+        window.history.replaceState(null, '', window.location.pathname + (q ? `?${q}` : ''));
+      } catch {}
+    }
+  }, [asigs]);
+
   const personas = useMemo(() => {
     const set = new Set(EQUIPO_DEFAULT);
     allWeekKeys().forEach(wk => listAssignments(wk).forEach(a => { if (a.persona) set.add(a.persona); }));
@@ -729,6 +750,7 @@ export default function ProduccionSection({ addToast }) {
   const asigsBoard = useMemo(() => {
     let list = asigs;
     if (soloSinAsignar) list = list.filter(a => !(a.persona || '').trim() && !a.creatorId);
+    if (soloCorrecciones) list = list.filter(a => (a.archivos || []).some(f => f.correccion?.texto));
     // Multi-select: si hay productos elegidos, la tarjeta pasa si su producto
     // está entre ellos (OR). Ídem personas, con '__sin__' = sin asignar.
     if (filtroProducto.length) list = list.filter(a => filtroProducto.includes((a.productoNombre || '').trim() || 'Sin nombre'));
@@ -738,7 +760,7 @@ export default function ProduccionSection({ addToast }) {
       return filtroPersona.includes(per);
     });
     return list;
-  }, [asigs, soloSinAsignar, filtroProducto, filtroPersona]);
+  }, [asigs, soloSinAsignar, soloCorrecciones, filtroProducto, filtroPersona]);
   const byCol = useMemo(() => {
     const m = { porhacer: [], revision: [], aprobado: [], publicado: [], archivado: [] };
     const now = Date.now();
@@ -1047,6 +1069,19 @@ export default function ProduccionSection({ addToast }) {
           <MultiFiltro label="personas" selected={filtroPersona} onToggle={toggleEn(setFiltroPersona)}
             onClear={() => setFiltroPersona([])}
             options={[...personasEnSemana.map(p => ({ value: p, label: p })), { value: '__sin__', label: '— Sin asignar —' }]} />
+          {(() => {
+            // Filtro rápido "Con correcciones": tarjetas que tienen al menos un
+            // video con corrección pedida. Aparece solo si hay alguna (o si está activo).
+            const nCorr = asigs.filter(a => (a.archivos || []).some(f => f.correccion?.texto)).length;
+            if (nCorr === 0 && !soloCorrecciones) return null;
+            return (
+              <button onClick={() => setSoloCorrecciones(v => !v)}
+                title="Ver solo las tarjetas con correcciones pedidas"
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold rounded-lg border transition ${soloCorrecciones ? 'border-amber-400 text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/40' : 'border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'}`}>
+                🔧 Con correcciones{nCorr > 0 ? ` · ${nCorr}` : ''}
+              </button>
+            );
+          })()}
           {(filtroProducto.length > 0 || filtroPersona.length > 0) && (
             <>
               <span className="text-xs text-gray-400 dark:text-gray-500 tabular-nums">{asigsBoard.length} tarjeta{asigsBoard.length === 1 ? '' : 's'}</span>

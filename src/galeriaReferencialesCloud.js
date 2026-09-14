@@ -250,6 +250,20 @@ export async function getReferencialesByProductoCloud(productoId, opts = {}) {
   return items;
 }
 
+// Signed URL de una MINIATURA (transform de Supabase) para la grilla — pesa
+// ~40KB en vez del PNG full de 1-3MB. Requiere que el proyecto tenga las image
+// transformations habilitadas; si no, devuelve null y el caller cae al full.
+export async function signThumbUrl(storagePath, width = 480) {
+  if (!supabase || !storagePath) return null;
+  try {
+    const { data, error } = await supabase.storage
+      .from(BUCKET)
+      .createSignedUrl(storagePath, 3600, { transform: { width, height: width, resize: 'cover', quality: 62 } });
+    if (error || !data?.signedUrl) return null;
+    return data.signedUrl;
+  } catch { return null; }
+}
+
 // Detalle pesado de UN creativo (prompt + skeleton), cargado on-demand al abrir
 // el creativo — así la lista se mantiene liviana. Devuelve {} si no está.
 export async function getReferencialDetalleCloud(id) {

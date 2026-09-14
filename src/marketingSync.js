@@ -224,8 +224,23 @@ export async function pullMarketingFromCloud() {
 
   // Detectar si hicimos merge — disparar push automático para subir lo
   // preservado al cloud sin que el user tenga que hacer nada.
-  const cloudStr = JSON.stringify((productos || []).map(r => r.data));
-  const mergedStr = JSON.stringify(productosArr);
+  //
+  // ⚠️ La comparación va sobre lo que REALMENTE se pushea (stripIdeas), no
+  // sobre el objeto crudo. Hay dos campos que este pull re-agrega al merged y
+  // que el push strippea SIEMPRE, así que el cloud nunca puede igualarlos:
+  //   - `bandejaIdeas` (vive en marketing_ideas, se re-attachea más abajo y
+  //     lo re-agrega el bloque de preservación)
+  //   - `competidores[].ads` (stripIdeas los saca de cada competidor)
+  // Comparando en crudo, `mergeOccurred` daba true en CADA pull aunque no
+  // hubiera nada nuevo que subir → dispatch → push de los 29 productos →
+  // evento realtime → pull → dispatch → ... Un bucle que se alimentaba solo,
+  // con una sola pestaña abierta, reescribiendo ~780 kB cada ~5 s. Acumuló
+  // 425.305 escrituras y saturó la instancia entera de Supabase el
+  // 14-09-2026 (Nexocom y el resto de las apps del proyecto quedaron con
+  // logins en timeout). Post-strip la comparación converge: si lo único
+  // distinto son campos que el push no persiste, no se dispara push.
+  const cloudStr = JSON.stringify((productos || []).map(r => stripIdeas(r.data)));
+  const mergedStr = JSON.stringify(productosArr.map(p => stripIdeas(p)));
   const mergeOccurred = cloudStr !== mergedStr;
   if (mergeOccurred) {
     console.info('[sync] smart-merge: campos local-only preservados, disparando push automático');

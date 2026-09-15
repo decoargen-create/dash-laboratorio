@@ -13,8 +13,15 @@
 
 import { supabase, getCurrentUser } from './supabase.js';
 import { uploadConReintento } from './uploadRetry.js';
+import { comprimirImagen } from './productoImagen.js';
+import { getCachedCreativoBlob } from './creativoImgCache.js';
 
 const BUCKET = 'creativos';
+// Miniatura para la grilla: ~480px JPEG (~40-60KB vs 1-3MB del PNG full).
+// La generamos NOSOTROS al guardar (y backfill de las viejas), así no depende
+// de que el plan de Supabase tenga image transformations.
+const THUMB_MAX = 480;
+const THUMB_Q = 0.72;
 
 // ¿Está habilitado el modo cloud? (supabase configurado + user logueado)
 // Cacheamos el resultado para no hacer un round-trip a auth.getUser() en
@@ -90,7 +97,28 @@ function base64ToBlob(b64, mimeType = 'image/png') {
   return new Blob([new Uint8Array(byteNumbers)], { type: mimeType });
 }
 
-// Sube imagen al bucket y devuelve { storagePath, imageUrl }.
+// Path del thumb a partir del path del full (…/<id>.png → …/<id>_thumb.jpg).
+function thumbPathDe(storagePath) {
+  return String(storagePath || '').replace(/\.[a-z0-9]+$/i, '') + '_thumb.jpg';
+}
+// Genera un blob de miniatura JPEG (~480px) desde un Blob de imagen. null si falla.
+async function makeThumbBlob(srcBlob) {
+  try {
+    const durl = await comprimirImagen(srcBlob, THUMB_MAX, THUMB_Q); // data:image/jpeg;base64,...
+    const b64 = (durl || '').split(',')[1];
+    return b64 ? base64ToBlob(b64, 'image/jpeg') : null;
+  } catch { return null; }
+}
+// Sube la miniatura (best-effort). Devuelve el thumbPath o null si no se pudo.
+async function subirThumb(storagePath, srcBlob) {
+  const tBlob = await makeThumbBlob(srcBlob);
+  if (!tBlob) return null;
+  const tPath = thumbPathDe(storagePath);
+  const { error } = await uploadConReintento(BUCKET, tPath, tBlob, { contentType: 'image/jpeg', upsert: true });
+  return error ? null : tPath;
+}
+
+// Sube imagen al bucket y devuelve { storagePath, imageUrl, thumbPath }.
 async function uploadImageToBucket(userId, refId, imageBase64, mimeType) {
   if (!supabase) throw new Error('Supabase no configurado');
   const blob = base64ToBlob(imageBase64, mimeType || 'image/png');
@@ -105,7 +133,48 @@ async function uploadImageToBucket(userId, refId, imageBase64, mimeType) {
   if (!publicUrl) {
     throw new Error(`getPublicUrl devolvió vacío para ${path} — bucket no está marcado público?`);
   }
-  return { storagePath: path, imageUrl: publicUrl };
+  // Miniatura (best-effort — si falla, la grilla usa el full igual).
+  const thumbPath = await subirThumb(path, blob);
+  return { storagePath: path, imageUrl: publicUrl, thumbPath };
+}
+
+// Firma las URLs (full + thumb) de una lista de items, en 2 batches SEPARADOS
+// para que cualquier problema con los thumbs NUNCA rompa las imágenes full.
+async function firmarUrls(items) {
+  const fullPaths = items.filter(it => it.storagePath).map(it => it.storagePath);
+  if (fullPaths.length) {
+    try {
+      const { data, error } = await supabase.storage.from(BUCKET).createSignedUrls(fullPaths, 3600);
+      if (!error && Array.isArray(data)) {
+        const by = new Map(data.map(s => [s.path, s.signedUrl]));
+        for (const it of items) { const u = it.storagePath && by.get(it.storagePath); if (u) it.imageUrl = u; }
+      }
+    } catch (e) { console.warn('[galería cloud] firmar full:', e?.message || e); }
+  }
+  const thumbPaths = items.filter(it => it.thumbPath).map(it => it.thumbPath);
+  if (thumbPaths.length) {
+    try {
+      const { data, error } = await supabase.storage.from(BUCKET).createSignedUrls(thumbPaths, 3600);
+      if (!error && Array.isArray(data)) {
+        const by = new Map(data.map(s => [s.path, s.signedUrl]));
+        for (const it of items) { const u = it.thumbPath && by.get(it.thumbPath); if (u) it.thumbUrl = u; }
+      }
+    } catch { /* thumb es best-effort: si falla, la grilla usa el full */ }
+  }
+}
+
+// Backfill: genera la miniatura de un item viejo (sin thumb) reusando el full ya
+// cacheado, la sube y persiste thumb_path. Best-effort (nunca rompe el render).
+export async function ensureThumbFor(item) {
+  if (!supabase || !item || item.thumbPath || !item.storagePath || !item.imageUrl) return null;
+  try {
+    const blob = await getCachedCreativoBlob(item.storagePath, item.imageUrl);
+    if (!blob) return null;
+    const tPath = await subirThumb(item.storagePath, blob);
+    if (!tPath) return null;
+    await supabase.from('marketing_creativos').update({ thumb_path: tPath }).eq('id', item.id);
+    return tPath;
+  } catch { return null; }
 }
 
 // Guarda un referencial en cloud: bytes → Storage, metadata → DB.
@@ -116,7 +185,7 @@ export async function saveReferencialCloud(ref) {
   const user = await getCurrentUser();
   if (!user) throw new Error('No hay sesión Supabase');
 
-  const { storagePath, imageUrl } = await uploadImageToBucket(
+  const { storagePath, imageUrl, thumbPath } = await uploadImageToBucket(
     user.id, ref.id, ref.imageBase64, ref.mimeType
   );
 
@@ -140,6 +209,7 @@ export async function saveReferencialCloud(ref) {
     quality: ref.quality || null,
     storage_path: storagePath,
     image_url: imageUrl,
+    thumb_path: thumbPath || null,
     mime_type: ref.mimeType || 'image/png',
     descargada: !!ref.descargada,
     descargada_at: ref.descargadaAt || null,
@@ -153,7 +223,7 @@ export async function saveReferencialCloud(ref) {
     .upsert(row, { onConflict: 'user_id,id' });
   if (error) throw new Error(`Insert en marketing_creativos falló: ${error.message}`);
 
-  return { ...ref, storagePath, imageUrl };
+  return { ...ref, storagePath, imageUrl, thumbPath };
 }
 
 // Map row de la tabla → shape compatible con la API existente de la galería.
@@ -180,6 +250,7 @@ function rowToRef(row) {
     quality: row.quality,
     storagePath: row.storage_path,
     imageUrl: row.image_url,        // ← consumers usan esto en vez de imageBase64
+    thumbPath: row.thumb_path || null,
     mimeType: row.mime_type,
     descargada: row.descargada,
     descargadaAt: row.descargada_at,
@@ -209,7 +280,7 @@ export async function getReferencialesByProductoCloud(productoId, opts = {}) {
   // contador (head-count) diera 58. Prompt/skeleton se cargan on-demand al abrir
   // un creativo (getReferencialDetalleCloud). El resto de features (regenerar,
   // iterar, winner) no necesitan esos dos campos.
-  const LIST_COLS = 'id,user_id,producto_id,source_ad_id,source_brand,source_image_url,source_headline,source_type,variant_index,variant_style,model,vision_model,size,size_fallback,quality,storage_path,image_url,mime_type,descargada,descargada_at,archivado,archivado_at,created_at,updated_at,winner,winner_at,winner_metrics';
+  const LIST_COLS = 'id,user_id,producto_id,source_ad_id,source_brand,source_image_url,source_headline,source_type,variant_index,variant_style,model,vision_model,size,size_fallback,quality,storage_path,image_url,thumb_path,mime_type,descargada,descargada_at,archivado,archivado_at,created_at,updated_at,winner,winner_at,winner_metrics';
   let query = supabase
     .from('marketing_creativos')
     .select(LIST_COLS)
@@ -229,23 +300,7 @@ export async function getReferencialesByProductoCloud(productoId, opts = {}) {
   // signing falla, dejamos la public URL como fallback (puede funcionar si
   // alguien hizo público el bucket después).
   const items = (data || []).map(rowToRef);
-  const itemsConStoragePath = items.filter(it => it.storagePath);
-  if (itemsConStoragePath.length > 0) {
-    try {
-      const { data: signedList, error: signErr } = await supabase.storage
-        .from(BUCKET)
-        .createSignedUrls(itemsConStoragePath.map(it => it.storagePath), 3600);
-      if (!signErr && Array.isArray(signedList)) {
-        const byPath = new Map(signedList.map(s => [s.path, s.signedUrl]));
-        for (const it of items) {
-          const signed = byPath.get(it.storagePath);
-          if (signed) it.imageUrl = signed;
-        }
-      }
-    } catch (err) {
-      console.warn('[galería cloud] signed URL falló:', err.message);
-    }
-  }
+  await firmarUrls(items);
   return items;
 }
 
@@ -291,23 +346,7 @@ export async function listAllWinnersCloud() {
   // Mismo fix de signed URLs que getReferencialesByProductoCloud — el bucket
   // privado rompe los <img src> sin esto.
   const items = (data || []).map(rowToRef);
-  const itemsConStoragePath = items.filter(it => it.storagePath);
-  if (itemsConStoragePath.length > 0) {
-    try {
-      const { data: signedList, error: signErr } = await supabase.storage
-        .from(BUCKET)
-        .createSignedUrls(itemsConStoragePath.map(it => it.storagePath), 3600);
-      if (!signErr && Array.isArray(signedList)) {
-        const byPath = new Map(signedList.map(s => [s.path, s.signedUrl]));
-        for (const it of items) {
-          const signed = byPath.get(it.storagePath);
-          if (signed) it.imageUrl = signed;
-        }
-      }
-    } catch (err) {
-      console.warn('[winners cloud] signed URL falló:', err.message);
-    }
-  }
+  await firmarUrls(items);
   return items;
 }
 

@@ -12,6 +12,7 @@
 // el user está logueado.
 
 import { supabase, getCurrentUser } from './supabase.js';
+import { uploadConReintento } from './uploadRetry.js';
 
 const BUCKET = 'creativos';
 
@@ -94,12 +95,10 @@ async function uploadImageToBucket(userId, refId, imageBase64, mimeType) {
   if (!supabase) throw new Error('Supabase no configurado');
   const blob = base64ToBlob(imageBase64, mimeType || 'image/png');
   const path = `${userId}/${refId}.png`;
-  const { error } = await supabase.storage
-    .from(BUCKET)
-    .upload(path, blob, {
-      contentType: mimeType || 'image/png',
-      upsert: true, // si re-subimos con el mismo id, sobreescribir
-    });
+  const { error } = await uploadConReintento(BUCKET, path, blob, {
+    contentType: mimeType || 'image/png',
+    upsert: true, // si re-subimos con el mismo id, sobreescribir
+  });
   if (error) throw new Error(`Upload a Storage falló: ${error.message}`);
   const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(path);
   const publicUrl = pub?.publicUrl;
@@ -248,20 +247,6 @@ export async function getReferencialesByProductoCloud(productoId, opts = {}) {
     }
   }
   return items;
-}
-
-// Signed URL de una MINIATURA (transform de Supabase) para la grilla — pesa
-// ~40KB en vez del PNG full de 1-3MB. Requiere que el proyecto tenga las image
-// transformations habilitadas; si no, devuelve null y el caller cae al full.
-export async function signThumbUrl(storagePath, width = 480) {
-  if (!supabase || !storagePath) return null;
-  try {
-    const { data, error } = await supabase.storage
-      .from(BUCKET)
-      .createSignedUrl(storagePath, 3600, { transform: { width, height: width, resize: 'cover', quality: 62 } });
-    if (error || !data?.signedUrl) return null;
-    return data.signedUrl;
-  } catch { return null; }
 }
 
 // Detalle pesado de UN creativo (prompt + skeleton), cargado on-demand al abrir

@@ -28,7 +28,6 @@ import { BarChart3 } from 'lucide-react';
 import { SkeletonGrid } from './Skeleton.jsx';
 import EmptyState from './EmptyState.jsx';
 import { getCachedCreativoUrl } from './creativoImgCache.js';
-import { signThumbUrl } from './galeriaReferencialesCloud.js';
 
 function fmtDate(iso) {
   if (!iso) return '';
@@ -95,14 +94,6 @@ function useBlobUrls(items) {
       (async () => {
         const results = await Promise.all(cloudItems.map(async (it) => {
           try {
-            // 1) MINIATURA transformada (liviana) para la grilla. Se cachea con
-            //    key propia (#thumb) para no pisar el full-res del cache.
-            const thumbSigned = await signThumbUrl(it.storagePath);
-            if (thumbSigned) {
-              const turl = await getCachedCreativoUrl(it.storagePath + '#thumb', thumbSigned);
-              if (turl) return [it.id, turl];
-            }
-            // 2) Fallback: full-res (si el plan no soporta transformaciones).
             const url = await getCachedCreativoUrl(it.storagePath, it.imageUrl);
             return url ? [it.id, url] : null;
           } catch { return null; }

@@ -77,6 +77,13 @@ function idbPut(key, blob) {
 // Devuelve null si no hay cache disponible o si la descarga falla → el caller
 // usa la signed URL directa como fallback.
 export async function getCachedCreativoUrl(storagePath, signedUrl) {
+  const blob = await getCachedCreativoBlob(storagePath, signedUrl);
+  return blob ? URL.createObjectURL(blob) : null;
+}
+
+// Igual que getCachedCreativoUrl pero devuelve el Blob (no un objectURL). Lo usa
+// el backfill de miniaturas para reusar el PNG ya cacheado sin re-descargarlo.
+export async function getCachedCreativoBlob(storagePath, signedUrl) {
   if (!storagePath || !signedUrl) return null;
   try {
     let blob = await idbGet(storagePath);
@@ -88,7 +95,7 @@ export async function getCachedCreativoUrl(storagePath, signedUrl) {
       // el blob recién bajado; solo nos perdemos el cache para la próxima.
       idbPut(storagePath, blob);
     }
-    return URL.createObjectURL(blob);
+    return blob;
   } catch {
     return null;
   }

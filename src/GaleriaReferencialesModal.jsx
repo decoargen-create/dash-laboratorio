@@ -28,6 +28,27 @@ import { BarChart3 } from 'lucide-react';
 import { SkeletonGrid } from './Skeleton.jsx';
 import EmptyState from './EmptyState.jsx';
 import { getCachedCreativoUrl } from './creativoImgCache.js';
+import { ensureThumbFor } from './galeriaReferencialesCloud.js';
+
+// Backfill de miniaturas: para creativos viejos (sin thumb), generamos la
+// miniatura en segundo plano reusando el full ya cacheado. Best-effort, 3 en
+// paralelo, una sola vez por id/sesión — así no dispara una avalancha.
+const _bfVistos = new Set();
+let _bfActivos = 0;
+const _bfCola = [];
+function encolarBackfillThumb(item) {
+  if (!item?.id || _bfVistos.has(item.id)) return;
+  _bfVistos.add(item.id);
+  _bfCola.push(item);
+  bombearBackfill();
+}
+function bombearBackfill() {
+  while (_bfActivos < 3 && _bfCola.length) {
+    const it = _bfCola.shift();
+    _bfActivos++;
+    Promise.resolve(ensureThumbFor(it)).catch(() => {}).finally(() => { _bfActivos--; bombearBackfill(); });
+  }
+}
 
 function fmtDate(iso) {
   if (!iso) return '';
@@ -80,8 +101,9 @@ function useBlobUrls(items) {
         } catch {
           if (it.imageUrl) next.set(it.id, it.imageUrl);
         }
-      } else if (it?.imageUrl) {
-        next.set(it.id, it.imageUrl);
+      } else if (it?.thumbUrl || it?.imageUrl) {
+        // Miniatura si existe (liviana); si no, el full como fallback inmediato.
+        next.set(it.id, it.thumbUrl || it.imageUrl);
       }
     }
     setMap(new Map(next));
@@ -94,7 +116,14 @@ function useBlobUrls(items) {
       (async () => {
         const results = await Promise.all(cloudItems.map(async (it) => {
           try {
+            // Miniatura propia (la generamos nosotros → JPEG válido, no rompe).
+            if (it.thumbPath && it.thumbUrl) {
+              const turl = await getCachedCreativoUrl(it.thumbPath, it.thumbUrl);
+              if (turl) return [it.id, turl];
+            }
+            // Full-res (base). Si no hay miniatura, la generamos en background.
             const url = await getCachedCreativoUrl(it.storagePath, it.imageUrl);
+            if (url && !it.thumbPath) encolarBackfillThumb(it);
             return url ? [it.id, url] : null;
           } catch { return null; }
         }));

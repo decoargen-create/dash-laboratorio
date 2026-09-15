@@ -1354,6 +1354,10 @@ function AppShell({ onExit }) {
   // módulo Marketing pueda hacer al resetear su propio state.
   const [state, dispatch] = useReducer(appReducer, INITIAL_STATE);
   const [hydrated, setHydrated] = useState(false);
+  // Marca si la hidratación local REAL ya terminó (resolvió o falló). El watchdog
+  // puede renderizar la app antes de eso; usamos esta ref para NO persistir (y
+  // pisar IndexedDB con el estado inicial) hasta que la carga real haya terminado.
+  const hydrateSettledRef = useRef(false);
 
   // Supabase user state — solo afecta a la plataforma Marketing. Las demás
   // plataformas siguen funcionando sin Supabase (localStorage / IndexedDB).
@@ -1378,6 +1382,11 @@ function AppShell({ onExit }) {
   // Hidratación inicial — async porque IndexedDB.
   useEffect(() => {
     let alive = true;
+    // Watchdog: si IndexedDB se cuelga (pestaña vieja abierta, PWA, storage
+    // trabado), arrancamos igual a los 6s en vez de quedar en "Cargando datos…"
+    // para siempre. La persistencia local espera a que la carga REAL termine
+    // (hydrateSettledRef) para no pisar la base con el estado inicial.
+    const watchdog = setTimeout(() => { if (alive) setHydrated(true); }, 6000);
     loadVioraState()
       .then(loaded => {
         if (!alive) return;
@@ -1399,20 +1408,25 @@ function AppShell({ onExit }) {
             },
           });
         }
+        hydrateSettledRef.current = true;
         setHydrated(true);
       })
       .catch(err => {
         console.warn('[viora] hydrate falló, arranco con INITIAL_STATE:', err?.message);
+        hydrateSettledRef.current = true;
         setHydrated(true);
-      });
-    return () => { alive = false; };
+      })
+      .finally(() => { clearTimeout(watchdog); });
+    return () => { alive = false; clearTimeout(watchdog); };
   }, []);
 
   // Persistimos el state en IndexedDB cada vez que cambia, debounced 200ms
   // para no saturar con cada keystroke. Solo después de hydrated para no
   // sobreescribir lo cargado con el INITIAL_STATE inicial.
   useEffect(() => {
-    if (!hydrated) return;
+    // Solo persistimos cuando la carga REAL terminó — si arrancó por el watchdog
+    // (IndexedDB colgado) NO guardamos, para no pisar la base con INITIAL_STATE.
+    if (!hydrated || !hydrateSettledRef.current) return;
     const id = setTimeout(() => {
       saveVioraState(state).catch(err => console.warn('[viora] save falló:', err?.message));
     }, 200);
@@ -1421,7 +1435,7 @@ function AppShell({ onExit }) {
 
   // Backup automático cada hora — red de seguridad ante state corrupto.
   useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated || !hydrateSettledRef.current) return;
     const id = setInterval(() => {
       createBackup(state).catch(() => {});
     }, 60 * 60 * 1000);

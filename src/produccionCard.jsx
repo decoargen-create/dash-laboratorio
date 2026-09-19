@@ -132,6 +132,14 @@ export default function TarjetaProduccion({ a, num, personas = [], team = [], on
     return !Number.isNaN(t) && (Date.now() - t) > 24 * 3600 * 1000;
   })();
 
+  // Cuándo se ENTREGÓ = cuándo pasó a "En revisión" (último evento del historial).
+  // Sirve para saber la fecha de entrega en revisión/aprobado/publicado. Puede
+  // no existir en tarjetas viejas sin ese evento en el historial.
+  const entregadaEl = (() => {
+    const revEv = [...(a.historial || [])].reverse().find(e => e.tipo === 'estado' && e.to === 'revision');
+    return revEv?.ts || null;
+  })();
+
   const onPick = async (fileList) => {
     setProg({ i: 0, total: 0, pct: 0, bps: 0, eta: null });
     try {
@@ -247,6 +255,12 @@ export default function TarjetaProduccion({ a, num, personas = [], team = [], on
         {fmtFechaCorta(a.createdAt) && (
           <span className="inline-flex items-center gap-1" title={`Tarjeta creada el ${fmtFechaLarga(a.createdAt)}`}>
             <Calendar size={12} className="text-gray-400" />{fmtFechaCorta(a.createdAt)}
+          </span>
+        )}
+        {entregadaEl && fmtFechaCorta(entregadaEl) && (
+          <span className="inline-flex items-center gap-1 font-semibold text-emerald-600 dark:text-emerald-400"
+            title={`Entregado (pasó a En revisión) el ${fmtFechaLarga(entregadaEl)}`}>
+            📤 entregado {fmtFechaCorta(entregadaEl)}
           </span>
         )}
         <span className="inline-flex items-center gap-1" title={`${subidos} de ${VIDEOS_POR_PRODUCTO} videos subidos`}>

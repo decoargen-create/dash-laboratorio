@@ -31,8 +31,10 @@ import { getCachedCreativoUrl } from './creativoImgCache.js';
 import { ensureThumbFor } from './galeriaReferencialesCloud.js';
 
 // Backfill de miniaturas: para creativos viejos (sin thumb), generamos la
-// miniatura en segundo plano reusando el full ya cacheado. Best-effort, 3 en
-// paralelo, una sola vez por id/sesión — así no dispara una avalancha.
+// miniatura en segundo plano reusando el full ya cacheado. Best-effort, y MUY
+// suave: 1 por vez con un respiro entre cada una, porque generar la miniatura
+// decodifica el full-res (mucha RAM) y hacerlo en ráfaga podía crashear la
+// pestaña de Chrome por falta de memoria (OOM). Una sola vez por id/sesión.
 const _bfVistos = new Set();
 let _bfActivos = 0;
 const _bfCola = [];
@@ -43,11 +45,13 @@ function encolarBackfillThumb(item) {
   bombearBackfill();
 }
 function bombearBackfill() {
-  while (_bfActivos < 3 && _bfCola.length) {
-    const it = _bfCola.shift();
-    _bfActivos++;
-    Promise.resolve(ensureThumbFor(it)).catch(() => {}).finally(() => { _bfActivos--; bombearBackfill(); });
-  }
+  if (_bfActivos >= 1 || !_bfCola.length) return; // 1 por vez (memoria)
+  const it = _bfCola.shift();
+  _bfActivos++;
+  Promise.resolve(ensureThumbFor(it)).catch(() => {}).finally(() => {
+    _bfActivos--;
+    setTimeout(bombearBackfill, 500); // respiro para que el GC libere el decode
+  });
 }
 
 function fmtDate(iso) {
@@ -79,7 +83,9 @@ function base64ToBlob(b64, mimeType = 'image/png') {
 // on-demand cuando el <img> es visible.
 // Cuántos creativos se muestran por "página". El resto se carga con "Cargar
 // más" / al scrollear → así no se bajan cientos de imágenes al abrir la galería.
-const PAGE_SIZE = 24;
+// 12 (y no más) para acotar cuántos full-res se decodifican a la vez en la
+// primera pasada (antes de que existan las miniaturas) y no reventar la RAM.
+const PAGE_SIZE = 12;
 
 function useBlobUrls(items) {
   const [map, setMap] = useState(() => new Map());

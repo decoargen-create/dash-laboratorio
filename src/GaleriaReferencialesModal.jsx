@@ -83,7 +83,9 @@ function base64ToBlob(b64, mimeType = 'image/png') {
 // on-demand cuando el <img> es visible.
 // Cuántos creativos se muestran por "página". El resto se carga con "Cargar
 // más" / al scrollear → así no se bajan cientos de imágenes al abrir la galería.
-const PAGE_SIZE = 24;
+// 12 (y no más) para acotar cuántos full-res se decodifican a la vez en la
+// primera pasada (antes de que existan las miniaturas) y no reventar la RAM.
+const PAGE_SIZE = 12;
 
 function useBlobUrls(items) {
   const [map, setMap] = useState(() => new Map());

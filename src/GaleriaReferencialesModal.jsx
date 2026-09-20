@@ -855,13 +855,14 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
   // (el prompt ya no viaja en la lista liviana).
   const [searchQuery, setSearchQuery] = useState('');
   const [zipping, setZipping] = useState(false);
-  // Cuántos creativos por ZIP en la descarga masiva (configurable + recordado).
-  // Más chico = menos memoria (más seguro contra el crash de Chrome).
+  // Tamaño de carpeta en la descarga masiva (0 = todo junto, sin carpetas).
+  // Un solo ZIP siempre; si es >0 y hay más que N, agrupa en carpetas "Tanda N".
   const [zipChunk, setZipChunk] = useState(() => {
-    try { const v = parseInt(localStorage.getItem('adslab-galeria-zip-chunk') || '', 10); return (v >= 1 && v <= 100) ? v : ZIP_CHUNK; } catch { return ZIP_CHUNK; }
+    try { const v = parseInt(localStorage.getItem('adslab-galeria-zip-chunk') || '', 10); return (v >= 0 && v <= 100) ? v : ZIP_CHUNK; } catch { return ZIP_CHUNK; }
   });
   const cambiarZipChunk = (v) => {
-    const n = Math.max(1, Math.min(100, parseInt(v, 10) || ZIP_CHUNK));
+    const raw = parseInt(v, 10);
+    const n = Number.isFinite(raw) ? Math.max(0, Math.min(100, raw)) : ZIP_CHUNK;
     setZipChunk(n);
     try { localStorage.setItem('adslab-galeria-zip-chunk', String(n)); } catch {}
   };
@@ -1045,10 +1046,9 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
     return blob;
   };
 
-  // Bulk download como ZIP. Baja POR TANDAS (secuencial) para no llenar la RAM:
-  // con muchas imágenes full-res, bajarlas todas juntas + zipear en memoria
-  // crasheaba Chrome (OOM). Cada tanda se baja, zipea y libera antes de la
-  // siguiente; si hay más de ZIP_CHUNK, salen varios ZIP (parte1, parte2…).
+  // Bulk download: UN solo ZIP. Si "de a N" > 0 y hay más que N, los agrupa en
+  // carpetas "Tanda 1", "Tanda 2"… de N cada una; si es "Todo junto" (0), van
+  // planos. Se bajan SECUENCIAL (una por vez) para no spikear memoria al bajar.
   const handleBulkDownload = async () => {
     if (seleccionados.size === 0) return;
     setZipping(true);
@@ -1064,55 +1064,35 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
         if (!cont) { setZipping(false); return; }
       }
 
-      const ts = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
-      // Partimos en tandas para acotar la memoria.
-      const tandas = [];
-      for (let i = 0; i < seleccionadosArr.length; i += zipChunk) tandas.push(seleccionadosArr.slice(i, i + zipChunk));
-      const multi = tandas.length > 1;
-
+      const zip = new JSZip();
+      // ¿Agrupamos en carpetas? Solo si el usuario eligió un tamaño de tanda (>0)
+      // y hay más creativos que ese tamaño.
+      const usarCarpetas = zipChunk > 0 && seleccionadosArr.length > zipChunk;
+      const nTandas = usarCarpetas ? Math.ceil(seleccionadosArr.length / zipChunk) : 1;
       const usedNames = new Set();
       const okItems = [];
       const failed = []; // { name, error }
 
-      for (let t = 0; t < tandas.length; t++) {
-        const zip = new JSZip();
-        let algo = false;
-        // SECUENCIAL (no Promise.all): una imagen por vez → memoria acotada.
-        for (const it of tandas[t]) {
-          let name = buildFileName(it, productoNombre);
-          let dedup = 1;
-          const base = name.replace(/\.png$/, '');
-          while (usedNames.has(name)) { name = `${base} (${++dedup}).png`; }
-          usedNames.add(name);
-          try {
-            let blob;
-            if (it.imageBase64) blob = base64ToBlob(it.imageBase64, it.mimeType || 'image/png');
-            else if (it.imageUrl) blob = await fetchImageBlob(it.imageUrl);
-            else throw new Error('Sin imageBase64 ni imageUrl');
-            zip.file(name, blob);
-            okItems.push(it);
-            algo = true;
-          } catch (err) {
-            failed.push({ name, error: err.message });
-          }
+      // SECUENCIAL (no Promise.all): una imagen por vez → memoria acotada al bajar.
+      for (let idx = 0; idx < seleccionadosArr.length; idx++) {
+        const it = seleccionadosArr[idx];
+        const carpeta = usarCarpetas ? `Tanda ${Math.floor(idx / zipChunk) + 1}/` : '';
+        let name = buildFileName(it, productoNombre);
+        let dedup = 1;
+        const base = name.replace(/\.png$/, '');
+        let ruta = carpeta + name;
+        while (usedNames.has(ruta)) { ruta = carpeta + `${base} (${++dedup}).png`; }
+        usedNames.add(ruta);
+        try {
+          let blob;
+          if (it.imageBase64) blob = base64ToBlob(it.imageBase64, it.mimeType || 'image/png');
+          else if (it.imageUrl) blob = await fetchImageBlob(it.imageUrl);
+          else throw new Error('Sin imageBase64 ni imageUrl');
+          zip.file(ruta, blob);
+          okItems.push(it);
+        } catch (err) {
+          failed.push({ name, error: err.message });
         }
-        if (!algo) continue;
-        // STORE (sin compresión): los PNG ya vienen comprimidos → evitamos el
-        // deflate, que consume CPU/RAM extra al generar.
-        const zblob = await zip.generateAsync({ type: 'blob', compression: 'STORE' });
-        const zipName = multi
-          ? `creativos-${slugify(productoNombre)}-${ts}-parte${t + 1}.zip`
-          : `creativos-${slugify(productoNombre)}-${ts}.zip`;
-        const url = URL.createObjectURL(zblob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = zipName;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(url), 2000);
-        // Respiro entre tandas para que el GC libere antes de la próxima.
-        if (t < tandas.length - 1) await new Promise(r => setTimeout(r, 500));
       }
 
       if (okItems.length === 0) {
@@ -1120,16 +1100,29 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
         setZipping(false);
         return;
       }
+
+      // STORE (sin compresión): los PNG ya vienen comprimidos → evitamos el
+      // deflate, que consume CPU/RAM extra al generar.
+      const zblob = await zip.generateAsync({ type: 'blob', compression: 'STORE' });
+      const ts = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
+      const zipName = `creativos-${slugify(productoNombre)}-${ts}.zip`;
+      const url = URL.createObjectURL(zblob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = zipName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+
       // Marcar solo los OK como descargados.
       await patchReferenciales(
         okItems.map(it => it.id),
         { descargada: true, descargadaAt: new Date().toISOString() }
       );
-      const partesMsg = multi ? ` (en ${tandas.length} ZIP: parte1…parte${tandas.length})` : '';
+      const carpetasMsg = usarCarpetas ? ` en ${nTandas} carpetas (Tanda 1…Tanda ${nTandas})` : '';
       if (failed.length > 0) {
-        alert(`ZIP listo con ${okItems.length} creativos${partesMsg}. ${failed.length} no se pudieron bajar (URLs caídas o sin permisos) — quedaron sin marcar para reintentar:\n\n${failed.slice(0, 5).map(f => `· ${f.name}: ${f.error}`).join('\n')}${failed.length > 5 ? `\n…y ${failed.length - 5} más` : ''}`);
-      } else if (multi) {
-        alert(`Listo: ${okItems.length} creativos descargados en ${tandas.length} ZIP (parte1…parte${tandas.length}). Se parte en varios a propósito para no saturar la memoria del navegador.`);
+        alert(`ZIP listo con ${okItems.length} creativos${carpetasMsg}. ${failed.length} no se pudieron bajar (URLs caídas o sin permisos) — quedaron sin marcar para reintentar:\n\n${failed.slice(0, 5).map(f => `· ${f.name}: ${f.error}`).join('\n')}${failed.length > 5 ? `\n…y ${failed.length - 5} más` : ''}`);
       }
       limpiarSeleccion();
       refresh();
@@ -1548,11 +1541,12 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
           >
             <Archive size={12} /> Archivar ({seleccionados.size})
           </button>
-          <label className="inline-flex items-center gap-1 text-[11px] font-semibold text-gray-500 dark:text-gray-400" title="Cuántos creativos por ZIP. Más chico = menos memoria (evita que se cierre Chrome).">
-            de a
+          <label className="inline-flex items-center gap-1 text-[11px] font-semibold text-gray-500 dark:text-gray-400" title="Un solo ZIP. 'sin carpetas' = todo junto; 'de N' = agrupa en carpetas Tanda 1, Tanda 2… de N cada una.">
+            Carpetas
             <select value={zipChunk} onChange={e => cambiarZipChunk(e.target.value)} disabled={zipping}
               className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md px-1.5 py-1 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:opacity-60">
-              {[5, 10, 15, 20, 25, 30, 50].map(n => <option key={n} value={n}>{n}</option>)}
+              <option value={0}>sin carpetas</option>
+              {[5, 10, 15, 20, 25, 30, 50].map(n => <option key={n} value={n}>de {n}</option>)}
             </select>
           </label>
           <button

@@ -28,31 +28,6 @@ import { BarChart3 } from 'lucide-react';
 import { SkeletonGrid } from './Skeleton.jsx';
 import EmptyState from './EmptyState.jsx';
 import { getCachedCreativoUrl } from './creativoImgCache.js';
-import { ensureThumbFor } from './galeriaReferencialesCloud.js';
-
-// Backfill de miniaturas: para creativos viejos (sin thumb), generamos la
-// miniatura en segundo plano reusando el full ya cacheado. Best-effort, y MUY
-// suave: 1 por vez con un respiro entre cada una, porque generar la miniatura
-// decodifica el full-res (mucha RAM) y hacerlo en ráfaga podía crashear la
-// pestaña de Chrome por falta de memoria (OOM). Una sola vez por id/sesión.
-const _bfVistos = new Set();
-let _bfActivos = 0;
-const _bfCola = [];
-function encolarBackfillThumb(item) {
-  if (!item?.id || _bfVistos.has(item.id)) return;
-  _bfVistos.add(item.id);
-  _bfCola.push(item);
-  bombearBackfill();
-}
-function bombearBackfill() {
-  if (_bfActivos >= 1 || !_bfCola.length) return; // 1 por vez (memoria)
-  const it = _bfCola.shift();
-  _bfActivos++;
-  Promise.resolve(ensureThumbFor(it)).catch(() => {}).finally(() => {
-    _bfActivos--;
-    setTimeout(bombearBackfill, 500); // respiro para que el GC libere el decode
-  });
-}
 
 function fmtDate(iso) {
   if (!iso) return '';
@@ -127,9 +102,10 @@ function useBlobUrls(items) {
               const turl = await getCachedCreativoUrl(it.thumbPath, it.thumbUrl);
               if (turl) return [it.id, turl];
             }
-            // Full-res (base). Si no hay miniatura, la generamos en background.
+            // Full-res (base). Las miniaturas ya NO se generan on-the-fly acá
+            // (decodificar el full-res spikeaba la RAM y crasheaba Chrome). Los
+            // creativos NUEVOS ya salen con miniatura al guardarse.
             const url = await getCachedCreativoUrl(it.storagePath, it.imageUrl);
-            if (url && !it.thumbPath) encolarBackfillThumb(it);
             return url ? [it.id, url] : null;
           } catch { return null; }
         }));

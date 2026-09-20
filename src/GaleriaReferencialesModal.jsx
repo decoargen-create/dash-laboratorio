@@ -62,6 +62,12 @@ function base64ToBlob(b64, mimeType = 'image/png') {
 // primera pasada (antes de que existan las miniaturas) y no reventar la RAM.
 const PAGE_SIZE = 12;
 
+// Cuántos creativos entran en cada ZIP de la descarga masiva. Bajar y zipear
+// MUCHAS imágenes full-res de una llena la RAM y crashea Chrome (OOM); por eso
+// partimos en tandas: cada tanda se baja secuencial, se zipea y se libera antes
+// de la siguiente. Si hay más que esto, salen varios ZIP (parte1, parte2…).
+const ZIP_CHUNK = 15;
+
 function useBlobUrls(items) {
   const [map, setMap] = useState(() => new Map());
 
@@ -1026,81 +1032,91 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
     return blob;
   };
 
-  // Bulk download como ZIP. Marca todos los descargados con timestamp.
+  // Bulk download como ZIP. Baja POR TANDAS (secuencial) para no llenar la RAM:
+  // con muchas imágenes full-res, bajarlas todas juntas + zipear en memoria
+  // crasheaba Chrome (OOM). Cada tanda se baja, zipea y libera antes de la
+  // siguiente; si hay más de ZIP_CHUNK, salen varios ZIP (parte1, parte2…).
   const handleBulkDownload = async () => {
     if (seleccionados.size === 0) return;
     setZipping(true);
     try {
-      const zip = new JSZip();
       let seleccionadosArr = items.filter(it => seleccionados.has(it.id));
-      // Re-firmamos signed URLs (TTL 5min) antes de bajar bytes. Las URLs
-      // viejas del load inicial pueden tener >1h y dar 403 acá. Items sin
-      // storagePath (IDB legacy) se devuelven igual.
+      // Re-firmamos signed URLs (TTL 5min) antes de bajar bytes.
       seleccionadosArr = await refreshSignedUrls(seleccionadosArr);
       const yaDescargados = seleccionadosArr.filter(it => it.descargada).length;
       if (yaDescargados > 0) {
         const cont = window.confirm(
           `Atención: ${yaDescargados} de los ${seleccionadosArr.length} seleccionados ya los descargaste antes. ¿Querés descargarlos otra vez?`
         );
-        if (!cont) {
-          setZipping(false);
-          return;
-        }
+        if (!cont) { setZipping(false); return; }
       }
-      // Trackear nombres usados para evitar colisiones (ej. mismo producto +
-      // fecha + brand → agregar _2, _3, etc).
+
+      const ts = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
+      // Partimos en tandas para acotar la memoria.
+      const tandas = [];
+      for (let i = 0; i < seleccionadosArr.length; i += ZIP_CHUNK) tandas.push(seleccionadosArr.slice(i, i + ZIP_CHUNK));
+      const multi = tandas.length > 1;
+
       const usedNames = new Set();
-      // Items que efectivamente entraron al ZIP — solo estos los marcamos
-      // como descargados al final. Los fallados quedan disponibles para
-      // reintentar sin ensuciar el filtro "no descargados".
       const okItems = [];
       const failed = []; // { name, error }
-      await Promise.all(seleccionadosArr.map(async (it) => {
-        let name = buildFileName(it, productoNombre);
-        let dedup = 1;
-        const base = name.replace(/\.png$/, '');
-        while (usedNames.has(name)) {
-          name = `${base} (${++dedup}).png`;
-        }
-        usedNames.add(name);
-        try {
-          let blob;
-          if (it.imageBase64) {
-            blob = base64ToBlob(it.imageBase64, it.mimeType || 'image/png');
-          } else if (it.imageUrl) {
-            blob = await fetchImageBlob(it.imageUrl);
-          } else {
-            throw new Error('Sin imageBase64 ni imageUrl');
+
+      for (let t = 0; t < tandas.length; t++) {
+        const zip = new JSZip();
+        let algo = false;
+        // SECUENCIAL (no Promise.all): una imagen por vez → memoria acotada.
+        for (const it of tandas[t]) {
+          let name = buildFileName(it, productoNombre);
+          let dedup = 1;
+          const base = name.replace(/\.png$/, '');
+          while (usedNames.has(name)) { name = `${base} (${++dedup}).png`; }
+          usedNames.add(name);
+          try {
+            let blob;
+            if (it.imageBase64) blob = base64ToBlob(it.imageBase64, it.mimeType || 'image/png');
+            else if (it.imageUrl) blob = await fetchImageBlob(it.imageUrl);
+            else throw new Error('Sin imageBase64 ni imageUrl');
+            zip.file(name, blob);
+            okItems.push(it);
+            algo = true;
+          } catch (err) {
+            failed.push({ name, error: err.message });
           }
-          zip.file(name, blob);
-          okItems.push(it);
-        } catch (err) {
-          failed.push({ name, error: err.message });
         }
-      }));
+        if (!algo) continue;
+        // STORE (sin compresión): los PNG ya vienen comprimidos → evitamos el
+        // deflate, que consume CPU/RAM extra al generar.
+        const zblob = await zip.generateAsync({ type: 'blob', compression: 'STORE' });
+        const zipName = multi
+          ? `creativos-${slugify(productoNombre)}-${ts}-parte${t + 1}.zip`
+          : `creativos-${slugify(productoNombre)}-${ts}.zip`;
+        const url = URL.createObjectURL(zblob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = zipName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+        // Respiro entre tandas para que el GC libere antes de la próxima.
+        if (t < tandas.length - 1) await new Promise(r => setTimeout(r, 500));
+      }
+
       if (okItems.length === 0) {
         alert(`No se pudo bajar ninguno de los ${seleccionadosArr.length} creativos. Errores:\n\n${failed.slice(0, 5).map(f => `· ${f.name}: ${f.error}`).join('\n')}`);
         setZipping(false);
         return;
       }
-      const blob = await zip.generateAsync({ type: 'blob' });
-      const ts = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
-      const zipName = `creativos-${slugify(productoNombre)}-${ts}.zip`;
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = zipName;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
       // Marcar solo los OK como descargados.
       await patchReferenciales(
         okItems.map(it => it.id),
         { descargada: true, descargadaAt: new Date().toISOString() }
       );
+      const partesMsg = multi ? ` (en ${tandas.length} ZIP: parte1…parte${tandas.length})` : '';
       if (failed.length > 0) {
-        alert(`ZIP listo con ${okItems.length} creativos. ${failed.length} no se pudieron bajar (URLs caídas o sin permisos) — quedaron sin marcar como descargados para reintentar:\n\n${failed.slice(0, 5).map(f => `· ${f.name}: ${f.error}`).join('\n')}${failed.length > 5 ? `\n…y ${failed.length - 5} más` : ''}`);
+        alert(`ZIP listo con ${okItems.length} creativos${partesMsg}. ${failed.length} no se pudieron bajar (URLs caídas o sin permisos) — quedaron sin marcar para reintentar:\n\n${failed.slice(0, 5).map(f => `· ${f.name}: ${f.error}`).join('\n')}${failed.length > 5 ? `\n…y ${failed.length - 5} más` : ''}`);
+      } else if (multi) {
+        alert(`Listo: ${okItems.length} creativos descargados en ${tandas.length} ZIP (parte1…parte${tandas.length}). Se parte en varios a propósito para no saturar la memoria del navegador.`);
       }
       limpiarSeleccion();
       refresh();

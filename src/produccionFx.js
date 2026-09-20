@@ -6,8 +6,9 @@
 //
 // Respetan prefers-reduced-motion: con animaciones reducidas, nada de esto
 // corre (el estado igual cambia — los efectos son puro feedback).
-
-import confetti from 'canvas-confetti';
+//
+// canvas-confetti se importa dinámicamente dentro de confettiAt (abajo) para no
+// meterlo en el bundle principal.
 
 export const motionOk = () => {
   try { return !window.matchMedia('(prefers-reduced-motion: reduce)').matches; }
@@ -39,6 +40,8 @@ export function rearm(el, cls, ms = 800) {
 }
 
 // Confeti centrado en un elemento (tres ráfagas, colores de la marca).
+// canvas-confetti se carga dinámico: solo pesa cuando de verdad se festeja algo,
+// no en el bundle principal.
 export function confettiAt(el) {
   if (!motionOk()) return;
   try {
@@ -46,9 +49,11 @@ export function confettiAt(el) {
     const x = r ? (r.left + r.width / 2) / window.innerWidth : 0.5;
     const y = r ? Math.min(0.95, (r.top + r.height * 0.6) / window.innerHeight) : 0.6;
     const COLORS = ['#34d399', '#c93bee', '#8b5cf6', '#fbbf24'];
-    confetti({ particleCount: 90, spread: 78, origin: { x, y }, colors: COLORS, zIndex: 9999 });
-    setTimeout(() => confetti({ particleCount: 45, angle: 60, spread: 55, origin: { x: Math.max(0, x - 0.18), y }, colors: COLORS, zIndex: 9999 }), 160);
-    setTimeout(() => confetti({ particleCount: 45, angle: 120, spread: 55, origin: { x: Math.min(1, x + 0.18), y }, colors: COLORS, zIndex: 9999 }), 300);
+    import('canvas-confetti').then(({ default: confetti }) => {
+      confetti({ particleCount: 90, spread: 78, origin: { x, y }, colors: COLORS, zIndex: 9999 });
+      setTimeout(() => confetti({ particleCount: 45, angle: 60, spread: 55, origin: { x: Math.max(0, x - 0.18), y }, colors: COLORS, zIndex: 9999 }), 160);
+      setTimeout(() => confetti({ particleCount: 45, angle: 120, spread: 55, origin: { x: Math.min(1, x + 0.18), y }, colors: COLORS, zIndex: 9999 }), 300);
+    }).catch(() => {});
   } catch {}
 }
 

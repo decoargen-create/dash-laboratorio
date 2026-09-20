@@ -875,7 +875,7 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
   // keyboard nav que lo usa en su dep array). Estaba abajo en línea 935
   // y producía TDZ "Cannot access 'N' before initialization" en prod.
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
-  const visibleItems = items.filter(it => {
+  const visibleItems = useMemo(() => items.filter(it => {
     if (panel === 'winners' && !it.winner) return false;
     if (panel === 'archivados' && !it.archivado) return false;
     if (panel === 'todos' && it.archivado) return false;
@@ -898,11 +898,14 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
       if (!haystack.includes(q)) return false;
     }
     return true;
-  });
+  }), [items, panel, filtroEstado, filtroVariante, filtroOrigen, searchQuery]);
 
   // Paginado: solo mostramos (y bajamos imágenes de) los primeros N. "Cargar
   // más" sube el tope. Reset cuando cambian filtros/panel/búsqueda o los items.
-  const shownItems = visibleItems.slice(0, visibleCount);
+  // MEMOIZADO: sin esto, `shownItems` era un array nuevo en cada render y hacía
+  // que useBlobUrls corriera en loop (setState → render → nuevo array → …),
+  // dejando la pestaña recalculando sin parar ("página pesada / no responde").
+  const shownItems = useMemo(() => visibleItems.slice(0, visibleCount), [visibleItems, visibleCount]);
   useEffect(() => { setVisibleCount(PAGE_SIZE); }, [panel, filtroEstado, filtroVariante, filtroOrigen, searchQuery, items]);
 
   // Al abrir un creativo, si no trae prompt/skeleton (lista liviana), los pedimos

@@ -1,9 +1,5 @@
 import React, { useState, useReducer, useEffect, useMemo, useRef, useCallback, Fragment } from 'react';
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-  LineChart, Line, PieChart, Pie, Cell
-} from 'recharts';
-import {
   Menu, LogOut, Home, ShoppingCart, Package, Users, AlertCircle, CreditCard,
   UserCheck, TrendingUp, Plus, Filter, Eye, Edit2, Trash2, Calendar, DollarSign,
   ChevronDown, ChevronRight, Search, X, Command, Check, Bell,

@@ -22,7 +22,7 @@ import {
 import {
   loadIdeas, updateIdea, removeIdea, TIPO_META, ESTADO_META, VARIABLE_META, ANGULO_META, CAMPAÑA_META,
 } from './bandejaStore.js';
-import { exportBriefDocx } from './exportDocx.js';
+// exportBriefDocx se importa dinámico dentro de exportDocxFlow (docx ~200KB fuera del bundle principal).
 import { logCostsFromResponse } from './costsStore.js';
 import { getProductoImagen, getAccentColor } from './productoImagen.js';
 import { saveReferencial } from './galeriaReferenciales.js';
@@ -2085,6 +2085,8 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
 
   const exportDocxFlow = async (lista) => {
     try {
+      // docx (~200KB) se carga dinámico: solo pesa al exportar, no en el arranque.
+      const { exportBriefDocx } = await import('./exportDocx.js');
       await exportBriefDocx(lista, productoActivo?.legacy ? null : productoActivo);
       addToast?.({ type: 'success', message: `Brief .docx con ${lista.length} ideas descargado` });
     } catch (err) {

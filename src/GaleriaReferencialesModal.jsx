@@ -15,7 +15,7 @@ import {
   LayoutGrid, Rows3, Table2, Plus, Check, FileArchive, EyeOff, Eye,
   Archive, ArchiveRestore, Trophy, Sparkles, Search,
 } from 'lucide-react';
-import JSZip from 'jszip';
+// JSZip (~96KB) se importa dinámico dentro de handleBulkDownload — fuera del bundle principal.
 import {
   getReferencialesByProducto, getReferencialDetalle, deleteReferencial, patchReferenciales,
   archiveReferencial, countReferencialesByProducto,
@@ -1064,6 +1064,7 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
         if (!cont) { setZipping(false); return; }
       }
 
+      const JSZip = (await import('jszip')).default;
       const zip = new JSZip();
       // ¿Agrupamos en carpetas? Solo si el usuario eligió un tamaño de tanda (>0)
       // y hay más creativos que ese tamaño.

@@ -855,6 +855,16 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
   // (el prompt ya no viaja en la lista liviana).
   const [searchQuery, setSearchQuery] = useState('');
   const [zipping, setZipping] = useState(false);
+  // Cuántos creativos por ZIP en la descarga masiva (configurable + recordado).
+  // Más chico = menos memoria (más seguro contra el crash de Chrome).
+  const [zipChunk, setZipChunk] = useState(() => {
+    try { const v = parseInt(localStorage.getItem('adslab-galeria-zip-chunk') || '', 10); return (v >= 1 && v <= 100) ? v : ZIP_CHUNK; } catch { return ZIP_CHUNK; }
+  });
+  const cambiarZipChunk = (v) => {
+    const n = Math.max(1, Math.min(100, parseInt(v, 10) || ZIP_CHUNK));
+    setZipChunk(n);
+    try { localStorage.setItem('adslab-galeria-zip-chunk', String(n)); } catch {}
+  };
   // Iteración de winner en curso — bloquea el botón y muestra progreso.
   const [iteratingId, setIteratingId] = useState(null);
   const [iterateProgress, setIterateProgress] = useState(null);
@@ -1054,7 +1064,7 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
       const ts = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
       // Partimos en tandas para acotar la memoria.
       const tandas = [];
-      for (let i = 0; i < seleccionadosArr.length; i += ZIP_CHUNK) tandas.push(seleccionadosArr.slice(i, i + ZIP_CHUNK));
+      for (let i = 0; i < seleccionadosArr.length; i += zipChunk) tandas.push(seleccionadosArr.slice(i, i + zipChunk));
       const multi = tandas.length > 1;
 
       const usedNames = new Set();
@@ -1535,6 +1545,13 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
           >
             <Archive size={12} /> Archivar ({seleccionados.size})
           </button>
+          <label className="inline-flex items-center gap-1 text-[11px] font-semibold text-gray-500 dark:text-gray-400" title="Cuántos creativos por ZIP. Más chico = menos memoria (evita que se cierre Chrome).">
+            de a
+            <select value={zipChunk} onChange={e => cambiarZipChunk(e.target.value)} disabled={zipping}
+              className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md px-1.5 py-1 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:opacity-60">
+              {[5, 10, 15, 20, 25, 30, 50].map(n => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </label>
           <button
             onClick={handleBulkDownload}
             disabled={zipping}

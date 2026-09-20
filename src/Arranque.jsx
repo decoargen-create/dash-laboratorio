@@ -1719,7 +1719,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     try {
       const resp = await fetch('/api/marketing/match-product-ads', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders(),
         body: JSON.stringify({
           producto: {
             nombre: producto.nombre,
@@ -2214,7 +2214,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       try {
         const resp = await fetch('/api/marketing/post-research-analysis', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: await authHeaders(),
           body: JSON.stringify({
             producto: {
               nombre: productoActualizado.nombre,

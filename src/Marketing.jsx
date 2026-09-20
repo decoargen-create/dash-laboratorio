@@ -12,6 +12,7 @@
 import React, { useEffect, useState, useRef, Fragment } from 'react';
 import { deleteProducto as deleteProductoFromCloud } from './marketingSync.js';
 import { safeSetItem } from './safeStorage.js';
+import { authHeaders } from './authFetch.js';
 import {
   FileText, Sparkles, Download, Loader2, Check, AlertTriangle, X,
   RefreshCw, Trash2, ChevronRight, Copy, Package, Plus, MessageSquare,
@@ -193,7 +194,7 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
     try {
       const resp = await fetch('/api/marketing/creatives', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders(),
         body: JSON.stringify({
           action: 'hooks',
           producto: {

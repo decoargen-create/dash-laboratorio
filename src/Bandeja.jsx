@@ -24,6 +24,7 @@ import {
 } from './bandejaStore.js';
 // exportBriefDocx se importa dinámico dentro de exportDocxFlow (docx ~200KB fuera del bundle principal).
 import { logCostsFromResponse } from './costsStore.js';
+import { authHeaders } from './authFetch.js';
 import { getProductoImagen, getAccentColor } from './productoImagen.js';
 import { saveReferencial } from './galeriaReferenciales.js';
 import { supabase } from './supabase.js';
@@ -1639,7 +1640,7 @@ function VideoBriefPanel({ idea }) {
     try {
       const resp = await fetch('/api/marketing/adapt-guion', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders(),
         body: JSON.stringify({
           idea: {
             titulo: idea.titulo,

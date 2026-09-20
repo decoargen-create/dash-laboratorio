@@ -13,6 +13,7 @@
 import React, { useState, useEffect } from 'react';
 import { Sparkles, Loader2, AlertTriangle, Copy, Check, Image as ImageIcon, X, Inbox } from 'lucide-react';
 import { logCostsFromResponse } from './costsStore.js';
+import { authHeaders } from './authFetch.js';
 import { startExecution, updateExecution, finishExecution } from './executionsStore.js';
 import { runGeneradorRapido, cancelGenerador, subscribeGenerador } from './generadorRapidoStore.js';
 import { TIPO_META } from './bandejaStore.js';
@@ -350,7 +351,7 @@ export default function CreativosTab({ producto, onUpdateProducto, addToast }) {
       updateExecution(execId, { stage: 'Analizando research + competencia con Claude…' });
       const resp = await fetch('/api/marketing/creatives', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders(),
         body: JSON.stringify({
           action: 'hooks',
           producto: {

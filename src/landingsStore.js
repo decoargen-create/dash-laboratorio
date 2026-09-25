@@ -16,6 +16,9 @@ import { uploadConReintento } from './uploadRetry.js';
 const TABLE = 'landings';
 const BUCKET = 'landing-refs';
 const LS_KEY = 'adslab-landings-v1';
+// Dueño del espejo local. Si cambia (otro usuario en el mismo navegador) tiramos
+// el cache para no mostrarle landings ajenas al que entra.
+const OWNER_KEY = 'adslab-landings-owner-v1';
 
 let _cache = readLocal();
 let _user = null;
@@ -78,12 +81,35 @@ export function initLandings() {
   if (_initPromise) return _initPromise;
   _initPromise = (async () => {
     if (!supabase) { notify(); return; }
-    try { const user = await getCurrentUser(); _user = user?.id || null; }
-    catch { _user = null; }
+    let uid = null;
+    try { const user = await getCurrentUser(); uid = user?.id || null; }
+    catch { uid = null; }
+    // Cambió el dueño en el mismo navegador (otro login) → tiramos el espejo
+    // local para NO mostrarle landings del usuario anterior mientras hidrata.
+    try {
+      const prev = localStorage.getItem(OWNER_KEY);
+      if (uid && prev && prev !== uid) localStorage.removeItem(LS_KEY);
+      if (uid) localStorage.setItem(OWNER_KEY, uid);
+    } catch {}
+    _user = uid;
+    _cache = readLocal(); // espejo del dueño correcto (vacío si se limpió recién)
     await hydrate();
     startRealtime();
   })();
   return _initPromise;
+}
+
+// Se llama al desloguear (o cambiar de usuario). Corta el realtime, vacía el
+// cache en memoria y resetea el init para que el próximo usuario re-hidrate de
+// cero — sin esto, en la misma pestaña el usuario nuevo veía las landings del
+// anterior (el estado a nivel módulo sobrevive al logout de una SPA).
+export function teardownLandings() {
+  if (_rtTimer) { clearTimeout(_rtTimer); _rtTimer = null; }
+  if (_channel) { try { supabase.removeChannel(_channel); } catch {} _channel = null; }
+  _initPromise = null;
+  _user = null;
+  _cache = [];
+  notify();
 }
 async function hydrate() {
   if (!supabase || !_user) return;
@@ -97,10 +123,13 @@ function byUpdated(a, b) { return String(b.updatedAt || '').localeCompare(String
 
 let _rtTimer = null;
 function startRealtime() {
-  if (!supabase || _channel || typeof window === 'undefined') return;
+  if (!supabase || _channel || typeof window === 'undefined' || !_user) return;
   try {
-    _channel = supabase.channel(`landings-rt-${_user || 'anon'}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: TABLE }, () => {
+    // Filtramos por owner_id: solo nos llegan cambios de NUESTRAS landings
+    // (además de la RLS que ya acota el hydrate). Evita re-hidratar por cambios
+    // de otros dueños y escucha solo lo propio.
+    _channel = supabase.channel(`landings-rt-${_user}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: TABLE, filter: `owner_id=eq.${_user}` }, () => {
         clearTimeout(_rtTimer); _rtTimer = setTimeout(() => { hydrate(); }, 400);
       })
       .subscribe();

@@ -2,6 +2,7 @@
 // Click → dropdown con lista. Badge muestra count de errores no leídos.
 
 import React, { useState, useEffect, useRef } from 'react';
+import { confirmDialog } from './dialogs.jsx';
 import { Bell, Check, AlertCircle, X, Trash2, Filter } from 'lucide-react';
 import {
   subscribeActivity, getUnreadErrorCount, markAllRead, clearActivity,
@@ -109,7 +110,7 @@ export default function ActivityBell() {
               </button>
               {items.length > 0 && (
                 <button
-                  onClick={() => { if (window.confirm('¿Borrar todo el log?')) clearActivity(); }}
+                  onClick={async () => { if (await confirmDialog({ title: '¿Borrar todo el log?', tone: 'danger', confirmLabel: 'Borrar' })) clearActivity(); }}
                   className="p-1 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition"
                   title="Borrar log"
                 >

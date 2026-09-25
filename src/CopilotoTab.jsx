@@ -12,6 +12,7 @@
 // (acá guardamos directo al cloud en cada turno del chat).
 
 import React, { useState, useEffect, useRef } from 'react';
+import { confirmDialog } from './dialogs.jsx';
 import { Loader2, Send, Sparkles, Trash2 } from 'lucide-react';
 import { loadIdeas } from './bandejaStore.js';
 import { logCostsFromResponse } from './costsStore.js';
@@ -174,8 +175,8 @@ export default function CopilotoTab({ producto, addToast }) {
     }
   };
 
-  const limpiar = () => {
-    if (!window.confirm('¿Borrar toda la conversación con Santi para este producto?')) return;
+  const limpiar = async () => {
+    if (!(await confirmDialog({ title: '¿Borrar la conversación?', message: 'Se borra toda la charla con Santi para este producto.', tone: 'danger', confirmLabel: 'Borrar' }))) return;
     setMessages([]);
     saveCopilotChatToCloud(producto?.id, []);
   };

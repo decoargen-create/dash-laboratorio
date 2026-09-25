@@ -13,6 +13,7 @@
 // creator van por la RPC produccion_creator_update; para un admin, directo.
 
 import React, { useEffect, useRef, useState } from 'react';
+import { confirmDialog } from './dialogs.jsx';
 import { Film, X, UploadCloud, Loader2, AlertTriangle, ExternalLink, Check, CheckCircle2 } from 'lucide-react';
 import { supabase, getCurrentUser } from './supabase.js';
 import { sparksAt, motionOk, confettiAt, stampAprobado, flipMove } from './produccionFx.js';
@@ -514,7 +515,7 @@ export function CreativosSection({ a, addToast, canDelete = true, readOnly = fal
   const moverADrive = async () => {
     if (migrando || adslabVideos.length === 0) return;
     const n = adslabVideos.length;
-    if (!window.confirm(`¿Mover ${n} video${n > 1 ? 's' : ''} de AdsLab a Google Drive? Se copian a la carpeta de la tarjeta y recién se sacan de AdsLab cuando se confirmó que quedaron en Drive.`)) return;
+    if (!(await confirmDialog({ title: `¿Mover ${n} video${n > 1 ? 's' : ''} a Google Drive?`, message: 'Se copian a la carpeta de la tarjeta y recién se sacan de AdsLab cuando se confirmó que quedaron en Drive.', confirmLabel: 'Mover' }))) return;
     setMigrando({ i: 0, total: n, name: '' });
     try {
       await moverArchivosADrive(a, { addToast, onProgress: (p) => setMigrando(p.done ? null : p) });

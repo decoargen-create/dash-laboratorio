@@ -20,6 +20,7 @@
 import { getUserIdFromAuth } from '../marketing/_supabase-server.js';
 import { driveEnsureFolder, driveList, driveIsAlive } from '../actas/_google.js';
 import { getDriveContext } from './_drive-ctx.js';
+import { alertDriveDown } from './_drive-alert.js';
 import { clean, cardFolderName } from './_naming.js';
 
 const UPLOAD = 'https://www.googleapis.com/upload/drive/v3/files';
@@ -89,6 +90,9 @@ export default async function handler(req, res) {
     // Drive está conectado pero el OAuth falló transitoriamente (ya se reintentó
     // 3× del lado del server). NO usamos la service account (403 sin quota, que
     // mandaba todo a AdsLab). Que el front reintente / lo diga claro.
+    // Además: un editor quiso subir y el Drive no responde → avisamos (mail +
+    // Discord). El helper dedupea (cooldown), así que reintentos no spamean.
+    try { await alertDriveDown('permiso-vencido'); } catch {}
     return respondJSON(res, 200, { configured: false, reason: 'drive-oauth-transitorio', error: 'Drive está conectado pero Google no respondió en este momento. Reintentá en unos segundos.' });
   }
 

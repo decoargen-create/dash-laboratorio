@@ -15,6 +15,7 @@ import crypto from 'node:crypto';
 import { getUserIdFromAuth, getUserRole, saveGoogleOAuth, getGoogleOAuth, deleteGoogleOAuth } from '../marketing/_supabase-server.js';
 import { oauthConfigured, oauthConsentUrl, oauthExchangeCode } from '../actas/_google.js';
 import { getDriveContext } from './_drive-ctx.js';
+import { alertDriveDown, markDriveHealthy, alertDriveManualDisconnect } from './_drive-alert.js';
 
 function respondJSON(res, status, obj) {
   res.status(status).setHeader('Content-Type', 'application/json');
@@ -123,6 +124,10 @@ export default async function handler(req, res) {
     // connected=true pero working=false → el front lo muestra en ámbar.
     let working = false;
     try { const ctx = await getDriveContext(); working = !!(ctx && !ctx.failed); } catch { working = false; }
+    // Avisamos por mail + Discord al detectar que el Drive dejó de funcionar
+    // (permiso vencido/revocado). Edge-trigger + cooldown adentro del helper, así
+    // que chequearlo en cada status no spamea. Si volvió a andar, reseteamos.
+    try { if (working) await markDriveHealthy(); else await alertDriveDown('permiso-vencido'); } catch {}
     return respondJSON(res, 200, {
       connected: true,
       working,
@@ -139,7 +144,11 @@ export default async function handler(req, res) {
     // no-creators (no es destructivo y el dueño necesita poder reconectar).
     const role = await getUserRole(uid);
     if (role !== 'admin') return respondJSON(res, 403, { error: 'Solo un admin puede desconectar Drive.' });
+    const conn = await getGoogleOAuth(); // email para el aviso, antes de borrar
     await deleteGoogleOAuth(null); // borra la conexión lab-wide
+    // Avisamos que se desconectó (una vez) — así el equipo sabe que las subidas
+    // quedan en pausa hasta reconectar.
+    try { await alertDriveManualDisconnect(conn?.email || null, uid); } catch {}
     return respondJSON(res, 200, { ok: true, connected: false });
   }
 

@@ -32,6 +32,7 @@ import TesteosSection from './TesteosSection.jsx';
 import ProduccionSection from './ProduccionSection.jsx';
 import CreativaDashboard from './CreativaDashboard.jsx';
 import LandingsSection from './LandingsSection.jsx';
+import { teardownLandings } from './landingsStore.js';
 import { PipelineRunProvider } from './PipelineRunContext.jsx';
 import PipelineRunOverlay from './PipelineRunOverlay.jsx';
 import ExecutionsTray from './ExecutionsTray.jsx';
@@ -2186,6 +2187,7 @@ function AppShell({ onExit }) {
     } else {
       teardownProduccionSync();
       teardownMoneySync();
+      teardownLandings(); // corta realtime + vacía cache: el próximo user no ve landings ajenas
     }
   }, [currentUser?.role, supabaseUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 

@@ -41,8 +41,12 @@ export async function fetchProductos() {
     .select('id, data, updated_at')
     .order('updated_at', { ascending: false });
   if (error) {
+    // OJO: NO devolver [] acá. Un error de red/DB no es "no hay productos" —
+    // si devolvíamos [], el hook hacía setProductos([]) y la lista DESAPARECÍA
+    // de la pantalla ante un blip transitorio. Lanzamos: el consumidor cae a su
+    // catch, marca el error y CONSERVA lo que ya tenía cargado.
     console.warn('[cloudData] fetchProductos error:', error.message);
-    return [];
+    throw new Error(`fetchProductos: ${error.message}`);
   }
   // Stripear campos pesados legacy (mismo que pullMarketingFromCloud)
   // + filtrar tombstones (productos borrados — ver deleteProductoCloud).
@@ -116,8 +120,11 @@ export async function fetchIdeas() {
     .select('id, producto_id, data, updated_at')
     .order('updated_at', { ascending: false });
   if (error) {
+    // Igual que fetchProductos: un error NO es "cero ideas". Si devolvíamos [],
+    // el refresh de realtime re-particionaba vacío y BORRABA las bandejaIdeas
+    // del localStorage. Lanzamos → el consumidor cae a su catch y no pisa nada.
     console.warn('[cloudData] fetchIdeas error:', error.message);
-    return [];
+    throw new Error(`fetchIdeas: ${error.message}`);
   }
   // El data ya contiene id y productoId — mergeamos con la columna por si
   // hay drift (la columna es source of truth, pero el data legacy puede

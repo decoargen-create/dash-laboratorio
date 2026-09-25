@@ -22,6 +22,7 @@
 //   5. (Parte 7.4): botón "Adaptar a {producto}" en cada ad
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { confirmDialog } from './dialogs.jsx';
 import {
   Sparkles, Package, ChevronRight, ChevronDown, Plus, Trash2, Link2, X,
   Loader2, Download, Image as ImageIcon, ExternalLink, Wand2, Search,
@@ -2005,10 +2006,10 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     addToast?.({ type: 'success', message: `Marca "${nombre}" sumada a Competencia` });
   };
 
-  const handleRemoveBrand = (id) => {
+  const handleRemoveBrand = async (id) => {
     const b = brands.find(x => x.id === id);
     if (!b) return;
-    if (!window.confirm(`¿Eliminar "${b.nombre}"? Si está cargado como competidor también lo quita de Setup → Competencia.`)) return;
+    if (!(await confirmDialog({ title: `¿Eliminar "${b.nombre}"?`, message: 'Si está cargado como competidor también lo quita de Setup → Competencia.', tone: 'danger', confirmLabel: 'Eliminar' }))) return;
     setBrands(prev => prev.filter(x => x.id !== id));
     setAdsByBrand(prev => {
       const next = { ...prev }; delete next[id]; return next;
@@ -2227,11 +2228,11 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     if (!skipCategoryWarn && typeof window !== 'undefined') {
       const { mismatch, productDomain, adDomain } = checkAdProductMismatch(producto, ad);
       if (mismatch) {
-        const ok = window.confirm(
-          `⚠ Este ad parece ser de "${adDomain.label}", pero tu producto "${producto.nombre}" es de "${productDomain.label}".\n\n` +
-          `El creativo se va a re-anclar a tu producto, pero la inspiración visual va a ser de otra categoría (y puede salir raro).\n\n` +
-          `¿Generar igual?`
-        );
+        const ok = await confirmDialog({
+          title: '⚠ El ad parece de otra categoría',
+          message: `Este ad parece de "${adDomain.label}", pero tu producto "${producto.nombre}" es de "${productDomain.label}". El creativo se re-ancla a tu producto, pero la inspiración visual va a ser de otra categoría (y puede salir raro).`,
+          tone: 'warn', confirmLabel: 'Generar igual',
+        });
         if (!ok) return false;
       }
     }
@@ -2639,7 +2640,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     });
     if (adsAGenerar.length === 0) return;
     const costoAprox = (adsAGenerar.length * 0.005).toFixed(3);
-    if (!window.confirm(`Convertir ${adsAGenerar.length} ads en ideas para la Bandeja de ${producto.nombre}. Cada ad genera ~3-5 ideas. Costo: ~$${costoAprox} (Claude Haiku). ¿Seguir?`)) return;
+    if (!(await confirmDialog({ title: `¿Convertir ${adsAGenerar.length} ads en ideas?`, message: `Se agregan a la Bandeja de ${producto.nombre}. Cada ad genera ~3-5 ideas. Costo: ~$${costoAprox} (Claude Haiku).`, confirmLabel: 'Convertir' }))) return;
     bulkAdaptingRef.current = true;
     const startedAt = Date.now();
     const execId = startExecution({
@@ -3586,8 +3587,8 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
               {retryingQuota ? 'Reintentando…' : `Reintentar ${quotaQueue.length}`}
             </button>
             <button
-              onClick={() => {
-                if (window.confirm(`¿Vaciar la cola de ${quotaQueue.length}? Vas a tener que re-scrapear cada uno a mano si los querés.`)) {
+              onClick={async () => {
+                if (await confirmDialog({ title: `¿Vaciar la cola de ${quotaQueue.length}?`, message: 'Vas a tener que re-scrapear cada uno a mano si los querés.', tone: 'danger', confirmLabel: 'Vaciar' })) {
                   clearQuotaQueue();
                 }
               }}

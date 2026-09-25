@@ -21,6 +21,7 @@
 //      campañas con gasto, CTR, CPM, ROAS, compras, CPA y estado.
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { confirmDialog } from './dialogs.jsx';
 import {
   Check, Loader2, Trash2, AlertCircle, RefreshCw, ExternalLink,
   TrendingUp, ChevronDown, Search, Plus,
@@ -369,7 +370,7 @@ export default function CampanasTracker({ addToast }) {
   };
 
   const handleDelete = async (conn) => {
-    if (!window.confirm(`¿Eliminar la conexión "${conn.label}"? Vas a tener que volver a pegar el token para usarla.`)) return;
+    if (!(await confirmDialog({ title: '¿Eliminar la conexión?', message: `"${conn.label}" — vas a tener que volver a pegar el token para usarla.`, tone: 'danger', confirmLabel: 'Eliminar' }))) return;
     try {
       await deleteMetaConnection(conn.id);
       addToast?.({ type: 'info', message: 'Conexión eliminada.' });

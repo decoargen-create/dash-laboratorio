@@ -10,6 +10,7 @@
 // - Lightbox comparativo ref vs variación con panel debug skeleton+prompt
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { confirmDialog, alertDialog, toast } from './dialogs.jsx';
 import {
   X, Download, Trash2, Images, ChevronDown, ChevronUp, ExternalLink,
   LayoutGrid, Rows3, Table2, Plus, Check, FileArchive, EyeOff, Eye,
@@ -1015,7 +1016,7 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
   const seleccionarTodos = () => setSeleccionados(new Set(visibleItems.map(i => i.id)));
 
   const handleDelete = async (id) => {
-    if (!window.confirm('¿Borrar este creativo referencial?')) return;
+    if (!(await confirmDialog({ title: '¿Borrar este creativo referencial?', tone: 'danger', confirmLabel: 'Borrar' }))) return;
     await deleteReferencial(id);
     setSelected(null);
     setSeleccionados(prev => { const n = new Set(prev); n.delete(id); return n; });
@@ -1058,9 +1059,11 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
       seleccionadosArr = await refreshSignedUrls(seleccionadosArr);
       const yaDescargados = seleccionadosArr.filter(it => it.descargada).length;
       if (yaDescargados > 0) {
-        const cont = window.confirm(
-          `Atención: ${yaDescargados} de los ${seleccionadosArr.length} seleccionados ya los descargaste antes. ¿Querés descargarlos otra vez?`
-        );
+        const cont = await confirmDialog({
+          title: 'Ya descargaste algunos',
+          message: `${yaDescargados} de los ${seleccionadosArr.length} seleccionados ya los descargaste antes. ¿Querés descargarlos otra vez?`,
+          confirmLabel: 'Descargar igual',
+        });
         if (!cont) { setZipping(false); return; }
       }
 
@@ -1097,7 +1100,11 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
       }
 
       if (okItems.length === 0) {
-        alert(`No se pudo bajar ninguno de los ${seleccionadosArr.length} creativos. Errores:\n\n${failed.slice(0, 5).map(f => `· ${f.name}: ${f.error}`).join('\n')}`);
+        await alertDialog({
+          title: 'No se pudo bajar ninguno',
+          message: `Fallaron los ${seleccionadosArr.length} creativos. Primeros errores:\n${failed.slice(0, 5).map(f => `· ${f.name}: ${f.error}`).join('\n')}`,
+          tone: 'danger',
+        });
         setZipping(false);
         return;
       }
@@ -1123,13 +1130,17 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
       );
       const carpetasMsg = usarCarpetas ? ` en ${nTandas} carpetas (Tanda 1…Tanda ${nTandas})` : '';
       if (failed.length > 0) {
-        alert(`ZIP listo con ${okItems.length} creativos${carpetasMsg}. ${failed.length} no se pudieron bajar (URLs caídas o sin permisos) — quedaron sin marcar para reintentar:\n\n${failed.slice(0, 5).map(f => `· ${f.name}: ${f.error}`).join('\n')}${failed.length > 5 ? `\n…y ${failed.length - 5} más` : ''}`);
+        await alertDialog({
+          title: `ZIP listo con ${okItems.length} creativos`,
+          message: `${okItems.length} descargados${carpetasMsg}. ${failed.length} no se pudieron bajar (URLs caídas o sin permisos) — quedaron sin marcar para reintentar:\n${failed.slice(0, 5).map(f => `· ${f.name}: ${f.error}`).join('\n')}${failed.length > 5 ? `\n…y ${failed.length - 5} más` : ''}`,
+          tone: 'warn',
+        });
       }
       limpiarSeleccion();
       refresh();
     } catch (err) {
       console.error('ZIP error:', err);
-      alert(`Error armando ZIP: ${err.message}`);
+      toast({ type: 'error', message: `Error armando ZIP: ${err.message}` });
     } finally {
       setZipping(false);
     }
@@ -1163,7 +1174,7 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
       await patchReferenciales([it.id], { descargada: true, descargadaAt: new Date().toISOString() });
       refresh();
     } catch (err) {
-      alert(`Error descargando: ${err.message}`);
+      toast({ type: 'error', message: `Error descargando: ${err.message}` });
     }
   };
 
@@ -1186,11 +1197,11 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
   };
 
   // Winner — abrir form si va a marcar, des-marcar directo si quitar.
-  const handleToggleWinner = (item) => {
+  const handleToggleWinner = async (item) => {
     if (item.winner) {
       // Des-marcar directo (sin form). Si querían editar las métricas, hay
       // un botón aparte "Editar métricas" en el lightbox.
-      if (!window.confirm('¿Sacar el flag de winner de este creativo? Las métricas guardadas se pierden.')) return;
+      if (!(await confirmDialog({ title: '¿Sacar el flag de winner?', message: 'Las métricas guardadas de este creativo se pierden.', tone: 'danger', confirmLabel: 'Sacar winner' }))) return;
       unmarkWinner(item.id).then(() => refresh());
       return;
     }
@@ -1210,7 +1221,7 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
   // hipótesis a editar.
   const handleIterateWinner = async (item) => {
     if (!producto) {
-      alert('Falta el contexto del producto para iterar.');
+      toast({ type: 'error', message: 'Falta el contexto del producto para iterar.' });
       return;
     }
     if (iteratingId) return; // ya hay una iteración corriendo
@@ -1226,9 +1237,9 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
       // El backend ya disparó viora:referencial-saved en cada save al cloud;
       // por las dudas refresh local también.
       refresh();
-      alert(`✓ ${count} variación nueva del winner generada y guardada al repositorio.`);
+      toast({ type: 'success', message: `${count} variación nueva del winner generada y guardada.` });
     } catch (err) {
-      alert(`Error iterando: ${err.message}`);
+      toast({ type: 'error', message: `Error iterando: ${err.message}` });
     } finally {
       setIteratingId(null);
       setIterateProgress(null);
@@ -1239,7 +1250,7 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
   // (aplicando las mejoras actuales: formato, tamaño, guardas) + la instrucción
   // de ajuste que escribió el user. Crea uno NUEVO — no pisa el viejo.
   const handleRegenerar = async (item, ajuste) => {
-    if (!producto) { alert('Falta el contexto del producto para regenerar.'); return; }
+    if (!producto) { toast({ type: 'error', message: 'Falta el contexto del producto para regenerar.' }); return; }
     if (regenId) return; // ya hay una regeneración corriendo
     setRegenId(item.id);
     try {
@@ -1249,9 +1260,9 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
         size: item.size || '1024x1024',
       });
       refresh();
-      alert('✓ Nuevo creativo generado. El anterior sigue en el repositorio por si querés compararlos (borrá el que no sirva).');
+      toast({ type: 'success', message: 'Nuevo creativo generado. El anterior sigue en el repositorio para comparar.', duration: 6000 });
     } catch (err) {
-      alert(`No se pudo regenerar: ${err.message}`);
+      toast({ type: 'error', message: `No se pudo regenerar: ${err.message}` });
     } finally {
       setRegenId(null);
     }
@@ -1263,7 +1274,7 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
   const handleBulkArchive = async () => {
     if (seleccionados.size === 0) return;
     const cant = seleccionados.size;
-    if (!window.confirm(`¿Archivar ${cant} creativo${cant !== 1 ? 's' : ''} seleccionado${cant !== 1 ? 's' : ''}? Quedan ocultos pero no se borran — los podés restaurar con el toggle "Ver archivados".`)) return;
+    if (!(await confirmDialog({ title: `¿Archivar ${cant} creativo${cant !== 1 ? 's' : ''}?`, message: 'Quedan ocultos pero no se borran — los podés restaurar con el toggle "Ver archivados".', confirmLabel: 'Archivar' }))) return;
     await patchReferenciales(
       Array.from(seleccionados),
       { archivado: true, archivadoAt: new Date().toISOString() }
@@ -1277,7 +1288,7 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
   const handleArchivarDescargados = async () => {
     const ids = items.filter(it => it.descargada && !it.archivado).map(it => it.id);
     if (ids.length === 0) return;
-    if (!window.confirm(`¿Archivar los ${ids.length} creativo${ids.length !== 1 ? 's' : ''} ya descargado${ids.length !== 1 ? 's' : ''}? Salen de "Todos" y quedan en Archivados (no se borran). Así "Todos" te queda solo con lo que falta descargar.`)) return;
+    if (!(await confirmDialog({ title: `¿Archivar ${ids.length} ya descargado${ids.length !== 1 ? 's' : ''}?`, message: 'Salen de "Todos" y quedan en Archivados (no se borran). Así "Todos" te queda solo con lo que falta descargar.', confirmLabel: 'Archivar' }))) return;
     await patchReferenciales(ids, { archivado: true, archivadoAt: new Date().toISOString() });
     limpiarSeleccion();
     refresh();
@@ -1287,7 +1298,7 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
   const handleBulkWinner = async () => {
     if (seleccionados.size === 0) return;
     const cant = seleccionados.size;
-    if (!window.confirm(`¿Marcar ${cant} creativo${cant !== 1 ? 's' : ''} como winner? Aparecen en la pestaña Winners y en la galería global.`)) return;
+    if (!(await confirmDialog({ title: `¿Marcar ${cant} como winner?`, message: 'Aparecen en la pestaña Winners y en la galería global.', confirmLabel: 'Marcar winner' }))) return;
     await patchReferenciales(
       Array.from(seleccionados),
       { winner: true, winnerAt: new Date().toISOString() }

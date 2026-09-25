@@ -344,18 +344,27 @@ async function hydrate() {
       const merged = [];
       for (const r of cloud) {
         if (esAdmin && _deleted.has(r.id)) continue;
-        if (esAdmin && _unsynced.has(r.id) && localById.has(r.id)) merged.push(localById.get(r.id));
+        // Preservamos los updates locales sin sincronizar para AMBOS roles: un
+        // creator que editó su tarjeta (mover de estado, corrección, subir video)
+        // y cuya sync falló NO debe perder el cambio cuando el refetch trae la
+        // versión vieja de la nube. Antes esto era solo-admin y el creator perdía
+        // el cambio callado.
+        if (_unsynced.has(r.id) && localById.has(r.id)) merged.push(localById.get(r.id));
         else merged.push(r);
       }
+      // Re-agregar filas que nunca llegaron a la nube (insert que falló) es una
+      // operación de admin: el creator no crea filas, solo actualiza las suyas.
       if (esAdmin) {
         for (const id of _unsynced) {
           if (!cloudById.has(id) && !_deleted.has(id) && localById.has(id)) merged.push(localById.get(id));
         }
       }
       write(merged);
-      // Reintentamos los pendientes (fire & forget; si vuelven a fallar, siguen marcados).
+      // Reintentamos los pendientes (fire & forget; si vuelven a fallar, siguen
+      // marcados). El reintento de updates aplica a AMBOS roles (para el creator
+      // re-empuja sus archivos por la RPC). Los deletes solo los hace el admin.
+      for (const id of _unsynced) if (localById.has(id)) pushRow(id);
       if (esAdmin) {
-        for (const id of _unsynced) if (localById.has(id)) pushRow(id);
         for (const id of [..._deleted]) pushDelete(id);
       }
     } else {

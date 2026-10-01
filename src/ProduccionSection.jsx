@@ -22,9 +22,10 @@ import {
   getRole, entregasNuevas, ultimaSubidaTs, personasEnTarjetas, resumenVideosPorProducto,
   resyncDesdeNube, vaciarTodo, setMaterialLinkProducto, probarDiscord,
   loadNotifConfig, saveNotifConfig, toggleWinner, winnersDeProducto, pagoProductoDe,
+  monthLabel,
 } from './produccionStore.js';
 import { CreativosSection, subirParaTarjeta, VIDEO_ACCEPT, probeDrive, aprobarTodosConCascada, AnilloAprobados, getAuthToken } from './produccionUpload.jsx';
-import { numerarDuplicados, columnaEfectiva } from './produccionCalc.js';
+import { numerarDuplicados, columnaEfectiva, monthOfWeek } from './produccionCalc.js';
 import { registrarColoresPersonas, personaColor, CHIP_CLS } from './produccionColors.js';
 import TarjetaProduccion, { CAPS_ADMIN } from './produccionCard.jsx';
 import { listTeam, createMember, removeMember } from './produccionTeam.js';
@@ -2336,6 +2337,30 @@ function NotifConfigModal({ team = [], onClose, addToast }) {
 // Exportado para reusarlo como "acceso directo" desde el Resumen (CreativaDashboard):
 // abrir la MISMA tarjeta de Producción sin salir de esa pantalla. Los cambios se
 // propagan solos porque updateAssignment escribe en el store global.
+// Semanas elegibles para mover una tarjeta de mes a mano (excepciones). Cubre
+// ~3 meses hacia atrás y ~1 hacia adelante, agrupadas por mes (el mes lo define
+// el domingo de la semana — ver monthOfWeek). Siempre incluye la semana actual
+// de la tarjeta, aunque sea vieja, para que el select tenga su valor.
+function semanasElegibles(currentWeekKey) {
+  const set = new Set();
+  const hoy = new Date();
+  for (let off = -84; off <= 28; off += 7) {
+    const d = new Date(hoy); d.setDate(d.getDate() + off);
+    set.add(weekKeyOf(d));
+  }
+  if (currentWeekKey) set.add(currentWeekKey);
+  const groups = new Map();
+  for (const wk of [...set].sort()) {
+    const mk = monthOfWeek(wk);
+    if (!groups.has(mk)) groups.set(mk, []);
+    groups.get(mk).push(wk);
+  }
+  // Meses más recientes primero.
+  return [...groups.entries()]
+    .sort((x, y) => y[0].localeCompare(x[0]))
+    .map(([mk, wks]) => ({ monthKey: mk, label: monthLabel(mk), weeks: wks }));
+}
+
 export function CardDetailModal({ a, personas, team = [], onClose, addToast, onTeamChange }) {
   const [brief, setBrief] = useState(a.brief || '');
   const [material, setMaterial] = useState(a.materialLink || '');
@@ -2394,6 +2419,34 @@ export function CardDetailModal({ a, personas, team = [], onClose, addToast, onT
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* Mes de pago · semana — manual, para EXCEPCIONES. El mes en que la
+              tarjeta cuenta para el pago lo define la semana (por su domingo de
+              entrega). Mover la semana la pasa a otro mes. */}
+          <div>
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <Calendar size={13} className="text-gray-400" />
+              <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400">Mes de pago · semana</span>
+            </div>
+            <select
+              value={a.weekKey || ''}
+              onChange={(e) => {
+                const wk = e.target.value;
+                if (!wk || wk === a.weekKey) return;
+                updateAssignment(a.id, { weekKey: wk });
+                addToast?.({ type: 'success', message: `Movida a ${monthLabel(monthOfWeek(wk))} · ${weekLabel(wk)}` });
+              }}
+              className="w-full px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500">
+              {semanasElegibles(a.weekKey).map(g => (
+                <optgroup key={g.monthKey} label={g.label}>
+                  {g.weeks.map(wk => <option key={wk} value={wk}>{weekLabel(wk)}</option>)}
+                </optgroup>
+              ))}
+            </select>
+            <p className="text-[10px] text-gray-400 mt-1">
+              Cuenta para el pago del mes de la semana elegida. Cambialo solo para excepciones (ej. una tarjeta que se aprobó tarde pero es del mes pasado).
+            </p>
           </div>
 
           {/* Cambios pedidos (lo que ve el creativo) */}

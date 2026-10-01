@@ -859,14 +859,20 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
   // Tamaño de carpeta en la descarga masiva (0 = todo junto, sin carpetas).
   // Un solo ZIP siempre; si es >0 y hay más que N, agrupa en carpetas "Tanda N".
   const [zipChunk, setZipChunk] = useState(() => {
-    try { const v = parseInt(localStorage.getItem('adslab-galeria-zip-chunk') || '', 10); return (v >= 0 && v <= 100) ? v : ZIP_CHUNK; } catch { return ZIP_CHUNK; }
+    try { const v = parseInt(localStorage.getItem('adslab-galeria-zip-chunk') || '', 10); return (v >= 0 && v <= 999) ? v : ZIP_CHUNK; } catch { return ZIP_CHUNK; }
   });
+  // 0 = sin carpetas. Recordamos el último N elegido para restaurarlo cuando el
+  // user vuelve a tildar "agrupar" después de haberlo sacado.
+  const lastChunkRef = useRef(zipChunk > 0 ? zipChunk : ZIP_CHUNK);
   const cambiarZipChunk = (v) => {
     const raw = parseInt(v, 10);
-    const n = Number.isFinite(raw) ? Math.max(0, Math.min(100, raw)) : ZIP_CHUNK;
+    const n = Number.isFinite(raw) ? Math.max(0, Math.min(999, raw)) : 0;
+    if (n > 0) lastChunkRef.current = n;
     setZipChunk(n);
     try { localStorage.setItem('adslab-galeria-zip-chunk', String(n)); } catch {}
   };
+  // Check "agrupar": al tildar restaura el último N; al destildar deja 0.
+  const toggleAgrupar = (on) => cambiarZipChunk(on ? (lastChunkRef.current || ZIP_CHUNK) : 0);
   // Iteración de winner en curso — bloquea el botón y muestra progreso.
   const [iteratingId, setIteratingId] = useState(null);
   const [iterateProgress, setIterateProgress] = useState(null);
@@ -1553,14 +1559,22 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
           >
             <Archive size={12} /> Archivar ({seleccionados.size})
           </button>
-          <label className="inline-flex items-center gap-1 text-[11px] font-semibold text-gray-500 dark:text-gray-400" title="Un solo ZIP. 'sin carpetas' = todo junto; 'de N' = agrupa en carpetas Tanda 1, Tanda 2… de N cada una.">
-            Carpetas
-            <select value={zipChunk} onChange={e => cambiarZipChunk(e.target.value)} disabled={zipping}
-              className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md px-1.5 py-1 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:opacity-60">
-              <option value={0}>sin carpetas</option>
-              {[5, 10, 15, 20, 25, 30, 50].map(n => <option key={n} value={n}>de {n}</option>)}
-            </select>
-          </label>
+          <div className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-gray-500 dark:text-gray-400" title="Un solo ZIP. Sin agrupar = todo junto; agrupado = carpetas Tanda 1, Tanda 2… de N creativos cada una. Elegís vos el N.">
+            <label className="inline-flex items-center gap-1 cursor-pointer select-none">
+              <input type="checkbox" checked={zipChunk > 0} onChange={e => toggleAgrupar(e.target.checked)} disabled={zipping}
+                className="accent-brand-600" />
+              Agrupar en carpetas
+            </label>
+            {zipChunk > 0 && (
+              <span className="inline-flex items-center gap-1">
+                de
+                <input type="number" min={1} max={999} step={1} value={zipChunk} disabled={zipping}
+                  onChange={e => { const raw = parseInt(e.target.value, 10); cambiarZipChunk(Number.isFinite(raw) ? Math.max(1, Math.min(999, raw)) : 1); }}
+                  className="w-14 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md px-1.5 py-1 text-xs font-bold text-center focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:opacity-60" />
+                c/u
+              </span>
+            )}
+          </div>
           <button
             onClick={handleBulkDownload}
             disabled={zipping}

@@ -8,6 +8,7 @@
 //   - trial: gratis o en prueba (no cuenta en el total)
 
 import React, { useState, useEffect } from 'react';
+import { confirmDialog } from './dialogs.jsx';
 import {
   DollarSign, Plus, Trash2, Edit2, Check, X, ExternalLink,
   Server, Bot, Target, Zap, Package, AlertTriangle, Activity,
@@ -226,9 +227,9 @@ export default function GastosStackSection({ addToast }) {
     addToast?.({ type: 'success', message: 'Servicio actualizado' });
   };
 
-  const handleDelete = (id) => {
+  const handleDelete = async (id) => {
     const svc = services.find(s => s.id === id);
-    if (!window.confirm(`¿Borrar "${svc?.nombre}"?`)) return;
+    if (!(await confirmDialog({ title: `¿Borrar "${svc?.nombre}"?`, tone: 'danger', confirmLabel: 'Borrar' }))) return;
     setServices(prev => prev.filter(s => s.id !== id));
   };
 

@@ -17,6 +17,7 @@ import {
   addItemLink, removeItemLink, uploadItemImage, removeItemImage,
   progresoDe, itemsOrdenados,
 } from './landingsStore.js';
+import { confirmDialog } from './dialogs.jsx';
 
 function readProductos() {
   try { return JSON.parse(localStorage.getItem('adslab-marketing-productos-v1') || '[]'); }
@@ -160,7 +161,7 @@ function LandingDetail({ l, addToast }) {
             <ExternalLink size={12} /> Abrir landing
           </a>
         )}
-        <button onClick={() => { if (confirm('¿Eliminar esta landing y su checklist?')) deleteLanding(l.id); }}
+        <button onClick={async () => { if (await confirmDialog({ title: '¿Eliminar esta landing?', message: 'Se elimina la landing y todo su checklist.', tone: 'danger', confirmLabel: 'Eliminar' })) deleteLanding(l.id); }}
           className="ml-auto inline-flex items-center gap-1 text-[11px] font-bold text-gray-400 hover:text-red-500 transition">
           <Trash2 size={12} /> Eliminar
         </button>

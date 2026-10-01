@@ -13,7 +13,7 @@ import { AlertTriangle, X } from 'lucide-react';
 
 export default function ConfirmDialog({
   open, title, message,
-  confirmLabel = 'Confirmar', cancelLabel = 'Cancelar',
+  confirmLabel = 'Confirmar', cancelLabel = 'Cancelar', hideCancel = false,
   tone = 'brand', // 'brand' | 'warn' | 'danger'
   withInput = false, inputLabel, defaultValue = '', placeholder, multiline = false,
   onConfirm, onClose,
@@ -55,7 +55,7 @@ export default function ConfirmDialog({
             )}
             <div className="flex-1 min-w-0">
               <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">{title}</h3>
-              {message && <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{message}</p>}
+              {message && <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 whitespace-pre-line">{message}</p>}
             </div>
             <button onClick={onClose} className="text-gray-400 hover:text-gray-600 shrink-0"><X size={16} /></button>
           </div>
@@ -74,7 +74,9 @@ export default function ConfirmDialog({
           )}
         </div>
         <div className="flex items-center justify-end gap-2 px-5 py-3 bg-gray-50 dark:bg-gray-800/50 border-t border-gray-100 dark:border-gray-800">
-          <button onClick={onClose} className="px-3 py-1.5 text-xs font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition">{cancelLabel}</button>
+          {!hideCancel && (
+            <button onClick={onClose} className="px-3 py-1.5 text-xs font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition">{cancelLabel}</button>
+          )}
           <button onClick={confirm} className={`px-3.5 py-1.5 text-xs font-bold text-white rounded-lg transition ${toneCls}`}>{confirmLabel}</button>
         </div>
       </div>

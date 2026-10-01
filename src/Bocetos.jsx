@@ -15,6 +15,7 @@
 // + bordes redondeados más marcados para que se sienta la ergonomía.
 
 import React, { useEffect, useState, useRef, useMemo } from 'react';
+import { confirmDialog } from './dialogs.jsx';
 import {
   Plus, Trash2, Download, Upload, Package, Image as ImageIcon,
   Save, X, Check, Sparkles, Link as LinkIcon, Loader2, ChevronDown, UserPlus,
@@ -706,10 +707,10 @@ export default function BocetosSection({ addToast }) {
     addToast?.({ type: 'success', message: `Cliente "${nombre}" agregado` });
   };
 
-  const handleDeleteCliente = (id) => {
+  const handleDeleteCliente = async (id) => {
     const cli = clientes.find(c => c.id === id);
     if (!cli) return;
-    if (!window.confirm(`¿Borrar el cliente "${cli.nombre}"? Los productos no se borran, pero pierden la referencia.`)) return;
+    if (!(await confirmDialog({ title: `¿Borrar el cliente "${cli.nombre}"?`, message: 'Los productos no se borran, pero pierden la referencia.', tone: 'danger', confirmLabel: 'Borrar' }))) return;
     setClientes(prev => prev.filter(c => c.id !== id));
     if (clienteId === id) {
       setClienteId(clientes.find(c => c.id !== id)?.id ?? null);
@@ -1141,10 +1142,10 @@ export default function BocetosSection({ addToast }) {
 
   // ---------- Guardados CRUD ----------
 
-  const handleDeleteSaved = (id) => {
+  const handleDeleteSaved = async (id) => {
     const b = bocetos.find(x => x.id === id);
     if (!b) return;
-    if (!window.confirm(`¿Borrar "${b.nombre}"?`)) return;
+    if (!(await confirmDialog({ title: `¿Borrar "${b.nombre}"?`, tone: 'danger', confirmLabel: 'Borrar' }))) return;
     setBocetos(prev => prev.filter(x => x.id !== id));
   };
 

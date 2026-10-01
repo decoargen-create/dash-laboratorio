@@ -97,6 +97,7 @@ import { ideaFromDeepAnalysis, addGeneratedIdeas, loadIdeas, countIdeasGenerador
 import { deleteProducto as deleteProductoFromCloud } from './marketingSync.js';
 import { supabase } from './supabase.js';
 import { authHeaders } from './authFetch.js';
+import { confirmDialog, promptDialog } from './dialogs.jsx';
 import { downloadProductoExport, importProductoFromFile } from './productoExport.js';
 import DiagnosticoSyncModal from './DiagnosticoSyncModal.jsx';
 import { logCostsFromResponse, spendAllProductos, backfillProductoIds, normalizeCostName, pushUnsyncedCostsToCloud, promoteSyncedCosts, dailyExpenseLog, avgByKind } from './costsStore.js';
@@ -1882,7 +1883,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   };
 
   const handleRemoveCompetidor = async (id) => {
-    if (!window.confirm('¿Sacar a este competidor de la lista?')) return;
+    if (!(await confirmDialog({ title: '¿Sacar a este competidor de la lista?', tone: 'danger', confirmLabel: 'Sacar' }))) return;
     setCompetidores(prev => prev.filter(c => c.id !== id));
     // Limpiar el brand "auto-sincronizado" en Inspiración (fromCompetidorId)
     // → sin esto quedaba una marca huérfana en la galería de inspiración
@@ -1973,13 +1974,15 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
   // Rename del producto. Persiste el nombre nuevo y, si ya había research
   // generado con el nombre viejo, ofrece regenerarlo (solo research + stage).
-  const handleRenameProducto = (nombre) => {
+  const handleRenameProducto = async (nombre) => {
     const tieneResearch = !!(producto?.docs?.research);
     let regen = false;
     if (tieneResearch) {
-      regen = window.confirm(
-        `Ya hay un research doc generado con el nombre anterior.\n\n¿Regenerarlo con "${nombre}"?\n\nBorra research + avatar + offer brief + creencias + stage y los vuelve a generar (~3-4 min). Las ideas que ya están en la Bandeja no se tocan; las nuevas saldrán con el nombre correcto.`
-      );
+      regen = await confirmDialog({
+        title: '¿Regenerar el research con el nombre nuevo?',
+        message: `Ya hay un research generado con el nombre anterior. Regenerarlo con "${nombre}" borra research + avatar + offer brief + creencias + stage y los vuelve a generar (~3-4 min). Las ideas de la Bandeja no se tocan; las nuevas saldrán con el nombre correcto.`,
+        tone: 'warn', confirmLabel: 'Regenerar', cancelLabel: 'Solo renombrar',
+      });
     }
     setProductos(prev => prev.map(p =>
       String(p.id) === String(producto.id)
@@ -2001,14 +2004,16 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // sync a la nube. Si ya hay research cargado y el link cambió, avisamos:
   // puede que la landing nueva sea de OTRO producto y el research/avatar haya
   // quedado desactualizado → ofrecemos regenerarlo (mismo patrón que rename).
-  const handleEditLandingUrl = (landingUrl) => {
+  const handleEditLandingUrl = async (landingUrl) => {
     const tieneResearch = !!(producto?.docs?.research);
     const cambioReal = landingUrl !== (producto?.landingUrl || '');
     let regen = false;
     if (tieneResearch && cambioReal) {
-      regen = window.confirm(
-        `Cambiaste el link de la landing.\n\nSi es de OTRO producto, el research + avatar actuales quedaron desactualizados (fueron generados desde la landing anterior).\n\n¿Regenerarlos desde la landing nueva? Borra research + avatar + offer brief + creencias + stage y los vuelve a generar (~3-4 min).\n\nSi es la MISMA landing (otra variante/URL), cancelá: el link se guarda igual y no se toca nada.`
-      );
+      regen = await confirmDialog({
+        title: '¿Regenerar el research desde la landing nueva?',
+        message: 'Si el link es de OTRO producto, el research + avatar quedaron desactualizados (se generaron desde la landing anterior). Regenerar borra research + avatar + offer brief + creencias + stage y los vuelve a generar (~3-4 min). Si es la MISMA landing (otra URL), tocá "Solo guardar link".',
+        tone: 'warn', confirmLabel: 'Regenerar', cancelLabel: 'Solo guardar link',
+      });
     }
     setProductos(prev => prev.map(p =>
       String(p.id) === String(producto.id)
@@ -3347,7 +3352,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                       // Se duplica TODO el producto salvo: id nuevo + sufijo " (copia)"
                       // en el nombre + bandejaIdeas vacía (las ideas son específicas
                       // del original).
-                      const newName = window.prompt(`Nombre del producto duplicado:`, `${p.nombre} (copia)`);
+                      const newName = await promptDialog({ title: 'Duplicar producto', inputLabel: 'Nombre del producto duplicado', defaultValue: `${p.nombre} (copia)`, confirmLabel: 'Duplicar' });
                       if (!newName?.trim()) return;
                       const newId = `prod-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
                       const dup = {
@@ -3374,7 +3379,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                   <button
                     onClick={async (e) => {
                       e.stopPropagation();
-                      if (!window.confirm(`¿Eliminar "${p.nombre}"? Se borran sus competidores, cuenta Meta y research. No se pueden recuperar.`)) return;
+                      if (!(await confirmDialog({ title: `¿Eliminar "${p.nombre}"?`, message: 'Se borran sus competidores, cuenta Meta y research. No se pueden recuperar.', tone: 'danger', confirmLabel: 'Eliminar' }))) return;
                       try {
                         await deleteProductoFromCloud(p.id);
                       } catch (err) {
@@ -4593,8 +4598,8 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                   pipeline" ya los genera). */}
               {!running && producto?.docs?.research && (
                 <button
-                  onClick={() => {
-                    if (window.confirm('¿Rehacer TODO con la landing / datos nuevos?\n\nVuelve a generar research, avatar, oferta y resumen desde la landing ACTUAL (reemplaza los que ya estaban) y sigue con el análisis e ideas. Tarda ~3-5 min y tiene costo de IA.')) {
+                  onClick={async () => {
+                    if (await confirmDialog({ title: '¿Rehacer TODO con la landing / datos nuevos?', message: 'Vuelve a generar research, avatar, oferta y resumen desde la landing ACTUAL (reemplaza los que ya estaban) y sigue con el análisis e ideas. Tarda ~3-5 min y tiene costo de IA.', tone: 'warn', confirmLabel: 'Rehacer todo' })) {
                       runPipeline({ forceDocs: true });
                     }
                   }}
@@ -4705,8 +4710,8 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       {/* Historial de corridas del producto activo — persistido. */}
       <RunHistoryCard
         history={runHistory.filter(r => String(r.productoId || '') === String(producto?.id || ''))}
-        onClear={() => {
-          if (window.confirm('¿Borrar el historial de corridas de este producto?')) {
+        onClear={async () => {
+          if (await confirmDialog({ title: '¿Borrar el historial de corridas de este producto?', tone: 'danger', confirmLabel: 'Borrar' })) {
             setRunHistory(prev => prev.filter(r => String(r.productoId || '') !== String(producto?.id || '')));
           }
         }}

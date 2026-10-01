@@ -14,6 +14,7 @@
 // El token nunca toca el browser: el backend lo cifra y lo guarda.
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { confirmDialog } from './dialogs.jsx';
 import {
   Zap, Check, Loader2, AlertCircle, ExternalLink, KeyRound, X, HelpCircle,
   Clock, ShieldCheck, Plug, ChevronDown, Trash2,
@@ -440,7 +441,7 @@ export function MetaConnectModal({ open, onClose, connections, loading, onConnec
   };
 
   const handleDelete = async (conn) => {
-    if (!window.confirm(`¿Eliminar la conexión "${conn.label}"? Vas a tener que volver a conectarla para usarla.`)) return;
+    if (!(await confirmDialog({ title: '¿Eliminar la conexión?', message: `"${conn.label}" — vas a tener que volver a conectarla para usarla.`, tone: 'danger', confirmLabel: 'Eliminar' }))) return;
     setDeleting(conn.id);
     try {
       await deleteMetaConnection(conn.id);

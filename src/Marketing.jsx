@@ -10,6 +10,7 @@
 // Próxima iteración: generador de Meta Ads Creatives (hooks + prompts IA + brief .docx).
 
 import React, { useEffect, useState, useRef, Fragment } from 'react';
+import { confirmDialog } from './dialogs.jsx';
 import { deleteProducto as deleteProductoFromCloud } from './marketingSync.js';
 import { safeSetItem } from './safeStorage.js';
 import { authHeaders } from './authFetch.js';
@@ -1090,7 +1091,7 @@ export default function MarketingSection({ addToast, bgAnalysis, onStart, onCanc
   };
 
   const handleDeleteProducto = async (id) => {
-    if (!window.confirm('¿Borrar esta documentación? No se puede deshacer.')) return;
+    if (!(await confirmDialog({ title: '¿Borrar esta documentación?', message: 'No se puede deshacer.', tone: 'danger', confirmLabel: 'Borrar' }))) return;
     try {
       await deleteProductoFromCloud(id);
     } catch (err) {
@@ -1211,7 +1212,7 @@ export default function MarketingSection({ addToast, bgAnalysis, onStart, onCanc
             <div className="flex items-center gap-2">
               {effRunning && typeof onCancel === 'function' && (
                 <button
-                  onClick={() => { if (window.confirm('¿Cancelar el análisis en curso?')) onCancel(); }}
+                  onClick={async () => { if (await confirmDialog({ title: '¿Cancelar el análisis en curso?', tone: 'warn', confirmLabel: 'Cancelar análisis', cancelLabel: 'Seguir' })) onCancel(); }}
                   className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-red-700 dark:text-red-300 bg-white dark:bg-gray-700 border border-red-200 dark:border-red-800 hover:bg-red-50 rounded-md transition"
                 >
                   <X size={12} /> Cancelar análisis

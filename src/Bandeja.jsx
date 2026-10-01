@@ -25,6 +25,7 @@ import {
 // exportBriefDocx se importa dinámico dentro de exportDocxFlow (docx ~200KB fuera del bundle principal).
 import { logCostsFromResponse } from './costsStore.js';
 import { authHeaders } from './authFetch.js';
+import { confirmDialog, promptDialog } from './dialogs.jsx';
 import { getProductoImagen, getAccentColor } from './productoImagen.js';
 import { saveReferencial } from './galeriaReferenciales.js';
 import { supabase } from './supabase.js';
@@ -1861,29 +1862,29 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [baseTitles]);
 
-  const renameBaseColumn = (key) => {
+  const renameBaseColumn = async (key) => {
     const currentName = baseTitles[key] || DEFAULT_BASE_TITLES[key];
-    const name = window.prompt(`Nuevo nombre para "${currentName}":`, currentName);
+    const name = await promptDialog({ title: 'Renombrar columna', inputLabel: `Nuevo nombre para "${currentName}"`, defaultValue: currentName, confirmLabel: 'Guardar' });
     if (!name?.trim()) return;
     setBaseTitles(prev => ({ ...prev, [key]: name.trim() }));
   };
 
-  const addCustomColumn = () => {
-    const name = window.prompt('Nombre de la nueva columna:');
+  const addCustomColumn = async () => {
+    const name = await promptDialog({ title: 'Nueva columna', inputLabel: 'Nombre de la columna', confirmLabel: 'Crear' });
     if (!name?.trim()) return;
     const COLORS = ['violet', 'rose', 'sky', 'lime', 'orange', 'teal', 'indigo', 'pink'];
     const color = COLORS[customColumns.length % COLORS.length];
     setCustomColumns(prev => [...prev, { id: `col-${Date.now()}`, name: name.trim(), color }]);
   };
-  const renameCustomColumn = (colId) => {
+  const renameCustomColumn = async (colId) => {
     const col = customColumns.find(c => c.id === colId);
     if (!col) return;
-    const name = window.prompt('Nuevo nombre:', col.name);
+    const name = await promptDialog({ title: 'Renombrar columna', inputLabel: 'Nuevo nombre', defaultValue: col.name, confirmLabel: 'Guardar' });
     if (!name?.trim()) return;
     setCustomColumns(prev => prev.map(c => c.id === colId ? { ...c, name: name.trim() } : c));
   };
-  const removeCustomColumn = (colId) => {
-    if (!window.confirm('¿Eliminar esta columna? Las ideas que estén en ella vuelven a "Pendientes".')) return;
+  const removeCustomColumn = async (colId) => {
+    if (!(await confirmDialog({ title: '¿Eliminar esta columna?', message: 'Las ideas que estén en ella vuelven a "Pendientes".', tone: 'danger', confirmLabel: 'Eliminar' }))) return;
     // Mover ideas de esa columna a pendiente.
     const affectedIds = ideas.filter(i => i.customColumnId === colId).map(i => i.id);
     for (const id of affectedIds) {
@@ -1972,17 +1973,18 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
     };
   }, []);
 
-  const setEstado = (id, estado) => {
+  const setEstado = async (id, estado) => {
     const patch = { estado };
     if (estado === 'usada') {
       patch.usedAt = new Date().toISOString();
       // Si el user marca "usada", le pedimos el adId con el que la lanzó.
       // Es opcional — si lo deja vacío, no pasa nada, solo no habilita el
       // pull de performance.
-      const adIdRaw = window.prompt(
-        '¿Con qué ad ID de Meta la lanzaste?\n\n(Opcional — pegá el ID para cerrar el loop y traer performance real después. Ej: "120211234567890". Dejá vacío para saltear.)',
-        ''
-      );
+      const adIdRaw = await promptDialog({
+        title: '¿Con qué ad ID de Meta la lanzaste?',
+        message: 'Opcional — pegá el ID para cerrar el loop y traer performance real después (ej: "120211234567890"). Dejá vacío para saltear.',
+        inputLabel: 'Ad ID', placeholder: '120211234567890', confirmLabel: 'Guardar',
+      });
       const adId = (adIdRaw || '').trim();
       if (adId) patch.launchedAsAdId = adId;
     }
@@ -2015,7 +2017,7 @@ export default function BandejaSection({ addToast, forcedProductoId, embedded = 
   };
 
   const handleRemove = async (id) => {
-    if (!window.confirm('¿Borrar esta idea? No se puede deshacer.')) return;
+    if (!(await confirmDialog({ title: '¿Borrar esta idea?', message: 'No se puede deshacer.', tone: 'danger', confirmLabel: 'Borrar' }))) return;
     // Si era réplica de un ad de competencia, sacar el adId de
     // producto.usedAdIds para que en Inspiración el ad deje de aparecer
     // gris/"usado". Sin esto quedaba un ref zombi.

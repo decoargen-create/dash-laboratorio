@@ -33,6 +33,7 @@ import ProduccionSection from './ProduccionSection.jsx';
 import CreativaDashboard from './CreativaDashboard.jsx';
 import LandingsSection from './LandingsSection.jsx';
 import { teardownLandings } from './landingsStore.js';
+import { DialogHost, confirmDialog } from './dialogs.jsx';
 import { PipelineRunProvider } from './PipelineRunContext.jsx';
 import PipelineRunOverlay from './PipelineRunOverlay.jsx';
 import ExecutionsTray from './ExecutionsTray.jsx';
@@ -1154,7 +1155,7 @@ function MetaConexionSection() {
   };
 
   const handleDisconnect = async () => {
-    if (!window.confirm('¿Desconectar tu cuenta de Meta? Podés volver a conectarla cuando quieras.')) return;
+    if (!(await confirmDialog({ title: '¿Desconectar tu cuenta de Meta?', message: 'Podés volver a conectarla cuando quieras.', tone: 'warn', confirmLabel: 'Desconectar' }))) return;
     setBusy(true);
     try {
       await fetch('/api/meta/disconnect', { method: 'POST' });
@@ -1332,7 +1333,7 @@ function BgAnalysisPill({ analysis, onView, onCancel, onDismiss }) {
           </button>
           {isRunning && (
             <button
-              onClick={() => { if (window.confirm('¿Cancelar el análisis en curso?')) onCancel(); }}
+              onClick={async () => { if (await confirmDialog({ title: '¿Cancelar el análisis en curso?', tone: 'warn', confirmLabel: 'Cancelar análisis', cancelLabel: 'Seguir' })) onCancel(); }}
               className="inline-flex items-center gap-1 px-2 py-1.5 text-[11px] font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 hover:bg-red-50 hover:text-red-600 hover:border-red-200 rounded-md transition"
               title="Cancelar"
             >
@@ -2207,6 +2208,7 @@ function AppShell({ onExit }) {
           ? <SupabaseAuthScreen onLoggedIn={setSupabaseUser} />
           : <LoginScreen onLogin={handleLogin} onSessionAuth={handleSessionAuth} darkMode={darkMode} toggleDarkMode={toggleDarkMode} />}
         <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+        <DialogHost />
       </>
     );
   }
@@ -2225,6 +2227,7 @@ function AppShell({ onExit }) {
           toggleDarkMode={toggleDarkMode}
         />
         <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+        <DialogHost />
       </>
     );
   }
@@ -2523,6 +2526,7 @@ function AppShell({ onExit }) {
 
       {/* Toast container */}
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+      <DialogHost />
     </div>
   );
 }
@@ -3585,8 +3589,8 @@ function OrdersList({ state, dispatch, orders, onEditOrder }) {
                         </button>
                       )}
                       <button
-                        onClick={() => {
-                          if (window.confirm(`¿Borrar la orden #${order.id} de ${getClientName(order.clienteId)}? Esta acción no se puede deshacer.`)) {
+                        onClick={async () => {
+                          if (await confirmDialog({ title: `¿Borrar la orden #${order.id}?`, message: `De ${getClientName(order.clienteId)}. Esta acción no se puede deshacer.`, tone: 'danger', confirmLabel: 'Borrar' })) {
                             dispatch({ type: 'DELETE_ORDER', payload: { id: order.id } });
                           }
                         }}
@@ -6067,11 +6071,11 @@ function DatosSection({ state, dispatch, addToast }) {
                 const file = e.target.files?.[0];
                 if (!file) return;
                 const reader = new FileReader();
-                reader.onload = (ev) => {
+                reader.onload = async (ev) => {
                   try {
                     const parsed = JSON.parse(ev.target.result);
                     if (!parsed || typeof parsed !== 'object') throw new Error('JSON inválido');
-                    if (!window.confirm('¿Restaurar desde backup? Se reemplazarán todos los datos actuales.')) return;
+                    if (!(await confirmDialog({ title: '¿Restaurar desde backup?', message: 'Se reemplazarán todos los datos actuales.', tone: 'danger', confirmLabel: 'Restaurar' }))) return;
                     ['products', 'clients', 'mentors', 'sales'].forEach(key => {
                       if (Array.isArray(parsed[key])) {
                         dispatch({ type: 'BULK_REPLACE', payload: { entity: key, data: parsed[key] } });
@@ -6109,7 +6113,7 @@ function EntityDataCard({ entity, state, dispatch, addToast }) {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (ev) => {
+    reader.onload = async (ev) => {
       try {
         const text = ev.target.result;
         const parsed = parseCSV(text);
@@ -6117,7 +6121,7 @@ function EntityDataCard({ entity, state, dispatch, addToast }) {
         const items = parsed.rows.map(entity.parseRow).filter(x => x.nombre || x.fecha || x.clienteId); // filtra vacíos
 
         if (mode === 'replace') {
-          if (!window.confirm(`¿Reemplazar los ${data.length} ${entity.label.toLowerCase()} actuales por ${items.length} del CSV?`)) return;
+          if (!(await confirmDialog({ title: '¿Reemplazar por el CSV?', message: `Reemplaza los ${data.length} ${entity.label.toLowerCase()} actuales por ${items.length} del CSV.`, tone: 'warn', confirmLabel: 'Reemplazar' }))) return;
           // Re-IDdamos desde 1
           const reIdd = items.map((it, i) => ({ ...it, id: i + 1 }));
           dispatch({ type: 'BULK_REPLACE', payload: { entity: entity.key, data: reIdd } });
@@ -8582,7 +8586,7 @@ function UserMenu({ currentUser, sidebarOpen, state, onLogout }) {
             </button>
             <button
               onClick={async () => {
-                if (window.confirm('¿Borrar todos los datos cargados? Esta acción no se puede deshacer. Si tenés info importante, exportá primero desde la sección Datos.')) {
+                if (await confirmDialog({ title: '¿Vaciar todos los datos?', message: 'Se borran todas las órdenes, clientes, productos y pagos cargados. No se puede deshacer — si tenés info importante, exportá primero desde Datos.', tone: 'danger', confirmLabel: 'Vaciar todo' })) {
                   try { await clearVioraState(); } catch {}
                   // Limpiamos también la key legacy de localStorage por si quedó.
                   try { localStorage.removeItem(STATE_STORAGE_KEY); } catch {}
@@ -8597,7 +8601,7 @@ function UserMenu({ currentUser, sidebarOpen, state, onLogout }) {
             </button>
             <button
               onClick={async () => {
-                if (window.confirm('¿Cargar datos de ejemplo? Esto reemplaza lo que tengas cargado por los datos demo (5 productos, 8 clientes, 2 mentores, 15 órdenes).')) {
+                if (await confirmDialog({ title: '¿Cargar datos de ejemplo?', message: 'Reemplaza lo que tengas cargado por los datos demo (5 productos, 8 clientes, 2 mentores, 15 órdenes).', tone: 'warn', confirmLabel: 'Cargar demo' })) {
                   try { await saveVioraState(DEMO_STATE); } catch {}
                   window.location.reload();
                 }

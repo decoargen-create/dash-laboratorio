@@ -14,6 +14,7 @@
 // videos quedan en el bucket; acá solo guardamos texto + storagePath.
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { confirmDialog } from './dialogs.jsx';
 import {
   Clapperboard, Upload, Loader2, Check, X, Copy, Trash2, RefreshCw,
   ChevronDown, AlertTriangle, FileText, Languages, Wand2, Lightbulb,
@@ -341,7 +342,7 @@ export default function TranscripcionVideosSection({ addToast, forcedProductoId,
   }, [patchItem, forcedProductoId, addToast]);
 
   const borrar = useCallback(async (item) => {
-    if (!window.confirm(`¿Borrar "${item.nombre}" (transcripción + guion)?`)) return;
+    if (!(await confirmDialog({ title: `¿Borrar "${item.nombre}"?`, message: 'Se borra la transcripción y el guion.', tone: 'danger', confirmLabel: 'Borrar' }))) return;
     // Bytes del bucket: best-effort, no bloquea.
     if (item.storagePath) {
       supabase.storage.from(BUCKET).remove([item.storagePath]).catch(() => {});

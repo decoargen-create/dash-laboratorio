@@ -185,8 +185,8 @@ const EVENTO_SLUGS = {
   black_friday: 'BlackFriday', navidad: 'Navidad', ano_nuevo: 'AnoNuevo', reyes: 'Reyes',
 };
 
-// Nombre CORTO e identificable: producto + fecha + ángulo + evento + #código.
-//   "Cepillo 3-10 Testimonio v2 #qoen2k.png"
+// Nombre CORTO e identificable: producto + fecha + formato + ángulo + evento + #código.
+//   "Cepillo 3-10 Estatico Testimonio v2 #qoen2k.png"
 //   "Cepillo 3-10 Story Urgencia DiaMadre v3 #8x1u2y.png"
 // La marca de referencia (Getaeki, etc.) y el estilo YA NO van en el nombre:
 // confundían y alargaban — el #código identifica la fila exacta, y en la
@@ -195,10 +195,9 @@ function buildFileName(it, productoNombre) {
   const prod = capit(firstWord(productoNombre)) || 'Creativo';
   const d = it.createdAt ? new Date(it.createdAt) : new Date();
   const dateStr = `${d.getDate()}-${d.getMonth() + 1}`;
-  // Solo marcamos el formato cuando NO es el estático cuadrado default.
   const formato = it.size === '1024x1536' ? ' Story'
     : it.size === '1536x1024' ? ' Landscape'
-    : '';
+    : ' Estatico';
   // Ángulo estratégico + evento (solo creativos nuevos que los traen).
   const angulo = ANGLE_LABELS[String(it.angle || '').toLowerCase()] || '';
   const eventoSlug = EVENTO_SLUGS[String(it.evento || '').toLowerCase()] || '';

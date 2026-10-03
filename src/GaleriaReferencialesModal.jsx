@@ -173,9 +173,9 @@ function shortCodeDe(id) {
 
 // Ángulo estratégico del plan → etiqueta corta para el nombre de archivo.
 const ANGLE_LABELS = {
-  problem_solution: 'Problema',  demo: 'Demo',            social_proof: 'Testimonio',
-  authority: 'Autoridad',        before_after: 'AntesDespues', scarcity: 'Urgencia',
-  ugc: 'UGC',                    founder: 'Founder',      transformation: 'Transformacion',
+  problem_solution: 'Problema',  demo: 'Demo',           social_proof: 'Testimonio',
+  authority: 'Autoridad',        before_after: 'AntesDesp', scarcity: 'Urgencia',
+  ugc: 'UGC',                    founder: 'Founder',     transformation: 'Transform',
   curiosity: 'Curiosidad',       benefit_stack: 'Beneficios',
 };
 // Evento → slug corto para el nombre de archivo.
@@ -185,26 +185,30 @@ const EVENTO_SLUGS = {
   black_friday: 'BlackFriday', navidad: 'Navidad', ano_nuevo: 'AnoNuevo', reyes: 'Reyes',
 };
 
+// Nombre CORTO e identificable: producto + fecha + ángulo + evento + #código.
+//   "Cepillo 3-10 Testimonio v2 #qoen2k.png"
+//   "Cepillo 3-10 Story Urgencia DiaMadre v3 #8x1u2y.png"
+// La marca de referencia (Getaeki, etc.) y el estilo YA NO van en el nombre:
+// confundían y alargaban — el #código identifica la fila exacta, y en la
+// galería se ve todo (pegando el código en el buscador).
 function buildFileName(it, productoNombre) {
   const prod = capit(firstWord(productoNombre)) || 'Creativo';
   const d = it.createdAt ? new Date(it.createdAt) : new Date();
   const dateStr = `${d.getDate()}-${d.getMonth() + 1}`;
-  const formato = it.size === '1024x1536' ? 'Story'
-    : it.size === '1536x1024' ? 'Landscape'
-    : 'Estatico';
-  const brand = capit(firstWord(it.sourceBrand)) || 'Ref';
-  const rebrand = it.variantStyle === 'rebrand' ? ' Rebrand' : '';
-  // Numeral de variante para evitar colisiones cuando hay 2+ de la misma combinación.
-  const variantSuffix = it.variantIndex != null ? ` v${it.variantIndex + 1}` : '';
-  // Ángulo estratégico + evento (solo creativos nuevos que los traen): hacen el
-  // nombre identificable a simple vista — "Getaeki Testimonio DiaMadre v2".
+  // Solo marcamos el formato cuando NO es el estático cuadrado default.
+  const formato = it.size === '1024x1536' ? ' Story'
+    : it.size === '1536x1024' ? ' Landscape'
+    : '';
+  // Ángulo estratégico + evento (solo creativos nuevos que los traen).
   const angulo = ANGLE_LABELS[String(it.angle || '').toLowerCase()] || '';
   const eventoSlug = EVENTO_SLUGS[String(it.evento || '').toLowerCase()] || '';
+  // Numeral de variante para distinguir hermanas de la misma tanda.
+  const variantSuffix = it.variantIndex != null ? ` v${it.variantIndex + 1}` : '';
   // #código único al final: si usás el archivo tal cual como nombre del ad en
   // Meta, "Winners desde Meta" lo identifica EXACTO por este código (sin bajar
   // imágenes ni IA). También podés pegarlo en el buscador de la galería.
   const code = shortCodeDe(it.id);
-  return `${prod} ${dateStr} ${formato} ${brand}${rebrand}${angulo ? ` ${angulo}` : ''}${eventoSlug ? ` ${eventoSlug}` : ''}${variantSuffix}${code ? ` #${code}` : ''}.png`;
+  return `${prod} ${dateStr}${formato}${angulo ? ` ${angulo}` : ''}${eventoSlug ? ` ${eventoSlug}` : ''}${variantSuffix}${code ? ` #${code}` : ''}.png`;
 }
 
 // Props:

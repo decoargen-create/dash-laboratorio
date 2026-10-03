@@ -534,6 +534,68 @@ function dedupOfertas(rawOfertas) {
   return out.join('\n');
 }
 
+// ── EVENTO / fecha comercial ────────────────────────────────────────────────
+// Reangula el creativo para una fecha (Día de la Madre, BlackFriday, etc.) SIN
+// romper el dominio ni la fidelidad del producto. kind: 'gift' (regalo, enfoque
+// emocional en el destinatario) | 'sale' (descuento/urgencia) | 'seasonal'.
+const EVENTOS = {
+  dia_madre:    { label: 'Día de la Madre', kind: 'gift', recipientEs: 'mamá',          recipientEn: 'a mother (optionally with her child or family)' },
+  dia_padre:    { label: 'Día del Padre',   kind: 'gift', recipientEs: 'papá',          recipientEn: 'a father (optionally with his child or family)' },
+  dia_nino:     { label: 'Día del Niño',    kind: 'gift', recipientEs: 'los chicos',    recipientEn: 'a happy child' },
+  san_valentin: { label: 'San Valentín',    kind: 'gift', recipientEs: 'tu pareja',     recipientEn: 'a romantic couple' },
+  navidad:      { label: 'Navidad',         kind: 'gift', recipientEs: 'un ser querido', recipientEn: 'a cozy family Christmas moment' },
+  reyes:        { label: 'Reyes',           kind: 'gift', recipientEs: 'la familia',     recipientEn: 'a festive Three Kings / holiday moment' },
+  ano_nuevo:    { label: 'Año Nuevo',       kind: 'sale', recipientEs: null, recipientEn: null },
+  hot_sale:     { label: 'Hot Sale',        kind: 'sale', recipientEs: null, recipientEn: null },
+  cyber_monday: { label: 'CyberMonday',     kind: 'sale', recipientEs: null, recipientEn: null, dark: true },
+  black_friday: { label: 'BlackFriday',     kind: 'sale', recipientEs: null, recipientEn: null, dark: true },
+};
+
+function resolveEvento(evento) {
+  if (!evento) return null;
+  let key = null, meta = null, label = null, kind = null;
+  if (typeof evento === 'string') {
+    const norm = evento.trim().toLowerCase().replace(/[\s.\-]+/g, '_');
+    if (!norm || norm === 'none' || norm === 'sin_evento' || norm === 'evergreen') return null;
+    if (EVENTOS[norm]) { key = norm; meta = EVENTOS[norm]; }
+    else { key = 'custom'; label = evento.trim().slice(0, 60); kind = 'seasonal'; }
+  } else if (typeof evento === 'object' && (evento.key || evento.label)) {
+    key = evento.key || 'custom';
+    if (EVENTOS[key]) meta = EVENTOS[key];
+    else { label = String(evento.label || '').slice(0, 60); kind = evento.kind === 'sale' ? 'sale' : evento.kind === 'gift' ? 'gift' : 'seasonal'; }
+  } else return null;
+  if (meta) return { key, label: meta.label, kind: meta.kind, recipientEs: meta.recipientEs || null, recipientEn: meta.recipientEn || null, dark: !!meta.dark };
+  if (!label) return null;
+  return { key, label, kind, recipientEs: null, recipientEn: null, dark: false };
+}
+
+// Directiva para el STRATEGIST (español, alta prioridad).
+function eventoStrategyDirective(ev) {
+  if (!ev) return '';
+  if (ev.kind === 'gift') {
+    return `**EVENTO / FECHA (CRÍTICO): ${ev.label}**. Este creativo es para la campaña de ${ev.label}. Reangulá TODO el mensaje para posicionar el producto como el REGALO ideal para ${ev.recipientEs || 'un ser querido'} en ${ev.label}, SIN perder los pain points y beneficios reales del producto (son la razón por la que el regalo vale la pena). Conectá el beneficio del producto con lo que esa persona valora/necesita (ej.: un producto de autocuidado para Día de la Madre → "regalale a mamá el descanso que se merece"). Los headlines/claims deben mencionar la ocasión ("Regalá en ${ev.label}", "El regalo perfecto para ${ev.recipientEs || 'quien querés'}") ADEMÁS del beneficio real. Mantené el DOMAIN LOCK: el problema/beneficio sigue siendo el del producto, nunca el del ad de referencia.`;
+  }
+  if (ev.kind === 'sale') {
+    return `**EVENTO / FECHA (CRÍTICO): ${ev.label}**. Este creativo es para ${ev.label} (fecha de descuentos). Reangulá hacia URGENCIA + OFERTA: destacá el ahorro, el tiempo limitado y la escasez, manteniendo el beneficio real del producto. NO inventes porcentajes ni precios: usá SOLO las ofertas/precios reales del usuario (más abajo). Si no hay oferta cargada, usá urgencia genérica ("Solo por ${ev.label}", "Por tiempo limitado") SIN un número falso. Los badges deben comunicar la oferta real + la fecha ${ev.label}.`;
+  }
+  return `**EVENTO / FECHA (CRÍTICO): ${ev.label}**. Este creativo es para la campaña de ${ev.label}. Dale al mensaje y al clima visual la temática de ${ev.label}, manteniendo el beneficio/pain point real del producto y el DOMAIN LOCK. Si corresponde, mencioná la ocasión en el copy. No inventes ofertas ni claims que no estén en los datos del usuario.`;
+}
+
+// Directiva VISUAL para el prompt de imagen (inglés, como el resto del prompt).
+function eventoVisualDirective(ev) {
+  if (!ev) return '';
+  if (ev.kind === 'gift') {
+    return `EVENT CAMPAIGN — ${ev.label} (gifting): Theme the whole scene for ${ev.label}. Add TASTEFUL gift cues as SECONDARY props around the product — a wrapped gift box, a satin ribbon/bow, a small greeting card, soft celebratory elements — plus a warm, emotional, premium palette fitting ${ev.label}.${ev.recipientEn ? ` You may naturally include ${ev.recipientEn} in the scene if it fits.` : ''} CRITICAL: the product (IMAGE 2) stays pixel-faithful and remains the HERO — do NOT gift-wrap, cover or hide it; the gift cues never alter product fidelity. Text overlays may carry a small "${ev.label}" tag/ribbon, but any offer/price/claim must come ONLY from the user's real offers.`;
+  }
+  if (ev.kind === 'sale') {
+    const palette = ev.dark
+      ? 'a bold Black Friday / Cyber palette (deep black background with neon / electric accent highlights)'
+      : 'a high-contrast, high-energy sale palette';
+    return `EVENT CAMPAIGN — ${ev.label} (sale): Give the creative a high-urgency SALE look fitting ${ev.label} — a bold discount ribbon/sticker, an urgency/countdown cue, and ${palette}. CRITICAL: render ONLY the user's real offer/price in any badge — NEVER invent a % or a price. If no real offer is provided, use urgency wording only ("Solo por ${ev.label}", "Por tiempo limitado") with NO fake number. The product (IMAGE 2) stays pixel-faithful and the hero.`;
+  }
+  return `EVENT CAMPAIGN — ${ev.label}: Give the scene a tasteful ${ev.label} seasonal theme (palette, light props, mood) while keeping the product (IMAGE 2) pixel-faithful and the hero. Offers/claims only from the user's real offers.`;
+}
+
 async function readBody(req) {
   if (req.body && typeof req.body === 'object') return req.body;
   if (typeof req.body === 'string') {
@@ -619,7 +681,7 @@ function parseJSONFromClaude(text) {
 // N variaciones distintas (mismo concepto, distinta ejecución).
 //
 // Devuelve { plan: {...}, cost: number } o { plan: null } si falla.
-async function planStrategyAndVariations({ apiKey, refImgBuf, refMime, producto, accentColor, n }) {
+async function planStrategyAndVariations({ apiKey, refImgBuf, refMime, producto, accentColor, n, evento = null }) {
   const client = new Anthropic({ apiKey });
   const b64 = refImgBuf.toString('base64');
 
@@ -654,6 +716,9 @@ async function planStrategyAndVariations({ apiKey, refImgBuf, refMime, producto,
     `Producto: ${producto?.nombre || 'N/A'}`,
     producto?.descripcion ? `Descripción: ${producto.descripcion.slice(0, 400)}` : '',
     domainLock,
+    // Evento/fecha comercial (Día de la Madre, BlackFriday…): reangula el
+    // mensaje hacia la ocasión SIN perder el dominio/beneficio del producto.
+    evento ? eventoStrategyDirective(evento) : '',
     useCaseHint ? `**CASO DE USO REAL DEL PRODUCTO** (CRÍTICO — los textos/testimonios/claims adaptados DEBEN ser sobre esto, NO sobre el problema del ad ref): ${useCaseHint.directive}` : '',
     useCaseHint?.copyTone ? `**TONO / REDACCIÓN DEL COPY** (CRÍTICO — cómo redactar los headlines y claims): ${useCaseHint.copyTone}` : '',
     scaleHint ? `**TAMAÑO REAL DEL PRODUCTO** (CRÍTICO para que la imagen no lo dibuje chiquito): ${scaleHint}` : '',
@@ -1009,7 +1074,7 @@ function aspectRatioFromSize(size) {
 // Cada variación termina con un prompt distinto → la grilla de N creativos
 // son N ejecuciones distintas de la misma fórmula validada, no N versiones
 // de la misma foto.
-function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentColor, aspectRatio, rebrand = false, ajuste = '' }) {
+function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentColor, aspectRatio, rebrand = false, ajuste = '', evento = null }) {
   const nombre = (producto?.nombre || '').trim();
   const descripcion = (producto?.descripcion || '').trim();
   const research = (producto?.research || producto?.docs?.research || '').trim();
@@ -1025,6 +1090,10 @@ function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentCol
   parts.push('  • IMAGE 1 = a winning competitor ad. COPY its composition, framing, lighting, background style, palette, mood.');
   parts.push('  • IMAGE 2 = the product you must feature. KEEP it pixel-faithful.');
   if (ajuste) parts.push(`  • **USER CORRECTION (HIGHEST PRIORITY — the user is re-generating this creative because the previous version was wrong; obey this ABOVE everything else below)**: ${ajuste}`);
+  if (evento) {
+    parts.push('');
+    parts.push(eventoVisualDirective(evento));
+  }
 
   // Strategy: el "por qué" del ad
   parts.push('');
@@ -1241,7 +1310,7 @@ function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentCol
   return parts.join('\n');
 }
 
-function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio, variantStyle = 'reference', ajuste = '' }) {
+function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio, variantStyle = 'reference', ajuste = '', evento = null }) {
   const nombre = (producto?.nombre || '').trim();
   const descripcion = (producto?.descripcion || '').trim();
   const research = (producto?.research || producto?.docs?.research || '').trim();
@@ -1255,6 +1324,7 @@ function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio
   parts.push('  • IMAGE 1 = a winning competitor ad. COPY its composition, framing, lighting, background style, palette, and overall mood — but DO NOT copy the brand, the actual product, or the literal text.');
   parts.push('  • IMAGE 2 = the product you must feature. KEEP its shape, color, label artwork, packaging and proportions IDENTICAL. Do NOT redraw the label. Do NOT invent any new text on the packaging.');
   if (ajuste) parts.push(`  • **USER CORRECTION (HIGHEST PRIORITY — the user is re-generating this creative because the previous version was wrong; obey this ABOVE everything else below)**: ${ajuste}`);
+  if (evento) parts.push(eventoVisualDirective(evento));
   parts.push('');
 
   if (skeleton && typeof skeleton === 'object') {
@@ -1603,8 +1673,11 @@ export default async function handler(req, res) {
                      // lo pasa y nos saltamos Vision (ahorra ~$0.005 + 5-10s).
     planOnly,        // Corré SÓLO el Strategist y devolvé el plan, sin generar
                      // ninguna imagen. Ver el bloque planOnly más abajo.
+    evento,          // Fecha comercial ('dia_madre' | 'black_friday' | texto libre).
+                     // Reangula estrategia + visual hacia la ocasión.
   } = body || {};
   const ajuste = (typeof ajusteUsuario === 'string' ? ajusteUsuario : '').trim().slice(0, 500);
+  const ev = resolveEvento(evento);
 
   if (!producto?.nombre) {
     return respondJSON(res, 400, { error: 'Falta producto.nombre' });
@@ -1694,7 +1767,7 @@ export default async function handler(req, res) {
       // aunque generemos solo `n` imágenes ahora. Las restantes quedan en el
       // plan que devolvemos al cliente para que las use en próximos calls.
       const stratResult = await planStrategyAndVariations({
-        apiKey: anthropicKey, refImgBuf, refMime, producto, accentColor, n: nPlan,
+        apiKey: anthropicKey, refImgBuf, refMime, producto, accentColor, n: nPlan, evento: ev,
       });
       if (stratResult.plan && Array.isArray(stratResult.plan.variations) && stratResult.plan.variations.length > 0) {
         plan = stratResult.plan;
@@ -1781,7 +1854,7 @@ export default async function handler(req, res) {
         return {
           prompt: buildPromptFromPlan({
             producto, inspiracion, plan, variation, accentColor, aspectRatio,
-            rebrand: shouldRebrand, ajuste,
+            rebrand: shouldRebrand, ajuste, evento: ev,
           }),
           variantStyle: shouldRebrand ? 'rebrand' : 'strategist',
           variation,
@@ -1790,9 +1863,9 @@ export default async function handler(req, res) {
     } else {
       // Fallback legacy: reference / rebrand.
       const usarRebrandVariant = !!accentColor && n >= 2;
-      const promptRef = buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio, variantStyle: 'reference', ajuste });
+      const promptRef = buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio, variantStyle: 'reference', ajuste, evento: ev });
       const promptRebrand = usarRebrandVariant
-        ? buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio, variantStyle: 'rebrand', ajuste })
+        ? buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio, variantStyle: 'rebrand', ajuste, evento: ev })
         : null;
       prompts = null; // marcador para que runCalls use el path viejo
       __legacyPromptRef = promptRef;

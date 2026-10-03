@@ -50,7 +50,7 @@ export async function generateFromWinner(creativo, producto, opts = {}) {
       : 'El winner no tiene imagen para usar como referencia');
   }
 
-  const { quality = 'high', size = '1024x1024', n = 1, onProgress, evento = '' } = opts;
+  const { quality = 'high', size = '1024x1024', n = 1, onProgress, evento = '', eventoOferta = '' } = opts;
 
   // 1. Foto del producto — sin esto el endpoint rechaza con 400.
   const prodImg = await getProductoImagen(producto.id, producto);
@@ -107,6 +107,7 @@ export async function generateFromWinner(creativo, producto, opts = {}) {
     // Modo evento (Día de la Madre, BlackFriday…): la variante iterada se
     // reangula hacia la ocasión manteniendo los dolores del producto.
     evento: evento || undefined,
+    eventoOferta: (evento && eventoOferta) || undefined,
   };
 
   const created = [];
@@ -197,7 +198,7 @@ export async function generateFromWinner(creativo, producto, opts = {}) {
 export async function regenerarReferencial(creativo, producto, opts = {}) {
   if (!creativo?.id) throw new Error('regenerarReferencial: falta creativo');
   if (!producto?.id) throw new Error('regenerarReferencial: falta producto');
-  const { ajuste = '', quality = 'high', size, onProgress, evento = '' } = opts;
+  const { ajuste = '', quality = 'high', size, onProgress, evento = '', eventoOferta = '' } = opts;
 
   // Referencia = el AD ORIGINAL. Preferimos los bytes cacheados (por sourceAdId)
   // para no depender de la URL del CDN de Meta (que expira ~1h). Si no hay ni
@@ -251,6 +252,7 @@ export async function regenerarReferencial(creativo, producto, opts = {}) {
     quality,
     ...(size ? { size } : {}),
     evento: evento || undefined,
+    eventoOferta: (evento && eventoOferta) || undefined,
   };
 
   onProgress?.({ current: 1, total: 1 });

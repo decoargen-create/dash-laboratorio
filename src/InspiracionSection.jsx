@@ -1659,7 +1659,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       //   - 4 variantes: el plan del Strategist va de réplica fiel a
       //     creatividad libre; con 4 ya cubrís ese rango.
       //   - high: siempre.
-      const RECOMENDADO = { n: 4, size: '1024x1536', quality: 'high', evento: '', v: 2 };
+      const RECOMENDADO = { n: 4, size: '1024x1536', quality: 'high', evento: '', eventoOferta: '', v: 2 };
       const raw = localStorage.getItem('adslab-marketing-gen-opts');
       const parsed = raw ? JSON.parse(raw) : null;
       // MIGRACIÓN v2 (one-shot): pisa lo persistido con el recomendado UNA
@@ -1667,7 +1667,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       // (2K para un ganador, 6 variantes, etc.) sigue persistiendo normal.
       if (!parsed || parsed.v !== 2) return RECOMENDADO;
       return parsed;
-    } catch { return { n: 4, size: '1024x1536', quality: 'high', evento: '', v: 2 }; }
+    } catch { return { n: 4, size: '1024x1536', quality: 'high', evento: '', eventoOferta: '', v: 2 }; }
   });
   useEffect(() => {
     try { localStorage.setItem('adslab-marketing-gen-opts', JSON.stringify(genOpts)); } catch {}
@@ -1720,10 +1720,10 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   // plan se adapta al PRODUCTO, así que cachear solo por ad.id hacía que el
   // mismo ad usado en 2 productos reusara el plan del otro (texto del producto
   // equivocado). Prefijamos con el producto activo.
-  // La clave del cache de planes incluye el EVENTO: un plan calculado sin
-  // evento (o para otro evento) tiene la estrategia mal angulada para la
-  // fecha elegida — no se debe reusar.
-  const skelKey = (adId) => `${activeProductoId || 'global'}:${adId}${genOpts.evento ? `:ev-${genOpts.evento}` : ''}`;
+  // La clave del cache de planes incluye el EVENTO y su OFERTA: un plan
+  // calculado sin evento (o con otra promo) tiene la estrategia/badges mal
+  // angulados para la fecha elegida — no se debe reusar.
+  const skelKey = (adId) => `${activeProductoId || 'global'}:${adId}${genOpts.evento ? `:ev-${genOpts.evento}` : ''}${genOpts.evento && genOpts.eventoOferta ? `:of-${genOpts.eventoOferta.slice(0, 40)}` : ''}`;
   const upsertSkeleton = (adId, skel) => {
     if (!adId || !skel) return;
     setSkeletonCache(prev => {
@@ -2183,6 +2183,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           n: 1,
           nPlan: nVar,
           evento: genOpts.evento || undefined,
+          eventoOferta: (genOpts.evento && (genOpts.eventoOferta || '').trim()) || undefined,
           producto: {
             id: producto.id,
             nombre: producto.nombre,
@@ -2328,8 +2329,10 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       quality: genOpts.quality,
       size: genOpts.size,
       // Modo evento (Día de la Madre, BlackFriday…): el backend reangula
-      // estrategia + visual hacia la ocasión.
+      // estrategia + visual hacia la ocasión. La oferta del evento (si hay)
+      // le gana a las ofertas generales en los overlays de promo.
       evento: genOpts.evento || undefined,
+      eventoOferta: (genOpts.evento && (genOpts.eventoOferta || '').trim()) || undefined,
     };
 
     // Helper: una sola llamada (devuelve { data } o lanza).
@@ -3670,6 +3673,18 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           >
             {EVENTOS_FECHA.map(ev => <option key={ev.key} value={ev.key}>{ev.label}</option>)}
           </select>
+          {/* Oferta específica de la fecha — le gana a las ofertas generales
+              en los badges (ej. "3x2 solo por el Día de la Madre"). */}
+          {genOpts.evento && (
+            <input
+              type="text"
+              value={genOpts.eventoOferta || ''}
+              onChange={e => setGenOpts(o => ({ ...o, eventoOferta: e.target.value }))}
+              placeholder="Oferta del evento (ej. 3x2)…"
+              title="Promo específica de esta fecha. Si la cargás, los badges del creativo usan ESTA oferta (textual) en vez de las generales del Setup."
+              className="w-36 text-[10px] font-bold rounded-md px-2 py-1 bg-white dark:bg-gray-800 border border-pink-300 dark:border-pink-800 focus:outline-none focus:ring-2 focus:ring-pink-500"
+            />
+          )}
 
           <button onClick={limpiarSeleccion}
             className="text-[11px] text-gray-500 hover:text-red-500 transition">
@@ -4066,8 +4081,17 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                       >
                         {EVENTOS_FECHA.map(ev => <option key={ev.key} value={ev.key}>{ev.label}</option>)}
                       </select>
+                      {genOpts.evento && (
+                        <input
+                          type="text"
+                          value={genOpts.eventoOferta || ''}
+                          onChange={e => setGenOpts(o => ({ ...o, eventoOferta: e.target.value }))}
+                          placeholder="Oferta del evento (ej. 3x2 solo por el Día de la Madre)…"
+                          className="mt-1.5 w-full text-[10px] font-bold rounded px-2 py-1.5 bg-white dark:bg-gray-800 border border-pink-300 dark:border-pink-800 focus:outline-none focus:ring-2 focus:ring-pink-500"
+                        />
+                      )}
                       <p className="mt-1 text-[9px] text-gray-500 dark:text-gray-400">
-                        Reangula el creativo hacia la fecha (regalo u oferta) manteniendo los dolores del producto. En eventos de descuento usa SOLO tus ofertas reales.
+                        Reangula el creativo hacia la fecha (regalo u oferta) manteniendo los dolores del producto. Cada variante sale con un ángulo DISTINTO del evento (emocional / urgencia / oferta / testimonio). Si cargás la oferta del evento, los badges usan esa promo textual.
                       </p>
                     </div>
 

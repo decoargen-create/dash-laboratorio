@@ -882,6 +882,7 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
   // galería como referencia. Estado simple (no persiste): se elige cada vez,
   // así nunca queda prendido sin querer.
   const [eventoGal, setEventoGal] = useState('');
+  const [eventoOfertaGal, setEventoOfertaGal] = useState('');
   // Regeneración/corrección de un creativo en curso (bloquea el botón).
   const [regenId, setRegenId] = useState(null);
 
@@ -1245,6 +1246,7 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
         quality: 'high',
         size: item.size || '1024x1024',
         evento: eventoGal || undefined,
+        eventoOferta: (eventoGal && eventoOfertaGal.trim()) || undefined,
         onProgress: (p) => setIterateProgress({ ...p, brand: item.sourceBrand }),
       });
       // El backend ya disparó viora:referencial-saved en cada save al cloud;
@@ -1272,6 +1274,7 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
         quality: item.quality || 'high',
         size: item.size || '1024x1024',
         evento: eventoGal || undefined,
+        eventoOferta: (eventoGal && eventoOfertaGal.trim()) || undefined,
       });
       refresh();
       toast({ type: 'success', message: 'Nuevo creativo generado. El anterior sigue en el repositorio para comparar.', duration: 6000 });
@@ -1481,6 +1484,16 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
           >
             {EVENTOS_FECHA.map(ev => <option key={ev.key} value={ev.key}>{ev.label}</option>)}
           </select>
+          {eventoGal && (
+            <input
+              type="text"
+              value={eventoOfertaGal}
+              onChange={e => setEventoOfertaGal(e.target.value)}
+              placeholder="Oferta del evento (ej. 3x2)…"
+              title="Promo específica de esta fecha: si la cargás, los badges del creativo usan ESTA oferta textual."
+              className="mb-1 w-36 text-[10px] font-bold rounded-md px-2 py-1 bg-white dark:bg-gray-800 border border-pink-300 dark:border-pink-800 focus:outline-none focus:ring-2 focus:ring-pink-500"
+            />
+          )}
         </div>
 
         {/* Body */}

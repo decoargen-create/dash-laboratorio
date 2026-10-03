@@ -73,7 +73,9 @@ async function fetchImageB64(url, maxBytes = 6 * 1024 * 1024) {
 // La fecha es el createdAt del creativo en hora ARGENTINA. Devuelve
 // { desdeIso, hastaIso, brand, rebrand, variantIndex } o null.
 function parseDownloadName(name) {
-  const m = String(name || '').match(/(\d{1,2})-(\d{1,2})\s+(?:Estatico|Story|Landscape)\s+(\S+?)(\s+Rebrand)?\s+v(\d{1,2})\b/i);
+  // Tolera palabras extra entre la marca y el vN (la nomenclatura nueva mete
+  // ángulo/evento ahí: "Getaeki Rebrand Testimonio DiaMadre v2").
+  const m = String(name || '').match(/(\d{1,2})-(\d{1,2})\s+(?:Estatico|Story|Landscape)\s+(\S+?)(\s+Rebrand)?(?:\s+(?!v\d+\b)[^\s#]+)*\s+v(\d{1,2})\b/i);
   if (!m) return null;
   const d = Number(m[1]), mes = Number(m[2]);
   if (!d || !mes || d > 31 || mes > 12) return null;
@@ -128,10 +130,9 @@ export default async function handler(req, res) {
   const userId = await requireAuth(req, res, getUserIdFromAuth);
   if (!userId) return;
 
+  // Meta es necesario SOLO para nombres viejos sin #código (matcheo por
+  // imagen). Con código, la resolución es directa contra la base.
   const metaSession = readMetaCookie(req);
-  if (!metaSession?.accessToken) {
-    return respondJSON(res, 401, { error: 'Meta no conectado — conectá tu cuenta de Meta primero (el matcheo baja la imagen real de cada ad).' });
-  }
 
   const svc = getServiceClient();
   if (!svc) return respondJSON(res, 500, { error: 'Supabase no configurado en el server.' });
@@ -156,6 +157,36 @@ export default async function handler(req, res) {
 
   for (const it of items) {
     try {
+      // 0. CÓDIGO CORTO en el nombre ("#abc123"): los archivos descargados
+      //    desde la galería llevan la cola única del id del creativo →
+      //    resolución EXACTA e instantánea, sin Meta ni visión.
+      const codeM = String(it.name || '').match(/#([a-z0-9]{4,10})\b/i);
+      if (codeM) {
+        const code = codeM[1].toLowerCase();
+        const { data: porCodigo } = await svc.from('marketing_creativos')
+          .select('id, winner')
+          .eq('producto_id', productoId)
+          .like('id', `%${code}`)
+          .limit(5);
+        const exactos = (porCodigo || []).filter(c => String(c.id).toLowerCase().endsWith(`_${code}`));
+        if (exactos.length === 1) {
+          const c = exactos[0];
+          if (c.winner) {
+            results.push({ ...it, status: 'ya-era-winner', creativoId: c.id });
+          } else {
+            aMarcar.push({ creativoId: c.id, adId: it.adId, adName: it.name });
+            results.push({ ...it, status: 'matched', creativoId: c.id, por: 'codigo' });
+          }
+          continue;
+        }
+        // Código sin match único → seguimos por el camino de imagen.
+      }
+
+      if (!metaSession?.accessToken) {
+        results.push({ ...it, status: 'sin-meta', detalle: 'Nombre sin #código — conectá Meta para matchear por imagen.' });
+        continue;
+      }
+
       // 1. Imagen real del ad desde Graph (thumbnail 512 alcanza para comparar).
       let adImg = null;
       try {

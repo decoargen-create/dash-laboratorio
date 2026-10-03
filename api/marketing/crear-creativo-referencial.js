@@ -2072,6 +2072,10 @@ export default async function handler(req, res) {
               source_type: 'inspiracion',
               variant_index: localVariantIndex,
               variant_style: variantStyle,
+              // Ángulo estratégico + evento: van al nombre de archivo de la
+              // descarga (nomenclatura identificable) y al filtro de la galería.
+              angle: plan?.strategy?.angle || null,
+              evento: ev?.key || null,
               prompt: promptStr,
               skeleton: plan?.visual || skeleton || null,
               model: MODEL_IMAGE,

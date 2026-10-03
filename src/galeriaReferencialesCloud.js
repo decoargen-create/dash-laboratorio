@@ -239,6 +239,8 @@ function rowToRef(row) {
     sourceType: row.source_type,
     variantIndex: row.variant_index,
     variantStyle: row.variant_style,
+    angle: row.angle ?? null,
+    evento: row.evento ?? null,
     // prompt/skeleton NO vienen en la query de lista (columnas ligeras) — se
     // cargan on-demand. `?? null` para no dejar undefined si la fila no los trae.
     prompt: row.prompt ?? null,
@@ -280,7 +282,7 @@ export async function getReferencialesByProductoCloud(productoId, opts = {}) {
   // contador (head-count) diera 58. Prompt/skeleton se cargan on-demand al abrir
   // un creativo (getReferencialDetalleCloud). El resto de features (regenerar,
   // iterar, winner) no necesitan esos dos campos.
-  const LIST_COLS = 'id,user_id,producto_id,source_ad_id,source_brand,source_image_url,source_headline,source_type,variant_index,variant_style,model,vision_model,size,size_fallback,quality,storage_path,image_url,thumb_path,mime_type,descargada,descargada_at,archivado,archivado_at,created_at,updated_at,winner,winner_at,winner_metrics';
+  const LIST_COLS = 'id,user_id,producto_id,source_ad_id,source_brand,source_image_url,source_headline,source_type,variant_index,variant_style,angle,evento,model,vision_model,size,size_fallback,quality,storage_path,image_url,thumb_path,mime_type,descargada,descargada_at,archivado,archivado_at,created_at,updated_at,winner,winner_at,winner_metrics';
   let query = supabase
     .from('marketing_creativos')
     .select(LIST_COLS)

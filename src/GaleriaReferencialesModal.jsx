@@ -164,6 +164,27 @@ function firstWord(s) {
 // Formato = "Estatico" (1:1) | "Story" (vertical) | etc.
 // Brand   = primera palabra del sourceBrand, capitalizada
 // Si hay variantStyle=rebrand se sufija " Rebrand"
+// Código corto ÚNICO del creativo: la cola random de su id
+// (ref_{ts}_{adId}_{v}_{rand} → "rand"). Identifica la fila exacta en la base.
+function shortCodeDe(id) {
+  const m = String(id || '').match(/_([a-z0-9]{4,10})$/i);
+  return m ? m[1].toLowerCase() : '';
+}
+
+// Ángulo estratégico del plan → etiqueta corta para el nombre de archivo.
+const ANGLE_LABELS = {
+  problem_solution: 'Problema',  demo: 'Demo',            social_proof: 'Testimonio',
+  authority: 'Autoridad',        before_after: 'AntesDespues', scarcity: 'Urgencia',
+  ugc: 'UGC',                    founder: 'Founder',      transformation: 'Transformacion',
+  curiosity: 'Curiosidad',       benefit_stack: 'Beneficios',
+};
+// Evento → slug corto para el nombre de archivo.
+const EVENTO_SLUGS = {
+  dia_madre: 'DiaMadre', dia_padre: 'DiaPadre', dia_nino: 'DiaNino',
+  san_valentin: 'SanValentin', hot_sale: 'HotSale', cyber_monday: 'Cyber',
+  black_friday: 'BlackFriday', navidad: 'Navidad', ano_nuevo: 'AnoNuevo', reyes: 'Reyes',
+};
+
 function buildFileName(it, productoNombre) {
   const prod = capit(firstWord(productoNombre)) || 'Creativo';
   const d = it.createdAt ? new Date(it.createdAt) : new Date();
@@ -175,7 +196,15 @@ function buildFileName(it, productoNombre) {
   const rebrand = it.variantStyle === 'rebrand' ? ' Rebrand' : '';
   // Numeral de variante para evitar colisiones cuando hay 2+ de la misma combinación.
   const variantSuffix = it.variantIndex != null ? ` v${it.variantIndex + 1}` : '';
-  return `${prod} ${dateStr} ${formato} ${brand}${rebrand}${variantSuffix}.png`;
+  // Ángulo estratégico + evento (solo creativos nuevos que los traen): hacen el
+  // nombre identificable a simple vista — "Getaeki Testimonio DiaMadre v2".
+  const angulo = ANGLE_LABELS[String(it.angle || '').toLowerCase()] || '';
+  const eventoSlug = EVENTO_SLUGS[String(it.evento || '').toLowerCase()] || '';
+  // #código único al final: si usás el archivo tal cual como nombre del ad en
+  // Meta, "Winners desde Meta" lo identifica EXACTO por este código (sin bajar
+  // imágenes ni IA). También podés pegarlo en el buscador de la galería.
+  const code = shortCodeDe(it.id);
+  return `${prod} ${dateStr} ${formato} ${brand}${rebrand}${angulo ? ` ${angulo}` : ''}${eventoSlug ? ` ${eventoSlug}` : ''}${variantSuffix}${code ? ` #${code}` : ''}.png`;
 }
 
 // Props:
@@ -906,10 +935,12 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
     if (filtroOrigen === 'inspiracion' && it.sourceType === 'bandeja-idea') return false;
     if (filtroOrigen === 'bandeja-idea' && it.sourceType !== 'bandeja-idea') return false;
     if (searchQuery.trim()) {
-      const q = searchQuery.trim().toLowerCase();
+      // Se puede pegar el #código del nombre de archivo para encontrar el
+      // creativo exacto (con o sin el '#').
+      const q = searchQuery.trim().toLowerCase().replace(/^#/, '');
       // it.prompt ya NO viene en la lista (columnas livianas) → no lo incluimos
       // para no dar la falsa impresión de que se busca por prompt.
-      const haystack = [it.sourceBrand, it.sourceHeadline, it.variantStyle]
+      const haystack = [it.sourceBrand, it.sourceHeadline, it.variantStyle, shortCodeDe(it.id)]
         .filter(Boolean).join(' ').toLowerCase();
       if (!haystack.includes(q)) return false;
     }

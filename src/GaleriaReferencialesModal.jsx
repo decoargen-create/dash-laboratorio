@@ -10,8 +10,9 @@
 // - Lightbox comparativo ref vs variación con panel debug skeleton+prompt
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { confirmDialog, alertDialog, toast } from './dialogs.jsx';
+import { confirmDialog, alertDialog, promptDialog, toast } from './dialogs.jsx';
 import { EVENTOS_FECHA } from './eventosFecha.js';
+import { authHeaders } from './authFetch.js';
 import {
   X, Download, Trash2, Images, ChevronDown, ChevronUp, ExternalLink,
   LayoutGrid, Rows3, Table2, Plus, Check, FileArchive, EyeOff, Eye,
@@ -1323,6 +1324,65 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
     limpiarSeleccion();
     refresh();
   };
+
+  // 🏆 Winners desde Meta: pegás la lista de ads ganadores (nombre de archivo
+  // + ad ID) y el backend baja la imagen REAL de cada ad desde Graph, la
+  // compara con los candidatos de la galería (visión) y marca el creativo
+  // EXACTO. El nombre solo no alcanza: el mismo día se generan tandas de
+  // varios ads con el mismo nombre de archivo.
+  const [matchingWinners, setMatchingWinners] = useState(false);
+  const handleWinnersDesdeMeta = async () => {
+    if (matchingWinners) return;
+    const texto = await promptDialog({
+      title: '🏆 Marcar winners desde Meta',
+      message: 'Pegá la lista de ads ganadores: una línea por ad, con el nombre del archivo y el ad ID. Se baja la imagen real de cada ad y se marca el creativo EXACTO en la galería. Necesita Meta conectado.',
+      multiline: true, inputLabel: 'Lista de ads',
+      placeholder: 'Cepillo 10-8 Estatico Getaeki v3 (4) 122147559801100350',
+      confirmLabel: 'Matchear',
+    });
+    if (texto == null || !texto.trim()) return;
+    const items = [];
+    const vistos = new Set();
+    for (const linea of texto.split(/\n+/)) {
+      const l = linea.trim();
+      if (!l) continue;
+      const idm = l.match(/(\d{12,})/);
+      if (!idm) continue;
+      const adId = idm[1];
+      if (vistos.has(adId)) continue;
+      vistos.add(adId);
+      items.push({ adId, name: l.replace(idm[1], '').replace(/-?\s*Copia\s*$/i, '').trim() });
+    }
+    if (items.length === 0) { toast({ type: 'error', message: 'No encontré ningún ad ID numérico en la lista.' }); return; }
+    setMatchingWinners(true);
+    toast({ type: 'info', message: `Matcheando ${items.length} ads contra Meta… puede tardar ~${Math.max(1, Math.round(items.length * 8 / 60))} min.`, duration: 7000 });
+    try {
+      const resp = await fetch('/api/marketing/match-winner-ads', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ productoId, items }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      const porEstado = {};
+      for (const r of data.results || []) porEstado[r.status] = (porEstado[r.status] || 0) + 1;
+      const fallidos = (data.results || [])
+        .filter(r => r.status !== 'matched' && r.status !== 'ya-era-winner')
+        .slice(0, 8)
+        .map(r => `· ${(r.name || r.adId).slice(0, 55)} → ${r.status}`)
+        .join('\n');
+      await alertDialog({
+        title: `🏆 ${data.marked} winner${data.marked === 1 ? '' : 's'} marcado${data.marked === 1 ? '' : 's'}`,
+        message: `${porEstado['matched'] || 0} matcheados ahora · ${porEstado['ya-era-winner'] || 0} ya eran winners.${fallidos ? `\nNo se pudieron matchear:\n${fallidos}` : ''}`,
+        tone: data.marked > 0 ? 'brand' : 'warn',
+      });
+      refresh();
+    } catch (err) {
+      toast({ type: 'error', message: `Matcheo falló: ${err.message}` });
+    } finally {
+      setMatchingWinners(false);
+    }
+  };
   // visibleItems se declara arriba (línea 673) — TDZ fix para el useEffect
   // de keyboard nav del lightbox.
   const anyFilterActive = filtroEstado !== 'all' || filtroVariante !== 'all' || filtroOrigen !== 'all';
@@ -1469,6 +1529,15 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
             count={counts.winners}
             accent="amber"
           />
+          {/* Pegar la lista de ads ganadores de Meta → marca el creativo exacto. */}
+          <button
+            onClick={handleWinnersDesdeMeta}
+            disabled={matchingWinners}
+            title="Pegá tu lista de ads ganadores de Meta (nombre de archivo + ad ID): se baja la imagen real de cada ad y se marca como winner el creativo EXACTO de la galería."
+            className="ml-auto mb-1 inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-700 rounded-md hover:bg-amber-100 dark:hover:bg-amber-900/50 transition disabled:opacity-60"
+          >
+            <Trophy size={11} /> {matchingWinners ? 'Matcheando…' : 'Winners desde Meta'}
+          </button>
           {/* Evento/fecha para "Iterar winner" y "Regenerar": la variante nueva
               sale tematizada para la ocasión, usando el creativo de la galería
               como referencia. No persiste — se elige cada vez. */}
@@ -1476,7 +1545,7 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
             value={eventoGal}
             onChange={e => setEventoGal(e.target.value)}
             title="Al iterar un winner o regenerar un creativo, la variante nueva sale enfocada en esta fecha (ej. Día de la Madre = regalo para mamá) usando el creativo como referencia."
-            className={`ml-auto mb-1 text-[10px] font-bold rounded-md px-1.5 py-1 border focus:outline-none focus:ring-2 focus:ring-brand-500 transition ${
+            className={`mb-1 text-[10px] font-bold rounded-md px-1.5 py-1 border focus:outline-none focus:ring-2 focus:ring-brand-500 transition ${
               eventoGal
                 ? 'bg-pink-600 text-white border-pink-500'
                 : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 border-transparent'

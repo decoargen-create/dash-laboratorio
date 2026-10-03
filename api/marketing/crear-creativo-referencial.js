@@ -581,6 +581,19 @@ function eventoStrategyDirective(ev) {
   return `**EVENTO / FECHA (CRÍTICO): ${ev.label}**. Este creativo es para la campaña de ${ev.label}. Dale al mensaje y al clima visual la temática de ${ev.label}, manteniendo el beneficio/pain point real del producto y el DOMAIN LOCK. Si corresponde, mencioná la ocasión en el copy. No inventes ofertas ni claims que no estén en los datos del usuario.`;
 }
 
+// Regla para el Strategist: con evento activo, las N variations REPARTEN
+// ángulos distintos del evento (una tanda = varias apuestas sobre la fecha,
+// no la misma idea N veces). El Strategist devuelve "evento_angle" por
+// variation y el prompt de imagen se lo aplica a ESA variación puntual.
+function eventoAnglesRule(ev) {
+  if (!ev) return '';
+  const angulos = ev.kind === 'sale'
+    ? `1) OFERTA HERO: la promo REAL como protagonista absoluto (tipografía gigante, el producto al lado). 2) URGENCIA/COUNTDOWN: "termina ${ev.label}" / stock limitado — reloj, barra de stock, deadline. 3) VALUE STACK: todo lo que se lleva (bundle/beneficios apilados) + la promo. 4) SOCIAL PROOF + ESCASEZ: "miles ya lo aprovecharon" + quedan pocos.`
+    : `1) REGALO EMOCIONAL: el producto como el regalo que ${ev.recipientEs || 'esa persona'} se merece — escena cálida, overlay emocional. 2) URGENCIA DE FECHA/ENVÍO: "pedilo antes y llega para ${ev.label}" — paquete/regalo listo, deadline de envío. 3) OFERTA DE REGALO: el bundle/promo REAL como "regalo resuelto" (overlay de la oferta, nunca inventada). 4) SOCIAL PROOF TEMATIZADO: testimonio de alguien que lo regaló ("se lo regalé a ${ev.recipientEs || 'mi vieja'} y no para de usarlo") en estilo reseña.`;
+  return `
+- **ÁNGULOS DEL EVENTO (${ev.label}) — REPARTIR ENTRE LAS VARIATIONS**: la tanda es para ${ev.label}, así que cada variation ataca la fecha desde un ángulo DISTINTO (una tanda = varias apuestas, no N versiones de la misma idea). Ángulos en orden (variation #1 → ángulo 1, #2 → ángulo 2, etc.; si hay más variations que ángulos, reusá ángulos con OTRA ejecución): ${angulos} Agregá a CADA variation un campo "evento_angle" (string) con el ángulo asignado y cómo se ejecuta en ESE creativo (escena + overlay concretos). La divergencia visual progresiva (tight→loose) se mantiene igual.`;
+}
+
 // Directiva VISUAL para el prompt de imagen (inglés, como el resto del prompt).
 function eventoVisualDirective(ev) {
   if (!ev) return '';
@@ -681,7 +694,7 @@ function parseJSONFromClaude(text) {
 // N variaciones distintas (mismo concepto, distinta ejecución).
 //
 // Devuelve { plan: {...}, cost: number } o { plan: null } si falla.
-async function planStrategyAndVariations({ apiKey, refImgBuf, refMime, producto, accentColor, n, evento = null }) {
+async function planStrategyAndVariations({ apiKey, refImgBuf, refMime, producto, accentColor, n, evento = null, eventoOferta = '' }) {
   const client = new Anthropic({ apiKey });
   const b64 = refImgBuf.toString('base64');
 
@@ -719,6 +732,11 @@ async function planStrategyAndVariations({ apiKey, refImgBuf, refMime, producto,
     // Evento/fecha comercial (Día de la Madre, BlackFriday…): reangula el
     // mensaje hacia la ocasión SIN perder el dominio/beneficio del producto.
     evento ? eventoStrategyDirective(evento) : '',
+    // Oferta ESPECÍFICA de la fecha (ej. "3x2 solo por el Día de la Madre"):
+    // le gana a las ofertas generales para los overlays de promo del creativo.
+    (evento && eventoOferta)
+      ? `**OFERTA DEL EVENTO (${evento.label}) — PRIORIDAD sobre las ofertas generales para cualquier overlay/badge de promo**: "${eventoOferta}". Es la promo específica de esta fecha: usala TEXTUAL en los badges (podés atarla a la fecha, ej. "${eventoOferta} — solo por ${evento.label}").`
+      : '',
     useCaseHint ? `**CASO DE USO REAL DEL PRODUCTO** (CRÍTICO — los textos/testimonios/claims adaptados DEBEN ser sobre esto, NO sobre el problema del ad ref): ${useCaseHint.directive}` : '',
     useCaseHint?.copyTone ? `**TONO / REDACCIÓN DEL COPY** (CRÍTICO — cómo redactar los headlines y claims): ${useCaseHint.copyTone}` : '',
     scaleHint ? `**TAMAÑO REAL DEL PRODUCTO** (CRÍTICO para que la imagen no lo dibuje chiquito): ${scaleHint}` : '',
@@ -838,7 +856,7 @@ REGLAS:
 - "variations" tiene que tener EXACTAMENTE ${n} items.
 - **DIVERGENCIA PROGRESIVA**: variation #1 SIEMPRE es "tight" (réplica fiel del ad ref). Variation #2 es "medium". Variations #3 y posteriores son "loose" (escena inventada, solo se mantiene la estrategia). Esto da al usuario una grilla que va desde "lo seguro y validado" hasta "creatividad libre con la misma fórmula".
 - Si la imagen no tiene badges o CTA elements, devolvé arrays vacíos — NO inventes.
-- "research" del producto debe informar qué modelo demográfica usar en cada variación.`;
+- "research" del producto debe informar qué modelo demográfica usar en cada variación.${evento ? eventoAnglesRule(evento) : ''}`;
 
   try {
     const resp = await client.messages.create({
@@ -1074,7 +1092,7 @@ function aspectRatioFromSize(size) {
 // Cada variación termina con un prompt distinto → la grilla de N creativos
 // son N ejecuciones distintas de la misma fórmula validada, no N versiones
 // de la misma foto.
-function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentColor, aspectRatio, rebrand = false, ajuste = '', evento = null }) {
+function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentColor, aspectRatio, rebrand = false, ajuste = '', evento = null, eventoOferta = '' }) {
   const nombre = (producto?.nombre || '').trim();
   const descripcion = (producto?.descripcion || '').trim();
   const research = (producto?.research || producto?.docs?.research || '').trim();
@@ -1093,6 +1111,16 @@ function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentCol
   if (evento) {
     parts.push('');
     parts.push(eventoVisualDirective(evento));
+    // Ángulo PUNTUAL de esta variación dentro del evento (el Strategist los
+    // reparte: emocional / urgencia / oferta / social proof). Así una tanda
+    // de N son N apuestas distintas sobre la fecha.
+    if (variation?.evento_angle) {
+      parts.push(`EVENT ANGLE FOR THIS SPECIFIC VARIATION (apply on top of the event block above): ${String(variation.evento_angle).slice(0, 500)}`);
+    }
+    // Oferta específica de la fecha — le gana a la lista general de ofertas.
+    if (eventoOferta) {
+      parts.push(`EVENT OFFER (HIGHEST PRIORITY for any promo overlay/badge — render THIS text, verbatim in Spanish, optionally tied to ${evento.label}; it overrides the general offers list below): "${eventoOferta}"`);
+    }
   }
 
   // Strategy: el "por qué" del ad
@@ -1310,7 +1338,7 @@ function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentCol
   return parts.join('\n');
 }
 
-function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio, variantStyle = 'reference', ajuste = '', evento = null }) {
+function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio, variantStyle = 'reference', ajuste = '', evento = null, eventoOferta = '' }) {
   const nombre = (producto?.nombre || '').trim();
   const descripcion = (producto?.descripcion || '').trim();
   const research = (producto?.research || producto?.docs?.research || '').trim();
@@ -1325,6 +1353,7 @@ function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio
   parts.push('  • IMAGE 2 = the product you must feature. KEEP its shape, color, label artwork, packaging and proportions IDENTICAL. Do NOT redraw the label. Do NOT invent any new text on the packaging.');
   if (ajuste) parts.push(`  • **USER CORRECTION (HIGHEST PRIORITY — the user is re-generating this creative because the previous version was wrong; obey this ABOVE everything else below)**: ${ajuste}`);
   if (evento) parts.push(eventoVisualDirective(evento));
+  if (evento && eventoOferta) parts.push(`EVENT OFFER (HIGHEST PRIORITY for any promo overlay/badge — render THIS text, verbatim in Spanish, optionally tied to ${evento.label}; it overrides the general offers list below): "${eventoOferta}"`);
   parts.push('');
 
   if (skeleton && typeof skeleton === 'object') {
@@ -1675,9 +1704,12 @@ export default async function handler(req, res) {
                      // ninguna imagen. Ver el bloque planOnly más abajo.
     evento,          // Fecha comercial ('dia_madre' | 'black_friday' | texto libre).
                      // Reangula estrategia + visual hacia la ocasión.
+    eventoOferta,    // Promo específica de la fecha (ej. "3x2 solo por el Día
+                     // de la Madre") — prioridad sobre las ofertas generales.
   } = body || {};
   const ajuste = (typeof ajusteUsuario === 'string' ? ajusteUsuario : '').trim().slice(0, 500);
   const ev = resolveEvento(evento);
+  const evOferta = ev ? String(eventoOferta || '').trim().slice(0, 200) : '';
 
   if (!producto?.nombre) {
     return respondJSON(res, 400, { error: 'Falta producto.nombre' });
@@ -1767,7 +1799,7 @@ export default async function handler(req, res) {
       // aunque generemos solo `n` imágenes ahora. Las restantes quedan en el
       // plan que devolvemos al cliente para que las use en próximos calls.
       const stratResult = await planStrategyAndVariations({
-        apiKey: anthropicKey, refImgBuf, refMime, producto, accentColor, n: nPlan, evento: ev,
+        apiKey: anthropicKey, refImgBuf, refMime, producto, accentColor, n: nPlan, evento: ev, eventoOferta: evOferta,
       });
       if (stratResult.plan && Array.isArray(stratResult.plan.variations) && stratResult.plan.variations.length > 0) {
         plan = stratResult.plan;
@@ -1854,7 +1886,7 @@ export default async function handler(req, res) {
         return {
           prompt: buildPromptFromPlan({
             producto, inspiracion, plan, variation, accentColor, aspectRatio,
-            rebrand: shouldRebrand, ajuste, evento: ev,
+            rebrand: shouldRebrand, ajuste, evento: ev, eventoOferta: evOferta,
           }),
           variantStyle: shouldRebrand ? 'rebrand' : 'strategist',
           variation,
@@ -1863,9 +1895,9 @@ export default async function handler(req, res) {
     } else {
       // Fallback legacy: reference / rebrand.
       const usarRebrandVariant = !!accentColor && n >= 2;
-      const promptRef = buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio, variantStyle: 'reference', ajuste, evento: ev });
+      const promptRef = buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio, variantStyle: 'reference', ajuste, evento: ev, eventoOferta: evOferta });
       const promptRebrand = usarRebrandVariant
-        ? buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio, variantStyle: 'rebrand', ajuste, evento: ev })
+        ? buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio, variantStyle: 'rebrand', ajuste, evento: ev, eventoOferta: evOferta })
         : null;
       prompts = null; // marcador para que runCalls use el path viejo
       __legacyPromptRef = promptRef;

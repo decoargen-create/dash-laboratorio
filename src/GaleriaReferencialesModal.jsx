@@ -11,6 +11,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { confirmDialog, alertDialog, toast } from './dialogs.jsx';
+import { EVENTOS_FECHA } from './eventosFecha.js';
 import {
   X, Download, Trash2, Images, ChevronDown, ChevronUp, ExternalLink,
   LayoutGrid, Rows3, Table2, Plus, Check, FileArchive, EyeOff, Eye,
@@ -876,6 +877,11 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
   // Iteración de winner en curso — bloquea el botón y muestra progreso.
   const [iteratingId, setIteratingId] = useState(null);
   const [iterateProgress, setIterateProgress] = useState(null);
+  // Evento/fecha para iterar o regenerar (Día de la Madre, BlackFriday…): la
+  // variante nueva se reangula hacia la ocasión usando ESTE creativo de la
+  // galería como referencia. Estado simple (no persiste): se elige cada vez,
+  // así nunca queda prendido sin querer.
+  const [eventoGal, setEventoGal] = useState('');
   // Regeneración/corrección de un creativo en curso (bloquea el botón).
   const [regenId, setRegenId] = useState(null);
 
@@ -1238,6 +1244,7 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
         n: 1,
         quality: 'high',
         size: item.size || '1024x1024',
+        evento: eventoGal || undefined,
         onProgress: (p) => setIterateProgress({ ...p, brand: item.sourceBrand }),
       });
       // El backend ya disparó viora:referencial-saved en cada save al cloud;
@@ -1264,6 +1271,7 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
         ajuste: ajuste || '',
         quality: item.quality || 'high',
         size: item.size || '1024x1024',
+        evento: eventoGal || undefined,
       });
       refresh();
       toast({ type: 'success', message: 'Nuevo creativo generado. El anterior sigue en el repositorio para comparar.', duration: 6000 });
@@ -1458,6 +1466,21 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
             count={counts.winners}
             accent="amber"
           />
+          {/* Evento/fecha para "Iterar winner" y "Regenerar": la variante nueva
+              sale tematizada para la ocasión, usando el creativo de la galería
+              como referencia. No persiste — se elige cada vez. */}
+          <select
+            value={eventoGal}
+            onChange={e => setEventoGal(e.target.value)}
+            title="Al iterar un winner o regenerar un creativo, la variante nueva sale enfocada en esta fecha (ej. Día de la Madre = regalo para mamá) usando el creativo como referencia."
+            className={`ml-auto mb-1 text-[10px] font-bold rounded-md px-1.5 py-1 border focus:outline-none focus:ring-2 focus:ring-brand-500 transition ${
+              eventoGal
+                ? 'bg-pink-600 text-white border-pink-500'
+                : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 border-transparent'
+            }`}
+          >
+            {EVENTOS_FECHA.map(ev => <option key={ev.key} value={ev.key}>{ev.label}</option>)}
+          </select>
         </div>
 
         {/* Body */}

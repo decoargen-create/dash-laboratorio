@@ -37,6 +37,7 @@ import { friendlyAIError } from './aiError.js';
 import { saveReferencial, getUsedAdIdsForProducto } from './galeriaReferenciales.js';
 import { startBulk, patchBulk, reportAdFinished, finishBulk, clearBulk, subscribeBulk } from './bulkProgressStore.js';
 import { withGenSlot, TARGET_INFLIGHT } from './genConcurrency.js';
+import { EVENTOS_FECHA } from './eventosFecha.js';
 import BulkConfirmModal from './BulkConfirmModal.jsx';
 import { cacheAdImagesBatch, getCachedAdImageUrl, getCachedAdImageDataUrl } from './adImagesStore.js';
 import { checkAdProductMismatch } from './adDomainCheck.js';
@@ -1658,7 +1659,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       //   - 4 variantes: el plan del Strategist va de réplica fiel a
       //     creatividad libre; con 4 ya cubrís ese rango.
       //   - high: siempre.
-      const RECOMENDADO = { n: 4, size: '1024x1536', quality: 'high', v: 2 };
+      const RECOMENDADO = { n: 4, size: '1024x1536', quality: 'high', evento: '', v: 2 };
       const raw = localStorage.getItem('adslab-marketing-gen-opts');
       const parsed = raw ? JSON.parse(raw) : null;
       // MIGRACIÓN v2 (one-shot): pisa lo persistido con el recomendado UNA
@@ -1666,7 +1667,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       // (2K para un ganador, 6 variantes, etc.) sigue persistiendo normal.
       if (!parsed || parsed.v !== 2) return RECOMENDADO;
       return parsed;
-    } catch { return { n: 4, size: '1024x1536', quality: 'high', v: 2 }; }
+    } catch { return { n: 4, size: '1024x1536', quality: 'high', evento: '', v: 2 }; }
   });
   useEffect(() => {
     try { localStorage.setItem('adslab-marketing-gen-opts', JSON.stringify(genOpts)); } catch {}
@@ -1719,7 +1720,10 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   // plan se adapta al PRODUCTO, así que cachear solo por ad.id hacía que el
   // mismo ad usado en 2 productos reusara el plan del otro (texto del producto
   // equivocado). Prefijamos con el producto activo.
-  const skelKey = (adId) => `${activeProductoId || 'global'}:${adId}`;
+  // La clave del cache de planes incluye el EVENTO: un plan calculado sin
+  // evento (o para otro evento) tiene la estrategia mal angulada para la
+  // fecha elegida — no se debe reusar.
+  const skelKey = (adId) => `${activeProductoId || 'global'}:${adId}${genOpts.evento ? `:ev-${genOpts.evento}` : ''}`;
   const upsertSkeleton = (adId, skel) => {
     if (!adId || !skel) return;
     setSkeletonCache(prev => {
@@ -2178,6 +2182,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           planOnly: true,
           n: 1,
           nPlan: nVar,
+          evento: genOpts.evento || undefined,
           producto: {
             id: producto.id,
             nombre: producto.nombre,
@@ -2322,6 +2327,9 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       accentColor: getAccentColor(producto.id, producto) || '',
       quality: genOpts.quality,
       size: genOpts.size,
+      // Modo evento (Día de la Madre, BlackFriday…): el backend reangula
+      // estrategia + visual hacia la ocasión.
+      evento: genOpts.evento || undefined,
     };
 
     // Helper: una sola llamada (devuelve { data } o lanza).
@@ -3646,6 +3654,23 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
             ))}
           </div>
 
+          {/* Evento / fecha comercial — reangula los creativos hacia la ocasión
+              (regalo u oferta según el evento) manteniendo los dolores y
+              beneficios reales del producto. Rosa fuerte cuando está activo,
+              para que nunca quede prendido sin que se note. */}
+          <select
+            value={genOpts.evento || ''}
+            onChange={e => setGenOpts(o => ({ ...o, evento: e.target.value }))}
+            title="Modo evento: los creativos se enfocan en esta fecha (ej. Día de la Madre = el producto como regalo para mamá; BlackFriday = urgencia + oferta real). Tomá de referencia tus ads evergreen de siempre."
+            className={`text-[10px] font-bold rounded-md px-1.5 py-1 border focus:outline-none focus:ring-2 focus:ring-brand-500 transition ${
+              genOpts.evento
+                ? 'bg-pink-600 text-white border-pink-500'
+                : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 border-transparent'
+            }`}
+          >
+            {EVENTOS_FECHA.map(ev => <option key={ev.key} value={ev.key}>{ev.label}</option>)}
+          </select>
+
           <button onClick={limpiarSeleccion}
             className="text-[11px] text-gray-500 hover:text-red-500 transition">
             Limpiar
@@ -4026,6 +4051,24 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                           );
                         })}
                       </div>
+                    </div>
+
+                    <div className="mt-2.5 mb-1">
+                      <p className="text-[9px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">Evento / fecha</p>
+                      <select
+                        value={genOpts.evento || ''}
+                        onChange={e => setGenOpts(o => ({ ...o, evento: e.target.value }))}
+                        className={`w-full text-[10px] font-bold rounded px-2 py-1.5 border focus:outline-none focus:ring-2 focus:ring-brand-500 transition ${
+                          genOpts.evento
+                            ? 'bg-pink-600 text-white border-pink-500'
+                            : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 border-transparent'
+                        }`}
+                      >
+                        {EVENTOS_FECHA.map(ev => <option key={ev.key} value={ev.key}>{ev.label}</option>)}
+                      </select>
+                      <p className="mt-1 text-[9px] text-gray-500 dark:text-gray-400">
+                        Reangula el creativo hacia la fecha (regalo u oferta) manteniendo los dolores del producto. En eventos de descuento usa SOLO tus ofertas reales.
+                      </p>
                     </div>
 
                     <p className="mt-2 text-[9px] text-gray-500 dark:text-gray-400 italic">

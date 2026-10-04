@@ -252,6 +252,14 @@ export default function TarjetaProduccion({ a, num, personas = [], team = [], on
 
       {/* Meta: creada · subidos · aprobados ✓ · brief · trabada · botón de mover */}
       <div className="mt-2 pl-5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+        {/* Etiqueta de campaña (ej. "💐 Día de la Madre") — la pone el admin en
+            el detalle; sirve para distinguir las tarjetas de una fecha. */}
+        {a.etiqueta && (
+          <span className="inline-flex items-center gap-1 font-bold text-pink-700 dark:text-pink-300 bg-pink-100 dark:bg-pink-900/40 px-1.5 py-0.5 rounded-md"
+            title={`Tarjeta de la campaña: ${a.etiqueta}`}>
+            {a.etiqueta}
+          </span>
+        )}
         {fmtFechaCorta(a.createdAt) && (
           <span className="inline-flex items-center gap-1" title={`Tarjeta creada el ${fmtFechaLarga(a.createdAt)}`}>
             <Calendar size={12} className="text-gray-400" />{fmtFechaCorta(a.createdAt)}

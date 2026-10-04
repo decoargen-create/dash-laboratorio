@@ -33,6 +33,7 @@ import { driveStatus, connectDrive, disconnectDrive } from './produccionDrive.js
 import { analizar as analizarCarpetas, reparar as repararCarpetas, tarjetasConVideosEnDrive } from './produccionRepararCarpetas.js';
 import TeamModal from './TeamModal.jsx';
 import ConfirmDialog from './ConfirmDialog.jsx';
+import { EVENTOS_FECHA } from './eventosFecha.js';
 
 const EQUIPO_DEFAULT = ['Fran', 'Wanda', 'Flor'];
 
@@ -2447,6 +2448,26 @@ export function CardDetailModal({ a, personas, team = [], onClose, addToast, onT
             <p className="text-[10px] text-gray-400 mt-1">
               Cuenta para el pago del mes de la semana elegida. Cambialo solo para excepciones (ej. una tarjeta que se aprobó tarde pero es del mes pasado).
             </p>
+          </div>
+
+          {/* Etiqueta de campaña — marca la tarjeta como de una fecha comercial
+              ("💐 Día de la Madre") y se ve como chip en el tablero (admin y
+              editor). Útil para distinguir lo de la fecha de lo evergreen. */}
+          <div>
+            <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Etiqueta de campaña</span>
+            <div className="flex flex-wrap gap-1">
+              <button onClick={() => updateAssignment(a.id, { etiqueta: '' })}
+                className={`text-[11px] font-bold px-2 py-1 rounded-md transition ${!a.etiqueta ? 'bg-brand-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200'}`}>
+                Sin etiqueta
+              </button>
+              {EVENTOS_FECHA.filter(e => e.key).map(e => (
+                <button key={e.key} onClick={() => updateAssignment(a.id, { etiqueta: e.label })}
+                  className={`text-[11px] font-bold px-2 py-1 rounded-md transition ${a.etiqueta === e.label ? 'bg-pink-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200'}`}>
+                  {e.label}
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] text-gray-400 mt-1">Se muestra como chip en la tarjeta, también en el tablero del editor.</p>
           </div>
 
           {/* Cambios pedidos (lo que ve el creativo) */}

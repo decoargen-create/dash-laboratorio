@@ -288,6 +288,23 @@ function deviceGuardLine(effectiveForm) {
   return `  • **PHYSICAL, NON-INGESTIBLE PRODUCT (CRITICAL, HARD RULE — overrides the reference)**: This product is a physical ${effectiveForm} — a real object you hold, use or wear, NOT something you ingest, swallow or spread, and NOT a supplement. You MUST render EXACTLY the object shown in IMAGE 2 (the product photo): same shape, material, color and proportions. NEVER draw capsules, pills, softgels, tablets, gummies, powder, liquid, a supplement bottle/jar/blister, or ANY ingestible — even if IMAGE 1 (the reference) is a supplement and shows capsules/pills/a bottle. Replace the reference product ENTIRELY with the object from IMAGE 2. Do NOT place it inside a bowl/jar as if it were content, and do NOT scatter loose capsules/pills anywhere in the scene. Any label or packaging must show THIS product, never a pill bottle.`;
 }
 
+// ¿El producto EMITE LUZ? (lámparas solares, luciérnagas, guirnaldas, faroles,
+// veladores, LED). Para estos la foto del producto suele ser APAGADO y de día
+// — pero el producto VENDE por el resplandor. La fidelidad aplica a su diseño
+// físico; el creativo debe mostrarlo ENCENDIDO, con el brillo como héroe.
+function emitsLight(producto) {
+  const haystack = [
+    producto?.nombre || '',
+    producto?.descripcion || '',
+    String(producto?.research || producto?.docs?.research || '').slice(0, 3000),
+  ].join(' ').toLowerCase();
+  return /\b(l[áa]mparas?|luces|luz solar|lumin|luci[ée]rnag|farol(es)?|led|velador(es)?|guirnald|antorchas?|solar light|fairy light|string light|glow)\b/.test(haystack);
+}
+
+function lightProductDirective() {
+  return '**LIGHT-EMITTING PRODUCT (CRITICAL)**: this product\'s entire selling point is its GLOW. Render it switched ON — warm points of light / soft warm glow exactly where the real product emits light, casting believable warm light onto nearby plants, ground or surfaces. "Pixel-faithful" applies to its PHYSICAL design (shape, materials, colors — copy those from IMAGE 2 exactly); showing it ILLUMINATED is REQUIRED, never a violation, even if IMAGE 2 shows it off/unlit in daylight. Prefer dusk or night scenes where the glow pops as the hero of the image. An unlit, daytime-only rendering of this product is a FAILED creative.';
+}
+
 // Devuelve la "categoría de uso" del producto — el contexto en el que vive
 // el producto naturalmente. gpt-image-2 lo usa para ADAPTAR PROPS y FONDO
 // del winner cuando son category-specific del producto original (ej:
@@ -749,6 +766,8 @@ async function planStrategyAndVariations({ apiKey, refImgBuf, refMime, producto,
       ? `**OFERTA DEL EVENTO (${evento.label}) — PRIORIDAD sobre las ofertas generales para cualquier overlay/badge de promo**: "${eventoOferta}". Es la promo específica de esta fecha: usala TEXTUAL en los badges (podés atarla a la fecha, ej. "${eventoOferta} — solo por ${evento.label}").`
       : '',
     useCaseHint ? `**CASO DE USO REAL DEL PRODUCTO** (CRÍTICO — los textos/testimonios/claims adaptados DEBEN ser sobre esto, NO sobre el problema del ad ref): ${useCaseHint.directive}` : '',
+    // Producto que emite luz: el plan debe apostar al RESPLANDOR de noche.
+    emitsLight(producto) ? `**PRODUCTO QUE EMITE LUZ (CRÍTICO)**: el diferencial de este producto es su RESPLANDOR encendido (la foto del producto puede venir apagada y de día — ignorá eso). Las variations deben mostrarlo ENCENDIDO, con preferencia por escenas de atardecer/noche donde el brillo cálido sea el héroe visual del ad (jardín oscureciendo, luz cálida sobre plantas/camino). Al menos una variation debe ser una toma nocturna full donde solo se vea el resplandor mágico. Escenas de día con el producto apagado = creativo fallido.` : '',
     useCaseHint?.copyTone ? `**TONO / REDACCIÓN DEL COPY** (CRÍTICO — cómo redactar los headlines y claims): ${useCaseHint.copyTone}` : '',
     scaleHint ? `**TAMAÑO REAL DEL PRODUCTO** (CRÍTICO para que la imagen no lo dibuje chiquito): ${scaleHint}` : '',
     research ? `Research / audiencia / pain points (foco de la landing):\n${research}` : '',
@@ -1213,6 +1232,8 @@ function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentCol
   parts.push('');
   parts.push('THE PRODUCT (IMAGE 2):');
   if (nombre) parts.push(`  • Product name: ${nombre}`);
+  // Producto que emite luz: mostrarlo ENCENDIDO (la foto suele venir apagada).
+  if (emitsLight(producto)) parts.push(`  • ${lightProductDirective()}`);
   // Fallback (audit HIGH #2): si productoForm es null, igual intentamos
   // inferir categoría desde nombre+descripcion+research para no perder
   // el guardrail "closed packaging" / "scene adaptation" cuando el user
@@ -1417,6 +1438,8 @@ function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio
   parts.push('');
   parts.push('THE PRODUCT (IMAGE 2):');
   if (nombre) parts.push(`  - Product name: ${nombre}`);
+  // Producto que emite luz: mostrarlo ENCENDIDO (la foto suele venir apagada).
+  if (emitsLight(producto)) parts.push(`  - ${lightProductDirective()}`);
   // Fallback (audit HIGH #2) — ver comentario en buildPromptFromPlan.
   const effectiveForm = productoForm || inferCategoryFromText(producto);
   if (effectiveForm) {

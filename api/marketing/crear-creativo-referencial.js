@@ -99,6 +99,9 @@ function inferProductForm(producto) {
     // caer en crema/otro formato ingerible. Sin esto, el generador copiaba las
     // cápsulas del ad de referencia (bug reportado con Getaeki → cápsulas).
     { canon: 'cepillo',      re: /\b(cepillos?|brush|masajeador(es)?|gua ?sha|rodillo facial|roller facial|jade roller|dispositivos?|gadgets?|aparatos?)\b/ },
+    // Jardín/exterior ANTES que los formatos cosméticos: una "lámpara solar"
+    // no debe caer en crema/aceite por alguna palabra suelta del research.
+    { canon: 'jardin',       re: /\b(l[áa]mparas? solares?|luz solar|luces solares?|luci[ée]rnagas?|farol(es)? solar(es)?|estacas? solares?|luminarias?|solar garden|jard[íi]n|patio|exterior|camino de entrada)\b/ },
     { canon: 'gomitas',      re: /\b(gomitas?|gummies|gummys?)\b/ },
     { canon: 'cápsulas',     re: /\b(c[áa]psulas?|capsules?|softgels?|pastillas?|tabletas?|tablets?)\b/ },
     { canon: 'polvo',        re: /\b(polvo|powder|mix en polvo)\b/ },
@@ -270,6 +273,7 @@ const DEVICE_FORMATS = new Set([
   'cepillo', 'brush', 'masajeador', 'gua sha', 'guasha',
   'gadget', 'dispositivo', 'aparato', 'herramienta', 'accesorio',
   'rodillo', 'roller', 'textil', 'prenda', 'hogar', 'organizador',
+  'jardin', 'jardín', 'exterior', 'lámpara', 'lampara',
 ]);
 function isDevice(formato) {
   if (!formato) return false;
@@ -508,6 +512,13 @@ function inferProductCategory(formato) {
       label: 'hogar / organizador',
       context: 'the product in a real home setting (closet, shelf, drawer, room), scaled realistically against furniture and people, clean bright light',
       avoidContext: 'capsules, pills, cosmetics vanity, tiny handheld framing — this is a home / furniture-scale object',
+    };
+  }
+  if (['jardin', 'jardín', 'exterior', 'lámpara', 'lampara'].includes(f)) {
+    return {
+      label: 'jardín / exterior (luces, deco)',
+      context: 'an outdoor garden at dusk or night: the product INSTALLED outdoors — staked into a flower bed, lawn, planter or along a path — glowing warmly against the darkening garden (firefly-like warm points of light if it is a light), cozy backyard/patio with real plants, stone path or wooden deck, twilight/blue-hour ambience that makes the glow pop; realistic outdoor scale vs plants and ground',
+      avoidContext: 'capsules, pills, supplement bottles, bathroom vanity, indoor closets/shelves/drawers, applying anything to the body or face, daytime-only scenes that hide the glow — this is an outdoor garden product, NOT a beauty device, supplement or indoor organizer',
     };
   }
   return null;

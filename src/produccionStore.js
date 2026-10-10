@@ -22,7 +22,8 @@
 import { supabase } from './supabase.js';
 import {
   PAGO_POR_PRODUCTO, VIDEOS_POR_PRODUCTO, DEFAULT_BONUS_TRAMOS,
-  bonusObjetivo, pagoProductoDeCfg, bonusDeCfg, resumenVideosPorProducto, monthOfWeek } from './produccionCalc.js';
+  bonusObjetivo, pagoProductoDeCfg, bonusDeCfg, resumenVideosPorProducto, monthOfWeek,
+  proporcionVideos } from './produccionCalc.js';
 // Re-exportamos la lógica pura para no romper a quien la importaba desde acá.
 export { PAGO_POR_PRODUCTO, VIDEOS_POR_PRODUCTO, DEFAULT_BONUS_TRAMOS, bonusObjetivo, resumenVideosPorProducto };
 
@@ -699,7 +700,7 @@ export function toggleWinner(rec, productoId, productoNombre) {
   return !estaba;
 }
 
-export function addAssignment({ weekKey, productoId, productoNombre, persona, creatorId = null, tipo = 'renovado', brief = '', materialLink = '' }) {
+export function addAssignment({ weekKey, productoId, productoNombre, persona, creatorId = null, tipo = 'renovado', brief = '', materialLink = '', videosTotal = null }) {
   const per = (persona || '').trim();
   // persona es opcional: una tarjeta puede quedar "sin asignar" hasta que se le
   // cuelgue la persona (como en Trello, agregás el label después).
@@ -720,7 +721,9 @@ export function addAssignment({ weekKey, productoId, productoNombre, persona, cr
     ownerId: _userId || null, // dueño = quien crea la tarjeta (aislamiento por inquilino)
     tipo: tipo === 'testeo' ? 'testeo' : 'renovado',
     estado: 'porhacer',
-    videosTotal: VIDEOS_POR_PRODUCTO,
+    // Objetivo de videos de ESTA tarjeta (el pago escala proporcional). Si no
+    // lo pasan, queda el default histórico de 9.
+    videosTotal: Number(videosTotal) > 0 ? Math.min(30, Math.round(Number(videosTotal))) : VIDEOS_POR_PRODUCTO,
     videosAprobados: 0,
     brief: brief || '',
     nota: '',
@@ -1113,6 +1116,10 @@ function writePagoConfigLocal(obj) {
 // Monto y bono de una persona = la lógica pura (produccionCalc) aplicada a SU
 // config guardada (o los defaults si no configuró).
 export function pagoProductoDe(persona) { return pagoProductoDeCfg(_pagoConfig[cfgKey(persona)]); }
+// Pago de UNA tarjeta: el monto por producto de la persona, proporcional al
+// objetivo de videos de la tarjeta (7 videos = 7/9 del monto — mismo precio
+// por video). Tarjetas de 9 pagan el monto completo, como siempre.
+export function pagoDeTarjeta(a) { return Math.round(pagoProductoDe(a?.persona) * proporcionVideos(a)); }
 export function bonusDe(persona, completados) { return bonusDeCfg(_pagoConfig[cfgKey(persona)], completados); }
 // Config completa de una persona para la UI (con defaults si no hay fila).
 export function getPagoConfig(persona) {
@@ -1180,15 +1187,16 @@ export function paymentSummary(weekKey) {
   for (const a of asigs) {
     const p = a.persona;
     if (!p) continue; // "por distribuir" no cuenta para el pago todavía
-    if (!byPersona[p]) byPersona[p] = { persona: p, asignados: 0, completados: 0, pagados: 0 };
+    if (!byPersona[p]) byPersona[p] = { persona: p, asignados: 0, completados: 0, pagados: 0, montoProductos: 0 };
     byPersona[p].asignados++;
-    if (esCompleto(a.estado)) byPersona[p].completados++;
+    // El monto se suma POR TARJETA (no completados × precio): cada tarjeta
+    // paga proporcional a su objetivo de videos (ver pagoDeTarjeta).
+    if (esCompleto(a.estado)) { byPersona[p].completados++; byPersona[p].montoProductos += pagoDeTarjeta(a); }
     if (a.pagado) byPersona[p].pagados++;
   }
   return Object.values(byPersona).map(x => {
-    const montoProductos = x.completados * pagoProductoDe(x.persona);
     const bonus = bonusDe(x.persona, x.completados);
-    return { ...x, montoProductos, bonus, totalArs: montoProductos + bonus };
+    return { ...x, bonus, totalArs: x.montoProductos + bonus };
   }).sort((a, b) => a.persona.localeCompare(b.persona, 'es'));
 }
 
@@ -1209,7 +1217,7 @@ export function inversionPorProducto() {
       }
       const p = byProd[key];
       p.tarjetas++;
-      if (esCompleto(a.estado)) { p.completados++; p.invertido += pagoProductoDe(a.persona); }
+      if (esCompleto(a.estado)) { p.completados++; p.invertido += pagoDeTarjeta(a); }
       else p.enProceso++;
     }
   }

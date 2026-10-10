@@ -16,7 +16,7 @@ import {
 import {
   subscribeProduccion, allWeekKeys, listAssignments, weekLabel, weekKeyOf,
   ESTADO_LABELS, ESTADOS_CREATOR, updateAssignment, refreshProduccion, esCompleto,
-  monthKeyOf, monthLabel, weeksInMonth, pagoProductoDe, bonusDe,
+  monthKeyOf, monthLabel, weeksInMonth, pagoDeTarjeta, bonusDe,
   resumenVideosPorProducto, VIDEOS_POR_PRODUCTO,
 } from './produccionStore.js';
 import { CreativosSection, AnilloAprobados } from './produccionUpload.jsx';
@@ -253,10 +253,12 @@ export default function CreatorWorkspace({ user, onLogout, addToast, darkMode, t
     const byPer = {};
     for (const a of cards) { const p = a.persona || ''; (byPer[p] = byPer[p] || []).push(a); }
     for (const p in byPer) {
-      const comp = byPer[p].filter(a => esCompleto(a.estado)).length;
-      completadosMes += comp;
-      ganadoProductos += comp * pagoProductoDe(p);
-      bonusMes += bonusDe(p, comp);
+      // El pago se suma POR TARJETA (proporcional a su objetivo de videos),
+      // no completados × precio fijo — así una tarjeta de 7 paga 7/9.
+      const compCards = byPer[p].filter(a => esCompleto(a.estado));
+      completadosMes += compCards.length;
+      ganadoProductos += compCards.reduce((s, a) => s + pagoDeTarjeta(a), 0);
+      bonusMes += bonusDe(p, compCards.length);
     }
     videosMes += cards.reduce((n, a) => n + (a.archivos?.length || 0), 0);
   }

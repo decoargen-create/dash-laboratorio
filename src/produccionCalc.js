@@ -19,6 +19,15 @@ export function pagoProductoDeCfg(cfg) {
   return Number.isFinite(cfg?.pagoProducto) ? cfg.pagoProducto : PAGO_POR_PRODUCTO;
 }
 
+// Proporción del pago según el objetivo de videos de la tarjeta: el monto por
+// producto está calibrado para 9 videos, así que una tarjeta de 7 paga 7/9
+// (mismo precio POR VIDEO: ej. $45.000/9 = $5.000 → 7 videos = $35.000).
+// Las tarjetas de 9 (el default histórico) siguen pagando el monto completo.
+export function proporcionVideos(a) {
+  const t = Number(a?.videosTotal);
+  return (t > 0 ? t : VIDEOS_POR_PRODUCTO) / VIDEOS_POR_PRODUCTO;
+}
+
 // Bonus de una persona según sus completados de la semana. Sin config → default
 // global; con config → el tramo más alto que alcanzó (0 si no tiene tramos).
 export function bonusDeCfg(cfg, completados) {
@@ -59,7 +68,7 @@ export function resumenVideosPorProducto(cards) {
     const k = nombre.toLowerCase();
     if (!by[k]) by[k] = { producto: nombre, subidos: 0, target: 0, tarjetas: 0, entregadas: 0 };
     by[k].subidos += (a.archivos?.length || 0);
-    by[k].target += VIDEOS_POR_PRODUCTO;
+    by[k].target += (Number(a.videosTotal) > 0 ? Number(a.videosTotal) : VIDEOS_POR_PRODUCTO);
     by[k].tarjetas++;
     if (a.estado === 'publicado' || a.estado === 'archivado') by[k].entregadas++;   // entregada = publicada (o archivada)
   }

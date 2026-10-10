@@ -21,7 +21,7 @@ import {
   assignCreator, subscribeProduccion, esCompleto, bonusObjetivo, bonusDe, inversionPorProducto,
   getRole, entregasNuevas, ultimaSubidaTs, personasEnTarjetas, resumenVideosPorProducto,
   resyncDesdeNube, vaciarTodo, setMaterialLinkProducto, probarDiscord,
-  loadNotifConfig, saveNotifConfig, toggleWinner, winnersDeProducto, pagoProductoDe,
+  loadNotifConfig, saveNotifConfig, toggleWinner, winnersDeProducto, pagoDeTarjeta,
   monthLabel,
 } from './produccionStore.js';
 import { CreativosSection, subirParaTarjeta, VIDEO_ACCEPT, probeDrive, aprobarTodosConCascada, AnilloAprobados, getAuthToken } from './produccionUpload.jsx';
@@ -1010,7 +1010,7 @@ export default function ProduccionSection({ addToast }) {
         const resumen = resumenVideosPorProducto(asigsActivos).map(r => {
           const invertido = asigs.reduce((s, a) => {
             const nombre = ((a.productoNombre || '').trim() || 'Sin nombre').toLowerCase();
-            return (nombre === r.producto.toLowerCase() && esCompleto(a.estado)) ? s + pagoProductoDe(a.persona) : s;
+            return (nombre === r.producto.toLowerCase() && esCompleto(a.estado)) ? s + pagoDeTarjeta(a) : s;
           }, 0);
           return { ...r, invertido };
         });
@@ -1338,6 +1338,17 @@ function AgregarProductoModal({ productos, personas, team = [], asigs, weekKey, 
   // Evita crear tarjetas de más o con el producto equivocado.
   const [confirming, setConfirming] = useState(false);
 
+  // Objetivo de VIDEOS por tarjeta para esta tanda. El pago escala proporcional
+  // (mismo precio por video: 7 videos = 7/9 del monto). Recordamos la última
+  // elección para que "a partir de ahora son 7" sea elegirlo una sola vez.
+  const [videosPorTarjeta, setVideosPorTarjeta] = useState(() => {
+    try { const v = parseInt(localStorage.getItem('adslab-videos-por-tarjeta') || '', 10); return (v >= 1 && v <= 30) ? v : VIDEOS_POR_PRODUCTO; } catch { return VIDEOS_POR_PRODUCTO; }
+  });
+  const elegirVideos = (n) => {
+    setVideosPorTarjeta(n);
+    try { localStorage.setItem('adslab-videos-por-tarjeta', String(n)); } catch {}
+  };
+
   const yaEnSemana = useMemo(() => new Set(asigs.map(a => String(a.productoId))), [asigs]);
   const filtrados = useMemo(() => {
     const t = q.trim().toLowerCase();
@@ -1371,7 +1382,7 @@ function AgregarProductoModal({ productos, personas, team = [], asigs, weekKey, 
       const prod = productos.find(p => String(p.id) === id);
       if (!prod) return;
       if (targets.length === 0) {
-        addAssignment({ weekKey, productoId: prod.id, productoNombre: prod.nombre, persona: '', creatorId: null });
+        addAssignment({ weekKey, productoId: prod.id, productoNombre: prod.nombre, persona: '', creatorId: null, videosTotal: videosPorTarjeta });
         n++;
         return;
       }
@@ -1379,7 +1390,7 @@ function AgregarProductoModal({ productos, personas, team = [], asigs, weekKey, 
         const m = team.find(t => t.id === key);
         const per = m ? (m.display_name || m.email) : key.slice(2); // "p:Nombre"
         for (let i = 0; i < c; i++) {
-          addAssignment({ weekKey, productoId: prod.id, productoNombre: prod.nombre, persona: per, creatorId: m ? m.id : null });
+          addAssignment({ weekKey, productoId: prod.id, productoNombre: prod.nombre, persona: per, creatorId: m ? m.id : null, videosTotal: videosPorTarjeta });
           n++;
         }
       });
@@ -1409,7 +1420,7 @@ function AgregarProductoModal({ productos, personas, team = [], asigs, weekKey, 
           <div className="p-5 space-y-4">
             <div className="text-center py-1">
               <div className="text-3xl font-extrabold text-brand-600 dark:text-brand-400 tabular-nums leading-none">{totalTarjetas}</div>
-              <div className="text-sm text-gray-600 dark:text-gray-300 mt-1">tarjeta{totalTarjetas === 1 ? '' : 's'} nueva{totalTarjetas === 1 ? '' : 's'} para <b>{weekLabel(weekKey)}</b></div>
+              <div className="text-sm text-gray-600 dark:text-gray-300 mt-1">tarjeta{totalTarjetas === 1 ? '' : 's'} nueva{totalTarjetas === 1 ? '' : 's'} de <b>{videosPorTarjeta} video{videosPorTarjeta === 1 ? '' : 's'}</b> para <b>{weekLabel(weekKey)}</b></div>
             </div>
             <div>
               <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Producto{productosSel.length === 1 ? '' : 's'}</span>
@@ -1524,6 +1535,24 @@ function AgregarProductoModal({ productos, personas, team = [], asigs, weekKey, 
                 </div>
               );
             })()}
+          </div>
+          {/* Objetivo de videos por tarjeta — el pago escala proporcional
+              (mismo precio por video). Se recuerda la última elección. */}
+          <div>
+            <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">
+              Videos por tarjeta <span className="normal-case font-medium text-gray-400">(el pago escala proporcional)</span>
+            </span>
+            <div className="flex items-center gap-1.5">
+              {[3, 5, 6, 7, 9].map(n => (
+                <button key={n} onClick={() => elegirVideos(n)}
+                  className={`text-xs font-bold px-2.5 py-1 rounded-md transition tabular-nums ${videosPorTarjeta === n ? 'bg-brand-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200'}`}>
+                  {n}
+                </button>
+              ))}
+              <input type="number" min={1} max={30} value={videosPorTarjeta}
+                onChange={e => { const v = parseInt(e.target.value, 10); if (v >= 1 && v <= 30) elegirVideos(v); }}
+                className="w-14 px-2 py-1 text-xs font-bold text-center bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-2 px-5 py-3.5 border-t border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
@@ -2468,6 +2497,24 @@ export function CardDetailModal({ a, personas, team = [], onClose, addToast, onT
               ))}
             </div>
             <p className="text-[10px] text-gray-400 mt-1">Se muestra como chip en la tarjeta, también en el tablero del editor.</p>
+          </div>
+
+          {/* Objetivo de videos de ESTA tarjeta — el pago escala proporcional
+              (mismo precio por video). Cambiarlo acá corrige tarjetas ya creadas. */}
+          <div>
+            <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Videos objetivo · pago proporcional</span>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {[3, 5, 6, 7, 9].map(n => (
+                <button key={n} onClick={() => updateAssignment(a.id, { videosTotal: n })}
+                  className={`text-[11px] font-bold px-2 py-1 rounded-md transition tabular-nums ${(a.videosTotal || VIDEOS_POR_PRODUCTO) === n ? 'bg-brand-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200'}`}>
+                  {n}
+                </button>
+              ))}
+              <input type="number" min={1} max={30} value={a.videosTotal || VIDEOS_POR_PRODUCTO}
+                onChange={e => { const v = parseInt(e.target.value, 10); if (v >= 1 && v <= 30) updateAssignment(a.id, { videosTotal: v }); }}
+                className="w-14 px-2 py-1 text-xs font-bold text-center bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
+              <span className="text-[11px] text-gray-400">→ paga {Math.round(((a.videosTotal || VIDEOS_POR_PRODUCTO) / VIDEOS_POR_PRODUCTO) * 100)}% del monto por producto</span>
+            </div>
           </div>
 
           {/* Cambios pedidos (lo que ve el creativo) */}

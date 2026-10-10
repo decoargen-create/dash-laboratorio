@@ -271,8 +271,8 @@ export default function TarjetaProduccion({ a, num, personas = [], team = [], on
             📤 entregado {fmtFechaCorta(entregadaEl)}
           </span>
         )}
-        <span className="inline-flex items-center gap-1" title={`${subidos} de ${VIDEOS_POR_PRODUCTO} videos subidos`}>
-          <Film size={12} className="text-emerald-500" /><b className="text-gray-700 dark:text-gray-200">{subidos}</b>/{VIDEOS_POR_PRODUCTO} videos
+        <span className="inline-flex items-center gap-1" title={`${subidos} de ${a.videosTotal || VIDEOS_POR_PRODUCTO} videos subidos`}>
+          <Film size={12} className="text-emerald-500" /><b className="text-gray-700 dark:text-gray-200">{subidos}</b>/{a.videosTotal || VIDEOS_POR_PRODUCTO} videos
         </span>
         {subidos > 0 && (
           <span className={`inline-flex items-center gap-1 tabular-nums ${aprob >= subidos ? 'text-emerald-500' : aprob === subidos - 1 ? 'text-amber-500' : 'text-gray-400'}`}

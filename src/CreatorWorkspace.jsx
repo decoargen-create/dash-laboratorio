@@ -12,6 +12,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   Film, LogOut, RefreshCw, CheckCircle2, Clock, Sparkles, ExternalLink, AlertTriangle, Wallet, X, FileText, FolderOpen, Star,
+  Clapperboard, ChevronDown, Copy, Check,
 } from 'lucide-react';
 import {
   subscribeProduccion, allWeekKeys, listAssignments, weekLabel, weekKeyOf,
@@ -31,6 +32,73 @@ const ESTADO_BADGE = {
   aprobado: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
   publicado: 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300',
 };
+
+// Reels de Instagram de referencia que el admin adjuntó a la tarjeta: el
+// editor los mira (embed público de IG — no necesita login) y, si hay guion
+// adaptado, lo copia. El iframe se monta recién al expandir (lazy).
+function ReferenciaItem({ r }) {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const guionTxt = [
+    r.guion || '',
+    (r.hooksAlternativos || []).length ? '\nHOOKS ALTERNATIVOS\n' + r.hooksAlternativos.map((h, i) => `${i + 1}. ${h}`).join('\n') : '',
+    r.notasEditor ? `\nNOTAS\n${r.notasEditor}` : '',
+  ].filter(Boolean).join('\n');
+  const copiar = async () => {
+    try { await navigator.clipboard.writeText(guionTxt); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
+  };
+  return (
+    <div className="rounded-md bg-white/70 dark:bg-gray-800/50 overflow-hidden">
+      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left hover:bg-white dark:hover:bg-gray-800 transition">
+        <Clapperboard size={11} className="text-pink-500 shrink-0" />
+        <span className="flex-1 min-w-0 truncate text-xs font-medium text-gray-800 dark:text-gray-100">
+          @{r.owner || r.shortcode}{r.angle ? <span className="text-pink-600 dark:text-pink-300"> · {r.angle}</span> : ''}
+        </span>
+        <ChevronDown size={12} className={`text-gray-400 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="px-2.5 pb-2.5 space-y-2">
+          {r.shortcode && (
+            <iframe
+              src={`https://www.instagram.com/p/${r.shortcode}/embed`}
+              title={`Reel ${r.shortcode}`}
+              className="w-full max-w-[300px] h-[430px] mx-auto rounded-lg bg-white border-0"
+              loading="lazy"
+              allow="autoplay; encrypted-media"
+            />
+          )}
+          {(r.hooks || []).length > 0 && (
+            <div className="text-[11px] text-gray-600 dark:text-gray-300">
+              <span className="font-bold">Hooks:</span> {r.hooks.join(' · ')}
+            </div>
+          )}
+          {r.estructura && (
+            <div className="text-[11px] text-gray-600 dark:text-gray-300"><span className="font-bold">Fórmula:</span> {r.estructura}</div>
+          )}
+          {r.guion && (
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400">Guion adaptado — leé esto en voz alta</span>
+                <button onClick={copiar} className="inline-flex items-center gap-1 text-[10px] font-bold text-pink-600 dark:text-pink-300 hover:underline">
+                  {copied ? <Check size={10} /> : <Copy size={10} />} {copied ? 'Copiado' : 'Copiar'}
+                </button>
+              </div>
+              <pre className="whitespace-pre-wrap break-words text-xs text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-gray-900/60 rounded-md p-2.5 leading-relaxed font-sans">{r.guion}</pre>
+              {r.notasEditor && (
+                <pre className="whitespace-pre-wrap break-words text-[11px] text-gray-500 dark:text-gray-400 mt-1.5 font-sans">{r.notasEditor}</pre>
+              )}
+            </div>
+          )}
+          {r.url && (
+            <a href={r.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-[11px] font-bold text-pink-600 dark:text-pink-300 hover:underline">
+              Abrir en Instagram <ExternalLink size={10} />
+            </a>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function EstadoBadge({ estado }) {
   return (
@@ -141,6 +209,20 @@ function CreatorCardDetail({ a, num, onClose, addToast, mia = true }) {
                 ))}
               </div>
               <p className="text-[10px] text-amber-700/70 dark:text-amber-400/70 mt-1.5">Esto es lo que funcionó — usalo de base para renovar.</p>
+            </div>
+          )}
+
+          {/* Referencias de Instagram: reels que el equipo quiere que repliques.
+              Cada una trae el video (embed de IG) y, si hay, el guion adaptado. */}
+          {(a.referencias || []).length > 0 && (
+            <div className="rounded-lg border border-pink-300 dark:border-pink-800/70 bg-pink-50/60 dark:bg-pink-900/15 px-3 py-2.5">
+              <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase text-pink-700 dark:text-pink-300 mb-1.5">
+                <Clapperboard size={12} /> Reels de referencia · {a.referencias.length}
+              </div>
+              <div className="space-y-1.5">
+                {a.referencias.map(r => <ReferenciaItem key={r.id || r.url} r={r} />)}
+              </div>
+              <p className="text-[10px] text-pink-700/70 dark:text-pink-400/70 mt-1.5">Mirá el reel y replicá el formato — si hay guion adaptado, usalo tal cual.</p>
             </div>
           )}
 

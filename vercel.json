@@ -29,6 +29,7 @@
     "api/marketing/proxy-image.js": { "maxDuration": 30 },
     "api/marketing/ocr-ad.js": { "maxDuration": 180 },
     "api/marketing/transcribe-ad.js": { "maxDuration": 240 },
+    "api/marketing/referencias.js": { "maxDuration": 300 },
     "api/marketing/transcribir-video.js": { "maxDuration": 240 },
     "api/marketing/adaptar-guion-video.js": { "maxDuration": 120 },
     "api/marketing/search-ads.js": { "maxDuration": 30 },

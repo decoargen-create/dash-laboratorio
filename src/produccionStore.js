@@ -55,6 +55,8 @@ let _materialCloud = false;
 let _winnersCloud = false;
 // Ídem `etiqueta` (migración 0035) — etiqueta de campaña ("Día de la Madre").
 let _etiquetaCloud = false;
+// Ídem `referencias` (migración 0036) — reels de IG de referencia para el editor.
+let _referenciasCloud = false;
 // Contador de escrituras locales. Sirve para que un hydrate/refetch NO pise un
 // cambio optimista que ocurrió mientras traíamos la data de la nube.
 let _writeSeq = 0;
@@ -146,6 +148,7 @@ function rowToLocal(r) {
     nota: r.nota || '',
     materialLink: r.material_link || '',
     winners: Array.isArray(r.winners) ? r.winners : [],
+    referencias: Array.isArray(r.referencias) ? r.referencias : [],
     etiqueta: r.etiqueta || '',
     pagado: !!r.pagado,
     archivos: Array.isArray(r.archivos) ? r.archivos : [],
@@ -182,6 +185,8 @@ function localToRow(a) {
   if (_materialCloud) row.material_link = a.materialLink || '';
   // Ídem winners (migración 0030).
   if (_winnersCloud) row.winners = Array.isArray(a.winners) ? a.winners : [];
+  // Ídem referencias (migración 0036).
+  if (_referenciasCloud) row.referencias = Array.isArray(a.referencias) ? a.referencias : [];
   // Ídem etiqueta (migración 0035).
   if (_etiquetaCloud) row.etiqueta = a.etiqueta || null;
   return row;
@@ -329,6 +334,11 @@ async function hydrate() {
       const probe = await supabase.from(TABLE).select('etiqueta').limit(1);
       _etiquetaCloud = !probe.error;
     } catch { _etiquetaCloud = false; }
+    // Ídem `referencias` (migración 0036).
+    try {
+      const probe = await supabase.from(TABLE).select('referencias').limit(1);
+      _referenciasCloud = !probe.error;
+    } catch { _referenciasCloud = false; }
 
     const seqBefore = _writeSeq;
     const { data, error } = await supabase.from(TABLE).select('*');
@@ -681,6 +691,65 @@ export function setWinnersProducto(productoId, productoNombre, winners) {
   return n;
 }
 
+// ── Referencias (reels de IG) por producto ──────────────────────────────────
+// Igual que winners: la referencia se copia a TODAS las tarjetas del producto
+// (desnormalizada) para que el editor asignado la vea — su RLS solo le deja
+// leer sus propias filas. Shape: { id, url, shortcode, caption, owner, angle,
+// hooks, guion, notasEditor, hooksAlternativos, ts }.
+const refKey = (r) => String(r?.id || r?.shortcode || r?.url || '').trim().toLowerCase();
+
+export function referenciasDeProducto(productoId, productoNombre) {
+  const seen = new Set(); const out = [];
+  for (const a of read()) {
+    if (!mismoProducto(a, productoId, productoNombre)) continue;
+    for (const r of (a.referencias || [])) {
+      const k = refKey(r);
+      if (k && !seen.has(k)) { seen.add(k); out.push(r); }
+    }
+  }
+  return out.sort((x, y) => (y.ts || 0) - (x.ts || 0));
+}
+
+export function setReferenciasProducto(productoId, productoNombre, referencias) {
+  const arr = Array.isArray(referencias) ? referencias : [];
+  const target = JSON.stringify(arr);
+  let n = 0;
+  for (const a of read()) {
+    if (mismoProducto(a, productoId, productoNombre) && JSON.stringify(a.referencias || []) !== target) {
+      updateAssignment(a.id, { referencias: arr }); n++;
+    }
+  }
+  return n;
+}
+
+// Agrega (o actualiza, si ya estaba) una referencia en todas las tarjetas del
+// producto. Devuelve cuántas tarjetas tocó.
+export function addReferenciaAProducto(productoId, productoNombre, ref) {
+  const k = refKey(ref);
+  if (!k) return 0;
+  const actuales = referenciasDeProducto(productoId, productoNombre);
+  const nuevas = [{ ...ref, ts: ref.ts || Date.now() }, ...actuales.filter(r => refKey(r) !== k)];
+  return setReferenciasProducto(productoId, productoNombre, nuevas);
+}
+
+export function removeReferenciaDeProducto(productoId, productoNombre, refOrId) {
+  const k = typeof refOrId === 'string' ? refOrId.trim().toLowerCase() : refKey(refOrId);
+  const nuevas = referenciasDeProducto(productoId, productoNombre).filter(r => refKey(r) !== k);
+  return setReferenciasProducto(productoId, productoNombre, nuevas);
+}
+
+// Productos únicos presentes en el tablero (para el picker "enviar a tarjeta").
+export function productosEnTablero() {
+  const seen = new Map();
+  for (const a of read()) {
+    const key = a.productoId != null ? `id:${a.productoId}` : `nom:${(a.productoNombre || '').trim().toLowerCase()}`;
+    if (!a.productoNombre && a.productoId == null) continue;
+    if (!seen.has(key)) seen.set(key, { productoId: a.productoId, productoNombre: a.productoNombre || '', tarjetas: 0 });
+    seen.get(key).tarjetas++;
+  }
+  return [...seen.values()].sort((x, y) => (x.productoNombre || '').localeCompare(y.productoNombre || ''));
+}
+
 export function esWinner(rec, productoId, productoNombre) {
   const k = winnerKey(rec);
   return winnersDeProducto(productoId, productoNombre).some(w => winnerKey(w) === k);
@@ -710,6 +779,7 @@ export function addAssignment({ weekKey, productoId, productoNombre, persona, cr
   // heredamos, así una tarjeta nueva de Cepillo ya trae sus winners de referencia.
   const material = (materialLink || '').trim() || materialLinkDeProducto(productoId, productoNombre);
   const winnersHeredados = winnersDeProducto(productoId, productoNombre);
+  const referenciasHeredadas = referenciasDeProducto(productoId, productoNombre);
   const nueva = {
     id: genId(),
     weekKey,
@@ -726,6 +796,7 @@ export function addAssignment({ weekKey, productoId, productoNombre, persona, cr
     nota: '',
     materialLink: material,
     winners: winnersHeredados,
+    referencias: referenciasHeredadas,
     pagado: false,
     archivos: [],
     historial: [nuevoEvento('creacion')],

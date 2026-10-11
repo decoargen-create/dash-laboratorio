@@ -114,6 +114,7 @@ import ProductoImagenUploader from './ProductoImagenUploader.jsx';
 import GaleriaReferencialesModal from './GaleriaReferencialesModal.jsx';
 import { countReferencialesAllProductos } from './galeriaReferenciales.js';
 import TranscripcionVideosSection from './TranscripcionVideosSection.jsx';
+import ReferenciasSection from './ReferenciasSection.jsx';
 import { usePipelineRun } from './PipelineRunContext.jsx';
 import { getProductoImagen } from './productoImagen.js';
 import { setCompAds, getCompAds, hydrateCompetidoresAds, removeCompAds } from './competidorAdsIDB.js';
@@ -679,6 +680,7 @@ function ProductTabs({ activeTab, onChange }) {
       tabs: [
         { id: 'bandeja', label: 'Bandeja', emoji: '📥' },
         { id: 'inspiracion', label: 'Inspiración', emoji: '✨' },
+        { id: 'referencias', label: 'Referencias', emoji: '🎞️' },
         { id: 'creativos', label: 'Creativos', emoji: '🎨' },
         { id: 'guiones', label: 'Guiones IA', emoji: '🎬' },
         { id: 'galeria', label: 'Galería', emoji: '🖼️' },
@@ -3813,6 +3815,10 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
       {productoTab === 'guiones' && (
         <TranscripcionVideosSection addToast={addToast} forcedProductoId={String(producto.id)} embedded />
+      )}
+
+      {productoTab === 'referencias' && (
+        <ReferenciasSection producto={producto} addToast={addToast} />
       )}
 
       {productoTab === 'galeria' && (

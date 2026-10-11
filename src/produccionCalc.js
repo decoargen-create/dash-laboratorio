@@ -2,8 +2,13 @@
 // tanto la app como los tests la importen — así los tests prueban el código real
 // y no una copia que puede quedar desincronizada.
 
-export const PAGO_POR_PRODUCTO = 42000;   // ARS por producto completo y aprobado
-export const VIDEOS_POR_PRODUCTO = 9;     // objetivo de videos por tarjeta
+// ARS por producto completo y aprobado. Bajó de 42.000 cuando el objetivo pasó
+// de 9 a 7 videos. El proporcional exacto daba 32.667 (42.000 × 7/9); se
+// redondea al millar porque es plata que se paga a mano y un número redondo
+// se controla de un vistazo. Se redondea PARA ARRIBA: ante la duda el que
+// cobra de más es el creador, no la empresa.
+export const PAGO_POR_PRODUCTO = 33000;
+export const VIDEOS_POR_PRODUCTO = 7;     // objetivo de videos por tarjeta
 export const DEFAULT_BONUS_TRAMOS = [{ min: 3, monto: 24000 }, { min: 4, monto: 30000 }, { min: 5, monto: 36000 }];
 
 // Bonus por objetivo semanal por defecto (productos COMPLETADOS en la semana).
@@ -48,7 +53,7 @@ export function numerarDuplicados(cards) {
   return out;
 }
 
-// Resumen por producto: VIDEOS (subidos vs. objetivo de 9 por tarjeta) y TARJETAS
+// Resumen por producto: VIDEOS (subidos vs. el objetivo de cada tarjeta) y TARJETAS
 // (cuántas entregadas —publicadas— vs. cuántas faltan entregar). Devuelve
 // [{ producto, subidos, target, faltan, tarjetas, entregadas, pendientes }]
 // ordenado por tarjetas pendientes desc (lo que más falta, primero).
@@ -59,7 +64,9 @@ export function resumenVideosPorProducto(cards) {
     const k = nombre.toLowerCase();
     if (!by[k]) by[k] = { producto: nombre, subidos: 0, target: 0, tarjetas: 0, entregadas: 0 };
     by[k].subidos += (a.archivos?.length || 0);
-    by[k].target += VIDEOS_POR_PRODUCTO;
+    // Cada tarjeta trae su propio objetivo (videosTotal); la constante es solo
+    // el default de las que se crearon sin uno.
+    by[k].target += a.videosTotal || VIDEOS_POR_PRODUCTO;
     by[k].tarjetas++;
     if (a.estado === 'publicado' || a.estado === 'archivado') by[k].entregadas++;   // entregada = publicada (o archivada)
   }

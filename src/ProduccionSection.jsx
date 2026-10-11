@@ -22,9 +22,10 @@ import {
   getRole, entregasNuevas, ultimaSubidaTs, personasEnTarjetas, resumenVideosPorProducto,
   resyncDesdeNube, vaciarTodo, setMaterialLinkProducto, probarDiscord,
   loadNotifConfig, saveNotifConfig, toggleWinner, winnersDeProducto, pagoProductoDe,
-  referenciasDeProducto, removeReferenciaDeProducto,
+  referenciasDeProducto, removeReferenciaDeProducto, addReferenciaAProducto,
   monthLabel,
 } from './produccionStore.js';
+import { referenciasApi, toCardRef } from './referenciasApi.js';
 import { CreativosSection, subirParaTarjeta, VIDEO_ACCEPT, probeDrive, aprobarTodosConCascada, AnilloAprobados, getAuthToken } from './produccionUpload.jsx';
 import { numerarDuplicados, columnaEfectiva, monthOfWeek } from './produccionCalc.js';
 import { registrarColoresPersonas, personaColor, CHIP_CLS } from './produccionColors.js';
@@ -2386,13 +2387,41 @@ export function CardDetailModal({ a, personas, team = [], onClose, addToast, onT
     addToast?.({ type: 'success', message: `Devuelta para corregir — ${nCorr} corrección${nCorr === 1 ? '' : 'es'} marcada${nCorr === 1 ? '' : 's'}.` });
     onClose();
   };
+  // Reels de IG de referencia: pegás el link acá y se agenda (scrape + guardado
+  // del mp4 vía /api/marketing/referencias) y se adjunta a las tarjetas del
+  // producto. El análisis IA / guion se hacen desde Marketing → Referencias.
+  const [refUrl, setRefUrl] = useState('');
+  const [refBusy, setRefBusy] = useState(false);
+  const agregarReferencia = async () => {
+    const url = refUrl.trim();
+    if (!/instagram\.com\//i.test(url)) {
+      addToast?.({ type: 'warning', message: 'Pegá un link de Instagram (instagram.com/reel/… o /p/…).' });
+      return;
+    }
+    setRefBusy(true);
+    try {
+      const data = await referenciasApi('', { method: 'POST', body: { url } });
+      if (data.videoWarn) addToast?.({ type: 'warning', message: data.videoWarn });
+      const n = addReferenciaAProducto(a.productoId, a.productoNombre, toCardRef(data.referencia));
+      setRefUrl('');
+      addToast?.({ type: 'success', message: n > 0 ? `Reel agendado y agregado a ${n} tarjeta${n === 1 ? '' : 's'} ✓` : 'Ese reel ya estaba en las tarjetas del producto.' });
+    } catch (err) {
+      addToast?.({ type: 'error', message: `No se pudo agendar el reel: ${err.message}` });
+    } finally {
+      setRefBusy(false);
+    }
+  };
+
   // Diálogos propios (reemplazan window.confirm/prompt): 'eliminar' | 'cambios'.
   const [dlg, setDlg] = useState(null);
   useEscape(() => { if (dlg) return; saveAll(); onClose(); }); // Esc = guardar brief y cerrar (salvo diálogo abierto)
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto bg-black/50 backdrop-blur-sm" onClick={() => { saveAll(); onClose(); }}>
-      <div data-card-detail className="relative w-full max-w-2xl my-6 flex flex-col max-h-[calc(100vh-3rem)] bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden" onClick={e => e.stopPropagation()}>
+      {/* max-h descuenta my-6 (3rem) + p-4 del overlay (2rem): si no, el modal
+          queda más alto que el viewport y el footer (Listo / Pedir cambios)
+          obliga a scrollear la página en vez de quedar siempre visible. */}
+      <div data-card-detail className="relative w-full max-w-2xl my-6 flex flex-col max-h-[calc(100vh-5rem)] bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden" onClick={e => e.stopPropagation()}>
         {/* Header (fijo) */}
         <div className="shrink-0 flex items-start gap-3 px-5 py-4 border-b border-gray-100 dark:border-gray-800">
           <AnilloAprobados a={a} />
@@ -2532,35 +2561,48 @@ export function CardDetailModal({ a, personas, team = [], onClose, addToast, onT
             );
           })()}
 
-          {/* Reels de IG de referencia — se adjuntan desde Marketing → Referencias
-              ("Enviar a tarjeta") y el editor los ve en su workspace con el embed
-              de IG + guion adaptado. Acá el admin los revisa / quita. */}
+          {/* Reels de IG de referencia — se pegan acá directo (o se mandan desde
+              Marketing → Referencias). Son POR PRODUCTO (patrón winners): el
+              editor los ve en su workspace con el embed de IG + guion adaptado. */}
           {(() => {
             const refs = referenciasDeProducto(a.productoId, a.productoNombre);
-            if (refs.length === 0) return null;
             return (
               <div>
                 <div className="flex items-center gap-1.5 mb-1.5">
                   <Clapperboard size={13} className="text-pink-500" />
-                  <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400">Reels de referencia · {refs.length}</span>
+                  <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400">Reels de referencia{refs.length ? ` · ${refs.length}` : ''}</span>
                 </div>
-                <div className="space-y-1.5">
-                  {refs.map(r => (
-                    <div key={r.id || r.url} className="flex items-center gap-2 rounded-lg border border-pink-200 dark:border-pink-900/50 bg-pink-50/50 dark:bg-pink-900/10 px-2.5 py-1.5">
-                      <Clapperboard size={12} className="text-pink-500 shrink-0" />
-                      <span className="flex-1 min-w-0 truncate text-xs font-medium text-gray-800 dark:text-gray-100" title={r.caption || r.url}>
-                        @{r.owner || r.shortcode}{r.angle ? ` · ${r.angle}` : ''}{r.guion ? ' · 📜 con guion' : ''}
-                      </span>
-                      {r.url && (
-                        <a href={r.url} target="_blank" rel="noopener noreferrer" title="Abrir en Instagram"
-                          className="text-pink-500 hover:text-pink-600 shrink-0"><ExternalLink size={13} /></a>
-                      )}
-                      <button onClick={() => removeReferenciaDeProducto(a.productoId, a.productoNombre, r)} title="Quitar de las tarjetas del producto"
-                        className="text-gray-300 hover:text-red-500 shrink-0"><X size={13} /></button>
-                    </div>
-                  ))}
+                <div className="flex items-center gap-2 mb-1.5">
+                  <input type="url" value={refUrl} onChange={e => setRefUrl(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); agregarReferencia(); } }}
+                    disabled={refBusy}
+                    placeholder="https://www.instagram.com/reel/… (se guarda el video y el editor lo ve acá)"
+                    className="flex-1 min-w-0 px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 disabled:opacity-60" />
+                  <button onClick={agregarReferencia} disabled={refBusy || !refUrl.trim()}
+                    className="shrink-0 inline-flex items-center gap-1 px-3 py-2 text-xs font-bold text-white bg-pink-500 hover:bg-pink-600 rounded-lg transition disabled:opacity-50">
+                    {refBusy ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />} {refBusy ? 'Agendando…' : 'Agregar'}
+                  </button>
                 </div>
-                <p className="text-[10px] text-gray-400 mt-1">Se agregan desde Marketing → tab Referencias → "A tarjeta". El editor las ve con el reel + guion.</p>
+                {refBusy && <p className="text-[10px] text-gray-400 mb-1.5">Scrapeando y guardando el video… tarda ~20-60s.</p>}
+                {refs.length > 0 && (
+                  <div className="space-y-1.5">
+                    {refs.map(r => (
+                      <div key={r.id || r.url} className="flex items-center gap-2 rounded-lg border border-pink-200 dark:border-pink-900/50 bg-pink-50/50 dark:bg-pink-900/10 px-2.5 py-1.5">
+                        <Clapperboard size={12} className="text-pink-500 shrink-0" />
+                        <span className="flex-1 min-w-0 truncate text-xs font-medium text-gray-800 dark:text-gray-100" title={r.caption || r.url}>
+                          @{r.owner || r.shortcode}{r.angle ? ` · ${r.angle}` : ''}{r.guion ? ' · 📜 con guion' : ''}
+                        </span>
+                        {r.url && (
+                          <a href={r.url} target="_blank" rel="noopener noreferrer" title="Abrir en Instagram"
+                            className="text-pink-500 hover:text-pink-600 shrink-0"><ExternalLink size={13} /></a>
+                        )}
+                        <button onClick={() => removeReferenciaDeProducto(a.productoId, a.productoNombre, r)} title="Quitar de las tarjetas del producto"
+                          className="text-gray-300 hover:text-red-500 shrink-0"><X size={13} /></button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <p className="text-[10px] text-gray-400 mt-1">Se aplica a todas las tarjetas de este producto. El análisis IA y el guion adaptado se hacen desde Marketing → Referencias (ahí también queda la biblioteca completa).</p>
               </div>
             );
           })()}

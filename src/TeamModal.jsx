@@ -8,7 +8,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { X, UserPlus, Loader2, Trash2, KeyRound, Users, Mail, Copy, Check, Search, Wallet, Plus } from 'lucide-react';
 import { listTeam, createMember, resetPassword, removeMember, setLider } from './produccionTeam.js';
-import { personasEnTarjetas, assignCreator, allWeekKeys, listAssignments, getPagoConfig, setPagoConfig, DEFAULT_BONUS_TRAMOS } from './produccionStore.js';
+import { personasEnTarjetas, assignCreator, allWeekKeys, listAssignments, getPagoConfig, setPagoConfig, DEFAULT_BONUS_TRAMOS, VIDEOS_POR_PRODUCTO } from './produccionStore.js';
 import ConfirmDialog from './ConfirmDialog.jsx';
 
 // Genera una contraseña simple pero decente para pasarle al chico.
@@ -19,7 +19,7 @@ function suggestPassword() {
   return `${w}${n}`;
 }
 
-// Editor de PAGO por persona: monto por producto (9 videos) + bono con tramos
+// Editor de PAGO por persona: monto por producto completo + bono con tramos
 // propios ("cada N completos → $X"), o sin bono. Se guarda por persona; si es
 // una cuenta le pasamos su creatorId para que el editor pueda leer su config.
 function PagoConfigEditor({ member, onClose, addToast }) {
@@ -46,7 +46,7 @@ function PagoConfigEditor({ member, onClose, addToast }) {
   return (
     <div className="mt-1.5 rounded-lg border border-brand-200 dark:border-brand-800 bg-brand-50/40 dark:bg-brand-900/10 p-3 space-y-3">
       <div>
-        <label className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1">Pago por producto (9 videos)</label>
+        <label className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1">Pago por producto ({VIDEOS_POR_PRODUCTO} videos)</label>
         <div className="flex items-center gap-1.5">
           <span className="text-sm text-gray-400">$</span>
           <input type="number" value={pago} onChange={e => setPago(e.target.value)} min="0" step="1000"

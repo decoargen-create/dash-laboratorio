@@ -128,13 +128,18 @@ async function handleAdd(res, sb, userId, body) {
   const actor = process.env.APIFY_IG_ACTOR_ID || DEFAULT_IG_ACTOR;
   let items;
   try {
+    // El maxTotalChargeUsd no es capricho: pedimos UN post, y un post suelto es
+    // barato. El techo que Apify calcula solo (1 × precio por resultado) cae por
+    // debajo de su mínimo de $0.0027 y rechaza el run con 400 antes de
+    // arrancarlo. Con un techo explícito y holgado el run corre; el gasto real
+    // lo sigue acotando maxItems: 1.
     items = await runActorSync(actor, {
       directUrls: [canonical],
       resultsType: 'posts',
       resultsLimit: 1,
       maxItems: 1,
       addParentData: false,
-    }, apifyToken, { timeout: 150 });
+    }, apifyToken, { timeout: 150, maxTotalChargeUsd: 0.10 });
   } catch (err) {
     return respondJSON(res, 502, { error: `Apify falló scrapeando el post: ${err.message}` });
   }

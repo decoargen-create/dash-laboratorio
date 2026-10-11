@@ -16,6 +16,7 @@ import {
   nombreBase, nombrePublicado,
 } from '../api/produccion/_naming.js';
 import { parseFunnel, deriveFunnelRates, pickAction } from '../api/meta/_funnel.js';
+import { topeDeGasto, APIFY_MIN_CHARGE_USD } from '../api/marketing/_apify.js';
 import { validarPedido, mismaCuenta, resumirResultados, inverso, estadoVisible, entregaDe, MAX_IDS } from '../api/meta/_estado.js';
 import { repararTarjetas, carpetaDestinoDe } from '../api/produccion/_repair-core.js';
 import {
@@ -575,6 +576,20 @@ eq('semana 24/8 → entrega 30/8 → agosto', monthOfWeek('2026-08-24'), '2026-0
 eq('semana 28/9 → entrega 4/10 → octubre', monthOfWeek('2026-09-28'), '2026-10');
 eq('semana 29/12/2025 → entrega 4/1 → enero 2026', monthOfWeek('2025-12-29'), '2026-01');
 eq('weekKey inválido → vacío', monthOfWeek(''), '');
+
+// ─────────── TOPE DE GASTO DE APIFY ───────────
+console.log('\nTOPE DE GASTO DE APIFY:');
+// Pedir un solo post es barato, y por eso se caía: el techo implícito quedaba
+// debajo del mínimo que Apify exige y rechazaba el run con 400.
+eq('un techo por debajo del mínimo sube al mínimo', topeDeGasto(0.0001), APIFY_MIN_CHARGE_USD);
+eq('un techo holgado se respeta tal cual', topeDeGasto(0.10), 0.10);
+eq('justo en el mínimo pasa', topeDeGasto(APIFY_MIN_CHARGE_USD), APIFY_MIN_CHARGE_USD);
+// Sin techo pedido no mandamos el parámetro: los actors que hoy andan bien
+// siguen con el cálculo propio de Apify.
+eq('sin techo → null (no se manda el parámetro)', topeDeGasto(null), null);
+eq('cero no es un techo', topeDeGasto(0), null);
+eq('basura no es un techo', topeDeGasto('ocho'), null);
+
 
 // ─────────── RESUMEN ───────────
 console.log(`\n${'─'.repeat(40)}\nRESULTADO: ${pass} ✅   ${fail} ❌\n`);

@@ -35,7 +35,13 @@ const eq = (name, got, exp) => {
 
 // ─────────── PAGO POR PERSONA ───────────
 console.log('\nPAGO POR PERSONA:');
-eq('sin config → default $42k', pagoProductoDeCfg(null), PAGO_POR_PRODUCTO);
+eq('sin config → default global', pagoProductoDeCfg(null), PAGO_POR_PRODUCTO);
+// El default acompañó la baja de 9 a 7 videos: proporcional sobre los 42.000
+// de antes (32.666,67) redondeado al millar PARA ARRIBA.
+eq('el default es el proporcional redondeado para arriba',
+  PAGO_POR_PRODUCTO, Math.ceil(42000 * 7 / 9 / 1000) * 1000);
+eq('redondear para arriba nunca deja al creador por debajo del proporcional',
+  [40000, 42000].every(x => Math.ceil(x * 7 / 9 / 1000) * 1000 >= x * 7 / 9), true);
 eq('Poncio $40k', pagoProductoDeCfg({ pagoProducto: 40000 }), 40000);
 eq('bono default con 5 completos = 36k', bonusDeCfg(null, 5), 36000);
 eq('bono default con 2 = 0', bonusDeCfg(null, 2), 0);
@@ -81,6 +87,16 @@ const kit = [
 eq('Kit Inicial: 3 tarjetas, 1 entregada, 2 pendientes', (({ tarjetas, entregadas, pendientes }) => ({ tarjetas, entregadas, pendientes }))(resumenVideosPorProducto(kit)[0]), { tarjetas: 3, entregadas: 1, pendientes: 2 });
 // Archivado también cuenta como entregada
 eq('archivado cuenta como entregada', resumenVideosPorProducto([{ productoNombre: 'X', estado: 'archivado', archivos: [] }])[0].entregadas, 1);
+// El objetivo bajó de 9 a 7, pero las tarjetas viejas siguen pidiendo 9: el
+// resumen tiene que sumar el objetivo de CADA una, no la constante del momento.
+eq('el objetivo por defecto es 7', VIDEOS_POR_PRODUCTO, 7);
+eq('mezcla de objetivos: 9 + 7 = 16',
+  resumenVideosPorProducto([
+    { productoNombre: 'X', videosTotal: 9, archivos: [1, 2] },
+    { productoNombre: 'X', videosTotal: 7, archivos: [1] },
+  ])[0], { producto: 'X', subidos: 3, target: 16, tarjetas: 2, entregadas: 0, faltan: 13, pendientes: 2 });
+eq('una tarjeta sin objetivo propio cae al default de 7',
+  resumenVideosPorProducto([{ productoNombre: 'X', archivos: [] }])[0].target, 7);
 
 // ─────────── AUTO-ARCHIVO (publicado +48h) ───────────
 console.log('\nAUTO-ARCHIVO:');

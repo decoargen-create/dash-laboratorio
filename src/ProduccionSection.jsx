@@ -13,7 +13,7 @@ import {
   Film, Plus, X, Trash2, ChevronDown, UploadCloud, Loader2, CheckCircle2,
   AlertTriangle, ExternalLink, FileText, GripVertical, Users, History, Search, ArrowLeftRight,
   Bell, BellRing, Inbox, Eye, RefreshCw, Calendar, Filter, FolderOpen, Download, Star, Settings,
-  FolderTree,
+  FolderTree, Clapperboard,
 } from 'lucide-react';
 import {
   ESTADOS, ESTADO_LABELS, VIDEOS_POR_PRODUCTO, weekKeyOf, weekLabel, allWeekKeys,
@@ -22,6 +22,7 @@ import {
   getRole, entregasNuevas, ultimaSubidaTs, personasEnTarjetas, resumenVideosPorProducto,
   resyncDesdeNube, vaciarTodo, setMaterialLinkProducto, probarDiscord,
   loadNotifConfig, saveNotifConfig, toggleWinner, winnersDeProducto, pagoProductoDe,
+  referenciasDeProducto, removeReferenciaDeProducto,
   monthLabel,
 } from './produccionStore.js';
 import { CreativosSection, subirParaTarjeta, VIDEO_ACCEPT, probeDrive, aprobarTodosConCascada, AnilloAprobados, getAuthToken } from './produccionUpload.jsx';
@@ -2527,6 +2528,39 @@ export function CardDetailModal({ a, personas, team = [], onClose, addToast, onT
                     </div>
                   ))}
                 </div>
+              </div>
+            );
+          })()}
+
+          {/* Reels de IG de referencia — se adjuntan desde Marketing → Referencias
+              ("Enviar a tarjeta") y el editor los ve en su workspace con el embed
+              de IG + guion adaptado. Acá el admin los revisa / quita. */}
+          {(() => {
+            const refs = referenciasDeProducto(a.productoId, a.productoNombre);
+            if (refs.length === 0) return null;
+            return (
+              <div>
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <Clapperboard size={13} className="text-pink-500" />
+                  <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400">Reels de referencia · {refs.length}</span>
+                </div>
+                <div className="space-y-1.5">
+                  {refs.map(r => (
+                    <div key={r.id || r.url} className="flex items-center gap-2 rounded-lg border border-pink-200 dark:border-pink-900/50 bg-pink-50/50 dark:bg-pink-900/10 px-2.5 py-1.5">
+                      <Clapperboard size={12} className="text-pink-500 shrink-0" />
+                      <span className="flex-1 min-w-0 truncate text-xs font-medium text-gray-800 dark:text-gray-100" title={r.caption || r.url}>
+                        @{r.owner || r.shortcode}{r.angle ? ` · ${r.angle}` : ''}{r.guion ? ' · 📜 con guion' : ''}
+                      </span>
+                      {r.url && (
+                        <a href={r.url} target="_blank" rel="noopener noreferrer" title="Abrir en Instagram"
+                          className="text-pink-500 hover:text-pink-600 shrink-0"><ExternalLink size={13} /></a>
+                      )}
+                      <button onClick={() => removeReferenciaDeProducto(a.productoId, a.productoNombre, r)} title="Quitar de las tarjetas del producto"
+                        className="text-gray-300 hover:text-red-500 shrink-0"><X size={13} /></button>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[10px] text-gray-400 mt-1">Se agregan desde Marketing → tab Referencias → "A tarjeta". El editor las ve con el reel + guion.</p>
               </div>
             );
           })()}

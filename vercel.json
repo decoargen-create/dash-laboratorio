@@ -20,6 +20,7 @@
     "api/marketing/copilot.js":         { "maxDuration": 60 },
     "api/marketing/score-hooks.js":     { "maxDuration": 60 },
     "api/marketing/match-product-ads.js": { "maxDuration": 60 },
+    "api/marketing/match-winner-ads.js": { "maxDuration": 300 },
     "api/marketing/suggest-competitors.js": { "maxDuration": 180 },
     "api/marketing/post-research-analysis.js": { "maxDuration": 60 },
     "api/marketing/creatives.js": { "maxDuration": 180 },

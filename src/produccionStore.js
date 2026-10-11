@@ -53,6 +53,8 @@ let _histCloud = false;
 let _materialCloud = false;
 // Ídem `winners` (migración 0030).
 let _winnersCloud = false;
+// Ídem `etiqueta` (migración 0035) — etiqueta de campaña ("Día de la Madre").
+let _etiquetaCloud = false;
 // Contador de escrituras locales. Sirve para que un hydrate/refetch NO pise un
 // cambio optimista que ocurrió mientras traíamos la data de la nube.
 let _writeSeq = 0;
@@ -144,6 +146,7 @@ function rowToLocal(r) {
     nota: r.nota || '',
     materialLink: r.material_link || '',
     winners: Array.isArray(r.winners) ? r.winners : [],
+    etiqueta: r.etiqueta || '',
     pagado: !!r.pagado,
     archivos: Array.isArray(r.archivos) ? r.archivos : [],
     historial: Array.isArray(r.historial) ? r.historial : [],
@@ -179,6 +182,8 @@ function localToRow(a) {
   if (_materialCloud) row.material_link = a.materialLink || '';
   // Ídem winners (migración 0030).
   if (_winnersCloud) row.winners = Array.isArray(a.winners) ? a.winners : [];
+  // Ídem etiqueta (migración 0035).
+  if (_etiquetaCloud) row.etiqueta = a.etiqueta || null;
   return row;
 }
 
@@ -319,6 +324,11 @@ async function hydrate() {
       const probe = await supabase.from(TABLE).select('winners').limit(1);
       _winnersCloud = !probe.error;
     } catch { _winnersCloud = false; }
+    // Ídem `etiqueta` (migración 0035).
+    try {
+      const probe = await supabase.from(TABLE).select('etiqueta').limit(1);
+      _etiquetaCloud = !probe.error;
+    } catch { _etiquetaCloud = false; }
 
     const seqBefore = _writeSeq;
     const { data, error } = await supabase.from(TABLE).select('*');

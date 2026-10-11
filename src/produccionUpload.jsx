@@ -610,9 +610,12 @@ export function CreativosSection({ a, addToast, canDelete = true, readOnly = fal
       <div className="flex items-center gap-1.5 mb-1.5">
         <UploadCloud size={13} className="text-gray-400" />
         <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400">Creativos</span>
-        {/* Link a la carpeta SIEMPRE que Drive esté conectado: la de esta tanda
-            si ya hay videos en Drive, o la del producto si no. */}
-        {driveFolder && drive?.configured !== false && (
+        {/* Link a la carpeta: si la tanda YA tiene carpeta en Drive (folderLink),
+            se muestra SIEMPRE — es una URL común de Google y funciona aunque la
+            conexión OAuth esté caída (antes se escondía y parecía que el link
+            "desaparecía" cada vez que vencía el permiso). El gate por conexión
+            aplica solo a los links derivados del sondeo (producto/root). */}
+        {driveFolder && (folderLink || drive?.configured !== false) && (
           <a href={driveFolder} target="_blank" rel="noopener noreferrer" className="text-[11px] font-bold text-brand-500 hover:text-brand-600 inline-flex items-center gap-0.5 ml-1">
             ▶ carpeta de Drive <ExternalLink size={10} />
           </a>

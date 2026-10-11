@@ -4001,6 +4001,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                   <option value="herramienta">🛠️ Herramienta / accesorio</option>
                   <option value="textil">🧣 Textil / prenda</option>
                   <option value="hogar">🏠 Hogar / organizador</option>
+                  <option value="jardin">🌿 Jardín / exterior (luces, deco)</option>
                   <option value="otros">❓ Otros (deja heurística)</option>
                 </select>
 

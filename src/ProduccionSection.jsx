@@ -35,7 +35,7 @@ import { driveStatus, connectDrive, disconnectDrive } from './produccionDrive.js
 import { analizar as analizarCarpetas, reparar as repararCarpetas, tarjetasConVideosEnDrive } from './produccionRepararCarpetas.js';
 import TeamModal from './TeamModal.jsx';
 import ConfirmDialog from './ConfirmDialog.jsx';
-import { EVENTOS_FECHA } from './eventosFecha.js';
+import { EVENTOS_FECHA, ETIQUETAS_TANDA } from './eventosFecha.js';
 
 const EQUIPO_DEFAULT = ['Fran', 'Wanda', 'Flor'];
 
@@ -2509,6 +2509,25 @@ export function CardDetailModal({ a, personas, team = [], onClose, addToast, onT
                   {e.label}
                 </button>
               ))}
+            </div>
+            {/* Tipo de tanda: de dónde sale la consigna (referencias de IG que
+                cargó el admin, replicar winners, UGC, evergreen). */}
+            <div className="flex flex-wrap gap-1 mt-1.5">
+              {ETIQUETAS_TANDA.map(e => (
+                <button key={e.key} onClick={() => updateAssignment(a.id, { etiqueta: e.label })}
+                  className={`text-[11px] font-bold px-2 py-1 rounded-md transition ${a.etiqueta === e.label ? 'bg-sky-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200'}`}>
+                  {e.label}
+                </button>
+              ))}
+              {/* Etiqueta libre: lo que quieras, Enter aplica. */}
+              <input
+                key={`etq-${a.id}-${a.etiqueta || ''}`}
+                defaultValue={a.etiqueta && !EVENTOS_FECHA.some(e => e.label === a.etiqueta) && !ETIQUETAS_TANDA.some(e => e.label === a.etiqueta) ? a.etiqueta : ''}
+                placeholder="Otra etiqueta… (Enter)"
+                onKeyDown={ev => { if (ev.key === 'Enter') updateAssignment(a.id, { etiqueta: ev.currentTarget.value.trim() }); }}
+                onBlur={ev => { const v = ev.currentTarget.value.trim(); if (v && v !== (a.etiqueta || '')) updateAssignment(a.id, { etiqueta: v }); }}
+                className="text-[11px] font-semibold px-2 py-1 rounded-md bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500 w-44"
+              />
             </div>
             <p className="text-[10px] text-gray-400 mt-1">Se muestra como chip en la tarjeta, también en el tablero del editor.</p>
           </div>

@@ -21,7 +21,7 @@ import { repararTarjetas, carpetaDestinoDe } from '../api/produccion/_repair-cor
 import {
   CFG_DEFAULT, cfgPara, roasBreakeven, fechaDelNombre, lunesDe, tipoDeCampana,
   productoDeCampana, veredicto, cohortesSemanales, esProspectador,
-  rondaDeOptimizacion, promediosDelDia, linkMeta, evaluarPausa, CONDICIONES_PAUSA,
+  rondaDeOptimizacion, promediosDelDia, linkMeta, evaluarPausa, CONDICIONES_PAUSA, etapaDeCampana, oportunidadDeEscala,
   semanaMadura, fusionarConFotos, cohortesParaCongelar, fotoDeCohorte,
 } from '../src/testeosCore.js';
 import { DEMO } from '../src/testeosDemo.js';
@@ -305,6 +305,27 @@ eq('ABO BIDCAP → excluida (escala)', tipo('Cepillo 27/7 [ABO BIDCAP 25 a 35]')
 eq('ABO Costcap → excluida', tipo('Cepillo 5/8 [ABO Costcap 15 a 24]'), 'excluida');
 eq('CBO sin fecha → sin-fecha (no ensucia ninguna semana)', tipo('Cepillo [CBO Videos]'), 'sin-fecha');
 eq('nombre suelto → otra', tipo('Nueva campaña de Interacción'), 'otra');
+// ETAPAS: dentro de lo que dice "CBO", las deep pocket / mayor roas / cost
+// cap / bid cap / only pocket son PREESCALAS, no testeos de renovación.
+const etapa = (n) => etapaDeCampana(n, CFG_DEFAULT).etapa;
+eq('CBO Videos → etapa testeo', etapa('Cepillo 22/8 [CBO Videos]'), 'testeo');
+eq('CBO Deep Poket (typo incluido) → preescala', etapa('Aceite 3/10 [CBO Deep Poket]'), 'preescala');
+eq('CBO Mayor Roas → preescala', etapa('Aceite 3/10 [CBO Mayor Roas]'), 'preescala');
+eq('Cost Cap → preescala', etapa('Crema 5/9 [Cost Cap 30]'), 'preescala');
+eq('Only Pocket → preescala', etapa('Crema 5/9 [CBO Only Pocket]'), 'preescala');
+eq('Escala → escala', etapa('Cepillo 1/9 [CBO Escala Winner]'), 'escala');
+// Y las cohortes respetan la etapa pedida:
+const campEtapas = [
+  { id: 'c1', name: 'Aceite 25/8 [CBO Videos]', effectiveStatus: 'ACTIVE', insights: { spend: 100, impressions: 5000, purchases: 5, revenue: 300 } },
+  { id: 'c2', name: 'Aceite 25/8 [CBO Deep Poket]', effectiveStatus: 'ACTIVE', insights: { spend: 100, impressions: 5000, purchases: 5, revenue: 300 } },
+  { id: 'c3', name: 'Aceite 25/8 [CBO Escala]', effectiveStatus: 'ACTIVE', insights: { spend: 100, impressions: 5000, purchases: 5, revenue: 300 } },
+];
+const soloTesteos = cohortesSemanales(campEtapas, { cfg: CFG_DEFAULT, hoy: HOY });
+eq('la cohorte default deja afuera preescalas y escalas', soloTesteos.filas[0].idsTodas, ['c1']);
+const soloPre = cohortesSemanales(campEtapas, { cfg: CFG_DEFAULT, hoy: HOY, etapa: 'preescala' });
+eq('etapa preescala trae solo las preescalas', soloPre.filas[0].idsTodas, ['c2']);
+const todasEtapas = cohortesSemanales(campEtapas, { cfg: CFG_DEFAULT, hoy: HOY, etapa: 'todas' });
+eq('etapa todas junta las tres', todasEtapas.filas[0].idsTodas.length, 3);
 eq('producto Cepillo detectado', productoDeCampana('Cepillo 22/8 [CBO Videos]', DEMO.productos)?.id, 'p-cepillo');
 eq('producto Crema detectado', productoDeCampana('Crema 23/7 [CBO Video UGC 2]', DEMO.productos)?.id, 'p-crema');
 eq('sin producto reconocible → null', productoDeCampana('Nueva campaña de Interacción', DEMO.productos), null);
@@ -400,6 +421,37 @@ eq('los totales van separados: no se suma como ahorro lo que solo se redirige',
 eq('a las 12 del mediodía ya no es temprano', ronda.temprano, false);
 const temprano = rondaDeOptimizacion(DEMO.adsHoy, { cfg: cfgPausa, ahora: new Date('2026-08-26T12:00:00Z') });
 eq('a las 9 AM avisa que el día no maduró', temprano.temprano, true);
+
+// VEREDICTO EN DOS ETAPAS: el ROAS bajo solo te pone en la mira; confirman
+// los costos del embudo contra el promedio de la cuenta. Si carrito y pago
+// están dentro del promedio, la venta puede caer tarde → dejalo correr.
+const promedioRef = { spend: 100000, costoPorATC: 2000, costoPorCheckout: 5000 };
+const costosSanos = evaluarPausa(
+  { dailyBudget: 50000, insights: { spend: 30000, roas: 0.8, addToCart: 20, initiateCheckout: 7, impressions: 90000 } },
+  promedioRef, cfgPausa);
+// costoATC 1.500 < 2.500 (2.000+25%) y costoCheckout ~4.286 < 6.250 → sanos.
+eq('ROAS bajo + costos en el promedio → candidato pero DEJALO CORRER', [costosSanos.candidato, costosSanos.accion], [true, 'dejar-correr']);
+eq('el motivo explica que el embudo está sano', /embudo está sano/.test(costosSanos.motivoAccion), true);
+const unCostoCaro = evaluarPausa(
+  { dailyBudget: 50000, insights: { spend: 30000, roas: 0.8, addToCart: 9, initiateCheckout: 7, impressions: 90000 } },
+  promedioRef, cfgPausa);
+// costoATC ~3.333 > 2.500 alcanza, aunque el checkout siga sano → pausar.
+eq('ROAS bajo + UN costo sobre el promedio alcanza para pausar', unCostoCaro.accion, 'pausar');
+// PROMEDIO DE REFERENCIA (últimos 7 días): los umbrales se miden contra la
+// referencia que llega de afuera, no contra el día en curso.
+const rondaRef = rondaDeOptimizacion(DEMO.adsHoy, { cfg: cfgPausa, ahora: HOY, promediosRef: promedioRef });
+eq('la ronda usa la referencia histórica cuando se la pasan', [rondaRef.usaReferencia, rondaRef.referencia.costoPorATC], [true, 2000]);
+eq('sin referencia cae al promedio del día', rondaDeOptimizacion(DEMO.adsHoy, { cfg: cfgPausa, ahora: HOY }).usaReferencia, false);
+
+// OPORTUNIDAD DE ESCALA: ROAS holgado sobre el corte (corte × factor), hoy y
+// sostenido en la ventana con gasto real → candidata a subir presupuesto.
+// Con corte 1.5 y factor 1.3 el objetivo es 2.25 (redondeando el gusto: 1.6 → 2.08).
+const opSi = oportunidadDeEscala({ spend: 30000, roas: 2.4 }, { spend: 90000, roas: 2.3 }, cfgPausa);
+eq('ROAS alto hoy + sostenido en la ventana → oportunidad', opSi.es, true);
+eq('el objetivo sale del corte × factor', Math.round(opSi.objetivo * 100) / 100, 1.95);
+eq('ROAS alto hoy pero NO sostenido → todavía no', oportunidadDeEscala({ spend: 30000, roas: 2.4 }, { spend: 90000, roas: 1.2 }, cfgPausa).es, false);
+eq('sostenido pero sin gasto en la ventana → no prueba nada', oportunidadDeEscala({ spend: 30000, roas: 2.4 }, { spend: 500, roas: 3.0 }, cfgPausa).es, false);
+eq('sin histórico → no es oportunidad', oportunidadDeEscala({ spend: 30000, roas: 2.4 }, null, cfgPausa).es, false);
 
 console.log('\nTESTEOS · LINK A META:');
 const link = linkMeta({ accountId: 'act_123', nivel: 'campaigns', ids: ['1', '2'], desde: '2026-08-17', hasta: '2026-08-23' });

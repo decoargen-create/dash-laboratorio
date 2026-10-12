@@ -19,7 +19,7 @@ import { parseFunnel, deriveFunnelRates, pickAction } from '../api/meta/_funnel.
 import { validarPedido, mismaCuenta, resumirResultados, inverso, estadoVisible, entregaDe, MAX_IDS } from '../api/meta/_estado.js';
 import { repararTarjetas, carpetaDestinoDe } from '../api/produccion/_repair-core.js';
 import {
-  CFG_DEFAULT, cfgPara, roasBreakeven, fechaDelNombre, lunesDe, tipoDeCampana,
+  CFG_DEFAULT, cfgPara, roasBreakeven, fechaDelNombre, lunesDe, tipoDeCampana, mesDeSemana, etiquetaMes, semanaDelMes,
   productoDeCampana, veredicto, cohortesSemanales, esProspectador,
   rondaDeOptimizacion, promediosDelDia, linkMeta, evaluarPausa, CONDICIONES_PAUSA, etapaDeCampana, oportunidadDeEscala,
   semanaMadura, fusionarConFotos, cohortesParaCongelar, fotoDeCohorte,
@@ -294,6 +294,18 @@ eq('sin fecha → null', fechaDelNombre('Crema [ABO BIDCAP 29 A 39]', HOY), null
 eq('31/2 no existe → null', fechaDelNombre('Cepillo 31/2', HOY), null);
 // Un "28/12" mirado en enero es de diciembre PASADO, no del que viene.
 eq('sin año, no salta al futuro', fechaDelNombre('Cepillo 28/12', new Date('2027-01-10T12:00:00Z')), '2026-12-28');
+// DECIMALES EN EL SUFIJO: "Costcap 25.5" o "roas 2.4" matchean como fechas
+// (25/5, 2/4). La fecha real es la PRIMERA válida, pegada al producto.
+const HOY_OCT = new Date('2026-10-12T12:00:00Z');
+eq('decimal del costcap no pisa la fecha', fechaDelNombre('Aceite 3/10 [CBO Costcap 25.5]', HOY_OCT), '2026-10-03');
+eq('decimal del roas no pisa la fecha', fechaDelNombre('Aceite 12/10 [CBO Mayor Roas 2.4]', HOY_OCT), '2026-10-12');
+eq('match inválido primero (31/2) no corta: sigue al siguiente', fechaDelNombre('Promo 31/2 Aceite 3/10 [CBO]', HOY_OCT), '2026-10-03');
+// Agrupado por mes: helpers.
+eq('mes de la semana', mesDeSemana('2026-10-12'), '2026-10');
+eq('etiqueta del mes', etiquetaMes('2026-10'), 'Octubre 2026');
+eq('lunes 12/10 → semana 2 del mes', semanaDelMes('2026-10-12'), 2);
+eq('lunes 5/10 → semana 1 del mes', semanaDelMes('2026-10-05'), 1);
+eq('lunes 29/10 → semana 5 del mes', semanaDelMes('2026-10-29'), 5);
 eq('semana lunes-domingo: 22/8 (sábado) → lunes 17/8', lunesDe('2026-08-22'), '2026-08-17');
 eq('lunes se queda en su lunes', lunesDe('2026-08-24'), '2026-08-24');
 eq('domingo cae en el lunes anterior', lunesDe('2026-08-23'), '2026-08-17');
@@ -442,6 +454,13 @@ eq('ROAS bajo + UN costo sobre el promedio alcanza para pausar', unCostoCaro.acc
 const rondaRef = rondaDeOptimizacion(DEMO.adsHoy, { cfg: cfgPausa, ahora: HOY, promediosRef: promedioRef });
 eq('la ronda usa la referencia histórica cuando se la pasan', [rondaRef.usaReferencia, rondaRef.referencia.costoPorATC], [true, 2000]);
 eq('sin referencia cae al promedio del día', rondaDeOptimizacion(DEMO.adsHoy, { cfg: cfgPausa, ahora: HOY }).usaReferencia, false);
+// GASTO CERO: con el piso vacío (null → 0), una campaña sin gasto pasaba la
+// mira (0 ≥ 0 y ROAS 0 < corte) y caía en "dejalo correr". Gastar algo es
+// prerequisito del veredicto, no una condición más.
+const sinGasto = evaluarPausa(
+  { dailyBudget: 85000, insights: { spend: 0, roas: 0, addToCart: 0, initiateCheckout: 0, impressions: 0 } },
+  promedioRef, { ...cfgPausa, pisoGastoPausar: null });
+eq('campaña con $0 gastado NO es candidata aunque el piso esté vacío', [sinGasto.candidato, sinGasto.accion], [false, null]);
 
 // OPORTUNIDAD DE ESCALA: ROAS holgado sobre el corte (corte × factor), hoy y
 // sostenido en la ventana con gasto real → candidata a subir presupuesto.

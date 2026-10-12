@@ -34,7 +34,7 @@ import {
 } from './MetaConnect.jsx';
 import {
   CFG_DEFAULT, CONDICIONES_PAUSA, cfgPara, cohortesSemanales, rondaDeOptimizacion, esProspectador,
-  promediosDelDia, ETAPAS, oportunidadDeEscala,
+  promediosDelDia, ETAPAS, oportunidadDeEscala, mesDeSemana, etiquetaMes, semanaDelMes,
   productoDeCampana, linkMeta, FORMULAS,
   fusionarConFotos, cohortesParaCongelar, fotoDeCohorte,
 } from './testeosCore.js';
@@ -568,12 +568,15 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
                 const opp = (!p.accion && i.spend > 0)
                   ? oportunidadDeEscala(i, historico?.get?.(a.id), a.cfgUsada || cfg)
                   : { es: false };
+                // Sin gasto hoy (o debajo del piso) no hay nada que juzgar:
+                // "Sin datos aún", neutro — ni "va bien" ni "dejalo correr".
+                const sinDatos = i.spend <= 0 || i.spend < (cfg.pisoGastoPausar || 0);
                 const tone = p.accion === 'pausar' ? 'bad' : p.accion === 'dejar-correr' ? 'warn'
                   : opp.es ? 'up'
-                  : i.spend < cfg.pisoGastoPausar ? 'mute' : 'ok';
+                  : sinDatos ? 'mute' : 'ok';
                 const label = p.accion === 'pausar' ? 'Pausar' : p.accion === 'dejar-correr' ? 'Dejalo correr'
                   : opp.es ? '📈 Subir presupuesto'
-                  : i.spend < cfg.pisoGastoPausar ? 'Sin datos aún' : 'Va bien';
+                  : sinDatos ? 'Sin datos aún' : 'Va bien';
                 // Franja + fondo por veredicto: rojo suave = apagar, ámbar =
                 // seguir de cerca, verde = va bien, verde fuerte = escalar.
                 const tinte = tone === 'bad' ? 'bg-red-500/[0.06] dark:bg-red-500/[0.08]'
@@ -762,11 +765,25 @@ function VistaSemanas({ campaigns, cfg, productos, productoId, currency, account
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 dark:divide-gray-700/60">
-            {filas.map(f => {
+            {filas.map((f, idx) => {
               const open = abierto === f.semana;
               const tone = f.eficiencia >= 50 ? 'ok' : f.eficiencia >= 30 ? 'warn' : 'bad';
+              // Separador de MES: las filas ya vienen ordenadas de la más
+              // nueva a la más vieja, así que las semanas del mismo mes son
+              // contiguas — un header cada vez que cambia el mes del lunes.
+              const mes = mesDeSemana(f.semana);
+              const mesAnterior = idx > 0 ? mesDeSemana(filas[idx - 1].semana) : undefined;
+              const nuevoMes = idx === 0 || mes !== mesAnterior;
+              const nroSemana = semanaDelMes(f.semana);
               return (
                 <React.Fragment key={f.semana || 'sin'}>
+                  {nuevoMes && (
+                    <tr className="bg-gray-50/80 dark:bg-gray-900/60">
+                      <td colSpan={9} className="px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                        {etiquetaMes(mes)}
+                      </td>
+                    </tr>
+                  )}
                   <tr onClick={() => setAbierto(open ? null : f.semana)}
                     className={`cursor-pointer transition ${open ? 'bg-gray-50 dark:bg-gray-900/40' : 'hover:bg-gray-50 dark:hover:bg-gray-900/30'}`}>
                     <td className="px-3.5 py-2">
@@ -774,7 +791,10 @@ function VistaSemanas({ campaigns, cfg, productos, productoId, currency, account
                         {open ? <ChevronDown size={13} className="text-brand-500 shrink-0" /> : <ChevronRight size={13} className="text-gray-400 shrink-0" />}
                         <span>
                           <span className="flex items-center gap-1.5">
-                            <span className="font-semibold text-gray-900 dark:text-gray-100">Semana {f.etiqueta}</span>
+                            <span className="font-semibold text-gray-900 dark:text-gray-100">
+                              {nroSemana ? `Semana ${nroSemana}` : 'Sin fecha en el nombre'}
+                            </span>
+                            <span className="text-[10px] text-gray-400 font-normal">{f.semana ? f.etiqueta : ''}</span>
                             {f.cerrada
                               ? <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400"
                                   title="Número congelado: la semana ya pasó los días de atribución de Meta.">CERRADA</span>

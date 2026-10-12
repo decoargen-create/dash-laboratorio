@@ -176,36 +176,65 @@ export function normalizar(s) {
 export function fechaDelNombre(nombre, hoy = new Date()) {
   const txt = String(nombre || '');
   const re = /(\d{1,2})\s*[/\-.]\s*(\d{1,2})(?:\s*[/\-.]\s*(\d{2,4}))?/g;
-  let m, ultimo = null;
-  while ((m = re.exec(txt)) !== null) ultimo = m;
-  if (!ultimo) return null;
+  // Se toma la PRIMERA fecha VÁLIDA, no la última: la convención pone la
+  // fecha pegada al producto ("Aceite 12/10 [CBO ...]"), y lo que viene
+  // después suele traer decimales ("Costcap 25.5", "roas 2.4") que matchean
+  // como fechas fantasma (25/5, 2/4) y mandaban la campaña a cualquier
+  // semana. Un match inválido (31/2, "25 a 35") se saltea y se sigue buscando.
+  let m;
+  while ((m = re.exec(txt)) !== null) {
+    const dia = Number(m[1]);
+    const mes = Number(m[2]);
+    if (!(dia >= 1 && dia <= 31) || !(mes >= 1 && mes <= 12)) continue;
 
-  const dia = Number(ultimo[1]);
-  const mes = Number(ultimo[2]);
-  if (!(dia >= 1 && dia <= 31) || !(mes >= 1 && mes <= 12)) return null;
+    let anio = null;
+    if (m[3]) {
+      const n = Number(m[3]);
+      const candidato = n < 100 ? 2000 + n : n;
+      // La regex admite espacios alrededor del separador: en "25/5 - 99" (un
+      // 99% OFF, un precio, un "99K") el 99 matchearía como año y la campaña
+      // caía en una cohorte de 2099. Un "año" fuera del rango real de la
+      // operación no es un año: se ignora y se infiere como si no estuviera.
+      if (candidato >= 2020 && candidato <= hoy.getFullYear() + 1) anio = candidato;
+    }
+    if (anio == null) {
+      anio = hoy.getFullYear();
+      const tentativa = Date.UTC(anio, mes - 1, dia);
+      const limite = hoy.getTime() + 15 * 24 * 60 * 60 * 1000;
+      if (tentativa > limite) anio -= 1;
+    }
 
-  let anio = null;
-  if (ultimo[3]) {
-    const n = Number(ultimo[3]);
-    const candidato = n < 100 ? 2000 + n : n;
-    // La regex admite espacios alrededor del separador, así que un "25/5 - 99"
-    // (un 99% OFF, un precio, un número suelto) matchea como si "99" fuera el
-    // año y la campaña caía en una cohorte de 2099. Un "año" fuera del rango
-    // real de la operación no es un año: se ignora y se infiere como si la
-    // fecha no lo trajera.
-    if (candidato >= 2020 && candidato <= hoy.getFullYear() + 1) anio = candidato;
+    // Validación real (31/2 no existe) — si no cierra, probamos el siguiente.
+    const d = new Date(Date.UTC(anio, mes - 1, dia));
+    if (d.getUTCMonth() !== mes - 1 || d.getUTCDate() !== dia) continue;
+    return `${anio}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
   }
-  if (anio == null) {
-    anio = hoy.getFullYear();
-    const tentativa = Date.UTC(anio, mes - 1, dia);
-    const limite = hoy.getTime() + 15 * 24 * 60 * 60 * 1000;
-    if (tentativa > limite) anio -= 1;
-  }
+  return null;
+}
 
-  // Validación real (31/2 no existe).
-  const d = new Date(Date.UTC(anio, mes - 1, dia));
-  if (d.getUTCMonth() !== mes - 1 || d.getUTCDate() !== dia) return null;
-  return `${anio}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+// ── Agrupado por mes de las cohortes ─────────────────────────────────────
+// "Semana 2 de octubre" se entiende mejor que una lista plana de rangos.
+const MESES_ES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+
+// 'YYYY-MM' del lunes de la semana.
+export function mesDeSemana(lunes) {
+  return lunes ? String(lunes).slice(0, 7) : null;
+}
+
+export function etiquetaMes(mesKey) {
+  if (!mesKey) return 'Sin fecha en el nombre';
+  const [y, m] = String(mesKey).split('-').map(Number);
+  const nombre = MESES_ES[(m || 1) - 1] || '';
+  return `${nombre.charAt(0).toUpperCase()}${nombre.slice(1)} ${y}`;
+}
+
+// Número de semana DENTRO del mes del lunes (1 a 5): lunes 5/10 → semana 1,
+// lunes 12/10 → semana 2.
+export function semanaDelMes(lunes) {
+  if (!lunes) return null;
+  const dia = Number(String(lunes).slice(8, 10));
+  return Math.ceil(dia / 7);
 }
 
 // Fecha de lanzamiento de una campaña. PRIMERO la "Fecha de inicio" real que
@@ -661,7 +690,11 @@ export function evaluarPausa(item, promedios, cfg = CFG_DEFAULT) {
   const CLAVES_COSTO = ['atc', 'checkout'];
   const deMira = condiciones.filter(c => c.cuenta && !CLAVES_COSTO.includes(c.clave));
   const deCosto = condiciones.filter(c => c.cuenta && CLAVES_COSTO.includes(c.clave));
-  const candidato = deMira.length > 0 && deMira.every(c => c.ok);
+  // Sin gasto hoy no hay veredicto posible: con el piso vacío (0), una
+  // campaña que gastó $0 pasaba "la mira" (0 ≥ 0 y ROAS 0 < corte) y, como
+  // con cero gasto ningún costo puede dar "caro", terminaba en un "dejalo
+  // correr" sin sentido. Gastar algo es prerequisito, no una condición más.
+  const candidato = gasto > 0 && deMira.length > 0 && deMira.every(c => c.ok);
   // Sin condiciones de costo activas no hay segundo filtro: pausa directa.
   const costosCaros = deCosto.length === 0 ? true : deCosto.some(c => c.ok);
 

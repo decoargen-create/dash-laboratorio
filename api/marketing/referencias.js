@@ -222,6 +222,79 @@ async function handleAdd(res, sb, userId, body) {
   });
 }
 
+// ── Agregar un creativo EXTERNO ya resuelto ─────────────────────────────────
+// Para los WINNERS propios de Meta: la galería de Winners ya tiene la URL del
+// mp4 (via /api/meta/video-source, que vence) y la miniatura, así que acá no
+// hay scraping — solo persistir ASAP al bucket e insertar la fila. El destino
+// es el mismo que un reel de IG: biblioteca de Referencias, con su análisis
+// IA, guion adaptado y envío a tarjetas de Producción.
+async function handleAddExternal(res, sb, userId, body) {
+  const refId = String(body.refId || '').trim();
+  const videoUrl = String(body.videoUrl || '').trim();
+  const thumbUrl = String(body.thumbUrl || '').trim();
+  if (!refId) return respondJSON(res, 400, { error: 'Falta refId (id del ad)' });
+  if (!videoUrl && !thumbUrl) return respondJSON(res, 400, { error: 'Falta videoUrl o thumbUrl' });
+
+  // Dedup por ad: reutilizamos la columna shortcode como clave externa.
+  const shortcode = `meta_${refId}`.slice(0, 120);
+  const { data: dup } = await sb.from(TABLE).select('*')
+    .eq('user_id', userId).eq('shortcode', shortcode).limit(1).maybeSingle();
+  if (dup) {
+    const signed = await signPaths(sb, [dup.video_storage_path, dup.thumb_storage_path]);
+    return respondJSON(res, 200, { referencia: rowOut(dup, signed), dedup: true });
+  }
+
+  const id = `ref_meta_${refId}_${Date.now()}`;
+  let videoPath = null;
+  let thumbPath = null;
+  let videoWarn = null;
+  if (videoUrl) {
+    try {
+      // El CDN de Meta (fbcdn) está en el allowlist de safeFetch.
+      const buf = await downloadBuffer(videoUrl, { maxMB: VIDEO_MAX_MB, label: 'video' });
+      videoPath = `${userId}/referencias/${id}.mp4`;
+      const { error } = await sb.storage.from(BUCKET).upload(videoPath, buf, { contentType: 'video/mp4', upsert: true });
+      if (error) { videoPath = null; videoWarn = `Storage: ${error.message}`; }
+    } catch (err) {
+      videoWarn = err.message;
+    }
+  }
+  if (thumbUrl) {
+    try {
+      const buf = await downloadBuffer(thumbUrl, { maxMB: 15, timeoutMs: 30000, label: 'miniatura' });
+      thumbPath = `${userId}/referencias/${id}_thumb.jpg`;
+      const { error } = await sb.storage.from(BUCKET).upload(thumbPath, buf, { contentType: 'image/jpeg', upsert: true });
+      if (error) thumbPath = null;
+    } catch { thumbPath = null; }
+  }
+  if (!videoPath && !thumbPath) {
+    return respondJSON(res, 502, { error: `No pude guardar ni el video ni la miniatura${videoWarn ? ` (${videoWarn})` : ''} — ¿la URL del CDN ya venció? Volvé a abrir el winner y reintentá.` });
+  }
+
+  const row = {
+    id,
+    user_id: userId,
+    producto_id: body.productoId != null ? String(body.productoId) : null,
+    url: String(body.url || '').slice(0, 500) || null,
+    shortcode,
+    platform: String(body.platform || 'meta').slice(0, 20),
+    caption: String(body.caption || '').slice(0, 4000) || null,
+    owner_username: String(body.owner || '').slice(0, 200) || null,
+    video_duration: Number(body.duration) || null,
+    video_storage_path: videoPath,
+    thumb_storage_path: thumbPath,
+  };
+  const { data: inserted, error: insErr } = await sb.from(TABLE)
+    .upsert(row, { onConflict: 'user_id,id' }).select().single();
+  if (insErr) return respondJSON(res, 500, { error: `Insert: ${insErr.message}` });
+
+  const signed = await signPaths(sb, [videoPath, thumbPath]);
+  return respondJSON(res, 200, {
+    referencia: rowOut(inserted, signed),
+    ...(videoWarn ? { videoWarn: `No se pudo guardar el mp4 (${videoWarn}) — quedó solo la miniatura.` } : {}),
+  });
+}
+
 // ── Analizar: Whisper (idioma auto) + Claude (ángulo/hooks/estructura) ──────
 const ANALYZE_SYSTEM = `Sos un analista senior de video-ads y reels para DTC en Argentina. Te paso un reel de Instagram que el equipo guardó como referencia creativa (miniatura + caption + transcripción si hay). Tu output son insights accionables para que un editor lo REPLIQUE para otro producto.
 
@@ -457,6 +530,7 @@ export default async function handler(req, res) {
     if (req.method === 'POST') {
       const body = await readBody(req);
       if (action === 'analyze') return await handleAnalyze(res, sb, userId, body);
+      if (action === 'add-external') return await handleAddExternal(res, sb, userId, body);
       return await handleAdd(res, sb, userId, body);
     }
     if (req.method === 'PATCH') {

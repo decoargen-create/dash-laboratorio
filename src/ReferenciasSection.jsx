@@ -306,6 +306,7 @@ export default function ReferenciasSection({ producto, addToast }) {
     }
     setAdding({ done: 0, total: urls.length });
     let ok = 0;
+    const nuevos = [];
     for (let i = 0; i < urls.length; i++) {
       try {
         const data = await api('', { method: 'POST', body: { url: urls[i], productoId } });
@@ -313,6 +314,7 @@ export default function ReferenciasSection({ producto, addToast }) {
           addToast?.({ type: 'info', message: 'Ese reel ya estaba agendado.' });
         } else {
           ok++;
+          nuevos.push(data.referencia);
           setRefs(prev => [data.referencia, ...prev.filter(r => r.id !== data.referencia.id)]);
           if (data.videoWarn) addToast?.({ type: 'warning', message: data.videoWarn });
         }
@@ -324,15 +326,24 @@ export default function ReferenciasSection({ producto, addToast }) {
     setAdding(null);
     if (ok > 0) {
       setInput('');
-      addToast?.({ type: 'success', message: `${ok} reel${ok === 1 ? '' : 's'} agendado${ok === 1 ? '' : 's'} ✓` });
+      addToast?.({ type: 'success', message: `${ok} reel${ok === 1 ? '' : 's'} agendado${ok === 1 ? '' : 's'} ✓ — desglosando con IA…` });
+    }
+    // Desglose AUTOMÁTICO: cada reel nuevo se transcribe y analiza al toque
+    // (de a uno) y queda guardado en la fila — no hay que acordarse de
+    // apretar "Analizar", y no se repite nunca (el análisis persiste).
+    for (const r of nuevos) {
+      if (!r.analisis) { try { await analyze(r, { silencioso: true }); } catch {} }
     }
   };
 
-  const analyze = async (r) => {
+  const analyze = async (r, { silencioso = false } = {}) => {
+    // Ya analizado → no se repite (el análisis persiste en la fila).
+    if (r.analisis && silencioso) return r;
     setBusyFor(r.id, 'analyze');
     try {
       const data = await api('?action=analyze', { method: 'POST', body: { id: r.id } });
       patchRef(r.id, data.referencia);
+      if (silencioso) return data.referencia;
       if (String(data.transcriptStatus || '').startsWith('skipped')) {
         addToast?.({ type: 'warning', message: `Analizado sin transcripción (${data.transcriptStatus.replace('skipped: ', '')}).` });
       } else {
@@ -340,7 +351,7 @@ export default function ReferenciasSection({ producto, addToast }) {
       }
       return data.referencia;
     } catch (err) {
-      addToast?.({ type: 'error', message: `Análisis falló: ${err.message}` });
+      if (!silencioso) addToast?.({ type: 'error', message: `Análisis falló: ${err.message}` });
       return null;
     } finally {
       setBusyFor(r.id, null);

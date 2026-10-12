@@ -572,6 +572,107 @@ async function handleAdsWithInsights(req, res) {
 // Performance de UN ad específico — usado cuando el user marca una idea
 // de la Bandeja como "usada" con un adId real, para cerrar el loop de
 // aprendizaje (hipótesis vs resultado real).
+// El mp4 de un video PROPIO de la cuenta (los creativos de la galería de
+// Winners): Graph API expone /{video_id}?fields=source para videos del
+// advertiser. La URL que devuelve es del CDN y vence — se pide en el momento
+// de reproducir o de guardarlo como referencia, nunca se persiste.
+async function handleVideoSource(req, res) {
+  if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
+  const origin = getOrigin(req);
+  const url = new URL(req.url, origin);
+  const { token, error, status } = await resolveAccessToken(req, url);
+  if (!token) return respondJSON(res, status || 401, { error: error || 'Meta no conectado' });
+
+  const videoId = url.searchParams.get('video_id');
+  if (!videoId || !/^\d+$/.test(videoId)) return respondJSON(res, 400, { error: 'Falta video_id (numérico)' });
+  const accountId = url.searchParams.get('account_id'); // para el fallback por advideos
+
+  // Intento 1: el nodo del video directo. Para videos de ads suele fallar con
+  // (#10) permiso insuficiente — `source` en el nodo Video pide permisos de
+  // página que un token de ads_read no tiene.
+  try {
+    const data = await graphGet(`${videoId}`, token, { fields: 'source,picture,permalink_url,length' });
+    if (data.source) {
+      return respondJSON(res, 200, {
+        source: data.source,
+        picture: data.picture || null,
+        permalink: data.permalink_url || null,
+        lengthSec: Number(data.length) || null,
+      });
+    }
+  } catch (err) {
+    // Si no es un tema de permisos, cortamos acá con el error real.
+    const esPermiso = /#10|#100|permission|nonexisting/i.test(err.message || '');
+    if (!esPermiso) return respondJSON(res, err.status || 502, { error: err.message });
+  }
+
+  // Intento 2: el listado de videos del ad account (act_X/advideos) responde
+  // con el token de ads en cuentas donde el nodo directo da (#10).
+  if (accountId) {
+    try {
+      let after = null, guard = 0;
+      do {
+        const params = { fields: 'id,source,picture,length', limit: 100 };
+        if (after) params.after = after;
+        const d = await graphGet(`${accountId}/advideos`, token, params);
+        const hit = (d.data || []).find(v => String(v.id) === String(videoId));
+        if (hit?.source) {
+          return respondJSON(res, 200, {
+            source: hit.source,
+            picture: hit.picture || null,
+            permalink: null,
+            lengthSec: Number(hit.length) || null,
+          });
+        }
+        after = d.paging?.cursors?.after && d.paging?.next ? d.paging.cursors.after : null;
+        guard++;
+      } while (after && guard < 5);
+    } catch { /* cae al 404 de abajo */ }
+  }
+
+  return respondJSON(res, 404, {
+    error: 'Meta no expone el mp4 de este video con el permiso actual del token — usá la vista previa del ad (se carga sola) o abrilo en Meta.',
+    sinPermiso: true,
+  });
+}
+
+// Vista previa OFICIAL de un ad (la misma que renderiza Ads Manager): Graph
+// /{ad_id}/previews devuelve un iframe que reproduce el creativo real,
+// video incluido, y funciona con ads_read — es el fallback de reproducción
+// cuando el mp4 no está disponible. El src del iframe vence a las 24 h.
+const PREVIEW_FORMATS = ['INSTAGRAM_REELS', 'INSTAGRAM_STANDARD', 'MOBILE_FEED_STANDARD', 'DESKTOP_FEED_STANDARD'];
+async function handleAdPreview(req, res) {
+  if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
+  const origin = getOrigin(req);
+  const url = new URL(req.url, origin);
+  const { token, error, status } = await resolveAccessToken(req, url);
+  if (!token) return respondJSON(res, status || 401, { error: error || 'Meta no conectado' });
+
+  const adId = url.searchParams.get('ad_id');
+  if (!adId || !/^\d+$/.test(adId)) return respondJSON(res, 400, { error: 'Falta ad_id (numérico)' });
+  const pedido = url.searchParams.get('format');
+  const formatos = pedido && PREVIEW_FORMATS.includes(pedido)
+    ? [pedido, ...PREVIEW_FORMATS.filter(f => f !== pedido)]
+    : PREVIEW_FORMATS;
+
+  let ultimoError = null;
+  for (const formato of formatos) {
+    try {
+      const d = await graphGet(`${adId}/previews`, token, { ad_format: formato });
+      const body = d.data?.[0]?.body || '';
+      const m = body.match(/src="([^"]+)"/);
+      if (m) {
+        // El src viene HTML-escapado dentro del atributo.
+        const src = m[1].replace(/&amp;/g, '&');
+        return respondJSON(res, 200, { iframeSrc: src, formato });
+      }
+    } catch (err) {
+      ultimoError = err.message;
+    }
+  }
+  return respondJSON(res, 502, { error: `Meta no devolvió la vista previa del ad${ultimoError ? ` (${ultimoError})` : ''}` });
+}
+
 async function handleAdPerformance(req, res) {
   if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
   const session = readMetaCookie(req);
@@ -1706,62 +1807,70 @@ async function handleTestingInsights(req, res) {
   ]);
 
   try {
+    // TODAS las llamadas a Meta salen EN PARALELO (antes campañas y conjuntos
+    // iban en serie delante del resto y la carga tardaba el doble o más). El
+    // join de presupuestos se hace al final, cuando ya está todo en memoria.
+
     // ── 1. Campañas con su acumulado del período ──
-    const campanas = [];
-    let after = null, guard = 0;
-    do {
-      const params = {
-        fields: `id,name,status,effective_status,daily_budget,lifetime_budget,created_time,start_time,insights.date_preset(${preset}){${INS}}`,
-        limit: 100,
-        effective_status: effectiveStatus,
-      };
-      if (after) params.after = after;
-      const d = await graphGet(`${accountId}/campaigns`, token, params);
-      for (const c of d.data || []) {
-        campanas.push({
-          id: c.id,
-          name: c.name,
-          status: c.status,
-          effectiveStatus: c.effective_status,
-          // Meta manda los presupuestos en centavos de la moneda de la cuenta.
-          dailyBudget: c.daily_budget != null ? Number(c.daily_budget) / 100 : null,
-          lifetimeBudget: c.lifetime_budget != null ? Number(c.lifetime_budget) / 100 : null,
-          createdTime: c.created_time,
-          // "Fecha de inicio" real del Calendario de la campaña (con el huso
-          // de la cuenta). Las cohortes semanales se arman con esto, no con
-          // la fecha escrita en el nombre.
-          startTime: c.start_time || null,
-          insights: parseFunnel(c.insights?.data?.[0]) || null,
-        });
-      }
-      after = d.paging?.cursors?.after && d.paging?.next ? d.paging.cursors.after : null;
-      guard++;
-    } while (after && guard < 6);
+    const traerCampanas = async () => {
+      const lista = [];
+      let after = null, guard = 0;
+      do {
+        const params = {
+          fields: `id,name,status,effective_status,daily_budget,lifetime_budget,created_time,start_time,insights.date_preset(${preset}){${INS}}`,
+          limit: 100,
+          effective_status: effectiveStatus,
+        };
+        if (after) params.after = after;
+        const d = await graphGet(`${accountId}/campaigns`, token, params);
+        for (const c of d.data || []) {
+          lista.push({
+            id: c.id,
+            name: c.name,
+            status: c.status,
+            effectiveStatus: c.effective_status,
+            // Meta manda los presupuestos en centavos de la moneda de la cuenta.
+            dailyBudget: c.daily_budget != null ? Number(c.daily_budget) / 100 : null,
+            lifetimeBudget: c.lifetime_budget != null ? Number(c.lifetime_budget) / 100 : null,
+            createdTime: c.created_time,
+            // "Fecha de inicio" real del Calendario de la campaña (con el huso
+            // de la cuenta). Las cohortes semanales se arman con esto, no con
+            // la fecha escrita en el nombre.
+            startTime: c.start_time || null,
+            insights: parseFunnel(c.insights?.data?.[0]) || null,
+          });
+        }
+        after = d.paging?.cursors?.after && d.paging?.next ? d.paging.cursors.after : null;
+        guard++;
+      } while (after && guard < 6);
+      return lista;
+    };
 
     // ── 2. Presupuestos de los conjuntos (para la plata en riesgo) ──
     // En ABO el presupuesto vive en el conjunto, no en la campaña.
-    const adsets = new Map();
-    try {
-      let a2 = null, g2 = 0;
-      do {
-        const params = { fields: 'id,name,daily_budget,campaign_id', limit: 200 };
-        if (a2) params.after = a2;
-        const d = await graphGet(`${accountId}/adsets`, token, params);
-        for (const s of d.data || []) {
-          adsets.set(s.id, {
-            name: s.name,
-            campaignId: s.campaign_id,
-            dailyBudget: s.daily_budget != null ? Number(s.daily_budget) / 100 : null,
-          });
-        }
-        a2 = d.paging?.cursors?.after && d.paging?.next ? d.paging.cursors.after : null;
-        g2++;
-      } while (a2 && g2 < 6);
-    } catch (e) {
-      console.warn('meta/testing-insights adsets:', e.message);
-    }
-
-    const budgetPorCampana = new Map(campanas.map(c => [c.id, c.dailyBudget]));
+    const traerAdsets = async () => {
+      const mapa = new Map();
+      try {
+        let a2 = null, g2 = 0;
+        do {
+          const params = { fields: 'id,name,daily_budget,campaign_id', limit: 200 };
+          if (a2) params.after = a2;
+          const d = await graphGet(`${accountId}/adsets`, token, params);
+          for (const s of d.data || []) {
+            mapa.set(s.id, {
+              name: s.name,
+              campaignId: s.campaign_id,
+              dailyBudget: s.daily_budget != null ? Number(s.daily_budget) / 100 : null,
+            });
+          }
+          a2 = d.paging?.cursors?.after && d.paging?.next ? d.paging.cursors.after : null;
+          g2++;
+        } while (a2 && g2 < 6);
+      } catch (e) {
+        console.warn('meta/testing-insights adsets:', e.message);
+      }
+      return mapa;
+    };
 
     // Trae insights a nivel anuncio para un período. Una sola llamada por
     // período: {cuenta}/insights?level=ad devuelve una fila por anuncio.
@@ -1778,7 +1887,8 @@ async function handleTestingInsights(req, res) {
         if (a) params.after = a;
         const d = await graphGet(`${accountId}/insights`, token, params);
         for (const r of d.data || []) {
-          const conjunto = adsets.get(r.adset_id) || null;
+          // El presupuesto del padre se pega DESPUÉS del Promise.all (los
+          // conjuntos y campañas se están trayendo en paralelo con esto).
           filas.push({
             id: r.ad_id,
             name: r.ad_name,
@@ -1786,10 +1896,6 @@ async function handleTestingInsights(req, res) {
             adsetName: r.adset_name,
             campaignId: r.campaign_id,
             campaignName: r.campaign_name,
-            // Presupuesto del padre: el del conjunto si es ABO, si no el de la
-            // campaña (CBO). Es contra esto que se mide lo que queda por gastar.
-            dailyBudget: conjunto?.dailyBudget ?? budgetPorCampana.get(r.campaign_id) ?? null,
-            nivelPresupuesto: conjunto?.dailyBudget != null ? 'conjunto' : 'campaña',
             insights: parseFunnel(r),
           });
         }
@@ -1819,7 +1925,7 @@ async function handleTestingInsights(req, res) {
             id: r.campaign_id,
             name: r.campaign_name,
             campaignName: r.campaign_name,
-            dailyBudget: budgetPorCampana.get(r.campaign_id) ?? null,
+            // dailyBudget se pega después del Promise.all.
             nivelPresupuesto: 'campaña',
             insights: parseFunnel(r),
           });
@@ -1857,10 +1963,20 @@ async function handleTestingInsights(req, res) {
       return mapa;
     };
 
-    // ── 3. Hoy (ronda de optimización) y últimos 7 días (prospectadores) ──
-    const [adsToday, ads7d, campaignsToday, estadosAds] = await Promise.all([
-      adsDe('today'), adsDe('last_7d'), campanasHoy(), estadosDeAnuncios(),
+    // ── 3. TODO junto: campañas, conjuntos, hoy, 7 días y estados ──
+    const [campanas, adsets, adsToday, ads7d, campaignsToday, estadosAds] = await Promise.all([
+      traerCampanas(), traerAdsets(), adsDe('today'), adsDe('last_7d'), campanasHoy(), estadosDeAnuncios(),
     ]);
+
+    // Join de presupuestos: el del conjunto si es ABO, si no el de la campaña
+    // (CBO). Es contra esto que se mide lo que queda por gastar.
+    const budgetPorCampana = new Map(campanas.map(c => [c.id, c.dailyBudget]));
+    for (const ad of [...adsToday, ...ads7d]) {
+      const conjunto = adsets.get(ad.adsetId) || null;
+      ad.dailyBudget = conjunto?.dailyBudget ?? budgetPorCampana.get(ad.campaignId) ?? null;
+      ad.nivelPresupuesto = conjunto?.dailyBudget != null ? 'conjunto' : 'campaña';
+    }
+    for (const c of campaignsToday) c.dailyBudget = budgetPorCampana.get(c.id) ?? null;
 
     // Pegar el estado a cada fila. La campaña ya lo trae de la llamada 1.
     const estadoCampana = new Map(campanas.map(c => [c.id, { status: c.status, effectiveStatus: c.effectiveStatus }]));
@@ -1985,6 +2101,8 @@ const actions = {
   'testing-insights': handleTestingInsights,
   'ads-with-insights': handleAdsWithInsights,
   'ad-performance': handleAdPerformance,
+  'video-source': handleVideoSource,
+  'ad-preview': handleAdPreview,
   'ig-accounts': handleIgAccounts,
   'latest-ig-post': handleLatestIgPost,
   'campaigns': handleCampaigns,

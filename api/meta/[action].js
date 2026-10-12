@@ -1711,7 +1711,7 @@ async function handleTestingInsights(req, res) {
     let after = null, guard = 0;
     do {
       const params = {
-        fields: `id,name,status,effective_status,daily_budget,lifetime_budget,created_time,insights.date_preset(${preset}){${INS}}`,
+        fields: `id,name,status,effective_status,daily_budget,lifetime_budget,created_time,start_time,insights.date_preset(${preset}){${INS}}`,
         limit: 100,
         effective_status: effectiveStatus,
       };
@@ -1727,6 +1727,10 @@ async function handleTestingInsights(req, res) {
           dailyBudget: c.daily_budget != null ? Number(c.daily_budget) / 100 : null,
           lifetimeBudget: c.lifetime_budget != null ? Number(c.lifetime_budget) / 100 : null,
           createdTime: c.created_time,
+          // "Fecha de inicio" real del Calendario de la campaña (con el huso
+          // de la cuenta). Las cohortes semanales se arman con esto, no con
+          // la fecha escrita en el nombre.
+          startTime: c.start_time || null,
           insights: parseFunnel(c.insights?.data?.[0]) || null,
         });
       }

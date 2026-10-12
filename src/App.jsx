@@ -59,6 +59,7 @@ import CreatorWorkspace from './CreatorWorkspace.jsx';
 import { generateCSV, downloadCSV, parseCSV, toNumber, toBool } from './csv.js';
 import { loadVioraState, saveVioraState, clearVioraState, createBackup } from './vioraStorage.js';
 import { safeSetItem } from './safeStorage.js';
+import { prefetchMetricas } from './metricasCache.js';
 
 // Estados del pipeline de producción de una orden
 export const ORDER_STATES = [
@@ -1513,6 +1514,17 @@ function AppShell({ onExit }) {
         setCurrentSection('mk-produccion');
       }
     } catch {}
+  }, [currentUser]);
+  // Precarga de Métricas: apenas hay sesión de admin, el tablero de Meta
+  // (testing-insights + winners de la última cuenta usada) se pide en
+  // segundo plano y queda cacheado — al entrar a la sección ya está cargado.
+  // El delay deja respirar el arranque de la app (fonts, primer render).
+  const prefetchDone = useRef(false);
+  useEffect(() => {
+    if (prefetchDone.current || currentUser?.role !== 'admin') return;
+    prefetchDone.current = true;
+    const t = setTimeout(() => { try { prefetchMetricas(); } catch {} }, 2500);
+    return () => clearTimeout(t);
   }, [currentUser]);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   // Cada vez que cambia el estado del sidebar, avisamos a otros componentes

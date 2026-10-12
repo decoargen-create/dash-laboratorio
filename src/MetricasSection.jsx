@@ -27,18 +27,19 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   Loader2, RefreshCw, AlertCircle, ChevronDown, ChevronRight, Plug, X,
   FlaskConical, Radar, Gauge, SlidersHorizontal, ExternalLink, Clock, Filter,
-  Pause, Play, AlertTriangle,
+  Pause, Play, AlertTriangle, Trophy, Film, BookmarkPlus, Check,
 } from 'lucide-react';
 import {
   useMetaConnections, useMetaAdAccounts, authHeaders, openMetaConnect,
 } from './MetaConnect.jsx';
 import {
   CFG_DEFAULT, CONDICIONES_PAUSA, cfgPara, cohortesSemanales, rondaDeOptimizacion, esProspectador,
-  promediosDelDia, ETAPAS, oportunidadDeEscala, mesDeSemana, etiquetaMes, semanaDelMes,
+  promediosDelDia, ETAPAS, oportunidadDeEscala, mesDeSemana, etiquetaMes, semanaDelMes, veredicto,
   productoDeCampana, linkMeta, FORMULAS,
   fusionarConFotos, cohortesParaCongelar, fotoDeCohorte,
 } from './testeosCore.js';
 import { cargarCfg, guardarCfg, cargarFotos, guardarFotos, leerCfgLocal } from './testeosStore.js';
+import { referenciasApi } from './referenciasApi.js';
 import { VistaEmbudo } from './EmbudoVista.jsx';
 import { cambiarEstado, inverso, estadoVisible, entregaDe } from './testeosAcciones.js';
 import { deriveFunnelRates } from '../api/meta/_funnel.js';
@@ -869,6 +870,264 @@ function VistaSemanas({ campaigns, cfg, productos, productoId, currency, account
 }
 
 // ========================================================================
+// Pestaña: WINNERS — galería multimedia de los creativos ganadores
+// ========================================================================
+// Los ads que hoy son GANADORES según las reglas de la tienda (compras +
+// ROAS del producto, ventana de 14 días de ads-with-insights), con su
+// creativo real traído de Meta: miniatura, el mp4 para verlo acá mismo, y
+// un click que lo guarda en Referencias (mp4 persistido + análisis IA de
+// hook/ángulo/estructura) para que el editor lo replique desde su tarjeta.
+function VistaWinners({ account, accountId, cfg, cfgRaw, productos, productoId, currency, addToast }) {
+  const [adsRaw, setAdsRaw] = useState(null);
+  const [cargando, setCargando] = useState(true);
+  const [error, setError] = useState(null);
+  const [player, setPlayer] = useState(null);     // { ad, source?, cargando }
+  const [guardando, setGuardando] = useState({}); // adId → true
+  const [guardados, setGuardados] = useState({}); // adId → referencia
+  const [analisisModal, setAnalisisModal] = useState(null); // referencia con analisis
+  const fuentes = useRef(new Map());              // adId → { source, lengthSec } (vencen, no persistir)
+
+  const metaGet = useCallback(async (path) => {
+    let u = `/api/meta/${path}`;
+    if (account?.connId && account.connId !== '__cookie__') {
+      u += `${u.includes('?') ? '&' : '?'}connection_id=${encodeURIComponent(account.connId)}`;
+    }
+    const r = await fetch(u, { headers: await authHeaders(false) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || `Error ${r.status}`);
+    return d;
+  }, [account]);
+
+  useEffect(() => {
+    if (!accountId) return;
+    let vivo = true;
+    setCargando(true); setError(null);
+    (async () => {
+      try {
+        const d = await metaGet(`ads-with-insights?account_id=${encodeURIComponent(accountId)}&limit=100`);
+        if (vivo) setAdsRaw(d.ads || []);
+      } catch (e) {
+        if (vivo) { setError(e.message); setAdsRaw(null); }
+      } finally {
+        if (vivo) setCargando(false);
+      }
+    })();
+    return () => { vivo = false; };
+  }, [accountId, metaGet]);
+
+  // Ganadores con las reglas de SU producto (mismo criterio que las cohortes).
+  const winners = useMemo(() => (adsRaw || [])
+    .map(ad => {
+      const producto = productoDeCampana(ad.campaign?.name || ad.name, productos, cfgRaw);
+      let cfgProd = cfg;
+      try { if (producto && cfgRaw) cfgProd = cfgPara(cfgRaw, producto.id); } catch {}
+      return { ...ad, producto, v: veredicto(ad.insights, cfgProd) };
+    })
+    .filter(a => a.v?.estado === 'ganador')
+    .filter(a => !productoId || a.producto?.id === productoId)
+    .sort((x, y) => (y.insights?.roas || 0) - (x.insights?.roas || 0)), [adsRaw, productos, cfgRaw, cfg, productoId]);
+
+  // El mp4 del creativo: la URL del CDN de Meta vence, se pide al momento.
+  const fuenteDe = useCallback(async (ad) => {
+    if (!ad.creative?.videoId) return null;
+    if (fuentes.current.has(ad.id)) return fuentes.current.get(ad.id);
+    const d = await metaGet(`video-source?video_id=${encodeURIComponent(ad.creative.videoId)}`);
+    fuentes.current.set(ad.id, d);
+    return d;
+  }, [metaGet]);
+
+  const ver = async (ad) => {
+    setPlayer({ ad, cargando: !!ad.creative?.videoId });
+    if (!ad.creative?.videoId) return;
+    try {
+      const f = await fuenteDe(ad);
+      setPlayer(prev => (prev?.ad?.id === ad.id ? { ad, source: f?.source || null, cargando: false } : prev));
+    } catch (e) {
+      addToast?.({ type: 'error', message: `No pude traer el video: ${e.message}` });
+      setPlayer(prev => (prev?.ad?.id === ad.id ? { ad, cargando: false } : prev));
+    }
+  };
+
+  // Guardar como referencia: persiste el mp4 + miniatura en la biblioteca de
+  // Referencias y corre el análisis IA (hook / ángulo / estructura). De ahí
+  // en más vale todo el circuito: guion adaptado y envío a tarjetas.
+  const guardar = async (ad) => {
+    setGuardando(prev => ({ ...prev, [ad.id]: true }));
+    try {
+      let fuente = null;
+      if (ad.creative?.videoId) {
+        try { fuente = await fuenteDe(ad); }
+        catch (e) { addToast?.({ type: 'warning', message: `Sin mp4 (${e.message}) — guardo la miniatura igual.` }); }
+      }
+      const data = await referenciasApi('?action=add-external', {
+        method: 'POST',
+        body: {
+          refId: ad.id,
+          videoUrl: fuente?.source || '',
+          thumbUrl: ad.creative?.thumbnailUrl || ad.creative?.imageUrl || '',
+          caption: ad.creative?.body || ad.creative?.title || '',
+          owner: ad.campaign?.name || ad.name,
+          url: linkMeta({ accountId, nivel: 'ads', ids: [ad.id] }),
+          duration: fuente?.lengthSec || null,
+          platform: 'meta',
+          productoId: ad.producto?.id ?? null,
+        },
+      });
+      if (data.videoWarn) addToast?.({ type: 'warning', message: data.videoWarn });
+      let ref = data.referencia;
+      setGuardados(prev => ({ ...prev, [ad.id]: ref }));
+      if (data.dedup && ref.analisis) {
+        setAnalisisModal(ref);
+      } else {
+        addToast?.({ type: 'info', message: 'Winner guardado — analizando hook y ángulo con IA…' });
+        const anal = await referenciasApi('?action=analyze', { method: 'POST', body: { id: ref.id } });
+        ref = anal.referencia;
+        setGuardados(prev => ({ ...prev, [ad.id]: ref }));
+        setAnalisisModal(ref);
+      }
+    } catch (e) {
+      addToast?.({ type: 'error', message: `No se pudo guardar el winner: ${e.message}` });
+    } finally {
+      setGuardando(prev => ({ ...prev, [ad.id]: false }));
+    }
+  };
+
+  if (cargando) {
+    return <div className="flex items-center justify-center py-14 text-gray-400"><Loader2 size={18} className="animate-spin mr-2" /> Buscando tus winners en Meta…</div>;
+  }
+  if (error) {
+    return (
+      <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl flex items-start gap-3">
+        <AlertCircle size={17} className="text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-red-900 dark:text-red-200">No pude traer los creativos</p>
+          <p className="text-xs text-red-700 dark:text-red-300 mt-0.5 break-words">{error}</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2 flex-wrap">
+        <Trophy size={15} className="text-amber-500" />
+        <h3 className="text-[13px] font-bold text-gray-900 dark:text-gray-100">Winners · últimos 14 días</h3>
+        <span className="text-[10.5px] text-gray-400">
+          ganador = las reglas de su producto (compras + ROAS) · guardalo para desglosar hook/ángulo y pasárselo al editor
+        </span>
+      </div>
+
+      {winners.length === 0 ? (
+        <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-10 text-center">
+          <Trophy size={24} className="mx-auto text-gray-300 dark:text-gray-600 mb-2" />
+          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Ningún ad califica como winner en los últimos 14 días</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">El corte es el de <b>Reglas</b> (compras mínimas + ROAS del producto).</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+          {winners.map(ad => {
+            const ref = guardados[ad.id];
+            const i = ad.insights || {};
+            return (
+              <div key={ad.id} className="rounded-xl border border-amber-200/70 dark:border-amber-900/40 bg-white dark:bg-gray-900 overflow-hidden flex flex-col">
+                <button onClick={() => ver(ad)} className="relative aspect-[9/16] max-h-72 w-full bg-gray-100 dark:bg-gray-800 group overflow-hidden">
+                  {(ad.creative?.thumbnailUrl || ad.creative?.imageUrl) ? (
+                    <img src={ad.creative.thumbnailUrl || ad.creative.imageUrl} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
+                  ) : (
+                    <div className="absolute inset-0 flex items-center justify-center text-gray-300 dark:text-gray-600"><Film size={30} /></div>
+                  )}
+                  <span className="absolute top-1.5 left-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500 text-white text-[10px] font-bold shadow"><Trophy size={10} /> ROAS {fmtR(i.roas)}</span>
+                  {ad.creative?.videoId && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/25 opacity-80 group-hover:opacity-100 transition">
+                      <span className="w-11 h-11 rounded-full bg-white/90 flex items-center justify-center shadow-lg">
+                        <Play size={18} className="text-gray-900 ml-0.5" fill="currentColor" />
+                      </span>
+                    </div>
+                  )}
+                </button>
+                <div className="p-3 flex-1 flex flex-col gap-1.5">
+                  <span className="text-xs font-bold text-gray-900 dark:text-gray-100 truncate" title={ad.name}>{ad.name}</span>
+                  <span className="text-[10px] text-gray-400 truncate" title={ad.campaign?.name}>{ad.campaign?.name}{ad.producto ? ` · ${ad.producto.nombre}` : ''}</span>
+                  <span className="text-[10.5px] text-gray-500 dark:text-gray-400 tabular-nums">
+                    {i.purchases || 0} compras · {fmtM(i.spend, currency)} · {fmtM(i.revenue, currency)} fact.
+                  </span>
+                  <div className="mt-auto flex flex-wrap gap-1.5 pt-1">
+                    <button onClick={() => guardar(ad)} disabled={!!guardando[ad.id]}
+                      title="Guarda el mp4 en Referencias y lo analiza con IA (hook, ángulo, estructura). Después: guion adaptado y envío a tarjeta desde Marketing → Referencias."
+                      className={`inline-flex items-center gap-1 px-2 py-1.5 text-[11px] font-bold rounded-lg transition disabled:opacity-50 ${ref ? 'text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900 hover:bg-emerald-50 dark:hover:bg-emerald-900/20' : 'text-white bg-amber-500 hover:bg-amber-600'}`}>
+                      {guardando[ad.id] ? <Loader2 size={12} className="animate-spin" /> : ref ? <Check size={12} /> : <BookmarkPlus size={12} />}
+                      {guardando[ad.id] ? 'Guardando…' : ref ? 'En Referencias' : 'Desglosar + guardar'}
+                    </button>
+                    {ref?.analisis && (
+                      <button onClick={() => setAnalisisModal(ref)}
+                        className="inline-flex items-center gap-1 px-2 py-1.5 text-[11px] font-bold rounded-lg border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition">
+                        Ver análisis
+                      </button>
+                    )}
+                    <MetaLink nivel="ads" ids={[ad.id]} accountId={accountId}>Meta</MetaLink>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Reproductor */}
+      {player && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" onClick={() => setPlayer(null)}>
+          <div className="relative" onClick={e => e.stopPropagation()}>
+            <button onClick={() => setPlayer(null)} className="absolute -top-9 right-0 text-white/80 hover:text-white"><X size={22} /></button>
+            {player.cargando ? (
+              <div className="w-[320px] h-[480px] rounded-xl bg-gray-900 flex items-center justify-center text-gray-400"><Loader2 size={20} className="animate-spin mr-2" /> Trayendo el mp4…</div>
+            ) : player.source ? (
+              <video src={player.source} controls autoPlay playsInline className="max-h-[82vh] max-w-[92vw] rounded-xl bg-black shadow-2xl" />
+            ) : (player.ad.creative?.imageUrl || player.ad.creative?.thumbnailUrl) ? (
+              <img src={player.ad.creative.imageUrl || player.ad.creative.thumbnailUrl} alt="" className="max-h-[82vh] max-w-[92vw] rounded-xl shadow-2xl" />
+            ) : (
+              <div className="w-[320px] p-6 rounded-xl bg-gray-900 text-sm text-gray-300">Meta no devolvió el creativo de este ad.</div>
+            )}
+            <div className="mt-2 text-center text-xs text-white/70 max-w-[92vw] truncate">{player.ad.name}</div>
+          </div>
+        </div>
+      )}
+
+      {/* Análisis IA del winner guardado */}
+      {analisisModal && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto bg-black/50 backdrop-blur-sm" onClick={() => setAnalisisModal(null)}>
+          <div className="w-full max-w-xl my-8 bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center gap-2 px-5 py-3.5 border-b border-gray-100 dark:border-gray-800">
+              <Trophy size={15} className="text-amber-500" />
+              <h3 className="flex-1 text-sm font-bold text-gray-900 dark:text-gray-100 truncate">Por qué funciona · {analisisModal.owner_username || 'winner'}</h3>
+              <button onClick={() => setAnalisisModal(null)} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+            </div>
+            <div className="p-5 space-y-3 max-h-[70vh] overflow-y-auto text-sm text-gray-700 dark:text-gray-200">
+              {analisisModal.analisis ? (
+                <>
+                  {analisisModal.analisis.angle && <p><span className="font-bold">Ángulo:</span> {analisisModal.analisis.angle}</p>}
+                  {(analisisModal.analisis.hooks || []).length > 0 && (
+                    <div><span className="font-bold">Hooks:</span>
+                      <ul className="mt-1 space-y-1">{analisisModal.analisis.hooks.map((h, n) => <li key={n} className="flex gap-2"><span className="text-amber-500 font-bold shrink-0">🪝</span>{h}</li>)}</ul>
+                    </div>
+                  )}
+                  {analisisModal.analisis.estructura && <p><span className="font-bold">Estructura:</span> {analisisModal.analisis.estructura}</p>}
+                  {(analisisModal.analisis.triggers || []).length > 0 && <p><span className="font-bold">Triggers:</span> {analisisModal.analisis.triggers.join(' · ')}</p>}
+                  {analisisModal.analisis.visual && <p><span className="font-bold">Visual:</span> {analisisModal.analisis.visual}</p>}
+                  {analisisModal.analisis.why_it_works && <p><span className="font-bold">Por qué funciona:</span> {analisisModal.analisis.why_it_works}</p>}
+                </>
+              ) : <p className="text-gray-400">Sin análisis todavía.</p>}
+              <p className="text-[11px] text-gray-400 border-t border-gray-100 dark:border-gray-800 pt-3">
+                Quedó guardado en <b>Marketing → Referencias</b>: desde ahí generás el guion adaptado y lo mandás a una tarjeta de Producción para el editor.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ========================================================================
 // Pestaña: PROSPECTADORES
 // ========================================================================
 function VistaProspectadores({ ads, cfg, currency, accountId, onWhy, cambios, trabajando, onEstado }) {
@@ -1453,6 +1712,7 @@ export default function MetricasSection({ addToast }) {
     { id: 'embudo', label: 'Embudo de compra', icon: Filter },
     { id: 'semanas', label: 'Testeos por semana', icon: FlaskConical },
     { id: 'prosp', label: 'Prospectadores', icon: Radar },
+    { id: 'winners', label: 'Winners', icon: Trophy },
     { id: 'reglas', label: 'Reglas de la tienda', icon: SlidersHorizontal },
   ];
 
@@ -1572,6 +1832,10 @@ export default function MetricasSection({ addToast }) {
             ads={ads7d} cfg={cfg} currency={currency} accountId={accountId} onWhy={setWhy}
             cambios={cambios} trabajando={trabajando}
             onEstado={({ items, status }) => aplicarEstado({ level: 'ad', items, status })}
+          />}
+          {tab === 'winners' && <VistaWinners
+            account={account} accountId={accountId} cfg={cfg} cfgRaw={cfgRaw}
+            productos={productos} productoId={productoId || null} currency={currency} addToast={addToast}
           />}
           {tab === 'reglas' && <VistaReglas campaigns={data.campaigns} cfg={cfgRaw} setCfg={setCfgRaw} productos={productos} currency={currency} onWhy={setWhy} origen={origenCfg} />}
         </>

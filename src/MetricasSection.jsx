@@ -2523,13 +2523,24 @@ export default function MetricasSection({ addToast }) {
           <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
         </div>
         {ventana.fija ? (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300"
-            title="Esta pestaña mira siempre esta ventana — no hay nada que elegir.">
+          <button
+            onClick={() => {
+              setTab('manager');
+              addToast?.({
+                type: 'info',
+                message: tab === 'hoy'
+                  ? '"Hoy" mira siempre el día en curso (sus recomendaciones de pausa son de hoy). Acá en Campañas y anuncios elegís cualquier rango con el calendario.'
+                  : 'Esta pestaña tiene ventana fija. Acá en Campañas y anuncios elegís cualquier rango con el calendario.',
+                duration: 7000,
+              });
+            }}
+            title="Esta pestaña mira siempre esta ventana. Click para ver otro rango en Campañas y anuncios."
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:border-[#1877F2]/60 transition cursor-pointer">
             <CalendarDays size={12} className="text-[#1877F2]" /> {ventana.label}
             <span className="text-gray-400 font-normal">
               · {new Date().toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric', month: 'short' })}
             </span>
-          </span>
+          </button>
         ) : (
           <MenuFecha value={ventana.valor} onChange={ventana.set} opciones={ventana.opciones} />
         )}

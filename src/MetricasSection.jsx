@@ -249,6 +249,19 @@ function PresupuestoCell({ a, p, cfg, currency, nivel, override, onGuardar }) {
 function DesgloseCampana({ campaignId, accountId, connId, currency, presupuestos, onPresupuesto }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
+  // Prender/apagar conjuntos y anuncios desde el desglose: en una ABO la
+  // optimización se hace acá, no apagando la campaña entera.
+  const [estados, setEstados] = useState({});
+  const [busy, setBusy] = useState({});
+  const toggle = async (item, level) => {
+    const actual = estados[item.id] || item.effectiveStatus;
+    const nuevo = actual === 'ACTIVE' ? 'PAUSED' : 'ACTIVE';
+    setBusy(prev => ({ ...prev, [item.id]: true }));
+    const r = await cambiarEstado({ accountId, connId, level, ids: [item.id], status: nuevo });
+    setBusy(prev => { const n = { ...prev }; delete n[item.id]; return n; });
+    if (r.ok) setEstados(prev => ({ ...prev, [item.id]: nuevo }));
+  };
+  const estadoDe = (item) => estados[item.id] || item.effectiveStatus;
   useEffect(() => {
     let muerto = false;
     (async () => {
@@ -294,6 +307,7 @@ function DesgloseCampana({ campaignId, accountId, connId, currency, presupuestos
         <table className="w-full text-[11.5px] min-w-[720px]">
           <thead>
             <tr className="text-gray-400 text-[9px] uppercase tracking-wider">
+              <th className="px-2 py-1 w-9" />
               <th className="text-left font-bold px-2 py-1">Conjunto / anuncio</th>
               <th className="text-left font-bold px-2 py-1">Entrega</th>
               <th className="text-right font-bold px-2 py-1">Presupuesto</th>
@@ -308,8 +322,11 @@ function DesgloseCampana({ campaignId, accountId, connId, currency, presupuestos
             {data.map(s => (
               <React.Fragment key={s.id}>
                 <tr className="bg-gray-50/80 dark:bg-gray-900/30">
+                  <td className="px-2 py-1.5">
+                    <SwitchEstado estado={estadoDe(s)} trabajando={!!busy[s.id]} onCambiar={() => toggle(s, 'adset')} />
+                  </td>
                   <td className="px-2 py-1.5 font-semibold text-gray-900 dark:text-gray-100">▦ {s.name}</td>
-                  <td className="px-2 py-1.5"><Dot on={s.effectiveStatus === 'ACTIVE'} /></td>
+                  <td className="px-2 py-1.5"><Dot on={estadoDe(s) === 'ACTIVE'} /></td>
                   <td className="px-2 py-1.5 text-right whitespace-nowrap">
                     {s.dailyBudget != null ? (
                       <PresupuestoCell
@@ -326,8 +343,11 @@ function DesgloseCampana({ campaignId, accountId, connId, currency, presupuestos
                 </tr>
                 {s.ads.map(ad => (
                   <tr key={ad.id}>
-                    <td className="px-2 py-1.5 pl-7 text-gray-700 dark:text-gray-300 max-w-[300px] truncate" title={ad.name}>▶ {ad.name}</td>
-                    <td className="px-2 py-1.5"><Dot on={ad.effectiveStatus === 'ACTIVE'} /></td>
+                    <td className="px-2 py-1.5 pl-5">
+                      <SwitchEstado estado={estadoDe(ad)} trabajando={!!busy[ad.id]} onCambiar={() => toggle(ad, 'ad')} />
+                    </td>
+                    <td className="px-2 py-1.5 pl-4 text-gray-700 dark:text-gray-300 max-w-[300px] truncate" title={ad.name}>▶ {ad.name}</td>
+                    <td className="px-2 py-1.5"><Dot on={estadoDe(ad) === 'ACTIVE'} /></td>
                     <td className="px-2 py-1.5 text-right text-gray-400">—</td>
                     <Num v={ad.compras} money={false} />
                     <Num v={ad.spend} />
@@ -805,7 +825,15 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
                           />
                           {open ? <ChevronDown size={13} className="text-brand-500 shrink-0" /> : <ChevronRight size={13} className="text-gray-400 shrink-0" />}
                           <span className="min-w-0">
-                            <span className="block font-semibold text-gray-900 dark:text-gray-100 truncate">{a.name}</span>
+                            <span className="flex items-center gap-1.5 min-w-0">
+                              <span className="font-semibold text-gray-900 dark:text-gray-100 truncate">{a.name}</span>
+                              {esCampana && a.dailyBudget == null && a.lifetimeBudget == null && (
+                                <span className="shrink-0 px-1.5 py-0.5 rounded text-[8.5px] font-bold bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300"
+                                  title="ABO: el presupuesto vive en los conjuntos. Expandí la fila para optimizar conjunto por conjunto (prender/apagar y presupuesto).">
+                                  ABO · por conjunto
+                                </span>
+                              )}
+                            </span>
                             {!esCampana && <span className="block text-[10px] text-gray-400 truncate">{a.campaignName}</span>}
                           </span>
                         </div>

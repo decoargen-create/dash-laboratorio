@@ -692,50 +692,64 @@ export function setWinnersProducto(productoId, productoNombre, winners) {
 }
 
 // ── Referencias (reels de IG) por producto ──────────────────────────────────
-// Igual que winners: la referencia se copia a TODAS las tarjetas del producto
-// (desnormalizada) para que el editor asignado la vea — su RLS solo le deja
-// leer sus propias filas. Shape: { id, url, shortcode, caption, owner, angle,
-// hooks, guion, notasEditor, hooksAlternativos, ts }.
+// Las referencias son POR TARJETA, a diferencia de winners y materialLink.
+//
+// Arrancaron copiadas a todas las tarjetas del producto (patrón winners), y
+// estaba mal: un reel de referencia es la consigna de UN video puntual. Si se
+// pega en la tarjeta de Ponzio, es para que Ponzio replique ESE reel — no para
+// que las otras tres tarjetas del mismo producto hereden una consigna que
+// nadie les dio. La columna jsonb sigue igual (desnormalizada en la fila, que
+// es lo que deja que el editor la lea con su RLS); lo que cambia es que se
+// escribe en una sola fila.
+//
+// Shape: { id, url, shortcode, caption, owner, angle, hooks, guion,
+//          notasEditor, hooksAlternativos, ts }.
 const refKey = (r) => String(r?.id || r?.shortcode || r?.url || '').trim().toLowerCase();
 
-export function referenciasDeProducto(productoId, productoNombre) {
-  const seen = new Set(); const out = [];
-  for (const a of read()) {
-    if (!mismoProducto(a, productoId, productoNombre)) continue;
-    for (const r of (a.referencias || [])) {
-      const k = refKey(r);
-      if (k && !seen.has(k)) { seen.add(k); out.push(r); }
-    }
-  }
-  return out.sort((x, y) => (y.ts || 0) - (x.ts || 0));
+export function referenciasDeTarjeta(cardId) {
+  const a = read().find(x => x.id === cardId);
+  return Array.isArray(a?.referencias) ? a.referencias : [];
 }
 
-export function setReferenciasProducto(productoId, productoNombre, referencias) {
-  const arr = Array.isArray(referencias) ? referencias : [];
-  const target = JSON.stringify(arr);
-  let n = 0;
-  for (const a of read()) {
-    if (mismoProducto(a, productoId, productoNombre) && JSON.stringify(a.referencias || []) !== target) {
-      updateAssignment(a.id, { referencias: arr }); n++;
-    }
-  }
-  return n;
-}
-
-// Agrega (o actualiza, si ya estaba) una referencia en todas las tarjetas del
-// producto. Devuelve cuántas tarjetas tocó.
-export function addReferenciaAProducto(productoId, productoNombre, ref) {
+// Agrega (o actualiza, si ya estaba) una referencia en UNA tarjeta.
+// Devuelve true si quedó agregada, false si ya estaba igual.
+export function addReferenciaATarjeta(cardId, ref) {
   const k = refKey(ref);
-  if (!k) return 0;
-  const actuales = referenciasDeProducto(productoId, productoNombre);
+  if (!k || !cardId) return false;
+  const actuales = referenciasDeTarjeta(cardId);
   const nuevas = [{ ...ref, ts: ref.ts || Date.now() }, ...actuales.filter(r => refKey(r) !== k)];
-  return setReferenciasProducto(productoId, productoNombre, nuevas);
+  if (JSON.stringify(nuevas) === JSON.stringify(actuales)) return false;
+  updateAssignment(cardId, { referencias: nuevas });
+  return true;
 }
 
-export function removeReferenciaDeProducto(productoId, productoNombre, refOrId) {
+export function removeReferenciaDeTarjeta(cardId, refOrId) {
   const k = typeof refOrId === 'string' ? refOrId.trim().toLowerCase() : refKey(refOrId);
-  const nuevas = referenciasDeProducto(productoId, productoNombre).filter(r => refKey(r) !== k);
-  return setReferenciasProducto(productoId, productoNombre, nuevas);
+  const actuales = referenciasDeTarjeta(cardId);
+  const nuevas = actuales.filter(r => refKey(r) !== k);
+  if (nuevas.length === actuales.length) return false;
+  updateAssignment(cardId, { referencias: nuevas });
+  return true;
+}
+
+// Tarjetas del tablero para el picker "enviar a tarjeta" de Marketing →
+// Referencias. Antes se elegía un PRODUCTO y la referencia caía en todas sus
+// tarjetas; ahora se elige la tarjeta, que es la unidad real de trabajo.
+// Se ordenan por semana descendente: lo que se está produciendo ahora primero.
+export function tarjetasParaReferencia() {
+  return read()
+    .filter(a => a.estado !== 'archivado')
+    .map(a => ({
+      id: a.id,
+      productoNombre: a.productoNombre || '(sin producto)',
+      persona: a.persona || '',
+      weekKey: a.weekKey,
+      estado: a.estado,
+      referencias: (a.referencias || []).length,
+    }))
+    .sort((x, y) => String(y.weekKey || '').localeCompare(String(x.weekKey || ''))
+      || (x.productoNombre || '').localeCompare(y.productoNombre || '', 'es')
+      || (x.persona || '').localeCompare(y.persona || '', 'es'));
 }
 
 // Productos únicos presentes en el tablero (para el picker "enviar a tarjeta").
@@ -777,9 +791,11 @@ export function addAssignment({ weekKey, productoId, productoNombre, persona, cr
   // El link de material es por producto: si no lo pasan, lo heredamos de otra
   // tarjeta del mismo producto. Los winners también son por producto → los
   // heredamos, así una tarjeta nueva de Cepillo ya trae sus winners de referencia.
+  //
+  // Las referencias NO se heredan: son de la tarjeta. Una tarjeta nueva nace
+  // sin reels y se le pegan los que correspondan a ese video.
   const material = (materialLink || '').trim() || materialLinkDeProducto(productoId, productoNombre);
   const winnersHeredados = winnersDeProducto(productoId, productoNombre);
-  const referenciasHeredadas = referenciasDeProducto(productoId, productoNombre);
   const nueva = {
     id: genId(),
     weekKey,
@@ -796,7 +812,7 @@ export function addAssignment({ weekKey, productoId, productoNombre, persona, cr
     nota: '',
     materialLink: material,
     winners: winnersHeredados,
-    referencias: referenciasHeredadas,
+    referencias: [],
     pagado: false,
     archivos: [],
     historial: [nuevoEvento('creacion')],

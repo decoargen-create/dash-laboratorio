@@ -22,7 +22,7 @@ import {
   getRole, entregasNuevas, ultimaSubidaTs, personasEnTarjetas, resumenVideosPorProducto,
   resyncDesdeNube, vaciarTodo, setMaterialLinkProducto, probarDiscord,
   loadNotifConfig, saveNotifConfig, toggleWinner, winnersDeProducto, pagoProductoDe,
-  referenciasDeProducto, removeReferenciaDeProducto, addReferenciaAProducto,
+  referenciasDeTarjeta, removeReferenciaDeTarjeta, addReferenciaATarjeta,
   monthLabel,
 } from './produccionStore.js';
 import { referenciasApi, toCardRef } from './referenciasApi.js';
@@ -2388,8 +2388,8 @@ export function CardDetailModal({ a, personas, team = [], onClose, addToast, onT
     onClose();
   };
   // Reels de IG de referencia: pegás el link acá y se agenda (scrape + guardado
-  // del mp4 vía /api/marketing/referencias) y se adjunta a las tarjetas del
-  // producto. El análisis IA / guion se hacen desde Marketing → Referencias.
+  // del mp4 vía /api/marketing/referencias) y queda en ESTA tarjeta. El
+  // análisis IA / guion se hacen desde Marketing → Referencias.
   const [refUrl, setRefUrl] = useState('');
   const [refBusy, setRefBusy] = useState(false);
   const agregarReferencia = async () => {
@@ -2402,9 +2402,9 @@ export function CardDetailModal({ a, personas, team = [], onClose, addToast, onT
     try {
       const data = await referenciasApi('', { method: 'POST', body: { url } });
       if (data.videoWarn) addToast?.({ type: 'warning', message: data.videoWarn });
-      const n = addReferenciaAProducto(a.productoId, a.productoNombre, toCardRef(data.referencia));
+      const agregada = addReferenciaATarjeta(a.id, toCardRef(data.referencia));
       setRefUrl('');
-      addToast?.({ type: 'success', message: n > 0 ? `Reel agendado y agregado a ${n} tarjeta${n === 1 ? '' : 's'} ✓` : 'Ese reel ya estaba en las tarjetas del producto.' });
+      addToast?.({ type: agregada ? 'success' : 'info', message: agregada ? 'Reel agendado y agregado a esta tarjeta ✓' : 'Ese reel ya estaba en esta tarjeta.' });
     } catch (err) {
       addToast?.({ type: 'error', message: `No se pudo agendar el reel: ${err.message}` });
     } finally {
@@ -2562,10 +2562,11 @@ export function CardDetailModal({ a, personas, team = [], onClose, addToast, onT
           })()}
 
           {/* Reels de IG de referencia — se pegan acá directo (o se mandan desde
-              Marketing → Referencias). Son POR PRODUCTO (patrón winners): el
-              editor los ve en su workspace con el embed de IG + guion adaptado. */}
+              Marketing → Referencias). Son DE ESTA TARJETA: el reel es la
+              consigna de este video puntual, no del producto entero. El editor
+              los ve en su workspace con el reel + guion adaptado. */}
           {(() => {
-            const refs = referenciasDeProducto(a.productoId, a.productoNombre);
+            const refs = referenciasDeTarjeta(a.id);
             return (
               <div>
                 <div className="flex items-center gap-1.5 mb-1.5">
@@ -2576,7 +2577,7 @@ export function CardDetailModal({ a, personas, team = [], onClose, addToast, onT
                   <input type="url" value={refUrl} onChange={e => setRefUrl(e.target.value)}
                     onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); agregarReferencia(); } }}
                     disabled={refBusy}
-                    placeholder="https://www.instagram.com/reel/… (se guarda el video y el editor lo ve acá)"
+                    placeholder="https://www.instagram.com/reel/… (queda en esta tarjeta y el editor lo ve)"
                     className="flex-1 min-w-0 px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 disabled:opacity-60" />
                   <button onClick={agregarReferencia} disabled={refBusy || !refUrl.trim()}
                     className="shrink-0 inline-flex items-center gap-1 px-3 py-2 text-xs font-bold text-white bg-pink-500 hover:bg-pink-600 rounded-lg transition disabled:opacity-50">
@@ -2596,13 +2597,13 @@ export function CardDetailModal({ a, personas, team = [], onClose, addToast, onT
                           <a href={r.url} target="_blank" rel="noopener noreferrer" title="Abrir en Instagram"
                             className="text-pink-500 hover:text-pink-600 shrink-0"><ExternalLink size={13} /></a>
                         )}
-                        <button onClick={() => removeReferenciaDeProducto(a.productoId, a.productoNombre, r)} title="Quitar de las tarjetas del producto"
+                        <button onClick={() => removeReferenciaDeTarjeta(a.id, r)} title="Quitar de esta tarjeta"
                           className="text-gray-300 hover:text-red-500 shrink-0"><X size={13} /></button>
                       </div>
                     ))}
                   </div>
                 )}
-                <p className="text-[10px] text-gray-400 mt-1">Se aplica a todas las tarjetas de este producto. El análisis IA y el guion adaptado se hacen desde Marketing → Referencias (ahí también queda la biblioteca completa).</p>
+                <p className="text-[10px] text-gray-400 mt-1">Solo para esta tarjeta. El análisis IA y el guion adaptado se hacen desde Marketing → Referencias (ahí también queda la biblioteca completa).</p>
               </div>
             );
           })()}

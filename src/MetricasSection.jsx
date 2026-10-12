@@ -27,7 +27,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   Loader2, RefreshCw, AlertCircle, ChevronDown, ChevronRight, Plug, X,
   FlaskConical, Radar, Gauge, SlidersHorizontal, ExternalLink, Clock, Filter,
-  Pause, Play, AlertTriangle, Trophy, Film, BookmarkPlus, Check, Pencil, CalendarDays, Rocket,
+  Pause, Play, AlertTriangle, Trophy, Film, BookmarkPlus, Check, Pencil, CalendarDays, Rocket, Table2,
 } from 'lucide-react';
 import {
   useMetaConnections, useMetaAdAccounts, authHeaders, openMetaConnect,
@@ -242,6 +242,176 @@ function PresupuestoCell({ a, p, cfg, currency, nivel, override, onGuardar }) {
       ) : <span className="text-gray-400">—</span>}
     </span>
   );
+}
+
+// Pestaña "Campañas y anuncios": la tabla clásica del Ads Manager por niveles
+// (Campañas / Conjuntos / Anuncios) con la ventana elegida arriba, buscador,
+// orden por columna, toggles reales, presupuesto editable con doble click y
+// fila de totales al pie. Cachea por (cuenta, nivel, ventana) y refresca atrás.
+function VistaManager({ accountId, connId, currency, preset, presupuestos, onPresupuesto }) {
+  const [nivel, setNivel] = useState('campaign');
+  const [data, setData] = useState(null);
+  const [cargando, setCargando] = useState(false);
+  const [err, setErr] = useState(null);
+  const [q, setQ] = useState('');
+  const [orden, setOrden] = useState({ k: 'spend', dir: 1 });
+  const [estados, setEstados] = useState({});
+  const [busy, setBusy] = useState({});
+  const cacheRef = useRef({});
+
+  useEffect(() => {
+    if (!accountId) return;
+    const key = `${accountId}|${nivel}|${preset}`;
+    let muerto = false;
+    setErr(null);
+    if (cacheRef.current[key]) setData(cacheRef.current[key]);
+    else setData(null);
+    setCargando(true);
+    (async () => {
+      try {
+        const qs = new URLSearchParams({ account_id: accountId, level: nivel, date_preset: preset });
+        if (connId && connId !== '__cookie__') qs.set('connection_id', connId);
+        const r = await fetch(`/api/meta/manager-table?${qs}`, { headers: await authHeaders(false) });
+        const d = await r.json().catch(() => ({}));
+        if (muerto) return;
+        if (!r.ok || d.error) setErr(d.error || `Error ${r.status}`);
+        else { cacheRef.current[key] = d; setData(d); }
+      } catch (e) { if (!muerto) setErr(e.message); }
+      finally { if (!muerto) setCargando(false); }
+    })();
+    return () => { muerto = true; };
+  }, [accountId, connId, nivel, preset]);
+
+  const estadoDe = (r) => estados[r.id] || r.effectiveStatus;
+  const togglear = async (row) => {
+    const nuevo = estadoDe(row) === 'ACTIVE' ? 'PAUSED' : 'ACTIVE';
+    setBusy(prev => ({ ...prev, [row.id]: true }));
+    const r = await cambiarEstado({ accountId, connId, level: nivel, ids: [row.id], status: nuevo });
+    setBusy(prev => { const n = { ...prev }; delete n[row.id]; return n; });
+    if (r.ok) setEstados(prev => ({ ...prev, [row.id]: nuevo }));
+  };
+
+  const clickOrden = (k) => setOrden(o => o.k === k ? { k, dir: -o.dir } : { k, dir: 1 });
+  const flecha = (k) => orden.k === k ? (orden.dir === 1 ? ' ↓' : ' ↑') : '';
+  const thSort = (k, label, title) => (
+    <th key={k} onClick={() => clickOrden(k)} title={title || label}
+      className="text-right font-bold px-2 py-2 cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-200 transition whitespace-nowrap">
+      {label}{flecha(k)}
+    </th>
+  );
+
+  const filas = (data?.rows || [])
+    .filter(r => !q || r.name.toLowerCase().includes(q) || (r.sub || '').toLowerCase().includes(q))
+    .sort((a, b) => orden.dir * ((Number(b[orden.k]) || 0) - (Number(a[orden.k]) || 0)));
+  const t = data?.totals;
+
+  const NIVELES_UI = [
+    { id: 'campaign', label: 'Campañas' },
+    { id: 'adset', label: 'Conjuntos' },
+    { id: 'ad', label: 'Anuncios' },
+  ];
+
+  return (
+    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
+      <div className="flex items-center gap-2 px-3.5 py-2.5 border-b border-gray-100 dark:border-gray-700/60 flex-wrap">
+        <div className="inline-flex gap-0.5 p-0.5 rounded-lg bg-gray-100 dark:bg-gray-900 border border-gray-200 dark:border-gray-700">
+          {NIVELES_UI.map(n => (
+            <button key={n.id} onClick={() => setNivel(n.id)}
+              className={`px-3 py-1 text-[11.5px] font-bold rounded-md transition ${
+                nivel === n.id ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}>
+              {n.label}{data && nivel === n.id ? ` · ${filas.length}` : ''}
+            </button>
+          ))}
+        </div>
+        <div className="relative flex-1 min-w-[160px] max-w-[280px]">
+          <input value={q} onChange={e => setQ(e.target.value.trim().toLowerCase())} placeholder="Buscar por nombre…"
+            className="w-full px-3 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-full focus:outline-none focus:ring-2 focus:ring-[#1877F2]" />
+        </div>
+        {cargando && <span className="inline-flex items-center gap-1.5 text-[11px] text-gray-400"><Loader2 size={11} className="animate-spin" /> Actualizando…</span>}
+        <span className="ml-auto text-[10.5px] text-gray-400">click en las columnas para ordenar</span>
+      </div>
+
+      {err ? (
+        <div className="p-6 text-sm text-red-600 dark:text-red-400 flex items-center gap-2"><AlertCircle size={15} /> {err}</div>
+      ) : !data ? (
+        <div className="p-4 space-y-2">
+          {[0, 1, 2, 3, 4].map(i => <div key={i} className="h-10 rounded-lg bg-gray-100 dark:bg-gray-900 animate-pulse" style={{ animationDelay: `${i * 120}ms` }} />)}
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs min-w-[860px]">
+            <thead>
+              <tr className="bg-gray-50 dark:bg-gray-900/50 text-gray-400 text-[9.5px] uppercase tracking-wider">
+                <th className="px-3 py-2 w-10" />
+                <th className="text-left font-bold px-2 py-2">Nombre</th>
+                <th className="text-left font-bold px-2 py-2">Entrega</th>
+                <th className="text-right font-bold px-2 py-2">Presupuesto</th>
+                {thSort('compras', 'Compras')}
+                {thSort('cpa', 'Costo por compra')}
+                {thSort('spend', 'Importe gastado')}
+                {thSort('revenue', 'Valor de conversión')}
+                {thSort('roas', 'ROAS (compras)')}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100 dark:divide-gray-700/60">
+              {filas.length === 0 && (
+                <tr><td colSpan={9} className="px-3.5 py-6 text-center text-xs text-gray-400">
+                  Sin {nivel === 'campaign' ? 'campañas' : nivel === 'adset' ? 'conjuntos' : 'anuncios'} con datos en este período{q ? ' (con ese nombre)' : ''}.
+                </td></tr>
+              )}
+              {filas.map(r => (
+                <tr key={r.id} className={`hover:bg-gray-50 dark:hover:bg-gray-900/30 ${estadoDe(r) === 'PAUSED' ? 'opacity-55' : ''}`}>
+                  <td className="px-3 py-2">
+                    <SwitchEstado estado={estadoDe(r)} trabajando={!!busy[r.id]} onCambiar={() => togglear(r)} />
+                  </td>
+                  <td className="px-2 py-2 max-w-[300px]">
+                    <span className="block font-semibold text-gray-900 dark:text-gray-100 truncate" title={r.name}>{r.name}</span>
+                    {r.sub && <span className="block text-[10px] text-gray-400 truncate" title={r.sub}>{r.sub}</span>}
+                  </td>
+                  <td className="px-2 py-2 whitespace-nowrap">
+                    <span className={`inline-flex items-center gap-1.5 text-[11px] font-semibold ${estadoDe(r) === 'ACTIVE' ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-400'}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${estadoDe(r) === 'ACTIVE' ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+                      {estadoDe(r) === 'ACTIVE' ? 'Activo' : 'Desactivado'}
+                    </span>
+                  </td>
+                  <td className="px-2 py-2 text-right whitespace-nowrap">
+                    {nivel !== 'ad' && r.dailyBudget != null ? (
+                      <PresupuestoCell a={{ id: r.id, dailyBudget: r.dailyBudget }} p={{}} cfg={{}} currency={currency}
+                        nivel="campaigns" override={presupuestos?.[r.id]}
+                        onGuardar={onPresupuesto ? ({ id, dailyBudget }) => onPresupuesto({ id, level: nivel === 'adset' ? 'adset' : 'campaign', dailyBudget }) : null} />
+                    ) : <span className="text-gray-400">—</span>}
+                  </td>
+                  <td className="px-2 py-2 text-right tabular-nums font-semibold text-gray-700 dark:text-gray-200">{r.compras || '—'}</td>
+                  <td className="px-2 py-2 text-right tabular-nums text-gray-600 dark:text-gray-300">{r.cpa != null ? fmtM(r.cpa, currency) : '—'}</td>
+                  <td className="px-2 py-2 text-right tabular-nums font-semibold text-gray-700 dark:text-gray-200">{fmtM(r.spend, currency)}</td>
+                  <td className="px-2 py-2 text-right tabular-nums text-gray-600 dark:text-gray-300">{r.revenue ? fmtM(r.revenue, currency) : '—'}</td>
+                  <td className={`px-2 py-2 text-right tabular-nums font-bold ${r.roas >= (cfgGlobalRoas() || 1.5) ? 'text-emerald-600 dark:text-emerald-400' : r.spend > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400'}`}>{fmtR(r.roas)}</td>
+                </tr>
+              ))}
+            </tbody>
+            {t && filas.length > 0 && (
+              <tfoot>
+                <tr className="bg-gray-50 dark:bg-gray-900/50 border-t-2 border-gray-200 dark:border-gray-700 font-bold">
+                  <td className="px-3 py-2.5" />
+                  <td className="px-2 py-2.5 text-[11px] text-gray-500" colSpan={3}>Resultados de {filas.length} {nivel === 'campaign' ? 'campañas' : nivel === 'adset' ? 'conjuntos' : 'anuncios'}</td>
+                  <td className="px-2 py-2.5 text-right tabular-nums">{t.compras}</td>
+                  <td className="px-2 py-2.5 text-right tabular-nums">{t.cpa != null ? fmtM(t.cpa, currency) : '—'}</td>
+                  <td className="px-2 py-2.5 text-right tabular-nums">{fmtM(t.spend, currency)}</td>
+                  <td className="px-2 py-2.5 text-right tabular-nums">{fmtM(t.revenue, currency)}</td>
+                  <td className={`px-2 py-2.5 text-right tabular-nums ${t.roas >= 1.5 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>{fmtR(t.roas)}</td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+// El corte de color del ROAS en la tabla Manager: el general de Reglas si está
+// en localStorage, sino 1.5 (el default del veredicto de ganador).
+function cfgGlobalRoas() {
+  try { return Number(leerCfgLocal()?.roasMaxPausar) || null; } catch { return null; }
 }
 
 // Desglose de UNA campaña al expandirla: sus conjuntos y los anuncios de cada
@@ -2330,6 +2500,7 @@ export default function MetricasSection({ addToast }) {
 
   const TABS = [
     { id: 'hoy', label: 'Hoy — optimizar', icon: Gauge },
+    { id: 'manager', label: 'Campañas y anuncios', icon: Table2 },
     { id: 'embudo', label: 'Embudo de compra', icon: Filter },
     { id: 'semanas', label: 'Testeos por semana', icon: FlaskConical },
     { id: 'prosp', label: 'Prospectadores', icon: Radar },
@@ -2468,6 +2639,8 @@ export default function MetricasSection({ addToast }) {
             account={account} accountId={accountId} cfg={cfg} cfgRaw={cfgRaw}
             productos={productos} productoId={productoId || null} currency={currency} addToast={addToast}
           />}
+          {tab === 'manager' && <VistaManager accountId={accountId} connId={account?.connId} currency={currency} preset={preset}
+            presupuestos={presupuestos} onPresupuesto={cambiarPresupuestoRow} />}
           {tab === 'publicar' && <PublicarCampana accountId={accountId} connId={account?.connId} currency={currency} addToast={addToast} productosVisibles={productosEnCuenta} />}
           {tab === 'reglas' && <VistaReglas campaigns={data.campaigns} cfg={cfgRaw} setCfg={setCfgRaw} productos={productos} currency={currency} onWhy={setWhy} origen={origenCfg} />}
         </>

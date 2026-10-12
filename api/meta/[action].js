@@ -1720,7 +1720,9 @@ async function handleFunnelInsights(req, res) {
     'last_90d', 'this_month', 'last_month', 'maximum',
   ];
   let datePreset = url.searchParams.get('date_preset') || 'last_7d';
-  if (!allowedPresets.includes(datePreset)) datePreset = 'last_7d';
+  // Rango personalizado del calendario: "custom_YYYY-MM-DD_YYYY-MM-DD".
+  const customEmbudo = /^custom_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})$/.exec(datePreset);
+  if (!customEmbudo && !allowedPresets.includes(datePreset)) datePreset = 'last_7d';
 
   try {
     const rows = [];
@@ -1729,7 +1731,9 @@ async function handleFunnelInsights(req, res) {
     do {
       const params = {
         level: 'campaign',
-        date_preset: datePreset,
+        ...(customEmbudo
+          ? { time_range: JSON.stringify({ since: customEmbudo[1], until: customEmbudo[2] }) }
+          : { date_preset: datePreset }),
         fields: [
           'campaign_id', 'campaign_name', 'objective',
           'impressions', 'clicks', 'spend', 'ctr', 'cpc', 'cpm', 'reach', 'frequency',
@@ -1809,7 +1813,12 @@ async function handleTestingInsights(req, res) {
 
   const allowed = ['last_7d', 'last_14d', 'last_30d', 'last_90d', 'this_month', 'last_month', 'maximum'];
   let preset = url.searchParams.get('date_preset') || 'last_30d';
-  if (!allowed.includes(preset)) preset = 'last_30d';
+  // Rango personalizado del calendario: "custom_YYYY-MM-DD_YYYY-MM-DD".
+  const custom = /^custom_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})$/.exec(preset);
+  if (!custom && !allowed.includes(preset)) preset = 'last_30d';
+  const insSel = custom
+    ? `insights.time_range({"since":"${custom[1]}","until":"${custom[2]}"})`
+    : `insights.date_preset(${preset})`;
 
   // Campos de insights que alimentan el embudo y las reglas.
   const INS = 'impressions,clicks,ctr,cpc,cpm,spend,reach,frequency,actions,action_values';
@@ -1829,7 +1838,7 @@ async function handleTestingInsights(req, res) {
       let after = null, guard = 0;
       do {
         const params = {
-          fields: `id,name,status,effective_status,daily_budget,lifetime_budget,created_time,start_time,insights.date_preset(${preset}){${INS}}`,
+          fields: `id,name,status,effective_status,daily_budget,lifetime_budget,created_time,start_time,${insSel}{${INS}}`,
           limit: 100,
           effective_status: effectiveStatus,
         };

@@ -99,6 +99,9 @@ export default function TarjetaProduccion({ a, num, personas = [], team = [], on
 
   const subidos = a.archivos?.length || 0;
   const aprob = Math.min(a.videosAprobados || 0, subidos);
+  // El objetivo es el de ESTA tarjeta, no el global: las creadas antes del
+  // cambio siguen pidiendo 9 y tienen que seguir mostrando 9.
+  const objetivoVideos = a.videosTotal || VIDEOS_POR_PRODUCTO;
   const folderLink = (a.archivos || []).find(f => f.folderLink)?.folderLink;
   // Tinte sutil con el color de la persona (barra izquierda + degradé tenue).
   const _pcol = personaColor(a.persona);
@@ -271,8 +274,8 @@ export default function TarjetaProduccion({ a, num, personas = [], team = [], on
             📤 entregado {fmtFechaCorta(entregadaEl)}
           </span>
         )}
-        <span className="inline-flex items-center gap-1" title={`${subidos} de ${VIDEOS_POR_PRODUCTO} videos subidos`}>
-          <Film size={12} className="text-emerald-500" /><b className="text-gray-700 dark:text-gray-200">{subidos}</b>/{VIDEOS_POR_PRODUCTO} videos
+        <span className="inline-flex items-center gap-1" title={`${subidos} de ${objetivoVideos} videos subidos`}>
+          <Film size={12} className="text-emerald-500" /><b className="text-gray-700 dark:text-gray-200">{subidos}</b>/{objetivoVideos} videos
         </span>
         {subidos > 0 && (
           <span className={`inline-flex items-center gap-1 tabular-nums ${aprob >= subidos ? 'text-emerald-500' : aprob === subidos - 1 ? 'text-amber-500' : 'text-gray-400'}`}

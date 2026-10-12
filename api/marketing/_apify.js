@@ -24,6 +24,13 @@ export async function runActorSync(actorId, input, token, opts = {}) {
 
   // Prioridad: input.maxItems → input.maxResults → input.resultsLimit.
   // Si ninguno está, default 50 — Apify rechaza 0/null en PPR actors.
+  //
+  // OJO con pedir muy poco: Apify exige que el techo de gasto del run
+  // (maxItems × precio por resultado) llegue a $0.0027. Con actors baratos,
+  // maxItems 1 queda abajo y el run se rechaza con 400
+  // `max-total-charge-usd-below-minimum`. Quien necesite un solo resultado
+  // igual tiene que autorizar 2-3 (ver MIN_ITEMS_COBRABLES en referencias.js):
+  // el gasto lo define cuántos resultados DEVUELVE, no cuántos se autorizan.
   const maxItems = Math.max(1, Number(input?.maxItems || input?.maxResults || input?.resultsLimit || 50));
 
   // BELT + SUSPENDERS para PPR actors:

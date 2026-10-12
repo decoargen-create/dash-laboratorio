@@ -21,7 +21,7 @@ import {
 import { authHeaders } from './authFetch.js';
 import { parseJsonOrThrow } from './apiHelpers.js';
 import { confirmDialog } from './dialogs.jsx';
-import { productosEnTablero, addReferenciaAProducto } from './produccionStore.js';
+import { tarjetasParaReferencia, addReferenciaATarjeta } from './produccionStore.js';
 import { referenciasApi as api, toCardRef, IG_URL_RE } from './referenciasApi.js';
 
 // Contexto del producto para adaptar-guion-video — mismos fallbacks que
@@ -131,35 +131,65 @@ function GuionModal({ r, onClose }) {
   );
 }
 
-// Picker: a qué producto del tablero de Producción mandar la referencia.
+// Picker: a qué TARJETA del tablero de Producción mandar la referencia.
+//
+// Antes se elegía un producto y el reel caía en todas sus tarjetas. Ahora se
+// elige la tarjeta, que es la unidad real de trabajo: el reel es la consigna
+// de ESE video, no del producto entero.
 function TarjetaPicker({ r, onClose, addToast }) {
-  const productos = productosEnTablero();
+  const [q, setQ] = useState('');
+  const tarjetas = tarjetasParaReferencia();
+  const filtradas = (() => {
+    const t = q.trim().toLowerCase();
+    if (!t) return tarjetas;
+    return tarjetas.filter(x =>
+      `${x.productoNombre} ${x.persona} ${x.weekKey}`.toLowerCase().includes(t));
+  })();
+
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto bg-black/50 backdrop-blur-sm" onClick={onClose}>
       <div className="w-full max-w-md my-10 bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700" onClick={e => e.stopPropagation()}>
         <div className="flex items-center gap-2 px-5 py-3.5 border-b border-gray-100 dark:border-gray-800">
           <Send size={15} className="text-brand-500" />
-          <h3 className="flex-1 text-sm font-bold text-gray-900 dark:text-gray-100">Enviar a tarjetas de Producción</h3>
+          <h3 className="flex-1 text-sm font-bold text-gray-900 dark:text-gray-100">Enviar a una tarjeta</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
         </div>
+        {tarjetas.length > 6 && (
+          <div className="px-3 pt-3">
+            <input autoFocus value={q} onChange={e => setQ(e.target.value)}
+              placeholder="Buscar por producto, persona o semana…"
+              className="w-full px-3 py-2 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+          </div>
+        )}
         <div className="p-3 max-h-[60vh] overflow-y-auto">
-          {productos.length === 0 ? (
+          {tarjetas.length === 0 ? (
             <p className="text-sm text-gray-400 px-2 py-4 text-center">No hay tarjetas en el tablero de Producción todavía.</p>
-          ) : productos.map(p => (
-            <button key={`${p.productoId}|${p.productoNombre}`}
+          ) : filtradas.length === 0 ? (
+            <p className="text-sm text-gray-400 px-2 py-4 text-center">Ninguna tarjeta coincide con «{q}».</p>
+          ) : filtradas.map(t => (
+            <button key={t.id}
               onClick={() => {
-                const n = addReferenciaAProducto(p.productoId, p.productoNombre, toCardRef(r));
-                addToast?.({ type: n > 0 ? 'success' : 'info', message: n > 0 ? `Referencia agregada a ${n} tarjeta${n === 1 ? '' : 's'} de ${p.productoNombre}` : 'Ya estaba en esas tarjetas' });
+                const agregada = addReferenciaATarjeta(t.id, toCardRef(r));
+                addToast?.({
+                  type: agregada ? 'success' : 'info',
+                  message: agregada
+                    ? `Referencia agregada a ${t.productoNombre}${t.persona ? ` · ${t.persona}` : ''}`
+                    : 'Esa tarjeta ya tenía este reel',
+                });
                 onClose();
               }}
               className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-left hover:bg-gray-100 dark:hover:bg-gray-800 transition">
               <Clapperboard size={14} className="text-gray-400 shrink-0" />
-              <span className="flex-1 min-w-0 truncate text-sm font-medium text-gray-800 dark:text-gray-100">{p.productoNombre || '(sin nombre)'}</span>
-              <span className="text-[11px] text-gray-400 shrink-0">{p.tarjetas} tarjeta{p.tarjetas === 1 ? '' : 's'}</span>
+              <span className="flex-1 min-w-0">
+                <span className="block truncate text-sm font-medium text-gray-800 dark:text-gray-100">{t.productoNombre}</span>
+                <span className="block truncate text-[11px] text-gray-400">
+                  {t.persona || 'sin asignar'} · {t.weekKey}{t.referencias ? ` · ${t.referencias} reel${t.referencias === 1 ? '' : 's'}` : ''}
+                </span>
+              </span>
             </button>
           ))}
         </div>
-        <p className="px-5 pb-4 text-[11px] text-gray-400">Se agrega a todas las tarjetas del producto — el editor la ve en su tablero con el reel + guion.</p>
+        <p className="px-5 pb-4 text-[11px] text-gray-400">Se agrega solo a esa tarjeta — el editor la ve en su tablero con el reel + guion.</p>
       </div>
     </div>
   );

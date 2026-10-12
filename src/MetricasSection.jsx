@@ -254,6 +254,9 @@ function DesgloseCampana({ campaignId, accountId, connId, currency, presupuestos
   // optimización se hace acá, no apagando la campaña entera.
   const [estados, setEstados] = useState({});
   const [busy, setBusy] = useState({});
+  // Acordeón: los CONJUNTOS se ven siempre con sus métricas; los anuncios de
+  // cada uno se abren con el caret (si hay un solo conjunto, arranca abierto).
+  const [abiertos, setAbiertos] = useState({});
   const toggle = async (item, level) => {
     const actual = estados[item.id] || item.effectiveStatus;
     const nuevo = actual === 'ACTIVE' ? 'PAUSED' : 'ACTIVE';
@@ -273,7 +276,11 @@ function DesgloseCampana({ campaignId, accountId, connId, currency, presupuestos
         const d = await r.json().catch(() => ({}));
         if (muerto) return;
         if (!r.ok || d.error) setErr(d.error || `Error ${r.status}`);
-        else setData(d.adsets || []);
+        else {
+          const lista = d.adsets || [];
+          setData(lista);
+          setAbiertos(lista.length === 1 ? { [lista[0].id]: true } : {});
+        }
       } catch (e) { if (!muerto) setErr(e.message); }
     })();
     return () => { muerto = true; };
@@ -326,7 +333,15 @@ function DesgloseCampana({ campaignId, accountId, connId, currency, presupuestos
                   <td className="px-2 py-1.5">
                     <SwitchEstado estado={estadoDe(s)} trabajando={!!busy[s.id]} onCambiar={() => toggle(s, 'adset')} />
                   </td>
-                  <td className="px-2 py-1.5 font-semibold text-gray-900 dark:text-gray-100">▦ {s.name}</td>
+                  <td className="px-2 py-1.5 font-semibold text-gray-900 dark:text-gray-100">
+                    <button onClick={() => setAbiertos(prev => ({ ...prev, [s.id]: !prev[s.id] }))}
+                      className="inline-flex items-center gap-1.5 font-semibold text-left hover:text-brand-600 dark:hover:text-brand-300 transition"
+                      title={abiertos[s.id] ? 'Ocultar los anuncios' : 'Ver los anuncios de este conjunto'}>
+                      {abiertos[s.id] ? <ChevronDown size={12} className="text-brand-500 shrink-0" /> : <ChevronRight size={12} className="text-gray-400 shrink-0" />}
+                      ▦ {s.name}
+                      <span className="text-[10px] font-semibold text-gray-400">· {s.ads.length} anuncio{s.ads.length === 1 ? '' : 's'}</span>
+                    </button>
+                  </td>
                   <td className="px-2 py-1.5"><Dot on={estadoDe(s) === 'ACTIVE'} /></td>
                   <td className="px-2 py-1.5 text-right whitespace-nowrap">
                     {s.dailyBudget != null ? (
@@ -342,7 +357,7 @@ function DesgloseCampana({ campaignId, accountId, connId, currency, presupuestos
                   <Num v={s.costoATC} />
                   <Num v={s.costoCheckout} />
                 </tr>
-                {s.ads.map(ad => (
+                {abiertos[s.id] && s.ads.map(ad => (
                   <tr key={ad.id}>
                     <td className="px-2 py-1.5 pl-5">
                       <SwitchEstado estado={estadoDe(ad)} trabajando={!!busy[ad.id]} onCambiar={() => toggle(ad, 'ad')} />
@@ -361,6 +376,58 @@ function DesgloseCampana({ campaignId, accountId, connId, currency, presupuestos
             ))}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+// Loader moderno del tablero: barra de progreso con etapas + esqueleto del
+// layout real (KPIs y filas con shimmer). El progreso es una curva asintótica
+// (nunca llega a 100 hasta que los datos aparecen y el componente se va) —
+// reemplaza al spinner con texto plano. La precarga del login (App.jsx) suele
+// evitar que esto se vea; aparece solo en la primera carga fría de una cuenta.
+function CargandoMetricas() {
+  const PASOS = [
+    'Conectando con Meta…',
+    'Trayendo las campañas del período…',
+    'Anuncios de hoy…',
+    'Performance de los últimos 7 días…',
+    'Cruzando con tus reglas y armando el tablero…',
+  ];
+  const [p, setP] = useState(4);
+  useEffect(() => {
+    const t0 = Date.now();
+    const id = setInterval(() => {
+      const s = (Date.now() - t0) / 1000;
+      setP(Math.min(93, Math.round(100 * (1 - Math.exp(-s / 3.4)))));
+    }, 150);
+    return () => clearInterval(id);
+  }, []);
+  const paso = PASOS[Math.min(PASOS.length - 1, Math.floor((p / 94) * PASOS.length))];
+  return (
+    <div className="space-y-3">
+      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-5">
+        <div className="flex items-center justify-between gap-3 mb-2.5">
+          <span className="text-xs font-semibold text-gray-700 dark:text-gray-200 flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#1877F2] animate-ping" />
+            {paso}
+          </span>
+          <span className="text-[11px] tabular-nums font-bold text-gray-400">{p}%</span>
+        </div>
+        <div className="h-2 rounded-full bg-gray-100 dark:bg-gray-900 overflow-hidden">
+          <div className="h-full rounded-full bg-gradient-to-r from-brand-500 via-[#1877F2] to-brand-400 transition-[width] duration-300 ease-out"
+            style={{ width: `${p}%` }} />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+        {[0, 1, 2, 3].map(i => (
+          <div key={i} className="h-20 rounded-xl bg-gray-100 dark:bg-gray-800 animate-pulse" style={{ animationDelay: `${i * 140}ms` }} />
+        ))}
+      </div>
+      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-3 space-y-2">
+        {[0, 1, 2, 3, 4, 5].map(i => (
+          <div key={i} className="h-9 rounded-lg bg-gray-100 dark:bg-gray-900 animate-pulse" style={{ animationDelay: `${i * 120}ms` }} />
+        ))}
       </div>
     </div>
   );
@@ -2354,10 +2421,7 @@ export default function MetricasSection({ addToast }) {
           </div>
         </div>
       ) : loading && !data ? (
-        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-8 flex items-center gap-3">
-          <Loader2 size={17} className="animate-spin text-gray-400" />
-          <span className="text-sm text-gray-500 dark:text-gray-400">Trayendo campañas, anuncios de hoy y de los últimos 7 días…</span>
-        </div>
+        <CargandoMetricas />
       ) : !data ? (
         <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-10 text-center">
           <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Elegí una cuenta para empezar</p>

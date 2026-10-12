@@ -136,6 +136,18 @@ export async function graphGet(path, accessToken, params = {}) {
   const data = await resp.json();
   if (!resp.ok || data.error) {
     const msg = data.error?.message || `HTTP ${resp.status}`;
+    // Token inválido/vencido (190) o sesión caída (102): la conexión de Meta
+    // MURIÓ → avisamos por mail + Discord (dedup con cooldown adentro; jamás
+    // rompe la request — el error original se propaga igual). graphGet es el
+    // punto único por donde pasan TODAS las llamadas a Graph, así que esto
+    // cubre métricas, performance, winners, etc. sin tocar cada handler.
+    const code = data.error?.code;
+    if (code === 190 || code === 102) {
+      try {
+        const { alertMetaDown } = await import('./_alert.js');
+        await alertMetaDown(msg);
+      } catch {}
+    }
     const err = new Error(msg);
     err.status = resp.status;
     err.data = data;

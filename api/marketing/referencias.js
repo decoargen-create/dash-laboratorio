@@ -26,6 +26,13 @@ export const maxDuration = 300;
 const BUCKET = 'creativos';
 const TABLE = 'marketing_referencias';
 const DEFAULT_IG_ACTOR = 'apify/instagram-scraper';
+
+// Piso de resultados cobrables que hay que pedirle a Apify para que el run
+// pase su mínimo de $0.0027 por run. Con el precio actual del actor
+// (~$0.0023/resultado) alcanzaría con 2; 3 deja margen por si sube o si se
+// cambia el actor por env var, y no cuesta nada: el gasto lo define cuántos
+// resultados DEVUELVE, no cuántos se autorizan.
+const MIN_ITEMS_COBRABLES = 3;
 const MODEL = 'claude-sonnet-4-6';
 const VIDEO_MAX_MB = 60;    // cap de descarga del mp4 (reels suelen pesar 2-20MB)
 const WHISPER_MAX_MB = 25;  // límite de la API de Whisper
@@ -128,22 +135,36 @@ async function handleAdd(res, sb, userId, body) {
   const actor = process.env.APIFY_IG_ACTOR_ID || DEFAULT_IG_ACTOR;
   let items;
   try {
-    // El maxTotalChargeUsd no es capricho: pedimos UN post, y un post suelto es
-    // barato. El techo que Apify calcula solo (1 × precio por resultado) cae por
-    // debajo de su mínimo de $0.0027 y rechaza el run con 400 antes de
-    // arrancarlo. Con un techo explícito y holgado el run corre; el gasto real
-    // lo sigue acotando maxItems: 1.
+    // Por qué maxItems 3 si queremos UN post:
+    //
+    // apify/instagram-scraper cobra por resultado (~$0.0023). Apify calcula el
+    // techo de gasto del run como maxItems × precio, y exige que ese techo sea
+    // de al menos $0.0027. Con maxItems 1 el techo da $0.0023 — apenas abajo —
+    // y rechaza el run con 400 `max-total-charge-usd-below-minimum` antes de
+    // arrancarlo. Nunca se llegaba a scrapear nada.
+    //
+    // Subir el TECHO no sube el gasto: `directUrls` trae un solo post, así que
+    // se paga un resultado igual. Es permiso para gastar, no gasto.
     items = await runActorSync(actor, {
       directUrls: [canonical],
       resultsType: 'posts',
       resultsLimit: 1,
-      maxItems: 1,
+      maxItems: MIN_ITEMS_COBRABLES,
       addParentData: false,
-    }, apifyToken, { timeout: 150, maxTotalChargeUsd: 0.10 });
+    }, apifyToken, { timeout: 150 });
   } catch (err) {
     return respondJSON(res, 502, { error: `Apify falló scrapeando el post: ${err.message}` });
   }
-  const item = (Array.isArray(items) ? items : []).find(i => i && (i.shortCode || i.videoUrl || i.displayUrl));
+  // Nos quedamos con el post que PEDIMOS, no con el primero que venga. Ahora
+  // que autorizamos 3 resultados, si el actor devolviera alguno de más (otro
+  // post del mismo perfil, por ejemplo) guardaríamos el equivocado bajo este
+  // shortcode y el editor replicaría un reel que nadie eligió.
+  const lista = Array.isArray(items) ? items : [];
+  const mismoPost = (i) => String(i?.shortCode || '').trim().toLowerCase() === shortcode.toLowerCase();
+  const item = lista.find(i => i && mismoPost(i) && (i.videoUrl || i.displayUrl))
+    || lista.find(i => i && mismoPost(i))
+    // Último recurso: el actor no mandó shortCode pero trajo un solo post.
+    || (lista.length === 1 ? lista.find(i => i && (i.videoUrl || i.displayUrl)) : null);
   if (!item) {
     return respondJSON(res, 404, { error: 'Apify no devolvió el post — ¿es público? Los posts privados o borrados no se pueden scrapear.' });
   }

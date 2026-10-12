@@ -34,6 +34,7 @@ import {
 } from './MetaConnect.jsx';
 import {
   CFG_DEFAULT, CONDICIONES_PAUSA, cfgPara, cohortesSemanales, rondaDeOptimizacion, esProspectador,
+  promediosDelDia, ETAPAS,
   productoDeCampana, linkMeta, FORMULAS,
   fusionarConFotos, cohortesParaCongelar, fotoDeCohorte,
 } from './testeosCore.js';
@@ -314,7 +315,7 @@ function Criterios({ cfg, cfgRaw, setCfg, productos, productoId, currency, abier
   );
 
   // Un resumen de una línea para cuando está cerrado: se lee sin abrir nada.
-  const resumen = `ROAS < ${fmtR(cfg.roasMaxPausar)} · gastó ≥ ${fmtM(cfg.pisoGastoPausar, currency)} · costos ${cfg.sobrePromedioPct}% sobre el promedio${cfg.maxComprasPausar != null ? ` · hasta ${cfg.maxComprasPausar} compras` : ''}`;
+  const resumen = `ROAS < ${fmtR(cfg.roasMaxPausar)} te pone en la mira · confirma: carrito o pago ${cfg.sobrePromedioPct}% sobre el promedio (7 días) · gastó ≥ ${fmtM(cfg.pisoGastoPausar, currency)}${cfg.maxComprasPausar != null ? ` · hasta ${cfg.maxComprasPausar} compras` : ''}`;
 
   return (
     <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
@@ -401,7 +402,7 @@ function Criterios({ cfg, cfgRaw, setCfg, productos, productoId, currency, abier
 // ========================================================================
 // Pestaña: HOY (ronda de optimización)
 // ========================================================================
-export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisibles, productoId, currency, accountId, onWhy, nivel, setNivel, cambios, trabajando, onEstado, onRecalcular }) {
+export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisibles, productoId, currency, accountId, onWhy, nivel, setNivel, cambios, trabajando, onEstado, onRecalcular, promediosRef }) {
   const [abierto, setAbierto] = useState(null);
   const [confirmando, setConfirmando] = useState(null);
   const [verCriterios, setVerCriterios] = useState(false);
@@ -422,7 +423,7 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
     };
   }, [cfgRaw, productos]);
 
-  const r = useMemo(() => rondaDeOptimizacion(ads, { cfg, cfgDeItem }), [ads, cfg, cfgDeItem]);
+  const r = useMemo(() => rondaDeOptimizacion(ads, { cfg, cfgDeItem, promediosRef }), [ads, cfg, cfgDeItem, promediosRef]);
   const esCampana = nivel === 'campaigns';
 
   const selectorNivel = (
@@ -509,12 +510,13 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
           sub={`${fmtM(r.promedios.revenue, currency)} facturado`}>
           <Why k="roas" datos={r.promedios} cfg={cfg} currency={currency} onOpen={onWhy} />
         </Kpi>
-        <Kpi label="Costo por carrito" value={fmtM(r.promedios.costoPorATC, currency)} sub="promedio de la cuenta">
-          <Why k="promedioCuenta" datos={r.promedios} cfg={cfg} currency={currency} onOpen={onWhy} />
+        <Kpi label="Costo por carrito" value={fmtM(r.referencia.costoPorATC, currency)}
+          sub={r.usaReferencia ? 'promedio cuenta · últimos 7 días' : 'promedio de la cuenta (hoy)'}>
+          <Why k="promedioCuenta" datos={r.referencia} cfg={cfg} currency={currency} onOpen={onWhy} />
         </Kpi>
-        <Kpi label="Costo por pago" value={fmtM(r.promedios.costoPorCheckout, currency)}
-          sub={`umbral ${fmtM((r.promedios.costoPorCheckout || 0) * (1 + cfg.sobrePromedioPct / 100), currency)}`}>
-          <Why k="costoPorCheckout" datos={r.promedios} cfg={cfg} currency={currency} onOpen={onWhy} />
+        <Kpi label="Costo por pago" value={fmtM(r.referencia.costoPorCheckout, currency)}
+          sub={`umbral ${fmtM((r.referencia.costoPorCheckout || 0) * (1 + cfg.sobrePromedioPct / 100), currency)}`}>
+          <Why k="costoPorCheckout" datos={r.referencia} cfg={cfg} currency={currency} onOpen={onWhy} />
         </Kpi>
       </div>
 
@@ -665,16 +667,40 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
 // ========================================================================
 function VistaSemanas({ campaigns, cfg, productos, productoId, currency, accountId, onWhy, fotos }) {
   const [abierto, setAbierto] = useState(null);
+  // Etapa: la eficiencia semanal se mide sobre los TESTEOS (renovaciones).
+  // Las preescalas (deep pocket, mayor roas, cost cap, bid cap, only pocket)
+  // y escalas se pueden mirar aparte con los chips, pero no mezclan.
+  const [etapa, setEtapa] = useState('testeo');
   const filas = useMemo(() => {
-    const { filas: vivas } = cohortesSemanales(campaigns, { cfg, productos, productoId });
-    return fusionarConFotos(vivas, fotos || {});
-  }, [campaigns, cfg, productos, productoId, fotos]);
+    const { filas: vivas } = cohortesSemanales(campaigns, { cfg, productos, productoId, etapa });
+    // Las fotos congeladas se sacaron sobre los testeos — para las otras
+    // etapas se muestra siempre el número en vivo.
+    return etapa === 'testeo' ? fusionarConFotos(vivas, fotos || {}) : vivas;
+  }, [campaigns, cfg, productos, productoId, fotos, etapa]);
+
+  const chipsEtapa = (
+    <div className="inline-flex gap-0.5 p-0.5 rounded-lg bg-gray-100 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 ml-auto">
+      {ETAPAS.map(e => (
+        <button key={e.id} onClick={() => { setEtapa(e.id); setAbierto(null); }}
+          title={e.id === 'testeo' ? 'Renovaciones: video / imagen / orgánico / testeo'
+            : e.id === 'preescala' ? 'Deep pocket · mayor ROAS · cost cap · bid cap · only pocket'
+            : e.id === 'escala' ? 'Campañas de escala' : 'Testeos + preescalas + escalas'}
+          className={`px-2.5 py-1 text-[11px] font-bold rounded-md transition ${
+            etapa === e.id ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}>
+          {e.emoji ? `${e.emoji} ` : ''}{e.label}
+        </button>
+      ))}
+    </div>
+  );
 
   if (filas.length === 0) {
     return (
       <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-10 text-center">
+        <div className="flex justify-center mb-3">{chipsEtapa}</div>
         <FlaskConical size={24} className="mx-auto text-gray-300 dark:text-gray-600 mb-2" />
-        <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Ninguna campaña entra como testeo</p>
+        <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+          {etapa === 'testeo' ? 'Ninguna campaña entra como testeo' : `No hay campañas de ${etapa === 'preescala' ? 'preescala' : etapa === 'escala' ? 'escala' : 'ninguna etapa'} con fecha`}
+        </p>
         <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
           Revisá las palabras de la nomenclatura en <b>Reglas</b>: ahí se ve campaña por campaña por qué entró o quedó afuera.
         </p>
@@ -691,9 +717,12 @@ function VistaSemanas({ campaigns, cfg, productos, productoId, currency, account
   return (
     <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
       <div className="flex items-center gap-2 px-3.5 py-2.5 border-b border-gray-100 dark:border-gray-700/60 flex-wrap">
-        <h3 className="text-[13px] font-bold text-gray-900 dark:text-gray-100">Testeos por semana</h3>
+        <h3 className="text-[13px] font-bold text-gray-900 dark:text-gray-100">
+          {etapa === 'testeo' ? 'Testeos' : etapa === 'preescala' ? 'Preescalas' : etapa === 'escala' ? 'Escalas' : 'Campañas'} por semana
+        </h3>
         <Why k="cohorte" cfg={cfg} currency={currency} onOpen={onWhy} datos={{ name: filas[0]?.items[0]?.name, fecha: filas[0]?.items[0]?.fecha, semana: filas[0]?.semana }} />
         <span className="text-[10.5px] text-gray-400">lunes a domingo, según la fecha del nombre</span>
+        {chipsEtapa}
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
@@ -732,7 +761,7 @@ function VistaSemanas({ campaigns, cfg, productos, productoId, currency, account
                             <Why k="foto" cfg={cfg} currency={currency} onOpen={onWhy} datos={f} />
                           </span>
                           <span className="block text-[10px] text-gray-400">
-                            {f.lanzadas} testeo{f.lanzadas === 1 ? '' : 's'} · {f.activas} sigue{f.activas === 1 ? '' : 'n'} prendida{f.activas === 1 ? '' : 's'}
+                            {f.lanzadas} {etapa === 'testeo' ? 'testeo' : 'campaña'}{f.lanzadas === 1 ? '' : 's'} · {f.activas} sigue{f.activas === 1 ? '' : 'n'} prendida{f.activas === 1 ? '' : 's'}
                           </span>
                         </span>
                       </div>
@@ -761,6 +790,14 @@ function VistaSemanas({ campaigns, cfg, productos, productoId, currency, account
                         {f.items.map(c => (
                           <div key={c.id} className="flex items-center gap-2 text-[11.5px] flex-wrap">
                             <span className="font-semibold text-gray-900 dark:text-gray-100">{c.name}</span>
+                            {etapa === 'todas' && c.etapa && (
+                              <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                                c.etapa === 'preescala' ? 'bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300'
+                                  : c.etapa === 'escala' ? 'bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300'
+                                  : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'}`}>
+                                {c.etapa === 'preescala' ? '🚀 preescala' : c.etapa === 'escala' ? '📈 escala' : '🧪 testeo'}
+                              </span>
+                            )}
                             <span className="text-gray-500 dark:text-gray-400">· {c.veredicto.motivo}</span>
                             {c.producto && <span className="text-gray-400">· {c.producto.nombre}</span>}
                             <Pill tone={c.veredicto.estado === 'ganador' ? 'ok' : c.veredicto.estado === 'perdedor' ? 'bad' : 'mute'}>
@@ -1261,6 +1298,10 @@ export default function MetricasSection({ addToast }) {
   }, [data, nivelHoy, productoId, productos, cfgRaw]);
   const ads7d = useMemo(() => (data?.ads7d || [])
     .filter(a => !productoId || productoDeCampana(a.campaignName, productos, cfgRaw)?.id === productoId), [data, productoId, productos, cfgRaw]);
+  // Promedio de la CUENTA ENTERA en los últimos 7 días (sin filtro de
+  // producto): es la referencia de "caro" para el segundo filtro de la ronda
+  // — caro comparado con el resto de la cuenta, no con el día en curso.
+  const promedios7d = useMemo(() => promediosDelDia(data?.ads7d || []), [data]);
 
   // El embudo también respeta el filtro por producto — ese es medio el punto
   // de haber unificado las dos secciones. Como los totales que manda el
@@ -1443,6 +1484,7 @@ export default function MetricasSection({ addToast }) {
             cambios={cambios} trabajando={trabajando}
             onEstado={({ items, status }) => aplicarEstado({ level: nivelHoy === 'campaigns' ? 'campaign' : 'ad', items, status })}
             onRecalcular={() => account && load(account, preset)}
+            promediosRef={promedios7d}
           />}
           {tab === 'embudo' && (
             embudoError ? (

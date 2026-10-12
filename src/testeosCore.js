@@ -32,6 +32,19 @@ export const CFG_DEFAULT = {
   // Una campaña sin fecha no se puede asignar a ninguna semana.
   exigirFecha: true,
 
+  // ── Etapas ──
+  // Dentro de lo que matchea como "CBO", no todo es un testeo de renovación
+  // (video / imagen / orgánico / testeo). Las que dicen deep pocket, mayor
+  // roas, cost cap, bid cap u only pocket son PREESCALAS, y las de escala,
+  // escalas. "Testeos por semana" filtra por etapa: la eficiencia semanal se
+  // mide sobre los testeos, no sobre las preescalas.
+  palabrasPreescala: [
+    'deep pocket', 'deep poket', 'deeppocket', 'deeppoket',
+    'mayor roas', 'mayor roa', 'cost cap', 'costcap', 'bid cap', 'bidcap',
+    'only pocket', 'only poket', 'onlypocket', 'pre escala', 'pre-escala', 'preescala',
+  ],
+  palabrasEscala: ['escala', 'escalado', 'scaling', 'winner', 'abo'],
+
   // Ganador: las dos condiciones a la vez.
   minComprasGanador: 4,
   minRoasGanador: 1.5,
@@ -221,6 +234,29 @@ export function tipoDeCampana(nombre, cfg = CFG_DEFAULT, hoy = new Date()) {
   return { tipo: 'testeo', motivo: `dice "${marca}" + fecha en el nombre` };
 }
 
+// Etapa del funnel de campañas según el nombre: testeo (renovaciones: video /
+// imagen / orgánico / testeo) → preescala (deep pocket, mayor roas, cost cap,
+// bid cap, only pocket) → escala. Complementa a tipoDeCampana: una campaña
+// puede decir "CBO" (palabra de testeo) y aun así ser una preescala.
+export function etapaDeCampana(nombre, cfg = CFG_DEFAULT) {
+  const n = normalizar(nombre);
+  // Preescala primero: "preescala" contiene "escala" y ganaría la etapa equivocada.
+  const pre = (cfg.palabrasPreescala || CFG_DEFAULT.palabrasPreescala)
+    .find(p => n.includes(normalizar(p)));
+  if (pre) return { etapa: 'preescala', motivo: `dice "${pre}"` };
+  const esc = (cfg.palabrasEscala || CFG_DEFAULT.palabrasEscala)
+    .find(p => n.includes(normalizar(p)));
+  if (esc) return { etapa: 'escala', motivo: `dice "${esc}"` };
+  return { etapa: 'testeo', motivo: 'sin palabras de preescala/escala' };
+}
+
+export const ETAPAS = [
+  { id: 'testeo', label: 'Testeos', emoji: '🧪' },
+  { id: 'preescala', label: 'Preescalas', emoji: '🚀' },
+  { id: 'escala', label: 'Escalas', emoji: '📈' },
+  { id: 'todas', label: 'Todas', emoji: '' },
+];
+
 // Qué producto es, cruzando el nombre de la campaña contra los productos que
 // ya están cargados en AdsLab.
 //
@@ -348,15 +384,18 @@ export function sumarInsights(lista) {
 // Devuelve una fila por semana (lunes), ordenada de la más nueva a la más
 // vieja, con el veredicto de cada campaña adentro para poder abrir Meta con
 // las que uno quiera.
-export function cohortesSemanales(campanas, { cfg = CFG_DEFAULT, productos = [], productoId = null, hoy = new Date() } = {}) {
+export function cohortesSemanales(campanas, { cfg = CFG_DEFAULT, productos = [], productoId = null, hoy = new Date(), etapa = 'testeo' } = {}) {
   const enriquecidas = (campanas || []).map(c => {
     const tipo = tipoDeCampana(c.name, cfg, hoy);
+    const etapaInfo = etapaDeCampana(c.name, cfg);
     const fecha = fechaDelNombre(c.name, hoy);
     const producto = productoDeCampana(c.name, productos, cfg);
     return {
       ...c,
       tipo: tipo.tipo,
       tipoMotivo: tipo.motivo,
+      etapa: etapaInfo.etapa,
+      etapaMotivo: etapaInfo.motivo,
       fecha,
       semana: lunesDe(fecha),
       producto,
@@ -365,9 +404,20 @@ export function cohortesSemanales(campanas, { cfg = CFG_DEFAULT, productos = [],
     };
   });
 
-  // Solo testeos, y del producto elegido si hay filtro.
-  const testeos = enriquecidas.filter(c =>
-    c.tipo === 'testeo' && (!productoId || c.producto?.id === productoId));
+  // Del producto elegido si hay filtro, y de la ETAPA pedida:
+  //   - 'testeo' (default): solo renovaciones — palabra de testeo + fecha, y
+  //     que el nombre NO sea de preescala/escala (un "[CBO Deep Poket]" dice
+  //     CBO pero es preescala, no cuenta en la eficiencia de testeos).
+  //   - 'preescala' / 'escala': la palabra de etapa decide; la fecha del
+  //     nombre sigue definiendo en qué semana cae.
+  //   - 'todas': las tres juntas.
+  const testeos = enriquecidas.filter(c => {
+    if (productoId && c.producto?.id !== productoId) return false;
+    if (etapa === 'preescala' || etapa === 'escala') return c.etapa === etapa;
+    const esTesteoPuro = c.tipo === 'testeo' && c.etapa === 'testeo';
+    if (etapa === 'todas') return esTesteoPuro || c.etapa !== 'testeo';
+    return esTesteoPuro;
+  });
 
   const porSemana = new Map();
   for (const c of testeos) {
@@ -405,7 +455,7 @@ export function cohortesSemanales(campanas, { cfg = CFG_DEFAULT, productos = [],
     return b.semana.localeCompare(a.semana);
   });
 
-  return { filas, enriquecidas, descartadas: enriquecidas.filter(c => c.tipo !== 'testeo') };
+  return { filas, enriquecidas, descartadas: enriquecidas.filter(c => !(c.tipo === 'testeo' && c.etapa === 'testeo')) };
 }
 
 // ── Fotos semanales (por qué el histórico no se puede leer en vivo) ─────
@@ -573,7 +623,20 @@ export function evaluarPausa(item, promedios, cfg = CFG_DEFAULT) {
     : CFG_DEFAULT.condicionesPausar;
   const condiciones = todas.map(c => ({ ...c, cuenta: activas.includes(c.clave) }));
 
-  const candidato = condiciones.filter(c => c.cuenta).every(c => c.ok);
+  // Veredicto en DOS etapas:
+  //   1. "En la mira": gastó el piso y el ROAS quedó bajo el corte (más el
+  //      tope de compras si se mira). Esto solo NO alcanza para pausar.
+  //   2. Confirmación por costos: carrito y pago iniciado contra el promedio
+  //      de la cuenta (la referencia que llega en `promedios`). Si ALGUNO
+  //      supera su umbral, el embudo está caro → pausar. Si los dos están
+  //      dentro del promedio, el embudo está sano y la venta puede estar
+  //      cayendo tarde (atribución) → dejalo correr.
+  const CLAVES_COSTO = ['atc', 'checkout'];
+  const deMira = condiciones.filter(c => c.cuenta && !CLAVES_COSTO.includes(c.clave));
+  const deCosto = condiciones.filter(c => c.cuenta && CLAVES_COSTO.includes(c.clave));
+  const candidato = deMira.length > 0 && deMira.every(c => c.ok);
+  // Sin condiciones de costo activas no hay segundo filtro: pausa directa.
+  const costosCaros = deCosto.length === 0 ? true : deCosto.some(c => c.ok);
 
   // Plata en riesgo: lo que se deja de gastar si se pausa AHORA.
   //
@@ -619,24 +682,35 @@ export function evaluarPausa(item, promedios, cfg = CFG_DEFAULT) {
     //                gastar lo mismo igual, repartido entre los que quedan.
     //                No ahorrás; movés esa plata a los anuncios que sí venden.
     efecto: compartido ? 'redirige' : 'ahorro',
-    // "Pausar ahora ahorra" vs "ya se gastó, dejalo morir".
-    accion: !candidato ? null : (yaQuemado ? 'dejar-correr' : 'pausar'),
+    costosCaros,
+    // "Pausar ahora ahorra" vs "costos sanos, dejalo convertir" vs "ya se
+    // gastó, dejalo morir".
+    accion: !candidato ? null
+      : !costosCaros ? 'dejar-correr'
+        : yaQuemado ? 'dejar-correr' : 'pausar',
     motivoAccion: !candidato
       ? null
-      : yaQuemado
-        ? `ya consumió el ${Math.round(consumidoPct)}% del presupuesto: pausarlo no ahorra casi nada`
-        : restante != null
-          ? (compartido
-            ? `de acá a fin del día se llevaría ${Math.round(restante)} del presupuesto de la campaña — pausarlo no lo ahorra, lo manda a los otros anuncios`
-            : `le quedan ${Math.round(restante)} por gastar hoy`)
-          : 'sin presupuesto diario conocido',
+      : !costosCaros
+        ? 'ROAS bajo el corte, pero el costo por carrito y por pago iniciado están dentro del promedio de la cuenta: el embudo está sano y la venta puede caer más tarde — dejalo correr'
+        : yaQuemado
+          ? `ya consumió el ${Math.round(consumidoPct)}% del presupuesto: pausarlo no ahorra casi nada`
+          : restante != null
+            ? (compartido
+              ? `de acá a fin del día se llevaría ${Math.round(restante)} del presupuesto de la campaña — pausarlo no lo ahorra, lo manda a los otros anuncios`
+              : `le quedan ${Math.round(restante)} por gastar hoy`)
+            : 'sin presupuesto diario conocido',
   };
 }
 
 // Lista completa de la ronda: ordena por plata en riesgo desc.
 // `temprano` avisa que el día todavía no maduró (antes de la hora mínima).
-export function rondaDeOptimizacion(items, { cfg = CFG_DEFAULT, ahora = new Date(), cfgDeItem = null } = {}) {
+export function rondaDeOptimizacion(items, { cfg = CFG_DEFAULT, ahora = new Date(), cfgDeItem = null, promediosRef = null } = {}) {
   const promedios = promediosDelDia(items);
+  // Los umbrales de "caro" se miden contra el promedio de los ÚLTIMOS DÍAS de
+  // la cuenta (promediosRef, típicamente last_7d), no contra el día en curso:
+  // a media mañana el promedio de hoy está hecho de dos horas de datos y
+  // cualquier cosa parece cara (o barata). Sin referencia, caemos al día.
+  const referencia = (promediosRef && promediosRef.spend > 0) ? promediosRef : promedios;
   // Cada fila se juzga con las reglas de SU producto. El ROAS de equilibrio del
   // cepillo no es el de la crema: con un solo corte global, o pausás de más en
   // el de margen alto o de menos en el de margen bajo. `cfgDeItem` resuelve el
@@ -649,7 +723,7 @@ export function rondaDeOptimizacion(items, { cfg = CFG_DEFAULT, ahora = new Date
   const reglasDe = (i) => (cfgDeItem ? (cfgDeItem(i) || cfg) : cfg);
   const evaluados = (items || []).map(i => {
     const suCfg = reglasDe(i);
-    return { ...i, cfgUsada: suCfg, pausa: evaluarPausa(i, promedios, suCfg) };
+    return { ...i, cfgUsada: suCfg, pausa: evaluarPausa(i, referencia, suCfg) };
   });
   const candidatos = evaluados
     .filter(i => i.pausa.candidato)
@@ -658,6 +732,8 @@ export function rondaDeOptimizacion(items, { cfg = CFG_DEFAULT, ahora = new Date
   const hora = horaAR(ahora);
   return {
     promedios,
+    referencia,
+    usaReferencia: referencia !== promedios,
     hora,
     temprano: hora < (cfg.horaMinimaPausar || 0),
     candidatos,
@@ -737,15 +813,15 @@ export const FORMULAS = {
   },
   promedioCuenta: {
     label: 'Promedio de la cuenta',
-    formula: 'gasto TOTAL del día ÷ eventos TOTALES del día',
-    nota: 'Se calcula sobre las sumas de toda la cuenta, no promediando el costo de cada campaña: si no, una campaña de $2 pesaría igual que una de $200.000.',
+    formula: 'gasto TOTAL de los últimos 7 días ÷ eventos TOTALES de los últimos 7 días',
+    nota: 'Se calcula sobre las sumas de toda la cuenta en los últimos 7 días (no solo hoy: a media mañana el promedio del día está hecho de dos horas de datos), y sumando antes de dividir: si no, una campaña de $2 pesaría igual que una de $200.000.',
     calculo: (d, f) => `${f.money(d.spend)} ÷ ${f.num(d.addToCart)} carritos = ${d.costoPorATC != null ? f.money(d.costoPorATC) : '—'}`,
   },
   pausar: {
-    label: 'Candidato a pausar',
-    formula: 'gastó ≥ piso Y ROAS < máx Y costo por carrito > promedio+X% Y costo por pago iniciado > promedio+X%',
-    nota: 'Las cuatro a la vez. El piso de gasto está primero a propósito: sin él, todo lo que arrancó hace media hora aparecería como candidato. Un item sin ningún carrito ni pago iniciado habiendo gastado el piso cuenta como que supera el umbral — no llegó a ninguna parte.',
-    calculo: (d, f, cfg) => `gasto ≥ ${f.money(cfg.pisoGastoPausar)} · ROAS < ${cfg.roasMaxPausar} · costos > promedio +${cfg.sobrePromedioPct}%`,
+    label: 'Veredicto: pausar o dejar correr',
+    formula: 'FILTRO 1: gastó ≥ piso Y ROAS < corte → en la mira · FILTRO 2: costo por carrito O por pago iniciado > promedio de la cuenta (últimos 7 días) +X% → Pausar; costos dentro del promedio → Dejalo correr',
+    nota: 'El ROAS bajo solo te pone en la mira: la confirmación la dan los costos del embudo contra el promedio de la cuenta de los últimos 7 días. Si carrito y pago iniciado están en el promedio o mejor, el embudo está sano y la venta puede estar cayendo tarde — se deja correr. Un item sin ningún carrito ni pago habiendo gastado el piso cuenta como caro: no llegó a ninguna parte.',
+    calculo: (d, f, cfg) => `gasto ≥ ${f.money(cfg.pisoGastoPausar)} · ROAS < ${cfg.roasMaxPausar} → mira · carrito/pago > promedio 7d +${cfg.sobrePromedioPct}% → pausar`,
   },
   plataEnRiesgo: {
     label: 'Plata en riesgo',

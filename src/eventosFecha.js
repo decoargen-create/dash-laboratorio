@@ -27,6 +27,7 @@ export const ETIQUETAS_TANDA = [
   { key: 'instagram', label: '📸 Instagram' },  // sale de referencias de IG que cargó el admin
   { key: 'winners',   label: '⭐ Winners' },     // tanda para replicar los winners actuales
   { key: 'ugc',       label: '🎥 UGC' },
+  { key: 'diversificacion', label: '🧪 Diversificación' },
   { key: 'evergreen', label: '🌿 Evergreen' },
 ];
 

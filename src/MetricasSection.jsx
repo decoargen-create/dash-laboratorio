@@ -637,7 +637,9 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
                           </span>
                         )}
                       </td>
-                      <td className={`px-2 py-2 text-right tabular-nums font-semibold whitespace-nowrap ${i.roas >= p.cortes?.roasMaxPausar ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                      {/* Verde/rojo contra el ROAS de equilibrio de SU producto (antes
+                          comparaba contra p.cortes, que no existe → siempre rojo). */}
+                      <td className={`px-2 py-2 text-right tabular-nums font-semibold whitespace-nowrap ${i.roas >= (a.cfgUsada?.roasMaxPausar ?? cfg.roasMaxPausar) ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
                         {fmtR(i.roas)}
                         {i.spend > 0 && r.promedios.roas > 0 && (
                           i.roas >= r.promedios.roas

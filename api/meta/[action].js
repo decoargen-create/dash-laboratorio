@@ -255,6 +255,10 @@ async function handleCallback(req, res) {
   const signed = signState(cookiePayload, authSecret);
   setMetaCookie(res, signed);
 
+  // Reconectó OK → reseteamos el flag de "Meta caído" para que un corte
+  // futuro vuelva a avisar (ver api/meta/_alert.js).
+  try { const { markMetaHealthy } = await import('./_alert.js'); await markMetaHealthy(); } catch {}
+
   res.statusCode = 302;
   res.setHeader('Location', `${returnTo}?meta=connected`);
   res.end();
@@ -1189,10 +1193,18 @@ async function handleCronCreativeRefresh(req, res) {
     req.headers.authorization === `Bearer ${cronSecret}`;
   if (!cronAuth) return respondJSON(res, 401, { error: 'Cron no autorizado' });
 
+  // Aviso PREVENTIVO de vencimiento del token de Meta (best-effort): corre
+  // en este cron diario aunque el creative-refresh no esté configurado.
+  let metaExpiry = null;
+  try {
+    const { warnMetaExpiryIfDue } = await import('./_alert.js');
+    metaExpiry = await warnMetaExpiryIfDue();
+  } catch (e) { console.warn('[cron] warn meta expiry:', e.message); }
+
   // Config desde env var.
   const raw = process.env.CREATIVE_REFRESH_CONFIG;
   if (!raw) {
-    return respondJSON(res, 200, { skipped: true, reason: 'CREATIVE_REFRESH_CONFIG no configurada' });
+    return respondJSON(res, 200, { skipped: true, reason: 'CREATIVE_REFRESH_CONFIG no configurada', metaExpiry });
   }
   let cfg;
   try { cfg = JSON.parse(raw); } catch {
@@ -1400,6 +1412,8 @@ async function handleConnectToken(req, res) {
         metaUserName: me.name || null,
         accessToken,
       });
+      // Token nuevo OK → resetear el flag de "Meta caído".
+      try { const { markMetaHealthy } = await import('./_alert.js'); await markMetaHealthy(); } catch {}
       return respondJSON(res, 200, {
         stored: 'db',
         connection,
@@ -1419,6 +1433,9 @@ async function handleConnectToken(req, res) {
     exp: Math.floor(Date.now() / 1000) + META_COOKIE_MAX_AGE,
   };
   setMetaCookie(res, signState(cookiePayload, authSecret));
+
+  // Token nuevo OK → resetear el flag de "Meta caído".
+  try { const { markMetaHealthy } = await import('./_alert.js'); await markMetaHealthy(); } catch {}
 
   return respondJSON(res, 200, {
     stored: 'cookie',

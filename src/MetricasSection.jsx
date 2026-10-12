@@ -449,7 +449,8 @@ function DesgloseCampana({ campaignId, accountId, connId, currency, presupuestos
         else {
           const lista = d.adsets || [];
           setData(lista);
-          setAbiertos(lista.length === 1 ? { [lista[0].id]: true } : {});
+          const conGasto = lista.filter(s => Number(s.spend) > 0);
+          setAbiertos(conGasto.length === 1 ? { [conGasto[0].id]: true } : {});
         }
       } catch (e) { if (!muerto) setErr(e.message); }
     })();
@@ -476,10 +477,20 @@ function DesgloseCampana({ campaignId, accountId, connId, currency, presupuestos
   );
   if (!data.length) return <p className="text-[11px] text-gray-400 mt-2.5">La campaña no tiene conjuntos.</p>;
 
+  // La misma regla que la tabla de arriba: sin gasto HOY no se muestra —
+  // las copias apagadas de la automatización solo ensuciaban el desglose.
+  const visibles = data.filter(s => Number(s.spend) > 0);
+  const ocultos = (data.length - visibles.length) +
+    visibles.reduce((n, s) => n + s.ads.filter(a => !(Number(a.spend) > 0)).length, 0);
+  if (!visibles.length) {
+    return <p className="text-[11px] text-gray-400 mt-2.5">Ningún conjunto con gasto hoy — {data.length} sin entrega quedaron ocultos.</p>;
+  }
+
   return (
     <div className="mt-3 border-t border-gray-200 dark:border-gray-700/60 pt-2">
       <p className="text-[9.5px] font-bold uppercase tracking-[.08em] text-gray-400 mb-1">
         Desglose · conjuntos y anuncios (hoy)
+        {ocultos > 0 && <span className="normal-case tracking-normal font-semibold"> — {ocultos} sin gasto no se muestran</span>}
       </p>
       <div className="overflow-x-auto">
         <table className="w-full text-[11.5px] min-w-[720px]">
@@ -497,7 +508,7 @@ function DesgloseCampana({ campaignId, accountId, connId, currency, presupuestos
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 dark:divide-gray-700/60">
-            {data.map(s => (
+            {visibles.map(s => (
               <React.Fragment key={s.id}>
                 <tr className="bg-gray-50/80 dark:bg-gray-900/30">
                   <td className="px-2 py-1.5">
@@ -509,7 +520,7 @@ function DesgloseCampana({ campaignId, accountId, connId, currency, presupuestos
                       title={abiertos[s.id] ? 'Ocultar los anuncios' : 'Ver los anuncios de este conjunto'}>
                       {abiertos[s.id] ? <ChevronDown size={12} className="text-brand-500 shrink-0" /> : <ChevronRight size={12} className="text-gray-400 shrink-0" />}
                       ▦ {s.name}
-                      <span className="text-[10px] font-semibold text-gray-400">· {s.ads.length} anuncio{s.ads.length === 1 ? '' : 's'}</span>
+                      <span className="text-[10px] font-semibold text-gray-400">· {s.ads.filter(x => Number(x.spend) > 0).length} anuncio{s.ads.filter(x => Number(x.spend) > 0).length === 1 ? '' : 's'}</span>
                     </button>
                   </td>
                   <td className="px-2 py-1.5"><Dot on={estadoDe(s) === 'ACTIVE'} /></td>
@@ -527,7 +538,7 @@ function DesgloseCampana({ campaignId, accountId, connId, currency, presupuestos
                   <Num v={s.costoATC} />
                   <Num v={s.costoCheckout} />
                 </tr>
-                {abiertos[s.id] && s.ads.map(ad => (
+                {abiertos[s.id] && s.ads.filter(x => Number(x.spend) > 0).map(ad => (
                   <tr key={ad.id}>
                     <td className="px-2 py-1.5 pl-5">
                       <SwitchEstado estado={estadoDe(ad)} trabajando={!!busy[ad.id]} onCambiar={() => toggle(ad, 'ad')} />
@@ -1108,30 +1119,30 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
                     {open && (
                       <tr><td colSpan={9} className="bg-gray-50/60 dark:bg-gray-900/40 px-3.5 py-3">
                         <div className="pl-5 space-y-1.5">
-                          {p.condiciones.map((c, n) => (
-                            <div key={n} className={`flex items-start gap-2 text-[11.5px] ${c.cuenta === false ? 'opacity-45' : ''}`}>
-                              <span className={`w-[15px] h-[15px] rounded-full grid place-items-center text-[9px] font-bold shrink-0 mt-px ${
-                                c.cuenta === false ? 'bg-gray-200 dark:bg-gray-700 text-gray-400'
-                                  : c.ok ? 'bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400' : 'bg-gray-200 dark:bg-gray-700 text-gray-400'}`}>
-                                {c.cuenta === false ? '–' : c.ok ? '✓' : '·'}
-                              </span>
-                              <span className="text-gray-600 dark:text-gray-300">
-                                {c.texto}
-                                {c.cuenta === false && <span className="text-gray-400"> · apagada en los criterios</span>}
-                              </span>
-                            </div>
-                          ))}
-                          <p className="text-[11px] text-gray-500 dark:text-gray-400 border-l-2 border-gray-200 dark:border-gray-700 pl-2.5 mt-2 flex items-center gap-1.5 flex-wrap">
+                          {/* Al expandir una CAMPAÑA va directo el desglose por conjuntos
+                              (pedido de Lucas: sin el checklist técnico de criterios — el
+                              porqué del veredicto queda en una línea y en el ⓘ). */}
+                          <p className="text-[11px] text-gray-500 dark:text-gray-400 flex items-center gap-1.5 flex-wrap">
                             {p.motivoAccion || (opp.es ? opp.motivo : 'No está en la mira: gastó poco o el ROAS está sobre el corte.')}
-                            {p.compartido && <span className="text-gray-400">· presupuesto compartido a nivel {p.nivelPresupuesto || 'campaña'}</span>}
-                            {a.cfgUsada?.roasMaxPausar != null && a.cfgUsada.roasMaxPausar !== cfg.roasMaxPausar && (
-                              <span className="text-gray-400">· juzgada con el ROAS de equilibrio de su producto ({fmtR(a.cfgUsada.roasMaxPausar)})</span>
-                            )}
                             <Why k="plataEnRiesgo" cfg={cfg} currency={currency} onOpen={onWhy} datos={{ ...p, gastoHoy: i.spend }} />
                           </p>
-                          {esCampana && (
+                          {esCampana ? (
                             <DesgloseCampana campaignId={a.id} accountId={accountId} connId={connId} currency={currency}
                               presupuestos={presupuestos} onPresupuesto={onPresupuesto} />
+                          ) : (
+                            p.condiciones.map((c, n) => (
+                              <div key={n} className={`flex items-start gap-2 text-[11.5px] ${c.cuenta === false ? 'opacity-45' : ''}`}>
+                                <span className={`w-[15px] h-[15px] rounded-full grid place-items-center text-[9px] font-bold shrink-0 mt-px ${
+                                  c.cuenta === false ? 'bg-gray-200 dark:bg-gray-700 text-gray-400'
+                                    : c.ok ? 'bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400' : 'bg-gray-200 dark:bg-gray-700 text-gray-400'}`}>
+                                  {c.cuenta === false ? '–' : c.ok ? '✓' : '·'}
+                                </span>
+                                <span className="text-gray-600 dark:text-gray-300">
+                                  {c.texto}
+                                  {c.cuenta === false && <span className="text-gray-400"> · apagada en los criterios</span>}
+                                </span>
+                              </div>
+                            ))
                           )}
                         </div>
                       </td></tr>

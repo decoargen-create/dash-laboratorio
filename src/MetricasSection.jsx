@@ -887,6 +887,13 @@ function VistaWinners({ account, accountId, cfg, cfgRaw, productos, productoId, 
   const [guardados, setGuardados] = useState({}); // adId → referencia
   const [analisisModal, setAnalisisModal] = useState(null); // referencia con analisis
   const fuentes = useRef(new Map());              // adId → { source, lengthSec } (vencen, no persistir)
+  // Desglose AUTOMÁTICO: lo ya procesado se levanta de marketing_referencias
+  // (dedup por shortcode = meta_<adId>) y lo que falta se procesa solo, de a
+  // uno, apenas carga la galería. Nada se desglosa dos veces.
+  const [refsListas, setRefsListas] = useState(false);
+  const guardadosRef = useRef({});
+  const [auto, setAuto] = useState({ done: 0, total: 0, corriendo: false });
+  const autoCorrido = useRef(false);
   const [vista, setVista] = useState(() => {
     try { return localStorage.getItem('adslab-winners-view') || 'grid'; } catch { return 'grid'; }
   });
@@ -925,6 +932,27 @@ function VistaWinners({ account, accountId, cfg, cfgRaw, productos, productoId, 
     })();
     return () => { vivo = false; };
   }, [accountId, account]);
+
+  // Lo ya desglosado en sesiones anteriores: se hidrata desde la biblioteca
+  // de Referencias así los winners procesados aparecen con su análisis al
+  // instante, sin repetir Whisper/Claude (eso ya se pagó una vez).
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      try {
+        const d = await referenciasApi('');
+        if (!vivo) return;
+        const porShortcode = {};
+        for (const r of d.referencias || []) {
+          if (r.shortcode && r.shortcode.startsWith('meta_')) porShortcode[r.shortcode.slice(5)] = r;
+        }
+        guardadosRef.current = porShortcode;
+        setGuardados(prev => ({ ...porShortcode, ...prev }));
+      } catch { /* sin la tabla o sin red: la galería sirve igual */ }
+      if (vivo) setRefsListas(true);
+    })();
+    return () => { vivo = false; };
+  }, []);
 
   // Ganadores con las reglas de SU producto (mismo criterio que las cohortes).
   const winners = useMemo(() => (adsRaw || [])
@@ -978,16 +1006,24 @@ function VistaWinners({ account, accountId, cfg, cfgRaw, productos, productoId, 
     }
   };
 
-  // Guardar como referencia: persiste el mp4 + miniatura en la biblioteca de
-  // Referencias y corre el análisis IA (hook / ángulo / estructura). De ahí
-  // en más vale todo el circuito: guion adaptado y envío a tarjetas.
-  const guardar = async (ad) => {
+  // Procesa UN winner: persiste mp4 + miniatura en Referencias y corre el
+  // análisis IA (hook / ángulo / estructura). Con `abrirModal` (click manual)
+  // muestra el resultado; el modo automático trabaja en silencio. De ahí en
+  // más vale todo el circuito: guion adaptado y envío a tarjetas.
+  const procesar = async (ad, { abrirModal = false } = {}) => {
+    // Ya desglosado en otra sesión → directo al resultado, sin gastar nada.
+    const previo = guardadosRef.current[ad.id];
+    if (previo?.analisis) {
+      setGuardados(prev => ({ ...prev, [ad.id]: previo }));
+      if (abrirModal) setAnalisisModal(previo);
+      return previo;
+    }
     setGuardando(prev => ({ ...prev, [ad.id]: true }));
     try {
       let fuente = null;
       if (ad.creative?.videoId) {
         try { fuente = await fuenteDe(ad); }
-        catch (e) { addToast?.({ type: 'warning', message: `Sin mp4 (${e.message}) — guardo la miniatura igual.` }); }
+        catch (e) { if (abrirModal) addToast?.({ type: 'warning', message: `Sin mp4 (${e.message}) — guardo la miniatura igual.` }); }
       }
       const data = await referenciasApi('?action=add-external', {
         method: 'POST',
@@ -1003,24 +1039,51 @@ function VistaWinners({ account, accountId, cfg, cfgRaw, productos, productoId, 
           productoId: ad.producto?.id ?? null,
         },
       });
-      if (data.videoWarn) addToast?.({ type: 'warning', message: data.videoWarn });
+      if (data.videoWarn && abrirModal) addToast?.({ type: 'warning', message: data.videoWarn });
       let ref = data.referencia;
-      setGuardados(prev => ({ ...prev, [ad.id]: ref }));
-      if (data.dedup && ref.analisis) {
-        setAnalisisModal(ref);
-      } else {
-        addToast?.({ type: 'info', message: 'Winner guardado — analizando hook y ángulo con IA…' });
+      if (!ref.analisis) {
         const anal = await referenciasApi('?action=analyze', { method: 'POST', body: { id: ref.id } });
         ref = anal.referencia;
-        setGuardados(prev => ({ ...prev, [ad.id]: ref }));
-        setAnalisisModal(ref);
       }
+      guardadosRef.current[ad.id] = ref;
+      setGuardados(prev => ({ ...prev, [ad.id]: ref }));
+      if (abrirModal) setAnalisisModal(ref);
+      return ref;
     } catch (e) {
-      addToast?.({ type: 'error', message: `No se pudo guardar el winner: ${e.message}` });
+      if (abrirModal) addToast?.({ type: 'error', message: `No se pudo desglosar el winner: ${e.message}` });
+      throw e;
     } finally {
       setGuardando(prev => ({ ...prev, [ad.id]: false }));
     }
   };
+
+  // Cola automática: cuando la galería y la biblioteca están cargadas, lo
+  // que falte desglosar se procesa solo, de a uno (controla costo y rate
+  // limits). Corre una vez por visita a la pestaña; lo procesado persiste,
+  // así la próxima vez no hay nada que hacer.
+  useEffect(() => {
+    if (!refsListas || autoCorrido.current || winners.length === 0) return;
+    autoCorrido.current = true;
+    const pendientes = winners.filter(ad => !guardadosRef.current[ad.id]?.analisis);
+    if (pendientes.length === 0) return;
+    let cancelado = false;
+    setAuto({ done: 0, total: pendientes.length, corriendo: true });
+    (async () => {
+      let hechos = 0;
+      for (const ad of pendientes) {
+        if (cancelado) return;
+        try { await procesar(ad); } catch { /* seguimos con el próximo */ }
+        hechos++;
+        if (!cancelado) setAuto({ done: hechos, total: pendientes.length, corriendo: true });
+      }
+      if (!cancelado) {
+        setAuto(a => ({ ...a, corriendo: false }));
+        addToast?.({ type: 'success', message: `${hechos} winner${hechos === 1 ? '' : 's'} desglosado${hechos === 1 ? '' : 's'} y guardado${hechos === 1 ? '' : 's'} en Referencias ✓` });
+      }
+    })();
+    return () => { cancelado = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refsListas, winners]);
 
   if (cargando) {
     return <div className="flex items-center justify-center py-14 text-gray-400"><Loader2 size={18} className="animate-spin mr-2" /> Buscando tus winners en Meta…</div>;
@@ -1043,8 +1106,14 @@ function VistaWinners({ account, accountId, cfg, cfgRaw, productos, productoId, 
         <Trophy size={15} className="text-amber-500" />
         <h3 className="text-[13px] font-bold text-gray-900 dark:text-gray-100">Winners · últimos 14 días</h3>
         <span className="text-[10.5px] text-gray-400">
-          ganador = las reglas de su producto (compras + ROAS) · guardalo para desglosar hook/ángulo y pasárselo al editor
+          ganador = las reglas de su producto (compras + ROAS) · el desglose IA corre solo y queda guardado en Referencias
         </span>
+        {auto.corriendo && (
+          <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 text-[10.5px] font-bold"
+            title="Transcribiendo y analizando cada winner nuevo con IA. Lo procesado queda guardado — no se repite.">
+            <Loader2 size={11} className="animate-spin" /> Desglosando {auto.done}/{auto.total}…
+          </span>
+        )}
         <div className="ml-auto inline-flex gap-0.5 p-0.5 rounded-lg bg-gray-100 dark:bg-gray-900 border border-gray-200 dark:border-gray-700">
           {[{ id: 'grid', l: 'Galería' }, { id: 'lista', l: 'Lista' }].map(o => (
             <button key={o.id} onClick={() => cambiarVista(o.id)}
@@ -1106,7 +1175,7 @@ function VistaWinners({ account, accountId, cfg, cfgRaw, productos, productoId, 
                       <td className="px-2 py-2 text-right tabular-nums text-gray-600 dark:text-gray-300">{fmtM(i.revenue, currency)}</td>
                       <td className="px-2 py-2 text-right whitespace-nowrap">
                         <div className="inline-flex items-center gap-1.5">
-                          <button onClick={() => guardar(ad)} disabled={!!guardando[ad.id]}
+                          <button onClick={() => procesar(ad, { abrirModal: true })} disabled={!!guardando[ad.id]}
                             className={`inline-flex items-center gap-1 px-2 py-1 text-[10.5px] font-bold rounded-md transition disabled:opacity-50 ${ref ? 'text-emerald-600 dark:text-emerald-400' : 'text-white bg-amber-500 hover:bg-amber-600'}`}>
                             {guardando[ad.id] ? <Loader2 size={11} className="animate-spin" /> : ref ? <Check size={11} /> : <BookmarkPlus size={11} />}
                             {ref ? 'Guardado' : 'Desglosar'}
@@ -1153,7 +1222,7 @@ function VistaWinners({ account, accountId, cfg, cfgRaw, productos, productoId, 
                     {i.purchases || 0} compras · {fmtM(i.spend, currency)} · {fmtM(i.revenue, currency)} fact.
                   </span>
                   <div className="mt-auto flex flex-wrap gap-1.5 pt-1">
-                    <button onClick={() => guardar(ad)} disabled={!!guardando[ad.id]}
+                    <button onClick={() => procesar(ad, { abrirModal: true })} disabled={!!guardando[ad.id]}
                       title="Guarda el mp4 en Referencias y lo analiza con IA (hook, ángulo, estructura). Después: guion adaptado y envío a tarjeta desde Marketing → Referencias."
                       className={`inline-flex items-center gap-1 px-2 py-1.5 text-[11px] font-bold rounded-lg transition disabled:opacity-50 ${ref ? 'text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900 hover:bg-emerald-50 dark:hover:bg-emerald-900/20' : 'text-white bg-amber-500 hover:bg-amber-600'}`}>
                       {guardando[ad.id] ? <Loader2 size={12} className="animate-spin" /> : ref ? <Check size={12} /> : <BookmarkPlus size={12} />}

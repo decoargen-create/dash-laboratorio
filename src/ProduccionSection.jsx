@@ -2402,9 +2402,22 @@ export function CardDetailModal({ a, personas, team = [], onClose, addToast, onT
     try {
       const data = await referenciasApi('', { method: 'POST', body: { url } });
       if (data.videoWarn) addToast?.({ type: 'warning', message: data.videoWarn });
-      const agregada = addReferenciaATarjeta(a.id, toCardRef(data.referencia));
+      let ref = data.referencia;
+      const agregada = addReferenciaATarjeta(a.id, toCardRef(ref));
       setRefUrl('');
-      addToast?.({ type: agregada ? 'success' : 'info', message: agregada ? 'Reel agendado y agregado a esta tarjeta ✓' : 'Ese reel ya estaba en esta tarjeta.' });
+      addToast?.({ type: agregada ? 'success' : 'info', message: agregada ? 'Reel agendado y agregado a esta tarjeta ✓ — desglosando con IA…' : 'Ese reel ya estaba en esta tarjeta.' });
+      // Desglose automático: se transcribe y analiza al toque (persiste en la
+      // biblioteca) y la tarjeta se actualiza con ángulo/hooks para el editor.
+      if (!ref.analisis) {
+        try {
+          const anal = await referenciasApi('?action=analyze', { method: 'POST', body: { id: ref.id } });
+          ref = anal.referencia;
+        } catch { /* la tarjeta queda igual; se puede analizar después desde Referencias */ }
+      }
+      if (ref.analisis) {
+        addReferenciaATarjeta(a.id, toCardRef(ref));
+        addToast?.({ type: 'success', message: `Reel desglosado: ${ref.analisis.angle || 'análisis listo'} ✓` });
+      }
     } catch (err) {
       addToast?.({ type: 'error', message: `No se pudo agendar el reel: ${err.message}` });
     } finally {

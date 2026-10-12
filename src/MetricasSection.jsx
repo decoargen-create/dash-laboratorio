@@ -27,7 +27,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   Loader2, RefreshCw, AlertCircle, ChevronDown, ChevronRight, Plug, X,
   FlaskConical, Radar, Gauge, SlidersHorizontal, ExternalLink, Clock, Filter,
-  Pause, Play, AlertTriangle, Trophy, Film, BookmarkPlus, Check,
+  Pause, Play, AlertTriangle, Trophy, Film, BookmarkPlus, Check, Pencil,
 } from 'lucide-react';
 import {
   useMetaConnections, useMetaAdAccounts, authHeaders, openMetaConnect,
@@ -44,7 +44,7 @@ import { supabase } from './supabase.js';
 import { referenciasApi } from './referenciasApi.js';
 import { fetchMeta, leerCacheMeta, pathTestingInsights, pathAdsWithInsights, recordarConnId } from './metricasCache.js';
 import { VistaEmbudo } from './EmbudoVista.jsx';
-import { cambiarEstado, inverso, estadoVisible, entregaDe } from './testeosAcciones.js';
+import { cambiarEstado, cambiarPresupuesto, inverso, estadoVisible, entregaDe } from './testeosAcciones.js';
 import { deriveFunnelRates } from '../api/meta/_funnel.js';
 
 // Las claves siguen diciendo "testeos" a propósito: renombrarlas le borraría
@@ -173,6 +173,73 @@ function Pill({ tone, children }) {
     up: 'bg-emerald-500 text-white dark:bg-emerald-500 dark:text-white shadow-sm',
   }[tone] || 'bg-gray-100 dark:bg-gray-700 text-gray-600';
   return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold whitespace-nowrap ${t}`}>{children}</span>;
+}
+
+// Columna Presupuesto: muestra el diario y, como en Meta, DOBLE CLICK para
+// editarlo ahí mismo (Enter guarda, Esc cancela). Solo entidades con
+// presupuesto diario propio — en ABO vive en el conjunto y acá se muestra
+// solo el % consumido.
+function PresupuestoCell({ a, p, cfg, currency, nivel, override, onGuardar }) {
+  const [editando, setEditando] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [guardando, setGuardando] = useState(false);
+  const monto = override ?? (a.dailyBudget != null ? Number(a.dailyBudget) : null);
+  const editable = nivel === 'campaigns' && monto != null && typeof onGuardar === 'function';
+
+  const abrir = () => {
+    if (!editable) return;
+    setDraft(String(Math.round(monto)));
+    setEditando(true);
+  };
+  const guardar = async () => {
+    // "45.000" (puntos de miles) o "45000,50" → número.
+    const v = Number(String(draft).replace(/[^\d.,]/g, '').replace(/\./g, '').replace(',', '.'));
+    if (!Number.isFinite(v) || v <= 0 || Math.round(v) === Math.round(monto)) { setEditando(false); return; }
+    setGuardando(true);
+    const ok = await onGuardar({ id: a.id, level: 'campaign', dailyBudget: v });
+    setGuardando(false);
+    if (ok) setEditando(false);
+  };
+
+  if (editando) {
+    return (
+      <span className="inline-flex items-center gap-1">
+        <input autoFocus value={draft} onChange={e => setDraft(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') guardar(); if (e.key === 'Escape') setEditando(false); }}
+          onBlur={() => { if (!guardando) setEditando(false); }}
+          className="w-24 px-1.5 py-0.5 text-[11.5px] text-right tabular-nums bg-white dark:bg-gray-900 border border-brand-400 rounded focus:outline-none focus:ring-1 focus:ring-brand-500" />
+        {guardando
+          ? <Loader2 size={11} className="animate-spin text-gray-400" />
+          : <button onMouseDown={e => { e.preventDefault(); guardar(); }}
+              className="text-emerald-600 dark:text-emerald-400 text-[12px] font-bold" title="Guardar (Enter)">✓</button>}
+      </span>
+    );
+  }
+
+  return (
+    <span className={editable ? 'cursor-pointer' : ''} onDoubleClick={abrir}
+      title={editable ? 'Doble click para cambiar el presupuesto diario — como en Meta' : undefined}>
+      {monto != null ? (
+        <span className="inline-flex flex-col items-end leading-tight">
+          <span className="tabular-nums font-semibold text-gray-700 dark:text-gray-200 text-[11.5px]">
+            {fmtM(monto, currency)} <span className="text-[9px] text-gray-400 font-normal">/ día</span>
+            {editable && <Pencil size={9} className="inline ml-1 text-gray-400 opacity-50" />}
+          </span>
+          {p.consumidoPct != null && (
+            <span className="inline-flex items-center gap-1">
+              <span className="tabular-nums text-[9.5px] text-gray-400">{fmtP(p.consumidoPct)}</span>
+              <Bar pct={p.consumidoPct} tone={p.consumidoPct >= cfg.consumoAltoPct ? 'warn' : undefined} />
+            </span>
+          )}
+        </span>
+      ) : p.consumidoPct != null ? (
+        <span className="inline-flex items-center gap-1.5">
+          <span className="tabular-nums text-[10.5px] text-gray-500">{fmtP(p.consumidoPct)}</span>
+          <Bar pct={p.consumidoPct} tone={p.consumidoPct >= cfg.consumoAltoPct ? 'warn' : undefined} />
+        </span>
+      ) : <span className="text-gray-400">—</span>}
+    </span>
+  );
 }
 
 function Bar({ pct, tone }) {
@@ -408,7 +475,7 @@ function Criterios({ cfg, cfgRaw, setCfg, productos, productoId, currency, abier
 // ========================================================================
 // Pestaña: HOY (ronda de optimización)
 // ========================================================================
-export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisibles, productoId, currency, accountId, onWhy, nivel, setNivel, cambios, trabajando, onEstado, onRecalcular, promediosRef, historico }) {
+export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisibles, productoId, currency, accountId, onWhy, nivel, setNivel, cambios, trabajando, onEstado, onRecalcular, promediosRef, historico, presupuestos, onPresupuesto }) {
   const [abierto, setAbierto] = useState(null);
   const [confirmando, setConfirmando] = useState(null);
   const [verCriterios, setVerCriterios] = useState(false);
@@ -664,10 +731,8 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
                       <td className="px-2 py-2 text-right tabular-nums text-gray-600 dark:text-gray-300">{p.costoATC != null ? fmtM(p.costoATC, currency) : '—'}</td>
                       <td className="px-2 py-2 text-right tabular-nums text-gray-600 dark:text-gray-300">{p.costoCheckout != null ? fmtM(p.costoCheckout, currency) : '—'}</td>
                       <td className="px-2 py-2 text-right whitespace-nowrap">
-                        {p.consumidoPct != null ? (
-                          <><span className="tabular-nums text-[10.5px] text-gray-500 mr-1.5">{fmtP(p.consumidoPct)}</span>
-                            <Bar pct={p.consumidoPct} tone={p.consumidoPct >= cfg.consumoAltoPct ? 'warn' : undefined} /></>
-                        ) : <span className="text-gray-400">—</span>}
+                        <PresupuestoCell a={a} p={p} cfg={cfg} currency={currency} nivel={nivel}
+                          override={presupuestos?.[a.id]} onGuardar={onPresupuesto} />
                       </td>
                       <td className="px-2 py-2 text-right"><MetaLink nivel={nivel} ids={[a.id]} accountId={accountId}>Meta</MetaLink></td>
                     </tr>
@@ -1785,6 +1850,20 @@ export default function MetricasSection({ addToast }) {
   // dos veces, aplica solo lo que Meta confirmó (si de 5 salieron 3, se
   // repintan 3) y deja el deshacer a mano en el toast.
   const aplicarRef = useRef(null);
+  // Presupuesto editable (doble click, como en Meta): escribe el diario nuevo
+  // en Meta y recuerda el valor aplicado para repintar la celda sin recargar.
+  const [presupuestos, setPresupuestos] = useState({});
+  const cambiarPresupuestoRow = useCallback(async ({ id, level, dailyBudget }) => {
+    const r = await cambiarPresupuesto({ accountId, connId: account?.connId, level, id, dailyBudget });
+    if (r.ok) {
+      setPresupuestos(prev => ({ ...prev, [id]: r.nuevo }));
+      addToast?.({ type: 'success', message: `Presupuesto de "${r.name}": ${fmtM(r.anterior, currency)} → ${fmtM(r.nuevo, currency)} por día` });
+    } else {
+      addToast?.({ type: 'error', message: `Presupuesto: ${r.error}` });
+    }
+    return r.ok;
+  }, [accountId, account, addToast, currency]);
+
   // ⭐ Winners automáticos: el server analiza los ads de ESTA cuenta (ventana
   // 7 días) y marca las estrellas en Producción — solo productos con data en
   // Meta; los demás siguen manuales. La cuenta elegida se aprende y el cron
@@ -2155,6 +2234,7 @@ export default function MetricasSection({ addToast }) {
             onEstado={({ items, status }) => aplicarEstado({ level: nivelHoy === 'campaigns' ? 'campaign' : 'ad', items, status })}
             onRecalcular={() => account && load(account, preset)}
             promediosRef={promedios7d} historico={historico7d}
+            presupuestos={presupuestos} onPresupuesto={cambiarPresupuestoRow}
           />}
           {tab === 'embudo' && (
             embudoError ? (

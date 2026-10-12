@@ -2040,6 +2040,61 @@ async function handleTestingInsights(req, res) {
 // Si la número 3 falla por permisos, las otras igual quedaron cambiadas y el
 // front sabe cuáles: un all-or-nothing acá sería mentira, porque Meta no da
 // transacciones.
+// Cambia el presupuesto DIARIO de una campaña (CBO) o un conjunto (ABO) —
+// el equivalente al doble click en la columna Presupuesto del Ads Manager.
+// POST { account_id, connection_id?, level: 'campaign'|'adset', id, dailyBudget }
+// `dailyBudget` viene en moneda de la cuenta; Meta lo quiere en centavos.
+async function handleSetBudget(req, res) {
+  if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
+
+  let body;
+  try {
+    if (req.body && typeof req.body === 'object') body = req.body;
+    else {
+      const chunks = [];
+      for await (const c of req) chunks.push(c);
+      body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+    }
+  } catch {
+    return respondJSON(res, 400, { error: 'Body JSON inválido' });
+  }
+
+  const origin = getOrigin(req);
+  const url = new URL(req.url, origin);
+  const { token, error, status: authStatus } = await resolveAccessToken(req, url, body?.connection_id || null);
+  if (!token) return respondJSON(res, authStatus || 401, { error: error || 'Meta no conectado' });
+
+  const accountId = String(body.account_id || '').trim();
+  const id = String(body.id || '').trim();
+  const level = body.level === 'adset' ? 'adset' : 'campaign';
+  const monto = Number(body.dailyBudget);
+  if (!accountId) return respondJSON(res, 400, { error: 'Falta account_id (con prefijo act_)' });
+  if (!/^\d+$/.test(id)) return respondJSON(res, 400, { error: 'id inválido' });
+  if (!Number.isFinite(monto) || monto <= 0) return respondJSON(res, 400, { error: 'Presupuesto inválido' });
+
+  const nombre = level === 'adset' ? 'conjunto' : 'campaña';
+  try {
+    // 1. ¿Existe, es de esta cuenta y tiene presupuesto diario PROPIO?
+    const actual = await graphGet(id, token, { fields: 'id,name,daily_budget,account_id' });
+    if (!mismaCuenta(actual.account_id, accountId)) {
+      return respondJSON(res, 400, { error: `Esa ${nombre} no es de la cuenta ${accountId}.` });
+    }
+    if (actual.daily_budget == null) {
+      return respondJSON(res, 400, {
+        error: level === 'campaign'
+          ? 'Esta campaña no tiene presupuesto diario propio (ABO: el presupuesto vive en sus conjuntos).'
+          : 'Este conjunto no tiene presupuesto diario propio (CBO: el presupuesto vive en la campaña).',
+      });
+    }
+    const anterior = Number(actual.daily_budget) / 100;
+    // 2. El cambio (Meta trabaja en centavos de la moneda de la cuenta).
+    await graphPost(id, token, { daily_budget: String(Math.round(monto * 100)) });
+    return respondJSON(res, 200, { ok: true, id, name: actual.name, anterior, nuevo: monto });
+  } catch (e) {
+    return respondJSON(res, e.status && e.status < 500 ? e.status : 500, { error: e.message });
+  }
+}
+
 async function handleSetStatus(req, res) {
   if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
 
@@ -2123,6 +2178,7 @@ const actions = {
   'cron-creative-refresh': handleCronCreativeRefresh,
   'resolve-ig-url': handleResolveIgUrl,
   'set-status': handleSetStatus,
+  'set-budget': handleSetBudget,
 };
 
 export default async function handler(req, res) {

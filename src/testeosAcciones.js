@@ -46,3 +46,25 @@ export async function cambiarEstado({ accountId, connId, level, ids, status }) {
     return { ok: false, resultados, resumen: resumirResultados(resultados, { level, status }) };
   }
 }
+
+// Cambia el presupuesto diario de una campaña/conjunto — el doble click de la
+// columna Presupuesto, como en Meta. Devuelve { ok, name, anterior, nuevo } o
+// { ok:false, error }.
+export async function cambiarPresupuesto({ accountId, connId, level = 'campaign', id, dailyBudget }) {
+  try {
+    const r = await fetch('/api/meta/set-budget', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(await authHeaders(false)) },
+      body: JSON.stringify({
+        account_id: accountId,
+        connection_id: connId && connId !== '__cookie__' ? connId : undefined,
+        level, id, dailyBudget,
+      }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || d.error) return { ok: false, error: d.error || `Error ${r.status}` };
+    return { ok: true, ...d };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}

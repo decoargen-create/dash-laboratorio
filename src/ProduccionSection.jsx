@@ -2607,14 +2607,17 @@ export function CardDetailModal({ a, personas, team = [], onClose, addToast, onT
             );
           })()}
 
-          {/* Brief a mano */}
+          {/* Brief a mano: cajón de sastre. No es un campo por video ni solo para
+              guiones — acá va cualquier cosa que el editor tenga que saber
+              (ideas, indicaciones, links). Por eso el placeholder no habla de
+              cuántos videos son. */}
           <div>
             <div className="flex items-center gap-1.5 mb-1.5">
               <FileText size={13} className="text-gray-400" />
-              <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400">Brief / guiones</span>
+              <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400">Brief / indicaciones</span>
             </div>
             <textarea value={brief} onChange={e => setBrief(e.target.value)} onBlur={saveBrief}
-              rows={7} placeholder={`Pegá acá las consignas, los guiones de los ${a.videosTotal || VIDEOS_POR_PRODUCTO} videos, links de Drive (material / creativos), lo que haga falta…`}
+              rows={7} placeholder="Ideas, indicaciones, consignas, guiones, links de Drive (material / creativos)… todo lo que el editor tenga que saber."
               className="w-full px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 resize-y font-mono leading-relaxed" />
           </div>
 

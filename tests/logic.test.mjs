@@ -442,6 +442,13 @@ eq('ROAS bajo + UN costo sobre el promedio alcanza para pausar', unCostoCaro.acc
 const rondaRef = rondaDeOptimizacion(DEMO.adsHoy, { cfg: cfgPausa, ahora: HOY, promediosRef: promedioRef });
 eq('la ronda usa la referencia histórica cuando se la pasan', [rondaRef.usaReferencia, rondaRef.referencia.costoPorATC], [true, 2000]);
 eq('sin referencia cae al promedio del día', rondaDeOptimizacion(DEMO.adsHoy, { cfg: cfgPausa, ahora: HOY }).usaReferencia, false);
+// GASTO CERO: con el piso vacío (null → 0), una campaña sin gasto pasaba la
+// mira (0 ≥ 0 y ROAS 0 < corte) y caía en "dejalo correr". Gastar algo es
+// prerequisito del veredicto, no una condición más.
+const sinGasto = evaluarPausa(
+  { dailyBudget: 85000, insights: { spend: 0, roas: 0, addToCart: 0, initiateCheckout: 0, impressions: 0 } },
+  promedioRef, { ...cfgPausa, pisoGastoPausar: null });
+eq('campaña con $0 gastado NO es candidata aunque el piso esté vacío', [sinGasto.candidato, sinGasto.accion], [false, null]);
 
 // OPORTUNIDAD DE ESCALA: ROAS holgado sobre el corte (corte × factor), hoy y
 // sostenido en la ventana con gasto real → candidata a subir presupuesto.

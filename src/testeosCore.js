@@ -638,7 +638,11 @@ export function evaluarPausa(item, promedios, cfg = CFG_DEFAULT) {
   const CLAVES_COSTO = ['atc', 'checkout'];
   const deMira = condiciones.filter(c => c.cuenta && !CLAVES_COSTO.includes(c.clave));
   const deCosto = condiciones.filter(c => c.cuenta && CLAVES_COSTO.includes(c.clave));
-  const candidato = deMira.length > 0 && deMira.every(c => c.ok);
+  // Sin gasto hoy no hay veredicto posible: con el piso vacío (0), una
+  // campaña que gastó $0 pasaba "la mira" (0 ≥ 0 y ROAS 0 < corte) y, como
+  // con cero gasto ningún costo puede dar "caro", terminaba en un "dejalo
+  // correr" sin sentido. Gastar algo es prerequisito, no una condición más.
+  const candidato = gasto > 0 && deMira.length > 0 && deMira.every(c => c.ok);
   // Sin condiciones de costo activas no hay segundo filtro: pausa directa.
   const costosCaros = deCosto.length === 0 ? true : deCosto.some(c => c.ok);
 

@@ -568,12 +568,15 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
                 const opp = (!p.accion && i.spend > 0)
                   ? oportunidadDeEscala(i, historico?.get?.(a.id), a.cfgUsada || cfg)
                   : { es: false };
+                // Sin gasto hoy (o debajo del piso) no hay nada que juzgar:
+                // "Sin datos aún", neutro — ni "va bien" ni "dejalo correr".
+                const sinDatos = i.spend <= 0 || i.spend < (cfg.pisoGastoPausar || 0);
                 const tone = p.accion === 'pausar' ? 'bad' : p.accion === 'dejar-correr' ? 'warn'
                   : opp.es ? 'up'
-                  : i.spend < cfg.pisoGastoPausar ? 'mute' : 'ok';
+                  : sinDatos ? 'mute' : 'ok';
                 const label = p.accion === 'pausar' ? 'Pausar' : p.accion === 'dejar-correr' ? 'Dejalo correr'
                   : opp.es ? '📈 Subir presupuesto'
-                  : i.spend < cfg.pisoGastoPausar ? 'Sin datos aún' : 'Va bien';
+                  : sinDatos ? 'Sin datos aún' : 'Va bien';
                 // Franja + fondo por veredicto: rojo suave = apagar, ámbar =
                 // seguir de cerca, verde = va bien, verde fuerte = escalar.
                 const tinte = tone === 'bad' ? 'bg-red-500/[0.06] dark:bg-red-500/[0.08]'

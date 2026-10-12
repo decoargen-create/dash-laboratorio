@@ -257,10 +257,25 @@ export default function TarjetaProduccion({ a, num, personas = [], team = [], on
       <div className="mt-2 pl-5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
         {/* Etiqueta de campaña (ej. "💐 Día de la Madre") — la pone el admin en
             el detalle; sirve para distinguir las tarjetas de una fecha. */}
+        {/* Prioridad: alta/media/baja — manda en el orden de la columna. */}
+        {a.prioridad === 1 && (
+          <span className="inline-flex items-center gap-1 font-bold text-red-700 dark:text-red-300 bg-red-100 dark:bg-red-900/40 px-1.5 py-0.5 rounded-md" title="Prioridad ALTA — hacer primero">🔥 Alta</span>
+        )}
+        {a.prioridad === 2 && (
+          <span className="inline-flex items-center gap-1 font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/40 px-1.5 py-0.5 rounded-md" title="Prioridad media">🟡 Media</span>
+        )}
         {a.etiqueta && (
           <span className="inline-flex items-center gap-1 font-bold text-pink-700 dark:text-pink-300 bg-pink-100 dark:bg-pink-900/40 px-1.5 py-0.5 rounded-md"
             title={`Tarjeta de la campaña: ${a.etiqueta}`}>
             {a.etiqueta}
+          </span>
+        )}
+        {/* Tarjeta sin consigna: sin etiqueta, sin brief y sin referencias — el
+            editor no sabe qué laburar sobre ella ("este no tiene nada"). */}
+        {!a.etiqueta && !(a.brief || '').trim() && !(a.referencias || []).length && (
+          <span className="inline-flex items-center gap-1 font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-800 px-1.5 py-0.5 rounded-md"
+            title="Sin etiqueta, sin brief y sin referencias: el editor no sabe qué va acá. Abrí la tarjeta y completala.">
+            ⚠️ sin consigna
           </span>
         )}
         {fmtFechaCorta(a.createdAt) && (

@@ -809,26 +809,55 @@ function VistaSemanas({ campaigns, cfg, productos, productoId, currency, account
                   {open && (
                     <tr><td colSpan={9} className="bg-gray-50/60 dark:bg-gray-900/40 px-3.5 py-3">
                       <div className="pl-5 space-y-1.5">
-                        {f.items.map(c => (
-                          <div key={c.id} className="flex items-center gap-2 text-[11.5px] flex-wrap">
-                            <span className="font-semibold text-gray-900 dark:text-gray-100">{c.name}</span>
-                            {etapa === 'todas' && c.etapa && (
-                              <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
-                                c.etapa === 'preescala' ? 'bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300'
-                                  : c.etapa === 'escala' ? 'bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300'
-                                  : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'}`}>
-                                {c.etapa === 'preescala' ? '🚀 preescala' : c.etapa === 'escala' ? '📈 escala' : '🧪 testeo'}
-                              </span>
-                            )}
-                            <span className="text-gray-500 dark:text-gray-400">· {c.veredicto.motivo}</span>
-                            {c.producto && <span className="text-gray-400">· {c.producto.nombre}</span>}
-                            <Pill tone={c.veredicto.estado === 'ganador' ? 'ok' : c.veredicto.estado === 'perdedor' ? 'bad' : 'mute'}>
-                              {c.veredicto.estado === 'ganador' ? 'Ganadora' : c.veredicto.estado === 'perdedor' ? 'Perdedora' : 'Sin datos'}
-                            </Pill>
-                            <span className="tabular-nums text-gray-500 ml-auto">{fmtM(c.insights?.spend, currency)}</span>
-                            <MetaLink nivel="campaigns" ids={[c.id]} accountId={accountId}>Meta</MetaLink>
-                          </div>
-                        ))}
+                        {f.items.map(c => {
+                          // Las mismas métricas que el resto del tablero, pero de ESTA
+                          // campaña en su cohorte: inversión, compras, ROAS, CPA y
+                          // costos de carrito / pago iniciado.
+                          const i = c.insights || {};
+                          const gasto = Number(i.spend || 0);
+                          const compras = Number(i.purchases || 0);
+                          const roasC = gasto > 0 ? Number(i.revenue || 0) / gasto : 0;
+                          const atc = Number(i.addToCart || 0);
+                          const chk = Number(i.initiateCheckout || 0);
+                          const mets = [
+                            ['Inversión', fmtM(gasto, currency), ''],
+                            ['Compras', String(compras), ''],
+                            ['ROAS', fmtR(roasC), roasC >= 1.5 ? 'text-emerald-600 dark:text-emerald-400' : gasto > 0 ? 'text-red-600 dark:text-red-400' : ''],
+                            ['CPA', compras > 0 ? fmtM(gasto / compras, currency) : '—', ''],
+                            ['Costo carrito', atc > 0 ? fmtM(gasto / atc, currency) : '—', ''],
+                            ['Costo pago', chk > 0 ? fmtM(gasto / chk, currency) : '—', ''],
+                          ];
+                          return (
+                            <div key={c.id} className="rounded-lg bg-white dark:bg-gray-800/60 border border-gray-100 dark:border-gray-700/60 px-2.5 py-2">
+                              <div className="flex items-center gap-2 text-[11.5px] flex-wrap">
+                                <span className="font-semibold text-gray-900 dark:text-gray-100">{c.name}</span>
+                                {etapa === 'todas' && c.etapa && (
+                                  <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                                    c.etapa === 'preescala' ? 'bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300'
+                                      : c.etapa === 'escala' ? 'bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300'
+                                      : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'}`}>
+                                    {c.etapa === 'preescala' ? '🚀 preescala' : c.etapa === 'escala' ? '📈 escala' : '🧪 testeo'}
+                                  </span>
+                                )}
+                                <span className="text-gray-500 dark:text-gray-400">· {c.veredicto.motivo}</span>
+                                {c.producto && <span className="text-gray-400">· {c.producto.nombre}</span>}
+                                <Pill tone={c.veredicto.estado === 'ganador' ? 'ok' : c.veredicto.estado === 'perdedor' ? 'bad' : 'mute'}>
+                                  {c.veredicto.estado === 'ganador' ? 'Ganadora' : c.veredicto.estado === 'perdedor' ? 'Perdedora' : 'Sin datos'}
+                                </Pill>
+                                <span className="ml-auto" />
+                                <MetaLink nivel="campaigns" ids={[c.id]} accountId={accountId}>Meta</MetaLink>
+                              </div>
+                              <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5">
+                                {mets.map(([l, v, tone]) => (
+                                  <span key={l} className="inline-flex items-baseline gap-1.5">
+                                    <span className="text-[8.5px] font-bold uppercase tracking-[.08em] text-gray-400">{l}</span>
+                                    <span className={`text-[11px] tabular-nums font-semibold ${tone || 'text-gray-700 dark:text-gray-200'}`}>{v}</span>
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     </td></tr>
                   )}

@@ -184,11 +184,18 @@ export function fechaDelNombre(nombre, hoy = new Date()) {
   const mes = Number(ultimo[2]);
   if (!(dia >= 1 && dia <= 31) || !(mes >= 1 && mes <= 12)) return null;
 
-  let anio;
+  let anio = null;
   if (ultimo[3]) {
     const n = Number(ultimo[3]);
-    anio = n < 100 ? 2000 + n : n;
-  } else {
+    const candidato = n < 100 ? 2000 + n : n;
+    // La regex admite espacios alrededor del separador, así que un "25/5 - 99"
+    // (un 99% OFF, un precio, un número suelto) matchea como si "99" fuera el
+    // año y la campaña caía en una cohorte de 2099. Un "año" fuera del rango
+    // real de la operación no es un año: se ignora y se infiere como si la
+    // fecha no lo trajera.
+    if (candidato >= 2020 && candidato <= hoy.getFullYear() + 1) anio = candidato;
+  }
+  if (anio == null) {
     anio = hoy.getFullYear();
     const tentativa = Date.UTC(anio, mes - 1, dia);
     const limite = hoy.getTime() + 15 * 24 * 60 * 60 * 1000;

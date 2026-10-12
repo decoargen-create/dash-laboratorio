@@ -6,24 +6,6 @@
 
 const APIFY_API_BASE = 'https://api.apify.com/v2';
 
-// Apify NO acepta un tope de gasto por run arbitrariamente chico: por debajo
-// de este piso rechaza el run entero con 400 `max-total-charge-usd-below-
-// minimum`. Pedir UN solo resultado de un actor barato cae justo ahí — el
-// cap implícito (1 × precio por resultado) queda abajo del mínimo y el run
-// ni siquiera arranca.
-export const APIFY_MIN_CHARGE_USD = 0.0027;
-
-// Tope de gasto a mandarle a Apify. Sube lo pedido al piso de la plataforma
-// cuando se queda corto, así un pedido chico no se cae por ser barato. El
-// control de gasto de verdad sigue siendo maxItems: esto es solo el techo que
-// Apify exige, y por eso se redondea PARA ARRIBA (truncar el techo abortaría
-// el run a mitad de camino, que es peor que pagar un centavo de más).
-export function topeDeGasto(usd) {
-  const n = Number(usd);
-  if (!Number.isFinite(n) || n <= 0) return null;
-  return Math.max(n, APIFY_MIN_CHARGE_USD);
-}
-
 // Dispara un run del actor y espera hasta que termine. Devuelve los items
 // del dataset directamente (output del actor). Tarda 30-180s según cuántos
 // ads scrapee. Vercel maxDuration del endpoint tiene que cubrir eso.
@@ -37,11 +19,18 @@ export function topeDeGasto(usd) {
 // "Maximum charged results must be greater than zero" (HTTP 400). Lo sacamos
 // del input.maxItems / input.resultsLimit y lo mandamos al URL.
 export async function runActorSync(actorId, input, token, opts = {}) {
-  const { timeout = 240, maxTotalChargeUsd = null } = opts;
+  const { timeout = 240 } = opts;
   const actorPath = actorId.replace('/', '~');
 
   // Prioridad: input.maxItems → input.maxResults → input.resultsLimit.
   // Si ninguno está, default 50 — Apify rechaza 0/null en PPR actors.
+  //
+  // OJO con pedir muy poco: Apify exige que el techo de gasto del run
+  // (maxItems × precio por resultado) llegue a $0.0027. Con actors baratos,
+  // maxItems 1 queda abajo y el run se rechaza con 400
+  // `max-total-charge-usd-below-minimum`. Quien necesite un solo resultado
+  // igual tiene que autorizar 2-3 (ver MIN_ITEMS_COBRABLES en referencias.js):
+  // el gasto lo define cuántos resultados DEVUELVE, no cuántos se autorizan.
   const maxItems = Math.max(1, Number(input?.maxItems || input?.maxResults || input?.resultsLimit || 50));
 
   // BELT + SUSPENDERS para PPR actors:
@@ -55,11 +44,6 @@ export async function runActorSync(actorId, input, token, opts = {}) {
     maxItems: String(maxItems),
     memory: '1024',
   });
-  // Solo cuando quien llama lo pide: sin esto Apify calcula el techo como
-  // maxItems × precio por resultado, que para un pedido de 1 item queda por
-  // debajo de su mínimo y tira 400 antes de arrancar.
-  const tope = topeDeGasto(maxTotalChargeUsd);
-  if (tope != null) params.set('maxTotalChargeUsd', String(tope));
   const url = `${APIFY_API_BASE}/acts/${actorPath}/run-sync-get-dataset-items?${params.toString()}`;
 
   // Sanitize: garantizar que el body también tenga maxItems > 0 en TODOS
@@ -120,7 +104,7 @@ export async function runActorSync(actorId, input, token, opts = {}) {
 //
 // onProgress(stage) opcional — llamado cada iteración del polling.
 export async function runActorAsync(actorId, input, token, opts = {}) {
-  const { maxWaitSec = 270, pollIntervalSec = 5, onProgress, maxTotalChargeUsd = null } = opts;
+  const { maxWaitSec = 270, pollIntervalSec = 5, onProgress } = opts;
   const actorPath = actorId.replace('/', '~');
 
   // maxItems sigue siendo OBLIGATORIO para PPR actors (gasto cap).
@@ -137,8 +121,6 @@ export async function runActorAsync(actorId, input, token, opts = {}) {
 
   // 1. Disparar el run.
   const startParams = new URLSearchParams({ token, maxItems: String(maxItems), memory: '1024' });
-  const topeAsync = topeDeGasto(maxTotalChargeUsd);
-  if (topeAsync != null) startParams.set('maxTotalChargeUsd', String(topeAsync));
   const startUrl = `${APIFY_API_BASE}/acts/${actorPath}/runs?${startParams.toString()}`;
   let startResp;
   try {

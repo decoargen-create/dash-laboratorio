@@ -572,6 +572,38 @@ async function handleAdsWithInsights(req, res) {
 // Performance de UN ad específico — usado cuando el user marca una idea
 // de la Bandeja como "usada" con un adId real, para cerrar el loop de
 // aprendizaje (hipótesis vs resultado real).
+// El mp4 de un video PROPIO de la cuenta (los creativos de la galería de
+// Winners): Graph API expone /{video_id}?fields=source para videos del
+// advertiser. La URL que devuelve es del CDN y vence — se pide en el momento
+// de reproducir o de guardarlo como referencia, nunca se persiste.
+async function handleVideoSource(req, res) {
+  if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
+  const origin = getOrigin(req);
+  const url = new URL(req.url, origin);
+  const { token, error, status } = await resolveAccessToken(req, url);
+  if (!token) return respondJSON(res, status || 401, { error: error || 'Meta no conectado' });
+
+  const videoId = url.searchParams.get('video_id');
+  if (!videoId || !/^\d+$/.test(videoId)) return respondJSON(res, 400, { error: 'Falta video_id (numérico)' });
+
+  try {
+    const data = await graphGet(`${videoId}`, token, { fields: 'source,picture,permalink_url,length' });
+    if (!data.source) {
+      return respondJSON(res, 404, {
+        error: 'Meta no devolvió el mp4 de este video — puede faltarle un permiso al token o el video no es de esta cuenta.',
+      });
+    }
+    return respondJSON(res, 200, {
+      source: data.source,
+      picture: data.picture || null,
+      permalink: data.permalink_url || null,
+      lengthSec: Number(data.length) || null,
+    });
+  } catch (err) {
+    return respondJSON(res, err.status || 502, { error: err.message });
+  }
+}
+
 async function handleAdPerformance(req, res) {
   if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
   const session = readMetaCookie(req);
@@ -1981,6 +2013,7 @@ const actions = {
   'testing-insights': handleTestingInsights,
   'ads-with-insights': handleAdsWithInsights,
   'ad-performance': handleAdPerformance,
+  'video-source': handleVideoSource,
   'ig-accounts': handleIgAccounts,
   'latest-ig-post': handleLatestIgPost,
   'campaigns': handleCampaigns,

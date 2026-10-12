@@ -242,6 +242,108 @@ function PresupuestoCell({ a, p, cfg, currency, nivel, override, onGuardar }) {
   );
 }
 
+// Desglose de UNA campaña al expandirla: sus conjuntos y los anuncios de cada
+// uno con los números de hoy — los niveles del Ads Manager sin salir de la
+// fila. El presupuesto de un conjunto (ABO) también se edita con doble click.
+function DesgloseCampana({ campaignId, accountId, connId, currency, presupuestos, onPresupuesto }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(null);
+  useEffect(() => {
+    let muerto = false;
+    (async () => {
+      try {
+        const qs = new URLSearchParams({ account_id: accountId, campaign_id: campaignId, preset: 'today' });
+        if (connId && connId !== '__cookie__') qs.set('connection_id', connId);
+        const r = await fetch(`/api/meta/campaign-breakdown?${qs}`, { headers: await authHeaders(false) });
+        const d = await r.json().catch(() => ({}));
+        if (muerto) return;
+        if (!r.ok || d.error) setErr(d.error || `Error ${r.status}`);
+        else setData(d.adsets || []);
+      } catch (e) { if (!muerto) setErr(e.message); }
+    })();
+    return () => { muerto = true; };
+  }, [campaignId, accountId, connId]);
+
+  const Dot = ({ on }) => (
+    <span className={`inline-flex items-center gap-1 text-[10.5px] font-semibold ${on ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-400'}`}>
+      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${on ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+      {on ? 'Activo' : 'Desact.'}
+    </span>
+  );
+  const Num = ({ v, money = true, bold = false }) => (
+    <td className={`px-2 py-1.5 text-right tabular-nums ${bold ? 'font-semibold text-gray-700 dark:text-gray-200' : 'text-gray-600 dark:text-gray-300'}`}>
+      {v == null ? '—' : money ? fmtM(v, currency) : v}
+    </td>
+  );
+
+  if (err) return <p className="text-[11px] text-red-500 mt-2.5">Desglose: {err}</p>;
+  if (!data) return (
+    <p className="text-[11px] text-gray-400 mt-2.5 flex items-center gap-1.5">
+      <Loader2 size={11} className="animate-spin" /> Trayendo conjuntos y anuncios…
+    </p>
+  );
+  if (!data.length) return <p className="text-[11px] text-gray-400 mt-2.5">La campaña no tiene conjuntos.</p>;
+
+  return (
+    <div className="mt-3 border-t border-gray-200 dark:border-gray-700/60 pt-2">
+      <p className="text-[9.5px] font-bold uppercase tracking-[.08em] text-gray-400 mb-1">
+        Desglose · conjuntos y anuncios (hoy)
+      </p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-[11.5px] min-w-[720px]">
+          <thead>
+            <tr className="text-gray-400 text-[9px] uppercase tracking-wider">
+              <th className="text-left font-bold px-2 py-1">Conjunto / anuncio</th>
+              <th className="text-left font-bold px-2 py-1">Entrega</th>
+              <th className="text-right font-bold px-2 py-1">Presupuesto</th>
+              <th className="text-right font-bold px-2 py-1">Compras</th>
+              <th className="text-right font-bold px-2 py-1">Gastado</th>
+              <th className="text-right font-bold px-2 py-1">ROAS</th>
+              <th className="text-right font-bold px-2 py-1">Costo carrito</th>
+              <th className="text-right font-bold px-2 py-1">Costo pago</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100 dark:divide-gray-700/60">
+            {data.map(s => (
+              <React.Fragment key={s.id}>
+                <tr className="bg-gray-50/80 dark:bg-gray-900/30">
+                  <td className="px-2 py-1.5 font-semibold text-gray-900 dark:text-gray-100">▦ {s.name}</td>
+                  <td className="px-2 py-1.5"><Dot on={s.effectiveStatus === 'ACTIVE'} /></td>
+                  <td className="px-2 py-1.5 text-right whitespace-nowrap">
+                    {s.dailyBudget != null ? (
+                      <PresupuestoCell
+                        a={{ id: s.id, dailyBudget: s.dailyBudget }} p={{}} cfg={{}} currency={currency}
+                        nivel="campaigns" override={presupuestos?.[s.id]}
+                        onGuardar={onPresupuesto ? ({ id, dailyBudget }) => onPresupuesto({ id, level: 'adset', dailyBudget }) : null} />
+                    ) : <span className="text-gray-400" title="El presupuesto vive en la campaña (CBO)">— CBO</span>}
+                  </td>
+                  <Num v={s.compras} money={false} bold />
+                  <Num v={s.spend} bold />
+                  <td className={`px-2 py-1.5 text-right tabular-nums font-bold ${s.roas >= 1.5 ? 'text-emerald-600 dark:text-emerald-400' : s.spend > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400'}`}>{fmtR(s.roas)}</td>
+                  <Num v={s.costoATC} />
+                  <Num v={s.costoCheckout} />
+                </tr>
+                {s.ads.map(ad => (
+                  <tr key={ad.id}>
+                    <td className="px-2 py-1.5 pl-7 text-gray-700 dark:text-gray-300 max-w-[300px] truncate" title={ad.name}>▶ {ad.name}</td>
+                    <td className="px-2 py-1.5"><Dot on={ad.effectiveStatus === 'ACTIVE'} /></td>
+                    <td className="px-2 py-1.5 text-right text-gray-400">—</td>
+                    <Num v={ad.compras} money={false} />
+                    <Num v={ad.spend} />
+                    <td className={`px-2 py-1.5 text-right tabular-nums font-bold ${ad.roas >= 1.5 ? 'text-emerald-600 dark:text-emerald-400' : ad.spend > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400'}`}>{fmtR(ad.roas)}</td>
+                    <Num v={ad.costoATC} />
+                    <Num v={ad.costoCheckout} />
+                  </tr>
+                ))}
+              </React.Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function Bar({ pct, tone }) {
   const c = { ok: 'bg-emerald-500', bad: 'bg-red-500', warn: 'bg-amber-500' }[tone] || 'bg-brand-500';
   return (
@@ -475,7 +577,7 @@ function Criterios({ cfg, cfgRaw, setCfg, productos, productoId, currency, abier
 // ========================================================================
 // Pestaña: HOY (ronda de optimización)
 // ========================================================================
-export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisibles, productoId, currency, accountId, onWhy, nivel, setNivel, cambios, trabajando, onEstado, onRecalcular, promediosRef, historico, presupuestos, onPresupuesto }) {
+export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisibles, productoId, currency, accountId, connId, onWhy, nivel, setNivel, cambios, trabajando, onEstado, onRecalcular, promediosRef, historico, presupuestos, onPresupuesto }) {
   const [abierto, setAbierto] = useState(null);
   const [confirmando, setConfirmando] = useState(null);
   const [verCriterios, setVerCriterios] = useState(false);
@@ -760,6 +862,10 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
                             )}
                             <Why k="plataEnRiesgo" cfg={cfg} currency={currency} onOpen={onWhy} datos={{ ...p, gastoHoy: i.spend }} />
                           </p>
+                          {esCampana && (
+                            <DesgloseCampana campaignId={a.id} accountId={accountId} connId={connId} currency={currency}
+                              presupuestos={presupuestos} onPresupuesto={onPresupuesto} />
+                          )}
                         </div>
                       </td></tr>
                     )}
@@ -2235,6 +2341,7 @@ export default function MetricasSection({ addToast }) {
             onRecalcular={() => account && load(account, preset)}
             promediosRef={promedios7d} historico={historico7d}
             presupuestos={presupuestos} onPresupuesto={cambiarPresupuestoRow}
+            connId={account?.connId}
           />}
           {tab === 'embudo' && (
             embudoError ? (

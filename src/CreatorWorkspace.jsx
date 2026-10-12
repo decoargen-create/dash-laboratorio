@@ -25,6 +25,7 @@ import { getCurrentUser } from './supabase.js';
 import { numerarDuplicados, columnaEfectiva } from './produccionCalc.js';
 import TarjetaProduccion, { CAPS_EDITOR } from './produccionCard.jsx';
 import { registrarColoresPersonas } from './produccionColors.js';
+import { referenciasApi } from './referenciasApi.js';
 
 const ESTADO_BADGE = {
   porhacer: 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-200',
@@ -34,11 +35,32 @@ const ESTADO_BADGE = {
 };
 
 // Reels de Instagram de referencia que el admin adjuntó a la tarjeta: el
-// editor los mira (embed público de IG — no necesita login) y, si hay guion
-// adaptado, lo copia. El iframe se monta recién al expandir (lazy).
+// editor los mira y, si hay guion adaptado, lo copia.
+//
+// Se reproduce el mp4 que guardamos al agendar el reel, no el embed de IG.
+// Guardamos el archivo justamente porque los links de Instagram se pudren
+// (post borrado, cuenta a privada, CDN vencido) — si el editor igual mirara el
+// embed, ese respaldo no serviría para nada el día que hace falta. El embed
+// queda de red: si no hay mp4 (o falla la firma), se muestra igual.
+//
+// La URL se pide al abrir, no antes: es firmada y vence, así que pedirla para
+// una lista entera sería gastar firmas que quizás nadie usa.
 function ReferenciaItem({ r }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [videoUrl, setVideoUrl] = useState(null);
+  const [videoPedido, setVideoPedido] = useState(false);
+
+  useEffect(() => {
+    if (!open || videoPedido || !r.id) return;
+    setVideoPedido(true);
+    let vivo = true;
+    referenciasApi(`?action=video&id=${encodeURIComponent(r.id)}`)
+      .then(d => { if (vivo && d.videoUrl) setVideoUrl(d.videoUrl); })
+      // Sin video firmado no hay nada que avisar: abajo se muestra el embed.
+      .catch(() => {});
+    return () => { vivo = false; };
+  }, [open, videoPedido, r.id]);
   const guionTxt = [
     r.guion || '',
     (r.hooksAlternativos || []).length ? '\nHOOKS ALTERNATIVOS\n' + r.hooksAlternativos.map((h, i) => `${i + 1}. ${h}`).join('\n') : '',
@@ -58,7 +80,13 @@ function ReferenciaItem({ r }) {
       </button>
       {open && (
         <div className="px-2.5 pb-2.5 space-y-2">
-          {r.shortcode && (
+          {videoUrl ? (
+            <video
+              src={videoUrl}
+              controls playsInline preload="metadata"
+              className="w-full max-w-[300px] max-h-[430px] mx-auto rounded-lg bg-black"
+            />
+          ) : r.shortcode ? (
             <iframe
               src={`https://www.instagram.com/p/${r.shortcode}/embed`}
               title={`Reel ${r.shortcode}`}
@@ -66,7 +94,7 @@ function ReferenciaItem({ r }) {
               loading="lazy"
               allow="autoplay; encrypted-media"
             />
-          )}
+          ) : null}
           {(r.hooks || []).length > 0 && (
             <div className="text-[11px] text-gray-600 dark:text-gray-300">
               <span className="font-bold">Hooks:</span> {r.hooks.join(' · ')}

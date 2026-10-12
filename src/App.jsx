@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { VioraLogo, VioraMark, AdsLabLogo, AdsLabMark } from './logo.jsx';
 import { installDebugLog, exportDebugLog } from './debugLog.js';
+import Landing from './Landing.jsx';
 import LandingPage from './LandingPage.jsx';
 import BocetosSection from './Bocetos.jsx';
 import MarketingSection from './Marketing.jsx';
@@ -1362,6 +1363,9 @@ function AppShell({ onExit }) {
   // plataformas siguen funcionando sin Supabase (localStorage / IndexedDB).
   // Sin user, Marketing muestra el SupabaseAuthScreen (gate).
   const [supabaseUser, setSupabaseUser] = useState(null);
+  // Home pública: el visitante sin sesión ve la landing comercial; "Entrar"
+  // (o cualquier CTA) pasa al login de siempre.
+  const [verLogin, setVerLogin] = useState(false);
   useEffect(() => {
     if (!supabase) return;
     (async () => {
@@ -2211,7 +2215,25 @@ function AppShell({ onExit }) {
   const isRecoveryLink = typeof window !== 'undefined' &&
     (window.location.hash?.includes('type=recovery') || window.location.search?.includes('type=recovery'));
 
+  // Callbacks de auth en la URL (magic link, recovery, OAuth de Supabase):
+  // saltean la landing y van directo a la pantalla de auth.
+  const authEnUrl = typeof window !== 'undefined' && (
+    window.location.search.includes('token=') ||
+    window.location.search.includes('type=') ||
+    window.location.hash.includes('access_token') ||
+    window.location.hash.includes('type=')
+  );
+
   if (!currentUser || isRecoveryLink) {
+    if (!verLogin && !isRecoveryLink && !authEnUrl) {
+      return (
+        <>
+          <Landing onEntrar={() => setVerLogin(true)} />
+          <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+          <DialogHost />
+        </>
+      );
+    }
     // Sin sesión de Supabase → pantalla de auth Supabase (la única ahora).
     // Renderizamos toasts en paralelo por avisos del bootstrap.
     return (

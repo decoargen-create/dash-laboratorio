@@ -18,8 +18,10 @@ export async function referenciasApi(path, { method = 'GET', body } = {}) {
   return data;
 }
 
-// Lo que viaja desnormalizado a las tarjetas de Producción (el editor no puede
-// leer marketing_referencias ni firmar el bucket del admin — ve el embed de IG).
+// Lo que viaja desnormalizado a las tarjetas de Producción. No incluye la URL
+// del video: es firmada y vence, así que el editor la pide aparte con
+// ?action=video&id=… (el server se la firma si tiene una tarjeta con esa
+// referencia). Acá viaja solo lo que no caduca.
 export function toCardRef(r) {
   return {
     id: r.id,

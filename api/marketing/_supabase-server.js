@@ -216,6 +216,25 @@ export async function getMetaConnectionToken(userId, connectionId) {
   return decryptToken(data.access_token);
 }
 
+// Última conexión de Meta guardada (la más nueva de cualquier usuario) con su
+// token descifrado. Server-only: la usan el cron y los procesos automáticos
+// (auto-winners) que corren sin cookie ni sesión de browser.
+export async function getLatestMetaToken() {
+  const supabase = getClient();
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase
+      .from('meta_connections')
+      .select('access_token, user_id, meta_user_name, updated_at')
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error || !data) return null;
+    const token = decryptToken(data.access_token);
+    return token ? { token, userId: data.user_id, name: data.meta_user_name } : null;
+  } catch { return null; }
+}
+
 export async function deleteMetaConnection(userId, connectionId) {
   const supabase = getClient();
   if (!supabase || !userId || !connectionId) return false;

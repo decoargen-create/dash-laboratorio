@@ -410,6 +410,10 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
   const [abierto, setAbierto] = useState(null);
   const [confirmando, setConfirmando] = useState(null);
   const [verCriterios, setVerCriterios] = useState(false);
+  // Orden de la tabla, clickeando el encabezado. Por defecto mayor Importe
+  // gastado: los que más gastan son los que más mueven el ROAS promedio de
+  // la cuenta — lo primero es ver si esos tiran para arriba o para abajo.
+  const [orden, setOrden] = useState({ k: 'spend', dir: 1 }); // dir 1 = mayor primero
 
   // Cada fila se juzga con el perfil de SU producto: el ROAS de equilibrio del
   // cepillo no es el de la crema. Antes toda la ronda usaba un corte global y
@@ -460,8 +464,14 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
     );
   }
 
-  const filas = r.evaluados.slice().sort((a, b) =>
-    (b.pausa.candidato - a.pausa.candidato) || ((b.pausa.plataEnRiesgo || 0) - (a.pausa.plataEnRiesgo || 0)));
+  // Sin gasto en el día no hay nada que juzgar NI mostrar: una campaña
+  // apagada o sin entrega con $0 solo agrega ruido a la tabla.
+  const conGasto = r.evaluados.filter(a => Number(a.insights?.spend || 0) > 0);
+  const ocultas = r.evaluados.length - conGasto.length;
+  const vOrd = (a) => orden.k === 'roas' ? (Number(a.insights?.roas) || 0) : Number(a.insights?.spend || 0);
+  const filas = conGasto.slice().sort((a, b) => orden.dir * (vOrd(b) - vOrd(a)));
+  const clickOrden = (k) => setOrden(o => o.k === k ? { k, dir: -o.dir } : { k, dir: 1 });
+  const flechaOrden = (k) => orden.k === k ? (orden.dir === 1 ? ' ↓' : ' ↑') : '';
 
   // Los candidatos que TODAVÍA están prendidos. El botón de tanda se ofrece
   // sobre estos: incluir las que ya pausaste haría que el contador mienta y
@@ -528,7 +538,7 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
         <div className="flex items-center gap-2 px-3.5 py-2.5 border-b border-gray-100 dark:border-gray-700/60 flex-wrap">
           <h3 className="text-[13px] font-bold text-gray-900 dark:text-gray-100">Ronda de optimización</h3>
           <Why k="pausar" cfg={cfg} currency={currency} onOpen={onWhy} datos={{}} />
-          <span className="text-[10.5px] text-gray-400">ordenado por la plata que está en juego</span>
+          <span className="text-[10.5px] text-gray-400">ordenado por importe gastado — click en las columnas para cambiar</span>
           <span className="ml-auto flex items-center gap-2">
             {selectorNivel}
             {pausables.length > 0 && (
@@ -551,16 +561,24 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
                 <th className="text-left font-bold px-3.5 py-2">{esCampana ? 'Campaña' : 'Anuncio'}</th>
                 <th className="text-left font-bold px-2 py-2">Entrega</th>
                 <th className="text-left font-bold px-2 py-2">Veredicto</th>
-                <th className="text-right font-bold px-2 py-2" title="Lo que Meta llama «Importe gastado»">Importe gastado</th>
-                <th className="text-right font-bold px-2 py-2" title="Lo que Meta llama «ROAS de compras»">ROAS de compras</th>
+                <th className="text-right font-bold px-2 py-2 cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-200 transition"
+                  title="Lo que Meta llama «Importe gastado» — click para ordenar por mayor/menor"
+                  onClick={() => clickOrden('spend')}>Importe gastado{flechaOrden('spend')}</th>
+                <th className="text-right font-bold px-2 py-2 cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-200 transition"
+                  title="Lo que Meta llama «ROAS de compras» — click para ordenar por mayor/menor"
+                  onClick={() => clickOrden('roas')}>ROAS de compras{flechaOrden('roas')}</th>
                 <th className="text-right font-bold px-2 py-2" title="Costo por agregar al carrito">Costo p/ carrito</th>
                 <th className="text-right font-bold px-2 py-2" title="Costo por pago iniciado">Costo p/ pago</th>
                 <th className="text-right font-bold px-2 py-2">Presupuesto</th>
-                <th className="text-right font-bold px-2 py-2">En juego</th>
                 <th className="px-2 py-2" />
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-gray-700/60">
+              {filas.length === 0 && (
+                <tr><td colSpan={9} className="px-3.5 py-6 text-center text-xs text-gray-400">
+                  Ninguna {esCampana ? 'campaña' : 'anuncio'} con gasto hoy{ocultas > 0 ? ` — ${ocultas} sin entrega quedaron ocultas` : ''}.
+                </td></tr>
+              )}
               {filas.map(a => {
                 const p = a.pausa, i = a.insights;
                 const open = abierto === a.id;
@@ -581,11 +599,9 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
                   : sinDatos ? 'Sin datos aún' : 'Va bien';
                 // Franja + fondo por veredicto: rojo suave = apagar, ámbar =
                 // seguir de cerca, verde = va bien, verde fuerte = escalar.
-                const tinte = tone === 'bad' ? 'bg-red-500/[0.06] dark:bg-red-500/[0.08]'
-                  : tone === 'warn' ? 'bg-amber-400/[0.07] dark:bg-amber-400/[0.08]'
-                  : tone === 'up' ? 'bg-emerald-500/[0.12] dark:bg-emerald-500/[0.13]'
-                  : tone === 'ok' ? 'bg-emerald-500/[0.04] dark:bg-emerald-500/[0.05]'
-                  : '';
+                // Formal, tipo planilla: sin fondos tintados por fila — el color
+                // queda en la franja izquierda y en la pastilla del veredicto.
+                const tinte = '';
                 const franja = tone === 'bad' ? 'border-l-[3px] border-l-red-400/80'
                   : tone === 'warn' ? 'border-l-[3px] border-l-amber-400/80'
                   : tone === 'up' ? 'border-l-[3px] border-l-emerald-500'
@@ -612,8 +628,23 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
                       </td>
                       <td className="px-2 py-2"><Entrega item={a} cambios={cambios} /></td>
                       <td className="px-2 py-2"><Pill tone={tone}>{label}</Pill></td>
-                      <td className="px-2 py-2 text-right tabular-nums font-semibold text-gray-900 dark:text-gray-100">{fmtM(i.spend, currency)}</td>
-                      <td className={`px-2 py-2 text-right tabular-nums font-semibold ${i.roas >= p.cortes?.roasMaxPausar ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>{fmtR(i.roas)}</td>
+                      <td className="px-2 py-2 text-right tabular-nums font-semibold text-gray-900 dark:text-gray-100">
+                        {fmtM(i.spend, currency)}
+                        {r.promedios.spend > 0 && i.spend > 0 && (
+                          <span className="block text-[9px] font-semibold text-gray-400"
+                            title="Qué parte de la inversión de hoy se lleva — a mayor peso, más mueve el ROAS promedio de la cuenta.">
+                            {fmtP(i.spend / r.promedios.spend * 100)} del total
+                          </span>
+                        )}
+                      </td>
+                      <td className={`px-2 py-2 text-right tabular-nums font-semibold whitespace-nowrap ${i.roas >= p.cortes?.roasMaxPausar ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                        {fmtR(i.roas)}
+                        {i.spend > 0 && r.promedios.roas > 0 && (
+                          i.roas >= r.promedios.roas
+                            ? <span className="ml-1 text-emerald-500" title={`Te SUBE el ROAS promedio de la cuenta (hoy: ${fmtR(r.promedios.roas)})`}>▲</span>
+                            : <span className="ml-1 text-red-500" title={`Te BAJA el ROAS promedio de la cuenta (hoy: ${fmtR(r.promedios.roas)})`}>▼</span>
+                        )}
+                      </td>
                       <td className="px-2 py-2 text-right tabular-nums text-gray-600 dark:text-gray-300">{p.costoATC != null ? fmtM(p.costoATC, currency) : '—'}</td>
                       <td className="px-2 py-2 text-right tabular-nums text-gray-600 dark:text-gray-300">{p.costoCheckout != null ? fmtM(p.costoCheckout, currency) : '—'}</td>
                       <td className="px-2 py-2 text-right whitespace-nowrap">
@@ -622,21 +653,10 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
                             <Bar pct={p.consumidoPct} tone={p.consumidoPct >= cfg.consumoAltoPct ? 'warn' : undefined} /></>
                         ) : <span className="text-gray-400">—</span>}
                       </td>
-                      <td className={`px-2 py-2 text-right tabular-nums font-bold ${p.accion === 'pausar' ? 'text-red-600 dark:text-red-400' : 'text-gray-400'}`}>
-                        {p.restante != null ? fmtM(p.restante, currency) : '—'}
-                        {p.restante != null && p.accion === 'pausar' && (
-                          <span className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide"
-                            title={p.efecto === 'redirige'
-                              ? 'El presupuesto es de la campaña: pausarlo no ahorra, manda esa plata a los otros anuncios.'
-                              : 'El presupuesto es propio: pausarlo lo ahorra.'}>
-                            {p.efecto === 'redirige' ? 'se redirige' : 'se ahorra'}
-                          </span>
-                        )}
-                      </td>
                       <td className="px-2 py-2 text-right"><MetaLink nivel={nivel} ids={[a.id]} accountId={accountId}>Meta</MetaLink></td>
                     </tr>
                     {open && (
-                      <tr><td colSpan={10} className="bg-gray-50/60 dark:bg-gray-900/40 px-3.5 py-3">
+                      <tr><td colSpan={9} className="bg-gray-50/60 dark:bg-gray-900/40 px-3.5 py-3">
                         <div className="pl-5 space-y-1.5">
                           {p.condiciones.map((c, n) => (
                             <div key={n} className={`flex items-start gap-2 text-[11.5px] ${c.cuenta === false ? 'opacity-45' : ''}`}>
@@ -668,6 +688,11 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
             </tbody>
           </table>
         </div>
+        {ocultas > 0 && filas.length > 0 && (
+          <p className="px-3.5 py-2 border-t border-gray-100 dark:border-gray-700/60 text-[10.5px] text-gray-400">
+            {ocultas} {esCampana ? (ocultas === 1 ? 'campaña' : 'campañas') : (ocultas === 1 ? 'anuncio' : 'anuncios')} con $0 de gasto hoy (sin entrega) no se muestran.
+          </p>
+        )}
         {tocadas > 0 && (
           <div className="flex items-center gap-2 flex-wrap px-3.5 py-2 border-t border-gray-100 dark:border-gray-700/60 text-[11px] bg-amber-50/70 dark:bg-amber-900/20 text-amber-800 dark:text-amber-200">
             <AlertTriangle size={12} className="shrink-0" />

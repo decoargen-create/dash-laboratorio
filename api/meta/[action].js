@@ -14,7 +14,7 @@
 //   GET|POST /api/meta/disconnect → borra la cookie
 
 import crypto from 'node:crypto';
-import { parseFunnel, deriveFunnelRates } from './_funnel.js';
+import { parseFunnel, deriveFunnelRates, pickAction, ACTION_ALIASES } from './_funnel.js';
 import { validarPedido, mismaCuenta, NIVELES } from './_estado.js';
 import {
   META_API_VERSION, META_COOKIE_MAX_AGE, META_SCOPES,
@@ -2040,6 +2040,59 @@ async function handleTestingInsights(req, res) {
 // Si la número 3 falla por permisos, las otras igual quedaron cambiadas y el
 // front sabe cuáles: un all-or-nothing acá sería mentira, porque Meta no da
 // transacciones.
+// Desglose de UNA campaña: sus conjuntos y los anuncios de cada uno con los
+// números del preset pedido (default: hoy). Es lo que ve la Ronda de
+// optimización al expandir una campaña — los niveles del Ads Manager sin
+// cambiar de vista. Una sola llamada a Graph (fields anidados).
+// GET ?account_id=act_X&campaign_id=123&preset=today[&connection_id=...]
+async function handleCampaignBreakdown(req, res) {
+  if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
+  const origin = getOrigin(req);
+  const url = new URL(req.url, origin);
+  const { token, error, status } = await resolveAccessToken(req, url);
+  if (!token) return respondJSON(res, status || 401, { error });
+
+  const campaignId = String(url.searchParams.get('campaign_id') || '').trim();
+  const preset = /^[a-z0-9_]+$/.test(url.searchParams.get('preset') || '') ? url.searchParams.get('preset') : 'today';
+  if (!/^\d+$/.test(campaignId)) return respondJSON(res, 400, { error: 'campaign_id inválido' });
+
+  const INS = 'spend,actions,action_values';
+  const parse = (row) => {
+    const ins = row?.insights?.data?.[0] || null;
+    const spend = Number(ins?.spend || 0);
+    const compras = ins ? pickAction(ins.actions, ACTION_ALIASES.purchases) : 0;
+    const revenue = ins ? pickAction(ins.action_values, ACTION_ALIASES.purchases) : 0;
+    const atc = ins ? pickAction(ins.actions, ACTION_ALIASES.addToCart) : 0;
+    const chk = ins ? pickAction(ins.actions, ACTION_ALIASES.initiateCheckout) : 0;
+    return {
+      spend, compras,
+      roas: spend > 0 ? revenue / spend : 0,
+      costoATC: atc > 0 ? spend / atc : null,
+      costoCheckout: chk > 0 ? spend / chk : null,
+    };
+  };
+
+  try {
+    const d = await graphGet(`${campaignId}/adsets`, token, {
+      fields: `id,name,effective_status,daily_budget,insights.date_preset(${preset}){${INS}},ads.limit(50){id,name,effective_status,insights.date_preset(${preset}){${INS}}}`,
+      limit: 50,
+    });
+    const adsets = (d.data || []).map(s => ({
+      id: s.id,
+      name: s.name,
+      effectiveStatus: s.effective_status,
+      dailyBudget: s.daily_budget != null ? Number(s.daily_budget) / 100 : null,
+      ...parse(s),
+      ads: (s.ads?.data || [])
+        .map(ad => ({ id: ad.id, name: ad.name, effectiveStatus: ad.effective_status, ...parse(ad) }))
+        .sort((a, b) => b.spend - a.spend),
+    })).sort((a, b) => b.spend - a.spend);
+    return respondJSON(res, 200, { adsets });
+  } catch (e) {
+    return respondJSON(res, e.status && e.status < 500 ? e.status : 500, { error: e.message });
+  }
+}
+
 // Cambia el presupuesto DIARIO de una campaña (CBO) o un conjunto (ABO) —
 // el equivalente al doble click en la columna Presupuesto del Ads Manager.
 // POST { account_id, connection_id?, level: 'campaign'|'adset', id, dailyBudget }
@@ -2179,6 +2232,7 @@ const actions = {
   'resolve-ig-url': handleResolveIgUrl,
   'set-status': handleSetStatus,
   'set-budget': handleSetBudget,
+  'campaign-breakdown': handleCampaignBreakdown,
 };
 
 export default async function handler(req, res) {

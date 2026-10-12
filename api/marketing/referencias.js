@@ -6,6 +6,8 @@
 //
 // Endpoints:
 //   GET    /api/marketing/referencias?productoId=X   → lista (con signed URLs)
+//   GET    /api/marketing/referencias?action=video&id=X → firma el mp4 para
+//          quien tenga una tarjeta con esa referencia (el editor incluido)
 //   POST   /api/marketing/referencias                → agregar {url, productoId?}
 //   POST   /api/marketing/referencias?action=analyze → {id} transcribe + analiza y guarda
 //   PATCH  /api/marketing/referencias?id=X           → guardar {guion} | {producto_id}
@@ -399,6 +401,43 @@ async function handleDelete(res, sb, userId, id) {
   return respondJSON(res, 200, { ok: true });
 }
 
+// Firma el video de una referencia para el EDITOR.
+//
+// El editor no puede leer marketing_referencias (RLS por dueño) ni firmar el
+// bucket del admin, así que hasta ahora veía un embed de Instagram. Eso hace
+// que guardar el mp4 no sirva para nada justo cuando más importa: si borran el
+// post o lo hacen privado, el video está a salvo en el storage y el editor
+// igual ve un recuadro roto.
+//
+// Acá se cierra ese hueco sin abrir la tabla: se firma solo si quien pide
+// TIENE una tarjeta que lleva esa referencia — como dueño o como editor
+// asignado. Es el mismo permiso que ya tiene para ver la tarjeta.
+async function handleVideo(res, sb, userId, refId) {
+  if (!refId) return respondJSON(res, 400, { error: 'Falta id' });
+
+  const { data: tarjeta, error: errT } = await sb
+    .from('produccion_asignaciones')
+    .select('id')
+    .or(`owner_id.eq.${userId},creator_id.eq.${userId}`)
+    .contains('referencias', [{ id: refId }])
+    .limit(1)
+    .maybeSingle();
+  if (errT) return respondJSON(res, 500, { error: `No pude verificar el acceso: ${errT.message}` });
+  if (!tarjeta) return respondJSON(res, 403, { error: 'Esa referencia no está en ninguna de tus tarjetas.' });
+
+  const { data: ref, error: errR } = await sb
+    .from(TABLE).select('video_storage_path, thumb_storage_path').eq('id', refId).limit(1).maybeSingle();
+  if (errR) return respondJSON(res, 500, { error: `No pude leer la referencia: ${errR.message}` });
+  // Sin mp4 guardado no es un error: el front cae al embed de Instagram.
+  if (!ref?.video_storage_path) return respondJSON(res, 200, { videoUrl: null, thumbUrl: null });
+
+  const signed = await signPaths(sb, [ref.video_storage_path, ref.thumb_storage_path]);
+  return respondJSON(res, 200, {
+    videoUrl: signed.get(ref.video_storage_path) || null,
+    thumbUrl: signed.get(ref.thumb_storage_path) || null,
+  });
+}
+
 export default async function handler(req, res) {
   const userId = await requireAuth(req, res, getUserIdFromAuth);
   if (!userId) return;
@@ -411,6 +450,7 @@ export default async function handler(req, res) {
 
   try {
     if (req.method === 'GET') {
+      if (action === 'video') return await handleVideo(res, sb, userId, id);
       const referencias = await listReferencias(sb, userId, urlObj.searchParams.get('productoId'));
       return respondJSON(res, 200, { referencias });
     }

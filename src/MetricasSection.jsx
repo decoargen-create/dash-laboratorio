@@ -805,7 +805,7 @@ function VistaSemanas({ campaigns, cfg, productos, productoId, currency, account
                             <Why k="foto" cfg={cfg} currency={currency} onOpen={onWhy} datos={f} />
                           </span>
                           <span className="block text-[10px] text-gray-400">
-                            {f.lanzadas} {etapa === 'testeo' ? 'testeo' : 'campaña'}{f.lanzadas === 1 ? '' : 's'} · {f.activas} sigue{f.activas === 1 ? '' : 'n'} prendida{f.activas === 1 ? '' : 's'}
+                            {f.lanzadas} {etapa === 'testeo' ? 'testeo' : 'campaña'}{f.lanzadas === 1 ? '' : 's'} · {f.activas} sigue{f.activas === 1 ? '' : 'n'} prendida{f.activas === 1 ? '' : 's'}{f.programadas > 0 && <> · {f.programadas} programada{f.programadas === 1 ? '' : 's'}</>}
                           </span>
                         </span>
                       </div>
@@ -856,6 +856,20 @@ function VistaSemanas({ campaigns, cfg, productos, productoId, currency, account
                               const roasC = gasto > 0 ? Number(i.revenue || 0) / gasto : 0;
                               const atc = Number(i.addToCart || 0);
                               const chk = Number(i.initiateCheckout || 0);
+                              // "Sin datos" seco confunde cuando la campaña ni arrancó
+                              // (programada) o arrancó hace horas (recién lanzada):
+                              // se aclara con la Fecha de inicio real de Meta.
+                              const sinVeredicto = c.veredicto.estado !== 'ganador' && c.veredicto.estado !== 'perdedor';
+                              const inicio = c.startTime ? new Date(c.startTime) : null;
+                              const inicioOk = inicio && !Number.isNaN(inicio.getTime());
+                              const programada = !!(inicioOk && inicio.getTime() > Date.now());
+                              const recienLanzada = !!(sinVeredicto && !programada && inicioOk && (Date.now() - inicio.getTime()) < 48 * 60 * 60 * 1000);
+                              const inicioStr = inicioOk ? `${inicio.toLocaleDateString('es-AR', { day: 'numeric', month: 'numeric' })} a las ${inicio.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}` : '';
+                              const motivo = programada
+                                ? `arranca el ${inicioStr} — todavía no corre`
+                                : recienLanzada
+                                  ? `lanzada el ${inicioStr} · ${c.veredicto.motivo}`
+                                  : c.veredicto.motivo;
                               return (
                                 <tr key={c.id}>
                                   <td className="px-2 py-2">
@@ -868,7 +882,7 @@ function VistaSemanas({ campaigns, cfg, productos, productoId, currency, account
                                         {c.etapa === 'preescala' ? '🚀 preescala' : c.etapa === 'escala' ? '📈 escala' : '🧪 testeo'}
                                       </span>
                                     )}
-                                    <span className="block text-[10px] text-gray-400">{c.veredicto.motivo}{c.producto ? ` · ${c.producto.nombre}` : ''}</span>
+                                    <span className="block text-[10px] text-gray-400">{motivo}{c.producto ? ` · ${c.producto.nombre}` : ''}</span>
                                   </td>
                                   <td className="px-2 py-2 whitespace-nowrap">
                                     <span className={`inline-flex items-center gap-1.5 text-[11px] font-semibold ${c.activa ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-400'}`}>
@@ -877,9 +891,21 @@ function VistaSemanas({ campaigns, cfg, productos, productoId, currency, account
                                     </span>
                                   </td>
                                   <td className="px-2 py-2">
-                                    <Pill tone={c.veredicto.estado === 'ganador' ? 'ok' : c.veredicto.estado === 'perdedor' ? 'bad' : 'mute'}>
-                                      {c.veredicto.estado === 'ganador' ? 'Ganadora' : c.veredicto.estado === 'perdedor' ? 'Perdedora' : 'Sin datos'}
-                                    </Pill>
+                                    {programada ? (
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold whitespace-nowrap bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300"
+                                        title={`Fecha de inicio en Meta: ${inicioStr}. Hasta entonces no se juzga.`}>
+                                        ⏰ Programada
+                                      </span>
+                                    ) : recienLanzada ? (
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold whitespace-nowrap bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300"
+                                        title={`Arrancó el ${inicioStr}. Se juzga cuando pase el mínimo de impresiones y gasto.`}>
+                                        🚀 Recién lanzada
+                                      </span>
+                                    ) : (
+                                      <Pill tone={c.veredicto.estado === 'ganador' ? 'ok' : c.veredicto.estado === 'perdedor' ? 'bad' : 'mute'}>
+                                        {c.veredicto.estado === 'ganador' ? 'Ganadora' : c.veredicto.estado === 'perdedor' ? 'Perdedora' : 'Sin datos'}
+                                      </Pill>
+                                    )}
                                   </td>
                                   <td className="px-2 py-2 text-right tabular-nums font-semibold text-gray-700 dark:text-gray-200">{compras}</td>
                                   <td className="px-2 py-2 text-right tabular-nums font-semibold text-gray-700 dark:text-gray-200">{fmtM(gasto, currency)}</td>

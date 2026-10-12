@@ -457,6 +457,12 @@ export function cohortesSemanales(campanas, { cfg = CFG_DEFAULT, productos = [],
       producto,
       veredicto: veredicto(c.insights, cfg),
       activa: c.effectiveStatus === 'ACTIVE',
+      // Programada: la "Fecha de inicio" de Meta todavía no llegó — no tiene
+      // sentido juzgarla ni contarla como "sin datos" a secas.
+      programada: (() => {
+        const t = Date.parse(c.startTime || c.start_time || '');
+        return Number.isFinite(t) && t > hoy.getTime();
+      })(),
     };
   });
 
@@ -498,6 +504,7 @@ export function cohortesSemanales(campanas, { cfg = CFG_DEFAULT, productos = [],
       // Eficiencia sobre las que tuvieron chance, no sobre todas.
       eficiencia: conVeredicto > 0 ? (ganadoras.length / conVeredicto) * 100 : 0,
       activas: items.filter(c => c.activa).length,
+      programadas: items.filter(c => c.programada).length,
       totales: sumarInsights(items.map(c => c.insights)),
       items,
       idsGanadoras: ganadoras.map(c => c.id),

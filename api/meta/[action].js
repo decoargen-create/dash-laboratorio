@@ -2213,6 +2213,190 @@ async function handleSetStatus(req, res) {
   return respondJSON(res, code, { level: pedido.level, status: pedido.status, resultados });
 }
 
+// ========================================================================
+// PUBLICAR CAMPAÑAS — el lanzador de AdsLab
+// ========================================================================
+// Crea en Meta una estructura completa de venta a partir de posts existentes
+// (nombre + post id), con las tres recetas del equipo:
+//   cbo_deep    → CBO sin tope de puja (deep pocket): presupuesto en la
+//                 campaña, LOWEST_COST_WITHOUT_CAP.
+//   cbo_costcap → CBO con costo objetivo: presupuesto en la campaña,
+//                 COST_CAP, la puja (costo por compra objetivo) va como
+//                 bid_amount en cada conjunto.
+//   abo_bidcap  → ABO con tope de puja: presupuesto POR CONJUNTO,
+//                 LOWEST_COST_WITH_BID_CAP + bid_amount en cada conjunto.
+// Todo se crea PAUSADO salvo que pidan activar: revisás en Meta y encendés.
+
+// Prerrequisitos del formulario: páginas del usuario y píxeles de la cuenta.
+// GET ?account_id=act_X[&connection_id=...]
+async function handleLaunchPrereqs(req, res) {
+  if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
+  const origin = getOrigin(req);
+  const url = new URL(req.url, origin);
+  const { token, error, status } = await resolveAccessToken(req, url);
+  if (!token) return respondJSON(res, status || 401, { error });
+  const accountId = String(url.searchParams.get('account_id') || '').trim();
+  if (!accountId) return respondJSON(res, 400, { error: 'Falta account_id' });
+  try {
+    const [pixelsR, pagesR] = await Promise.allSettled([
+      graphGet(`${accountId}/adspixels`, token, { fields: 'id,name', limit: 25 }),
+      graphGet('me/accounts', token, { fields: 'id,name', limit: 50 }),
+    ]);
+    return respondJSON(res, 200, {
+      pixels: pixelsR.status === 'fulfilled' ? (pixelsR.value.data || []) : [],
+      pages: pagesR.status === 'fulfilled' ? (pagesR.value.data || []) : [],
+    });
+  } catch (e) {
+    return respondJSON(res, 500, { error: e.message });
+  }
+}
+
+// POST { account_id, connection_id?, estructura, nombre, presupuesto, puja,
+//        conjuntos, pageId, pixelId, pais, edadMin, edadMax,
+//        ads: [{ name, postId }], activar }
+async function handleLaunchCampaign(req, res) {
+  if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
+
+  let body;
+  try {
+    if (req.body && typeof req.body === 'object') body = req.body;
+    else {
+      const chunks = [];
+      for await (const c of req) chunks.push(c);
+      body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+    }
+  } catch {
+    return respondJSON(res, 400, { error: 'Body JSON inválido' });
+  }
+
+  const origin = getOrigin(req);
+  const url = new URL(req.url, origin);
+  const { token, error, status: authStatus } = await resolveAccessToken(req, url, body?.connection_id || null);
+  if (!token) return respondJSON(res, authStatus || 401, { error: error || 'Meta no conectado' });
+
+  const accountId = String(body.account_id || '').trim();
+  const estructura = ['cbo_deep', 'cbo_costcap', 'abo_bidcap'].includes(body.estructura) ? body.estructura : null;
+  const nombre = String(body.nombre || '').trim();
+  const presupuesto = Number(body.presupuesto);
+  const puja = Number(body.puja || 0);
+  const conjuntos = Math.min(5, Math.max(1, Math.round(Number(body.conjuntos) || 1)));
+  const pageId = String(body.pageId || '').trim();
+  const pixelId = String(body.pixelId || '').trim();
+  const pais = /^[A-Z]{2}$/.test(String(body.pais || '').toUpperCase()) ? String(body.pais).toUpperCase() : 'AR';
+  const edadMin = Math.min(65, Math.max(13, Math.round(Number(body.edadMin) || 18)));
+  const edadMax = Math.min(65, Math.max(edadMin, Math.round(Number(body.edadMax) || 65)));
+  const activar = body.activar === true;
+  const ads = (Array.isArray(body.ads) ? body.ads : [])
+    .map(a => ({ name: String(a?.name || '').trim(), postId: String(a?.postId || '').trim() }))
+    .filter(a => a.postId);
+
+  if (!accountId) return respondJSON(res, 400, { error: 'Falta account_id' });
+  if (!estructura) return respondJSON(res, 400, { error: 'Estructura inválida' });
+  if (!nombre) return respondJSON(res, 400, { error: 'Falta el nombre de la campaña' });
+  if (!Number.isFinite(presupuesto) || presupuesto <= 0) return respondJSON(res, 400, { error: 'Presupuesto inválido' });
+  if ((estructura === 'cbo_costcap' || estructura === 'abo_bidcap') && (!Number.isFinite(puja) || puja <= 0)) {
+    return respondJSON(res, 400, { error: estructura === 'cbo_costcap' ? 'Falta la puja (costo por compra objetivo)' : 'Falta la puja (tope de puja)' });
+  }
+  if (!pixelId) return respondJSON(res, 400, { error: 'Falta el píxel (va en promoted_object del conjunto)' });
+  if (!ads.length) return respondJSON(res, 400, { error: 'Pasá al menos un anuncio (nombre + post id)' });
+  if (ads.length > 20) return respondJSON(res, 400, { error: 'Máximo 20 anuncios por tirada' });
+  const sinPagina = ads.some(a => !a.postId.includes('_'));
+  if (sinPagina && !pageId) return respondJSON(res, 400, { error: 'Hay post ids sin página (sin "_"): elegí la página para componer pageId_postId' });
+
+  const estado = activar ? 'ACTIVE' : 'PAUSED';
+  const bidStrategy = estructura === 'cbo_deep' ? 'LOWEST_COST_WITHOUT_CAP'
+    : estructura === 'cbo_costcap' ? 'COST_CAP' : 'LOWEST_COST_WITH_BID_CAP';
+  const esCbo = estructura !== 'abo_bidcap';
+
+  const resumen = { campaignId: null, adsets: [], errores: [] };
+  try {
+    // 1. Campaña.
+    const campParams = {
+      name: nombre,
+      objective: 'OUTCOME_SALES',
+      buying_type: 'AUCTION',
+      special_ad_categories: [],
+      bid_strategy: bidStrategy,
+      status: estado,
+    };
+    if (esCbo) campParams.daily_budget = String(Math.round(presupuesto * 100));
+    const camp = await graphPost(`${accountId}/campaigns`, token, campParams);
+    resumen.campaignId = camp.id;
+
+    // 2. Conjuntos. Los ads se REPARTEN en orden entre los conjuntos
+    //    (2 conjuntos y 6 ads → 3 y 3), como en los testeos del equipo.
+    const grupos = Array.from({ length: conjuntos }, () => []);
+    ads.forEach((a, i) => grupos[i % conjuntos].push(a));
+
+    for (let i = 0; i < grupos.length; i++) {
+      const grupo = grupos[i];
+      if (!grupo.length) continue;
+      const adsetParams = {
+        name: conjuntos > 1 ? `${nombre} · C${i + 1}` : nombre,
+        campaign_id: camp.id,
+        status: estado,
+        optimization_goal: 'OFFSITE_CONVERSIONS',
+        billing_event: 'IMPRESSIONS',
+        promoted_object: { pixel_id: pixelId, custom_event_type: 'PURCHASE' },
+        targeting: {
+          geo_locations: { countries: [pais] },
+          age_min: edadMin,
+          age_max: edadMax,
+          // Advantage+ audience: que Meta expanda — es como arma los testeos
+          // el equipo. Las ubicaciones quedan automáticas (sin placements).
+          targeting_automation: { advantage_audience: 1 },
+        },
+      };
+      if (!esCbo) adsetParams.daily_budget = String(Math.round(presupuesto * 100));
+      if (estructura !== 'cbo_deep') adsetParams.bid_amount = String(Math.round(puja * 100));
+      let adset;
+      try {
+        adset = await graphPost(`${accountId}/adsets`, token, adsetParams);
+      } catch (e) {
+        resumen.errores.push(`Conjunto C${i + 1}: ${e.message}`);
+        continue;
+      }
+      const fila = { id: adset.id, name: adsetParams.name, ads: [] };
+      resumen.adsets.push(fila);
+
+      // 3. Anuncios del conjunto: creative desde el post existente + ad.
+      for (const ad of grupo) {
+        const storyId = ad.postId.includes('_') ? ad.postId : `${pageId}_${ad.postId}`;
+        const adName = ad.name || `Ad ${storyId.split('_')[1] || storyId}`;
+        try {
+          const creative = await graphPost(`${accountId}/adcreatives`, token, {
+            name: adName,
+            object_story_id: storyId,
+          });
+          const nuevo = await graphPost(`${accountId}/ads`, token, {
+            name: adName,
+            adset_id: adset.id,
+            creative: { creative_id: creative.id },
+            status: estado,
+          });
+          fila.ads.push({ name: adName, id: nuevo.id, ok: true });
+        } catch (e) {
+          fila.ads.push({ name: adName, ok: false, error: e.message });
+        }
+      }
+    }
+
+    const creados = resumen.adsets.reduce((s, x) => s + x.ads.filter(a => a.ok).length, 0);
+    return respondJSON(res, 200, {
+      ok: resumen.errores.length === 0 && creados > 0,
+      ...resumen,
+      creados,
+      estado,
+    });
+  } catch (e) {
+    // Si la campaña no llegó a crearse, no quedó nada colgado en Meta.
+    return respondJSON(res, e.status && e.status < 500 ? e.status : 500, {
+      error: e.message,
+      ...resumen,
+    });
+  }
+}
+
 // --- dispatcher ---
 
 const actions = {
@@ -2242,6 +2426,8 @@ const actions = {
   'set-status': handleSetStatus,
   'set-budget': handleSetBudget,
   'campaign-breakdown': handleCampaignBreakdown,
+  'launch-prereqs': handleLaunchPrereqs,
+  'launch-campaign': handleLaunchCampaign,
 };
 
 export default async function handler(req, res) {

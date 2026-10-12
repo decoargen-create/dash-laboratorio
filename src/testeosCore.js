@@ -187,11 +187,17 @@ export function fechaDelNombre(nombre, hoy = new Date()) {
     const mes = Number(m[2]);
     if (!(dia >= 1 && dia <= 31) || !(mes >= 1 && mes <= 12)) continue;
 
-    let anio;
+    let anio = null;
     if (m[3]) {
       const n = Number(m[3]);
-      anio = n < 100 ? 2000 + n : n;
-    } else {
+      const candidato = n < 100 ? 2000 + n : n;
+      // La regex admite espacios alrededor del separador: en "25/5 - 99" (un
+      // 99% OFF, un precio, un "99K") el 99 matchearía como año y la campaña
+      // caía en una cohorte de 2099. Un "año" fuera del rango real de la
+      // operación no es un año: se ignora y se infiere como si no estuviera.
+      if (candidato >= 2020 && candidato <= hoy.getFullYear() + 1) anio = candidato;
+    }
+    if (anio == null) {
       anio = hoy.getFullYear();
       const tentativa = Date.UTC(anio, mes - 1, dia);
       const limite = hoy.getTime() + 15 * 24 * 60 * 60 * 1000;
@@ -229,6 +235,17 @@ export function semanaDelMes(lunes) {
   if (!lunes) return null;
   const dia = Number(String(lunes).slice(8, 10));
   return Math.ceil(dia / 7);
+}
+
+// Fecha de lanzamiento de una campaña. PRIMERO la "Fecha de inicio" real que
+// configuraste en Meta (start_time — la misma que muestra el Ads Manager en
+// Calendario, ya en el huso de la cuenta): no depende de cómo esté escrito el
+// nombre, así un "28-05 / 99K" no inventa años raros. Si la API no la trajo,
+// cae al parseo del nombre como siempre.
+export function fechaDeCampana(c, hoy = new Date()) {
+  const st = String(c?.startTime || c?.start_time || '');
+  if (/^\d{4}-\d{2}-\d{2}/.test(st)) return st.slice(0, 10);
+  return fechaDelNombre(c?.name, hoy);
 }
 
 // Lunes de la semana de una fecha 'YYYY-MM-DD' → 'YYYY-MM-DD'. La semana del
@@ -420,9 +437,14 @@ export function sumarInsights(lista) {
 // las que uno quiera.
 export function cohortesSemanales(campanas, { cfg = CFG_DEFAULT, productos = [], productoId = null, hoy = new Date(), etapa = 'testeo' } = {}) {
   const enriquecidas = (campanas || []).map(c => {
-    const tipo = tipoDeCampana(c.name, cfg, hoy);
+    let tipo = tipoDeCampana(c.name, cfg, hoy);
     const etapaInfo = etapaDeCampana(c.name, cfg);
-    const fecha = fechaDelNombre(c.name, hoy);
+    const fecha = fechaDeCampana(c, hoy);
+    // tipoDeCampana solo mira el nombre: si quedó "sin-fecha" pero Meta nos
+    // dio la fecha de inicio real, la campaña SÍ tiene semana y cuenta.
+    if (tipo.tipo === 'sin-fecha' && fecha) {
+      tipo = { tipo: 'testeo', motivo: 'palabra de testeo + fecha de inicio de Meta' };
+    }
     const producto = productoDeCampana(c.name, productos, cfg);
     return {
       ...c,
@@ -931,8 +953,8 @@ export const FORMULAS = {
   },
   cohorte: {
     label: 'Semana de la campaña',
-    formula: 'fecha escrita en el nombre → lunes de esa semana',
-    nota: 'La fecha sale del NOMBRE de la campaña (ej. "cepillo 15/8"), no de cuándo Meta la creó. La semana va de lunes a domingo. Una campaña sin fecha en el nombre cae en "Sin fecha" y no ensucia ninguna semana.',
+    formula: 'Fecha de inicio de la campaña en Meta → lunes de esa semana',
+    nota: 'La fecha es la "Fecha de inicio" real del Calendario de la campaña en Meta (la misma que ves en el Ads Manager), no cómo esté escrito el nombre. Si Meta no la mandó, se usa la fecha escrita en el nombre (ej. "cepillo 15/8") como respaldo. La semana va de lunes a domingo.',
     calculo: (d) => `"${d.name}" → ${d.fecha || 'sin fecha'} → semana del ${d.semana ? etiquetaSemana(d.semana) : '—'}`,
   },
   testeo: {

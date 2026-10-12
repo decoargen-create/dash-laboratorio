@@ -830,27 +830,69 @@ function VistaSemanas({ campaigns, cfg, productos, productoId, currency, account
                   </tr>
                   {open && (
                     <tr><td colSpan={9} className="bg-gray-50/60 dark:bg-gray-900/40 px-3.5 py-3">
-                      <div className="pl-5 space-y-1.5">
-                        {f.items.map(c => (
-                          <div key={c.id} className="flex items-center gap-2 text-[11.5px] flex-wrap">
-                            <span className="font-semibold text-gray-900 dark:text-gray-100">{c.name}</span>
-                            {etapa === 'todas' && c.etapa && (
-                              <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
-                                c.etapa === 'preescala' ? 'bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300'
-                                  : c.etapa === 'escala' ? 'bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300'
-                                  : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'}`}>
-                                {c.etapa === 'preescala' ? '🚀 preescala' : c.etapa === 'escala' ? '📈 escala' : '🧪 testeo'}
-                              </span>
-                            )}
-                            <span className="text-gray-500 dark:text-gray-400">· {c.veredicto.motivo}</span>
-                            {c.producto && <span className="text-gray-400">· {c.producto.nombre}</span>}
-                            <Pill tone={c.veredicto.estado === 'ganador' ? 'ok' : c.veredicto.estado === 'perdedor' ? 'bad' : 'mute'}>
-                              {c.veredicto.estado === 'ganador' ? 'Ganadora' : c.veredicto.estado === 'perdedor' ? 'Perdedora' : 'Sin datos'}
-                            </Pill>
-                            <span className="tabular-nums text-gray-500 ml-auto">{fmtM(c.insights?.spend, currency)}</span>
-                            <MetaLink nivel="campaigns" ids={[c.id]} accountId={accountId}>Meta</MetaLink>
-                          </div>
-                        ))}
+                      <div className="pl-5 overflow-x-auto">
+                        <table className="w-full text-xs min-w-[780px]">
+                          <thead>
+                            <tr className="text-gray-400 text-[9.5px] uppercase tracking-wider">
+                              <th className="text-left font-bold px-2 py-1.5">Campaña</th>
+                              <th className="text-left font-bold px-2 py-1.5">Entrega</th>
+                              <th className="text-left font-bold px-2 py-1.5">Veredicto</th>
+                              <th className="text-right font-bold px-2 py-1.5">Compras</th>
+                              <th className="text-right font-bold px-2 py-1.5">Importe gastado</th>
+                              <th className="text-right font-bold px-2 py-1.5">ROAS de compras</th>
+                              <th className="text-right font-bold px-2 py-1.5">CPA</th>
+                              <th className="text-right font-bold px-2 py-1.5">Costo p/ carrito</th>
+                              <th className="text-right font-bold px-2 py-1.5">Costo p/ pago</th>
+                              <th className="px-2 py-1.5" />
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100 dark:divide-gray-700/60">
+                            {f.items.map(c => {
+                              // Las mismas métricas y el mismo formato que la tabla de
+                              // "Hoy — qué pausar", filtradas a las campañas de ESTA semana.
+                              const i = c.insights || {};
+                              const gasto = Number(i.spend || 0);
+                              const compras = Number(i.purchases || 0);
+                              const roasC = gasto > 0 ? Number(i.revenue || 0) / gasto : 0;
+                              const atc = Number(i.addToCart || 0);
+                              const chk = Number(i.initiateCheckout || 0);
+                              return (
+                                <tr key={c.id}>
+                                  <td className="px-2 py-2">
+                                    <span className="font-semibold text-gray-900 dark:text-gray-100">{c.name}</span>
+                                    {etapa === 'todas' && c.etapa && (
+                                      <span className={`ml-1.5 px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                                        c.etapa === 'preescala' ? 'bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300'
+                                          : c.etapa === 'escala' ? 'bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300'
+                                          : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'}`}>
+                                        {c.etapa === 'preescala' ? '🚀 preescala' : c.etapa === 'escala' ? '📈 escala' : '🧪 testeo'}
+                                      </span>
+                                    )}
+                                    <span className="block text-[10px] text-gray-400">{c.veredicto.motivo}{c.producto ? ` · ${c.producto.nombre}` : ''}</span>
+                                  </td>
+                                  <td className="px-2 py-2 whitespace-nowrap">
+                                    <span className={`inline-flex items-center gap-1.5 text-[11px] font-semibold ${c.activa ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-400'}`}>
+                                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${c.activa ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+                                      {c.activa ? 'Activa' : 'Desactivada'}
+                                    </span>
+                                  </td>
+                                  <td className="px-2 py-2">
+                                    <Pill tone={c.veredicto.estado === 'ganador' ? 'ok' : c.veredicto.estado === 'perdedor' ? 'bad' : 'mute'}>
+                                      {c.veredicto.estado === 'ganador' ? 'Ganadora' : c.veredicto.estado === 'perdedor' ? 'Perdedora' : 'Sin datos'}
+                                    </Pill>
+                                  </td>
+                                  <td className="px-2 py-2 text-right tabular-nums font-semibold text-gray-700 dark:text-gray-200">{compras}</td>
+                                  <td className="px-2 py-2 text-right tabular-nums font-semibold text-gray-700 dark:text-gray-200">{fmtM(gasto, currency)}</td>
+                                  <td className={`px-2 py-2 text-right tabular-nums font-bold ${roasC >= 1.5 ? 'text-emerald-600 dark:text-emerald-400' : gasto > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400'}`}>{fmtR(roasC)}</td>
+                                  <td className="px-2 py-2 text-right tabular-nums text-gray-600 dark:text-gray-300">{compras > 0 ? fmtM(gasto / compras, currency) : '—'}</td>
+                                  <td className="px-2 py-2 text-right tabular-nums text-gray-600 dark:text-gray-300">{atc > 0 ? fmtM(gasto / atc, currency) : '—'}</td>
+                                  <td className="px-2 py-2 text-right tabular-nums text-gray-600 dark:text-gray-300">{chk > 0 ? fmtM(gasto / chk, currency) : '—'}</td>
+                                  <td className="px-2 py-2 text-right"><MetaLink nivel="campaigns" ids={[c.id]} accountId={accountId}>Meta</MetaLink></td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
                       </div>
                     </td></tr>
                   )}

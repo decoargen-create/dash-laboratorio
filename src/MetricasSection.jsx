@@ -39,6 +39,8 @@ import {
   fusionarConFotos, cohortesParaCongelar, fotoDeCohorte,
 } from './testeosCore.js';
 import { cargarCfg, guardarCfg, cargarFotos, guardarFotos, leerCfgLocal } from './testeosStore.js';
+import { alertDialog } from './dialogs.jsx';
+import { supabase } from './supabase.js';
 import { referenciasApi } from './referenciasApi.js';
 import { fetchMeta, leerCacheMeta, pathTestingInsights, pathAdsWithInsights, recordarConnId } from './metricasCache.js';
 import { VistaEmbudo } from './EmbudoVista.jsx';
@@ -1771,6 +1773,47 @@ export default function MetricasSection({ addToast }) {
   // dos veces, aplica solo lo que Meta confirmó (si de 5 salieron 3, se
   // repintan 3) y deja el deshacer a mano en el toast.
   const aplicarRef = useRef(null);
+  // ⭐ Winners automáticos: el server analiza los ads de ESTA cuenta (ventana
+  // 7 días) y marca las estrellas en Producción — solo productos con data en
+  // Meta; los demás siguen manuales. La cuenta elegida se aprende y el cron
+  // diario de las 09:00 la incluye a partir de ahí.
+  const [winnersAutoBusy, setWinnersAutoBusy] = useState(false);
+  const correrWinnersAuto = useCallback(async () => {
+    if (!accountId || winnersAutoBusy) return;
+    setWinnersAutoBusy(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const t = session?.access_token;
+      const r = await fetch('/api/produccion/auto-winners', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(t ? { Authorization: `Bearer ${t}` } : {}) },
+        body: JSON.stringify({ accountId: String(accountId).replace(/^act_/, '') }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.error) throw new Error(d.error || `Error ${r.status}`);
+      if (d.skipped) {
+        await alertDialog({ title: '⭐ Winners automáticos', message: `No corrió: ${d.skipped}${d.hint ? `\n${d.hint}` : ''}` });
+        return;
+      }
+      const lineas = [];
+      if (d.marcados?.length) {
+        for (const m of d.marcados) {
+          lineas.push(`⭐ ${m.producto}`);
+          for (const n of m.nuevos) lineas.push(`   • ${n.name} — ${n.compras} compras · ROAS ${n.roas}${n.warn ? ' ⚠️ revisar (bajo el break-even)' : ''}`);
+        }
+      } else {
+        lineas.push(`Sin winners nuevos con el criterio actual (≥${d.criterio?.minCompras ?? 6} compras y ROAS ≥${d.criterio?.minRoas ?? 2.5}, o top de su tanda con ≥${d.criterio?.topMin ?? 3}).`);
+      }
+      if (d.sinData?.length) lineas.push('', `Sin data en Meta — siguen manuales: ${d.sinData.join(', ')}`);
+      lineas.push('', `${d.adsAnalizados} ads analizados · ${d.tarjetasConData} tarjetas con data. Esto también corre solo todos los días a las 09:00.`);
+      await alertDialog({ title: '⭐ Winners automáticos', message: lineas.join('\n') });
+      const total = (d.marcados || []).reduce((s, m) => s + m.nuevos.length, 0);
+      if (total) addToast?.({ type: 'success', message: `⭐ ${total} winner${total === 1 ? '' : 's'} marcado${total === 1 ? '' : 's'} en Producción` });
+    } catch (e) {
+      addToast?.({ type: 'error', message: `Winners auto: ${e.message}` });
+    } finally { setWinnersAutoBusy(false); }
+  }, [accountId, winnersAutoBusy, addToast]);
+
   const aplicarEstado = useCallback(async ({ level, items, status, esDeshacer = false }) => {
     const lista = (items || []).filter(Boolean);
     if (!lista.length || !accountId) return;
@@ -2043,8 +2086,13 @@ export default function MetricasSection({ addToast }) {
             Ningún producto reconocido en esta cuenta — cargá sus palabras en <b>Reglas</b>.
           </span>
         )}
+        <button onClick={correrWinnersAuto} disabled={!accountId || winnersAutoBusy}
+          title="Analiza los ads de esta cuenta (ventana de 7 días) y marca ⭐ automáticamente en Producción los videos ganadores — solo productos con data en Meta; el resto sigue manual."
+          className="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-lg hover:bg-amber-100 dark:hover:bg-amber-900/50 transition disabled:opacity-50">
+          {winnersAutoBusy ? <Loader2 size={12} className="animate-spin" /> : <Trophy size={12} />} Winners auto
+        </button>
         <button onClick={() => { if (!account) return; load(account, preset); setRecargaEmbudo(n => n + 1); }} disabled={!account || loading}
-          className="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition disabled:opacity-50">
+          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition disabled:opacity-50">
           <RefreshCw size={12} className={loading ? 'animate-spin' : ''} /> Refrescar
         </button>
       </div>

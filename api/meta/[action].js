@@ -1302,10 +1302,22 @@ async function handleCronCreativeRefresh(req, res) {
     metaExpiry = await warnMetaExpiryIfDue();
   } catch (e) { console.warn('[cron] warn meta expiry:', e.message); }
 
+  // ⭐ Winners automáticos (best-effort): marca en Producción los videos que
+  // Meta muestra como ganadores — solo productos con data; el resto sigue
+  // manual. Corre acá aunque el creative-refresh no esté configurado.
+  let autoWinners = null;
+  try {
+    const { correrAutoWinners } = await import('../produccion/auto-winners.js');
+    autoWinners = await correrAutoWinners();
+  } catch (e) {
+    autoWinners = { error: e.message };
+    console.warn('[cron] auto-winners:', e.message);
+  }
+
   // Config desde env var.
   const raw = process.env.CREATIVE_REFRESH_CONFIG;
   if (!raw) {
-    return respondJSON(res, 200, { skipped: true, reason: 'CREATIVE_REFRESH_CONFIG no configurada', metaExpiry });
+    return respondJSON(res, 200, { skipped: true, reason: 'CREATIVE_REFRESH_CONFIG no configurada', metaExpiry, autoWinners });
   }
   let cfg;
   try { cfg = JSON.parse(raw); } catch {

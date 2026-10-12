@@ -27,7 +27,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   Loader2, RefreshCw, AlertCircle, ChevronDown, ChevronRight, Plug, X,
   FlaskConical, Radar, Gauge, SlidersHorizontal, ExternalLink, Clock, Filter,
-  Pause, Play, AlertTriangle, Trophy, Film, BookmarkPlus, Check, Pencil,
+  Pause, Play, AlertTriangle, Trophy, Film, BookmarkPlus, Check, Pencil, CalendarDays,
 } from 'lucide-react';
 import {
   useMetaConnections, useMetaAdAccounts, authHeaders, openMetaConnect,
@@ -41,6 +41,7 @@ import {
 import { cargarCfg, guardarCfg, cargarFotos, guardarFotos, leerCfgLocal } from './testeosStore.js';
 import { alertDialog } from './dialogs.jsx';
 import { supabase } from './supabase.js';
+import MenuFecha from './MenuFecha.jsx';
 import { referenciasApi } from './referenciasApi.js';
 import { fetchMeta, leerCacheMeta, pathTestingInsights, pathAdsWithInsights, recordarConnId } from './metricasCache.js';
 import { VistaEmbudo } from './EmbudoVista.jsx';
@@ -2230,7 +2231,7 @@ export default function MetricasSection({ addToast }) {
         : { fija: false, valor: preset, set: setPreset, opciones: PRESETS_COHORTES };
 
   const TABS = [
-    { id: 'hoy', label: 'Hoy — qué pausar', icon: Gauge },
+    { id: 'hoy', label: 'Hoy — optimizar', icon: Gauge },
     { id: 'embudo', label: 'Embudo de compra', icon: Filter },
     { id: 'semanas', label: 'Testeos por semana', icon: FlaskConical },
     { id: 'prosp', label: 'Prospectadores', icon: Radar },
@@ -2252,15 +2253,15 @@ export default function MetricasSection({ addToast }) {
           <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
         </div>
         {ventana.fija ? (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400"
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300"
             title="Esta pestaña mira siempre esta ventana — no hay nada que elegir.">
-            <Clock size={12} /> {ventana.label}
+            <CalendarDays size={12} className="text-[#1877F2]" /> {ventana.label}
+            <span className="text-gray-400 font-normal">
+              · {new Date().toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric', month: 'short' })}
+            </span>
           </span>
         ) : (
-          <select value={ventana.valor} onChange={e => ventana.set(e.target.value)}
-            className="px-2.5 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1877F2]">
-            {ventana.opciones.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
-          </select>
+          <MenuFecha value={ventana.valor} onChange={ventana.set} opciones={ventana.opciones} />
         )}
         {productosEnCuenta.length > 0 && (
           <div className="flex items-center gap-1 flex-wrap">

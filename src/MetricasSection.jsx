@@ -480,6 +480,14 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
   // que confirmar un "Pausar 6" pause 2.
   const pausables = r.aPausar.filter(a => estadoVisible(a, cambios) === 'ACTIVE');
 
+  // Termómetro del día: qué % de la inversión de HOY se fue a lo que está
+  // para pausar. No es lo mismo pausar 69K gastando 765K (9%, un día normal)
+  // que gastando 150K (46%, la cuenta viene mal y hay que achicar). Umbral:
+  // sano < 15%, atención 15–30%, alarma > 30%.
+  const gastoMalo = r.aPausar.reduce((s, a) => s + Number(a.insights?.spend || 0), 0);
+  const pctMalo = r.promedios.spend > 0 ? (gastoMalo / r.promedios.spend) * 100 : 0;
+  const tonoMalo = pctMalo >= 30 ? 'bad' : pctMalo >= 15 ? 'warn' : 'ok';
+
   // Cuántas filas de esta vista cambiaron de estado en esta sesión. Los KPIs de
   // arriba se calcularon con los datos que trajo Meta ANTES de esos cambios,
   // así que hay que decirlo en vez de mostrar una plata en juego que ya no es.
@@ -519,6 +527,10 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
           <Why k="plataEnRiesgo" cfg={cfg} currency={currency} onOpen={onWhy}
             datos={r.aPausar[0]?.pausa ? { ...r.aPausar[0].pausa, gastoHoy: r.aPausar[0].insights.spend } : {}} />
         </Kpi>
+        <Kpi label="Mal invertido hoy" value={fmtP(pctMalo)} tone={tonoMalo}
+          sub={r.aPausar.length
+            ? `${fmtM(gastoMalo, currency)} de ${fmtM(r.promedios.spend, currency)} se fue a lo marcado para pausar · sano < 15%`
+            : 'nada para pausar — el gasto está sano'} />
         <Kpi label="Gastado hoy" value={fmtM(r.promedios.spend, currency)}
           sub={`${ads.length} anuncios con entrega`} />
         <Kpi label="ROAS del día" value={fmtR(r.promedios.roas)}

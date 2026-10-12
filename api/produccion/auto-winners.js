@@ -177,9 +177,50 @@ export async function correrAutoWinners({ extraAccountId = null } = {}) {
   const cards = (rows || []).map(r => ({
     ...r,
     archivosNorm: (Array.isArray(r.archivos) ? r.archivos : [])
-      .map(f => ({ name: f?.name || '', n: norm(f?.name) }))
+      .map(f => ({
+        name: f?.name || '',
+        n: norm(f?.name),
+        driveId: f?.driveId || null,
+        // El link del archivo, o lo armamos desde el driveId: el editor tiene
+        // que poder ABRIR el winner, no solo leer el nombre.
+        link: f?.link || (f?.driveId ? `https://drive.google.com/file/d/${f.driveId}/view` : null),
+      }))
       .filter(f => f.n.length >= 6),
   })).filter(c => c.archivosNorm.length > 0);
+
+  // Reparación de winners viejos sin link (los auto-marcados de antes se
+  // guardaban solo con el nombre): si el archivo de la tarjeta tiene Drive,
+  // completamos link/driveId. Corre siempre, haya o no winners nuevos.
+  let enriquecidos = 0;
+  {
+    const porProd = new Map();
+    for (const c of cards) {
+      const k = productoKey(c);
+      if (!porProd.has(k)) porProd.set(k, []);
+      porProd.get(k).push(c);
+    }
+    for (const lista of porProd.values()) {
+      const porNombre = new Map();
+      for (const c of lista) for (const f of c.archivosNorm) if (f.n && !porNombre.has(f.n)) porNombre.set(f.n, f);
+      for (const c of lista) {
+        const ws = Array.isArray(c.winners) ? c.winners : [];
+        let cambio = false;
+        const reparados = ws.map(w => {
+          if (!w || w.link || w.driveId) return w;
+          const f = porNombre.get(norm(w.name));
+          if (!f || (!f.driveId && !f.link)) return w;
+          cambio = true; enriquecidos++;
+          return { ...w, driveId: f.driveId || null, link: f.link || null };
+        });
+        if (cambio) {
+          c.winners = reparados;
+          try {
+            await svc.from(TABLE).update({ winners: reparados, updated_at: new Date().toISOString() }).eq('id', c.id);
+          } catch {}
+        }
+      }
+    }
+  }
 
   // Ads con gasto en la ventana, de todas las cuentas configuradas.
   const ads = [];
@@ -206,7 +247,10 @@ export async function correrAutoWinners({ extraAccountId = null } = {}) {
     if (!best) continue;
     if (!porCard.has(best.card.id)) porCard.set(best.card.id, new Map());
     const m = porCard.get(best.card.id);
-    const slot = m.get(best.f.n) || { archivoName: best.f.name, spend: 0, compras: 0, revenue: 0, adIds: [] };
+    const slot = m.get(best.f.n) || {
+      archivoName: best.f.name, driveId: best.f.driveId || null, link: best.f.link || null,
+      spend: 0, compras: 0, revenue: 0, adIds: [],
+    };
     slot.spend += ad.spend; slot.compras += ad.compras; slot.revenue += ad.revenue;
     slot.adIds.push(ad.adId);
     m.set(best.f.n, slot);
@@ -231,7 +275,7 @@ export async function correrAutoWinners({ extraAccountId = null } = {}) {
       const g = porProducto.get(k);
       if (g.recs.some(r => winnerKey(r) === it.archivoName.trim().toLowerCase())) continue;
       g.recs.push({
-        name: it.archivoName, link: null, driveId: null,
+        name: it.archivoName, link: it.link || null, driveId: it.driveId || null,
         fecha: fechaStr, ts: Date.now(),
         auto: true,
         compras: it.compras,
@@ -288,6 +332,7 @@ export async function correrAutoWinners({ extraAccountId = null } = {}) {
   return {
     ok: true,
     marcados,
+    enriquecidos,
     sinData,
     adsAnalizados: ads.length,
     tarjetasConData: porCard.size,

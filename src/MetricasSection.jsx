@@ -2279,6 +2279,7 @@ export default function MetricasSection({ addToast }) {
       } else {
         lineas.push(`Sin winners nuevos con el criterio actual (≥${d.criterio?.minCompras ?? 6} compras y ROAS ≥${d.criterio?.minRoas ?? 2.5}, o top de su tanda con ≥${d.criterio?.topMin ?? 3}).`);
       }
+      if (d.enriquecidos) lineas.push('', `🔗 ${d.enriquecidos} winners ya marcados ahora tienen su link a Drive.`);
       if (d.sinData?.length) lineas.push('', `Sin data en Meta — siguen manuales: ${d.sinData.join(', ')}`);
       lineas.push('', `${d.adsAnalizados} ads analizados · ${d.tarjetasConData} tarjetas con data. Esto también corre solo todos los días a las 09:00.`);
       await alertDialog({ title: '⭐ Winners automáticos', message: lineas.join('\n') });

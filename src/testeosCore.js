@@ -95,6 +95,10 @@ export const CFG_DEFAULT = {
   // si el pixel no reporta InitiateCheckout, esa condición da "malo" siempre y
   // ensucia la ronda entera. Editable desde la UI.
   condicionesPausar: ['piso', 'roas', 'atc', 'checkout'],
+  // Oportunidad de escala: ROAS este % por ENCIMA del corte (1.3 = 30%), hoy
+  // y sostenido en la ventana reciente, marca la campaña como candidata a
+  // subir presupuesto. Con corte 1.6 → objetivo 2.08.
+  factorOportunidad: 1.3,
 };
 
 // Las condiciones de la ronda, en orden, con el nombre que ve el usuario.
@@ -699,6 +703,32 @@ export function evaluarPausa(item, promedios, cfg = CFG_DEFAULT) {
               ? `de acá a fin del día se llevaría ${Math.round(restante)} del presupuesto de la campaña — pausarlo no lo ahorra, lo manda a los otros anuncios`
               : `le quedan ${Math.round(restante)} por gastar hoy`)
             : 'sin presupuesto diario conocido',
+  };
+}
+
+// Oportunidad de escala: lo opuesto a pausar. Una campaña que HOY viene con
+// un ROAS holgado sobre el corte (corte × factorOportunidad) y que además lo
+// sostuvo en la ventana reciente (los últimos días acumulados, que incluyen
+// las últimas 48 h) con gasto real, está mostrando estabilidad: es candidata
+// a que le subas el presupuesto, no solo a "va bien".
+export function oportunidadDeEscala(insightsHoy, insightsPrevios, cfg = CFG_DEFAULT) {
+  const corte = Number(cfg.roasMaxPausar ?? 1.5);
+  const factor = Number(cfg.factorOportunidad ?? CFG_DEFAULT.factorOportunidad ?? 1.3);
+  const objetivo = corte * factor;
+  const roasHoy = Number(insightsHoy?.roas || 0);
+  const gastoHoy = Number(insightsHoy?.spend || 0);
+  const roasPrev = Number(insightsPrevios?.roas || 0);
+  const gastoPrev = Number(insightsPrevios?.spend || 0);
+  // Gasto real en los dos lados: hoy algo (ya está entregando) y en la
+  // ventana al menos el piso (si no gastó, el ROAS alto no prueba nada).
+  const es = gastoHoy > 0 && roasHoy >= objetivo
+    && gastoPrev >= (cfg.pisoGastoPausar || 0) && roasPrev >= objetivo;
+  return {
+    es,
+    objetivo,
+    motivo: es
+      ? `ROAS ${roasHoy.toFixed(2)} hoy y ${roasPrev.toFixed(2)} sostenido en los últimos 7 días, los dos arriba de ${objetivo.toFixed(2)} (corte ${corte} +${Math.round((factor - 1) * 100)}%) con gasto real: estable — oportunidad de subir presupuesto`
+      : null,
   };
 }
 

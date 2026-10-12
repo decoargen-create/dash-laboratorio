@@ -34,7 +34,7 @@ import {
 } from './MetaConnect.jsx';
 import {
   CFG_DEFAULT, CONDICIONES_PAUSA, cfgPara, cohortesSemanales, rondaDeOptimizacion, esProspectador,
-  promediosDelDia, ETAPAS,
+  promediosDelDia, ETAPAS, oportunidadDeEscala,
   productoDeCampana, linkMeta, FORMULAS,
   fusionarConFotos, cohortesParaCongelar, fotoDeCohorte,
 } from './testeosCore.js';
@@ -165,6 +165,8 @@ function Pill({ tone, children }) {
     bad: 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300',
     warn: 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300',
     mute: 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300',
+    // Verde fuerte: oportunidad de escala (subir presupuesto).
+    up: 'bg-emerald-500 text-white dark:bg-emerald-500 dark:text-white shadow-sm',
   }[tone] || 'bg-gray-100 dark:bg-gray-700 text-gray-600';
   return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold whitespace-nowrap ${t}`}>{children}</span>;
 }
@@ -402,7 +404,7 @@ function Criterios({ cfg, cfgRaw, setCfg, productos, productoId, currency, abier
 // ========================================================================
 // Pestaña: HOY (ronda de optimización)
 // ========================================================================
-export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisibles, productoId, currency, accountId, onWhy, nivel, setNivel, cambios, trabajando, onEstado, onRecalcular, promediosRef }) {
+export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisibles, productoId, currency, accountId, onWhy, nivel, setNivel, cambios, trabajando, onEstado, onRecalcular, promediosRef, historico }) {
   const [abierto, setAbierto] = useState(null);
   const [confirmando, setConfirmando] = useState(null);
   const [verCriterios, setVerCriterios] = useState(false);
@@ -560,16 +562,36 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
               {filas.map(a => {
                 const p = a.pausa, i = a.insights;
                 const open = abierto === a.id;
+                // Oportunidad de escala: solo tiene sentido en lo que NO es
+                // candidato a pausar y viene con gasto hoy. La estabilidad se
+                // mide contra el acumulado del mismo item en los últimos días.
+                const opp = (!p.accion && i.spend > 0)
+                  ? oportunidadDeEscala(i, historico?.get?.(a.id), a.cfgUsada || cfg)
+                  : { es: false };
                 const tone = p.accion === 'pausar' ? 'bad' : p.accion === 'dejar-correr' ? 'warn'
+                  : opp.es ? 'up'
                   : i.spend < cfg.pisoGastoPausar ? 'mute' : 'ok';
                 const label = p.accion === 'pausar' ? 'Pausar' : p.accion === 'dejar-correr' ? 'Dejalo correr'
+                  : opp.es ? '📈 Subir presupuesto'
                   : i.spend < cfg.pisoGastoPausar ? 'Sin datos aún' : 'Va bien';
+                // Franja + fondo por veredicto: rojo suave = apagar, ámbar =
+                // seguir de cerca, verde = va bien, verde fuerte = escalar.
+                const tinte = tone === 'bad' ? 'bg-red-500/[0.06] dark:bg-red-500/[0.08]'
+                  : tone === 'warn' ? 'bg-amber-400/[0.07] dark:bg-amber-400/[0.08]'
+                  : tone === 'up' ? 'bg-emerald-500/[0.12] dark:bg-emerald-500/[0.13]'
+                  : tone === 'ok' ? 'bg-emerald-500/[0.04] dark:bg-emerald-500/[0.05]'
+                  : '';
+                const franja = tone === 'bad' ? 'border-l-[3px] border-l-red-400/80'
+                  : tone === 'warn' ? 'border-l-[3px] border-l-amber-400/80'
+                  : tone === 'up' ? 'border-l-[3px] border-l-emerald-500'
+                  : tone === 'ok' ? 'border-l-[3px] border-l-emerald-500/35'
+                  : 'border-l-[3px] border-l-transparent';
                 return (
                   <React.Fragment key={a.id}>
                     <tr onClick={() => setAbierto(open ? null : a.id)}
-                      className={`cursor-pointer transition ${open ? 'bg-gray-50 dark:bg-gray-900/40' : 'hover:bg-gray-50 dark:hover:bg-gray-900/30'} ${
+                      className={`cursor-pointer transition ${tinte} ${open ? 'bg-gray-50 dark:bg-gray-900/40' : 'hover:bg-gray-50 dark:hover:bg-gray-900/30'} ${
                         estadoVisible(a, cambios) === 'PAUSED' ? 'opacity-55' : ''}`}>
-                      <td className="px-3.5 py-2 max-w-[280px]">
+                      <td className={`px-3.5 py-2 max-w-[280px] ${franja}`}>
                         <div className="flex items-center gap-2">
                           <SwitchEstado
                             estado={estadoVisible(a, cambios)}
@@ -625,7 +647,7 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
                             </div>
                           ))}
                           <p className="text-[11px] text-gray-500 dark:text-gray-400 border-l-2 border-gray-200 dark:border-gray-700 pl-2.5 mt-2 flex items-center gap-1.5 flex-wrap">
-                            {p.motivoAccion || 'No cumple las cuatro condiciones: no es candidato.'}
+                            {p.motivoAccion || (opp.es ? opp.motivo : 'No está en la mira: gastó poco o el ROAS está sobre el corte.')}
                             {p.compartido && <span className="text-gray-400">· presupuesto compartido a nivel {p.nivelPresupuesto || 'campaña'}</span>}
                             {a.cfgUsada?.roasMaxPausar != null && a.cfgUsada.roasMaxPausar !== cfg.roasMaxPausar && (
                               <span className="text-gray-400">· juzgada con el ROAS de equilibrio de su producto ({fmtR(a.cfgUsada.roasMaxPausar)})</span>
@@ -1302,6 +1324,27 @@ export default function MetricasSection({ addToast }) {
   // producto): es la referencia de "caro" para el segundo filtro de la ronda
   // — caro comparado con el resto de la cuenta, no con el día en curso.
   const promedios7d = useMemo(() => promediosDelDia(data?.ads7d || []), [data]);
+  // Acumulado de los últimos 7 días POR ITEM (anuncio y campaña): es la
+  // ventana de estabilidad para marcar "subir presupuesto" — el ROAS de hoy
+  // tiene que venir sostenido, no ser un pico de una mañana.
+  const historico7d = useMemo(() => {
+    const m = new Map();
+    const porCampana = new Map();
+    for (const a of (data?.ads7d || [])) {
+      const ins = a.insights || {};
+      m.set(a.id, ins);
+      const k = a.campaignId;
+      if (!k) continue;
+      const acc = porCampana.get(k) || { spend: 0, revenue: 0 };
+      acc.spend += Number(ins.spend || 0);
+      acc.revenue += Number(ins.revenue || 0);
+      porCampana.set(k, acc);
+    }
+    for (const [k, acc] of porCampana) {
+      m.set(k, { ...acc, roas: acc.spend > 0 ? acc.revenue / acc.spend : 0 });
+    }
+    return m;
+  }, [data]);
 
   // El embudo también respeta el filtro por producto — ese es medio el punto
   // de haber unificado las dos secciones. Como los totales que manda el
@@ -1484,7 +1527,7 @@ export default function MetricasSection({ addToast }) {
             cambios={cambios} trabajando={trabajando}
             onEstado={({ items, status }) => aplicarEstado({ level: nivelHoy === 'campaigns' ? 'campaign' : 'ad', items, status })}
             onRecalcular={() => account && load(account, preset)}
-            promediosRef={promedios7d}
+            promediosRef={promedios7d} historico={historico7d}
           />}
           {tab === 'embudo' && (
             embudoError ? (

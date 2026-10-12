@@ -21,7 +21,7 @@ import { repararTarjetas, carpetaDestinoDe } from '../api/produccion/_repair-cor
 import {
   CFG_DEFAULT, cfgPara, roasBreakeven, fechaDelNombre, lunesDe, tipoDeCampana,
   productoDeCampana, veredicto, cohortesSemanales, esProspectador,
-  rondaDeOptimizacion, promediosDelDia, linkMeta, evaluarPausa, CONDICIONES_PAUSA, etapaDeCampana,
+  rondaDeOptimizacion, promediosDelDia, linkMeta, evaluarPausa, CONDICIONES_PAUSA, etapaDeCampana, oportunidadDeEscala,
   semanaMadura, fusionarConFotos, cohortesParaCongelar, fotoDeCohorte,
 } from '../src/testeosCore.js';
 import { DEMO } from '../src/testeosDemo.js';
@@ -442,6 +442,16 @@ eq('ROAS bajo + UN costo sobre el promedio alcanza para pausar', unCostoCaro.acc
 const rondaRef = rondaDeOptimizacion(DEMO.adsHoy, { cfg: cfgPausa, ahora: HOY, promediosRef: promedioRef });
 eq('la ronda usa la referencia histórica cuando se la pasan', [rondaRef.usaReferencia, rondaRef.referencia.costoPorATC], [true, 2000]);
 eq('sin referencia cae al promedio del día', rondaDeOptimizacion(DEMO.adsHoy, { cfg: cfgPausa, ahora: HOY }).usaReferencia, false);
+
+// OPORTUNIDAD DE ESCALA: ROAS holgado sobre el corte (corte × factor), hoy y
+// sostenido en la ventana con gasto real → candidata a subir presupuesto.
+// Con corte 1.5 y factor 1.3 el objetivo es 2.25 (redondeando el gusto: 1.6 → 2.08).
+const opSi = oportunidadDeEscala({ spend: 30000, roas: 2.4 }, { spend: 90000, roas: 2.3 }, cfgPausa);
+eq('ROAS alto hoy + sostenido en la ventana → oportunidad', opSi.es, true);
+eq('el objetivo sale del corte × factor', Math.round(opSi.objetivo * 100) / 100, 1.95);
+eq('ROAS alto hoy pero NO sostenido → todavía no', oportunidadDeEscala({ spend: 30000, roas: 2.4 }, { spend: 90000, roas: 1.2 }, cfgPausa).es, false);
+eq('sostenido pero sin gasto en la ventana → no prueba nada', oportunidadDeEscala({ spend: 30000, roas: 2.4 }, { spend: 500, roas: 3.0 }, cfgPausa).es, false);
+eq('sin histórico → no es oportunidad', oportunidadDeEscala({ spend: 30000, roas: 2.4 }, null, cfgPausa).es, false);
 
 console.log('\nTESTEOS · LINK A META:');
 const link = linkMeta({ accountId: 'act_123', nivel: 'campaigns', ids: ['1', '2'], desde: '2026-08-17', hasta: '2026-08-23' });

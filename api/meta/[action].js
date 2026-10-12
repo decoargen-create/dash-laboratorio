@@ -2214,6 +2214,105 @@ async function handleSetStatus(req, res) {
 }
 
 // ========================================================================
+// ADS MANAGER — la tabla clásica por niveles (pestaña "Campañas y anuncios")
+// ========================================================================
+// Una fila por entidad del nivel pedido (campaign | adset | ad) con los
+// números del período: gasto, compras, ingresos, ROAS, CPA. Las filas salen
+// de /insights a nivel cuenta (una llamada paginada) y se les une estado y
+// presupuesto desde el listado de entidades (otra llamada) — insights no
+// trae effective_status.
+// GET ?account_id=act_X&level=campaign&date_preset=last_7d|custom_A_B[&connection_id]
+async function handleManagerTable(req, res) {
+  if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
+  const origin = getOrigin(req);
+  const url = new URL(req.url, origin);
+  const { token, error, status } = await resolveAccessToken(req, url);
+  if (!token) return respondJSON(res, status || 401, { error });
+
+  const accountId = String(url.searchParams.get('account_id') || '').trim();
+  if (!accountId) return respondJSON(res, 400, { error: 'Falta account_id' });
+  const level = ['campaign', 'adset', 'ad'].includes(url.searchParams.get('level'))
+    ? url.searchParams.get('level') : 'campaign';
+
+  let preset = url.searchParams.get('date_preset') || 'last_7d';
+  const custom = /^custom_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})$/.exec(preset);
+  if (!custom && !/^[a-z0-9_]+$/.test(preset)) preset = 'last_7d';
+  const rango = custom
+    ? { time_range: JSON.stringify({ since: custom[1], until: custom[2] }) }
+    : { date_preset: preset };
+
+  const CAMPOS = {
+    campaign: 'campaign_id,campaign_name',
+    adset: 'adset_id,adset_name,campaign_name',
+    ad: 'ad_id,ad_name,adset_name,campaign_name',
+  }[level];
+  const EDGE = { campaign: 'campaigns', adset: 'adsets', ad: 'ads' }[level];
+  const ENT_FIELDS = level === 'ad'
+    ? 'id,effective_status'
+    : 'id,effective_status,daily_budget' + (level === 'campaign' ? ',lifetime_budget' : '');
+
+  try {
+    const traerInsights = async () => {
+      const filas = [];
+      let after = null, guard = 0;
+      do {
+        const params = { level, fields: `${CAMPOS},spend,actions,action_values`, limit: 250, ...rango };
+        if (after) params.after = after;
+        const d = await graphGet(`${accountId}/insights`, token, params);
+        filas.push(...(d.data || []));
+        after = d.paging?.cursors?.after && d.paging?.next ? d.paging.cursors.after : null;
+        guard++;
+      } while (after && guard < 8);
+      return filas;
+    };
+    const traerEntidades = async () => {
+      const map = new Map();
+      let after = null, guard = 0;
+      do {
+        const params = { fields: ENT_FIELDS, limit: 500 };
+        if (after) params.after = after;
+        const d = await graphGet(`${accountId}/${EDGE}`, token, params);
+        for (const e of d.data || []) map.set(e.id, e);
+        after = d.paging?.cursors?.after && d.paging?.next ? d.paging.cursors.after : null;
+        guard++;
+      } while (after && guard < 6);
+      return map;
+    };
+    const [insights, entidades] = await Promise.all([traerInsights(), traerEntidades()]);
+
+    const rows = insights.map(r => {
+      const id = r[`${level}_id`];
+      const ent = entidades.get(id) || {};
+      const spend = Number(r.spend || 0);
+      const compras = pickAction(r.actions, ACTION_ALIASES.purchases);
+      const revenue = pickAction(r.action_values, ACTION_ALIASES.purchases);
+      return {
+        id,
+        name: r[`${level}_name`] || id,
+        sub: level === 'campaign' ? null
+          : level === 'adset' ? (r.campaign_name || null)
+          : [r.adset_name, r.campaign_name].filter(Boolean).join(' · ') || null,
+        effectiveStatus: ent.effective_status || null,
+        dailyBudget: ent.daily_budget != null ? Number(ent.daily_budget) / 100 : null,
+        spend, compras, revenue,
+        roas: spend > 0 ? revenue / spend : 0,
+        cpa: compras > 0 ? spend / compras : null,
+      };
+    }).filter(r => r.spend > 0 || r.compras > 0);
+
+    const totals = rows.reduce((t, r) => {
+      t.spend += r.spend; t.compras += r.compras; t.revenue += r.revenue; return t;
+    }, { spend: 0, compras: 0, revenue: 0 });
+    totals.roas = totals.spend > 0 ? totals.revenue / totals.spend : 0;
+    totals.cpa = totals.compras > 0 ? totals.spend / totals.compras : null;
+
+    return respondJSON(res, 200, { level, rows, totals, total: rows.length });
+  } catch (e) {
+    return respondJSON(res, e.status && e.status < 500 ? e.status : 500, { error: e.message });
+  }
+}
+
+// ========================================================================
 // PUBLICAR CAMPAÑAS — el lanzador de AdsLab
 // ========================================================================
 // Crea en Meta una estructura completa de venta a partir de posts existentes
@@ -2426,6 +2525,7 @@ const actions = {
   'set-status': handleSetStatus,
   'set-budget': handleSetBudget,
   'campaign-breakdown': handleCampaignBreakdown,
+  'manager-table': handleManagerTable,
   'launch-prereqs': handleLaunchPrereqs,
   'launch-campaign': handleLaunchCampaign,
 };

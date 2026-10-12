@@ -40,6 +40,7 @@ import {
 } from './testeosCore.js';
 import { cargarCfg, guardarCfg, cargarFotos, guardarFotos, leerCfgLocal } from './testeosStore.js';
 import { referenciasApi } from './referenciasApi.js';
+import { fetchMeta, leerCacheMeta, pathTestingInsights, pathAdsWithInsights, recordarConnId } from './metricasCache.js';
 import { VistaEmbudo } from './EmbudoVista.jsx';
 import { cambiarEstado, inverso, estadoVisible, entregaDe } from './testeosAcciones.js';
 import { deriveFunnelRates } from '../api/meta/_funnel.js';
@@ -886,6 +887,10 @@ function VistaWinners({ account, accountId, cfg, cfgRaw, productos, productoId, 
   const [guardados, setGuardados] = useState({}); // adId → referencia
   const [analisisModal, setAnalisisModal] = useState(null); // referencia con analisis
   const fuentes = useRef(new Map());              // adId → { source, lengthSec } (vencen, no persistir)
+  const [vista, setVista] = useState(() => {
+    try { return localStorage.getItem('adslab-winners-view') || 'grid'; } catch { return 'grid'; }
+  });
+  const cambiarVista = (v) => { setVista(v); try { localStorage.setItem('adslab-winners-view', v); } catch {} };
 
   const metaGet = useCallback(async (path) => {
     let u = `/api/meta/${path}`;
@@ -898,22 +903,28 @@ function VistaWinners({ account, accountId, cfg, cfgRaw, productos, productoId, 
     return d;
   }, [account]);
 
+  // Cache-first (igual que el tablero principal): lo último guardado abre al
+  // instante y el refresh corre atrás. La precarga del login ya deja esto listo.
   useEffect(() => {
     if (!accountId) return;
     let vivo = true;
-    setCargando(true); setError(null);
+    const path = pathAdsWithInsights(accountId);
+    const cacheado = leerCacheMeta(path);
+    if (cacheado) { setAdsRaw(cacheado.data.ads || []); setCargando(false); }
+    else setCargando(true);
+    setError(null);
     (async () => {
       try {
-        const d = await metaGet(`ads-with-insights?account_id=${encodeURIComponent(accountId)}&limit=100`);
+        const d = await fetchMeta(path, { connId: account?.connId });
         if (vivo) setAdsRaw(d.ads || []);
       } catch (e) {
-        if (vivo) { setError(e.message); setAdsRaw(null); }
+        if (vivo && !cacheado) { setError(e.message); setAdsRaw(null); }
       } finally {
         if (vivo) setCargando(false);
       }
     })();
     return () => { vivo = false; };
-  }, [accountId, metaGet]);
+  }, [accountId, account]);
 
   // Ganadores con las reglas de SU producto (mismo criterio que las cohortes).
   const winners = useMemo(() => (adsRaw || [])
@@ -928,22 +939,41 @@ function VistaWinners({ account, accountId, cfg, cfgRaw, productos, productoId, 
     .sort((x, y) => (y.insights?.roas || 0) - (x.insights?.roas || 0)), [adsRaw, productos, cfgRaw, cfg, productoId]);
 
   // El mp4 del creativo: la URL del CDN de Meta vence, se pide al momento.
+  // En muchas cuentas Meta NO expone el source con el permiso del token
+  // ((#10)) — ahí se cae a la VISTA PREVIA oficial del ad (/previews), que
+  // reproduce el creativo real en un iframe y funciona con ads_read.
   const fuenteDe = useCallback(async (ad) => {
     if (!ad.creative?.videoId) return null;
     if (fuentes.current.has(ad.id)) return fuentes.current.get(ad.id);
-    const d = await metaGet(`video-source?video_id=${encodeURIComponent(ad.creative.videoId)}`);
+    const d = await metaGet(`video-source?video_id=${encodeURIComponent(ad.creative.videoId)}&account_id=${encodeURIComponent(accountId)}`);
     fuentes.current.set(ad.id, d);
     return d;
+  }, [metaGet, accountId]);
+
+  const previews = useRef(new Map()); // adId → iframeSrc (vence a las 24 h)
+  const previewDe = useCallback(async (ad) => {
+    if (previews.current.has(ad.id)) return previews.current.get(ad.id);
+    const d = await metaGet(`ad-preview?ad_id=${encodeURIComponent(ad.id)}`);
+    previews.current.set(ad.id, d.iframeSrc);
+    return d.iframeSrc;
   }, [metaGet]);
 
   const ver = async (ad) => {
-    setPlayer({ ad, cargando: !!ad.creative?.videoId });
-    if (!ad.creative?.videoId) return;
+    setPlayer({ ad, cargando: true });
     try {
-      const f = await fuenteDe(ad);
-      setPlayer(prev => (prev?.ad?.id === ad.id ? { ad, source: f?.source || null, cargando: false } : prev));
+      if (ad.creative?.videoId) {
+        try {
+          const f = await fuenteDe(ad);
+          if (f?.source) {
+            setPlayer(prev => (prev?.ad?.id === ad.id ? { ad, source: f.source, cargando: false } : prev));
+            return;
+          }
+        } catch { /* sin mp4 → probamos la vista previa */ }
+      }
+      const iframeSrc = await previewDe(ad);
+      setPlayer(prev => (prev?.ad?.id === ad.id ? { ad, iframeSrc, cargando: false } : prev));
     } catch (e) {
-      addToast?.({ type: 'error', message: `No pude traer el video: ${e.message}` });
+      addToast?.({ type: 'error', message: `No pude traer la vista previa: ${e.message}` });
       setPlayer(prev => (prev?.ad?.id === ad.id ? { ad, cargando: false } : prev));
     }
   };
@@ -1015,6 +1045,15 @@ function VistaWinners({ account, accountId, cfg, cfgRaw, productos, productoId, 
         <span className="text-[10.5px] text-gray-400">
           ganador = las reglas de su producto (compras + ROAS) · guardalo para desglosar hook/ángulo y pasárselo al editor
         </span>
+        <div className="ml-auto inline-flex gap-0.5 p-0.5 rounded-lg bg-gray-100 dark:bg-gray-900 border border-gray-200 dark:border-gray-700">
+          {[{ id: 'grid', l: 'Galería' }, { id: 'lista', l: 'Lista' }].map(o => (
+            <button key={o.id} onClick={() => cambiarVista(o.id)}
+              className={`px-2.5 py-1 text-[11px] font-bold rounded-md transition ${
+                vista === o.id ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}>
+              {o.l}
+            </button>
+          ))}
+        </div>
       </div>
 
       {winners.length === 0 ? (
@@ -1022,6 +1061,68 @@ function VistaWinners({ account, accountId, cfg, cfgRaw, productos, productoId, 
           <Trophy size={24} className="mx-auto text-gray-300 dark:text-gray-600 mb-2" />
           <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Ningún ad califica como winner en los últimos 14 días</p>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">El corte es el de <b>Reglas</b> (compras mínimas + ROAS del producto).</p>
+        </div>
+      ) : vista === 'lista' ? (
+        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-gray-50 dark:bg-gray-900/50 text-gray-400 text-[9.5px] uppercase tracking-wider">
+                  <th className="text-left font-bold px-3.5 py-2">Creativo</th>
+                  <th className="text-left font-bold px-2 py-2">Campaña · producto</th>
+                  <th className="text-right font-bold px-2 py-2">ROAS</th>
+                  <th className="text-right font-bold px-2 py-2">Compras</th>
+                  <th className="text-right font-bold px-2 py-2">Gasto</th>
+                  <th className="text-right font-bold px-2 py-2">Facturado</th>
+                  <th className="px-2 py-2" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-700/60">
+                {winners.map(ad => {
+                  const ref = guardados[ad.id];
+                  const i = ad.insights || {};
+                  return (
+                    <tr key={ad.id} className="hover:bg-gray-50 dark:hover:bg-gray-900/30 transition">
+                      <td className="px-3.5 py-2">
+                        <button onClick={() => ver(ad)} className="flex items-center gap-2.5 text-left group">
+                          <span className="relative w-9 h-14 rounded-md overflow-hidden bg-gray-100 dark:bg-gray-800 shrink-0">
+                            {(ad.creative?.thumbnailUrl || ad.creative?.imageUrl) && (
+                              <img src={ad.creative.thumbnailUrl || ad.creative.imageUrl} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
+                            )}
+                            <span className="absolute inset-0 flex items-center justify-center bg-black/25 opacity-0 group-hover:opacity-100 transition">
+                              <Play size={12} className="text-white" fill="currentColor" />
+                            </span>
+                          </span>
+                          <span className="min-w-0 font-semibold text-gray-900 dark:text-gray-100 truncate max-w-[220px]" title={ad.name}>{ad.name}</span>
+                        </button>
+                      </td>
+                      <td className="px-2 py-2 text-gray-500 dark:text-gray-400 max-w-[220px]">
+                        <span className="block truncate" title={ad.campaign?.name}>{ad.campaign?.name}</span>
+                        {ad.producto && <span className="block text-[10px] text-gray-400 truncate">{ad.producto.nombre}</span>}
+                      </td>
+                      <td className="px-2 py-2 text-right tabular-nums font-bold text-emerald-600 dark:text-emerald-400">{fmtR(i.roas)}</td>
+                      <td className="px-2 py-2 text-right tabular-nums text-gray-700 dark:text-gray-200">{i.purchases || 0}</td>
+                      <td className="px-2 py-2 text-right tabular-nums text-gray-600 dark:text-gray-300">{fmtM(i.spend, currency)}</td>
+                      <td className="px-2 py-2 text-right tabular-nums text-gray-600 dark:text-gray-300">{fmtM(i.revenue, currency)}</td>
+                      <td className="px-2 py-2 text-right whitespace-nowrap">
+                        <div className="inline-flex items-center gap-1.5">
+                          <button onClick={() => guardar(ad)} disabled={!!guardando[ad.id]}
+                            className={`inline-flex items-center gap-1 px-2 py-1 text-[10.5px] font-bold rounded-md transition disabled:opacity-50 ${ref ? 'text-emerald-600 dark:text-emerald-400' : 'text-white bg-amber-500 hover:bg-amber-600'}`}>
+                            {guardando[ad.id] ? <Loader2 size={11} className="animate-spin" /> : ref ? <Check size={11} /> : <BookmarkPlus size={11} />}
+                            {ref ? 'Guardado' : 'Desglosar'}
+                          </button>
+                          {ref?.analisis && (
+                            <button onClick={() => setAnalisisModal(ref)} className="text-[10.5px] font-bold text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">Análisis</button>
+                          )}
+                          <MetaLink nivel="ads" ids={[ad.id]} accountId={accountId}>Meta</MetaLink>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
@@ -1079,9 +1180,15 @@ function VistaWinners({ account, accountId, cfg, cfgRaw, productos, productoId, 
           <div className="relative" onClick={e => e.stopPropagation()}>
             <button onClick={() => setPlayer(null)} className="absolute -top-9 right-0 text-white/80 hover:text-white"><X size={22} /></button>
             {player.cargando ? (
-              <div className="w-[320px] h-[480px] rounded-xl bg-gray-900 flex items-center justify-center text-gray-400"><Loader2 size={20} className="animate-spin mr-2" /> Trayendo el mp4…</div>
+              <div className="w-[340px] h-[560px] rounded-xl bg-gray-900 flex items-center justify-center text-gray-400"><Loader2 size={20} className="animate-spin mr-2" /> Trayendo la vista previa…</div>
             ) : player.source ? (
               <video src={player.source} controls autoPlay playsInline className="max-h-[82vh] max-w-[92vw] rounded-xl bg-black shadow-2xl" />
+            ) : player.iframeSrc ? (
+              // Vista previa oficial del ad (la misma que Ads Manager): video,
+              // caption y CTA reales. Se usa cuando Meta no entrega el mp4.
+              <iframe src={player.iframeSrc} title={`Preview ${player.ad.name}`}
+                className="w-[360px] max-w-[92vw] h-[640px] max-h-[82vh] rounded-xl bg-white shadow-2xl border-0"
+                allow="autoplay; encrypted-media" scrolling="no" />
             ) : (player.ad.creative?.imageUrl || player.ad.creative?.thumbnailUrl) ? (
               <img src={player.ad.creative.imageUrl || player.ad.creative.thumbnailUrl} alt="" className="max-h-[82vh] max-w-[92vw] rounded-xl shadow-2xl" />
             ) : (
@@ -1531,22 +1638,33 @@ export default function MetricasSection({ addToast }) {
   }, [accountId, account, addToast]);
   useEffect(() => { aplicarRef.current = aplicarEstado; }, [aplicarEstado]);
 
+  // Cache-first: si hay un payload guardado de esta (cuenta, ventana) se
+  // muestra AL INSTANTE y el fetch fresco corre en segundo plano (el chip
+  // "Actualizando…" avisa). La precarga del login (App.jsx) suele dejar esto
+  // ya calentito, así que entrar a la sección no muestra spinner casi nunca.
+  const [actualizando, setActualizando] = useState(false);
   const load = useCallback(async (acct, datePreset) => {
     if (!acct) return;
-    setLoading(true); setError(null);
+    const path = pathTestingInsights(acct.id, datePreset);
+    const cacheado = leerCacheMeta(path);
+    if (cacheado) {
+      setData(cacheado.data); setLoading(false); setActualizando(true);
+    } else {
+      setLoading(true);
+    }
+    setError(null);
     try {
-      let url = `/api/meta/testing-insights?account_id=${encodeURIComponent(acct.id)}&date_preset=${encodeURIComponent(datePreset)}`;
-      if (acct.connId && acct.connId !== '__cookie__') url += `&connection_id=${encodeURIComponent(acct.connId)}`;
-      const r = await fetch(url, { headers: await authHeaders(false) });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(d.error || `Error ${r.status}`);
+      const d = await fetchMeta(path, { connId: acct.connId });
       setData(d);
     } catch (e) {
-      setError(e.message); setData(null);
-    } finally { setLoading(false); }
+      // Con cache a la vista, un refresh fallido no tira abajo el tablero.
+      if (!cacheado) { setError(e.message); setData(null); }
+    } finally { setLoading(false); setActualizando(false); }
   }, []);
 
   useEffect(() => { if (account) load(account, preset); }, [account, preset, load]);
+  // La precarga del próximo login necesita saber con qué conexión pedir.
+  useEffect(() => { if (account) recordarConnId(account.connId); }, [account]);
 
   // Embudo, perezoso: solo si estás parado en su pestaña.
   useEffect(() => {
@@ -1778,6 +1896,11 @@ export default function MetricasSection({ addToast }) {
             </button>
           );
         })}
+        {actualizando && (
+          <span className="ml-auto inline-flex items-center gap-1.5 px-2 py-2 text-[10.5px] text-gray-400 whitespace-nowrap" title="Mostrando lo último guardado mientras se refresca contra Meta.">
+            <Loader2 size={11} className="animate-spin" /> Actualizando…
+          </span>
+        )}
       </div>
 
       {error ? (

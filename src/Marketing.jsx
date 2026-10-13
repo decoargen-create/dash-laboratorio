@@ -273,7 +273,12 @@ function ProductDashboard({ product: p, activeTab, setActiveTab, onCopy, onDownl
   };
 
   const removeCompetidor = (id) => {
-    onUpdateProduct({ competidores: competidores.filter(c => c.id !== id) });
+    onUpdateProduct({
+      competidores: competidores.filter(c => c.id !== id),
+      // Tombstone: sin esto, el merge de sync (unión por id) resucitaba el
+      // competidor desde el local de otra PC y las sesiones divergían.
+      competidoresBorrados: [...(p.competidoresBorrados || []), { id: String(id), ts: Date.now() }].slice(-200),
+    });
   };
 
   const checkCompetitorAds = async (comp) => {

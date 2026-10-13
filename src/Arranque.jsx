@@ -1886,7 +1886,17 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
   const handleRemoveCompetidor = async (id) => {
     if (!(await confirmDialog({ title: '¿Sacar a este competidor de la lista?', tone: 'danger', confirmLabel: 'Sacar' }))) return;
-    setCompetidores(prev => prev.filter(c => c.id !== id));
+    // Borrado + TOMBSTONE en el producto: sin el tombstone, el merge de sync
+    // (unión por id) resucitaba al competidor desde el local de otra PC — dos
+    // sesiones de la misma cuenta terminaban viendo listas distintas/mezcladas.
+    setProductos(prev => prev.map(p => {
+      if (String(p.id) !== String(activeProductoId)) return p;
+      return {
+        ...p,
+        competidores: (p.competidores || []).filter(c => c.id !== id),
+        competidoresBorrados: [...(p.competidoresBorrados || []), { id: String(id), ts: Date.now() }].slice(-200),
+      };
+    }));
     // Limpiar el brand "auto-sincronizado" en Inspiración (fromCompetidorId)
     // → sin esto quedaba una marca huérfana en la galería de inspiración
     // apuntando a un competidor que ya no existe.

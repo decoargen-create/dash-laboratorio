@@ -1366,6 +1366,7 @@ function AppShell({ onExit }) {
   // Home pública: el visitante sin sesión ve la landing comercial; "Entrar"
   // (o cualquier CTA) pasa al login de siempre.
   const [verLogin, setVerLogin] = useState(false);
+
   useEffect(() => {
     if (!supabase) return;
     (async () => {
@@ -1523,6 +1524,20 @@ function AppShell({ onExit }) {
   // (testing-insights + winners de la última cuenta usada) se pide en
   // segundo plano y queda cacheado — al entrar a la sección ya está cargado.
   // El delay deja respirar el arranque de la app (fonts, primer render).
+  // Telemetría mínima de uso: una fila por visita a cada sección (quién, qué,
+  // cuándo) en uso_secciones. Para decidir con datos qué partes de la
+  // plataforma viven y cuáles se podan (pedido 14/10: "ver qué se usa de
+  // verdad"). Fire-and-forget: si falla o la tabla no existe, no molesta.
+  const usoLastRef = useRef(null);
+  useEffect(() => {
+    if (!supabase || !supabaseUser?.id || !currentSection) return;
+    if (usoLastRef.current === currentSection) return;
+    usoLastRef.current = currentSection;
+    try {
+      supabase.from('uso_secciones').insert({ seccion: currentSection }).then(() => {}, () => {});
+    } catch {}
+  }, [currentSection, supabaseUser?.id]);
+
   const prefetchDone = useRef(false);
   useEffect(() => {
     if (prefetchDone.current || currentUser?.role !== 'admin') return;
@@ -2395,8 +2410,11 @@ function AppShell({ onExit }) {
               </NavSection>
               <NavSection title="Creación de estáticos" sectionKey="mk-estaticos" sidebarOpen={sidebarOpen}>
                 <NavItem icon={Play} label="Productos" section="mk-arranque" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                <NavItem icon={Trophy} label="Winners" section="mk-winners" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                <NavItem icon={FileText} label="Copy AI" section="mk-copy" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                {/* "Winners" (galería vieja de estáticos) y "Copy AI" salieron del
+                    menú (14/10, no se usaban — los winners REALES viven en
+                    Métricas y Producción). Las secciones siguen existiendo por
+                    URL/estado viejo; si el tracking de uso confirma cero visitas,
+                    se borra el código entero. */}
               </NavSection>
               <NavSection title="Área creativa" sectionKey="mk-creativa" sidebarOpen={sidebarOpen}>
                 <NavItem icon={Wallet} label="Resumen" section="mk-creativa-dash" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />

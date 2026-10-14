@@ -2554,35 +2554,14 @@ export default function MetricasSection({ addToast }) {
   // Qué ventana de tiempo corresponde a la pestaña abierta. Las que no eligen
   // nada lo dicen en vez de mostrar un desplegable que no hace nada.
   const ventana = tab === 'hoy'
-<<<<<<< HEAD
-    ? { fija: true, label: 'Hoy' }
-    : tab === 'prosp'
-      ? { fija: true, label: `Últimos ${cfg.ventanaProspDias} días` }
-      : tab === 'embudo'
-        ? { fija: false, valor: presetEmbudo, set: setPresetEmbudo, opciones: PRESETS_EMBUDO }
-        : { fija: false, valor: preset, set: setPreset, opciones: PRESETS_COHORTES };
-
-  const TABS = [
-    { id: 'hoy', label: 'Hoy — optimizar', icon: Gauge },
-    { id: 'manager', label: 'Campañas y anuncios', icon: Table2 },
-    { id: 'embudo', label: 'Embudo de compra', icon: Filter },
-    { id: 'semanas', label: 'Testeos por semana', icon: FlaskConical },
-    { id: 'prosp', label: 'Prospectadores', icon: Radar },
-    { id: 'winners', label: 'Winners', icon: Trophy },
-    // "Publicar campaña" salió de acá: ahora es el PUBLICADOR, entrada propia
-    // del menú (Área creativa), que junta videos de tarjetas y estáticos.
-    { id: 'reglas', label: 'Reglas de la tienda', icon: SlidersHorizontal },
-=======
     ? { fija: true, label: 'Hoy', motivo: '"Hoy" optimiza el día en curso: sus recomendaciones de pausar/subir son de hoy, por eso el calendario no aplica acá.' }
-    : tab === 'publicar'
-      ? { fija: true, label: 'Nueva campaña', motivo: 'Acá se crea una campaña nueva: no hay rango de fechas que elegir.' }
-      : tab === 'prosp'
-        ? { fija: false, valor: presetProsp, set: setPresetProsp, opciones: PRESETS_PROSP }
-        : tab === 'winners'
-          ? { fija: false, valor: presetWinners, set: setPresetWinners, opciones: PRESETS_WINNERS }
-          : tab === 'embudo'
-            ? { fija: false, valor: presetEmbudo, set: setPresetEmbudo, opciones: PRESETS_EMBUDO }
-            : { fija: false, valor: preset, set: setPreset, opciones: PRESETS_COHORTES };
+    : tab === 'prosp'
+      ? { fija: false, valor: presetProsp, set: setPresetProsp, opciones: PRESETS_PROSP }
+      : tab === 'winners'
+        ? { fija: false, valor: presetWinners, set: setPresetWinners, opciones: PRESETS_WINNERS }
+        : tab === 'embudo'
+          ? { fija: false, valor: presetEmbudo, set: setPresetEmbudo, opciones: PRESETS_EMBUDO }
+          : { fija: false, valor: preset, set: setPreset, opciones: PRESETS_COHORTES };
 
   const TABS = [
     { id: 'hoy', label: 'Hoy — optimizar', icon: Gauge, desc: 'Qué anuncios conviene apagar o potenciar hoy.' },
@@ -2591,9 +2570,9 @@ export default function MetricasSection({ addToast }) {
     { id: 'semanas', label: 'Testeos por semana', icon: FlaskConical, desc: 'Cuántas de las campañas nuevas de cada semana salieron ganadoras.' },
     { id: 'prosp', label: 'Prospectadores', icon: Radar, desc: 'Anuncios que le venden a gente que nunca te había visto.' },
     { id: 'winners', label: 'Winners', icon: Trophy, desc: 'Tus anuncios ganadores, con el video y por qué funcionan.' },
-    { id: 'publicar', label: 'Publicar campaña', icon: Rocket, desc: 'Crear una campaña nueva en Meta desde acá.' },
+    // "Publicar campaña" salió de acá (solo en dev): es el PUBLICADOR, entrada
+    // propia del menú (Área creativa), que junta videos de tarjetas y estáticos.
     { id: 'reglas', label: 'Reglas de la tienda', icon: SlidersHorizontal, desc: 'Tus números de corte: desde cuánto algo es ganador o hay que apagarlo.' },
->>>>>>> origin/main
   ];
 
   return (

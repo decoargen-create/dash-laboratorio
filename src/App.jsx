@@ -2487,33 +2487,12 @@ function AppShell({ onExit }) {
               {/* Cuenta por área (miembro): solo ve las secciones de SUS áreas. */}
               <NavSection title="Operación" sectionKey="mk-op" sidebarOpen={sidebarOpen}>
                 <NavItem icon={LayoutGridIcon} label="Home" section="mk-home" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-<<<<<<< HEAD
                 {(!currentUser.miembro || currentUser.miembro.areas.includes('metricas')) && (
                   /* "Meta Ads" y "Métricas" eran lo mismo (pedido del user 14/10):
                      queda UNA entrada — Métricas ya incluye Campañas y anuncios.
                      mk-meta sigue existiendo por estado viejo y redirige. */
                   <NavItem icon={Gauge} label="Métricas" section="mk-metricas" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                 )}
-=======
-                <NavItem icon={BarChart3} label="Meta Ads" section="mk-meta" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                {/* Métricas y Testeos eran dos entradas que pedían lo mismo a
-                    la misma cuenta. Ahora es una sola sección con pestañas. */}
-                <NavItem icon={Gauge} label="Métricas" section="mk-metricas" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                <NavItem icon={Rocket} label="Publicador" section="mk-publicar" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              </NavSection>
-              <NavSection title="Creación de estáticos" sectionKey="mk-estaticos" sidebarOpen={sidebarOpen}>
-                <NavItem icon={Play} label="Productos" section="mk-arranque" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                {/* "Winners" (galería vieja de estáticos) y "Copy AI" salieron del
-                    menú (14/10, no se usaban — los winners REALES viven en
-                    Métricas y Producción). Las secciones siguen existiendo por
-                    URL/estado viejo; si el tracking de uso confirma cero visitas,
-                    se borra el código entero. */}
-              </NavSection>
-              <NavSection title="Área creativa" sectionKey="mk-creativa" sidebarOpen={sidebarOpen}>
-                <NavItem icon={Wallet} label="Resumen" section="mk-creativa-dash" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                <NavItem icon={Film} label="Producción" section="mk-produccion" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                <NavItem icon={ClipboardList} label="Landings" section="mk-landings" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
->>>>>>> origin/main
               </NavSection>
               {(!currentUser.miembro || currentUser.miembro.areas.includes('productos')) && (
                 <NavSection title="Productos" sectionKey="mk-estaticos" sidebarOpen={sidebarOpen}>

@@ -3068,8 +3068,6 @@ async function handleCreateCampaignStructure(req, res) {
     }
 
     const fallaron = resultados.filter(r => !r.ok).length;
-<<<<<<< HEAD
-=======
     await registrarPublicacion({
       campaign_id: String(camp.id),
       estado: okAds === 0 ? 'DELETED' : estadoFinal,
@@ -3077,7 +3075,6 @@ async function handleCreateCampaignStructure(req, res) {
       resultados,
       error: activacionError || null,
     });
->>>>>>> origin/main
     return respondJSON(res, fallaron === 0 && !activacionError ? 200 : 207, {
       campaignId: camp.id,
       adsetIds,

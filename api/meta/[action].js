@@ -2382,8 +2382,18 @@ async function handleLaunchPrereqs(req, res) {
 }
 
 // POST { account_id, connection_id?, estructura, nombre, presupuesto, puja,
-//        conjuntos, pageId, pixelId, pais, edadMin, edadMax,
+//        conjuntos, duplicarAds, pageId, pixelId, pais, edadMin, edadMax,
 //        ads: [{ name, postId }], activar }
+const MAX_CONJUNTOS = 20;
+// Tope de anuncios REALMENTE creados (conjuntos × anuncios si se duplican).
+// Cada anuncio son dos llamadas a Meta (creative + ad), así que sin tope una
+// tirada distraída se come el presupuesto de tiempo de la función y deja la
+// campaña a medio armar, que es el peor final posible.
+const MAX_ADS_CREADOS = 120;
+// Cuántos anuncios se crean a la vez dentro de un conjunto. Secuencial, 40
+// anuncios tardaban una eternidad; de a 4 Meta no se queja por rate limit.
+const CONCURRENCIA_ADS = 4;
+
 async function handleLaunchCampaign(req, res) {
   if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
 
@@ -2409,7 +2419,14 @@ async function handleLaunchCampaign(req, res) {
   const nombre = String(body.nombre || '').trim();
   const presupuesto = Number(body.presupuesto);
   const puja = Number(body.puja || 0);
-  const conjuntos = Math.min(5, Math.max(1, Math.round(Number(body.conjuntos) || 1)));
+  // El Deep Pocket del equipo son 8 conjuntos iguales; el tope viejo de 5 lo
+  // hacía imposible. 20 deja margen sin volverse una tirada ingobernable.
+  const conjuntos = Math.min(MAX_CONJUNTOS, Math.max(1, Math.round(Number(body.conjuntos) || 1)));
+  // Cómo se reparten los anuncios entre los conjuntos:
+  //   duplicar (default) → cada conjunto lleva TODOS. Es el Deep Pocket:
+  //     8 copias idénticas compitiendo entre sí.
+  //   repartir           → se distribuyen en orden (6 ads en 3 conjuntos → 2 y 2 y 2).
+  const duplicarAds = body.duplicarAds !== false;
   const pageId = String(body.pageId || '').trim();
   const pixelId = String(body.pixelId || '').trim();
   const pais = /^[A-Z]{2}$/.test(String(body.pais || '').toUpperCase()) ? String(body.pais).toUpperCase() : 'AR';
@@ -2430,6 +2447,12 @@ async function handleLaunchCampaign(req, res) {
   if (!pixelId) return respondJSON(res, 400, { error: 'Falta el píxel (va en promoted_object del conjunto)' });
   if (!ads.length) return respondJSON(res, 400, { error: 'Pasá al menos un anuncio (nombre + post id)' });
   if (ads.length > 20) return respondJSON(res, 400, { error: 'Máximo 20 anuncios por tirada' });
+  const totalAds = duplicarAds ? ads.length * conjuntos : ads.length;
+  if (totalAds > MAX_ADS_CREADOS) {
+    return respondJSON(res, 400, {
+      error: `Son ${totalAds} anuncios (${ads.length} × ${conjuntos} conjuntos) y el máximo es ${MAX_ADS_CREADOS}. Bajá los conjuntos o los anuncios.`,
+    });
+  }
   const sinPagina = ads.some(a => !a.postId.includes('_'));
   if (sinPagina && !pageId) return respondJSON(res, 400, { error: 'Hay post ids sin página (sin "_"): elegí la página para componer pageId_postId' });
 
@@ -2453,10 +2476,17 @@ async function handleLaunchCampaign(req, res) {
     const camp = await graphPost(`${accountId}/campaigns`, token, campParams);
     resumen.campaignId = camp.id;
 
-    // 2. Conjuntos. Los ads se REPARTEN en orden entre los conjuntos
-    //    (2 conjuntos y 6 ads → 3 y 3), como en los testeos del equipo.
-    const grupos = Array.from({ length: conjuntos }, () => []);
-    ads.forEach((a, i) => grupos[i % conjuntos].push(a));
+    // 2. Conjuntos.
+    //    duplicar → cada conjunto lleva TODOS los anuncios (Deep Pocket: 8
+    //      conjuntos idénticos compitiendo).
+    //    repartir → se distribuyen en orden (6 ads en 3 conjuntos → 2 y 2 y 2).
+    const grupos = duplicarAds
+      ? Array.from({ length: conjuntos }, () => ads.slice())
+      : (() => {
+          const g = Array.from({ length: conjuntos }, () => []);
+          ads.forEach((a, i) => g[i % conjuntos].push(a));
+          return g;
+        })();
 
     for (let i = 0; i < grupos.length; i++) {
       const grupo = grupos[i];
@@ -2490,7 +2520,14 @@ async function handleLaunchCampaign(req, res) {
       resumen.adsets.push(fila);
 
       // 3. Anuncios del conjunto: creative desde el post existente + ad.
-      for (const ad of grupo) {
+      //    De a CONCURRENCIA_ADS en paralelo: con 8 conjuntos duplicados esto
+      //    pasa de ~80 llamadas en fila a tandas, que es la diferencia entre
+      //    entrar en el presupuesto de tiempo de la función o no.
+      //
+      //    Un anuncio que falla no corta la tirada: queda anotado en su fila
+      //    con el error. Mejor una campaña con 39 de 40 y el detalle de cuál
+      //    faltó que un 500 sin saber qué quedó creado en Meta.
+      const crearAd = async (ad) => {
         const storyId = ad.postId.includes('_') ? ad.postId : `${pageId}_${ad.postId}`;
         const adName = ad.name || `Ad ${storyId.split('_')[1] || storyId}`;
         try {
@@ -2504,10 +2541,14 @@ async function handleLaunchCampaign(req, res) {
             creative: { creative_id: creative.id },
             status: estado,
           });
-          fila.ads.push({ name: adName, id: nuevo.id, ok: true });
+          return { name: adName, id: nuevo.id, ok: true };
         } catch (e) {
-          fila.ads.push({ name: adName, ok: false, error: e.message });
+          return { name: adName, ok: false, error: e.message };
         }
+      };
+      for (let j = 0; j < grupo.length; j += CONCURRENCIA_ADS) {
+        const tanda = await Promise.all(grupo.slice(j, j + CONCURRENCIA_ADS).map(crearAd));
+        fila.ads.push(...tanda);
       }
     }
 
@@ -2956,6 +2997,12 @@ const actions = {
   'launch-prereqs': handleLaunchPrereqs,
   'launch-campaign': handleLaunchCampaign,
 };
+
+// Publicar una campaña con muchos conjuntos duplicados son decenas de
+// llamadas a Meta; el default de Vercel se queda corto y deja la campaña a
+// medio armar. El resto de las acciones de este dispatcher no se ven
+// afectadas: es un techo, no una reserva.
+export const maxDuration = 300;
 
 export default async function handler(req, res) {
   const action = req.query.action;

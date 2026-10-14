@@ -291,6 +291,7 @@ export default function PublicarCampanaModal({ a, onClose, addToast, soloPreset 
         body: {
           account_id: account.id,
           currency: account.currency || '',
+          producto: a.productoNombre || '',
           campaignName: nombre.trim(),
           dailyBudget: Number(presupuesto),
           adsPerSet: Number(adsPorSet) || 3,

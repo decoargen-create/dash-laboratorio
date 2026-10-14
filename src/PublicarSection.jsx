@@ -9,11 +9,84 @@
 // ve TODO lo publicable junto, sin navegar el tablero.
 // =========================================================================
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Rocket, Film, CheckCircle2, Clock, Settings2, ChevronRight, PackageOpen } from 'lucide-react';
+import { Rocket, Film, CheckCircle2, Clock, Settings2, ChevronRight, PackageOpen, History, ExternalLink, Loader2, RefreshCw } from 'lucide-react';
 import PublicarCampanaModal, { leerPresetPublicar } from './PublicarCampanaModal.jsx';
+import { authHeaders } from './MetaConnect.jsx';
 import {
   listAllAssignments, subscribeProduccion, updateAssignment, weekLabel,
 } from './produccionStore.js';
+
+// ── Historial de publicaciones (lo escribe el server en cada intento) ──
+const CHIP_ESTADO = {
+  ACTIVE:  { label: 'ACTIVA',    cls: 'text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 border-emerald-500/30' },
+  PAUSED:  { label: 'EN PAUSA',  cls: 'text-amber-700 dark:text-amber-300 bg-amber-500/10 border-amber-500/30' },
+  DELETED: { label: 'DESHECHA',  cls: 'text-rose-700 dark:text-rose-300 bg-rose-500/10 border-rose-500/30' },
+  ERROR:   { label: 'FALLÓ',     cls: 'text-rose-700 dark:text-rose-300 bg-rose-500/10 border-rose-500/30' },
+};
+const linkAdsManager = (accountId, campaignId) => {
+  const act = String(accountId || '').replace(/^act_/, '');
+  return `https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=${act}&selected_campaign_ids=${campaignId}`;
+};
+
+function HistorialTab({ addToast }) {
+  const [filas, setFilas] = useState(null); // null = cargando
+  const cargar = useCallback(async () => {
+    setFilas(null);
+    try {
+      const r = await fetch('/api/meta/publicaciones', { headers: await authHeaders(false) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || `Error ${r.status}`);
+      setFilas(d.publicaciones || []);
+    } catch (e) {
+      setFilas([]);
+      addToast?.({ type: 'error', message: `Historial: ${e.message}` });
+    }
+  }, [addToast]);
+  useEffect(() => { cargar(); }, [cargar]);
+
+  if (filas === null) return <p className="text-sm text-gray-400 inline-flex items-center gap-2 py-8"><Loader2 size={14} className="animate-spin" /> Cargando historial…</p>;
+  if (filas.length === 0) return (
+    <div className="rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 p-10 text-center text-gray-500 dark:text-gray-400">
+      <History size={30} className="mx-auto mb-3 opacity-60" />
+      <p className="font-semibold">Todavía no hay publicaciones registradas.</p>
+      <p className="text-sm mt-1">Cada intento del publicador (exitoso o no) queda acá, con su resultado y el link a Meta.</p>
+    </div>
+  );
+  return (
+    <div className="space-y-2">
+      <div className="flex justify-end">
+        <button onClick={cargar} className="inline-flex items-center gap-1 text-xs font-semibold text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">
+          <RefreshCw size={12} /> Actualizar
+        </button>
+      </div>
+      {filas.map(p => {
+        const chip = CHIP_ESTADO[p.estado] || CHIP_ESTADO.ERROR;
+        const fecha = new Date(p.created_at).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+        return (
+          <details key={p.id} className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/60 px-4 py-2.5 group">
+            <summary className="flex items-center gap-3 cursor-pointer list-none">
+              <span className={`shrink-0 text-[10px] font-bold border rounded-full px-2 py-0.5 ${chip.cls}`}>{chip.label}</span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-gray-800 dark:text-gray-100 truncate">{p.campaign_name || '(sin nombre)'}</p>
+                <p className="text-[11px] text-gray-400">{fecha} hs{p.producto ? ` · ${p.producto}` : ''} · {p.ads_ok}/{p.ads_total} ads</p>
+              </div>
+              {p.campaign_id && p.estado !== 'DELETED' && (
+                <a href={linkAdsManager(p.account_id, p.campaign_id)} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
+                  className="shrink-0 inline-flex items-center gap-1 text-[11px] font-bold text-brand-600 dark:text-brand-400 hover:underline">
+                  <ExternalLink size={11} /> Ads Manager
+                </a>
+              )}
+            </summary>
+            <div className="mt-2 pt-2 border-t border-gray-100 dark:border-gray-700/60">
+              {p.error && <p className="text-xs text-rose-600 dark:text-rose-400 mb-1.5">{p.error}</p>}
+              <pre className="text-[11px] text-gray-500 dark:text-gray-400 whitespace-pre-wrap font-mono leading-relaxed">{(p.log || []).join('\n') || 'Sin detalle.'}</pre>
+            </div>
+          </details>
+        );
+      })}
+    </div>
+  );
+}
 
 // Videos publicables de una tarjeta: archivos con origen real (Drive o
 // storage). Los aprobados van primero — son los que el modal pre-tilda.
@@ -23,6 +96,7 @@ function videosDe(a) {
 
 export default function PublicarSection({ addToast }) {
   const [, setTick] = useState(0);
+  const [tab, setTab] = useState('cola'); // 'cola' | 'historial'
   useEffect(() => subscribeProduccion(() => setTick(t => t + 1)), []);
 
   const asignaciones = listAllAssignments();
@@ -91,14 +165,25 @@ export default function PublicarSection({ addToast }) {
             Todo lo aprobado por Producción, listo para salir a Meta. Al publicar OK, las tarjetas pasan solas a <b>Publicado</b>.
           </p>
         </div>
-        {enRevision > 0 && (
+        {enRevision > 0 && tab === 'cola' && (
           <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-700 dark:text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-full px-3 py-1">
             <Clock size={12} /> {enRevision} tarjeta{enRevision === 1 ? '' : 's'} en revisión viniendo atrás
           </span>
         )}
       </div>
 
-      {grupos.length === 0 ? (
+      <div className="flex gap-1.5">
+        {[['cola', 'Cola de listos', Rocket], ['historial', 'Historial', History]].map(([k, label, Icono]) => (
+          <button key={k} onClick={() => setTab(k)}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-bold rounded-lg transition ${tab === k
+              ? 'bg-brand-600 text-white'
+              : 'text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800'}`}>
+            <Icono size={13} /> {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'historial' ? <HistorialTab addToast={addToast} /> : grupos.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 p-10 text-center text-gray-500 dark:text-gray-400">
           <PackageOpen size={34} className="mx-auto mb-3 opacity-60" />
           <p className="font-semibold">No hay tarjetas aprobadas sin publicar.</p>

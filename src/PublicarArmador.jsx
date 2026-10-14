@@ -20,8 +20,9 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Rocket, ArrowLeft, Loader2, Check, AlertTriangle, ExternalLink, Film,
-  Image as ImageIcon, Settings2, Trophy, ChevronRight, ChevronDown, Maximize2, X,
+  Image as ImageIcon, Settings2, Trophy, ChevronRight, ChevronDown, Maximize2, X, Play,
 } from 'lucide-react';
+import { supabase } from './supabase.js';
 import PublicarCampanaModal, {
   leerPresetPublicar, metaApi, esperar, amigable, sinExtension, aplicarPatron,
 } from './PublicarCampanaModal.jsx';
@@ -93,16 +94,39 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
   });
   const toggle = (k) => setSel(prev => { const n = new Set(prev); if (n.has(k)) n.delete(k); else n.add(k); return n; });
 
+  // Vista previa de VIDEO tipo Drive (pedido del user): los de Drive usan el
+  // preview embebido (/file/<id>/preview); los subidos a AdsLab se firman y
+  // se reproducen en un <video> directo.
+  const [videoPrev, setVideoPrev] = useState(null); // { name, driveUrl? , fileUrl?, cargando }
+  const verVideo = useCallback(async (f) => {
+    if (f.driveId) {
+      setVideoPrev({ name: f.name, driveUrl: `https://drive.google.com/file/d/${encodeURIComponent(f.driveId)}/preview` });
+      return;
+    }
+    if (f.storagePath && supabase) {
+      setVideoPrev({ name: f.name, cargando: true });
+      try {
+        const { data, error } = await supabase.storage.from('creativos').createSignedUrl(f.storagePath, 3600);
+        if (error || !data?.signedUrl) throw new Error(error?.message || 'sin URL');
+        setVideoPrev(prev => (prev?.name === f.name ? { name: f.name, fileUrl: data.signedUrl } : prev));
+      } catch (e) {
+        setVideoPrev(null);
+        addToast?.({ type: 'error', message: `No pude abrir el video: ${e.message}` });
+      }
+    }
+  }, [addToast]);
+
   const [estaticos, setEstaticos] = useState(null); // null = cargando
-  // Tamaño de las miniaturas (pedido del user: "maximizar más o menos") y
-  // vista en grande de una imagen (lightbox).
-  const [tamano, setTamano] = useState(() => { try { return localStorage.getItem('adslab-armador-estaticos-size') || 'chico'; } catch { return 'chico'; } });
-  const cambiarTamano = (t) => { setTamano(t); try { localStorage.setItem('adslab-armador-estaticos-size', t); } catch {} };
-  const GRILLAS = {
-    chico: 'grid-cols-4 sm:grid-cols-6 md:grid-cols-8',
-    medio: 'grid-cols-3 sm:grid-cols-4 md:grid-cols-6',
-    grande: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4',
-  };
+  // Tamaño de las miniaturas con − / + (pedido del user): columnas libres,
+  // de 10 por fila (chiquitas) hasta 3 por fila (lo más grande).
+  const [cols, setCols] = useState(() => {
+    try { const v = parseInt(localStorage.getItem('adslab-armador-estaticos-cols'), 10); return v >= 3 && v <= 10 ? v : 8; } catch { return 8; }
+  });
+  const cambiarCols = (delta) => setCols(prev => {
+    const next = Math.max(3, Math.min(10, prev + delta));
+    try { localStorage.setItem('adslab-armador-estaticos-cols', String(next)); } catch {}
+    return next;
+  });
   const [preview, setPreview] = useState(null); // estático abierto en grande
   const productoId = useMemo(() => productoIdDeNombre(producto), [producto]);
   useEffect(() => {
@@ -388,10 +412,15 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
                           {vids.map(f => {
                             const k = `v:${t.id}:${f.ts}`;
                             return (
-                              <label key={k} className="flex items-center gap-2 px-3.5 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer min-w-0">
+                              <label key={k} className="group/v flex items-center gap-2 px-3.5 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer min-w-0">
                                 <input type="checkbox" checked={sel.has(k)} onChange={() => toggle(k)} disabled={fase === 'publicando'} className="accent-brand-500" />
                                 <Film size={12} className="text-gray-400 shrink-0" />
                                 <span className="flex-1 min-w-0 truncate text-xs text-gray-700 dark:text-gray-200" title={f.name}>{f.name}</span>
+                                <button type="button" onClick={(ev) => { ev.preventDefault(); ev.stopPropagation(); verVideo(f); }}
+                                  title="Ver el video"
+                                  className="shrink-0 w-6 h-6 rounded-md flex items-center justify-center text-gray-400 hover:text-brand-500 hover:bg-brand-500/10 opacity-0 group-hover/v:opacity-100 transition">
+                                  <Play size={12} fill="currentColor" />
+                                </button>
                                 {f.aprobado && <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 shrink-0">✓</span>}
                               </label>
                             );
@@ -412,11 +441,11 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
               <span className="text-[11px] font-semibold text-gray-400">las imágenes de tu galería, publicables como anuncios</span>
               {(estaticos || []).length > 0 && (
                 <span className="ml-auto inline-flex items-center gap-2 text-[11px] font-bold">
-                  <span className="inline-flex gap-0.5 p-0.5 rounded-lg bg-gray-100 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 mr-1" title="Tamaño de las miniaturas">
-                    {[['chico', 'S'], ['medio', 'M'], ['grande', 'L']].map(([t, l]) => (
-                      <button key={t} onClick={() => cambiarTamano(t)}
-                        className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold transition ${tamano === t ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}>{l}</button>
-                    ))}
+                  <span className="inline-flex gap-0.5 p-0.5 rounded-lg bg-gray-100 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 mr-1" title="Tamaño de las miniaturas (máximo: 3 por fila)">
+                    <button onClick={() => cambiarCols(1)} disabled={cols >= 10} title="Más chicas"
+                      className="w-6 h-5 rounded-md text-[13px] font-bold leading-none text-gray-500 hover:text-gray-800 dark:hover:text-gray-100 hover:bg-white dark:hover:bg-gray-700 transition disabled:opacity-30">−</button>
+                    <button onClick={() => cambiarCols(-1)} disabled={cols <= 3} title="Más grandes"
+                      className="w-6 h-5 rounded-md text-[13px] font-bold leading-none text-gray-500 hover:text-gray-800 dark:hover:text-gray-100 hover:bg-white dark:hover:bg-gray-700 transition disabled:opacity-30">+</button>
                   </span>
                   <button onClick={() => setSel(prev => { const nn = new Set(prev); for (const e of (estaticos || [])) nn.add(`i:${e.id}`); return nn; })}
                     disabled={fase === 'publicando'} className="text-brand-600 dark:text-brand-400 hover:underline">Todos</button>
@@ -432,7 +461,7 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
             ) : estaticos.length === 0 ? (
               <p className="text-sm text-gray-400">Este producto todavía no tiene estáticos en la galería.</p>
             ) : (
-              <div className={`grid ${GRILLAS[tamano] || GRILLAS.chico} gap-1.5`}>
+              <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
                 {estaticos.map(e => {
                   const k = `i:${e.id}`;
                   const on = sel.has(k);
@@ -572,6 +601,29 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
           )}
         </div>
       </div>
+
+      {/* Reproductor de video (tipo Drive) */}
+      {videoPrev && (
+        <div className="fixed inset-0 z-[70] bg-black/85 backdrop-blur-sm flex items-center justify-center p-6" onClick={() => setVideoPrev(null)}>
+          <div className="relative w-full max-w-md flex flex-col gap-2" onClick={ev => ev.stopPropagation()}>
+            <div className="flex items-center gap-2 text-white">
+              <Film size={14} className="shrink-0" />
+              <span className="text-sm font-semibold truncate flex-1">{videoPrev.name}</span>
+              <button onClick={() => setVideoPrev(null)} className="p-1.5 rounded-lg hover:bg-white/15 transition"><X size={16} /></button>
+            </div>
+            {videoPrev.cargando ? (
+              <div className="aspect-[9/16] max-h-[70vh] rounded-xl bg-gray-900 flex items-center justify-center text-gray-400">
+                <Loader2 size={20} className="animate-spin" />
+              </div>
+            ) : videoPrev.driveUrl ? (
+              <iframe src={videoPrev.driveUrl} title={videoPrev.name} allow="autoplay; fullscreen"
+                className="w-full aspect-[9/16] max-h-[70vh] rounded-xl bg-black border-0" />
+            ) : (
+              <video src={videoPrev.fileUrl} controls autoPlay className="w-full max-h-[70vh] rounded-xl bg-black" />
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Lightbox: un estático en grande, con tildar/destildar ahí mismo. */}
       {preview && (

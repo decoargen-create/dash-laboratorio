@@ -603,21 +603,28 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
           </div>
 
           <div>
-            <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">{lotes.length > 1 ? 'Nombre base de campaña' : 'Nombre de la campaña'}</span>
-            <input value={nombreBase} onChange={e => setNombreBase(e.target.value)} className={input} disabled={fase === 'publicando'} />
-            {/* Nombre propio POR CAMPAÑA (pedido del user): editás el que
-                quieras; vacío = base + número automático. */}
-            {lotes.length > 1 && (
-              <div className="mt-2 space-y-1.5">
-                {lotes.map((_, i) => (
-                  <div key={i} className="flex items-center gap-1.5">
-                    <span className="text-[10px] font-bold text-gray-400 w-7 shrink-0">C{i + 1}</span>
-                    <input value={nombresCampanas[i] ?? ''} placeholder={`${nombreBase.trim()} · C${i + 1}`}
-                      onChange={e => setNombresCampanas(prev => ({ ...prev, [i]: e.target.value }))}
-                      className={`${input} text-xs`} disabled={fase === 'publicando'} />
-                  </div>
-                ))}
-              </div>
+            {/* Con UNA campaña: un solo nombre. Con VARIAS: un input editable
+                por campaña, ya precargado (sin campo "base" que confunda). */}
+            {lotes.length <= 1 ? (
+              <>
+                <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Nombre de la campaña</span>
+                <input value={nombreBase} onChange={e => setNombreBase(e.target.value)} className={input} disabled={fase === 'publicando'} />
+              </>
+            ) : (
+              <>
+                <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Nombre de cada campaña</span>
+                <div className="space-y-1.5">
+                  {lotes.map((_, i) => (
+                    <div key={i} className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-bold text-gray-400 w-7 shrink-0">C{i + 1}</span>
+                      <input value={nombresCampanas[i] ?? `${nombreBase.trim()} · C${i + 1}`}
+                        onChange={e => setNombresCampanas(prev => ({ ...prev, [i]: e.target.value }))}
+                        className={`${input} text-xs`} disabled={fase === 'publicando'} />
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[10px] text-gray-400 mt-1">Editá el que quieras — cada campaña sale con SU nombre.</p>
+              </>
             )}
           </div>
 

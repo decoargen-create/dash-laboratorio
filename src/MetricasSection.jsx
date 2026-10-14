@@ -55,6 +55,8 @@ const LS_ACCOUNT = 'adslab-testeos-account';
 const LS_PRESET = 'adslab-testeos-preset';          // ventana de las cohortes
 const LS_PRESET_MIGRADO = 'adslab-testeos-preset-v2';
 const LS_PRESET_EMBUDO = 'adslab-metricas-preset';  // ventana del embudo
+const LS_PRESET_PROSP = 'adslab-metricas-preset-prosp';     // ventana de Prospectadores
+const LS_PRESET_WINNERS = 'adslab-metricas-preset-winners'; // ventana de Winners
 
 // El período NO es uno solo para toda la sección, y esto costó entenderlo:
 //
@@ -85,6 +87,29 @@ const PRESETS_COHORTES = [
   { value: 'last_month', label: 'Mes pasado' },
   { value: 'maximum', label: 'Histórico' },
 ];
+// Prospectadores y Winners tienen SU propio calendario (pedido del user:
+// "que me deje usar el calendario más libremente"): cada pestaña elige su
+// ventana sin tocar la de las otras.
+const PRESETS_PROSP = [
+  { value: 'last_7d', label: 'Últimos 7 días' },
+  { value: 'last_14d', label: 'Últimos 14 días' },
+  { value: 'last_30d', label: 'Últimos 30 días' },
+];
+const PRESETS_WINNERS = [
+  { value: 'last_7d', label: 'Últimos 7 días' },
+  { value: 'last_14d', label: 'Últimos 14 días' },
+  { value: 'last_30d', label: 'Últimos 30 días' },
+  { value: 'last_90d', label: 'Últimos 90 días' },
+];
+// Etiqueta humana de una ventana (preset o rango custom del calendario).
+function etiquetaVentana(valor, presets) {
+  const p = presets.find(x => x.value === valor);
+  if (p) return p.label.toLowerCase();
+  const c = /^custom_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})$/.exec(String(valor || ''));
+  if (!c) return valor || '';
+  const f = (s) => { const [y, m, d] = s.split('-'); return `${d}/${m}/${y.slice(2)}`; };
+  return `${f(c[1])} → ${f(c[2])}`;
+}
 
 function readProductos() {
   try { return JSON.parse(localStorage.getItem('adslab-marketing-productos-v1') || '[]'); }
@@ -1436,7 +1461,7 @@ function VistaSemanas({ campaigns, cfg, productos, productoId, currency, account
 // creativo real traído de Meta: miniatura, el mp4 para verlo acá mismo, y
 // un click que lo guarda en Referencias (mp4 persistido + análisis IA de
 // hook/ángulo/estructura) para que el editor lo replique desde su tarjeta.
-function VistaWinners({ account, accountId, cfg, cfgRaw, productos, productoId, currency, addToast }) {
+function VistaWinners({ account, accountId, cfg, cfgRaw, productos, productoId, currency, addToast, preset = 'last_14d' }) {
   const [adsRaw, setAdsRaw] = useState(null);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState(null);
@@ -1452,10 +1477,12 @@ function VistaWinners({ account, accountId, cfg, cfgRaw, productos, productoId, 
   const guardadosRef = useRef({});
   const [auto, setAuto] = useState({ done: 0, total: 0, corriendo: false });
   const autoCorrido = useRef(false);
+  // Default LISTA (formato tabla, como Campañas y anuncios — pedido del user).
+  // Key v2: el default viejo era la galería y quedó persistido en todos lados.
   const [vista, setVista] = useState(() => {
-    try { return localStorage.getItem('adslab-winners-view') || 'grid'; } catch { return 'grid'; }
+    try { return localStorage.getItem('adslab-winners-view-v2') || 'lista'; } catch { return 'lista'; }
   });
-  const cambiarVista = (v) => { setVista(v); try { localStorage.setItem('adslab-winners-view', v); } catch {} };
+  const cambiarVista = (v) => { setVista(v); try { localStorage.setItem('adslab-winners-view-v2', v); } catch {} };
 
   const metaGet = useCallback(async (path) => {
     let u = `/api/meta/${path}`;
@@ -1473,7 +1500,9 @@ function VistaWinners({ account, accountId, cfg, cfgRaw, productos, productoId, 
   useEffect(() => {
     if (!accountId) return;
     let vivo = true;
-    const path = pathAdsWithInsights(accountId);
+    // La ventana elegida en el calendario VIAJA al server (antes se ignoraba
+    // y la pestaña miraba siempre 14 días, eligieras lo que eligieras).
+    const path = pathAdsWithInsights(accountId, preset);
     const cacheado = leerCacheMeta(path);
     if (cacheado) { setAdsRaw(cacheado.data.ads || []); setCargando(false); }
     else setCargando(true);
@@ -1489,7 +1518,7 @@ function VistaWinners({ account, accountId, cfg, cfgRaw, productos, productoId, 
       }
     })();
     return () => { vivo = false; };
-  }, [accountId, account]);
+  }, [accountId, account, preset]);
 
   // Lo ya desglosado en sesiones anteriores: se hidrata desde la biblioteca
   // de Referencias así los winners procesados aparecen con su análisis al
@@ -1662,7 +1691,7 @@ function VistaWinners({ account, accountId, cfg, cfgRaw, productos, productoId, 
     <div className="space-y-3">
       <div className="flex items-center gap-2 flex-wrap">
         <Trophy size={15} className="text-amber-500" />
-        <h3 className="text-[13px] font-bold text-gray-900 dark:text-gray-100">Winners · últimos 14 días</h3>
+        <h3 className="text-[13px] font-bold text-gray-900 dark:text-gray-100">Winners · {etiquetaVentana(preset, PRESETS_WINNERS)}</h3>
         <span className="text-[10.5px] text-gray-400">
           ganador = las reglas de su producto (compras + ROAS) · el desglose IA corre solo y queda guardado en Referencias
         </span>
@@ -1686,8 +1715,8 @@ function VistaWinners({ account, accountId, cfg, cfgRaw, productos, productoId, 
       {winners.length === 0 ? (
         <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-10 text-center">
           <Trophy size={24} className="mx-auto text-gray-300 dark:text-gray-600 mb-2" />
-          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Ningún ad califica como winner en los últimos 14 días</p>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">El corte es el de <b>Reglas</b> (compras mínimas + ROAS del producto).</p>
+          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Ningún ad califica como winner en {etiquetaVentana(preset, PRESETS_WINNERS)}</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">El corte es el de <b>Reglas</b> (compras mínimas + ROAS del producto). Probá una ventana más larga con el calendario de arriba.</p>
         </div>
       ) : vista === 'lista' ? (
         <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
@@ -1864,7 +1893,7 @@ function VistaWinners({ account, accountId, cfg, cfgRaw, productos, productoId, 
 // ========================================================================
 // Pestaña: PROSPECTADORES
 // ========================================================================
-function VistaProspectadores({ ads, cfg, currency, accountId, onWhy, cambios, trabajando, onEstado }) {
+function VistaProspectadores({ ads, cfg, currency, accountId, onWhy, cambios, trabajando, onEstado, ventanaLabel = 'últimos 7 días' }) {
   const [abierto, setAbierto] = useState(null);
   const lista = useMemo(() => ads
     .map(a => ({ ...a, ...esProspectador(a.insights, cfg) }))
@@ -1877,7 +1906,7 @@ function VistaProspectadores({ ads, cfg, currency, accountId, onWhy, cambios, tr
         <h3 className="text-[13px] font-bold text-gray-900 dark:text-gray-100">Prospectadores</h3>
         <Why k="prospectador" cfg={cfg} currency={currency} onOpen={onWhy} datos={{}} />
         <span className="text-[10.5px] text-gray-400 flex items-center gap-1">
-          últimos 7 días · frecuencia <Why k="frecuencia" cfg={cfg} currency={currency} onOpen={onWhy} datos={lista[0]?.insights || {}} />
+          {ventanaLabel} · frecuencia <Why k="frecuencia" cfg={cfg} currency={currency} onOpen={onWhy} datos={lista[0]?.insights || {}} />
         </span>
         {si.length > 0 && (
           <span className="ml-auto"><MetaLink nivel="ads" ids={si.map(a => a.id)} accountId={accountId} solid>Abrir {si.length} en Meta</MetaLink></span>
@@ -1899,7 +1928,7 @@ function VistaProspectadores({ ads, cfg, currency, accountId, onWhy, cambios, tr
               <th className="text-right font-bold px-2 py-2">Alcance</th>
               <th className="text-right font-bold px-2 py-2">Compras</th>
               <th className="text-right font-bold px-2 py-2" title="Lo que Meta llama «ROAS de compras»">ROAS de compras</th>
-              <th className="text-right font-bold px-2 py-2" title="Importe gastado en los últimos 7 días">Importe gastado 7d</th>
+              <th className="text-right font-bold px-2 py-2" title={`Importe gastado en la ventana elegida (${ventanaLabel})`}>Importe gastado</th>
               <th className="px-2 py-2" />
             </tr>
           </thead>
@@ -2160,6 +2189,13 @@ export default function MetricasSection({ addToast }) {
       return PRESETS_EMBUDO.some(p => p.value === v) ? v : 'today';
     } catch { return 'today'; }
   });
+  // Ventanas propias de Prospectadores y Winners (calendario libre por pestaña).
+  const [presetProsp, setPresetProsp] = useState(() => {
+    try { return localStorage.getItem(LS_PRESET_PROSP) || 'last_7d'; } catch { return 'last_7d'; }
+  });
+  const [presetWinners, setPresetWinners] = useState(() => {
+    try { return localStorage.getItem(LS_PRESET_WINNERS) || 'last_14d'; } catch { return 'last_14d'; }
+  });
   const [productoId, setProductoId] = useState('');
   const [tab, setTab] = useState('hoy');
   // En estas cuentas los testeos son CBO: el presupuesto vive en la campaña,
@@ -2200,6 +2236,8 @@ export default function MetricasSection({ addToast }) {
   useEffect(() => { try { if (accountId) localStorage.setItem(LS_ACCOUNT, accountId); } catch {} }, [accountId]);
   useEffect(() => { try { localStorage.setItem(LS_PRESET, preset); } catch {} }, [preset]);
   useEffect(() => { try { localStorage.setItem(LS_PRESET_EMBUDO, presetEmbudo); } catch {} }, [presetEmbudo]);
+  useEffect(() => { try { localStorage.setItem(LS_PRESET_PROSP, presetProsp); } catch {} }, [presetProsp]);
+  useEffect(() => { try { localStorage.setItem(LS_PRESET_WINNERS, presetWinners); } catch {} }, [presetWinners]);
 
   // Las reglas son POR CUENTA y viven en Supabase. Se pinta primero la caché
   // local (instantáneo) y después manda lo que diga la nube.
@@ -2326,9 +2364,9 @@ export default function MetricasSection({ addToast }) {
   // "Actualizando…" avisa). La precarga del login (App.jsx) suele dejar esto
   // ya calentito, así que entrar a la sección no muestra spinner casi nunca.
   const [actualizando, setActualizando] = useState(false);
-  const load = useCallback(async (acct, datePreset) => {
+  const load = useCallback(async (acct, datePreset, prospP) => {
     if (!acct) return;
-    const path = pathTestingInsights(acct.id, datePreset);
+    const path = pathTestingInsights(acct.id, datePreset, prospP);
     const cacheado = leerCacheMeta(path);
     if (cacheado) {
       setData(cacheado.data); setLoading(false); setActualizando(true);
@@ -2345,7 +2383,7 @@ export default function MetricasSection({ addToast }) {
     } finally { setLoading(false); setActualizando(false); }
   }, []);
 
-  useEffect(() => { if (account) load(account, preset); }, [account, preset, load]);
+  useEffect(() => { if (account) load(account, preset, presetProsp); }, [account, preset, presetProsp, load]);
   // La precarga del próximo login necesita saber con qué conexión pedir.
   useEffect(() => { if (account) recordarConnId(account.connId); }, [account]);
 
@@ -2398,7 +2436,9 @@ export default function MetricasSection({ addToast }) {
     const base = nivelHoy === 'campaigns' ? (data?.campaignsToday || []) : (data?.adsToday || []);
     return base.filter(a => !productoId || productoDeCampana(a.campaignName || a.name, productos, cfgRaw)?.id === productoId);
   }, [data, nivelHoy, productoId, productos, cfgRaw]);
-  const ads7d = useMemo(() => (data?.ads7d || [])
+  // Prospectadores usa SU ventana (data.adsProsp); si el server todavía no la
+  // manda (deploy viejo en caché), cae a los 7 días de siempre.
+  const ads7d = useMemo(() => (data?.adsProsp || data?.ads7d || [])
     .filter(a => !productoId || productoDeCampana(a.campaignName, productos, cfgRaw)?.id === productoId), [data, productoId, productos, cfgRaw]);
   // Promedio de la CUENTA ENTERA en los últimos 7 días (sin filtro de
   // producto): es la referencia de "caro" para el segundo filtro de la ronda
@@ -2501,14 +2541,16 @@ export default function MetricasSection({ addToast }) {
   // Qué ventana de tiempo corresponde a la pestaña abierta. Las que no eligen
   // nada lo dicen en vez de mostrar un desplegable que no hace nada.
   const ventana = tab === 'hoy'
-    ? { fija: true, label: 'Hoy' }
-    : tab === 'prosp'
-      ? { fija: true, label: `Últimos ${cfg.ventanaProspDias} días` }
-      : tab === 'publicar'
-        ? { fija: true, label: 'Nueva campaña' }
-        : tab === 'embudo'
-          ? { fija: false, valor: presetEmbudo, set: setPresetEmbudo, opciones: PRESETS_EMBUDO }
-          : { fija: false, valor: preset, set: setPreset, opciones: PRESETS_COHORTES };
+    ? { fija: true, label: 'Hoy', motivo: '"Hoy" optimiza el día en curso: sus recomendaciones de pausar/subir son de hoy, por eso el calendario no aplica acá.' }
+    : tab === 'publicar'
+      ? { fija: true, label: 'Nueva campaña', motivo: 'Acá se crea una campaña nueva: no hay rango de fechas que elegir.' }
+      : tab === 'prosp'
+        ? { fija: false, valor: presetProsp, set: setPresetProsp, opciones: PRESETS_PROSP }
+        : tab === 'winners'
+          ? { fija: false, valor: presetWinners, set: setPresetWinners, opciones: PRESETS_WINNERS }
+          : tab === 'embudo'
+            ? { fija: false, valor: presetEmbudo, set: setPresetEmbudo, opciones: PRESETS_EMBUDO }
+            : { fija: false, valor: preset, set: setPreset, opciones: PRESETS_COHORTES };
 
   const TABS = [
     { id: 'hoy', label: 'Hoy — optimizar', icon: Gauge },
@@ -2535,24 +2577,16 @@ export default function MetricasSection({ addToast }) {
           <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
         </div>
         {ventana.fija ? (
-          <button
-            onClick={() => {
-              setTab('manager');
-              addToast?.({
-                type: 'info',
-                message: tab === 'hoy'
-                  ? '"Hoy" mira siempre el día en curso (sus recomendaciones de pausa son de hoy). Acá en Campañas y anuncios elegís cualquier rango con el calendario.'
-                  : 'Esta pestaña tiene ventana fija. Acá en Campañas y anuncios elegís cualquier rango con el calendario.',
-                duration: 7000,
-              });
-            }}
-            title="Esta pestaña mira siempre esta ventana. Click para ver otro rango en Campañas y anuncios."
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:border-[#1877F2]/60 transition cursor-pointer">
-            <CalendarDays size={12} className="text-[#1877F2]" /> {ventana.label}
-            <span className="text-gray-400 font-normal">
+          /* Calendario DESHABILITADO en las pestañas donde no aplica (pedido
+             del user): nada de saltos de pestaña — el tooltip explica por qué. */
+          <span
+            title={ventana.motivo || 'Esta pestaña mira siempre esta ventana.'}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-gray-50 dark:bg-gray-900 border border-dashed border-gray-200 dark:border-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed select-none">
+            <CalendarDays size={12} className="opacity-50" /> {ventana.label}
+            <span className="font-normal opacity-70">
               · {new Date().toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric', month: 'short' })}
             </span>
-          </button>
+          </span>
         ) : (
           <MenuFecha value={ventana.valor} onChange={ventana.set} opciones={ventana.opciones} />
         )}
@@ -2656,11 +2690,13 @@ export default function MetricasSection({ addToast }) {
           {tab === 'prosp' && <VistaProspectadores
             ads={ads7d} cfg={cfg} currency={currency} accountId={accountId} onWhy={setWhy}
             cambios={cambios} trabajando={trabajando}
+            ventanaLabel={etiquetaVentana(presetProsp, PRESETS_PROSP)}
             onEstado={({ items, status }) => aplicarEstado({ level: 'ad', items, status })}
           />}
           {tab === 'winners' && <VistaWinners
             account={account} accountId={accountId} cfg={cfg} cfgRaw={cfgRaw}
             productos={productos} productoId={productoId || null} currency={currency} addToast={addToast}
+            preset={presetWinners}
           />}
           {tab === 'manager' && <VistaManager accountId={accountId} connId={account?.connId} currency={currency} preset={preset}
             presupuestos={presupuestos} onPresupuesto={cambiarPresupuestoRow} />}

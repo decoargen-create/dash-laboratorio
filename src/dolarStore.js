@@ -87,6 +87,69 @@ export function subscribeDolar(fn) {
   return () => listeners.delete(fn);
 }
 
+// ── Dólar BLUE ───────────────────────────────────────────────────────────────
+// Mismo mecanismo que el cripto pero con su propia cache y listeners. Lo usa
+// la pill del header (pedido del user: "el tipo de cambio arriba deberías
+// traerlo vos directamente, el dólar blue venta").
+const BLUE_KEY = 'adslab-dolar-blue-v1';
+let inflightBlue = null;
+const listenersBlue = new Set();
+
+function readCacheBlue() {
+  try { const raw = localStorage.getItem(BLUE_KEY); return raw ? JSON.parse(raw) : null; } catch { return null; }
+}
+function emitBlue() {
+  const r = readCacheBlue();
+  listenersBlue.forEach(fn => { try { fn(r); } catch {} });
+}
+
+export function getDolarBlueCached() {
+  const c = readCacheBlue();
+  if (!c?.venta) return null;
+  return { venta: c.venta, compra: c.compra, fetchedAt: c.fetchedAt };
+}
+
+export async function fetchDolarBlue() {
+  const cached = readCacheBlue();
+  if (cached?.venta && cached.fetchedAt && (Date.now() - cached.fetchedAt) < TTL_MS) {
+    return cached;
+  }
+  if (inflightBlue) return inflightBlue;
+  inflightBlue = (async () => {
+    try {
+      const resp = await fetch('https://dolarapi.com/v1/dolares/blue', {
+        headers: { 'Accept': 'application/json' },
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      const out = {
+        venta: Number(data.venta) || 0,
+        compra: Number(data.compra) || 0,
+        fechaActualizacion: data.fechaActualizacion,
+        fetchedAt: Date.now(),
+      };
+      if (out.venta > 0) {
+        try { localStorage.setItem(BLUE_KEY, JSON.stringify(out)); } catch {}
+        emitBlue();
+        return out;
+      }
+      return cached;
+    } catch (err) {
+      console.warn('fetchDolarBlue falló:', err.message);
+      return cached; // mejor algo viejo que nada
+    } finally {
+      inflightBlue = null;
+    }
+  })();
+  return inflightBlue;
+}
+
+export function subscribeDolarBlue(fn) {
+  listenersBlue.add(fn);
+  try { fn(readCacheBlue()); } catch {}
+  return () => listenersBlue.delete(fn);
+}
+
 // Format helper: convierte USD a ARS y devuelve string corto tipo "$1.234 ARS".
 // Si no hay rate, devuelve vacío.
 export function usdToArsString(usd, rate) {

@@ -2623,6 +2623,26 @@ async function handleLaunchCampaign(req, res) {
     }
 
     const creados = resumen.adsets.reduce((s, x) => s + x.ads.filter(a => a.ok).length, 0);
+    // Registrar en el historial del Publicador (best-effort, nunca rompe).
+    try {
+      const sb = getServiceClient();
+      const uid = isSupabaseConfigured() ? await getUserIdFromAuth(req) : null;
+      if (sb && uid && resumen.campaignId) {
+        const totalIntentados = resumen.adsets.reduce((t, x) => t + x.ads.length, 0) || ads.length;
+        await sb.from('marketing_publicaciones').insert({
+          user_id: uid,
+          account_id: accountId,
+          campaign_id: String(resumen.campaignId),
+          campaign_name: nombre,
+          producto: null,
+          estado: creados > 0 ? estado : 'ERROR',
+          ads_ok: creados,
+          ads_total: totalIntentados,
+          log: [`Escalar · receta ${estructura} · ${resumen.adsets.length} conjunto(s)`, ...resumen.errores.slice(0, 20)],
+          error: resumen.errores.length ? resumen.errores.join(' | ').slice(0, 500) : null,
+        });
+      }
+    } catch { /* historial best-effort */ }
     return respondJSON(res, 200, {
       ok: resumen.errores.length === 0 && creados > 0,
       ...resumen,

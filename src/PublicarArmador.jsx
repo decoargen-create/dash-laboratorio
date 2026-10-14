@@ -232,11 +232,14 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
   // ── Publicación (en serie, campaña por campaña) ──
   const [fase, setFase] = useState(null); // null | 'publicando' | 'listo' | 'error'
   const [logs, setLogs] = useState([]);
-  // Panel flotante de progreso (pedido del user): abajo a la derecha, muestra
-  // el paso a paso en vivo mientras publica — podés seguir mirando la página.
-  const [panelMin, setPanelMin] = useState(false);
+  // WIZARD EN 3 PASOS (idea del user): 1 elegir creativos → 2 armar campañas
+  // (con la estructura en grande) → 3 publicando/resultado con progress bar.
+  const [paso, setPaso] = useState(1);
+  const [progreso, setProgreso] = useState({ pct: 0, etapa: '' });
+  const [resumenFinal, setResumenFinal] = useState(null); // { campanas, totalCampanas, videos, estaticos }
+  const [verLog, setVerLog] = useState(false);
   const logRef = React.useRef(null);
-  useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [logs]);
+  useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [logs, verLog]);
   const [resultados, setResultados] = useState([]); // [{nombre, campaignId, okAds, total, estado}]
   const log = (l) => setLogs(prev => [...prev, l]);
 
@@ -249,8 +252,14 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
       addToast?.({ type: 'warning', message: 'Máximo 30 creativos por campaña — repartí en más campañas o destildá algunos.' });
       return;
     }
-    setFase('publicando'); setLogs([]); setResultados([]);
+    setFase('publicando'); setLogs([]); setResultados([]); setResumenFinal(null);
+    setPaso(3); setProgreso({ pct: 2, etapa: 'Arrancando…' });
+    // Notificación del navegador al terminar (si el user la permite).
+    try { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); } catch {}
+    const totalC = lotes.length;
+    const prog = (c, frac, etapa) => setProgreso({ pct: Math.min(99, Math.round(((c + frac) / totalC) * 100)), etapa });
     const hechos = [];
+    let archivadosTotal = 0;
     const videosPublicados = []; // [{ cardId, ts }] — para marcar publicadoAd
     const adsetPattern = preset?.adsetPattern || 'Ad Set {index:01}';
     const adPattern = preset?.adPattern || '{filename}';
@@ -267,6 +276,7 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
 
         // 1. Videos → subir + esperar procesamiento.
         if (vids.length > 0) {
+          prog(c, 0.08, `Campaña ${c + 1}/${totalC}: subiendo ${vids.length} video${vids.length === 1 ? '' : 's'} a Meta…`);
           log(`  Subiendo ${vids.length} video${vids.length === 1 ? '' : 's'} a Meta…`);
           const up = await metaApi('upload-ad-videos', {
             connId: account.connId, method: 'POST',
@@ -276,6 +286,7 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
           for (const r of (up.resultados || [])) if (!r.ok) log(`  ✗ ${r.name}: ${r.error}`);
           var videosSubidosLote = []; // id de tarjeta + ts + nombre final del ad
           if (subidos.length > 0) {
+            prog(c, 0.2, `Campaña ${c + 1}/${totalC}: Meta está procesando los videos…`);
             log('  Esperando que Meta procese los videos…');
             const ids = subidos.map(r => r.videoId);
             let estados = []; let erroresSeguidos = 0;
@@ -284,6 +295,8 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
               try {
                 const st = await metaApi(`videos-status?ids=${ids.join(',')}`, { connId: account.connId });
                 estados = st.videos || []; erroresSeguidos = 0;
+                const listosN = estados.filter(v => v.ready).length;
+                prog(c, 0.2 + 0.4 * (listosN / Math.max(1, ids.length)), `Campaña ${c + 1}/${totalC}: procesando videos (${listosN}/${ids.length} listos)…`);
                 if (st.todosListos) break;
                 if (estados.every(v => v.ready || v.status === 'error')) break;
               } catch (e) {
@@ -307,6 +320,7 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
         // galería activa queda solo con lo no publicado — pedido del user).
         const imagenesSubidas = [];
         if (imgs.length > 0) {
+          prog(c, 0.65, `Campaña ${c + 1}/${totalC}: subiendo ${imgs.length} imagen${imgs.length === 1 ? '' : 'es'}…`);
           log(`  Subiendo ${imgs.length} imagen${imgs.length === 1 ? '' : 'es'} a Meta…`);
           const up = await metaApi('upload-ad-images', {
             connId: account.connId, method: 'POST',
@@ -324,6 +338,7 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
         if (adsListos.length === 0) throw new Error('Ningún creativo del lote quedó listo para publicar.');
 
         // 3. Estructura: campaña → conjuntos → ads.
+        prog(c, 0.75, `Campaña ${c + 1}/${totalC}: creando campaña, conjuntos y anuncios…`);
         log(`  Creando campaña con ${adsListos.length} ads…`);
         const cr = await metaApi('create-campaign-structure', {
           connId: account.connId, method: 'POST',
@@ -362,6 +377,7 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
               .update({ archivado: true, archivado_at: new Date().toISOString() })
               .in('id', aArchivar);
             if (eArch) throw new Error(eArch.message);
+            archivadosTotal += aArchivar.length;
             log(`  🗄 ${aArchivar.length} estático${aArchivar.length === 1 ? '' : 's'} archivado${aArchivar.length === 1 ? '' : 's'} (ya publicado${aArchivar.length === 1 ? '' : 's'})`);
             const idsArch = new Set(aArchivar);
             setEstaticos(prev => (prev || []).filter(e => !idsArch.has(e.id)));
@@ -377,16 +393,22 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
     }
 
     setResultados(hechos);
+    if (videosPublicados.length > 0) {
+      setSel(prev => { const nn = new Set(prev); for (const v of videosPublicados) nn.delete(`v:${v.cardId}:${v.ts}`); return nn; });
+    }
+    setResumenFinal({ campanas: hechos.length, totalCampanas: lotes.length, videos: videosPublicados.length, estaticos: archivadosTotal });
+    setProgreso({ pct: 100, etapa: hechos.length > 0 ? 'Terminado' : 'Falló' });
     if (hechos.length > 0) {
       setFase(huboError ? 'error' : 'listo');
       try { onPublicadas?.(videosPublicados); } catch {}
-      addToast?.({
-        type: huboError ? 'warning' : 'success',
-        message: `${hechos.length}/${lotes.length} campaña${lotes.length === 1 ? '' : 's'} creada${hechos.length === 1 ? '' : 's'}${enPausa ? ' en pausa' : ''} 🚀`,
-      });
+      const msg = `${hechos.length}/${lotes.length} campaña${lotes.length === 1 ? '' : 's'} creada${hechos.length === 1 ? '' : 's'}${enPausa ? ' en pausa' : ''} 🚀`;
+      addToast?.({ type: huboError ? 'warning' : 'success', message: msg });
+      // Notificación del navegador: por si estás en otra pestaña esperando.
+      try { if ('Notification' in window && Notification.permission === 'granted') new Notification('AdsLab · Publicación lista ✓', { body: msg }); } catch {}
     } else {
       setFase('error');
-      addToast?.({ type: 'error', message: 'No se pudo crear ninguna campaña — mirá el detalle en el log.' });
+      addToast?.({ type: 'error', message: 'No se pudo crear ninguna campaña — mirá el detalle.' });
+      try { if ('Notification' in window && Notification.permission === 'granted') new Notification('AdsLab · La publicación falló', { body: 'Mirá el detalle en el Publicador.' }); } catch {}
     }
   }, [listo, lotes, loteMax, account, template, preset, producto, presupuesto, adsPorSet, enPausa, nombreBase, fechaCorta, mensaje, titular, programada, nombresCampanas, addToast, onPublicadas]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -437,9 +459,32 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
         <p className="text-xs text-rose-600 dark:text-rose-400 flex items-center gap-1.5"><AlertTriangle size={13} /> La campaña base no se pudo leer: {tplError} — configurala de nuevo.</p>
       )}
 
-      <div className="grid lg:grid-cols-3 gap-5 items-start">
-        {/* ── IZQUIERDA: creativos ── */}
-        <div className="lg:col-span-2 space-y-5 min-w-0">
+
+      {/* Stepper: 1 Creativos → 2 Campañas → 3 Resultado */}
+      <div className="flex items-center gap-2 text-[11.5px] font-bold">
+        {[[1, 'Creativos'], [2, 'Campañas'], [3, 'Publicación']].map(([num, label], i) => (
+          <React.Fragment key={num}>
+            {i > 0 && <span className="text-gray-300 dark:text-gray-600">—</span>}
+            <button
+              onClick={() => {
+                if (fase === 'publicando' || num >= paso || num === 3) return;
+                if (fase) { setFase(null); setLogs([]); setVerLog(false); setProgreso({ pct: 0, etapa: '' }); }
+                setPaso(num);
+              }}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border transition ${paso === num
+                ? 'bg-brand-600 text-white border-brand-600'
+                : num < paso ? 'text-brand-600 dark:text-brand-400 border-brand-400/50 hover:bg-brand-500/10 cursor-pointer'
+                : 'text-gray-400 border-gray-300 dark:border-gray-600 cursor-default'}`}>
+              <span className={`w-4 h-4 rounded-full grid place-items-center text-[10px] ${paso === num ? 'bg-white/25' : 'bg-gray-200 dark:bg-gray-700'}`}>{num < paso ? '✓' : num}</span>
+              {label}
+            </button>
+          </React.Fragment>
+        ))}
+      </div>
+
+      {/* ══ PASO 1 · CREATIVOS (todo el ancho) ══ */}
+      {paso === 1 && (
+        <div className="space-y-5">
           {/* Videos por tarjeta */}
           <section>
             <h2 className="text-sm font-extrabold text-gray-900 dark:text-gray-100 mb-2 flex items-center gap-1.5 flex-wrap">
@@ -528,6 +573,7 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
             )}
           </section>
 
+
           {/* Estáticos */}
           <section>
             <h2 className="text-sm font-extrabold text-gray-900 dark:text-gray-100 mb-2 flex items-center gap-1.5 flex-wrap">
@@ -582,18 +628,32 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
             )}
           </section>
 
-        </div>
 
-        {/* ── DERECHA: armado (sticky) ── */}
-        <div className="lg:sticky lg:top-4 space-y-4 rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/60 p-4">
-          <div>
-            <p className="text-[11px] font-bold uppercase tracking-wide text-gray-400">Selección</p>
-            <p className="text-2xl font-black text-gray-900 dark:text-white tabular-nums">
-              {elegidos.length} <span className="text-sm font-bold text-gray-400">creativo{elegidos.length === 1 ? '' : 's'}</span>
-            </p>
-            <p className="text-[11px] text-gray-500 dark:text-gray-400">{nVideos} video{nVideos === 1 ? '' : 's'} · {nImagenes} imagen{nImagenes === 1 ? '' : 'es'}</p>
+          {/* Barra de avance al paso 2: pegada abajo, siempre a mano */}
+          <div className="sticky bottom-3 z-30">
+            <div className="flex items-center gap-3 rounded-2xl border border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-gray-900/95 backdrop-blur px-4 py-3 shadow-xl">
+              <p className="text-sm font-bold text-gray-900 dark:text-gray-100 tabular-nums">
+                {elegidos.length} creativo{elegidos.length === 1 ? '' : 's'}
+                <span className="font-normal text-gray-400"> · {nVideos} video{nVideos === 1 ? '' : 's'} · {nImagenes} imagen{nImagenes === 1 ? '' : 'es'}</span>
+              </p>
+              <button onClick={() => setPaso(2)} disabled={elegidos.length === 0}
+                className="ml-auto inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition disabled:opacity-40">
+                Siguiente: armar campañas <ChevronRight size={14} />
+              </button>
+            </div>
           </div>
+        </div>
+      )}
 
+      {/* ══ PASO 2 · CAMPAÑAS (config + estructura en grande) ══ */}
+      {paso === 2 && (
+        <div className="grid lg:grid-cols-5 gap-5 items-start">
+          {/* Config (izquierda) */}
+          <div className="lg:col-span-2 space-y-4 rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/60 p-4">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-gray-400">
+              {elegidos.length} creativo{elegidos.length === 1 ? '' : 's'} · {nVideos} 🎥 · {nImagenes} 🖼
+              <button onClick={() => setPaso(1)} className="ml-2 normal-case font-bold text-brand-600 dark:text-brand-400 hover:underline">cambiar</button>
+            </p>
           <div>
             <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5"
               title="Los creativos elegidos se reparten parejo entre las campañas (mezclando videos e imágenes).">¿En cuántas campañas?</span>
@@ -689,91 +749,127 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
             <p className="text-[11px] text-rose-500">El ad modelo no tiene link de destino: las imágenes lo necesitan. Elegí otra campaña base.</p>
           )}
 
-          {/* Cómo queda: campaña → conjuntos → anuncios, con el reparto real */}
-          {elegidos.length > 0 && (
-            <details className="rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2" open={lotes.length > 1}>
-              <summary className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 cursor-pointer select-none">
-                📋 Así queda la estructura
-              </summary>
-              <div className="mt-2 space-y-2.5 max-h-64 overflow-y-auto pr-1">
+
+          </div>
+
+          {/* Estructura EN GRANDE (derecha): sin cortes, nombres completos */}
+          <div className="lg:col-span-3 space-y-3">
+            <h2 className="text-sm font-extrabold text-gray-900 dark:text-gray-100">📋 Así queda la estructura</h2>
+            {elegidos.length === 0 ? (
+              <p className="text-sm text-gray-400">No hay creativos elegidos — volvé al paso 1.</p>
+            ) : (
+              <div className="space-y-3">
                 {estructuraPreview.map((c, i) => (
-                  <div key={i}>
-                    <p className="text-xs font-bold text-gray-800 dark:text-gray-100 truncate" title={c.nombre}>
-                      📦 {c.nombre}
-                      <span className="font-normal text-gray-400"> · {Number(presupuesto) > 0 ? `$${Number(presupuesto).toLocaleString('es-AR')}/día · ` : ''}{c.sets.length} conjunto{c.sets.length === 1 ? '' : 's'} · {c.total} ads</span>
+                  <div key={i} className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/60 p-4">
+                    <p className="text-sm font-extrabold text-gray-900 dark:text-gray-100 break-words">📦 {c.nombre}</p>
+                    <p className="text-[11px] text-gray-400 mb-2">
+                      {Number(presupuesto) > 0 ? `$${Number(presupuesto).toLocaleString('es-AR')}/día · ` : ''}
+                      {c.sets.length} conjunto{c.sets.length === 1 ? '' : 's'} · {c.total} anuncio{c.total === 1 ? '' : 's'}
+                      {programada ? ` · 🗓 programada ${new Date(`${programada}:00-03:00`).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} hs` : ''}
+                      {enPausa ? ' · en pausa' : ' · ACTIVA'}
                     </p>
-                    {c.sets.map((st, j) => (
-                      <div key={j} className="ml-3 mt-1">
-                        <p className="text-[11px] font-semibold text-gray-600 dark:text-gray-300">└ {st.nombre} <span className="text-gray-400 font-normal">({st.items.length} ad{st.items.length === 1 ? '' : 's'})</span></p>
-                        <div className="ml-4">
-                          {st.items.map((it, k) => (
-                            <p key={k} className="text-[10.5px] text-gray-500 dark:text-gray-400 truncate" title={it.nombre}>
-                              {it.tipo === 'video' ? '🎥' : '🖼'} {it.nombre}
-                            </p>
-                          ))}
+                    <div className="grid sm:grid-cols-2 gap-2.5">
+                      {c.sets.map((st, j) => (
+                        <div key={j} className="rounded-xl border border-gray-100 dark:border-gray-700/60 bg-gray-50 dark:bg-gray-900/40 p-2.5">
+                          <p className="text-[11.5px] font-bold text-gray-700 dark:text-gray-200 break-words">{st.nombre} <span className="text-gray-400 font-normal">· {st.items.length} ad{st.items.length === 1 ? '' : 's'}</span></p>
+                          <div className="mt-1 space-y-0.5">
+                            {st.items.map((it, k) => (
+                              <p key={k} className="text-[11px] text-gray-500 dark:text-gray-400 break-words leading-snug">
+                                {it.tipo === 'video' ? '🎥' : '🖼'} {it.nombre}
+                              </p>
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
                 ))}
               </div>
-            </details>
-          )}
-
-          {fase === 'listo' || fase === 'error' ? (
-            <button onClick={onVolver} className="w-full py-2.5 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition">Volver a la cola</button>
-          ) : (
-            <button onClick={publicar} disabled={!listo}
-              className="w-full inline-flex items-center justify-center gap-1.5 py-2.5 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition disabled:opacity-50">
-              {fase === 'publicando'
-                ? <><Loader2 size={14} className="animate-spin" /> Publicando…</>
-                : <><Rocket size={14} /> Publicar {lotes.length} campaña{lotes.length === 1 ? '' : 's'} · {elegidos.length} creativo{elegidos.length === 1 ? '' : 's'} <ChevronRight size={13} /></>}
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Panel flotante de progreso: paso a paso en vivo, abajo a la derecha */}
-      {fase && (
-        <div className="fixed bottom-4 right-4 z-[65] w-[min(400px,calc(100vw-2rem))] rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-2xl overflow-hidden">
-          <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/60">
-            {fase === 'publicando'
-              ? <Loader2 size={15} className="animate-spin text-brand-500 shrink-0" />
-              : fase === 'listo'
-                ? <Check size={15} className="text-emerald-500 shrink-0" />
-                : <AlertTriangle size={15} className="text-rose-500 shrink-0" />}
-            <span className="flex-1 min-w-0 truncate text-sm font-bold text-gray-900 dark:text-gray-100">
-              {fase === 'publicando' ? `Publicando ${lotes.length} campaña${lotes.length === 1 ? '' : 's'}…`
-                : fase === 'listo' ? 'Publicación terminada ✓'
-                : resultados.length > 0 ? 'Terminó con detalles' : 'La publicación falló'}
-            </span>
-            {fase === 'publicando' && <span className="text-[10px] text-amber-500 font-semibold shrink-0">no cierres la pestaña</span>}
-            <button onClick={() => setPanelMin(m => !m)} title={panelMin ? 'Expandir' : 'Minimizar'}
-              className="p-1 rounded-md text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200/60 dark:hover:bg-gray-700">
-              {panelMin ? <ChevronRight size={14} className="-rotate-90" /> : <ChevronRight size={14} className="rotate-90" />}
-            </button>
-            {(fase === 'listo' || fase === 'error') && (
-              <button onClick={() => { setFase(null); setLogs([]); setPanelMin(false); }} title="Cerrar"
-                className="p-1 rounded-md text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200/60 dark:hover:bg-gray-700"><X size={14} /></button>
             )}
+
+            <div className="flex items-center gap-3">
+              <button onClick={() => setPaso(1)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-sm font-bold text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition">
+                <ArrowLeft size={14} /> Creativos
+              </button>
+              <button onClick={publicar} disabled={!listo}
+                className="flex-1 inline-flex items-center justify-center gap-1.5 py-2.5 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition disabled:opacity-50">
+                <Rocket size={14} /> Publicar {lotes.length} campaña{lotes.length === 1 ? '' : 's'} · {elegidos.length} creativo{elegidos.length === 1 ? '' : 's'} <ChevronRight size={13} />
+              </button>
+            </div>
           </div>
-          {!panelMin && (
-            <div className="p-3 space-y-2">
-              <pre ref={logRef} className="text-[10.5px] text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-gray-800/60 rounded-lg p-2.5 border border-gray-100 dark:border-gray-700/60 whitespace-pre-wrap max-h-56 overflow-y-auto font-mono leading-relaxed">{logs.join('\n') || 'Arrancando…'}</pre>
-              {resultados.length > 0 && (
-                <div className="space-y-1">
-                  {resultados.map(r => (
-                    <a key={r.campaignId} href={linkMeta({ accountId: account?.id, nivel: 'campaigns', ids: [r.campaignId] })} target="_blank" rel="noopener noreferrer"
-                      className="flex items-center gap-1.5 text-xs font-semibold text-brand-600 dark:text-brand-300 hover:underline">
-                      <Check size={12} className="text-emerald-500 shrink-0" /> <span className="truncate">{r.nombre}</span>
-                      <span className="text-gray-400 font-normal shrink-0">{r.okAds}/{r.total} ads · {r.estado === 'ACTIVE' ? 'activa' : 'pausa'}</span>
-                      <ExternalLink size={11} className="shrink-0" />
-                    </a>
-                  ))}
-                </div>
+        </div>
+      )}
+
+      {/* ══ PASO 3 · PUBLICANDO / RESULTADO ══ */}
+      {paso === 3 && (
+        <div className="max-w-2xl mx-auto space-y-4">
+          <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/60 p-5 space-y-4">
+            <div className="flex items-center gap-2.5">
+              {fase === 'publicando'
+                ? <Loader2 size={20} className="animate-spin text-brand-500 shrink-0" />
+                : fase === 'listo'
+                  ? <span className="w-8 h-8 rounded-full bg-emerald-500 text-white grid place-items-center shrink-0"><Check size={18} /></span>
+                  : <span className="w-8 h-8 rounded-full bg-rose-500 text-white grid place-items-center shrink-0"><AlertTriangle size={16} /></span>}
+              <div className="min-w-0 flex-1">
+                <p className="text-base font-extrabold text-gray-900 dark:text-gray-100">
+                  {fase === 'publicando' ? `Publicando ${lotes.length} campaña${lotes.length === 1 ? '' : 's'}…`
+                    : fase === 'listo' ? '¡Publicación terminada!'
+                    : resultados.length > 0 ? 'Terminó con detalles' : 'La publicación falló'}
+                </p>
+                <p className="text-xs text-gray-400 truncate">{fase === 'publicando' ? progreso.etapa : resumenFinal ? `${resumenFinal.campanas}/${resumenFinal.totalCampanas} campañas · ${resumenFinal.videos} video${resumenFinal.videos === 1 ? '' : 's'} marcado${resumenFinal.videos === 1 ? '' : 's'} publicado${resumenFinal.videos === 1 ? '' : 's'} · ${resumenFinal.estaticos} estático${resumenFinal.estaticos === 1 ? '' : 's'} archivado${resumenFinal.estaticos === 1 ? '' : 's'}` : ''}</p>
+              </div>
+              {fase === 'publicando' && <span className="text-[10px] text-amber-500 font-semibold shrink-0">no cierres la pestaña</span>}
+            </div>
+
+            {/* Progress bar */}
+            <div>
+              <div className="h-2.5 rounded-full bg-gray-100 dark:bg-gray-700 overflow-hidden">
+                <div className={`h-full rounded-full transition-all duration-500 ${fase === 'error' ? 'bg-rose-500' : 'bg-gradient-to-r from-brand-500 to-violet-400'}`}
+                  style={{ width: `${progreso.pct}%` }} />
+              </div>
+              <p className="text-right text-[10.5px] text-gray-400 mt-1 tabular-nums">{progreso.pct}%</p>
+            </div>
+
+            {/* Campañas creadas, con link directo */}
+            {resultados.length > 0 && (
+              <div className="space-y-1.5">
+                {resultados.map(r => (
+                  <a key={r.campaignId} href={linkMeta({ accountId: account?.id, nivel: 'campaigns', ids: [r.campaignId] })} target="_blank" rel="noopener noreferrer"
+                    className="flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-sm font-semibold text-gray-800 dark:text-gray-100 hover:border-emerald-500/60 transition">
+                    <Check size={14} className="text-emerald-500 shrink-0" />
+                    <span className="truncate flex-1">{r.nombre}</span>
+                    <span className="text-[11px] text-gray-400 font-normal shrink-0">{r.okAds}/{r.total} ads · {r.estado === 'ACTIVE' ? 'activa' : 'en pausa'}</span>
+                    <ExternalLink size={12} className="text-brand-500 shrink-0" />
+                  </a>
+                ))}
+              </div>
+            )}
+
+            {/* Log paso a paso (colapsado por defecto) */}
+            <div>
+              <button onClick={() => setVerLog(v => !v)} className="text-[11px] font-bold text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+                {verLog ? '▾ Ocultar detalle' : '▸ Ver el paso a paso completo'}
+              </button>
+              {(verLog || fase === 'publicando') && (
+                <pre ref={logRef} className="mt-1.5 text-[10.5px] text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-gray-900/60 rounded-lg p-2.5 border border-gray-100 dark:border-gray-700/60 whitespace-pre-wrap max-h-52 overflow-y-auto font-mono leading-relaxed">{logs.join('\n') || 'Arrancando…'}</pre>
               )}
             </div>
-          )}
+
+            {(fase === 'listo' || fase === 'error') && (
+              <div className="flex items-center gap-2.5 pt-1">
+                <button onClick={() => { setPaso(1); setFase(null); setLogs([]); setVerLog(false); setProgreso({ pct: 0, etapa: '' }); }}
+                  className="flex-1 py-2.5 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition">
+                  Armar otra publicación
+                </button>
+                <button onClick={() => { const r = resultados[0]; if (r) window.open(linkMeta({ accountId: account?.id, nivel: 'campaigns', ids: resultados.map(x => x.campaignId) }), '_blank'); }}
+                  disabled={resultados.length === 0}
+                  className="px-3.5 py-2.5 text-sm font-bold text-gray-700 dark:text-gray-200 border border-gray-300 dark:border-gray-600 rounded-lg hover:border-brand-400 transition disabled:opacity-40">
+                  Ver en Meta
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       )}
 

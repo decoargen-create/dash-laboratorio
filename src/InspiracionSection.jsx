@@ -1860,11 +1860,16 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       if (activeProductoId) localStorage.setItem(ACTIVE_KEY, activeProductoId);
       else localStorage.removeItem(ACTIVE_KEY);
     } catch {}
+    brandsMountRef.current = false; // el próximo "cambio" de brands es la CARGA del producto, no una edición
     setBrands(loadBrands(activeProductoId));
   }, [activeProductoId]);
 
-  // Persistir brands al cambiar.
+  // Persistir brands al cambiar — con guard de PRIMER render: sin él, solo
+  // ABRIR Inspiración pusheaba la lista local (posiblemente vieja) y
+  // resucitaba brands borradas en otra PC (hallazgo #3 de la auditoría).
+  const brandsMountRef = useRef(false);
   useEffect(() => {
+    if (!brandsMountRef.current) { brandsMountRef.current = true; return; }
     saveBrands(activeProductoId, brands);
   }, [brands, activeProductoId]);
 
@@ -1958,7 +1963,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         if (String(p.id) !== String(activeProductoId)) return p;
         const cur = new Set((p.usedAdIds || []).map(String));
         if (cur.has(String(adId))) cur.delete(String(adId)); else cur.add(String(adId));
-        return { ...p, usedAdIds: [...cur] };
+        return { ...p, usedAdIds: [...cur], updated_at: new Date().toISOString() };
       });
       try { localStorage.setItem(PRODUCTOS_KEY, JSON.stringify(updated)); notifyMarketingChange(PRODUCTOS_KEY); } catch {}
       setProductos(updated);

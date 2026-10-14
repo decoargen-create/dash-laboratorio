@@ -1263,7 +1263,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       if (String(p.id) !== String(activeProductoId)) return p;
       const current = p.metaAccount || null;
       const next = typeof updater === 'function' ? updater(current) : updater;
-      return { ...p, metaAccount: next };
+      return { ...p, metaAccount: next, updated_at: new Date().toISOString() };
     }));
   };
 
@@ -1905,6 +1905,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         ...p,
         competidores: (p.competidores || []).filter(c => c.id !== id),
         competidoresBorrados: [...(p.competidoresBorrados || []), { id: String(id), ts: Date.now() }].slice(-200),
+        updated_at: new Date().toISOString(),
       };
     }));
     // Limpiar el brand "auto-sincronizado" en Inspiración (fromCompetidorId)

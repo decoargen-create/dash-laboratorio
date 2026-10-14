@@ -56,7 +56,9 @@ const CSS = `
   .blob.a{background:var(--violeta); top:-240px; left:-120px; animation:flotar 11s ease-in-out infinite;}
   .blob.b{background:var(--cian); top:-180px; right:-200px; animation:flotar 13s ease-in-out infinite reverse;}
   @keyframes flotar{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(42px,30px) scale(1.08)}}
-  .hero>*{position:relative; z-index:1;}
+  /* :not(.blob): los blobs son absolute (fondo) — sin esto esta regla los
+     pisa, entran al flujo y empujan todo el hero abajo del fold. */
+  .hero>*:not(.blob){position:relative; z-index:1;}
   .pill{display:inline-flex; align-items:center; gap:8px; border:1px solid rgba(139,92,246,.5); background:rgba(139,92,246,.1); border-radius:999px; padding:7px 16px; font-size:12px; color:var(--violeta2); font-weight:700;}
   .pill .punto{width:7px;height:7px;border-radius:50%;background:var(--verde); animation:pulso 1.8s ease-in-out infinite;}
   @keyframes pulso{0%,100%{box-shadow:0 0 0 0 rgba(52,211,153,.5)}50%{box-shadow:0 0 0 7px rgba(52,211,153,0)}}

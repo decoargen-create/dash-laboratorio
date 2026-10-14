@@ -191,6 +191,21 @@ if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
     console.info('[SW] nueva versión activa — recargando');
     window.location.reload();
   });
+
+  // Chequeo PROACTIVO de updates: una pestaña abierta no busca SW nuevo por
+  // sí sola (el browser chequea al navegar o cada ~24 h), así que un deploy
+  // no llegaba hasta recargar a mano dos veces. Buscamos cada 5 minutos y
+  // cada vez que la pestaña vuelve a primer plano — combinado con el reload
+  // de arriba, los deploys se aplican solos en ~5 min como mucho.
+  const buscarUpdate = async () => {
+    try {
+      const reg = await navigator.serviceWorker.getRegistration();
+      await reg?.update();
+    } catch {}
+  };
+  setInterval(buscarUpdate, 5 * 60 * 1000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) buscarUpdate(); });
+  window.addEventListener('focus', buscarUpdate);
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(

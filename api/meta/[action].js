@@ -14,7 +14,7 @@
 //   GET|POST /api/meta/disconnect → borra la cookie
 
 import crypto from 'node:crypto';
-import { parseFunnel, deriveFunnelRates } from './_funnel.js';
+import { parseFunnel, deriveFunnelRates, pickAction, ACTION_ALIASES } from './_funnel.js';
 import { validarPedido, mismaCuenta, NIVELES } from './_estado.js';
 import {
   META_API_VERSION, META_COOKIE_MAX_AGE, META_SCOPES,
@@ -1302,10 +1302,22 @@ async function handleCronCreativeRefresh(req, res) {
     metaExpiry = await warnMetaExpiryIfDue();
   } catch (e) { console.warn('[cron] warn meta expiry:', e.message); }
 
+  // ⭐ Winners automáticos (best-effort): marca en Producción los videos que
+  // Meta muestra como ganadores — solo productos con data; el resto sigue
+  // manual. Corre acá aunque el creative-refresh no esté configurado.
+  let autoWinners = null;
+  try {
+    const { correrAutoWinners } = await import('../produccion/auto-winners.js');
+    autoWinners = await correrAutoWinners();
+  } catch (e) {
+    autoWinners = { error: e.message };
+    console.warn('[cron] auto-winners:', e.message);
+  }
+
   // Config desde env var.
   const raw = process.env.CREATIVE_REFRESH_CONFIG;
   if (!raw) {
-    return respondJSON(res, 200, { skipped: true, reason: 'CREATIVE_REFRESH_CONFIG no configurada', metaExpiry });
+    return respondJSON(res, 200, { skipped: true, reason: 'CREATIVE_REFRESH_CONFIG no configurada', metaExpiry, autoWinners });
   }
   let cfg;
   try { cfg = JSON.parse(raw); } catch {
@@ -1708,7 +1720,9 @@ async function handleFunnelInsights(req, res) {
     'last_90d', 'this_month', 'last_month', 'maximum',
   ];
   let datePreset = url.searchParams.get('date_preset') || 'last_7d';
-  if (!allowedPresets.includes(datePreset)) datePreset = 'last_7d';
+  // Rango personalizado del calendario: "custom_YYYY-MM-DD_YYYY-MM-DD".
+  const customEmbudo = /^custom_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})$/.exec(datePreset);
+  if (!customEmbudo && !allowedPresets.includes(datePreset)) datePreset = 'last_7d';
 
   try {
     const rows = [];
@@ -1717,7 +1731,9 @@ async function handleFunnelInsights(req, res) {
     do {
       const params = {
         level: 'campaign',
-        date_preset: datePreset,
+        ...(customEmbudo
+          ? { time_range: JSON.stringify({ since: customEmbudo[1], until: customEmbudo[2] }) }
+          : { date_preset: datePreset }),
         fields: [
           'campaign_id', 'campaign_name', 'objective',
           'impressions', 'clicks', 'spend', 'ctr', 'cpc', 'cpm', 'reach', 'frequency',
@@ -1797,7 +1813,12 @@ async function handleTestingInsights(req, res) {
 
   const allowed = ['last_7d', 'last_14d', 'last_30d', 'last_90d', 'this_month', 'last_month', 'maximum'];
   let preset = url.searchParams.get('date_preset') || 'last_30d';
-  if (!allowed.includes(preset)) preset = 'last_30d';
+  // Rango personalizado del calendario: "custom_YYYY-MM-DD_YYYY-MM-DD".
+  const custom = /^custom_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})$/.exec(preset);
+  if (!custom && !allowed.includes(preset)) preset = 'last_30d';
+  const insSel = custom
+    ? `insights.time_range({"since":"${custom[1]}","until":"${custom[2]}"})`
+    : `insights.date_preset(${preset})`;
 
   // Campos de insights que alimentan el embudo y las reglas.
   const INS = 'impressions,clicks,ctr,cpc,cpm,spend,reach,frequency,actions,action_values';
@@ -1817,7 +1838,7 @@ async function handleTestingInsights(req, res) {
       let after = null, guard = 0;
       do {
         const params = {
-          fields: `id,name,status,effective_status,daily_budget,lifetime_budget,created_time,insights.date_preset(${preset}){${INS}}`,
+          fields: `id,name,status,effective_status,daily_budget,lifetime_budget,created_time,start_time,${insSel}{${INS}}`,
           limit: 100,
           effective_status: effectiveStatus,
         };
@@ -1833,6 +1854,10 @@ async function handleTestingInsights(req, res) {
             dailyBudget: c.daily_budget != null ? Number(c.daily_budget) / 100 : null,
             lifetimeBudget: c.lifetime_budget != null ? Number(c.lifetime_budget) / 100 : null,
             createdTime: c.created_time,
+            // "Fecha de inicio" real del Calendario de la campaña (con el huso
+            // de la cuenta). Las cohortes semanales se arman con esto, no con
+            // la fecha escrita en el nombre.
+            startTime: c.start_time || null,
             insights: parseFunnel(c.insights?.data?.[0]) || null,
           });
         }
@@ -2024,6 +2049,114 @@ async function handleTestingInsights(req, res) {
 // Si la número 3 falla por permisos, las otras igual quedaron cambiadas y el
 // front sabe cuáles: un all-or-nothing acá sería mentira, porque Meta no da
 // transacciones.
+// Desglose de UNA campaña: sus conjuntos y los anuncios de cada uno con los
+// números del preset pedido (default: hoy). Es lo que ve la Ronda de
+// optimización al expandir una campaña — los niveles del Ads Manager sin
+// cambiar de vista. Una sola llamada a Graph (fields anidados).
+// GET ?account_id=act_X&campaign_id=123&preset=today[&connection_id=...]
+async function handleCampaignBreakdown(req, res) {
+  if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
+  const origin = getOrigin(req);
+  const url = new URL(req.url, origin);
+  const { token, error, status } = await resolveAccessToken(req, url);
+  if (!token) return respondJSON(res, status || 401, { error });
+
+  const campaignId = String(url.searchParams.get('campaign_id') || '').trim();
+  const preset = /^[a-z0-9_]+$/.test(url.searchParams.get('preset') || '') ? url.searchParams.get('preset') : 'today';
+  if (!/^\d+$/.test(campaignId)) return respondJSON(res, 400, { error: 'campaign_id inválido' });
+
+  const INS = 'spend,actions,action_values';
+  const parse = (row) => {
+    const ins = row?.insights?.data?.[0] || null;
+    const spend = Number(ins?.spend || 0);
+    const compras = ins ? pickAction(ins.actions, ACTION_ALIASES.purchases) : 0;
+    const revenue = ins ? pickAction(ins.action_values, ACTION_ALIASES.purchases) : 0;
+    const atc = ins ? pickAction(ins.actions, ACTION_ALIASES.addToCart) : 0;
+    const chk = ins ? pickAction(ins.actions, ACTION_ALIASES.initiateCheckout) : 0;
+    return {
+      spend, compras,
+      roas: spend > 0 ? revenue / spend : 0,
+      costoATC: atc > 0 ? spend / atc : null,
+      costoCheckout: chk > 0 ? spend / chk : null,
+    };
+  };
+
+  try {
+    const d = await graphGet(`${campaignId}/adsets`, token, {
+      fields: `id,name,effective_status,daily_budget,insights.date_preset(${preset}){${INS}},ads.limit(50){id,name,effective_status,insights.date_preset(${preset}){${INS}}}`,
+      limit: 50,
+    });
+    const adsets = (d.data || []).map(s => ({
+      id: s.id,
+      name: s.name,
+      effectiveStatus: s.effective_status,
+      dailyBudget: s.daily_budget != null ? Number(s.daily_budget) / 100 : null,
+      ...parse(s),
+      ads: (s.ads?.data || [])
+        .map(ad => ({ id: ad.id, name: ad.name, effectiveStatus: ad.effective_status, ...parse(ad) }))
+        .sort((a, b) => b.spend - a.spend),
+    })).sort((a, b) => b.spend - a.spend);
+    return respondJSON(res, 200, { adsets });
+  } catch (e) {
+    return respondJSON(res, e.status && e.status < 500 ? e.status : 500, { error: e.message });
+  }
+}
+
+// Cambia el presupuesto DIARIO de una campaña (CBO) o un conjunto (ABO) —
+// el equivalente al doble click en la columna Presupuesto del Ads Manager.
+// POST { account_id, connection_id?, level: 'campaign'|'adset', id, dailyBudget }
+// `dailyBudget` viene en moneda de la cuenta; Meta lo quiere en centavos.
+async function handleSetBudget(req, res) {
+  if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
+
+  let body;
+  try {
+    if (req.body && typeof req.body === 'object') body = req.body;
+    else {
+      const chunks = [];
+      for await (const c of req) chunks.push(c);
+      body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+    }
+  } catch {
+    return respondJSON(res, 400, { error: 'Body JSON inválido' });
+  }
+
+  const origin = getOrigin(req);
+  const url = new URL(req.url, origin);
+  const { token, error, status: authStatus } = await resolveAccessToken(req, url, body?.connection_id || null);
+  if (!token) return respondJSON(res, authStatus || 401, { error: error || 'Meta no conectado' });
+
+  const accountId = String(body.account_id || '').trim();
+  const id = String(body.id || '').trim();
+  const level = body.level === 'adset' ? 'adset' : 'campaign';
+  const monto = Number(body.dailyBudget);
+  if (!accountId) return respondJSON(res, 400, { error: 'Falta account_id (con prefijo act_)' });
+  if (!/^\d+$/.test(id)) return respondJSON(res, 400, { error: 'id inválido' });
+  if (!Number.isFinite(monto) || monto <= 0) return respondJSON(res, 400, { error: 'Presupuesto inválido' });
+
+  const nombre = level === 'adset' ? 'conjunto' : 'campaña';
+  try {
+    // 1. ¿Existe, es de esta cuenta y tiene presupuesto diario PROPIO?
+    const actual = await graphGet(id, token, { fields: 'id,name,daily_budget,account_id' });
+    if (!mismaCuenta(actual.account_id, accountId)) {
+      return respondJSON(res, 400, { error: `Esa ${nombre} no es de la cuenta ${accountId}.` });
+    }
+    if (actual.daily_budget == null) {
+      return respondJSON(res, 400, {
+        error: level === 'campaign'
+          ? 'Esta campaña no tiene presupuesto diario propio (ABO: el presupuesto vive en sus conjuntos).'
+          : 'Este conjunto no tiene presupuesto diario propio (CBO: el presupuesto vive en la campaña).',
+      });
+    }
+    const anterior = Number(actual.daily_budget) / 100;
+    // 2. El cambio (Meta trabaja en centavos de la moneda de la cuenta).
+    await graphPost(id, token, { daily_budget: String(Math.round(monto * 100)) });
+    return respondJSON(res, 200, { ok: true, id, name: actual.name, anterior, nuevo: monto });
+  } catch (e) {
+    return respondJSON(res, e.status && e.status < 500 ? e.status : 500, { error: e.message });
+  }
+}
+
 async function handleSetStatus(req, res) {
   if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
 
@@ -2080,6 +2213,289 @@ async function handleSetStatus(req, res) {
   return respondJSON(res, code, { level: pedido.level, status: pedido.status, resultados });
 }
 
+// ========================================================================
+// ADS MANAGER — la tabla clásica por niveles (pestaña "Campañas y anuncios")
+// ========================================================================
+// Una fila por entidad del nivel pedido (campaign | adset | ad) con los
+// números del período: gasto, compras, ingresos, ROAS, CPA. Las filas salen
+// de /insights a nivel cuenta (una llamada paginada) y se les une estado y
+// presupuesto desde el listado de entidades (otra llamada) — insights no
+// trae effective_status.
+// GET ?account_id=act_X&level=campaign&date_preset=last_7d|custom_A_B[&connection_id]
+async function handleManagerTable(req, res) {
+  if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
+  const origin = getOrigin(req);
+  const url = new URL(req.url, origin);
+  const { token, error, status } = await resolveAccessToken(req, url);
+  if (!token) return respondJSON(res, status || 401, { error });
+
+  const accountId = String(url.searchParams.get('account_id') || '').trim();
+  if (!accountId) return respondJSON(res, 400, { error: 'Falta account_id' });
+  const level = ['campaign', 'adset', 'ad'].includes(url.searchParams.get('level'))
+    ? url.searchParams.get('level') : 'campaign';
+
+  let preset = url.searchParams.get('date_preset') || 'last_7d';
+  const custom = /^custom_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})$/.exec(preset);
+  if (!custom && !/^[a-z0-9_]+$/.test(preset)) preset = 'last_7d';
+  const rango = custom
+    ? { time_range: JSON.stringify({ since: custom[1], until: custom[2] }) }
+    : { date_preset: preset };
+
+  const CAMPOS = {
+    campaign: 'campaign_id,campaign_name',
+    adset: 'adset_id,adset_name,campaign_name',
+    ad: 'ad_id,ad_name,adset_name,campaign_name',
+  }[level];
+  const EDGE = { campaign: 'campaigns', adset: 'adsets', ad: 'ads' }[level];
+  const ENT_FIELDS = level === 'ad'
+    ? 'id,effective_status'
+    : 'id,effective_status,daily_budget' + (level === 'campaign' ? ',lifetime_budget' : '');
+
+  try {
+    const traerInsights = async () => {
+      const filas = [];
+      let after = null, guard = 0;
+      do {
+        const params = { level, fields: `${CAMPOS},spend,actions,action_values`, limit: 250, ...rango };
+        if (after) params.after = after;
+        const d = await graphGet(`${accountId}/insights`, token, params);
+        filas.push(...(d.data || []));
+        after = d.paging?.cursors?.after && d.paging?.next ? d.paging.cursors.after : null;
+        guard++;
+      } while (after && guard < 8);
+      return filas;
+    };
+    const traerEntidades = async () => {
+      const map = new Map();
+      let after = null, guard = 0;
+      do {
+        const params = { fields: ENT_FIELDS, limit: 500 };
+        if (after) params.after = after;
+        const d = await graphGet(`${accountId}/${EDGE}`, token, params);
+        for (const e of d.data || []) map.set(e.id, e);
+        after = d.paging?.cursors?.after && d.paging?.next ? d.paging.cursors.after : null;
+        guard++;
+      } while (after && guard < 6);
+      return map;
+    };
+    const [insights, entidades] = await Promise.all([traerInsights(), traerEntidades()]);
+
+    const rows = insights.map(r => {
+      const id = r[`${level}_id`];
+      const ent = entidades.get(id) || {};
+      const spend = Number(r.spend || 0);
+      const compras = pickAction(r.actions, ACTION_ALIASES.purchases);
+      const revenue = pickAction(r.action_values, ACTION_ALIASES.purchases);
+      return {
+        id,
+        name: r[`${level}_name`] || id,
+        sub: level === 'campaign' ? null
+          : level === 'adset' ? (r.campaign_name || null)
+          : [r.adset_name, r.campaign_name].filter(Boolean).join(' · ') || null,
+        effectiveStatus: ent.effective_status || null,
+        dailyBudget: ent.daily_budget != null ? Number(ent.daily_budget) / 100 : null,
+        spend, compras, revenue,
+        roas: spend > 0 ? revenue / spend : 0,
+        cpa: compras > 0 ? spend / compras : null,
+      };
+    }).filter(r => r.spend > 0 || r.compras > 0);
+
+    const totals = rows.reduce((t, r) => {
+      t.spend += r.spend; t.compras += r.compras; t.revenue += r.revenue; return t;
+    }, { spend: 0, compras: 0, revenue: 0 });
+    totals.roas = totals.spend > 0 ? totals.revenue / totals.spend : 0;
+    totals.cpa = totals.compras > 0 ? totals.spend / totals.compras : null;
+
+    return respondJSON(res, 200, { level, rows, totals, total: rows.length });
+  } catch (e) {
+    return respondJSON(res, e.status && e.status < 500 ? e.status : 500, { error: e.message });
+  }
+}
+
+// ========================================================================
+// PUBLICAR CAMPAÑAS — el lanzador de AdsLab
+// ========================================================================
+// Crea en Meta una estructura completa de venta a partir de posts existentes
+// (nombre + post id), con las tres recetas del equipo:
+//   cbo_deep    → CBO sin tope de puja (deep pocket): presupuesto en la
+//                 campaña, LOWEST_COST_WITHOUT_CAP.
+//   cbo_costcap → CBO con costo objetivo: presupuesto en la campaña,
+//                 COST_CAP, la puja (costo por compra objetivo) va como
+//                 bid_amount en cada conjunto.
+//   abo_bidcap  → ABO con tope de puja: presupuesto POR CONJUNTO,
+//                 LOWEST_COST_WITH_BID_CAP + bid_amount en cada conjunto.
+// Todo se crea PAUSADO salvo que pidan activar: revisás en Meta y encendés.
+
+// Prerrequisitos del formulario: páginas del usuario y píxeles de la cuenta.
+// GET ?account_id=act_X[&connection_id=...]
+async function handleLaunchPrereqs(req, res) {
+  if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
+  const origin = getOrigin(req);
+  const url = new URL(req.url, origin);
+  const { token, error, status } = await resolveAccessToken(req, url);
+  if (!token) return respondJSON(res, status || 401, { error });
+  const accountId = String(url.searchParams.get('account_id') || '').trim();
+  if (!accountId) return respondJSON(res, 400, { error: 'Falta account_id' });
+  try {
+    const [pixelsR, pagesR] = await Promise.allSettled([
+      graphGet(`${accountId}/adspixels`, token, { fields: 'id,name', limit: 25 }),
+      graphGet('me/accounts', token, { fields: 'id,name', limit: 50 }),
+    ]);
+    return respondJSON(res, 200, {
+      pixels: pixelsR.status === 'fulfilled' ? (pixelsR.value.data || []) : [],
+      pages: pagesR.status === 'fulfilled' ? (pagesR.value.data || []) : [],
+    });
+  } catch (e) {
+    return respondJSON(res, 500, { error: e.message });
+  }
+}
+
+// POST { account_id, connection_id?, estructura, nombre, presupuesto, puja,
+//        conjuntos, pageId, pixelId, pais, edadMin, edadMax,
+//        ads: [{ name, postId }], activar }
+async function handleLaunchCampaign(req, res) {
+  if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
+
+  let body;
+  try {
+    if (req.body && typeof req.body === 'object') body = req.body;
+    else {
+      const chunks = [];
+      for await (const c of req) chunks.push(c);
+      body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+    }
+  } catch {
+    return respondJSON(res, 400, { error: 'Body JSON inválido' });
+  }
+
+  const origin = getOrigin(req);
+  const url = new URL(req.url, origin);
+  const { token, error, status: authStatus } = await resolveAccessToken(req, url, body?.connection_id || null);
+  if (!token) return respondJSON(res, authStatus || 401, { error: error || 'Meta no conectado' });
+
+  const accountId = String(body.account_id || '').trim();
+  const estructura = ['cbo_deep', 'cbo_costcap', 'abo_bidcap'].includes(body.estructura) ? body.estructura : null;
+  const nombre = String(body.nombre || '').trim();
+  const presupuesto = Number(body.presupuesto);
+  const puja = Number(body.puja || 0);
+  const conjuntos = Math.min(5, Math.max(1, Math.round(Number(body.conjuntos) || 1)));
+  const pageId = String(body.pageId || '').trim();
+  const pixelId = String(body.pixelId || '').trim();
+  const pais = /^[A-Z]{2}$/.test(String(body.pais || '').toUpperCase()) ? String(body.pais).toUpperCase() : 'AR';
+  const edadMin = Math.min(65, Math.max(13, Math.round(Number(body.edadMin) || 18)));
+  const edadMax = Math.min(65, Math.max(edadMin, Math.round(Number(body.edadMax) || 65)));
+  const activar = body.activar === true;
+  const ads = (Array.isArray(body.ads) ? body.ads : [])
+    .map(a => ({ name: String(a?.name || '').trim(), postId: String(a?.postId || '').trim() }))
+    .filter(a => a.postId);
+
+  if (!accountId) return respondJSON(res, 400, { error: 'Falta account_id' });
+  if (!estructura) return respondJSON(res, 400, { error: 'Estructura inválida' });
+  if (!nombre) return respondJSON(res, 400, { error: 'Falta el nombre de la campaña' });
+  if (!Number.isFinite(presupuesto) || presupuesto <= 0) return respondJSON(res, 400, { error: 'Presupuesto inválido' });
+  if ((estructura === 'cbo_costcap' || estructura === 'abo_bidcap') && (!Number.isFinite(puja) || puja <= 0)) {
+    return respondJSON(res, 400, { error: estructura === 'cbo_costcap' ? 'Falta la puja (costo por compra objetivo)' : 'Falta la puja (tope de puja)' });
+  }
+  if (!pixelId) return respondJSON(res, 400, { error: 'Falta el píxel (va en promoted_object del conjunto)' });
+  if (!ads.length) return respondJSON(res, 400, { error: 'Pasá al menos un anuncio (nombre + post id)' });
+  if (ads.length > 20) return respondJSON(res, 400, { error: 'Máximo 20 anuncios por tirada' });
+  const sinPagina = ads.some(a => !a.postId.includes('_'));
+  if (sinPagina && !pageId) return respondJSON(res, 400, { error: 'Hay post ids sin página (sin "_"): elegí la página para componer pageId_postId' });
+
+  const estado = activar ? 'ACTIVE' : 'PAUSED';
+  const bidStrategy = estructura === 'cbo_deep' ? 'LOWEST_COST_WITHOUT_CAP'
+    : estructura === 'cbo_costcap' ? 'COST_CAP' : 'LOWEST_COST_WITH_BID_CAP';
+  const esCbo = estructura !== 'abo_bidcap';
+
+  const resumen = { campaignId: null, adsets: [], errores: [] };
+  try {
+    // 1. Campaña.
+    const campParams = {
+      name: nombre,
+      objective: 'OUTCOME_SALES',
+      buying_type: 'AUCTION',
+      special_ad_categories: [],
+      bid_strategy: bidStrategy,
+      status: estado,
+    };
+    if (esCbo) campParams.daily_budget = String(Math.round(presupuesto * 100));
+    const camp = await graphPost(`${accountId}/campaigns`, token, campParams);
+    resumen.campaignId = camp.id;
+
+    // 2. Conjuntos. Los ads se REPARTEN en orden entre los conjuntos
+    //    (2 conjuntos y 6 ads → 3 y 3), como en los testeos del equipo.
+    const grupos = Array.from({ length: conjuntos }, () => []);
+    ads.forEach((a, i) => grupos[i % conjuntos].push(a));
+
+    for (let i = 0; i < grupos.length; i++) {
+      const grupo = grupos[i];
+      if (!grupo.length) continue;
+      const adsetParams = {
+        name: conjuntos > 1 ? `${nombre} · C${i + 1}` : nombre,
+        campaign_id: camp.id,
+        status: estado,
+        optimization_goal: 'OFFSITE_CONVERSIONS',
+        billing_event: 'IMPRESSIONS',
+        promoted_object: { pixel_id: pixelId, custom_event_type: 'PURCHASE' },
+        targeting: {
+          geo_locations: { countries: [pais] },
+          age_min: edadMin,
+          age_max: edadMax,
+          // Advantage+ audience: que Meta expanda — es como arma los testeos
+          // el equipo. Las ubicaciones quedan automáticas (sin placements).
+          targeting_automation: { advantage_audience: 1 },
+        },
+      };
+      if (!esCbo) adsetParams.daily_budget = String(Math.round(presupuesto * 100));
+      if (estructura !== 'cbo_deep') adsetParams.bid_amount = String(Math.round(puja * 100));
+      let adset;
+      try {
+        adset = await graphPost(`${accountId}/adsets`, token, adsetParams);
+      } catch (e) {
+        resumen.errores.push(`Conjunto C${i + 1}: ${e.message}`);
+        continue;
+      }
+      const fila = { id: adset.id, name: adsetParams.name, ads: [] };
+      resumen.adsets.push(fila);
+
+      // 3. Anuncios del conjunto: creative desde el post existente + ad.
+      for (const ad of grupo) {
+        const storyId = ad.postId.includes('_') ? ad.postId : `${pageId}_${ad.postId}`;
+        const adName = ad.name || `Ad ${storyId.split('_')[1] || storyId}`;
+        try {
+          const creative = await graphPost(`${accountId}/adcreatives`, token, {
+            name: adName,
+            object_story_id: storyId,
+          });
+          const nuevo = await graphPost(`${accountId}/ads`, token, {
+            name: adName,
+            adset_id: adset.id,
+            creative: { creative_id: creative.id },
+            status: estado,
+          });
+          fila.ads.push({ name: adName, id: nuevo.id, ok: true });
+        } catch (e) {
+          fila.ads.push({ name: adName, ok: false, error: e.message });
+        }
+      }
+    }
+
+    const creados = resumen.adsets.reduce((s, x) => s + x.ads.filter(a => a.ok).length, 0);
+    return respondJSON(res, 200, {
+      ok: resumen.errores.length === 0 && creados > 0,
+      ...resumen,
+      creados,
+      estado,
+    });
+  } catch (e) {
+    // Si la campaña no llegó a crearse, no quedó nada colgado en Meta.
+    return respondJSON(res, e.status && e.status < 500 ? e.status : 500, {
+      error: e.message,
+      ...resumen,
+    });
+  }
+}
+
 // --- dispatcher ---
 
 const actions = {
@@ -2107,6 +2523,11 @@ const actions = {
   'cron-creative-refresh': handleCronCreativeRefresh,
   'resolve-ig-url': handleResolveIgUrl,
   'set-status': handleSetStatus,
+  'set-budget': handleSetBudget,
+  'campaign-breakdown': handleCampaignBreakdown,
+  'manager-table': handleManagerTable,
+  'launch-prereqs': handleLaunchPrereqs,
+  'launch-campaign': handleLaunchCampaign,
 };
 
 export default async function handler(req, res) {

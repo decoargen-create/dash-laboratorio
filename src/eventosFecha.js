@@ -20,6 +20,17 @@ export const EVENTOS_FECHA = [
   { key: 'reyes',        label: '👑 Reyes' },
 ];
 
+// Etiquetas de TIPO de tanda para las tarjetas de Producción (además de las
+// fechas comerciales de arriba): dicen de DÓNDE sale la consigna. No viajan
+// al generador de creativos — son organización del tablero nada más.
+export const ETIQUETAS_TANDA = [
+  { key: 'instagram', label: '📸 Instagram' },  // sale de referencias de IG que cargó el admin
+  { key: 'winners',   label: '⭐ Winners' },     // tanda para replicar los winners actuales
+  { key: 'ugc',       label: '🎥 UGC' },
+  { key: 'diversificacion', label: '🧪 Diversificación' },
+  { key: 'evergreen', label: '🌿 Evergreen' },
+];
+
 export function eventoLabel(key) {
   return EVENTOS_FECHA.find(e => e.key === key)?.label || key || '';
 }

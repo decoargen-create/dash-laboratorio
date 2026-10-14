@@ -331,7 +331,7 @@ export default function CreatorWorkspace({ user, onLogout, addToast, darkMode, t
 
   const thisWeek = weekKeyOf();
   const grupos = weeks
-    .map(wk => ({ wk, cards: listAssignments(wk).sort((a, b) => (a.productoNombre || '').localeCompare(b.productoNombre || '', 'es')) }))
+    .map(wk => ({ wk, cards: listAssignments(wk).sort((a, b) => ((a.prioridad ?? 99) - (b.prioridad ?? 99)) || (a.productoNombre || '').localeCompare(b.productoNombre || '', 'es')) }))
     .filter(g => g.cards.length > 0);
 
   const totalCards = grupos.reduce((n, g) => n + g.cards.length, 0);
@@ -517,7 +517,7 @@ export default function CreatorWorkspace({ user, onLogout, addToast, darkMode, t
                 {colsVis.map(col => {
                   const cards = allCards
                     .filter(a => columnaEfectiva(a, now) === col.key)
-                    .sort((x, y) => (y.weekKey || '').localeCompare(x.weekKey || '') || (x.productoNombre || '').localeCompare(y.productoNombre || '', 'es'));
+                    .sort((x, y) => ((x.prioridad ?? 99) - (y.prioridad ?? 99)) || (y.weekKey || '').localeCompare(x.weekKey || '') || (x.productoNombre || '').localeCompare(y.productoNombre || '', 'es'));
                   return (
                     <div key={col.key} className="rounded-2xl bg-gray-100/70 dark:bg-gray-800/40 border border-gray-200 dark:border-gray-700/60 p-2.5">
                       <div className="flex items-center gap-2 px-1 pb-2">

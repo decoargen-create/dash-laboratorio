@@ -125,7 +125,7 @@ export function Funnel({ totals, currency }) {
         <Filter size={15} className="text-brand-600 dark:text-brand-400" />
         <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Embudo de compra</h3>
         <span className="text-[10px] text-gray-400 dark:text-gray-500">
-          la barra es cuánta gente sobrevive de un paso al siguiente
+          la barra es cuánta gente llega a cada paso — solo puede achicarse
         </span>
         <span className="ml-auto text-[10px] text-gray-400 dark:text-gray-500">
           la «mayor caída» se busca de la landing para abajo — el CTR se mide contra el benchmark, no contra el resto
@@ -140,8 +140,14 @@ export function Funnel({ totals, currency }) {
           const cost = step.cost ? totals[step.cost] : null;
           const esMudo = mudos.has(step.key);
           const esPeor = step.key === worstKey;
-          // Piso de 2% para que una retención microscópica igual se vea.
-          const width = Math.max(2, Math.min(100, rate));
+          // Cascada por VOLUMEN real: cada barra mide cuánta gente LLEGÓ a ese
+          // paso, así solo puede achicarse — eso es lo intuitivo de un embudo
+          // (antes medía retención y "Vieron la landing 77%" se dibujaba más
+          // larga que Clicks). Escala raíz cuadrada: lineal, 40 compras contra
+          // 1.2M de impresiones serían un pixel invisible.
+          const maxVol = Math.max(1, ...STEPS.map(s => Number(totals[s.key] || 0)));
+          const width = value > 0 ? Math.max(4, Math.sqrt(value / maxVol) * 100) : 0;
+          const numeroAdentro = width >= 16;
           const tone = esMudo
             ? 'bg-gray-300 dark:bg-gray-600'
             : esPeor
@@ -149,39 +155,54 @@ export function Funnel({ totals, currency }) {
               : 'bg-gradient-to-r from-brand-400 to-brand-600';
 
           return (
-            <li key={step.key} className="px-4 py-3">
-              <div className="flex items-center gap-2 flex-wrap mb-1.5">
-                <Icon size={14} className="text-gray-400 shrink-0" />
-                <span className="text-xs font-bold text-gray-900 dark:text-gray-100" title={step.help}>
-                  {step.label}
+            <li key={step.key} className="px-4 py-2.5">
+              <div className="grid items-center gap-x-3 gap-y-1 grid-cols-[136px_minmax(0,1fr)] md:grid-cols-[160px_minmax(0,1fr)_230px]">
+                <span className="flex items-center justify-end gap-1.5 min-w-0">
+                  <Icon size={13} className="text-gray-400 shrink-0" />
+                  <span className="text-xs font-bold text-gray-900 dark:text-gray-100 truncate" title={step.help}>
+                    {step.label}
+                  </span>
                 </span>
-                {i > 0 && !esMudo && (
-                  <span className={`text-[10px] font-bold tabular-nums ${esPeor ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'}`}>
-                    {fmtPct(rate, rate < 10 ? 2 : 1)} del paso anterior
-                  </span>
-                )}
-                {esPeor && (
-                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold rounded bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300">
-                    <TrendingDown size={9} /> mayor caída
-                  </span>
-                )}
-                {esMudo && (
-                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold rounded bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300"
-                    title="Hay compras registradas pero este evento llega en cero: casi seguro el pixel no lo está mandando.">
-                    <AlertTriangle size={9} /> el pixel no manda este evento
-                  </span>
-                )}
-                <span className="ml-auto text-sm font-bold tabular-nums text-gray-900 dark:text-gray-100">
-                  {esMudo ? '—' : fmtNum(value)}
+                <div className="flex items-center gap-2 min-w-0">
+                  {value > 0 || esMudo ? (
+                    <div className={`h-[22px] rounded-md flex items-center px-2 transition-all duration-500 shrink-0 ${tone}`}
+                      style={{ width: `${Math.max(width, 4)}%`, minWidth: numeroAdentro ? 0 : 10 }}>
+                      {numeroAdentro && !esMudo && (
+                        <span className="text-[11px] font-bold tabular-nums text-white whitespace-nowrap">{fmtNum(value)}</span>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="h-[22px] w-1.5 rounded-md bg-gray-200 dark:bg-gray-700 shrink-0" />
+                  )}
+                  {(!numeroAdentro || esMudo) && (
+                    <span className="text-[11px] font-bold tabular-nums text-gray-900 dark:text-gray-100 whitespace-nowrap">
+                      {esMudo ? '—' : fmtNum(value)}
+                    </span>
+                  )}
+                </div>
+                <span className="flex items-center gap-2 flex-wrap justify-start md:justify-end col-start-2 md:col-start-3">
+                  {i > 0 && !esMudo && (
+                    <span className={`text-[10px] font-bold tabular-nums whitespace-nowrap ${esPeor ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'}`}>
+                      {fmtPct(rate, rate < 10 ? 2 : 1)} del paso anterior
+                    </span>
+                  )}
+                  {esPeor && (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold rounded bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 whitespace-nowrap">
+                      <TrendingDown size={9} /> mayor caída
+                    </span>
+                  )}
+                  {esMudo && (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold rounded bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 whitespace-nowrap"
+                      title="Hay compras registradas pero este evento llega en cero: casi seguro el pixel no lo está mandando.">
+                      <AlertTriangle size={9} /> el pixel no manda este evento
+                    </span>
+                  )}
+                  {cost != null && !esMudo && value > 0 && (
+                    <span className="text-[10px] text-gray-500 dark:text-gray-400 tabular-nums whitespace-nowrap">
+                      {fmtMoney(cost, currency)} c/u
+                    </span>
+                  )}
                 </span>
-                {cost != null && !esMudo && value > 0 && (
-                  <span className="text-[10px] text-gray-500 dark:text-gray-400 tabular-nums w-24 text-right">
-                    {fmtMoney(cost, currency)} c/u
-                  </span>
-                )}
-              </div>
-              <div className="h-2 bg-gray-100 dark:bg-gray-900 rounded-full overflow-hidden">
-                <div className={`h-full rounded-full transition-all duration-500 ${tone}`} style={{ width: `${width}%` }} />
               </div>
             </li>
           );

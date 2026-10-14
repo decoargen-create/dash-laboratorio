@@ -27,7 +27,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   Loader2, RefreshCw, AlertCircle, ChevronDown, ChevronRight, Plug, X,
   FlaskConical, Radar, Gauge, SlidersHorizontal, ExternalLink, Clock, Filter,
-  Pause, Play, AlertTriangle, Trophy, Film, BookmarkPlus, Check,
+  Pause, Play, AlertTriangle, Trophy, Film, BookmarkPlus, Check, Pencil, CalendarDays, Rocket, Table2,
 } from 'lucide-react';
 import {
   useMetaConnections, useMetaAdAccounts, authHeaders, openMetaConnect,
@@ -39,10 +39,14 @@ import {
   fusionarConFotos, cohortesParaCongelar, fotoDeCohorte,
 } from './testeosCore.js';
 import { cargarCfg, guardarCfg, cargarFotos, guardarFotos, leerCfgLocal } from './testeosStore.js';
+import { alertDialog } from './dialogs.jsx';
+import { supabase } from './supabase.js';
+import MenuFecha from './MenuFecha.jsx';
+import PublicarCampana from './PublicarCampana.jsx';
 import { referenciasApi } from './referenciasApi.js';
 import { fetchMeta, leerCacheMeta, pathTestingInsights, pathAdsWithInsights, recordarConnId } from './metricasCache.js';
 import { VistaEmbudo } from './EmbudoVista.jsx';
-import { cambiarEstado, inverso, estadoVisible, entregaDe } from './testeosAcciones.js';
+import { cambiarEstado, cambiarPresupuesto, inverso, estadoVisible, entregaDe } from './testeosAcciones.js';
 import { deriveFunnelRates } from '../api/meta/_funnel.js';
 
 // Las claves siguen diciendo "testeos" a propósito: renombrarlas le borraría
@@ -171,6 +175,443 @@ function Pill({ tone, children }) {
     up: 'bg-emerald-500 text-white dark:bg-emerald-500 dark:text-white shadow-sm',
   }[tone] || 'bg-gray-100 dark:bg-gray-700 text-gray-600';
   return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold whitespace-nowrap ${t}`}>{children}</span>;
+}
+
+// Columna Presupuesto: muestra el diario y, como en Meta, DOBLE CLICK para
+// editarlo ahí mismo (Enter guarda, Esc cancela). Solo entidades con
+// presupuesto diario propio — en ABO vive en el conjunto y acá se muestra
+// solo el % consumido.
+function PresupuestoCell({ a, p, cfg, currency, nivel, override, onGuardar }) {
+  const [editando, setEditando] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [guardando, setGuardando] = useState(false);
+  const monto = override ?? (a.dailyBudget != null ? Number(a.dailyBudget) : null);
+  const editable = nivel === 'campaigns' && monto != null && typeof onGuardar === 'function';
+
+  const abrir = () => {
+    if (!editable) return;
+    setDraft(String(Math.round(monto)));
+    setEditando(true);
+  };
+  const guardar = async () => {
+    // "45.000" (puntos de miles) o "45000,50" → número.
+    const v = Number(String(draft).replace(/[^\d.,]/g, '').replace(/\./g, '').replace(',', '.'));
+    if (!Number.isFinite(v) || v <= 0 || Math.round(v) === Math.round(monto)) { setEditando(false); return; }
+    setGuardando(true);
+    const ok = await onGuardar({ id: a.id, level: 'campaign', dailyBudget: v });
+    setGuardando(false);
+    if (ok) setEditando(false);
+  };
+
+  if (editando) {
+    return (
+      <span className="inline-flex items-center gap-1">
+        <input autoFocus value={draft} onChange={e => setDraft(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') guardar(); if (e.key === 'Escape') setEditando(false); }}
+          onBlur={() => { if (!guardando) setEditando(false); }}
+          className="w-24 px-1.5 py-0.5 text-[11.5px] text-right tabular-nums bg-white dark:bg-gray-900 border border-brand-400 rounded focus:outline-none focus:ring-1 focus:ring-brand-500" />
+        {guardando
+          ? <Loader2 size={11} className="animate-spin text-gray-400" />
+          : <button onMouseDown={e => { e.preventDefault(); guardar(); }}
+              className="text-emerald-600 dark:text-emerald-400 text-[12px] font-bold" title="Guardar (Enter)">✓</button>}
+      </span>
+    );
+  }
+
+  return (
+    <span className={editable ? 'cursor-pointer' : ''} onDoubleClick={abrir}
+      title={editable ? 'Doble click para cambiar el presupuesto diario — como en Meta' : undefined}>
+      {monto != null ? (
+        <span className="inline-flex flex-col items-end leading-tight">
+          <span className="tabular-nums font-semibold text-gray-700 dark:text-gray-200 text-[11.5px]">
+            {fmtM(monto, currency)} <span className="text-[9px] text-gray-400 font-normal">/ día</span>
+            {editable && <Pencil size={9} className="inline ml-1 text-gray-400 opacity-50" />}
+          </span>
+          {p.consumidoPct != null && (
+            <span className="inline-flex items-center gap-1">
+              <span className="tabular-nums text-[9.5px] text-gray-400">{fmtP(p.consumidoPct)}</span>
+              <Bar pct={p.consumidoPct} tone={p.consumidoPct >= cfg.consumoAltoPct ? 'warn' : undefined} />
+            </span>
+          )}
+        </span>
+      ) : p.consumidoPct != null ? (
+        <span className="inline-flex items-center gap-1.5">
+          <span className="tabular-nums text-[10.5px] text-gray-500">{fmtP(p.consumidoPct)}</span>
+          <Bar pct={p.consumidoPct} tone={p.consumidoPct >= cfg.consumoAltoPct ? 'warn' : undefined} />
+        </span>
+      ) : <span className="text-gray-400">—</span>}
+    </span>
+  );
+}
+
+// Pestaña "Campañas y anuncios": la tabla clásica del Ads Manager por niveles
+// (Campañas / Conjuntos / Anuncios) con la ventana elegida arriba, buscador,
+// orden por columna, toggles reales, presupuesto editable con doble click y
+// fila de totales al pie. Cachea por (cuenta, nivel, ventana) y refresca atrás.
+function VistaManager({ accountId, connId, currency, preset, presupuestos, onPresupuesto }) {
+  const [nivel, setNivel] = useState('campaign');
+  const [data, setData] = useState(null);
+  const [cargando, setCargando] = useState(false);
+  const [err, setErr] = useState(null);
+  const [q, setQ] = useState('');
+  const [orden, setOrden] = useState({ k: 'spend', dir: 1 });
+  const [estados, setEstados] = useState({});
+  const [busy, setBusy] = useState({});
+  const cacheRef = useRef({});
+
+  useEffect(() => {
+    if (!accountId) return;
+    const key = `${accountId}|${nivel}|${preset}`;
+    let muerto = false;
+    setErr(null);
+    if (cacheRef.current[key]) setData(cacheRef.current[key]);
+    else setData(null);
+    setCargando(true);
+    (async () => {
+      try {
+        const qs = new URLSearchParams({ account_id: accountId, level: nivel, date_preset: preset });
+        if (connId && connId !== '__cookie__') qs.set('connection_id', connId);
+        const r = await fetch(`/api/meta/manager-table?${qs}`, { headers: await authHeaders(false) });
+        const d = await r.json().catch(() => ({}));
+        if (muerto) return;
+        if (!r.ok || d.error) setErr(d.error || `Error ${r.status}`);
+        else { cacheRef.current[key] = d; setData(d); }
+      } catch (e) { if (!muerto) setErr(e.message); }
+      finally { if (!muerto) setCargando(false); }
+    })();
+    return () => { muerto = true; };
+  }, [accountId, connId, nivel, preset]);
+
+  const estadoDe = (r) => estados[r.id] || r.effectiveStatus;
+  const togglear = async (row) => {
+    const nuevo = estadoDe(row) === 'ACTIVE' ? 'PAUSED' : 'ACTIVE';
+    setBusy(prev => ({ ...prev, [row.id]: true }));
+    const r = await cambiarEstado({ accountId, connId, level: nivel, ids: [row.id], status: nuevo });
+    setBusy(prev => { const n = { ...prev }; delete n[row.id]; return n; });
+    if (r.ok) setEstados(prev => ({ ...prev, [row.id]: nuevo }));
+  };
+
+  const clickOrden = (k) => setOrden(o => o.k === k ? { k, dir: -o.dir } : { k, dir: 1 });
+  const flecha = (k) => orden.k === k ? (orden.dir === 1 ? ' ↓' : ' ↑') : '';
+  const thSort = (k, label, title) => (
+    <th key={k} onClick={() => clickOrden(k)} title={title || label}
+      className="text-right font-bold px-2 py-2 cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-200 transition whitespace-nowrap">
+      {label}{flecha(k)}
+    </th>
+  );
+
+  const filas = (data?.rows || [])
+    .filter(r => !q || r.name.toLowerCase().includes(q) || (r.sub || '').toLowerCase().includes(q))
+    .sort((a, b) => orden.dir * ((Number(b[orden.k]) || 0) - (Number(a[orden.k]) || 0)));
+  const t = data?.totals;
+
+  const NIVELES_UI = [
+    { id: 'campaign', label: 'Campañas' },
+    { id: 'adset', label: 'Conjuntos' },
+    { id: 'ad', label: 'Anuncios' },
+  ];
+
+  return (
+    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
+      <div className="flex items-center gap-2 px-3.5 py-2.5 border-b border-gray-100 dark:border-gray-700/60 flex-wrap">
+        <div className="inline-flex gap-0.5 p-0.5 rounded-lg bg-gray-100 dark:bg-gray-900 border border-gray-200 dark:border-gray-700">
+          {NIVELES_UI.map(n => (
+            <button key={n.id} onClick={() => setNivel(n.id)}
+              className={`px-3 py-1 text-[11.5px] font-bold rounded-md transition ${
+                nivel === n.id ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}>
+              {n.label}{data && nivel === n.id ? ` · ${filas.length}` : ''}
+            </button>
+          ))}
+        </div>
+        <div className="relative flex-1 min-w-[160px] max-w-[280px]">
+          <input value={q} onChange={e => setQ(e.target.value.trim().toLowerCase())} placeholder="Buscar por nombre…"
+            className="w-full px-3 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-full focus:outline-none focus:ring-2 focus:ring-[#1877F2]" />
+        </div>
+        {cargando && <span className="inline-flex items-center gap-1.5 text-[11px] text-gray-400"><Loader2 size={11} className="animate-spin" /> Actualizando…</span>}
+        <span className="ml-auto text-[10.5px] text-gray-400">click en las columnas para ordenar</span>
+      </div>
+
+      {err ? (
+        <div className="p-6 text-sm text-red-600 dark:text-red-400 flex items-center gap-2"><AlertCircle size={15} /> {err}</div>
+      ) : !data ? (
+        <div className="p-4 space-y-2">
+          {[0, 1, 2, 3, 4].map(i => <div key={i} className="h-10 rounded-lg bg-gray-100 dark:bg-gray-900 animate-pulse" style={{ animationDelay: `${i * 120}ms` }} />)}
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs min-w-[860px]">
+            <thead>
+              <tr className="bg-gray-50 dark:bg-gray-900/50 text-gray-400 text-[9.5px] uppercase tracking-wider">
+                <th className="px-3 py-2 w-10" />
+                <th className="text-left font-bold px-2 py-2">Nombre</th>
+                <th className="text-left font-bold px-2 py-2">Entrega</th>
+                <th className="text-right font-bold px-2 py-2">Presupuesto</th>
+                {thSort('compras', 'Compras')}
+                {thSort('cpa', 'Costo por compra')}
+                {thSort('spend', 'Importe gastado')}
+                {thSort('revenue', 'Valor de conversión')}
+                {thSort('roas', 'ROAS (compras)')}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100 dark:divide-gray-700/60">
+              {filas.length === 0 && (
+                <tr><td colSpan={9} className="px-3.5 py-6 text-center text-xs text-gray-400">
+                  Sin {nivel === 'campaign' ? 'campañas' : nivel === 'adset' ? 'conjuntos' : 'anuncios'} con datos en este período{q ? ' (con ese nombre)' : ''}.
+                </td></tr>
+              )}
+              {filas.map(r => (
+                <tr key={r.id} className={`hover:bg-gray-50 dark:hover:bg-gray-900/30 ${estadoDe(r) === 'PAUSED' ? 'opacity-55' : ''}`}>
+                  <td className="px-3 py-2">
+                    <SwitchEstado estado={estadoDe(r)} trabajando={!!busy[r.id]} onCambiar={() => togglear(r)} />
+                  </td>
+                  <td className="px-2 py-2 max-w-[300px]">
+                    <span className="block font-semibold text-gray-900 dark:text-gray-100 truncate" title={r.name}>{r.name}</span>
+                    {r.sub && <span className="block text-[10px] text-gray-400 truncate" title={r.sub}>{r.sub}</span>}
+                  </td>
+                  <td className="px-2 py-2 whitespace-nowrap">
+                    <span className={`inline-flex items-center gap-1.5 text-[11px] font-semibold ${estadoDe(r) === 'ACTIVE' ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-400'}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${estadoDe(r) === 'ACTIVE' ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+                      {estadoDe(r) === 'ACTIVE' ? 'Activo' : 'Desactivado'}
+                    </span>
+                  </td>
+                  <td className="px-2 py-2 text-right whitespace-nowrap">
+                    {nivel !== 'ad' && r.dailyBudget != null ? (
+                      <PresupuestoCell a={{ id: r.id, dailyBudget: r.dailyBudget }} p={{}} cfg={{}} currency={currency}
+                        nivel="campaigns" override={presupuestos?.[r.id]}
+                        onGuardar={onPresupuesto ? ({ id, dailyBudget }) => onPresupuesto({ id, level: nivel === 'adset' ? 'adset' : 'campaign', dailyBudget }) : null} />
+                    ) : <span className="text-gray-400">—</span>}
+                  </td>
+                  <td className="px-2 py-2 text-right tabular-nums font-semibold text-gray-700 dark:text-gray-200">{r.compras || '—'}</td>
+                  <td className="px-2 py-2 text-right tabular-nums text-gray-600 dark:text-gray-300">{r.cpa != null ? fmtM(r.cpa, currency) : '—'}</td>
+                  <td className="px-2 py-2 text-right tabular-nums font-semibold text-gray-700 dark:text-gray-200">{fmtM(r.spend, currency)}</td>
+                  <td className="px-2 py-2 text-right tabular-nums text-gray-600 dark:text-gray-300">{r.revenue ? fmtM(r.revenue, currency) : '—'}</td>
+                  <td className={`px-2 py-2 text-right tabular-nums font-bold ${r.roas >= (cfgGlobalRoas() || 1.5) ? 'text-emerald-600 dark:text-emerald-400' : r.spend > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400'}`}>{fmtR(r.roas)}</td>
+                </tr>
+              ))}
+            </tbody>
+            {t && filas.length > 0 && (
+              <tfoot>
+                <tr className="bg-gray-50 dark:bg-gray-900/50 border-t-2 border-gray-200 dark:border-gray-700 font-bold">
+                  <td className="px-3 py-2.5" />
+                  <td className="px-2 py-2.5 text-[11px] text-gray-500" colSpan={3}>Resultados de {filas.length} {nivel === 'campaign' ? 'campañas' : nivel === 'adset' ? 'conjuntos' : 'anuncios'}</td>
+                  <td className="px-2 py-2.5 text-right tabular-nums">{t.compras}</td>
+                  <td className="px-2 py-2.5 text-right tabular-nums">{t.cpa != null ? fmtM(t.cpa, currency) : '—'}</td>
+                  <td className="px-2 py-2.5 text-right tabular-nums">{fmtM(t.spend, currency)}</td>
+                  <td className="px-2 py-2.5 text-right tabular-nums">{fmtM(t.revenue, currency)}</td>
+                  <td className={`px-2 py-2.5 text-right tabular-nums ${t.roas >= 1.5 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>{fmtR(t.roas)}</td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+// El corte de color del ROAS en la tabla Manager: el general de Reglas si está
+// en localStorage, sino 1.5 (el default del veredicto de ganador).
+function cfgGlobalRoas() {
+  try { return Number(leerCfgLocal()?.roasMaxPausar) || null; } catch { return null; }
+}
+
+// Desglose de UNA campaña al expandirla: sus conjuntos y los anuncios de cada
+// uno con los números de hoy — los niveles del Ads Manager sin salir de la
+// fila. El presupuesto de un conjunto (ABO) también se edita con doble click.
+function DesgloseCampana({ campaignId, accountId, connId, currency, presupuestos, onPresupuesto }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(null);
+  // Prender/apagar conjuntos y anuncios desde el desglose: en una ABO la
+  // optimización se hace acá, no apagando la campaña entera.
+  const [estados, setEstados] = useState({});
+  const [busy, setBusy] = useState({});
+  // Acordeón: los CONJUNTOS se ven siempre con sus métricas; los anuncios de
+  // cada uno se abren con el caret (si hay un solo conjunto, arranca abierto).
+  const [abiertos, setAbiertos] = useState({});
+  const toggle = async (item, level) => {
+    const actual = estados[item.id] || item.effectiveStatus;
+    const nuevo = actual === 'ACTIVE' ? 'PAUSED' : 'ACTIVE';
+    setBusy(prev => ({ ...prev, [item.id]: true }));
+    const r = await cambiarEstado({ accountId, connId, level, ids: [item.id], status: nuevo });
+    setBusy(prev => { const n = { ...prev }; delete n[item.id]; return n; });
+    if (r.ok) setEstados(prev => ({ ...prev, [item.id]: nuevo }));
+  };
+  const estadoDe = (item) => estados[item.id] || item.effectiveStatus;
+  useEffect(() => {
+    let muerto = false;
+    (async () => {
+      try {
+        const qs = new URLSearchParams({ account_id: accountId, campaign_id: campaignId, preset: 'today' });
+        if (connId && connId !== '__cookie__') qs.set('connection_id', connId);
+        const r = await fetch(`/api/meta/campaign-breakdown?${qs}`, { headers: await authHeaders(false) });
+        const d = await r.json().catch(() => ({}));
+        if (muerto) return;
+        if (!r.ok || d.error) setErr(d.error || `Error ${r.status}`);
+        else {
+          const lista = d.adsets || [];
+          setData(lista);
+          const conGasto = lista.filter(s => Number(s.spend) > 0);
+          setAbiertos(conGasto.length === 1 ? { [conGasto[0].id]: true } : {});
+        }
+      } catch (e) { if (!muerto) setErr(e.message); }
+    })();
+    return () => { muerto = true; };
+  }, [campaignId, accountId, connId]);
+
+  const Dot = ({ on }) => (
+    <span className={`inline-flex items-center gap-1 text-[10.5px] font-semibold ${on ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-400'}`}>
+      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${on ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+      {on ? 'Activo' : 'Desact.'}
+    </span>
+  );
+  const Num = ({ v, money = true, bold = false }) => (
+    <td className={`px-2 py-1.5 text-right tabular-nums ${bold ? 'font-semibold text-gray-700 dark:text-gray-200' : 'text-gray-600 dark:text-gray-300'}`}>
+      {v == null ? '—' : money ? fmtM(v, currency) : v}
+    </td>
+  );
+
+  if (err) return <p className="text-[11px] text-red-500 mt-2.5">Desglose: {err}</p>;
+  if (!data) return (
+    <p className="text-[11px] text-gray-400 mt-2.5 flex items-center gap-1.5">
+      <Loader2 size={11} className="animate-spin" /> Trayendo conjuntos y anuncios…
+    </p>
+  );
+  if (!data.length) return <p className="text-[11px] text-gray-400 mt-2.5">La campaña no tiene conjuntos.</p>;
+
+  // La misma regla que la tabla de arriba: sin gasto HOY no se muestra —
+  // las copias apagadas de la automatización solo ensuciaban el desglose.
+  const visibles = data.filter(s => Number(s.spend) > 0);
+  const ocultos = (data.length - visibles.length) +
+    visibles.reduce((n, s) => n + s.ads.filter(a => !(Number(a.spend) > 0)).length, 0);
+  if (!visibles.length) {
+    return <p className="text-[11px] text-gray-400 mt-2.5">Ningún conjunto con gasto hoy — {data.length} sin entrega quedaron ocultos.</p>;
+  }
+
+  return (
+    <div className="mt-3 border-t border-gray-200 dark:border-gray-700/60 pt-2">
+      <p className="text-[9.5px] font-bold uppercase tracking-[.08em] text-gray-400 mb-1">
+        Desglose · conjuntos y anuncios (hoy)
+        {ocultos > 0 && <span className="normal-case tracking-normal font-semibold"> — {ocultos} sin gasto no se muestran</span>}
+      </p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-[11.5px] min-w-[720px]">
+          <thead>
+            <tr className="text-gray-400 text-[9px] uppercase tracking-wider">
+              <th className="px-2 py-1 w-9" />
+              <th className="text-left font-bold px-2 py-1">Conjunto / anuncio</th>
+              <th className="text-left font-bold px-2 py-1">Entrega</th>
+              <th className="text-right font-bold px-2 py-1">Presupuesto</th>
+              <th className="text-right font-bold px-2 py-1">Compras</th>
+              <th className="text-right font-bold px-2 py-1">Gastado</th>
+              <th className="text-right font-bold px-2 py-1">ROAS</th>
+              <th className="text-right font-bold px-2 py-1">Costo carrito</th>
+              <th className="text-right font-bold px-2 py-1">Costo pago</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100 dark:divide-gray-700/60">
+            {visibles.map(s => (
+              <React.Fragment key={s.id}>
+                <tr className="bg-gray-50/80 dark:bg-gray-900/30">
+                  <td className="px-2 py-1.5">
+                    <SwitchEstado estado={estadoDe(s)} trabajando={!!busy[s.id]} onCambiar={() => toggle(s, 'adset')} />
+                  </td>
+                  <td className="px-2 py-1.5 font-semibold text-gray-900 dark:text-gray-100">
+                    <button onClick={() => setAbiertos(prev => ({ ...prev, [s.id]: !prev[s.id] }))}
+                      className="inline-flex items-center gap-1.5 font-semibold text-left hover:text-brand-600 dark:hover:text-brand-300 transition"
+                      title={abiertos[s.id] ? 'Ocultar los anuncios' : 'Ver los anuncios de este conjunto'}>
+                      {abiertos[s.id] ? <ChevronDown size={12} className="text-brand-500 shrink-0" /> : <ChevronRight size={12} className="text-gray-400 shrink-0" />}
+                      ▦ {s.name}
+                      <span className="text-[10px] font-semibold text-gray-400">· {s.ads.filter(x => Number(x.spend) > 0).length} anuncio{s.ads.filter(x => Number(x.spend) > 0).length === 1 ? '' : 's'}</span>
+                    </button>
+                  </td>
+                  <td className="px-2 py-1.5"><Dot on={estadoDe(s) === 'ACTIVE'} /></td>
+                  <td className="px-2 py-1.5 text-right whitespace-nowrap">
+                    {s.dailyBudget != null ? (
+                      <PresupuestoCell
+                        a={{ id: s.id, dailyBudget: s.dailyBudget }} p={{}} cfg={{}} currency={currency}
+                        nivel="campaigns" override={presupuestos?.[s.id]}
+                        onGuardar={onPresupuesto ? ({ id, dailyBudget }) => onPresupuesto({ id, level: 'adset', dailyBudget }) : null} />
+                    ) : <span className="text-gray-400" title="El presupuesto vive en la campaña (CBO)">— CBO</span>}
+                  </td>
+                  <Num v={s.compras} money={false} bold />
+                  <Num v={s.spend} bold />
+                  <td className={`px-2 py-1.5 text-right tabular-nums font-bold ${s.roas >= 1.5 ? 'text-emerald-600 dark:text-emerald-400' : s.spend > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400'}`}>{fmtR(s.roas)}</td>
+                  <Num v={s.costoATC} />
+                  <Num v={s.costoCheckout} />
+                </tr>
+                {abiertos[s.id] && s.ads.filter(x => Number(x.spend) > 0).map(ad => (
+                  <tr key={ad.id}>
+                    <td className="px-2 py-1.5 pl-5">
+                      <SwitchEstado estado={estadoDe(ad)} trabajando={!!busy[ad.id]} onCambiar={() => toggle(ad, 'ad')} />
+                    </td>
+                    <td className="px-2 py-1.5 pl-4 text-gray-700 dark:text-gray-300 max-w-[300px] truncate" title={ad.name}>▶ {ad.name}</td>
+                    <td className="px-2 py-1.5"><Dot on={estadoDe(ad) === 'ACTIVE'} /></td>
+                    <td className="px-2 py-1.5 text-right text-gray-400">—</td>
+                    <Num v={ad.compras} money={false} />
+                    <Num v={ad.spend} />
+                    <td className={`px-2 py-1.5 text-right tabular-nums font-bold ${ad.roas >= 1.5 ? 'text-emerald-600 dark:text-emerald-400' : ad.spend > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400'}`}>{fmtR(ad.roas)}</td>
+                    <Num v={ad.costoATC} />
+                    <Num v={ad.costoCheckout} />
+                  </tr>
+                ))}
+              </React.Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// Loader moderno del tablero: barra de progreso con etapas + esqueleto del
+// layout real (KPIs y filas con shimmer). El progreso es una curva asintótica
+// (nunca llega a 100 hasta que los datos aparecen y el componente se va) —
+// reemplaza al spinner con texto plano. La precarga del login (App.jsx) suele
+// evitar que esto se vea; aparece solo en la primera carga fría de una cuenta.
+function CargandoMetricas() {
+  const PASOS = [
+    'Conectando con Meta…',
+    'Trayendo las campañas del período…',
+    'Anuncios de hoy…',
+    'Performance de los últimos 7 días…',
+    'Cruzando con tus reglas y armando el tablero…',
+  ];
+  const [p, setP] = useState(4);
+  useEffect(() => {
+    const t0 = Date.now();
+    const id = setInterval(() => {
+      const s = (Date.now() - t0) / 1000;
+      setP(Math.min(93, Math.round(100 * (1 - Math.exp(-s / 3.4)))));
+    }, 150);
+    return () => clearInterval(id);
+  }, []);
+  const paso = PASOS[Math.min(PASOS.length - 1, Math.floor((p / 94) * PASOS.length))];
+  return (
+    <div className="space-y-3">
+      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-5">
+        <div className="flex items-center justify-between gap-3 mb-2.5">
+          <span className="text-xs font-semibold text-gray-700 dark:text-gray-200 flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#1877F2] animate-ping" />
+            {paso}
+          </span>
+          <span className="text-[11px] tabular-nums font-bold text-gray-400">{p}%</span>
+        </div>
+        <div className="h-2 rounded-full bg-gray-100 dark:bg-gray-900 overflow-hidden">
+          <div className="h-full rounded-full bg-gradient-to-r from-brand-500 via-[#1877F2] to-brand-400 transition-[width] duration-300 ease-out"
+            style={{ width: `${p}%` }} />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+        {[0, 1, 2, 3].map(i => (
+          <div key={i} className="h-20 rounded-xl bg-gray-100 dark:bg-gray-800 animate-pulse" style={{ animationDelay: `${i * 140}ms` }} />
+        ))}
+      </div>
+      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-3 space-y-2">
+        {[0, 1, 2, 3, 4, 5].map(i => (
+          <div key={i} className="h-9 rounded-lg bg-gray-100 dark:bg-gray-900 animate-pulse" style={{ animationDelay: `${i * 120}ms` }} />
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function Bar({ pct, tone }) {
@@ -406,10 +847,14 @@ function Criterios({ cfg, cfgRaw, setCfg, productos, productoId, currency, abier
 // ========================================================================
 // Pestaña: HOY (ronda de optimización)
 // ========================================================================
-export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisibles, productoId, currency, accountId, onWhy, nivel, setNivel, cambios, trabajando, onEstado, onRecalcular, promediosRef, historico }) {
+export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisibles, productoId, currency, accountId, connId, onWhy, nivel, setNivel, cambios, trabajando, onEstado, onRecalcular, promediosRef, historico, presupuestos, onPresupuesto }) {
   const [abierto, setAbierto] = useState(null);
   const [confirmando, setConfirmando] = useState(null);
   const [verCriterios, setVerCriterios] = useState(false);
+  // Orden de la tabla, clickeando el encabezado. Por defecto mayor Importe
+  // gastado: los que más gastan son los que más mueven el ROAS promedio de
+  // la cuenta — lo primero es ver si esos tiran para arriba o para abajo.
+  const [orden, setOrden] = useState({ k: 'spend', dir: 1 }); // dir 1 = mayor primero
 
   // Cada fila se juzga con el perfil de SU producto: el ROAS de equilibrio del
   // cepillo no es el de la crema. Antes toda la ronda usaba un corte global y
@@ -460,13 +905,27 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
     );
   }
 
-  const filas = r.evaluados.slice().sort((a, b) =>
-    (b.pausa.candidato - a.pausa.candidato) || ((b.pausa.plataEnRiesgo || 0) - (a.pausa.plataEnRiesgo || 0)));
+  // Sin gasto en el día no hay nada que juzgar NI mostrar: una campaña
+  // apagada o sin entrega con $0 solo agrega ruido a la tabla.
+  const conGasto = r.evaluados.filter(a => Number(a.insights?.spend || 0) > 0);
+  const ocultas = r.evaluados.length - conGasto.length;
+  const vOrd = (a) => orden.k === 'roas' ? (Number(a.insights?.roas) || 0) : Number(a.insights?.spend || 0);
+  const filas = conGasto.slice().sort((a, b) => orden.dir * (vOrd(b) - vOrd(a)));
+  const clickOrden = (k) => setOrden(o => o.k === k ? { k, dir: -o.dir } : { k, dir: 1 });
+  const flechaOrden = (k) => orden.k === k ? (orden.dir === 1 ? ' ↓' : ' ↑') : '';
 
   // Los candidatos que TODAVÍA están prendidos. El botón de tanda se ofrece
   // sobre estos: incluir las que ya pausaste haría que el contador mienta y
   // que confirmar un "Pausar 6" pause 2.
   const pausables = r.aPausar.filter(a => estadoVisible(a, cambios) === 'ACTIVE');
+
+  // Termómetro del día: qué % de la inversión de HOY se fue a lo que está
+  // para pausar. No es lo mismo pausar 69K gastando 765K (9%, un día normal)
+  // que gastando 150K (46%, la cuenta viene mal y hay que achicar). Umbral:
+  // sano < 15%, atención 15–30%, alarma > 30%.
+  const gastoMalo = r.aPausar.reduce((s, a) => s + Number(a.insights?.spend || 0), 0);
+  const pctMalo = r.promedios.spend > 0 ? (gastoMalo / r.promedios.spend) * 100 : 0;
+  const tonoMalo = pctMalo >= 30 ? 'bad' : pctMalo >= 15 ? 'warn' : 'ok';
 
   // Cuántas filas de esta vista cambiaron de estado en esta sesión. Los KPIs de
   // arriba se calcularon con los datos que trajo Meta ANTES de esos cambios,
@@ -507,6 +966,10 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
           <Why k="plataEnRiesgo" cfg={cfg} currency={currency} onOpen={onWhy}
             datos={r.aPausar[0]?.pausa ? { ...r.aPausar[0].pausa, gastoHoy: r.aPausar[0].insights.spend } : {}} />
         </Kpi>
+        <Kpi label="Mal invertido hoy" value={fmtP(pctMalo)} tone={tonoMalo}
+          sub={r.aPausar.length
+            ? `${fmtM(gastoMalo, currency)} de ${fmtM(r.promedios.spend, currency)} se fue a lo marcado para pausar · sano < 15%`
+            : 'nada para pausar — el gasto está sano'} />
         <Kpi label="Gastado hoy" value={fmtM(r.promedios.spend, currency)}
           sub={`${ads.length} anuncios con entrega`} />
         <Kpi label="ROAS del día" value={fmtR(r.promedios.roas)}
@@ -528,7 +991,7 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
         <div className="flex items-center gap-2 px-3.5 py-2.5 border-b border-gray-100 dark:border-gray-700/60 flex-wrap">
           <h3 className="text-[13px] font-bold text-gray-900 dark:text-gray-100">Ronda de optimización</h3>
           <Why k="pausar" cfg={cfg} currency={currency} onOpen={onWhy} datos={{}} />
-          <span className="text-[10.5px] text-gray-400">ordenado por la plata que está en juego</span>
+          <span className="text-[10.5px] text-gray-400">ordenado por importe gastado — click en las columnas para cambiar</span>
           <span className="ml-auto flex items-center gap-2">
             {selectorNivel}
             {pausables.length > 0 && (
@@ -551,16 +1014,24 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
                 <th className="text-left font-bold px-3.5 py-2">{esCampana ? 'Campaña' : 'Anuncio'}</th>
                 <th className="text-left font-bold px-2 py-2">Entrega</th>
                 <th className="text-left font-bold px-2 py-2">Veredicto</th>
-                <th className="text-right font-bold px-2 py-2" title="Lo que Meta llama «Importe gastado»">Importe gastado</th>
-                <th className="text-right font-bold px-2 py-2" title="Lo que Meta llama «ROAS de compras»">ROAS de compras</th>
+                <th className="text-right font-bold px-2 py-2 cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-200 transition"
+                  title="Lo que Meta llama «Importe gastado» — click para ordenar por mayor/menor"
+                  onClick={() => clickOrden('spend')}>Importe gastado{flechaOrden('spend')}</th>
+                <th className="text-right font-bold px-2 py-2 cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-200 transition"
+                  title="Lo que Meta llama «ROAS de compras» — click para ordenar por mayor/menor"
+                  onClick={() => clickOrden('roas')}>ROAS de compras{flechaOrden('roas')}</th>
                 <th className="text-right font-bold px-2 py-2" title="Costo por agregar al carrito">Costo p/ carrito</th>
                 <th className="text-right font-bold px-2 py-2" title="Costo por pago iniciado">Costo p/ pago</th>
                 <th className="text-right font-bold px-2 py-2">Presupuesto</th>
-                <th className="text-right font-bold px-2 py-2">En juego</th>
                 <th className="px-2 py-2" />
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-gray-700/60">
+              {filas.length === 0 && (
+                <tr><td colSpan={9} className="px-3.5 py-6 text-center text-xs text-gray-400">
+                  Ninguna {esCampana ? 'campaña' : 'anuncio'} con gasto hoy{ocultas > 0 ? ` — ${ocultas} sin entrega quedaron ocultas` : ''}.
+                </td></tr>
+              )}
               {filas.map(a => {
                 const p = a.pausa, i = a.insights;
                 const open = abierto === a.id;
@@ -581,11 +1052,9 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
                   : sinDatos ? 'Sin datos aún' : 'Va bien';
                 // Franja + fondo por veredicto: rojo suave = apagar, ámbar =
                 // seguir de cerca, verde = va bien, verde fuerte = escalar.
-                const tinte = tone === 'bad' ? 'bg-red-500/[0.06] dark:bg-red-500/[0.08]'
-                  : tone === 'warn' ? 'bg-amber-400/[0.07] dark:bg-amber-400/[0.08]'
-                  : tone === 'up' ? 'bg-emerald-500/[0.12] dark:bg-emerald-500/[0.13]'
-                  : tone === 'ok' ? 'bg-emerald-500/[0.04] dark:bg-emerald-500/[0.05]'
-                  : '';
+                // Formal, tipo planilla: sin fondos tintados por fila — el color
+                // queda en la franja izquierda y en la pastilla del veredicto.
+                const tinte = '';
                 const franja = tone === 'bad' ? 'border-l-[3px] border-l-red-400/80'
                   : tone === 'warn' ? 'border-l-[3px] border-l-amber-400/80'
                   : tone === 'up' ? 'border-l-[3px] border-l-emerald-500'
@@ -605,60 +1074,76 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
                           />
                           {open ? <ChevronDown size={13} className="text-brand-500 shrink-0" /> : <ChevronRight size={13} className="text-gray-400 shrink-0" />}
                           <span className="min-w-0">
-                            <span className="block font-semibold text-gray-900 dark:text-gray-100 truncate">{a.name}</span>
+                            <span className="flex items-center gap-1.5 min-w-0">
+                              <span className="font-semibold text-gray-900 dark:text-gray-100 truncate">{a.name}</span>
+                              {esCampana && a.dailyBudget == null && a.lifetimeBudget == null && (
+                                <span className="shrink-0 px-1.5 py-0.5 rounded text-[8.5px] font-bold bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300"
+                                  title="ABO: el presupuesto vive en los conjuntos. Expandí la fila para optimizar conjunto por conjunto (prender/apagar y presupuesto).">
+                                  ABO · por conjunto
+                                </span>
+                              )}
+                            </span>
                             {!esCampana && <span className="block text-[10px] text-gray-400 truncate">{a.campaignName}</span>}
                           </span>
                         </div>
                       </td>
                       <td className="px-2 py-2"><Entrega item={a} cambios={cambios} /></td>
                       <td className="px-2 py-2"><Pill tone={tone}>{label}</Pill></td>
-                      <td className="px-2 py-2 text-right tabular-nums font-semibold text-gray-900 dark:text-gray-100">{fmtM(i.spend, currency)}</td>
-                      <td className={`px-2 py-2 text-right tabular-nums font-semibold ${i.roas >= p.cortes?.roasMaxPausar ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>{fmtR(i.roas)}</td>
+                      <td className="px-2 py-2 text-right tabular-nums font-semibold text-gray-900 dark:text-gray-100">
+                        {fmtM(i.spend, currency)}
+                        {r.promedios.spend > 0 && i.spend > 0 && (
+                          <span className="block text-[9px] font-semibold text-gray-400"
+                            title="Qué parte de la inversión de hoy se lleva — a mayor peso, más mueve el ROAS promedio de la cuenta.">
+                            {fmtP(i.spend / r.promedios.spend * 100)} del total
+                          </span>
+                        )}
+                      </td>
+                      {/* Verde/rojo contra el ROAS de equilibrio de SU producto (antes
+                          comparaba contra p.cortes, que no existe → siempre rojo). */}
+                      <td className={`px-2 py-2 text-right tabular-nums font-semibold whitespace-nowrap ${i.roas >= (a.cfgUsada?.roasMaxPausar ?? cfg.roasMaxPausar) ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                        {fmtR(i.roas)}
+                        {i.spend > 0 && r.promedios.roas > 0 && (
+                          i.roas >= r.promedios.roas
+                            ? <span className="ml-1 text-emerald-500" title={`Te SUBE el ROAS promedio de la cuenta (hoy: ${fmtR(r.promedios.roas)})`}>▲</span>
+                            : <span className="ml-1 text-red-500" title={`Te BAJA el ROAS promedio de la cuenta (hoy: ${fmtR(r.promedios.roas)})`}>▼</span>
+                        )}
+                      </td>
                       <td className="px-2 py-2 text-right tabular-nums text-gray-600 dark:text-gray-300">{p.costoATC != null ? fmtM(p.costoATC, currency) : '—'}</td>
                       <td className="px-2 py-2 text-right tabular-nums text-gray-600 dark:text-gray-300">{p.costoCheckout != null ? fmtM(p.costoCheckout, currency) : '—'}</td>
                       <td className="px-2 py-2 text-right whitespace-nowrap">
-                        {p.consumidoPct != null ? (
-                          <><span className="tabular-nums text-[10.5px] text-gray-500 mr-1.5">{fmtP(p.consumidoPct)}</span>
-                            <Bar pct={p.consumidoPct} tone={p.consumidoPct >= cfg.consumoAltoPct ? 'warn' : undefined} /></>
-                        ) : <span className="text-gray-400">—</span>}
-                      </td>
-                      <td className={`px-2 py-2 text-right tabular-nums font-bold ${p.accion === 'pausar' ? 'text-red-600 dark:text-red-400' : 'text-gray-400'}`}>
-                        {p.restante != null ? fmtM(p.restante, currency) : '—'}
-                        {p.restante != null && p.accion === 'pausar' && (
-                          <span className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide"
-                            title={p.efecto === 'redirige'
-                              ? 'El presupuesto es de la campaña: pausarlo no ahorra, manda esa plata a los otros anuncios.'
-                              : 'El presupuesto es propio: pausarlo lo ahorra.'}>
-                            {p.efecto === 'redirige' ? 'se redirige' : 'se ahorra'}
-                          </span>
-                        )}
+                        <PresupuestoCell a={a} p={p} cfg={cfg} currency={currency} nivel={nivel}
+                          override={presupuestos?.[a.id]} onGuardar={onPresupuesto} />
                       </td>
                       <td className="px-2 py-2 text-right"><MetaLink nivel={nivel} ids={[a.id]} accountId={accountId}>Meta</MetaLink></td>
                     </tr>
                     {open && (
-                      <tr><td colSpan={10} className="bg-gray-50/60 dark:bg-gray-900/40 px-3.5 py-3">
+                      <tr><td colSpan={9} className="bg-gray-50/60 dark:bg-gray-900/40 px-3.5 py-3">
                         <div className="pl-5 space-y-1.5">
-                          {p.condiciones.map((c, n) => (
-                            <div key={n} className={`flex items-start gap-2 text-[11.5px] ${c.cuenta === false ? 'opacity-45' : ''}`}>
-                              <span className={`w-[15px] h-[15px] rounded-full grid place-items-center text-[9px] font-bold shrink-0 mt-px ${
-                                c.cuenta === false ? 'bg-gray-200 dark:bg-gray-700 text-gray-400'
-                                  : c.ok ? 'bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400' : 'bg-gray-200 dark:bg-gray-700 text-gray-400'}`}>
-                                {c.cuenta === false ? '–' : c.ok ? '✓' : '·'}
-                              </span>
-                              <span className="text-gray-600 dark:text-gray-300">
-                                {c.texto}
-                                {c.cuenta === false && <span className="text-gray-400"> · apagada en los criterios</span>}
-                              </span>
-                            </div>
-                          ))}
-                          <p className="text-[11px] text-gray-500 dark:text-gray-400 border-l-2 border-gray-200 dark:border-gray-700 pl-2.5 mt-2 flex items-center gap-1.5 flex-wrap">
+                          {/* Al expandir una CAMPAÑA va directo el desglose por conjuntos
+                              (pedido de Lucas: sin el checklist técnico de criterios — el
+                              porqué del veredicto queda en una línea y en el ⓘ). */}
+                          <p className="text-[11px] text-gray-500 dark:text-gray-400 flex items-center gap-1.5 flex-wrap">
                             {p.motivoAccion || (opp.es ? opp.motivo : 'No está en la mira: gastó poco o el ROAS está sobre el corte.')}
-                            {p.compartido && <span className="text-gray-400">· presupuesto compartido a nivel {p.nivelPresupuesto || 'campaña'}</span>}
-                            {a.cfgUsada?.roasMaxPausar != null && a.cfgUsada.roasMaxPausar !== cfg.roasMaxPausar && (
-                              <span className="text-gray-400">· juzgada con el ROAS de equilibrio de su producto ({fmtR(a.cfgUsada.roasMaxPausar)})</span>
-                            )}
                             <Why k="plataEnRiesgo" cfg={cfg} currency={currency} onOpen={onWhy} datos={{ ...p, gastoHoy: i.spend }} />
                           </p>
+                          {esCampana ? (
+                            <DesgloseCampana campaignId={a.id} accountId={accountId} connId={connId} currency={currency}
+                              presupuestos={presupuestos} onPresupuesto={onPresupuesto} />
+                          ) : (
+                            p.condiciones.map((c, n) => (
+                              <div key={n} className={`flex items-start gap-2 text-[11.5px] ${c.cuenta === false ? 'opacity-45' : ''}`}>
+                                <span className={`w-[15px] h-[15px] rounded-full grid place-items-center text-[9px] font-bold shrink-0 mt-px ${
+                                  c.cuenta === false ? 'bg-gray-200 dark:bg-gray-700 text-gray-400'
+                                    : c.ok ? 'bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400' : 'bg-gray-200 dark:bg-gray-700 text-gray-400'}`}>
+                                  {c.cuenta === false ? '–' : c.ok ? '✓' : '·'}
+                                </span>
+                                <span className="text-gray-600 dark:text-gray-300">
+                                  {c.texto}
+                                  {c.cuenta === false && <span className="text-gray-400"> · apagada en los criterios</span>}
+                                </span>
+                              </div>
+                            ))
+                          )}
                         </div>
                       </td></tr>
                     )}
@@ -668,6 +1153,11 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
             </tbody>
           </table>
         </div>
+        {ocultas > 0 && filas.length > 0 && (
+          <p className="px-3.5 py-2 border-t border-gray-100 dark:border-gray-700/60 text-[10.5px] text-gray-400">
+            {ocultas} {esCampana ? (ocultas === 1 ? 'campaña' : 'campañas') : (ocultas === 1 ? 'anuncio' : 'anuncios')} con $0 de gasto hoy (sin entrega) no se muestran.
+          </p>
+        )}
         {tocadas > 0 && (
           <div className="flex items-center gap-2 flex-wrap px-3.5 py-2 border-t border-gray-100 dark:border-gray-700/60 text-[11px] bg-amber-50/70 dark:bg-amber-900/20 text-amber-800 dark:text-amber-200">
             <AlertTriangle size={12} className="shrink-0" />
@@ -805,7 +1295,7 @@ function VistaSemanas({ campaigns, cfg, productos, productoId, currency, account
                             <Why k="foto" cfg={cfg} currency={currency} onOpen={onWhy} datos={f} />
                           </span>
                           <span className="block text-[10px] text-gray-400">
-                            {f.lanzadas} {etapa === 'testeo' ? 'testeo' : 'campaña'}{f.lanzadas === 1 ? '' : 's'} · {f.activas} sigue{f.activas === 1 ? '' : 'n'} prendida{f.activas === 1 ? '' : 's'}
+                            {f.lanzadas} {etapa === 'testeo' ? 'testeo' : 'campaña'}{f.lanzadas === 1 ? '' : 's'} · {f.activas} sigue{f.activas === 1 ? '' : 'n'} prendida{f.activas === 1 ? '' : 's'}{f.programadas > 0 && <> · {f.programadas} programada{f.programadas === 1 ? '' : 's'}</>}
                           </span>
                         </span>
                       </div>
@@ -830,27 +1320,95 @@ function VistaSemanas({ campaigns, cfg, productos, productoId, currency, account
                   </tr>
                   {open && (
                     <tr><td colSpan={9} className="bg-gray-50/60 dark:bg-gray-900/40 px-3.5 py-3">
-                      <div className="pl-5 space-y-1.5">
-                        {f.items.map(c => (
-                          <div key={c.id} className="flex items-center gap-2 text-[11.5px] flex-wrap">
-                            <span className="font-semibold text-gray-900 dark:text-gray-100">{c.name}</span>
-                            {etapa === 'todas' && c.etapa && (
-                              <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
-                                c.etapa === 'preescala' ? 'bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300'
-                                  : c.etapa === 'escala' ? 'bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300'
-                                  : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'}`}>
-                                {c.etapa === 'preescala' ? '🚀 preescala' : c.etapa === 'escala' ? '📈 escala' : '🧪 testeo'}
-                              </span>
-                            )}
-                            <span className="text-gray-500 dark:text-gray-400">· {c.veredicto.motivo}</span>
-                            {c.producto && <span className="text-gray-400">· {c.producto.nombre}</span>}
-                            <Pill tone={c.veredicto.estado === 'ganador' ? 'ok' : c.veredicto.estado === 'perdedor' ? 'bad' : 'mute'}>
-                              {c.veredicto.estado === 'ganador' ? 'Ganadora' : c.veredicto.estado === 'perdedor' ? 'Perdedora' : 'Sin datos'}
-                            </Pill>
-                            <span className="tabular-nums text-gray-500 ml-auto">{fmtM(c.insights?.spend, currency)}</span>
-                            <MetaLink nivel="campaigns" ids={[c.id]} accountId={accountId}>Meta</MetaLink>
-                          </div>
-                        ))}
+                      <div className="pl-5 overflow-x-auto">
+                        <table className="w-full text-xs min-w-[780px]">
+                          <thead>
+                            <tr className="text-gray-400 text-[9.5px] uppercase tracking-wider">
+                              <th className="text-left font-bold px-2 py-1.5">Campaña</th>
+                              <th className="text-left font-bold px-2 py-1.5">Entrega</th>
+                              <th className="text-left font-bold px-2 py-1.5">Veredicto</th>
+                              <th className="text-right font-bold px-2 py-1.5">Compras</th>
+                              <th className="text-right font-bold px-2 py-1.5">Importe gastado</th>
+                              <th className="text-right font-bold px-2 py-1.5">ROAS de compras</th>
+                              <th className="text-right font-bold px-2 py-1.5">CPA</th>
+                              <th className="text-right font-bold px-2 py-1.5">Costo p/ carrito</th>
+                              <th className="text-right font-bold px-2 py-1.5">Costo p/ pago</th>
+                              <th className="px-2 py-1.5" />
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100 dark:divide-gray-700/60">
+                            {f.items.map(c => {
+                              // Las mismas métricas y el mismo formato que la tabla de
+                              // "Hoy — qué pausar", filtradas a las campañas de ESTA semana.
+                              const i = c.insights || {};
+                              const gasto = Number(i.spend || 0);
+                              const compras = Number(i.purchases || 0);
+                              const roasC = gasto > 0 ? Number(i.revenue || 0) / gasto : 0;
+                              const atc = Number(i.addToCart || 0);
+                              const chk = Number(i.initiateCheckout || 0);
+                              // "Sin datos" seco confunde cuando la campaña ni arrancó
+                              // (programada) o arrancó hace horas (recién lanzada):
+                              // se aclara con la Fecha de inicio real de Meta.
+                              const sinVeredicto = c.veredicto.estado !== 'ganador' && c.veredicto.estado !== 'perdedor';
+                              const inicio = c.startTime ? new Date(c.startTime) : null;
+                              const inicioOk = inicio && !Number.isNaN(inicio.getTime());
+                              const programada = !!(inicioOk && inicio.getTime() > Date.now());
+                              const recienLanzada = !!(sinVeredicto && !programada && inicioOk && (Date.now() - inicio.getTime()) < 48 * 60 * 60 * 1000);
+                              const inicioStr = inicioOk ? `${inicio.toLocaleDateString('es-AR', { day: 'numeric', month: 'numeric' })} a las ${inicio.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}` : '';
+                              const motivo = programada
+                                ? `arranca el ${inicioStr} — todavía no corre`
+                                : recienLanzada
+                                  ? `lanzada el ${inicioStr} · ${c.veredicto.motivo}`
+                                  : c.veredicto.motivo;
+                              return (
+                                <tr key={c.id}>
+                                  <td className="px-2 py-2">
+                                    <span className="font-semibold text-gray-900 dark:text-gray-100">{c.name}</span>
+                                    {etapa === 'todas' && c.etapa && (
+                                      <span className={`ml-1.5 px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                                        c.etapa === 'preescala' ? 'bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300'
+                                          : c.etapa === 'escala' ? 'bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300'
+                                          : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'}`}>
+                                        {c.etapa === 'preescala' ? '🚀 preescala' : c.etapa === 'escala' ? '📈 escala' : '🧪 testeo'}
+                                      </span>
+                                    )}
+                                    <span className="block text-[10px] text-gray-400">{motivo}{c.producto ? ` · ${c.producto.nombre}` : ''}</span>
+                                  </td>
+                                  <td className="px-2 py-2 whitespace-nowrap">
+                                    <span className={`inline-flex items-center gap-1.5 text-[11px] font-semibold ${c.activa ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-400'}`}>
+                                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${c.activa ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+                                      {c.activa ? 'Activa' : 'Desactivada'}
+                                    </span>
+                                  </td>
+                                  <td className="px-2 py-2">
+                                    {programada ? (
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold whitespace-nowrap bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300"
+                                        title={`Fecha de inicio en Meta: ${inicioStr}. Hasta entonces no se juzga.`}>
+                                        ⏰ Programada
+                                      </span>
+                                    ) : recienLanzada ? (
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold whitespace-nowrap bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300"
+                                        title={`Arrancó el ${inicioStr}. Se juzga cuando pase el mínimo de impresiones y gasto.`}>
+                                        🚀 Recién lanzada
+                                      </span>
+                                    ) : (
+                                      <Pill tone={c.veredicto.estado === 'ganador' ? 'ok' : c.veredicto.estado === 'perdedor' ? 'bad' : 'mute'}>
+                                        {c.veredicto.estado === 'ganador' ? 'Ganadora' : c.veredicto.estado === 'perdedor' ? 'Perdedora' : 'Sin datos'}
+                                      </Pill>
+                                    )}
+                                  </td>
+                                  <td className="px-2 py-2 text-right tabular-nums font-semibold text-gray-700 dark:text-gray-200">{compras}</td>
+                                  <td className="px-2 py-2 text-right tabular-nums font-semibold text-gray-700 dark:text-gray-200">{fmtM(gasto, currency)}</td>
+                                  <td className={`px-2 py-2 text-right tabular-nums font-bold ${roasC >= 1.5 ? 'text-emerald-600 dark:text-emerald-400' : gasto > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400'}`}>{fmtR(roasC)}</td>
+                                  <td className="px-2 py-2 text-right tabular-nums text-gray-600 dark:text-gray-300">{compras > 0 ? fmtM(gasto / compras, currency) : '—'}</td>
+                                  <td className="px-2 py-2 text-right tabular-nums text-gray-600 dark:text-gray-300">{atc > 0 ? fmtM(gasto / atc, currency) : '—'}</td>
+                                  <td className="px-2 py-2 text-right tabular-nums text-gray-600 dark:text-gray-300">{chk > 0 ? fmtM(gasto / chk, currency) : '—'}</td>
+                                  <td className="px-2 py-2 text-right"><MetaLink nivel="campaigns" ids={[c.id]} accountId={accountId}>Meta</MetaLink></td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
                       </div>
                     </td></tr>
                   )}
@@ -1676,6 +2234,62 @@ export default function MetricasSection({ addToast }) {
   // dos veces, aplica solo lo que Meta confirmó (si de 5 salieron 3, se
   // repintan 3) y deja el deshacer a mano en el toast.
   const aplicarRef = useRef(null);
+  // Presupuesto editable (doble click, como en Meta): escribe el diario nuevo
+  // en Meta y recuerda el valor aplicado para repintar la celda sin recargar.
+  const [presupuestos, setPresupuestos] = useState({});
+  const cambiarPresupuestoRow = useCallback(async ({ id, level, dailyBudget }) => {
+    const r = await cambiarPresupuesto({ accountId, connId: account?.connId, level, id, dailyBudget });
+    if (r.ok) {
+      setPresupuestos(prev => ({ ...prev, [id]: r.nuevo }));
+      addToast?.({ type: 'success', message: `Presupuesto de "${r.name}": ${fmtM(r.anterior, currency)} → ${fmtM(r.nuevo, currency)} por día` });
+    } else {
+      addToast?.({ type: 'error', message: `Presupuesto: ${r.error}` });
+    }
+    return r.ok;
+  }, [accountId, account, addToast, currency]);
+
+  // ⭐ Winners automáticos: el server analiza los ads de ESTA cuenta (ventana
+  // 7 días) y marca las estrellas en Producción — solo productos con data en
+  // Meta; los demás siguen manuales. La cuenta elegida se aprende y el cron
+  // diario de las 09:00 la incluye a partir de ahí.
+  const [winnersAutoBusy, setWinnersAutoBusy] = useState(false);
+  const correrWinnersAuto = useCallback(async () => {
+    if (!accountId || winnersAutoBusy) return;
+    setWinnersAutoBusy(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const t = session?.access_token;
+      const r = await fetch('/api/produccion/auto-winners', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(t ? { Authorization: `Bearer ${t}` } : {}) },
+        body: JSON.stringify({ accountId: String(accountId).replace(/^act_/, '') }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.error) throw new Error(d.error || `Error ${r.status}`);
+      if (d.skipped) {
+        await alertDialog({ title: '⭐ Winners automáticos', message: `No corrió: ${d.skipped}${d.hint ? `\n${d.hint}` : ''}` });
+        return;
+      }
+      const lineas = [];
+      if (d.marcados?.length) {
+        for (const m of d.marcados) {
+          lineas.push(`⭐ ${m.producto}`);
+          for (const n of m.nuevos) lineas.push(`   • ${n.name} — ${n.compras} compras · ROAS ${n.roas}${n.warn ? ' ⚠️ revisar (bajo el break-even)' : ''}`);
+        }
+      } else {
+        lineas.push(`Sin winners nuevos con el criterio actual (≥${d.criterio?.minCompras ?? 6} compras y ROAS ≥${d.criterio?.minRoas ?? 2.5}, o top de su tanda con ≥${d.criterio?.topMin ?? 3}).`);
+      }
+      if (d.enriquecidos) lineas.push('', `🔗 ${d.enriquecidos} winners ya marcados ahora tienen su link a Drive.`);
+      if (d.sinData?.length) lineas.push('', `Sin data en Meta — siguen manuales: ${d.sinData.join(', ')}`);
+      lineas.push('', `${d.adsAnalizados} ads analizados · ${d.tarjetasConData} tarjetas con data. Esto también corre solo todos los días a las 09:00.`);
+      await alertDialog({ title: '⭐ Winners automáticos', message: lineas.join('\n') });
+      const total = (d.marcados || []).reduce((s, m) => s + m.nuevos.length, 0);
+      if (total) addToast?.({ type: 'success', message: `⭐ ${total} winner${total === 1 ? '' : 's'} marcado${total === 1 ? '' : 's'} en Producción` });
+    } catch (e) {
+      addToast?.({ type: 'error', message: `Winners auto: ${e.message}` });
+    } finally { setWinnersAutoBusy(false); }
+  }, [accountId, winnersAutoBusy, addToast]);
+
   const aplicarEstado = useCallback(async ({ level, items, status, esDeshacer = false }) => {
     const lista = (items || []).filter(Boolean);
     if (!lista.length || !accountId) return;
@@ -1890,16 +2504,20 @@ export default function MetricasSection({ addToast }) {
     ? { fija: true, label: 'Hoy' }
     : tab === 'prosp'
       ? { fija: true, label: `Últimos ${cfg.ventanaProspDias} días` }
-      : tab === 'embudo'
-        ? { fija: false, valor: presetEmbudo, set: setPresetEmbudo, opciones: PRESETS_EMBUDO }
-        : { fija: false, valor: preset, set: setPreset, opciones: PRESETS_COHORTES };
+      : tab === 'publicar'
+        ? { fija: true, label: 'Nueva campaña' }
+        : tab === 'embudo'
+          ? { fija: false, valor: presetEmbudo, set: setPresetEmbudo, opciones: PRESETS_EMBUDO }
+          : { fija: false, valor: preset, set: setPreset, opciones: PRESETS_COHORTES };
 
   const TABS = [
-    { id: 'hoy', label: 'Hoy — qué pausar', icon: Gauge },
+    { id: 'hoy', label: 'Hoy — optimizar', icon: Gauge },
+    { id: 'manager', label: 'Campañas y anuncios', icon: Table2 },
     { id: 'embudo', label: 'Embudo de compra', icon: Filter },
     { id: 'semanas', label: 'Testeos por semana', icon: FlaskConical },
     { id: 'prosp', label: 'Prospectadores', icon: Radar },
     { id: 'winners', label: 'Winners', icon: Trophy },
+    { id: 'publicar', label: 'Publicar campaña', icon: Rocket },
     { id: 'reglas', label: 'Reglas de la tienda', icon: SlidersHorizontal },
   ];
 
@@ -1917,15 +2535,26 @@ export default function MetricasSection({ addToast }) {
           <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
         </div>
         {ventana.fija ? (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400"
-            title="Esta pestaña mira siempre esta ventana — no hay nada que elegir.">
-            <Clock size={12} /> {ventana.label}
-          </span>
+          <button
+            onClick={() => {
+              setTab('manager');
+              addToast?.({
+                type: 'info',
+                message: tab === 'hoy'
+                  ? '"Hoy" mira siempre el día en curso (sus recomendaciones de pausa son de hoy). Acá en Campañas y anuncios elegís cualquier rango con el calendario.'
+                  : 'Esta pestaña tiene ventana fija. Acá en Campañas y anuncios elegís cualquier rango con el calendario.',
+                duration: 7000,
+              });
+            }}
+            title="Esta pestaña mira siempre esta ventana. Click para ver otro rango en Campañas y anuncios."
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:border-[#1877F2]/60 transition cursor-pointer">
+            <CalendarDays size={12} className="text-[#1877F2]" /> {ventana.label}
+            <span className="text-gray-400 font-normal">
+              · {new Date().toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric', month: 'short' })}
+            </span>
+          </button>
         ) : (
-          <select value={ventana.valor} onChange={e => ventana.set(e.target.value)}
-            className="px-2.5 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1877F2]">
-            {ventana.opciones.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
-          </select>
+          <MenuFecha value={ventana.valor} onChange={ventana.set} opciones={ventana.opciones} />
         )}
         {productosEnCuenta.length > 0 && (
           <div className="flex items-center gap-1 flex-wrap">
@@ -1948,8 +2577,13 @@ export default function MetricasSection({ addToast }) {
             Ningún producto reconocido en esta cuenta — cargá sus palabras en <b>Reglas</b>.
           </span>
         )}
+        <button onClick={correrWinnersAuto} disabled={!accountId || winnersAutoBusy}
+          title="Analiza los ads de esta cuenta (ventana de 7 días) y marca ⭐ automáticamente en Producción los videos ganadores — solo productos con data en Meta; el resto sigue manual."
+          className="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-lg hover:bg-amber-100 dark:hover:bg-amber-900/50 transition disabled:opacity-50">
+          {winnersAutoBusy ? <Loader2 size={12} className="animate-spin" /> : <Trophy size={12} />} Winners auto
+        </button>
         <button onClick={() => { if (!account) return; load(account, preset); setRecargaEmbudo(n => n + 1); }} disabled={!account || loading}
-          className="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition disabled:opacity-50">
+          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition disabled:opacity-50">
           <RefreshCw size={12} className={loading ? 'animate-spin' : ''} /> Refrescar
         </button>
       </div>
@@ -1981,10 +2615,7 @@ export default function MetricasSection({ addToast }) {
           </div>
         </div>
       ) : loading && !data ? (
-        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-8 flex items-center gap-3">
-          <Loader2 size={17} className="animate-spin text-gray-400" />
-          <span className="text-sm text-gray-500 dark:text-gray-400">Trayendo campañas, anuncios de hoy y de los últimos 7 días…</span>
-        </div>
+        <CargandoMetricas />
       ) : !data ? (
         <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-10 text-center">
           <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Elegí una cuenta para empezar</p>
@@ -2000,6 +2631,8 @@ export default function MetricasSection({ addToast }) {
             onEstado={({ items, status }) => aplicarEstado({ level: nivelHoy === 'campaigns' ? 'campaign' : 'ad', items, status })}
             onRecalcular={() => account && load(account, preset)}
             promediosRef={promedios7d} historico={historico7d}
+            presupuestos={presupuestos} onPresupuesto={cambiarPresupuestoRow}
+            connId={account?.connId}
           />}
           {tab === 'embudo' && (
             embudoError ? (
@@ -2029,6 +2662,9 @@ export default function MetricasSection({ addToast }) {
             account={account} accountId={accountId} cfg={cfg} cfgRaw={cfgRaw}
             productos={productos} productoId={productoId || null} currency={currency} addToast={addToast}
           />}
+          {tab === 'manager' && <VistaManager accountId={accountId} connId={account?.connId} currency={currency} preset={preset}
+            presupuestos={presupuestos} onPresupuesto={cambiarPresupuestoRow} />}
+          {tab === 'publicar' && <PublicarCampana accountId={accountId} connId={account?.connId} currency={currency} addToast={addToast} productosVisibles={productosEnCuenta} />}
           {tab === 'reglas' && <VistaReglas campaigns={data.campaigns} cfg={cfgRaw} setCfg={setCfgRaw} productos={productos} currency={currency} onWhy={setWhy} origen={origenCfg} />}
         </>
       )}

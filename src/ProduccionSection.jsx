@@ -35,7 +35,7 @@ import { driveStatus, connectDrive, disconnectDrive } from './produccionDrive.js
 import { analizar as analizarCarpetas, reparar as repararCarpetas, tarjetasConVideosEnDrive } from './produccionRepararCarpetas.js';
 import TeamModal from './TeamModal.jsx';
 import ConfirmDialog from './ConfirmDialog.jsx';
-import { EVENTOS_FECHA } from './eventosFecha.js';
+import { EVENTOS_FECHA, ETIQUETAS_TANDA } from './eventosFecha.js';
 
 const EQUIPO_DEFAULT = ['Fran', 'Wanda', 'Flor'];
 
@@ -770,6 +770,9 @@ export default function ProduccionSection({ addToast }) {
     const now = Date.now();
     // columnaEfectiva manda lo publicado hace +48h a "archivado" (auto-archivo).
     for (const a of asigsBoard) (m[columnaEfectiva(a, now)] || m.porhacer).push(a);
+    // Orden por PRIORIDAD dentro de cada columna (1 alta primero, sin prioridad
+    // al final) — "vamos a ir ordenando por prioridades" (reunión 12/10).
+    for (const k of Object.keys(m)) m[k].sort((a, b) => (a.prioridad ?? 99) - (b.prioridad ?? 99));
     return m;
   }, [asigsBoard]);
   // Resumen del header: "en producción" = tarjetas activas (sin las archivadas),
@@ -839,6 +842,29 @@ export default function ProduccionSection({ addToast }) {
               ? 'Agregá productos y repartilos 🎬'
               : <>{nActivos} en producción · <b className="text-emerald-600 dark:text-emerald-400">{nAprob} aprobado{nAprob === 1 ? '' : 's'}</b> {nAprob > 0 ? '🔥' : '🎬'}</>}
           </p>
+          {/* Carga por editor: cuántas tarjetas activas tiene cada uno —
+              "quiero ver cuánto tiene cada uno" (reunión 12/10). */}
+          {nActivos > 0 && (() => {
+            const porPersona = new Map();
+            for (const k of ['porhacer', 'revision', 'aprobado', 'publicado']) {
+              for (const x of byCol[k]) {
+                const p = (x.persona || '').trim() || 'Sin asignar';
+                porPersona.set(p, (porPersona.get(p) || 0) + 1);
+              }
+            }
+            const lista = [...porPersona.entries()].sort((x, y) => y[1] - x[1]);
+            if (!lista.length) return null;
+            return (
+              <div className="flex flex-wrap gap-1.5 mt-1.5">
+                {lista.map(([p, n]) => (
+                  <span key={p} title={`${p}: ${n} tarjeta${n === 1 ? '' : 's'} activa${n === 1 ? '' : 's'}`}
+                    className="inline-flex items-center gap-1.5 text-[10.5px] font-bold px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300">
+                    {p} <b className="tabular-nums text-gray-900 dark:text-gray-100">{n}</b>
+                  </span>
+                ))}
+              </div>
+            );
+          })()}
         </div>
         <div className="ml-auto flex items-center gap-2 flex-wrap">
           {/* Racha del día: tarjetas que pasaron a Aprobado HOY (por historial).
@@ -2510,7 +2536,44 @@ export function CardDetailModal({ a, personas, team = [], onClose, addToast, onT
                 </button>
               ))}
             </div>
+            {/* Tipo de tanda: de dónde sale la consigna (referencias de IG que
+                cargó el admin, replicar winners, UGC, evergreen). */}
+            <div className="flex flex-wrap gap-1 mt-1.5">
+              {ETIQUETAS_TANDA.map(e => (
+                <button key={e.key} onClick={() => updateAssignment(a.id, { etiqueta: e.label })}
+                  className={`text-[11px] font-bold px-2 py-1 rounded-md transition ${a.etiqueta === e.label ? 'bg-sky-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200'}`}>
+                  {e.label}
+                </button>
+              ))}
+              {/* Etiqueta libre: lo que quieras, Enter aplica. */}
+              <input
+                key={`etq-${a.id}-${a.etiqueta || ''}`}
+                defaultValue={a.etiqueta && !EVENTOS_FECHA.some(e => e.label === a.etiqueta) && !ETIQUETAS_TANDA.some(e => e.label === a.etiqueta) ? a.etiqueta : ''}
+                placeholder="Otra etiqueta… (Enter)"
+                onKeyDown={ev => { if (ev.key === 'Enter') updateAssignment(a.id, { etiqueta: ev.currentTarget.value.trim() }); }}
+                onBlur={ev => { const v = ev.currentTarget.value.trim(); if (v && v !== (a.etiqueta || '')) updateAssignment(a.id, { etiqueta: v }); }}
+                className="text-[11px] font-semibold px-2 py-1 rounded-md bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500 w-44"
+              />
+            </div>
             <p className="text-[10px] text-gray-400 mt-1">Se muestra como chip en la tarjeta, también en el tablero del editor.</p>
+          </div>
+
+          {/* Prioridad — ordena la tarjeta dentro de su columna (admin y editor):
+              1 alta arriba de todo, sin prioridad al final. */}
+          <div>
+            <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Prioridad</span>
+            <div className="flex flex-wrap gap-1">
+              {[[null, 'Sin prioridad'], [1, '🔥 Alta'], [2, '🟡 Media'], [3, '🧊 Baja']].map(([v, lbl]) => (
+                <button key={String(v)} onClick={() => updateAssignment(a.id, { prioridad: v })}
+                  className={`text-[11px] font-bold px-2 py-1 rounded-md transition ${
+                    (a.prioridad ?? null) === v
+                      ? (v === 1 ? 'bg-red-600 text-white' : v === 2 ? 'bg-amber-500 text-white' : v === 3 ? 'bg-sky-700 text-white' : 'bg-brand-600 text-white')
+                      : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200'}`}>
+                  {lbl}
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] text-gray-400 mt-1">Las de prioridad alta aparecen primero en el tablero — el editor sigue ese orden.</p>
           </div>
 
           {/* Cambios pedidos (lo que ve el creativo) */}

@@ -55,6 +55,8 @@ let _materialCloud = false;
 let _winnersCloud = false;
 // Ídem `etiqueta` (migración 0035) — etiqueta de campaña ("Día de la Madre").
 let _etiquetaCloud = false;
+// Ídem `prioridad` (migración 0039).
+let _prioridadCloud = false;
 // Ídem `referencias` (migración 0036) — reels de IG de referencia para el editor.
 let _referenciasCloud = false;
 // Contador de escrituras locales. Sirve para que un hydrate/refetch NO pise un
@@ -150,6 +152,7 @@ function rowToLocal(r) {
     winners: Array.isArray(r.winners) ? r.winners : [],
     referencias: Array.isArray(r.referencias) ? r.referencias : [],
     etiqueta: r.etiqueta || '',
+    prioridad: r.prioridad != null ? r.prioridad : null,
     pagado: !!r.pagado,
     archivos: Array.isArray(r.archivos) ? r.archivos : [],
     historial: Array.isArray(r.historial) ? r.historial : [],
@@ -189,6 +192,8 @@ function localToRow(a) {
   if (_referenciasCloud) row.referencias = Array.isArray(a.referencias) ? a.referencias : [];
   // Ídem etiqueta (migración 0035).
   if (_etiquetaCloud) row.etiqueta = a.etiqueta || null;
+  // Ídem prioridad (migración 0039): 1 alta · 2 media · 3 baja · null sin.
+  if (_prioridadCloud) row.prioridad = a.prioridad != null ? a.prioridad : null;
   return row;
 }
 
@@ -334,6 +339,11 @@ async function hydrate() {
       const probe = await supabase.from(TABLE).select('etiqueta').limit(1);
       _etiquetaCloud = !probe.error;
     } catch { _etiquetaCloud = false; }
+    // Ídem `prioridad` (migración 0039).
+    try {
+      const probe = await supabase.from(TABLE).select('prioridad').limit(1);
+      _prioridadCloud = !probe.error;
+    } catch { _prioridadCloud = false; }
     // Ídem `referencias` (migración 0036).
     try {
       const probe = await supabase.from(TABLE).select('referencias').limit(1);

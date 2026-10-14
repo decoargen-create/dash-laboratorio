@@ -158,6 +158,34 @@ export async function pullMarketingFromCloud() {
         if (soloLocal.length) merged.competidores = [...cloudComps, ...soloLocal];
       }
 
+      // TOMBSTONES de competidores — la unión por id de arriba no puede
+      // distinguir "nuevo en local" de "borrado en la otra PC", así que los
+      // borrados RESUCITABAN: una sesión con local más nuevo re-mergeaba la
+      // lista vieja, la pusheaba, y dos sesiones de la misma cuenta veían
+      // listas distintas/mezcladas (bug reportado 13/10). El borrado queda
+      // registrado en competidoresBorrados (ambos lados se unen) y acá se
+      // aplica siempre. Ids = Date.now(): un re-agregado trae id nuevo y el
+      // tombstone viejo no lo toca.
+      {
+        const tombs = new Map();
+        for (const t of [
+          ...(Array.isArray(slim.competidoresBorrados) ? slim.competidoresBorrados : []),
+          ...(Array.isArray(localP.competidoresBorrados) ? localP.competidoresBorrados : []),
+        ]) {
+          const k = String(t?.id ?? '');
+          if (!k) continue;
+          const prev = tombs.get(k);
+          if (!prev || (t.ts || 0) > (prev.ts || 0)) tombs.set(k, { id: k, ts: t.ts || 0 });
+        }
+        if (tombs.size) {
+          merged.competidores = (Array.isArray(merged.competidores) ? merged.competidores : [])
+            .filter(c => !tombs.has(String(c.id)));
+          merged.competidoresBorrados = [...tombs.values()]
+            .sort((a, b) => (a.ts || 0) - (b.ts || 0))
+            .slice(-200);
+        }
+      }
+
       // TRANSCRIPCIONES/GUIONES DE VIDEO — misma lógica union + LWW que
       // competidores. Sin esto, el cloud (que puede estar unos segundos atrás,
       // antes de que el push del video recién traducido llegue) pisaba el array

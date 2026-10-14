@@ -235,6 +235,27 @@ export async function getLatestMetaToken() {
   } catch { return null; }
 }
 
+// Conexión de Meta más nueva DE UN DUEÑO puntual (token descifrado). La usan
+// los procesos server-side por inquilino (cron de auto-winners): el token de
+// "cualquier usuario" servía con un solo dueño, pero con varias cuentas cada
+// corrida tiene que usar el token del dueño de SUS tarjetas.
+export async function getMetaTokenForUser(userId) {
+  const supabase = getClient();
+  if (!supabase || !userId) return null;
+  try {
+    const { data, error } = await supabase
+      .from('meta_connections')
+      .select('access_token, user_id, meta_user_name')
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error || !data) return null;
+    const token = decryptToken(data.access_token);
+    return token ? { token, userId: data.user_id, name: data.meta_user_name } : null;
+  } catch { return null; }
+}
+
 export async function deleteMetaConnection(userId, connectionId) {
   const supabase = getClient();
   if (!supabase || !userId || !connectionId) return false;

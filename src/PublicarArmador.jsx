@@ -98,6 +98,12 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
   // preview embebido (/file/<id>/preview); los subidos a AdsLab se firman y
   // se reproducen en un <video> directo.
   const [videoPrev, setVideoPrev] = useState(null); // { name, driveUrl? , fileUrl?, cargando }
+  // Filtro de tarjetas (pedido del user): por defecto solo las APROBADAS (las
+  // que están para publicar); "Todas" suma las ya publicadas para repescar.
+  const [filtroTarjetas, setFiltroTarjetas] = useState('aprobadas'); // 'aprobadas' | 'todas'
+  const tarjetasVisibles = useMemo(() => (
+    filtroTarjetas === 'aprobadas' ? tarjetas.filter(t => t.estado === 'aprobado') : tarjetas
+  ), [tarjetas, filtroTarjetas]);
   const verVideo = useCallback(async (f) => {
     if (f.driveId) {
       setVideoPrev({ name: f.name, driveUrl: `https://drive.google.com/file/d/${encodeURIComponent(f.driveId)}/preview` });
@@ -372,19 +378,31 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
           <section>
             <h2 className="text-sm font-extrabold text-gray-900 dark:text-gray-100 mb-2 flex items-center gap-1.5 flex-wrap">
               <Film size={14} className="text-brand-500" /> Videos de Producción
-              <span className="text-[11px] font-semibold text-gray-400">tildá video por video, de la tarjeta que quieras</span>
+              <span className="inline-flex gap-0.5 p-0.5 rounded-lg bg-gray-100 dark:bg-gray-900 border border-gray-200 dark:border-gray-700">
+                {[['aprobadas', 'Para publicar'], ['todas', 'Todas']].map(([k, l]) => (
+                  <button key={k} onClick={() => setFiltroTarjetas(k)}
+                    title={k === 'aprobadas' ? 'Solo las tarjetas APROBADAS: las que están listas para salir.' : 'Incluye también las ya publicadas, por si querés repescar un video.'}
+                    className={`px-2 py-0.5 rounded-md text-[10.5px] font-bold transition ${filtroTarjetas === k ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}>
+                    {l}
+                  </button>
+                ))}
+              </span>
               <span className="ml-auto inline-flex gap-2 text-[11px] font-bold">
-                <button onClick={() => setSel(prev => { const nn = new Set(prev); for (const t of tarjetas) for (const f of videosDe(t)) nn.add(`v:${t.id}:${f.ts}`); return nn; })}
+                <button onClick={() => setSel(prev => { const nn = new Set(prev); for (const t of tarjetasVisibles) for (const f of videosDe(t)) nn.add(`v:${t.id}:${f.ts}`); return nn; })}
                   disabled={fase === 'publicando'} className="text-brand-600 dark:text-brand-400 hover:underline">Todos</button>
                 <button onClick={() => setSel(prev => { const nn = new Set(prev); for (const k of prev) if (k.startsWith('v:')) nn.delete(k); return nn; })}
                   disabled={fase === 'publicando'} className="text-gray-400 hover:underline">Ninguno</button>
               </span>
             </h2>
-            {tarjetas.length === 0 ? (
-              <p className="text-sm text-gray-400">Este producto no tiene tarjetas con videos.</p>
+            {tarjetasVisibles.length === 0 ? (
+              <p className="text-sm text-gray-400">
+                {filtroTarjetas === 'aprobadas'
+                  ? 'No hay tarjetas aprobadas sin publicar — mirá en «Todas» si querés repescar una publicada.'
+                  : 'Este producto no tiene tarjetas con videos.'}
+              </p>
             ) : (
               <div className="space-y-3">
-                {tarjetas.map(t => {
+                {tarjetasVisibles.map(t => {
                   const vids = videosDe(t);
                   if (vids.length === 0) return null;
                   const keys = vids.map(f => `v:${t.id}:${f.ts}`);

@@ -86,6 +86,17 @@ export default function PublicarCampanaModal({ a, onClose, addToast }) {
   const [cargandoTpl, setCargandoTpl] = useState(false);
   const primeraCuenta = useRef(true);
 
+  // Si la cuenta del preset ya no está en el listado (conexión borrada,
+  // permiso perdido), el fallback a accounts[0] publicaría con el pixel de
+  // OTRA cuenta — se desarma el preset y se vuelve al picker.
+  useEffect(() => {
+    if (!usandoPreset || accounts.length === 0 || !preset?.accountId) return;
+    if (!accounts.some(x => x.id === preset.accountId)) {
+      setUsandoPreset(false); setAdSel(''); setTemplate(null);
+      addToast?.({ type: 'warning', message: 'La cuenta del preset ya no está disponible — elegí el template de nuevo.' });
+    }
+  }, [accounts]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Cambiar de cuenta INVALIDA el template: el pixel/página de la cuenta A
   // no sirven en la B (la campaña se crearía rota). Se resetea todo.
   useEffect(() => {
@@ -99,7 +110,7 @@ export default function PublicarCampanaModal({ a, onClose, addToast }) {
       try {
         const d = await metaApi(`campaigns?account_id=${encodeURIComponent(account.id)}`, { connId: account.connId });
         if (vivo) setCampanas(d.campaigns || []);
-      } catch (e) { addToast?.({ type: 'error', message: `Campañas: ${e.message}` }); }
+      } catch (e) { if (vivo) addToast?.({ type: 'error', message: `Campañas: ${e.message}` }); }
     })();
     return () => { vivo = false; };
   }, [account?.id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -112,7 +123,7 @@ export default function PublicarCampanaModal({ a, onClose, addToast }) {
       try {
         const d = await metaApi(`campaign-adsets?campaign_id=${encodeURIComponent(campSel)}&with_ads=1`, { connId: account.connId });
         if (vivo) setAdsets(d.adsets || []);
-      } catch (e) { addToast?.({ type: 'error', message: `Conjuntos: ${e.message}` }); }
+      } catch (e) { if (vivo) addToast?.({ type: 'error', message: `Conjuntos: ${e.message}` }); }
     })();
     return () => { vivo = false; };
   }, [campSel]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -120,7 +131,7 @@ export default function PublicarCampanaModal({ a, onClose, addToast }) {
   // template-config por adSel — funciona igual venga del picker o del preset.
   useEffect(() => {
     setTemplate(null);
-    if (!adSel || !account) return;
+    if (!adSel || !account) { setCargandoTpl(false); return; }
     let vivo = true;
     setCargandoTpl(true);
     (async () => {
@@ -131,7 +142,7 @@ export default function PublicarCampanaModal({ a, onClose, addToast }) {
           setMensaje(prev => prev || preset?.mensaje || d.defaultMessage || '');
         }
       } catch (e) {
-        addToast?.({ type: 'error', message: `Template: ${e.message}` });
+        if (vivo) addToast?.({ type: 'error', message: `Template: ${e.message}` });
         if (vivo && usandoPreset) setUsandoPreset(false); // preset roto → picker
       } finally { if (vivo) setCargandoTpl(false); }
     })();
@@ -187,6 +198,10 @@ export default function PublicarCampanaModal({ a, onClose, addToast }) {
 
   const publicar = useCallback(async () => {
     if (!listo) return;
+    if (elegidos.length > 30) {
+      addToast?.({ type: 'warning', message: 'Máximo 30 videos por publicación — destildá algunos.' });
+      return;
+    }
     setFase('subiendo'); setLogs([]); setResultado(null);
     try {
       // 1. Subir videos a Meta (por URL — el server resuelve Drive/storage).
@@ -195,7 +210,7 @@ export default function PublicarCampanaModal({ a, onClose, addToast }) {
         connId: account.connId, method: 'POST',
         body: {
           account_id: account.id,
-          videos: elegidos.map(f => ({ name: f.name, driveId: f.driveId || null, storagePath: f.storagePath || null })),
+          videos: elegidos.map((f, i) => ({ name: f.name, index: i, driveId: f.driveId || null, storagePath: f.storagePath || null })),
         },
       });
       const subidos = (up.resultados || []).filter(r => r.ok);
@@ -217,11 +232,12 @@ export default function PublicarCampanaModal({ a, onClose, addToast }) {
         if (estados.every(v => v.ready || v.status === 'error')) break;
       }
       const porId = new Map(estados.map(v => [v.id, v]));
-      const indicePorNombre = new Map(elegidos.map((f, i) => [f.name, i]));
+      // El server devuelve `index` (la posición que le mandamos): es la única
+      // clave segura — mapear por nombre rompía con duplicados o >90 chars.
       const adsListos = subidos
         .filter(r => porId.get(r.videoId)?.ready)
         .map(r => {
-          const i = indicePorNombre.get(r.name) ?? 0;
+          const i = Number.isInteger(r.index) ? r.index : 0;
           return { name: nombresAds[i] || sinExtension(r.name), videoId: r.videoId, picture: porId.get(r.videoId)?.picture || null };
         });
       if (adsListos.length === 0) throw new Error('Meta no terminó de procesar ningún video — reintentá en unos minutos (ya quedaron subidos).');
@@ -238,6 +254,7 @@ export default function PublicarCampanaModal({ a, onClose, addToast }) {
           dailyBudget: Number(presupuesto),
           adsPerSet: Number(adsPorSet) || 3,
           adsetNamePattern: adsetPattern,
+          fecha: fechaCorta,
           status: enPausa ? 'PAUSED' : 'ACTIVE',
           template,
           message: mensaje,

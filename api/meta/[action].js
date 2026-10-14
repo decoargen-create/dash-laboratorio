@@ -2637,10 +2637,13 @@ async function handleUploadAdVideos(req, res) {
       try {
         const ctl = new AbortController();
         const timer = setTimeout(() => ctl.abort(), 12000);
-        const h = await fetch(u, { method: 'HEAD', redirect: 'follow', signal: ctl.signal });
+        // GET con Range (1 byte) en vez de HEAD: algunos endpoints de Drive
+        // responden 405 o sin content-type útil a HEAD.
+        const h = await fetch(u, { method: 'GET', redirect: 'follow', signal: ctl.signal, headers: { Range: 'bytes=0-0' } });
         clearTimeout(timer);
+        try { h.body?.cancel?.(); } catch {}
         const tipo = (h.headers.get('content-type') || '').toLowerCase();
-        if (h.ok && (tipo.startsWith('video/') || tipo.includes('octet-stream'))) return u;
+        if ((h.ok || h.status === 206) && (tipo.startsWith('video/') || tipo.includes('octet-stream'))) return u;
       } catch { /* probamos la siguiente */ }
     }
     throw new Error('Drive no entrega el archivo directo (¿está compartido como "cualquiera con el link"? ¿pesa >100MB?)');
@@ -2648,9 +2651,14 @@ async function handleUploadAdVideos(req, res) {
 
   const subirUno = async (v) => {
     const name = String(v?.name || 'video').slice(0, 90);
+    // `index` viaja de ida y vuelta: es la clave con la que el cliente une
+    // cada resultado con SU archivo. Mapear por nombre rompía con nombres
+    // duplicados o >90 chars (el slice de arriba cambiaba la clave).
+    const index = Number.isInteger(v?.index) ? v.index : null;
     try {
       let fileUrl = String(v?.fileUrl || '').trim();
-      if (!fileUrl && v?.storagePath && sb) {
+      if (!fileUrl && v?.storagePath) {
+        if (!sb) throw new Error('Supabase no está configurado en el server (SUPABASE_SERVICE_ROLE_KEY) — no puedo firmar archivos de AdsLab');
         const { data, error: e } = await sb.storage.from('creativos').createSignedUrl(String(v.storagePath), 3600);
         if (e || !data?.signedUrl) throw new Error(`No pude firmar el archivo (${e?.message || 'sin URL'})`);
         fileUrl = data.signedUrl;
@@ -2658,9 +2666,9 @@ async function handleUploadAdVideos(req, res) {
       if (!fileUrl && v?.driveId) fileUrl = await resolverDriveUrl(v.driveId);
       if (!fileUrl) throw new Error('El archivo no tiene storagePath ni driveId');
       const up = await graphPost(`${accountId}/advideos`, token, { file_url: fileUrl, name });
-      return { name, ok: true, videoId: up.id };
+      return { name, index, ok: true, videoId: up.id };
     } catch (e) {
-      return { name, ok: false, error: e.message || 'Error subiendo a Meta' };
+      return { name, index, ok: false, error: e.message || 'Error subiendo a Meta' };
     }
   };
 
@@ -2777,15 +2785,20 @@ async function handleCreateCampaignStructure(req, res) {
     });
     log.push(`✓ Campaña creada: ${camp.id} (pausada hasta el final)`);
 
-    // Patrón de nombre de conjunto: {index}, {index:01}, {date}.
+    // Patrón de nombre de conjunto: {index}, {index:01}, {date}. La fecha la
+    // manda el CLIENTE (la del nombre de campaña = mañana, regla del equipo)
+    // para que preview y realidad coincidan; fallback: hoy en AR.
     const hoyAr = new Date().toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', day: 'numeric', month: 'numeric' });
+    const fechaPatron = String(body.fecha || hoyAr).slice(0, 20);
     const nombreConjunto = (i) => {
       const base = String(body.adsetNamePattern || 'Ad Set {index:01}');
       return base
         .replaceAll('{index:01}', String(i + 1).padStart(2, '0'))
         .replaceAll('{index}', String(i + 1))
-        .replaceAll('{date}', hoyAr)
-        .slice(0, 100);
+        .replaceAll('{date}', fechaPatron)
+        .replaceAll('{filename}', '')
+        .trim()
+        .slice(0, 100) || `Ad Set ${i + 1}`;
     };
 
     // 2. Conjuntos — clonando targeting/optimización/pixel del template.

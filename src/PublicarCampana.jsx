@@ -9,7 +9,7 @@
 // Post id: puede venir "pageId_postId" (como lo da Meta) o el id pelado — en
 // ese caso se compone con la página elegida.
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Rocket, Loader2, AlertCircle, CheckCircle2, XCircle, ExternalLink,
 } from 'lucide-react';
@@ -128,14 +128,18 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
   const adsOk = ads.filter(a => !a.invalida);
 
   // Nombre sugerido con la nomenclatura del equipo: "Producto d/m [receta]".
+  // El nombre default acompaña la RECETA elegida; si lo editaste a mano, no
+  // se toca (se compara contra el último default generado).
+  const ultimoNombreAuto = useRef('');
   useEffect(() => {
-    if (nombre) return;
     const hoy = new Date();
     const prod = productosVisibles[0]?.nombre?.split(' ')[0] || 'Producto';
     const tag = estructura === 'cbo_deep' ? '[CBO Deep Poket]'
       : estructura === 'cbo_costcap' ? '[CBO Costcap]'
       : estructura === 'abo_costcap' ? '[ABO Costcap]' : '[ABO Bidcap]';
-    setNombre(`${prod} ${hoy.getDate()}/${hoy.getMonth() + 1} ${tag}`);
+    const auto = `${prod} ${hoy.getDate()}/${hoy.getMonth() + 1} ${tag}`;
+    setNombre(prev => (!prev || prev === ultimoNombreAuto.current ? auto : prev));
+    ultimoNombreAuto.current = auto;
   }, [productosVisibles, estructura]); // eslint-disable-line
 
   // Cambiar de receta trae SUS números: es lo que hace que sea una receta y no
@@ -274,40 +278,59 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
         ))}
       </div>
 
-      {/* config */}
-      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-3.5 grid gap-3">
-        <div className="grid sm:grid-cols-2 gap-3">
-          <Campo label="Nombre de la campaña" hint="Con la fecha y la receta en el nombre, Testeos por semana la agarra sola.">
-            <input className={inputCls} value={nombre} onChange={e => setNombre(e.target.value)} />
-          </Campo>
-          <div className="grid grid-cols-2 gap-3">
-            <Campo label={estructura.startsWith('abo') ? `Presupuesto diario POR CONJUNTO (${currency || 'ARS'})` : `Presupuesto diario (${currency || 'ARS'})`}>
-              <input className={inputCls} value={presupuesto} onChange={e => setPresupuesto(e.target.value)} placeholder="150.000" inputMode="decimal" />
+      {/* config — filas parejas: 1) nombre+plata, 2) estructura (conjuntos →
+          pujas por conjunto), 3) cuenta (píxel/página/programación), 4) activar. */}
+      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-3.5 grid gap-3.5">
+        <div className="grid sm:grid-cols-3 gap-3">
+          <div className="sm:col-span-2">
+            <Campo label="Nombre de la campaña" hint="Con la fecha y la receta en el nombre, Testeos por semana la agarra sola.">
+              <input className={inputCls} value={nombre} onChange={e => setNombre(e.target.value)} />
             </Campo>
-            {receta.puja && !esAbo ? (
+          </div>
+          {receta.puja && !esAbo ? (
+            <div className="grid grid-cols-2 gap-3">
+              <Campo label={`Presupuesto diario (${currency || 'ARS'})`}>
+                <input className={inputCls} value={presupuesto} onChange={e => setPresupuesto(e.target.value)} placeholder="150.000" inputMode="decimal" />
+              </Campo>
               <Campo label={`${receta.puja} (${currency || 'ARS'})`}
-                hint={receta.pujaDesdeCpa
-                  ? (cpaCuenta
-                      ? `Tu CPA real de los últimos 30 días: ${Math.round(cpaCuenta).toLocaleString('es-AR')}`
-                      : 'Va a nivel conjunto. Sin compras en 30 días no puedo sugerirte un CPA.')
-                  : undefined}>
+                hint={cpaCuenta ? `Tu CPA real de 30 días: ${Math.round(cpaCuenta).toLocaleString('es-AR')}` : undefined}>
                 <input className={inputCls} value={puja} onChange={e => setPuja(e.target.value)} placeholder="28.000" inputMode="decimal" />
               </Campo>
-            ) : receta.puja && esAbo ? (
-              <Campo label={`${receta.puja} (${currency || 'ARS'})`} hint="Es un ABO: cada conjunto lleva la suya — se cargan acá abajo, junto a los conjuntos.">
-                <span className="px-2.5 py-1.5 text-xs text-gray-400">Por conjunto ↓</span>
-              </Campo>
-            ) : (
-              <Campo label="Puja"><span className="px-2.5 py-1.5 text-xs text-gray-400">Sin tope (deep pocket)</span></Campo>
-            )}
-          </div>
+            </div>
+          ) : (
+            <Campo label={esAbo ? `Presupuesto diario POR CONJUNTO (${currency || 'ARS'})` : `Presupuesto diario (${currency || 'ARS'})`}
+              hint={estructura === 'cbo_deep' ? 'Sin tope de puja (deep pocket).' : undefined}>
+              <input className={inputCls} value={presupuesto} onChange={e => setPresupuesto(e.target.value)} placeholder="150.000" inputMode="decimal" />
+            </Campo>
+          )}
         </div>
-        {pasado && (
-          <p className="text-[11px] font-semibold text-red-600 dark:text-red-400">
-            Son {totalAds} anuncios ({adsOk.length} × {conjuntos} conjuntos) y el máximo por tirada es {MAX_ADS_CREADOS}.
-            Bajá los conjuntos o los anuncios.
-          </p>
-        )}
+
+        {/* Estructura: conjuntos primero; las pujas por conjunto dependen de él */}
+        <div className="grid sm:grid-cols-3 gap-3 items-start">
+          <Campo label="Conjuntos">
+            <select className={inputCls} value={conjuntos} onChange={e => setConjuntos(Number(e.target.value))}>
+              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20].map(x => <option key={x} value={x}>{x}</option>)}
+            </select>
+          </Campo>
+          {receta.puja && esAbo && (
+            <div className="sm:col-span-2">
+              <span className="text-[9.5px] font-bold uppercase tracking-[.08em] text-gray-400 block mb-1">
+                {receta.puja} por conjunto ({currency || 'ARS'})
+                {cpaCuenta ? ` — tu CPA real de 30 días: ${Math.round(cpaCuenta).toLocaleString('es-AR')}` : ''}
+              </span>
+              <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                {Array.from({ length: conjuntos }, (_, i) => (
+                  <label key={i} className="grid gap-0.5">
+                    <span className="text-[9px] font-bold text-gray-400">C{i + 1}</span>
+                    <input className={inputCls} value={pujaDelSet(i)} inputMode="decimal"
+                      onChange={e => setPujas(prev => ({ ...prev, [i]: e.target.value }))}
+                      placeholder={cpaCuenta ? String(Math.round(cpaCuenta)) : '28.000'} />
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
         {conjuntos > 1 && (
           <label className="flex items-start gap-2 text-[11px] text-gray-600 dark:text-gray-300 cursor-pointer">
             <input type="checkbox" className="mt-0.5 accent-[#1877F2]" checked={duplicarAds}
@@ -319,34 +342,15 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
             </span>
           </label>
         )}
-        {receta.puja && esAbo && (
-          <div>
-            <span className="text-[9.5px] font-bold uppercase tracking-[.08em] text-gray-400 block mb-1.5">
-              {receta.puja} POR CONJUNTO ({currency || 'ARS'})
-              {cpaCuenta ? ` — tu CPA real de 30 días: ${Math.round(cpaCuenta).toLocaleString('es-AR')}` : ''}
-            </span>
-            <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-8 gap-2">
-              {Array.from({ length: conjuntos }, (_, i) => (
-                <label key={i} className="grid gap-0.5">
-                  <span className="text-[9px] font-bold text-gray-400">C{i + 1}</span>
-                  <input className={inputCls} value={pujaDelSet(i)} inputMode="decimal"
-                    onChange={e => setPujas(prev => ({ ...prev, [i]: e.target.value }))}
-                    placeholder={cpaCuenta ? String(Math.round(cpaCuenta)) : '28.000'} />
-                </label>
-              ))}
-            </div>
-          </div>
+        {pasado && (
+          <p className="text-[11px] font-semibold text-red-600 dark:text-red-400">
+            Son {totalAds} anuncios ({adsOk.length} × {conjuntos} conjuntos) y el máximo por tirada es {MAX_ADS_CREADOS}.
+            Bajá los conjuntos o los anuncios.
+          </p>
         )}
-        <div className="grid grid-cols-2 gap-3">
-          <Campo label="Conjuntos">
-            <select className={inputCls} value={conjuntos} onChange={e => setConjuntos(Number(e.target.value))}>
-              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20].map(n => <option key={n} value={n}>{n}</option>)}
-            </select>
-          </Campo>
-          <Campo label="Programada para (opcional)"
-            hint="Hora de Argentina. Meta la deja «Programada» y no gasta hasta esa fecha — para eso creala ACTIVA.">
-            <input className={inputCls} type="datetime-local" value={programada} onChange={e => setProgramada(e.target.value)} />
-          </Campo>
+
+        {/* Cuenta y programación */}
+        <div className="grid sm:grid-cols-3 gap-3">
           <Campo label="Píxel (evento Compra)">
             <select className={inputCls} value={pixelId} onChange={e => setPixelId(e.target.value)}>
               {!prereqs && <option>Cargando…</option>}
@@ -354,21 +358,24 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
               {(prereqs?.pixels || []).map(p => <option key={p.id} value={p.id}>{p.name || p.id}</option>)}
             </select>
           </Campo>
-        </div>
-        <div className="grid sm:grid-cols-2 gap-3">
           <Campo label="Página (para post ids sin «_»)">
             <select className={inputCls} value={pageId} onChange={e => setPageId(e.target.value)}>
               {(prereqs?.pages || []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
               {prereqs?.pages?.length === 0 && <option value="">Sin páginas visibles</option>}
             </select>
           </Campo>
-          <label className="flex items-end gap-2 pb-1 cursor-pointer">
-            <input type="checkbox" checked={activar} onChange={e => setActivar(e.target.checked)} className="accent-[#1877F2]" />
-            <span className="text-xs text-gray-700 dark:text-gray-200">
-              Crear <b>ACTIVA</b> <span className="text-gray-400">(si no, queda pausada para revisar — recomendado)</span>
-            </span>
-          </label>
+          <Campo label="Programada para (opcional)"
+            hint="Hora de Argentina. Meta la deja «Programada» y no gasta hasta esa fecha — para eso creala ACTIVA.">
+            <input className={inputCls} type="datetime-local" value={programada} onChange={e => setProgramada(e.target.value)} />
+          </Campo>
         </div>
+
+        <label className="flex items-center gap-2 cursor-pointer border-t border-gray-100 dark:border-gray-700/60 pt-3">
+          <input type="checkbox" checked={activar} onChange={e => setActivar(e.target.checked)} className="accent-[#1877F2]" />
+          <span className="text-xs text-gray-700 dark:text-gray-200">
+            Crear <b>ACTIVA</b> <span className="text-gray-400">(si no, queda pausada para revisar — recomendado{programada ? '; ojo: programada + pausada no arranca sola' : ''})</span>
+          </span>
+        </label>
       </div>
 
       {/* anuncios */}

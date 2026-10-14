@@ -2589,6 +2589,11 @@ async function handleLaunchCampaign(req, res) {
 // traducimos a algo accionable en vez de mandar al usuario a la doc de Graph.
 function traducirErrorMetaEscritura(msg) {
   const m = String(msg || '');
+  // subcode 1885183: la Meta app está en modo Desarrollo — Meta deja subir
+  // videos pero rechaza CREAR anuncios hasta que la app esté en modo Activo.
+  if (/1885183|modo de desarrollo|development mode/i.test(m)) {
+    return 'La app de Meta (developers.facebook.com) está en MODO DESARROLLO y Meta no permite crear anuncios así. Entrá a developers.facebook.com → tu app → pasá el modo de "Desarrollo" a "Activo" (puede pedirte cargar una URL de política de privacidad en Configuración → Información básica) y reintentá. Detalle: ' + m.slice(0, 180);
+  }
   if (/Unsupported post request|missing permissions|\(#200\)|\(#10\)|requires (the extended permission|ads_management)/i.test(m)) {
     return 'Tu conexión de Meta no tiene permisos de ESCRITURA (se conectó pidiendo solo lectura). Andá a Conectar Meta, reconectá la cuenta aceptando los permisos nuevos (gestión de anuncios y páginas) y reintentá. Detalle de Meta: ' + m.slice(0, 220);
   }
@@ -2620,6 +2625,12 @@ async function handleTemplateConfig(req, res) {
     if (targeting) {
       delete targeting.targeting_optimization;
       delete targeting.targeting_relaxation_types;
+      // Internos que Meta devuelve pero NO acepta en escritura — re-postearlos
+      // tira "(#3) Application does not have the capability" (verificado
+      // 14/10/2026 con un adset real de la cuenta Vya).
+      delete targeting.subscriber_universe;
+      delete targeting.user_age_unknown;
+      delete targeting.age_range;
     }
 
     // instagram_actor_id legacy puede ser una cuenta PBIA que
@@ -2853,6 +2864,21 @@ async function handleCreateCampaignStructure(req, res) {
     });
     log.push(`✓ Campaña creada: ${camp.id} (pausada hasta el final)`);
 
+    // Rollback: si de acá en adelante NADA útil se creó (ni un ad), borramos
+    // la campaña para no dejar basura pausada en el Ads Manager.
+    let huboAdsOk = false; // con ≥1 ad creado, el rollback NUNCA borra
+    const borrarCampana = async () => {
+      if (huboAdsOk) return;
+      try {
+        await graphPost(String(camp.id), token, { status: 'DELETED' });
+        log.push('↺ Campaña borrada (rollback: no se creó ningún anuncio)');
+      } catch (e) {
+        log.push(`⚠ No pude borrar la campaña ${camp.id}: ${e.message} — borrala desde Meta`);
+      }
+    };
+
+    try {
+
     // Patrón de nombre de conjunto: {index}, {index:01}, {date}. La fecha la
     // manda el CLIENTE (la del nombre de campaña = mañana, regla del equipo)
     // para que preview y realidad coincidan; fallback: hoy en AR.
@@ -2937,13 +2963,15 @@ async function handleCreateCampaignStructure(req, res) {
 
     // 4. Activación final: una sola escritura, solo con ≥1 ad OK.
     const okAds = resultados.filter(r => !r.ok ? false : true).length;
+    huboAdsOk = okAds > 0;
     let estadoFinal = 'PAUSED';
     if (estado === 'ACTIVE' && okAds > 0) {
       await graphPost(camp.id, token, { status: 'ACTIVE' });
       estadoFinal = 'ACTIVE';
       log.push('✓ Campaña ACTIVADA');
     } else if (okAds === 0) {
-      log.push('✗ Ningún ad se creó — la campaña queda PAUSADA (borrala desde Meta si no la vas a usar)');
+      log.push('✗ Ningún ad se creó');
+      await borrarCampana();
     }
 
     const fallaron = resultados.filter(r => !r.ok).length;
@@ -2952,8 +2980,15 @@ async function handleCreateCampaignStructure(req, res) {
       adsetIds,
       resultados,
       log,
-      estado: estadoFinal,
+      estado: okAds === 0 ? 'DELETED' : estadoFinal,
     });
+
+    } catch (errInterno) {
+      // Falló antes de crear ningún ad (p. ej. el primer conjunto): no
+      // dejamos la campaña vacía tirada en el Ads Manager.
+      await borrarCampana();
+      throw errInterno;
+    }
   } catch (err) {
     log.push(`✗ ${err.message}`);
     return respondJSON(res, err.status || 502, { error: traducirErrorMetaEscritura(err.message), log });

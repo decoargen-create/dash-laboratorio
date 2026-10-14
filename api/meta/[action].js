@@ -2806,6 +2806,77 @@ async function handleUploadAdVideos(req, res) {
   });
 }
 
+// Mix VIDEO vs IMAGEN por campaña (para "Testeos por semana"): cuánto del
+// gasto/ventas de cada campaña vino de ads de video y cuánto de imagen.
+// Dos llamadas: insights a nivel ad (la ventana elegida) + el tipo de
+// creativo de cada ad (video_id ⇒ video; si no, imagen).
+async function handleSemanasMix(req, res) {
+  if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
+  const origin = getOrigin(req);
+  const url = new URL(req.url, origin);
+  const { token, error, status } = await resolveAccessToken(req, url);
+  if (!token) return respondJSON(res, status || 401, { error });
+
+  const accountId = String(url.searchParams.get('account_id') || '').trim();
+  if (!accountId) return respondJSON(res, 400, { error: 'Falta account_id' });
+  let preset = url.searchParams.get('date_preset') || 'last_30d';
+  const custom = /^custom_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})$/.exec(preset);
+  if (!custom && !/^[a-z0-9_]+$/.test(preset)) preset = 'last_30d';
+  const rango = custom
+    ? { time_range: JSON.stringify({ since: custom[1], until: custom[2] }) }
+    : { date_preset: preset };
+
+  try {
+    const traerInsights = async () => {
+      const filas = [];
+      let after = null, guard = 0;
+      do {
+        const params = { level: 'ad', fields: 'ad_id,campaign_id,spend,actions,action_values', limit: 500, ...rango };
+        if (after) params.after = after;
+        const d = await graphGet(`${accountId}/insights`, token, params);
+        filas.push(...(d.data || []));
+        after = d.paging?.cursors?.after && d.paging?.next ? d.paging.cursors.after : null;
+        guard++;
+      } while (after && guard < 8);
+      return filas;
+    };
+    const traerTipos = async () => {
+      const tipos = new Map(); // adId -> 'video' | 'imagen'
+      let after = null, guard = 0;
+      do {
+        const params = { fields: 'id,creative{video_id,object_story_spec}', limit: 500 };
+        if (after) params.after = after;
+        const d = await graphGet(`${accountId}/ads`, token, params);
+        for (const ad of d.data || []) {
+          const cr = ad.creative || {};
+          const esVideo = !!(cr.video_id || cr.object_story_spec?.video_data);
+          tipos.set(ad.id, esVideo ? 'video' : 'imagen');
+        }
+        after = d.paging?.cursors?.after && d.paging?.next ? d.paging.cursors.after : null;
+        guard++;
+      } while (after && guard < 10);
+      return tipos;
+    };
+    const [insights, tipos] = await Promise.all([traerInsights(), traerTipos()]);
+
+    const porCampana = {};
+    for (const r of insights) {
+      const cid = r.campaign_id;
+      if (!cid) continue;
+      const tipo = tipos.get(r.ad_id) || 'imagen';
+      if (!porCampana[cid]) porCampana[cid] = { video: { ads: 0, spend: 0, compras: 0, revenue: 0 }, imagen: { ads: 0, spend: 0, compras: 0, revenue: 0 } };
+      const t = porCampana[cid][tipo];
+      t.ads++;
+      t.spend += Number(r.spend || 0);
+      t.compras += pickAction(r.actions, ACTION_ALIASES.purchases);
+      t.revenue += pickAction(r.action_values, ACTION_ALIASES.purchases);
+    }
+    return respondJSON(res, 200, { porCampana });
+  } catch (e) {
+    return respondJSON(res, e.status && e.status < 500 ? e.status : 500, { error: e.message });
+  }
+}
+
 // Desglose DIARIO de frecuencia para los candidatos a prospectador: la
 // frecuencia de la ventana puede dar baja "de promedio" aunque algún día se
 // haya ido arriba — acá se valida que el intradiario se mantenga bajo.
@@ -3181,6 +3252,7 @@ const actions = {
   'upload-ad-videos': handleUploadAdVideos,
   'videos-status': handleVideosStatus,
   'prosp-daily': handleProspDaily,
+  'semanas-mix': handleSemanasMix,
   'create-campaign-structure': handleCreateCampaignStructure,
   publicaciones: handlePublicaciones,
   'ig-accounts': handleIgAccounts,

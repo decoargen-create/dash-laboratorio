@@ -1,23 +1,33 @@
 // "Ads Uploader" propio — publica los videos de una tarjeta de Producción
 // como una campaña nueva en Meta, clonando la configuración (targeting,
-// pixel, página, CTA) de un ad existente que el usuario elige como template.
+// pixel, página, identidad IG, CTA) de un ad existente elegido como template.
 //
-// Flujo (orquestado acá, server en api/meta/[action].js):
-//   1. Elegir cuenta + videos de la tarjeta (default: los aprobados).
-//   2. Elegir el ad template: Campaña → Conjunto → Ad (igual que adsuploader).
-//   3. Config: nombre (convención de testeo con fecha → entra solo a las
-//      cohortes), presupuesto diario CBO, ads por conjunto, copy.
-//   4. Publicar: sube videos (advideos por URL) → espera el procesamiento →
-//      crea campaña + conjuntos + creatives + ads. ACTIVA directo.
+// Flujo ideal (el del equipo): cada PRODUCTO tiene asignada su cuenta y su
+// ad base (preset). Con preset, publicar es: abrir → poner presupuesto →
+// Publicar. El preset se guarda solo al publicar OK (o con el botón
+// "Guardar preset del producto") y vive en localStorage por producto.
+//
+// Server en api/meta/[action].js:
+//   upload-ad-videos (advideos por file_url) → videos-status (ready +
+//   thumbnail) → create-campaign-structure (campaña PAUSED → conjuntos →
+//   creatives → ads → activación final en una sola escritura).
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
-  Rocket, X, Loader2, Check, AlertTriangle, ChevronRight, ExternalLink, Film,
+  Rocket, X, Loader2, Check, AlertTriangle, ChevronRight, ExternalLink, Film, Save, Pencil,
 } from 'lucide-react';
 import { useMetaConnections, useMetaAdAccounts, authHeaders } from './MetaConnect.jsx';
 import { linkMeta } from './testeosCore.js';
 
 const LS_ACCOUNT = 'adslab-testeos-account';
+const presetKey = (a) => `adslab-publicar-preset-v1-${a.productoId != null ? `id:${a.productoId}` : `nom:${(a.productoNombre || '').trim().toLowerCase()}`}`;
+
+function leerPreset(a) {
+  try { return JSON.parse(localStorage.getItem(presetKey(a)) || 'null'); } catch { return null; }
+}
+function guardarPreset(a, preset) {
+  try { localStorage.setItem(presetKey(a), JSON.stringify({ ...preset, ts: Date.now() })); } catch {}
+}
 
 async function metaApi(path, { connId, method = 'GET', body } = {}) {
   let u = `/api/meta/${path}`;
@@ -35,35 +45,55 @@ async function metaApi(path, { connId, method = 'GET', body } = {}) {
 }
 
 const esperar = (ms) => new Promise(r => setTimeout(r, ms));
+const sinExtension = (n) => String(n || '').replace(/\.[a-z0-9]{2,5}$/i, '');
+
+// Patrones tipo adsuploader: {filename}, {index}, {index:01}, {date}.
+function aplicarPatron(patron, { filename = '', index = 0, fecha = '' }) {
+  return String(patron || '')
+    .replaceAll('{filename}', filename)
+    .replaceAll('{index:01}', String(index + 1).padStart(2, '0'))
+    .replaceAll('{index}', String(index + 1))
+    .replaceAll('{date}', fecha)
+    .slice(0, 100);
+}
 
 export default function PublicarCampanaModal({ a, onClose, addToast }) {
+  const preset = useMemo(() => leerPreset(a), [a]);
   const { connections } = useMetaConnections();
   const { accounts } = useMetaAdAccounts(connections);
-  const [accountId, setAccountId] = useState(() => { try { return localStorage.getItem(LS_ACCOUNT) || ''; } catch { return ''; } });
+  const [accountId, setAccountId] = useState(() => preset?.accountId || (() => { try { return localStorage.getItem(LS_ACCOUNT) || ''; } catch { return ''; } })());
   const account = useMemo(() => accounts.find(x => x.id === accountId) || accounts[0] || null, [accounts, accountId]);
 
   // ── Videos de la tarjeta ──
   const candidatos = useMemo(() => (a.archivos || []).filter(f => f && (f.driveId || f.storagePath)), [a]);
   const [sel, setSel] = useState(() => {
-    const aprobados = (a.archivos || []).filter(f => f?.aprobado && (f.driveId || f.storagePath));
-    const base = aprobados.length > 0 ? aprobados : (a.archivos || []).filter(f => f && (f.driveId || f.storagePath));
-    return new Set(base.map(f => f.ts));
+    const conArchivo = (a.archivos || []).filter(f => f && (f.driveId || f.storagePath));
+    const base = conArchivo.filter(f => f.aprobado);
+    return new Set((base.length > 0 ? base : conArchivo).map(f => f.ts));
   });
   const toggleSel = (ts) => setSel(prev => { const n = new Set(prev); if (n.has(ts)) n.delete(ts); else n.add(ts); return n; });
   const elegidos = candidatos.filter(f => sel.has(f.ts));
 
-  // ── Template: campaña → conjunto → ad ──
+  // ── Template (preset directo, o picker campaña → conjunto → ad) ──
+  const [usandoPreset, setUsandoPreset] = useState(!!preset?.adId);
   const [campanas, setCampanas] = useState([]);
   const [adsets, setAdsets] = useState([]);
   const [campSel, setCampSel] = useState('');
   const [adsetSel, setAdsetSel] = useState('');
-  const [adSel, setAdSel] = useState('');
+  const [adSel, setAdSel] = useState(preset?.adId || '');
   const [buscaCamp, setBuscaCamp] = useState('');
   const [template, setTemplate] = useState(null);
   const [cargandoTpl, setCargandoTpl] = useState(false);
+  const primeraCuenta = useRef(true);
 
+  // Cambiar de cuenta INVALIDA el template: el pixel/página de la cuenta A
+  // no sirven en la B (la campaña se crearía rota). Se resetea todo.
   useEffect(() => {
     if (!account) return;
+    if (primeraCuenta.current) { primeraCuenta.current = false; }
+    else {
+      setCampSel(''); setAdsetSel(''); setAdSel(''); setTemplate(null); setAdsets([]); setUsandoPreset(false);
+    }
     let vivo = true;
     (async () => {
       try {
@@ -72,10 +102,10 @@ export default function PublicarCampanaModal({ a, onClose, addToast }) {
       } catch (e) { addToast?.({ type: 'error', message: `Campañas: ${e.message}` }); }
     })();
     return () => { vivo = false; };
-  }, [account]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [account?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    setAdsets([]); setAdsetSel(''); setAdSel(''); setTemplate(null);
+    setAdsets([]); setAdsetSel('');
     if (!campSel || !account) return;
     let vivo = true;
     (async () => {
@@ -87,6 +117,7 @@ export default function PublicarCampanaModal({ a, onClose, addToast }) {
     return () => { vivo = false; };
   }, [campSel]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // template-config por adSel — funciona igual venga del picker o del preset.
   useEffect(() => {
     setTemplate(null);
     if (!adSel || !account) return;
@@ -97,22 +128,30 @@ export default function PublicarCampanaModal({ a, onClose, addToast }) {
         const d = await metaApi(`template-config?ad_id=${encodeURIComponent(adSel)}`, { connId: account.connId });
         if (vivo) {
           setTemplate(d);
-          if (d.defaultMessage && !mensaje) setMensaje(d.defaultMessage);
+          setMensaje(prev => prev || preset?.mensaje || d.defaultMessage || '');
         }
-      } catch (e) { addToast?.({ type: 'error', message: `Template: ${e.message}` }); }
-      finally { if (vivo) setCargandoTpl(false); }
+      } catch (e) {
+        addToast?.({ type: 'error', message: `Template: ${e.message}` });
+        if (vivo && usandoPreset) setUsandoPreset(false); // preset roto → picker
+      } finally { if (vivo) setCargandoTpl(false); }
     })();
     return () => { vivo = false; };
-  }, [adSel]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [adSel, account?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Config de la campaña nueva ──
-  const hoy = new Date();
-  const fechaCorta = `${hoy.getDate()}/${hoy.getMonth() + 1}`;
+  // La fecha del nombre es EL DÍA SIGUIENTE (regla del equipo: la campaña se
+  // arma hoy para que corra mañana).
+  const manana = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const fechaCorta = `${manana.getDate()}/${manana.getMonth() + 1}`;
   const [nombre, setNombre] = useState(`${a.productoNombre || 'Producto'} ${fechaCorta} [CBO Testeo Videos]`);
-  const [presupuesto, setPresupuesto] = useState('');
-  const [adsPorSet, setAdsPorSet] = useState(3);
-  const [mensaje, setMensaje] = useState('');
-  const [titular, setTitular] = useState('');
+  const [presupuesto, setPresupuesto] = useState(preset?.budget ? String(preset.budget) : '');
+  const [adsPorSet, setAdsPorSet] = useState(preset?.adsPerSet || 3);
+  const [mensaje, setMensaje] = useState(preset?.mensaje || '');
+  const [titular, setTitular] = useState(preset?.titular || '');
+  const [adsetPattern, setAdsetPattern] = useState(preset?.adsetPattern || 'Ad Set {index:01}');
+  const [adPattern, setAdPattern] = useState(preset?.adPattern || '{filename}');
+  const [enPausa, setEnPausa] = useState(false);
+  const [verPreview, setVerPreview] = useState(false);
 
   // ── Publicación ──
   const [fase, setFase] = useState(null); // null | 'subiendo' | 'procesando' | 'creando' | 'listo' | 'error'
@@ -120,7 +159,31 @@ export default function PublicarCampanaModal({ a, onClose, addToast }) {
   const [resultado, setResultado] = useState(null);
   const log = (l) => setLogs(prev => [...prev, l]);
 
+  const nSets = Math.ceil(elegidos.length / (Number(adsPorSet) || 3)) || 0;
+  const nombresAds = useMemo(() => elegidos.map((f, i) =>
+    aplicarPatron(adPattern, { filename: sinExtension(f.name), index: i, fecha: fechaCorta }) || sinExtension(f.name)
+  ), [elegidos, adPattern, fechaCorta]);
+  const nombresSets = useMemo(() => Array.from({ length: nSets }, (_, i) =>
+    aplicarPatron(adsetPattern, { filename: '', index: i, fecha: fechaCorta }) || `Ad Set ${i + 1}`
+  ), [nSets, adsetPattern, fechaCorta]);
+
   const listo = account && elegidos.length > 0 && template?.pageId && nombre.trim() && Number(presupuesto) > 0 && !fase;
+
+  const guardarPresetActual = useCallback((silencioso = false) => {
+    if (!account || !adSel) return;
+    guardarPreset(a, {
+      accountId: account.id,
+      adId: adSel,
+      adLabel: template?.adName || adSel,
+      budget: Number(presupuesto) || null,
+      adsPerSet: Number(adsPorSet) || 3,
+      mensaje,
+      titular,
+      adsetPattern,
+      adPattern,
+    });
+    if (!silencioso) addToast?.({ type: 'success', message: `Preset de ${a.productoNombre || 'este producto'} guardado ✓ — la próxima ya viene todo precargado.` });
+  }, [a, account, adSel, template, presupuesto, adsPorSet, mensaje, titular, adsetPattern, adPattern, addToast]);
 
   const publicar = useCallback(async () => {
     if (!listo) return;
@@ -139,9 +202,9 @@ export default function PublicarCampanaModal({ a, onClose, addToast }) {
       for (const r of (up.resultados || [])) log(r.ok ? `  ✓ ${r.name}` : `  ✗ ${r.name}: ${r.error}`);
       if (subidos.length === 0) throw new Error('Ningún video se pudo subir a Meta.');
 
-      // 2. Esperar el procesamiento (y el thumbnail que necesita el creative).
+      // 2. Esperar procesamiento + thumbnail (el creative lo necesita).
       setFase('procesando');
-      log('Esperando que Meta procese los videos…');
+      log('Esperando que Meta procese los videos (video + thumbnail)…');
       const ids = subidos.map(r => r.videoId);
       let estados = [];
       for (let i = 0; i < 45; i++) {
@@ -154,22 +217,28 @@ export default function PublicarCampanaModal({ a, onClose, addToast }) {
         if (estados.every(v => v.ready || v.status === 'error')) break;
       }
       const porId = new Map(estados.map(v => [v.id, v]));
+      const indicePorNombre = new Map(elegidos.map((f, i) => [f.name, i]));
       const adsListos = subidos
         .filter(r => porId.get(r.videoId)?.ready)
-        .map(r => ({ name: r.name, videoId: r.videoId, picture: porId.get(r.videoId)?.picture || null }));
-      if (adsListos.length === 0) throw new Error('Meta no terminó de procesar ningún video — probá de nuevo en unos minutos (ya quedaron subidos).');
+        .map(r => {
+          const i = indicePorNombre.get(r.name) ?? 0;
+          return { name: nombresAds[i] || sinExtension(r.name), videoId: r.videoId, picture: porId.get(r.videoId)?.picture || null };
+        });
+      if (adsListos.length === 0) throw new Error('Meta no terminó de procesar ningún video — reintentá en unos minutos (ya quedaron subidos).');
 
-      // 3. Crear campaña + conjuntos + creatives + ads.
+      // 3. Crear la estructura (el server la crea PAUSADA y la activa al final).
       setFase('creando');
       log(`Creando campaña "${nombre.trim()}" con ${adsListos.length} ads…`);
       const cr = await metaApi('create-campaign-structure', {
         connId: account.connId, method: 'POST',
         body: {
           account_id: account.id,
+          currency: account.currency || '',
           campaignName: nombre.trim(),
           dailyBudget: Number(presupuesto),
           adsPerSet: Number(adsPorSet) || 3,
-          status: 'ACTIVE',
+          adsetNamePattern: adsetPattern,
+          status: enPausa ? 'PAUSED' : 'ACTIVE',
           template,
           message: mensaje,
           headline: titular,
@@ -180,14 +249,20 @@ export default function PublicarCampanaModal({ a, onClose, addToast }) {
       if (cr.error) throw new Error(cr.error);
       setResultado(cr);
       setFase('listo');
+      guardarPresetActual(true); // publicación OK = el preset del producto se actualiza solo
       const okAds = (cr.resultados || []).filter(r => r.ok).length;
-      addToast?.({ type: 'success', message: `Campaña publicada ACTIVA: ${okAds} ad${okAds === 1 ? '' : 's'} 🚀` });
+      addToast?.({
+        type: okAds === adsListos.length ? 'success' : 'warning',
+        message: cr.estado === 'ACTIVE'
+          ? `Campaña publicada ACTIVA: ${okAds}/${adsListos.length} ads 🚀`
+          : `Campaña creada EN PAUSA: ${okAds}/${adsListos.length} ads — revisala en Meta`,
+      });
     } catch (e) {
       log(`✗ ${e.message}`);
       setFase('error');
       addToast?.({ type: 'error', message: `Publicación: ${e.message}` });
     }
-  }, [listo, elegidos, account, nombre, presupuesto, adsPorSet, mensaje, titular, template]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [listo, elegidos, account, nombre, presupuesto, adsPorSet, mensaje, titular, template, adsetPattern, nombresAds, enPausa, guardarPresetActual]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const h = (e) => { if (e.key === 'Escape' && !fase) onClose(); };
@@ -197,7 +272,6 @@ export default function PublicarCampanaModal({ a, onClose, addToast }) {
 
   const campFiltradas = campanas.filter(c => !buscaCamp.trim() || c.name.toLowerCase().includes(buscaCamp.toLowerCase()));
   const adsDelSet = adsets.find(s => s.id === adsetSel)?.ads || [];
-  const nSets = Math.ceil(elegidos.length / (Number(adsPorSet) || 3));
   const input = 'w-full px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500';
 
   return (
@@ -213,6 +287,21 @@ export default function PublicarCampanaModal({ a, onClose, addToast }) {
         </div>
 
         <div className="p-5 space-y-5 flex-1 min-h-0 overflow-y-auto">
+          {/* Preset del producto */}
+          {usandoPreset && (
+            <div className="flex items-center gap-2 rounded-lg border border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 px-3 py-2.5">
+              <Check size={15} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
+              <div className="flex-1 min-w-0 text-xs text-emerald-800 dark:text-emerald-200">
+                <b>Preset de {a.productoNombre || 'este producto'}</b> — template: <span className="font-medium">{template?.adName || preset?.adLabel || preset?.adId}</span>
+                {cargandoTpl && <Loader2 size={11} className="inline animate-spin ml-1.5" />}
+              </div>
+              <button onClick={() => { setUsandoPreset(false); setAdSel(''); setTemplate(null); }}
+                className="shrink-0 inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 hover:underline">
+                <Pencil size={11} /> Cambiar
+              </button>
+            </div>
+          )}
+
           {/* Cuenta */}
           <div>
             <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Cuenta publicitaria</span>
@@ -230,8 +319,7 @@ export default function PublicarCampanaModal({ a, onClose, addToast }) {
               <div className="space-y-1 max-h-44 overflow-y-auto pr-1">
                 {candidatos.map(f => (
                   <label key={f.ts} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer">
-                    <input type="checkbox" checked={sel.has(f.ts)} onChange={() => toggleSel(f.ts)} disabled={!!fase}
-                      className="accent-brand-500" />
+                    <input type="checkbox" checked={sel.has(f.ts)} onChange={() => toggleSel(f.ts)} disabled={!!fase} className="accent-brand-500" />
                     <Film size={13} className="text-gray-400 shrink-0" />
                     <span className="flex-1 min-w-0 truncate text-xs text-gray-800 dark:text-gray-100" title={f.name}>{f.name}</span>
                     {f.aprobado && <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 shrink-0">APROBADO</span>}
@@ -242,56 +330,65 @@ export default function PublicarCampanaModal({ a, onClose, addToast }) {
             )}
           </div>
 
-          {/* Template */}
-          <div>
-            <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Copiar configuración de un ad existente</span>
-            <p className="text-[11px] text-gray-400 mb-2">Se clonan targeting, optimización, pixel, página y CTA de este ad — elegí uno que esté funcionando bien.</p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              <div>
-                <input value={buscaCamp} onChange={e => setBuscaCamp(e.target.value)} placeholder="Buscar campaña…" disabled={!!fase}
-                  className={`${input} mb-1 text-xs`} />
-                <div className="border border-gray-200 dark:border-gray-700 rounded-lg max-h-36 overflow-y-auto">
-                  {campFiltradas.slice(0, 50).map(c => (
-                    <button key={c.id} onClick={() => setCampSel(c.id)} disabled={!!fase}
-                      className={`w-full text-left px-2 py-1.5 text-[11px] truncate ${campSel === c.id ? 'bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-200 font-bold' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'}`}
-                      title={c.name}>{c.name}</button>
+          {/* Template picker (solo sin preset activo) */}
+          {!usandoPreset && (
+            <div>
+              <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Copiar configuración de un ad existente</span>
+              <p className="text-[11px] text-gray-400 mb-2">Se clonan targeting, optimización, pixel, página, Instagram y CTA de este ad — elegí uno que esté funcionando bien.</p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div>
+                  <input value={buscaCamp} onChange={e => setBuscaCamp(e.target.value)} placeholder="Buscar campaña…" disabled={!!fase} className={`${input} mb-1 text-xs`} />
+                  <div className="border border-gray-200 dark:border-gray-700 rounded-lg max-h-36 overflow-y-auto">
+                    {campFiltradas.slice(0, 50).map(c => (
+                      <button key={c.id} onClick={() => setCampSel(c.id)} disabled={!!fase}
+                        className={`w-full text-left px-2 py-1.5 text-[11px] truncate ${campSel === c.id ? 'bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-200 font-bold' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'}`}
+                        title={c.name}>{c.name}</button>
+                    ))}
+                    {campFiltradas.length === 0 && <p className="px-2 py-2 text-[11px] text-gray-400">Sin campañas</p>}
+                  </div>
+                </div>
+                <div className="border border-gray-200 dark:border-gray-700 rounded-lg max-h-[10.5rem] overflow-y-auto self-end">
+                  {adsets.map(s => (
+                    <button key={s.id} onClick={() => setAdsetSel(s.id)} disabled={!!fase}
+                      className={`w-full text-left px-2 py-1.5 text-[11px] truncate ${adsetSel === s.id ? 'bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-200 font-bold' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'}`}
+                      title={s.name}>{s.name}{Array.isArray(s.ads) ? ` (${s.ads.length})` : ''}</button>
                   ))}
-                  {campFiltradas.length === 0 && <p className="px-2 py-2 text-[11px] text-gray-400">Sin campañas</p>}
+                  {campSel && adsets.length === 0 && <p className="px-2 py-2 text-[11px] text-gray-400">Cargando conjuntos…</p>}
+                  {!campSel && <p className="px-2 py-2 text-[11px] text-gray-400">← Elegí una campaña</p>}
+                </div>
+                <div className="border border-gray-200 dark:border-gray-700 rounded-lg max-h-[10.5rem] overflow-y-auto self-end">
+                  {adsDelSet.map(ad => (
+                    <button key={ad.id} onClick={() => setAdSel(ad.id)} disabled={!!fase}
+                      className={`w-full text-left px-2 py-1.5 text-[11px] truncate flex items-center gap-1 ${adSel === ad.id ? 'bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-200 font-bold' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'}`}
+                      title={ad.name}>{adSel === ad.id && <Check size={11} className="shrink-0" />}<span className="truncate">{ad.name}</span></button>
+                  ))}
+                  {adsetSel && adsDelSet.length === 0 && <p className="px-2 py-2 text-[11px] text-gray-400">Sin ads en este conjunto</p>}
+                  {!adsetSel && <p className="px-2 py-2 text-[11px] text-gray-400">← Elegí un conjunto</p>}
                 </div>
               </div>
-              <div className="border border-gray-200 dark:border-gray-700 rounded-lg max-h-[10.5rem] overflow-y-auto self-end">
-                {adsets.map(s => (
-                  <button key={s.id} onClick={() => { setAdsetSel(s.id); setAdSel(''); }} disabled={!!fase}
-                    className={`w-full text-left px-2 py-1.5 text-[11px] truncate ${adsetSel === s.id ? 'bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-200 font-bold' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'}`}
-                    title={s.name}>{s.name}</button>
-                ))}
-                {campSel && adsets.length === 0 && <p className="px-2 py-2 text-[11px] text-gray-400">Cargando conjuntos…</p>}
-                {!campSel && <p className="px-2 py-2 text-[11px] text-gray-400">← Elegí una campaña</p>}
-              </div>
-              <div className="border border-gray-200 dark:border-gray-700 rounded-lg max-h-[10.5rem] overflow-y-auto self-end">
-                {adsDelSet.map(ad => (
-                  <button key={ad.id} onClick={() => setAdSel(ad.id)} disabled={!!fase}
-                    className={`w-full text-left px-2 py-1.5 text-[11px] truncate flex items-center gap-1 ${adSel === ad.id ? 'bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-200 font-bold' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'}`}
-                    title={ad.name}>{adSel === ad.id && <Check size={11} className="shrink-0" />}<span className="truncate">{ad.name}</span></button>
-                ))}
-                {adsetSel && adsDelSet.length === 0 && <p className="px-2 py-2 text-[11px] text-gray-400">Sin ads en este conjunto</p>}
-                {!adsetSel && <p className="px-2 py-2 text-[11px] text-gray-400">← Elegí un conjunto</p>}
-              </div>
             </div>
-            {cargandoTpl && <p className="text-[11px] text-gray-400 mt-1.5 inline-flex items-center gap-1"><Loader2 size={11} className="animate-spin" /> Leyendo configuración del ad…</p>}
-            {template && (
-              <p className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-1.5 inline-flex items-center gap-1 flex-wrap">
-                <Check size={12} /> Config lista: {template.campaign?.objective || 'objetivo'} · {template.adset?.optimizationGoal || 'optimización'} · página {template.pageId}{template.link ? ` · CTA ${template.ctaType} → ${template.link.slice(0, 40)}…` : ''}
+          )}
+
+          {cargandoTpl && !usandoPreset && <p className="text-[11px] text-gray-400 inline-flex items-center gap-1"><Loader2 size={11} className="animate-spin" /> Leyendo configuración del ad…</p>}
+          {template && (
+            <div className="flex items-start gap-2 flex-wrap">
+              <p className="flex-1 min-w-0 text-[11px] text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1 flex-wrap">
+                <Check size={12} /> Config lista: {template.campaign?.objective || 'objetivo'} · {template.adset?.optimizationGoal || 'optimización'} · página {template.pageId}{template.link ? ` · CTA ${template.ctaType} → ${String(template.link).slice(0, 36)}…` : ''}
               </p>
-            )}
-          </div>
+              <button onClick={() => guardarPresetActual(false)} disabled={!!fase}
+                title="Asigna esta cuenta + este ad base al producto: la próxima publicación viene todo precargado"
+                className="shrink-0 inline-flex items-center gap-1 px-2 py-1 text-[11px] font-bold rounded-lg border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition">
+                <Save size={11} /> Guardar preset del producto
+              </button>
+            </div>
+          )}
 
           {/* Config campaña */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="sm:col-span-2">
               <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Nombre de la campaña</span>
               <input value={nombre} onChange={e => setNombre(e.target.value)} className={input} disabled={!!fase} />
-              <p className="text-[10px] text-gray-400 mt-1">Con "CBO" + fecha entra sola a las cohortes de Testeos por semana.</p>
+              <p className="text-[10px] text-gray-400 mt-1">Fecha predeterminada: mañana ({fechaCorta}). Con "CBO" + fecha entra sola a las cohortes de Testeos.</p>
             </div>
             <div>
               <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Presupuesto diario (CBO){account?.currency ? ` · ${account.currency}` : ''}</span>
@@ -300,18 +397,58 @@ export default function PublicarCampanaModal({ a, onClose, addToast }) {
             <div>
               <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Ads por conjunto</span>
               <input type="number" min="1" max="10" value={adsPorSet} onChange={e => setAdsPorSet(e.target.value)} className={input} disabled={!!fase} />
-              <p className="text-[10px] text-gray-400 mt-1">{elegidos.length} videos → {nSets || 0} conjunto{nSets === 1 ? '' : 's'}</p>
+              <p className="text-[10px] text-gray-400 mt-1">{elegidos.length} videos → {nSets} conjunto{nSets === 1 ? '' : 's'}</p>
+            </div>
+            <div>
+              <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Patrón nombre de conjunto</span>
+              <input value={adsetPattern} onChange={e => setAdsetPattern(e.target.value)} className={`${input} font-mono text-xs`} disabled={!!fase} />
+              <p className="text-[10px] text-gray-400 mt-1">{'{index}'} · {'{index:01}'} · {'{date}'}</p>
+            </div>
+            <div>
+              <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Patrón nombre de ad</span>
+              <input value={adPattern} onChange={e => setAdPattern(e.target.value)} className={`${input} font-mono text-xs`} disabled={!!fase} />
+              <p className="text-[10px] text-gray-400 mt-1">{'{filename}'} · {'{index}'} · {'{index:01}'} · {'{date}'}</p>
             </div>
             <div className="sm:col-span-2">
               <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Texto principal del ad (común a todos)</span>
               <textarea value={mensaje} onChange={e => setMensaje(e.target.value)} rows={3} className={`${input} resize-y`} disabled={!!fase}
-                placeholder="El copy que acompaña al video. Se precarga con el del ad template." />
+                placeholder="Se precarga con el copy del ad template (o del preset del producto)." />
             </div>
             <div className="sm:col-span-2">
               <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Titular (opcional)</span>
               <input value={titular} onChange={e => setTitular(e.target.value)} className={input} disabled={!!fase} />
             </div>
           </div>
+
+          {/* Preview de la estructura */}
+          {elegidos.length > 0 && (
+            <div>
+              <button onClick={() => setVerPreview(v => !v)} className="text-[11px] font-bold text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 inline-flex items-center gap-1">
+                <ChevronRight size={12} className={`transition-transform ${verPreview ? 'rotate-90' : ''}`} />
+                Preview: {elegidos.length} ads en {nSets} conjunto{nSets === 1 ? '' : 's'} — qué se va a crear
+              </button>
+              {verPreview && (
+                <div className="mt-2 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                  <table className="w-full text-[11px]">
+                    <thead><tr className="bg-gray-50 dark:bg-gray-900/50 text-gray-400 text-[9px] uppercase tracking-wider">
+                      <th className="text-left font-bold px-2.5 py-1.5">Campaña</th>
+                      <th className="text-left font-bold px-2 py-1.5">Conjunto</th>
+                      <th className="text-left font-bold px-2 py-1.5">Ad</th>
+                    </tr></thead>
+                    <tbody className="divide-y divide-gray-100 dark:divide-gray-700/60">
+                      {elegidos.map((f, i) => (
+                        <tr key={f.ts}>
+                          <td className="px-2.5 py-1 text-gray-400 truncate max-w-[160px]">{i === 0 ? nombre : ''}</td>
+                          <td className="px-2 py-1 text-gray-500 dark:text-gray-400">{nombresSets[Math.floor(i / (Number(adsPorSet) || 3))]}</td>
+                          <td className="px-2 py-1 text-gray-800 dark:text-gray-100 truncate max-w-[220px]" title={nombresAds[i]}>{nombresAds[i]}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Log de publicación */}
           {logs.length > 0 && (
@@ -325,9 +462,14 @@ export default function PublicarCampanaModal({ a, onClose, addToast }) {
           )}
         </div>
 
-        <div className="shrink-0 flex items-center gap-2 px-5 py-3.5 border-t border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
-          <span className="text-[11px] text-amber-600 dark:text-amber-400 inline-flex items-center gap-1 flex-1 min-w-0">
-            <AlertTriangle size={12} className="shrink-0" /> Se publica ACTIVA: arranca a gastar apenas Meta la apruebe.
+        <div className="shrink-0 flex items-center gap-3 px-5 py-3.5 border-t border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
+          <label className="inline-flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400 cursor-pointer shrink-0">
+            <input type="checkbox" checked={enPausa} onChange={e => setEnPausa(e.target.checked)} disabled={!!fase} className="accent-brand-500" />
+            Publicar en pausa
+          </label>
+          <span className="flex-1 min-w-0 text-[11px] text-amber-600 dark:text-amber-400 inline-flex items-center gap-1">
+            <AlertTriangle size={12} className="shrink-0" />
+            {enPausa ? 'Se crea pausada: la revisás en Meta y la activás vos.' : 'Se publica ACTIVA: arranca a gastar apenas Meta la apruebe.'}
           </span>
           {fase === 'listo' || fase === 'error' ? (
             <button onClick={onClose} className="px-4 py-2 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition">Cerrar</button>

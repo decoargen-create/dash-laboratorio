@@ -30,6 +30,7 @@ import { useMetaConnections, useMetaAdAccounts } from './MetaConnect.jsx';
 import { getReferencialesByProductoCloud } from './galeriaReferencialesCloud.js';
 import { linkMeta } from './testeosCore.js';
 import { weekLabel } from './produccionStore.js';
+import FechaHoraPicker from './FechaHoraPicker.jsx';
 
 const normNombre = (s) => String(s || '').trim().toLowerCase();
 
@@ -715,7 +716,7 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
             <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5"
               title="Hora de Argentina. Meta deja las campañas «Programadas» y no gastan hasta esa fecha — para eso tienen que crearse ACTIVAS (destildá «Crear pausadas»).">
               Programada para (opcional)</span>
-            <input type="datetime-local" value={programada} onChange={e => setProgramada(e.target.value)} className={input} disabled={fase === 'publicando'} />
+            <FechaHoraPicker value={programada} onChange={setProgramada} disabled={fase === 'publicando'} />
             {programada && enPausa && (
               <p className="text-[10px] text-amber-500 mt-1">Ojo: pausada + programada no arranca sola — destildá «Crear pausadas» para que quede Programada de verdad.</p>
             )}

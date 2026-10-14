@@ -2835,6 +2835,25 @@ async function handleCreateCampaignStructure(req, res) {
   if (ads.length === 0) return respondJSON(res, 400, { error: 'Sin videos listos para crear ads' });
   if (!template.pageId) return respondJSON(res, 400, { error: 'El template no tiene page_id — elegí otro ad de referencia' });
 
+  // Historial de publicaciones: una fila por intento (OK, parcial, rollback
+  // o error), escrita con el service role. Nunca rompe la publicación.
+  const usuarioId = isSupabaseConfigured() ? await getUserIdFromAuth(req) : null;
+  const registrarPublicacion = async (campos) => {
+    try {
+      const sb = getServiceClient();
+      if (!sb || !usuarioId) return;
+      await sb.from('marketing_publicaciones').insert({
+        user_id: usuarioId,
+        account_id: accountId,
+        campaign_name: campaignName,
+        producto: String(body.producto || '').slice(0, 120) || null,
+        ads_total: ads.length,
+        log,
+        ...campos,
+      });
+    } catch { /* historial best-effort */ }
+  };
+
   const log = [];
   try {
     // Objetivos legacy (pre-ODAX): Meta NO deja crear campañas nuevas con
@@ -2997,6 +3016,13 @@ async function handleCreateCampaignStructure(req, res) {
     }
 
     const fallaron = resultados.filter(r => !r.ok).length;
+    await registrarPublicacion({
+      campaign_id: String(camp.id),
+      estado: okAds === 0 ? 'DELETED' : estadoFinal,
+      ads_ok: okAds,
+      resultados,
+      error: activacionError || null,
+    });
     return respondJSON(res, fallaron === 0 && !activacionError ? 200 : 207, {
       campaignId: camp.id,
       adsetIds,
@@ -3010,12 +3036,30 @@ async function handleCreateCampaignStructure(req, res) {
       // Falló antes de crear ningún ad (p. ej. el primer conjunto): no
       // dejamos la campaña vacía tirada en el Ads Manager.
       await borrarCampana();
+      await registrarPublicacion({ campaign_id: String(camp.id), estado: 'ERROR', error: String(errInterno.message || '').slice(0, 500) });
       throw errInterno;
     }
   } catch (err) {
     log.push(`✗ ${err.message}`);
     return respondJSON(res, err.status || 502, { error: traducirErrorMetaEscritura(err.message), log });
   }
+}
+
+// Historial de publicaciones del Publicador (solo las del usuario logueado).
+async function handlePublicaciones(req, res) {
+  if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
+  if (!isSupabaseConfigured()) return respondJSON(res, 200, { publicaciones: [] });
+  const userId = await getUserIdFromAuth(req);
+  if (!userId) return respondJSON(res, 401, { error: 'No autenticado — falta sesión de Supabase' });
+  const sb = getServiceClient();
+  if (!sb) return respondJSON(res, 200, { publicaciones: [] });
+  const { data, error } = await sb.from('marketing_publicaciones')
+    .select('id, created_at, account_id, campaign_id, campaign_name, producto, estado, ads_ok, ads_total, error, log')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(60);
+  if (error) return respondJSON(res, 502, { error: error.message });
+  return respondJSON(res, 200, { publicaciones: data || [] });
 }
 
 // --- dispatcher ---
@@ -3041,6 +3085,7 @@ const actions = {
   'upload-ad-videos': handleUploadAdVideos,
   'videos-status': handleVideosStatus,
   'create-campaign-structure': handleCreateCampaignStructure,
+  publicaciones: handlePublicaciones,
   'ig-accounts': handleIgAccounts,
   'latest-ig-post': handleLatestIgPost,
   'campaigns': handleCampaigns,

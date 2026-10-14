@@ -2604,7 +2604,6 @@ const PRODUCT_TABS = {
     { id: 'inspiracion', label: 'Inspiración', emoji: '✨' },
     { id: 'creativos',   label: 'Creativos',   emoji: '🎨' },
     { id: 'galeria',     label: 'Galería',     emoji: '🖼️' },
-    { id: 'copiloto',    label: 'Santi',       emoji: '🧠' },
   ],
 };
 
@@ -2749,7 +2748,8 @@ function NavSection({ title, sectionKey, sidebarOpen, defaultOpen = true, childr
           moderado y en UNA línea (truncate) para títulos largos. */}
       <button
         onClick={toggle}
-        className="flex items-center gap-1.5 px-4 mb-1 text-[11px] font-extrabold uppercase tracking-[0.07em] text-white/60 hover:text-white/90 transition w-full"
+        style={{ fontFamily: "'Sora', Inter, system-ui, sans-serif" }}
+        className="flex items-center gap-1.5 px-4 mb-1 text-[11.5px] font-extrabold uppercase tracking-[0.1em] text-white/70 hover:text-white transition w-full"
       >
         <ChevronDown size={11} className={`shrink-0 transition-transform duration-200 ${open ? '' : '-rotate-90'}`} />
         <span className="truncate text-left" title={title}>{title}</span>
@@ -2770,8 +2770,8 @@ function NavItem({ icon: Icon, label, section, currentSection, onSelect, sidebar
       title={!sidebarOpen ? label : undefined}
       className={`group relative w-full flex items-center gap-2.5 px-3 py-2 rounded-lg transition-colors duration-200 ${
         isActive
-          ? 'bg-gradient-to-r from-pink-600/75 to-rose-500/55 text-white'
-          : 'text-pink-100/75 hover:text-white hover:bg-white/5'
+          ? 'bg-gradient-to-r from-violet-600/85 to-sky-500/55 text-white shadow-[0_4px_14px_rgba(124,58,237,.35)]'
+          : 'text-slate-200/75 hover:text-white hover:bg-white/5'
       }`}
     >
       {/* Indicador lateral sutil sobre el activo (misma geometría que el resto:
@@ -2783,7 +2783,7 @@ function NavItem({ icon: Icon, label, section, currentSection, onSelect, sidebar
         }`}
       />
       <Icon size={17} className="shrink-0" />
-      {sidebarOpen && <span className={`text-[13px] whitespace-nowrap ${isActive ? 'font-semibold' : 'font-medium'}`}>{label}</span>}
+      {sidebarOpen && <span style={{ fontFamily: "'Sora', Inter, system-ui, sans-serif" }} className={`text-[13.5px] whitespace-nowrap ${isActive ? 'font-bold' : 'font-semibold'}`}>{label}</span>}
       {/* Tooltip en modo colapsado */}
       {!sidebarOpen && (
         <span className="pointer-events-none absolute left-full ml-3 px-2 py-1 rounded-md text-xs font-semibold whitespace-nowrap bg-gray-900 text-white opacity-0 group-hover:opacity-100 translate-x-[-6px] group-hover:translate-x-0 transition-all duration-150 z-50 shadow-lg">

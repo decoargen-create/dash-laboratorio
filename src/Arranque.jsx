@@ -597,7 +597,6 @@ const FLOW_STEPS = [
   { emoji: '▶️', tab: null, titulo: 'Correr pipeline', desc: 'Leemos los ads ganadores de la competencia y armamos ideas.' },
   { emoji: '📥', tab: 'bandeja', titulo: 'Bandeja', desc: 'Revisás cada idea y generás el creativo ahí mismo.' },
   { emoji: '🎨', tab: 'creativos', titulo: 'Creativos', desc: 'Ves los estáticos generados, listos para descargar.' },
-  { emoji: '🧠', tab: 'copiloto', titulo: 'Santi', desc: 'Hablale a Santi — el cerebro de la plataforma. Pedíle variantes, ajustes o feedback en lenguaje natural.' },
 ];
 
 function FlowGuide() {
@@ -685,7 +684,6 @@ function ProductTabs({ activeTab, onChange }) {
         { id: 'creativos', label: 'Creativos', emoji: '🎨' },
         { id: 'guiones', label: 'Guiones IA', emoji: '🎬' },
         { id: 'galeria', label: 'Galería', emoji: '🖼️' },
-        { id: 'copiloto', label: 'Santi', emoji: '🧠' },
       ],
     },
   ];
@@ -4697,7 +4695,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               <button onClick={() => setShowGenConfig(v => !v)}
                 className="w-full flex items-center justify-between text-xs font-semibold text-gray-700 dark:text-gray-200">
                 <span className="inline-flex items-center gap-2">
-                  ⚙️ Generador de ideas
+                  ⚙️ Config avanzada del generador
                   <span className="text-[10px] font-mono text-gray-400">
                     {genConfig.limiteDiario} ideas/corrida · {genConfig.formatoStatic}/{genConfig.formatoVideo} static/video
                   </span>

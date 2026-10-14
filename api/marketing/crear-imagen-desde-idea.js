@@ -27,6 +27,7 @@ import {
   fungalTermsAreBenign,
   isSafetyError,
 } from './_safety.js';
+import { escenaConHumanos, realismoFotografico } from './_realismo.js';
 
 const MODEL = 'gpt-image-2';
 const DEFAULT_SIZE = '2048x2048';
@@ -211,6 +212,13 @@ function buildPromptForIdeaVariation({ idea, producto, accentColor, aspectRatio,
   parts.push('  • Keep the product packaging PIXEL-FAITHFUL.');
   parts.push('  • Render Spanish text overlays EXACTLY as written.');
   parts.push(`  • Output aspect ratio: ${aspectRatio || '1:1'}. High resolution.`);
+
+  // Realismo fotográfico: solo cuando el brief/variación describe personas o
+  // piel — en gráficas flat o packshots el bloque diluye el prompt.
+  if (escenaConHumanos(idea, variation)) {
+    parts.push('');
+    parts.push(realismoFotografico());
+  }
 
   return parts.join('\n');
 }

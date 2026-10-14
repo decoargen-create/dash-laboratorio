@@ -22,6 +22,7 @@ import {
 import { supabase } from './supabase.js';
 import { MetaConnectButton } from './MetaConnect.jsx';
 import { entregasNuevas } from './produccionStore.js';
+import CreativaDashboard from './CreativaDashboard.jsx';
 
 const PRODUCTOS_KEY = 'adslab-marketing-productos-v1';
 
@@ -78,14 +79,15 @@ function useHoy(productos) {
         }))
         .filter(p => p.n.length >= 3);
       let sinMatch = 0;
-      const tot = { spend: 0, compras: 0, revenue: 0, malo: 0 };
+      const tot = { spend: 0, compras: 0, revenue: 0, malo: 0, campBien: 0, campMal: 0 };
       for (const r of rows) {
         const cn = norm(r.name);
         tot.spend += r.spend; tot.compras += r.compras; tot.revenue += r.revenue;
         const p = prods.find(x => cn.includes(x.n));
         const be = p?.breakEven || 1.6;
         const esMalo = r.spend > 0 && r.roas < be;
-        if (esMalo) tot.malo += r.spend;
+        if (esMalo) { tot.malo += r.spend; tot.campMal++; }
+        else if (r.spend > 0 && r.roas >= be) tot.campBien++;
         if (!p) { if (r.spend > 0) sinMatch++; continue; }
         p.spend += r.spend; p.compras += r.compras; p.revenue += r.revenue;
         p.campanas++; if (esMalo) p.malo += r.spend;
@@ -323,15 +325,19 @@ export default function HomeOS({ onNavigate, addToast }) {
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-4">
               <KPI label="ROAS del día" destacado value={hoy.totals ? hoy.totals.roas.toFixed(2) : '—'}
                 tone={hoy.totals ? (hoy.totals.roas >= 2 ? 'good' : hoy.totals.roas >= 1.6 ? 'warn' : 'bad') : 'default'}
                 sub={hoy.totals ? `por cada $1 volvieron $${hoy.totals.roas.toFixed(2)}` : ''} />
               <KPI label="Facturado hoy" value={hoy.totals ? fmtAr(hoy.totals.revenue) : '—'} tone="good" />
-              <KPI label="Inversión hoy" value={hoy.totals ? fmtAr(hoy.totals.spend) : '—'} />
+              <KPI label="Inversión hoy" value={hoy.totals ? fmtAr(hoy.totals.spend) : '—'}
+                sub={hoy.totals?.malo > 0 ? `${Math.round(pctMalo)}% mal invertido` : ''} />
               <KPI label="Compras" value={hoy.totals ? hoy.totals.compras : '—'} sub={hoy.totals?.compras > 0 ? `CPA ${fmtAr(hoy.totals.spend / hoy.totals.compras)}` : ''} />
-              <KPI label="Mal invertido" value={hoy.totals ? `${Math.round(pctMalo)}%` : '—'} tone={toneMalo}
-                sub={hoy.totals?.malo > 0 ? `${fmtAr(hoy.totals.malo)} bajo el break-even` : 'todo sobre el break-even'} />
+              <KPI label="Vienen bien" value={hoy.totals ? hoy.totals.campBien : '—'} tone={hoy.totals?.campBien > 0 ? 'good' : 'default'}
+                sub={hoy.totals ? `campaña${hoy.totals.campBien === 1 ? '' : 's'} sobre el break-even` : ''} />
+              <KPI label="Para apagar" value={hoy.totals ? hoy.totals.campMal : '—'}
+                tone={hoy.totals ? (hoy.totals.campMal > 0 ? toneMalo : 'good') : 'default'}
+                sub={hoy.totals?.campMal > 0 ? `${fmtAr(hoy.totals.malo)} bajo el break-even hoy` : 'ninguna campaña en rojo'} />
             </div>
 
             {/* Por producto */}
@@ -383,7 +389,13 @@ export default function HomeOS({ onNavigate, addToast }) {
         )}
       </section>
 
-      {/* ── 3. Integraciones ──────────────────────────────────────────── */}
+      {/* ── 3. Área creativa — el resumen del mes vive acá (híbrido):
+             tarjetas por producto, publicables y pagos, sin salir del Home. */}
+      <section>
+        <CreativaDashboard embedded addToast={addToast} />
+      </section>
+
+      {/* ── 4. Integraciones ──────────────────────────────────────────── */}
       <section>
         <div className="flex items-center gap-2 mb-3">
           <Plug size={16} className="text-violet-500" />

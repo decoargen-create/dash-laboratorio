@@ -32,7 +32,6 @@ import MetricasSection from './MetricasSection.jsx';
 import PublicarSection from './PublicarSection.jsx';
 import TesteosSection from './TesteosSection.jsx';
 import ProduccionSection from './ProduccionSection.jsx';
-import CreativaDashboard from './CreativaDashboard.jsx';
 import LandingsSection from './LandingsSection.jsx';
 import { teardownLandings } from './landingsStore.js';
 import { DialogHost, confirmDialog } from './dialogs.jsx';
@@ -1486,7 +1485,7 @@ function AppShell({ onExit }) {
       // Si tenía una sección de Viora/Senydrop/MetaAds, defaulteamos a la
       // de Marketing. Lista de secciones válidas en las plataformas activas:
       const validSections = ['mk-home', 'mk-arranque', 'mk-bandeja', 'mk-copy', 'mk-meta', 'mk-metricas', 'mk-testeos',
-        'mk-inspiracion', 'mk-winners', 'mk-produccion', 'mk-publicar', 'mk-landings', 'mk-creativa-dash', 'mk-gastos', 'mk-docs', 'con-acta'];
+        'mk-inspiracion', 'mk-winners', 'mk-produccion', 'mk-publicar', 'mk-landings', 'mk-gastos', 'mk-docs', 'con-acta'];
       return validSections.includes(saved) ? saved : 'mk-home';
     } catch { return 'mk-home'; }
   });
@@ -2287,7 +2286,7 @@ function AppShell({ onExit }) {
     const SECCIONES_AREA = {
       metricas: ['mk-home', 'mk-meta', 'mk-metricas'],
       productos: ['mk-home', 'mk-arranque'],
-      produccion: ['mk-home', 'mk-creativa-dash', 'mk-produccion', 'mk-publicar'],
+      produccion: ['mk-home', 'mk-produccion', 'mk-publicar'],
       landings: ['mk-home', 'mk-landings'],
     };
     const permitidas = new Set((m.areas || []).flatMap(a => SECCIONES_AREA[a] || []));
@@ -2503,10 +2502,10 @@ function AppShell({ onExit }) {
               )}
               {(!currentUser.miembro || currentUser.miembro.areas.some(a => a === 'produccion' || a === 'landings')) && (
                 <NavSection title="Área creativa" sectionKey="mk-creativa" sidebarOpen={sidebarOpen}>
-                  {(!currentUser.miembro || currentUser.miembro.areas.includes('produccion')) && (<>
-                    <NavItem icon={Wallet} label="Resumen" section="mk-creativa-dash" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                  {/* El Resumen (CreativaDashboard) vive embebido en el Home. */}
+                  {(!currentUser.miembro || currentUser.miembro.areas.includes('produccion')) && (
                     <NavItem icon={Film} label="Producción" section="mk-produccion" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                  </>)}
+                  )}
                   {(!currentUser.miembro || currentUser.miembro.areas.includes('landings')) && (
                     <NavItem icon={ClipboardList} label="Landings" section="mk-landings" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                   )}
@@ -2620,7 +2619,6 @@ function AppShell({ onExit }) {
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-publicar' && <PublicarSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-testeos' && <TesteosSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-winners' && <WinnersGlobalSection addToast={addToast} onGoToSection={setCurrentSection} />}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-creativa-dash' && <CreativaDashboard addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-produccion' && <ProduccionSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-landings' && <LandingsSection addToast={addToast} />}
           {currentUser.role === 'admin' && esAdminPlataforma() && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-gastos' && <GastosStackSection addToast={addToast} />}
@@ -8504,7 +8502,6 @@ function getSectionTitle(user, section) {
     'mk-winners': 'Marketing · Winners',
     'mk-produccion': 'Marketing · Producción',
     'mk-landings': 'Marketing · Landings',
-    'mk-creativa-dash': 'Marketing · Área creativa',
     'mk-gastos': 'Marketing · Gastos del stack',
     'con-acta': 'Consultoría · Acta de reunión',
   };

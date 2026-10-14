@@ -61,7 +61,9 @@ const FILTRO_META = {
   entregadas: { label: 'entregadas', tone: 'emerald' },
 };
 
-export default function CreativaDashboard({ addToast }) {
+// `embedded`: renderizado adentro del Home (header compacto estilo sección,
+// sin el ancho propio). Standalone quedó para compatibilidad.
+export default function CreativaDashboard({ addToast, embedded = false }) {
   const [, force] = useState(0);
   const [monthKey, setMonthKey] = useState(() => monthKeyOf());
   const [expandedProd, setExpandedProd] = useState(() => new Set());
@@ -162,25 +164,38 @@ export default function CreativaDashboard({ addToast }) {
     addToast?.({ type: 'success', message: `🚀 Publicado — ${c.persona}` });
   };
 
+  const selectorMes = (
+    <div className="ml-auto relative">
+      <select value={monthKey} onChange={e => setMonthKey(e.target.value)}
+        className="appearance-none pl-3 pr-8 py-1.5 text-sm font-semibold bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 capitalize">
+        {meses.map(mk => <option key={mk} value={mk}>{monthLabel(mk)}{mk === monthKeyOf() ? ' (este mes)' : ''}</option>)}
+      </select>
+      <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+    </div>
+  );
+
   return (
-    <div className="max-w-4xl mx-auto space-y-5">
-      {/* Header */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white shadow-sm">
-          <Wallet size={20} />
+    <div className={embedded ? 'space-y-4' : 'max-w-4xl mx-auto space-y-5'}>
+      {/* Header: compacto (sección del Home) o completo (standalone). */}
+      {embedded ? (
+        <div className="flex items-center gap-2 flex-wrap">
+          <Film size={16} className="text-violet-500" />
+          <h3 className="text-sm font-extrabold text-gray-900 dark:text-gray-100">Área creativa</h3>
+          <span className="text-[11px] text-gray-400 hidden sm:inline">tarjetas, publicables y pagos del mes</span>
+          {selectorMes}
         </div>
-        <div>
-          <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Resumen del mes</h2>
-          <p className="text-xs text-gray-500 dark:text-gray-400">Publicá lo que está listo y seguí los pagos.</p>
+      ) : (
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white shadow-sm">
+            <Wallet size={20} />
+          </div>
+          <div>
+            <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Resumen del mes</h2>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Publicá lo que está listo y seguí los pagos.</p>
+          </div>
+          {selectorMes}
         </div>
-        <div className="ml-auto relative">
-          <select value={monthKey} onChange={e => setMonthKey(e.target.value)}
-            className="appearance-none pl-3 pr-8 py-1.5 text-sm font-semibold bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 capitalize">
-            {meses.map(mk => <option key={mk} value={mk}>{monthLabel(mk)}{mk === monthKeyOf() ? ' (este mes)' : ''}</option>)}
-          </select>
-          <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-        </div>
-      </div>
+      )}
 
       {/* KPIs — clickeables: filtran el bloque "Por producto" de abajo. */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">

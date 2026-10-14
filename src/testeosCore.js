@@ -73,8 +73,13 @@ export const CFG_DEFAULT = {
   ventanaProspDias: 7,
   maxFrecuenciaProsp: 1.10,
   minRoasProsp: 1.6,
-  minComprasProsp: 2,
+  // "Poca venta no sirve": un prospectador tiene que VENDER, no solo alcanzar.
+  minComprasProsp: 4,
   minAlcanceProsp: 1000,
+  // Gasto representativo: el ad tiene que gastar al menos este % del gasto
+  // promedio por anuncio de la ventana. "Un anuncio con dos compras y $58 mil
+  // cuando el resto gasta cientos de miles claramente no es prospectador."
+  pctGastoProsp: 60,
 
   // Días que espera Meta para atribuir una compra al click. Mientras no
   // pasen, los números de una cohorte siguen moviéndose.
@@ -390,13 +395,21 @@ export function veredicto(ins, cfg = CFG_DEFAULT) {
 //
 // Ojo: la frecuencia tiene que medirse sobre la VENTANA (5-7 días). Medida por
 // día da ~1.0 siempre y no dice nada.
-export function esProspectador(ins, cfg = CFG_DEFAULT) {
+// extra.gastoPromedio: gasto promedio por anuncio de la ventana (lo calcula la
+// vista sobre los ads con gasto). Si viene, se exige gasto REPRESENTATIVO:
+// spend ≥ pctGastoProsp% de ese promedio — frecuencia baja con dos mangos de
+// inversión no es prospección, es falta de data.
+export function esProspectador(ins, cfg = CFG_DEFAULT, extra = {}) {
   const freq = Number(ins?.frequency || 0);
   const roas = Number(ins?.roas || 0);
   const compras = Number(ins?.purchases || 0);
   const alcance = Number(ins?.reach || 0);
+  const spend = Number(ins?.spend || 0);
+  const pct = Number(cfg.pctGastoProsp ?? 60);
+  const pisoGasto = Number(extra.gastoPromedio || 0) * (pct / 100);
 
   const checks = [
+    ...(pisoGasto > 0 ? [{ ok: spend >= pisoGasto, texto: `gasto ${Math.round(spend)} ≥ ${Math.round(pisoGasto)} (${pct}% del promedio por anuncio)` }] : []),
     { ok: freq > 0 && freq <= cfg.maxFrecuenciaProsp, texto: `frecuencia ${freq.toFixed(2)} ≤ ${cfg.maxFrecuenciaProsp}` },
     { ok: roas >= cfg.minRoasProsp, texto: `ROAS ${roas.toFixed(2)} ≥ ${cfg.minRoasProsp}` },
     { ok: compras >= cfg.minComprasProsp, texto: `compras ${compras} ≥ ${cfg.minComprasProsp}` },

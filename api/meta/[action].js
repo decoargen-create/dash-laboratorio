@@ -2806,6 +2806,62 @@ async function handleUploadAdVideos(req, res) {
   });
 }
 
+// Desglose DIARIO de frecuencia para los candidatos a prospectador: la
+// frecuencia de la ventana puede dar baja "de promedio" aunque algún día se
+// haya ido arriba — acá se valida que el intradiario se mantenga bajo.
+async function handleProspDaily(req, res) {
+  if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
+  const origin = getOrigin(req);
+  const url = new URL(req.url, origin);
+  const { token, error, status } = await resolveAccessToken(req, url);
+  if (!token) return respondJSON(res, status || 401, { error: error || 'Meta no conectado' });
+
+  const accountId = String(url.searchParams.get('account_id') || '').trim();
+  const ids = String(url.searchParams.get('ids') || '').split(',').map(s => s.trim()).filter(s => /^\d+$/.test(s)).slice(0, 50);
+  if (!accountId) return respondJSON(res, 400, { error: 'Falta account_id' });
+  if (ids.length === 0) return respondJSON(res, 400, { error: 'Falta ids (coma-separados)' });
+
+  let preset = url.searchParams.get('date_preset') || 'last_7d';
+  const custom = /^custom_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})$/.exec(preset);
+  if (!custom && !/^[a-z0-9_]+$/.test(preset)) preset = 'last_7d';
+  const rango = custom
+    ? { time_range: JSON.stringify({ since: custom[1], until: custom[2] }) }
+    : { date_preset: preset };
+
+  try {
+    const porAd = {};
+    let after = null, guard = 0;
+    do {
+      const params = {
+        level: 'ad',
+        time_increment: 1,
+        fields: 'ad_id,frequency,reach,spend',
+        filtering: JSON.stringify([{ field: 'ad.id', operator: 'IN', value: ids }]),
+        limit: 500,
+        ...rango,
+      };
+      if (after) params.after = after;
+      const d = await graphGet(`${accountId}/insights`, token, params);
+      for (const r of d.data || []) {
+        const id = r.ad_id;
+        if (!porAd[id]) porAd[id] = { freqMax: 0, dias: 0 };
+        const spend = Number(r.spend || 0);
+        const freq = Number(r.frequency || 0);
+        // Días sin gasto no cuentan: una frecuencia alta con 3 impresiones
+        // sueltas es ruido, no saturación.
+        if (spend <= 0) continue;
+        porAd[id].dias++;
+        if (freq > porAd[id].freqMax) porAd[id].freqMax = freq;
+      }
+      after = d.paging?.cursors?.after && d.paging?.next ? d.paging.cursors.after : null;
+      guard++;
+    } while (after && guard < 6);
+    return respondJSON(res, 200, { porAd });
+  } catch (e) {
+    return respondJSON(res, e.status && e.status < 500 ? e.status : 500, { error: e.message });
+  }
+}
+
 // Estado de procesamiento de los videos subidos (y su thumbnail, que el
 // creative necesita como image_url).
 async function handleVideosStatus(req, res) {
@@ -3124,6 +3180,7 @@ const actions = {
   'template-config': handleTemplateConfig,
   'upload-ad-videos': handleUploadAdVideos,
   'videos-status': handleVideosStatus,
+  'prosp-daily': handleProspDaily,
   'create-campaign-structure': handleCreateCampaignStructure,
   publicaciones: handlePublicaciones,
   'ig-accounts': handleIgAccounts,

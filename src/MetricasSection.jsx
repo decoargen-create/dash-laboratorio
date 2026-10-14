@@ -1906,12 +1906,64 @@ function VistaWinners({ account, accountId, cfg, cfgRaw, productos, productoId, 
 // ========================================================================
 // Pestaña: PROSPECTADORES
 // ========================================================================
-function VistaProspectadores({ ads, cfg, currency, accountId, onWhy, cambios, trabajando, onEstado, ventanaLabel = 'últimos 7 días' }) {
+function VistaProspectadores({ ads, cfg, currency, accountId, connId, preset = 'last_7d', onWhy, cambios, trabajando, onEstado, ventanaLabel = 'últimos 7 días' }) {
   const [abierto, setAbierto] = useState(null);
-  const lista = useMemo(() => ads
-    .map(a => ({ ...a, ...esProspectador(a.insights, cfg) }))
-    .sort((a, b) => (b.es - a.es) || (b.insights.reach - a.insights.reach)), [ads, cfg]);
-  const si = lista.filter(a => a.es);
+
+  // Gasto promedio por anuncio de la ventana (solo ads con gasto): contra esto
+  // se mide el "gasto representativo" — frecuencia baja con dos mangos no es
+  // prospección, es falta de data.
+  const gastoPromedio = useMemo(() => {
+    const conGasto = ads.filter(a => Number(a.insights?.spend || 0) > 0);
+    if (conGasto.length === 0) return 0;
+    return conGasto.reduce((s, a) => s + Number(a.insights.spend || 0), 0) / conGasto.length;
+  }, [ads]);
+
+  // PRE-candidatos: pasan todos los cortes de la ventana (gasto representativo,
+  // frecuencia, ROAS, compras, alcance). El resto NI SE MUESTRA (pedido del
+  // user): esta pestaña es "quién está prospectando", no la lista completa.
+  const preCandidatos = useMemo(() => ads
+    .map(a => ({ ...a, ...esProspectador(a.insights, cfg, { gastoPromedio }) }))
+    .filter(a => a.es)
+    .sort((a, b) => (b.insights.spend - a.insights.spend)), [ads, cfg, gastoPromedio]);
+  const descartados = ads.length - preCandidatos.length;
+
+  // VERIFICACIÓN INTRADIARIA: la frecuencia de la ventana puede dar baja "de
+  // promedio" aunque algún día se haya ido arriba. Pedimos el desglose diario
+  // de los pre-candidatos y exigimos que el PEOR día siga bajo el límite.
+  const [diario, setDiario] = useState(null); // null = cargando | {adId: {freqMax, dias}}
+  useEffect(() => {
+    const ids = preCandidatos.map(a => a.id).filter(Boolean);
+    if (!accountId || ids.length === 0) { setDiario({}); return; }
+    let vivo = true;
+    setDiario(null);
+    (async () => {
+      try {
+        let u = `/api/meta/prosp-daily?account_id=${encodeURIComponent(accountId)}&ids=${ids.slice(0, 50).join(',')}&date_preset=${encodeURIComponent(preset)}`;
+        if (connId && connId !== '__cookie__') u += `&connection_id=${encodeURIComponent(connId)}`;
+        const r = await fetch(u, { headers: await authHeaders(false) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.error || `Error ${r.status}`);
+        if (vivo) setDiario(d.porAd || {});
+      } catch {
+        // Si el desglose falla (rate limit), mostramos los pre-candidatos con
+        // la marca "sin verificar" en vez de esconder todo.
+        if (vivo) setDiario({});
+      }
+    })();
+    return () => { vivo = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountId, connId, preset, preCandidatos.map(a => a.id).join(',')]);
+
+  const lista = useMemo(() => preCandidatos.map(a => {
+    const d = diario?.[a.id];
+    const freqMax = d?.freqMax || 0;
+    const verificado = diario !== null && d != null && d.dias > 0;
+    // Confirmado: el peor día se mantuvo bajo el límite intradiario.
+    const okDiario = !verificado || freqMax <= (cfg.maxFrecuenciaProsp || 1.10);
+    return { ...a, freqMax, verificado, okDiario };
+  }).filter(a => a.okDiario), [preCandidatos, diario, cfg]);
+  const caidosPorDia = preCandidatos.length - lista.length;
+  const si = lista;
 
   return (
     <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
@@ -1919,15 +1971,17 @@ function VistaProspectadores({ ads, cfg, currency, accountId, onWhy, cambios, tr
         <h3 className="text-[13px] font-bold text-gray-900 dark:text-gray-100">Prospectadores</h3>
         <Why k="prospectador" cfg={cfg} currency={currency} onOpen={onWhy} datos={{}} />
         <span className="text-[10.5px] text-gray-400 flex items-center gap-1">
-          {ventanaLabel} · frecuencia <Why k="frecuencia" cfg={cfg} currency={currency} onOpen={onWhy} datos={lista[0]?.insights || {}} />
+          {ventanaLabel} · solo candidatos reales {diario === null && preCandidatos.length > 0 && (
+            <span className="inline-flex items-center gap-1 text-amber-500"><Loader2 size={10} className="animate-spin" /> verificando frecuencia diaria…</span>
+          )}
         </span>
         {si.length > 0 && (
           <span className="ml-auto"><MetaLink nivel="ads" ids={si.map(a => a.id)} accountId={accountId} solid>Abrir {si.length} en Meta</MetaLink></span>
         )}
       </div>
-      {si.length === 0 && lista.length > 0 && (
-        <div className="mx-3.5 mt-3 p-3 rounded-xl text-xs bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-blue-800 dark:text-blue-200">
-          Ningún anuncio está trayendo gente nueva que compre: la cuenta está viviendo de públicos ya trabajados. Te conviene probar creativos nuevos.
+      {si.length === 0 && (
+        <div className="mx-3.5 my-3 p-3 rounded-xl text-xs bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-blue-800 dark:text-blue-200">
+          Ningún anuncio califica como prospectador en esta ventana: nada combina gasto representativo, ventas, ROAS sobre tu mínimo y frecuencia baja sostenida. La cuenta está viviendo de públicos ya trabajados — te conviene probar creativos nuevos.
         </div>
       )}
       <div className="overflow-x-auto">
@@ -1936,8 +1990,8 @@ function VistaProspectadores({ ads, cfg, currency, accountId, onWhy, cambios, tr
             <tr className="bg-gray-50 dark:bg-gray-900/50 text-gray-400 text-[9.5px] uppercase tracking-wider">
               <th className="text-left font-bold px-3.5 py-2">Anuncio</th>
               <th className="text-left font-bold px-2 py-2" title={TIP_ENTREGA}>Entrega</th>
-              <th className="text-left font-bold px-2 py-2" title="Lo que te recomendamos hacer con cada uno.">Veredicto</th>
-              <th className="text-right font-bold px-2 py-2" title="Cuántas veces vio el anuncio cada persona. Cerca de 1 = casi todos son gente nueva.">Frecuencia</th>
+              <th className="text-right font-bold px-2 py-2" title="Cuántas veces vio el anuncio cada persona en toda la ventana. Cerca de 1 = casi todos son gente nueva.">Frecuencia</th>
+              <th className="text-right font-bold px-2 py-2" title="El PEOR día de la ventana: la frecuencia tiene que mantenerse baja también día a día, no solo de promedio.">Frec. diaria máx</th>
               <th className="text-right font-bold px-2 py-2" title="Cuántas personas distintas lo vieron.">Alcance</th>
               <th className="text-right font-bold px-2 py-2">Compras</th>
               <th className="text-right font-bold px-2 py-2" title={`${TIP_ROAS} (lo que Meta llama «ROAS de compras»)`}>ROAS de compras</th>
@@ -1968,8 +2022,12 @@ function VistaProspectadores({ ads, cfg, currency, accountId, onWhy, cambios, tr
                       </div>
                     </td>
                     <td className="px-2 py-2"><Entrega item={a} cambios={cambios} /></td>
-                    <td className="px-2 py-2">{a.es ? <Pill tone="ok">Prospectador</Pill> : <Pill tone="mute">No</Pill>}</td>
                     <td className={`px-2 py-2 text-right tabular-nums font-semibold ${i.frequency > 0 && i.frequency <= cfg.maxFrecuenciaProsp ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>{fmtR(i.frequency)}</td>
+                    <td className="px-2 py-2 text-right tabular-nums">
+                      {a.verificado
+                        ? <span className="font-semibold text-emerald-600 dark:text-emerald-400">{fmtR(a.freqMax)}</span>
+                        : <span className="text-gray-400" title="No se pudo verificar el desglose diario (Meta no respondió) — el dato de la ventana igual pasa el corte.">—</span>}
+                    </td>
                     <td className="px-2 py-2 text-right tabular-nums text-gray-600 dark:text-gray-300">{fmtN(i.reach)}</td>
                     <td className="px-2 py-2 text-right tabular-nums text-gray-600 dark:text-gray-300">{i.purchases}</td>
                     <td className={`px-2 py-2 text-right tabular-nums font-semibold ${i.roas >= cfg.minRoasProsp ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-500'}`}>{fmtR(i.roas)}</td>
@@ -1988,6 +2046,12 @@ function VistaProspectadores({ ads, cfg, currency, accountId, onWhy, cambios, tr
                             <span className="text-gray-600 dark:text-gray-300">{c.texto}</span>
                           </div>
                         ))}
+                        {a.verificado && (
+                          <div className="flex items-start gap-2 text-[11.5px]">
+                            <span className="w-[15px] h-[15px] rounded-full grid place-items-center text-[9px] font-bold shrink-0 mt-px bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400">✓</span>
+                            <span className="text-gray-600 dark:text-gray-300">frecuencia diaria máxima {fmtR(a.freqMax)} ≤ {cfg.maxFrecuenciaProsp} (se mantuvo baja todos los días)</span>
+                          </div>
+                        )}
                       </div>
                     </td></tr>
                   )}
@@ -1997,6 +2061,12 @@ function VistaProspectadores({ ads, cfg, currency, accountId, onWhy, cambios, tr
           </tbody>
         </table>
       </div>
+      {(descartados > 0 || caidosPorDia > 0) && (
+        <p className="px-3.5 py-2 text-[10.5px] text-gray-400 border-t border-gray-100 dark:border-gray-700/60">
+          {descartados > 0 && `${descartados} anuncio${descartados === 1 ? '' : 's'} de la ventana no califica${descartados === 1 ? '' : 'n'} y no se muestra${descartados === 1 ? '' : 'n'} (poco gasto, pocas ventas, ROAS bajo o frecuencia alta).`}
+          {caidosPorDia > 0 && ` ${caidosPorDia} más quedó${caidosPorDia === 1 ? '' : 'aron'} afuera por frecuencia diaria alta (de promedio daba, pero algún día se fue arriba).`}
+        </p>
+      )}
     </div>
   );
 }
@@ -2163,6 +2233,12 @@ function VistaReglas({ campaigns, cfg, setCfg, productos, currency, onWhy, orige
           <Campo label="Frecuencia máxima (prospectador)"><input className={inputCls} type="number" step="0.05" value={cfg.maxFrecuenciaProsp} onChange={set('maxFrecuenciaProsp')} /></Campo>
           <Campo label="ROAS mínimo (prospectador)"><input className={inputCls} type="number" step="0.1" value={cfg.minRoasProsp} onChange={set('minRoasProsp')} /></Campo>
           <Campo label="Alcance mínimo (prospectador)"><input className={inputCls} type="number" value={cfg.minAlcanceProsp} onChange={set('minAlcanceProsp')} /></Campo>
+          <Campo label="Gasto mínimo (prospectador)" help="El anuncio tiene que gastar al menos este % del gasto promedio por anuncio de la ventana. Frecuencia baja con muy poco gasto no es prospección, es falta de data. 0 = apagado.">
+            <div className="flex items-center gap-1.5">
+              <input className={inputCls} type="number" min="0" max="100" step="5" value={cfg.pctGastoProsp ?? 60} onChange={set('pctGastoProsp')} />
+              <span className="text-[11px] text-gray-400 shrink-0">% del promedio</span>
+            </div>
+          </Campo>
         </div>
       </div>
     </div>
@@ -2703,7 +2779,8 @@ export default function MetricasSection({ addToast }) {
           )}
           {tab === 'semanas' && <VistaSemanas campaigns={data.campaigns} cfg={cfgRaw} productos={productos} productoId={productoId || null} currency={currency} accountId={accountId} onWhy={setWhy} fotos={fotos} />}
           {tab === 'prosp' && <VistaProspectadores
-            ads={ads7d} cfg={cfg} currency={currency} accountId={accountId} onWhy={setWhy}
+            ads={ads7d} cfg={cfg} currency={currency} accountId={accountId} connId={account?.connId}
+            preset={presetProsp} onWhy={setWhy}
             cambios={cambios} trabajando={trabajando}
             ventanaLabel={etiquetaVentana(presetProsp, PRESETS_PROSP)}
             onEstado={({ items, status }) => aplicarEstado({ level: 'ad', items, status })}

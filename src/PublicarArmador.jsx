@@ -408,7 +408,7 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
                         <span className="ml-auto text-[11px] text-gray-400 tabular-nums">{nSel}/{vids.length} video{vids.length === 1 ? '' : 's'}</span>
                       </div>
                       {abierta && (
-                        <div className="grid sm:grid-cols-2 gap-x-2">
+                        <div className="flex flex-col">
                           {vids.map(f => {
                             const k = `v:${t.id}:${f.ts}`;
                             return (

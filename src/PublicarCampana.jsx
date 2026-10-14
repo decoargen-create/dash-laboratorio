@@ -88,12 +88,12 @@ function parseAds(texto) {
   return out;
 }
 
-const inputCls = 'w-full px-2.5 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1877F2] text-gray-900 dark:text-gray-100';
+const inputCls = 'w-full px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 text-gray-900 dark:text-gray-100';
 const Campo = ({ label, children, hint }) => (
-  <label className="grid gap-1 min-w-0">
-    <span className="text-[9.5px] font-bold uppercase tracking-[.08em] text-gray-400">{label}</span>
+  <label className="grid gap-1.5 min-w-0">
+    <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 truncate">{label}</span>
     {children}
-    {hint && <span className="text-[10px] text-gray-400">{hint}</span>}
+    {hint && <span className="text-[10px] text-gray-400 leading-snug">{hint}</span>}
   </label>
 );
 
@@ -130,16 +130,17 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
   // Nombre sugerido con la nomenclatura del equipo: "Producto d/m [receta]".
   // El nombre default acompaña la RECETA elegida; si lo editaste a mano, no
   // se toca (se compara contra el último default generado).
-  const ultimoNombreAuto = useRef('');
+  // El nombre acompaña la RECETA (el tag cambia al cambiarla), salvo que lo
+  // hayas editado a mano — eso lo marca el onChange del input.
+  const nombreEditado = useRef(false);
   useEffect(() => {
+    if (nombreEditado.current) return;
     const hoy = new Date();
     const prod = productosVisibles[0]?.nombre?.split(' ')[0] || 'Producto';
     const tag = estructura === 'cbo_deep' ? '[CBO Deep Poket]'
       : estructura === 'cbo_costcap' ? '[CBO Costcap]'
       : estructura === 'abo_costcap' ? '[ABO Costcap]' : '[ABO Bidcap]';
-    const auto = `${prod} ${hoy.getDate()}/${hoy.getMonth() + 1} ${tag}`;
-    setNombre(prev => (!prev || prev === ultimoNombreAuto.current ? auto : prev));
-    ultimoNombreAuto.current = auto;
+    setNombre(`${prod} ${hoy.getDate()}/${hoy.getMonth() + 1} ${tag}`);
   }, [productosVisibles, estructura]); // eslint-disable-line
 
   // Cambiar de receta trae SUS números: es lo que hace que sea una receta y no
@@ -270,7 +271,7 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
           <button key={e.id} onClick={() => setEstructura(e.id)}
             className={`text-left rounded-xl border p-3 transition ${
               estructura === e.id
-                ? 'border-[#1877F2] bg-[#1877F2]/5 dark:bg-[#1877F2]/10 ring-1 ring-[#1877F2]'
+                ? 'border-brand-500 bg-brand-600/5 dark:bg-brand-500/10 ring-1 ring-brand-500'
                 : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-600'}`}>
             <p className="text-[13px] font-bold text-gray-900 dark:text-gray-100">{e.emoji} {e.titulo}</p>
             <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1 leading-snug">{e.desc}</p>
@@ -283,8 +284,8 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
       <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-3.5 grid gap-3.5">
         <div className="grid sm:grid-cols-3 gap-3 items-start">
           <div className="sm:col-span-2">
-            <Campo label="Nombre de la campaña" hint="Con la fecha y la receta en el nombre, Testeos por semana la agarra sola.">
-              <input className={inputCls} value={nombre} onChange={e => setNombre(e.target.value)} />
+            <Campo label="Nombre de la campaña" hint="Con la fecha y la receta en el nombre, Testeos por semana la agarra sola. El tag cambia solo al cambiar de receta.">
+              <input className={inputCls} value={nombre} onChange={e => { nombreEditado.current = true; setNombre(e.target.value); }} />
             </Campo>
           </div>
           {receta.puja && !esAbo ? (
@@ -350,7 +351,7 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
         </div>
         {conjuntos > 1 && (
           <label className="flex items-start gap-2 text-[11px] text-gray-600 dark:text-gray-300 cursor-pointer">
-            <input type="checkbox" className="mt-0.5 accent-[#1877F2]" checked={duplicarAds}
+            <input type="checkbox" className="mt-0.5 accent-brand-500" checked={duplicarAds}
               onChange={e => setDuplicarAds(e.target.checked)} />
             <span>
               <b>Los mismos anuncios en cada conjunto</b> — {conjuntos} conjuntos idénticos compitiendo
@@ -388,7 +389,7 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
         </div>
 
         <label className="flex items-center gap-2 cursor-pointer border-t border-gray-100 dark:border-gray-700/60 pt-3">
-          <input type="checkbox" checked={activar} onChange={e => setActivar(e.target.checked)} className="accent-[#1877F2]" />
+          <input type="checkbox" checked={activar} onChange={e => setActivar(e.target.checked)} className="accent-brand-500" />
           <span className="text-xs text-gray-700 dark:text-gray-200">
             Crear <b>ACTIVA</b> <span className="text-gray-400">(si no, queda pausada para revisar — recomendado{programada ? '; ojo: programada + pausada no arranca sola' : ''})</span>
           </span>
@@ -418,7 +419,7 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
 
       <div className="flex items-center gap-3 flex-wrap">
         <button onClick={publicar} disabled={!listo || busy}
-          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-[#1877F2] hover:bg-[#0a5ae0] rounded-xl transition disabled:opacity-40">
+          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-xl transition disabled:opacity-40">
           {busy ? <Loader2 size={15} className="animate-spin" /> : <Rocket size={15} />}
           {busy ? 'Creando en Meta…' : 'Crear en Meta'}
         </button>
@@ -434,7 +435,7 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
             <>
               <p className="text-sm font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
                 <CheckCircle2 size={15} className="text-emerald-600" /> Campaña creada ({resultado.estado === 'ACTIVE' ? 'ACTIVA' : 'pausada'})
-                <a className="inline-flex items-center gap-1 text-[11px] font-bold text-[#1877F2] hover:underline"
+                <a className="inline-flex items-center gap-1 text-[11px] font-bold text-brand-500 hover:underline"
                   href={`https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=${String(accountId).replace('act_', '')}&selected_campaign_ids=${resultado.campaignId}`}
                   target="_blank" rel="noreferrer">abrir en Meta <ExternalLink size={10} /></a>
               </p>

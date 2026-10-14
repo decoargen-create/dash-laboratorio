@@ -254,7 +254,45 @@ function emitSyncError(msg) {
   try { window.dispatchEvent(new CustomEvent('viora:produccion-sync-error', { detail: { message: msg || 'error' } })); } catch {}
 }
 
-function pushRow(id, evento = null, opts = {}) { return enqueue(id, () => doPushRow(id, evento, opts)); }
+// Ids de tarjetas CREADAS en esta máquina cuyo INSERT todavía no llegó a la
+// nube. Distinto de _unsynced (updates fallidos): solo lo creado acá puede
+// re-insertarse en el hydrate — antes cualquier _unsynced "que no está en la
+// nube" se re-agregaba, y eso RESUCITABA tarjetas borradas por otra sesión.
+const CREATED_KEY = 'adslab-produccion-created-v1';
+let _created = (() => { try { return new Set(JSON.parse(localStorage.getItem(CREATED_KEY) || '[]')); } catch { return new Set(); } })();
+function persistCreated() { try { localStorage.setItem(CREATED_KEY, JSON.stringify([..._created])); } catch {} }
+function markCreated(id, bad) {
+  if (bad) { if (!_created.has(id)) { _created.add(id); persistCreated(); } }
+  else if (_created.delete(id)) { persistCreated(); }
+}
+
+// UPDATES POR COLUMNA (auditoría #1): cada push lleva SOLO las columnas que
+// ese cambio tocó, acumuladas acá por tarjeta. null = fila completa (callers
+// legacy / insert). Así el admin cambiando la etiqueta ya no pisa el estado
+// que el editor acaba de mover, ni al revés.
+const _patchKeys = new Map(); // id -> Set<claveLocal> | null (fila completa)
+function addPatchKeys(id, keys) {
+  if (!keys) { _patchKeys.set(id, null); return; }
+  const cur = _patchKeys.get(id);
+  if (cur === null) return;
+  const set = cur || new Set();
+  for (const k of keys) set.add(k);
+  _patchKeys.set(id, set);
+}
+// clave local → columna de la tabla (subset de localToRow).
+const COLMAP = {
+  weekKey: 'week_key', productoId: 'producto_id', productoNombre: 'producto_nombre',
+  persona: 'persona', creatorId: 'creator_id', tipo: 'tipo', estado: 'estado',
+  videosTotal: 'videos_total', videosAprobados: 'videos_aprobados', brief: 'brief',
+  nota: 'nota', pagado: 'pagado', archivos: 'archivos', historial: 'historial',
+  materialLink: 'material_link', winners: 'winners', referencias: 'referencias',
+  etiqueta: 'etiqueta', prioridad: 'prioridad',
+};
+
+function pushRow(id, evento = null, opts = {}) {
+  addPatchKeys(id, opts.patch ? Object.keys(opts.patch) : null);
+  return enqueue(id, () => doPushRow(id, evento, opts));
+}
 function pushDelete(id) { return enqueue(id, () => doPushDelete(id)); }
 
 // Empuja una fila (insert/update) a la nube. Admin → tabla directa; creator →
@@ -265,17 +303,51 @@ async function doPushRow(id, evento = null, opts = {}) {
   const a = ensureCache().find(x => x.id === id);
   if (!a) return;
   if (_role === 'admin') {
-    // El historial ya está dentro de la fila (localToRow lo incluye si _histCloud).
-    const row = localToRow(a);
-    // Un update que NO toca archivos (estado / brief / nota / asignación) omite
-    // la columna `archivos` del upsert. Como el upsert solo pisa las columnas del
-    // payload, así NO borra videos que el editor subió concurrentemente (el
-    // last-writer-wins de la fila entera se los comía). Los cambios de archivos
-    // (addArchivos/removeArchivo/nueva tarjeta) NO pasan skipArchivos.
+    // INSERT solo para tarjetas creadas en ESTA máquina: un upsert de una
+    // tarjeta que otra sesión borró la resucitaría (auditoría #5).
+    if (_created.has(id)) {
+      const row = localToRow(a);
+      const { error } = await supabase.from(TABLE).upsert(row, { onConflict: 'id' });
+      if (error) { console.warn('[produccion] insert(admin):', error.message); markUnsynced(id, true); emitSyncError(error.message); }
+      else { markUnsynced(id, false); markCreated(id, false); _patchKeys.delete(id); }
+      return;
+    }
+    // UPDATE POR COLUMNA (auditoría #1): solo lo tocado desde el último push
+    // OK. Un update sobre fila borrada afecta 0 filas (no resucita nada), y
+    // dos sesiones editando CAMPOS distintos de la misma tarjeta ya no se
+    // pisan la fila entera. skipArchivos queda por compatibilidad: con
+    // patches, archivos solo viaja cuando el cambio lo tocó.
+    const keys = _patchKeys.get(id);
+    _patchKeys.delete(id);
+    const full = localToRow(a);
+    let row;
+    if (keys == null) {
+      row = { ...full };
+      delete row.id; delete row.created_at; delete row.owner_id; delete row.creator_id;
+    } else {
+      row = {};
+      for (const k of keys) {
+        const col = COLMAP[k];
+        if (col && col in full) row[col] = full[col];
+      }
+      // Un cambio con evento registra historial; sin _histCloud no viaja.
+      if (evento && _histCloud) row.historial = full.historial;
+    }
     if (opts.skipArchivos) delete row.archivos;
-    const { error } = await supabase.from(TABLE).upsert(row, { onConflict: 'id' });
-    if (error) { console.warn('[produccion] push(admin):', error.message); markUnsynced(id, true); emitSyncError(error.message); }
-    else markUnsynced(id, false);
+    if (Object.keys(row).length === 0) { markUnsynced(id, false); return; }
+    const { data, error } = await supabase.from(TABLE).update(row).eq('id', id).select('id');
+    if (error) {
+      console.warn('[produccion] update(admin):', error.message);
+      addPatchKeys(id, keys ? [...keys] : null); // re-anotar lo no sincronizado
+      markUnsynced(id, true); emitSyncError(error.message);
+    } else if (!data || data.length === 0) {
+      // La fila ya no existe en la nube (borrada en otra sesión): no la
+      // resucitamos; el próximo hydrate la saca del cache local.
+      console.warn(`[produccion] update sobre tarjeta inexistente ${id} — borrada en otra sesión, se descarta`);
+      markUnsynced(id, false);
+    } else {
+      markUnsynced(id, false);
+    }
   } else if (_role === 'creator') {
     // Solo mandamos p_estado si ESTE push viene de un cambio de estado real
     // (evento tipo 'estado'). Un push de solo-archivos NO debe tocar el estado:
@@ -357,7 +429,12 @@ async function hydrate() {
     // Si mientras traíamos la data hubo un cambio optimista local (o quedan
     // push en vuelo), NO pisamos el cache: el push ya persiste en el server y
     // el próximo refetch reconcilia. Evita que un refetch revierta un cambio.
-    if (_writeSeq !== seqBefore || _inflight > 0) return;
+    if (_writeSeq !== seqBefore || _inflight > 0) {
+      // Antes se DESCARTABA el refetch y una sesión activa podía quedar con
+      // cache viejo indefinidamente (auditoría #4). Ahora se reintenta.
+      scheduleRealtimeRefetch();
+      return;
+    }
 
     const cloud = (data || []).map(rowToLocal);
     if (cloud.length > 0) {
@@ -386,8 +463,19 @@ async function hydrate() {
       // operación de admin: el creator no crea filas, solo actualiza las suyas.
       if (esAdmin) {
         for (const id of _unsynced) {
-          if (!cloudById.has(id) && !_deleted.has(id) && localById.has(id)) merged.push(localById.get(id));
+          // SOLO tarjetas creadas en esta máquina (insert pendiente). Un update
+          // fallido de una tarjeta que ya no está en la nube significa que OTRA
+          // sesión la borró — re-agregarla la resucitaba (auditoría #5).
+          if (!cloudById.has(id) && !_deleted.has(id) && localById.has(id) && _created.has(id)) {
+            merged.push(localById.get(id));
+          }
         }
+      }
+      // Limpieza de fantasmas (ambos roles): un pendiente cuya tarjeta ya no
+      // existe en la nube y NO fue creada acá no tiene nada que sincronizar —
+      // sin esto, el creator quedaba con una "tarjeta fantasma" permanente.
+      for (const id of [..._unsynced]) {
+        if (!cloudById.has(id) && !_created.has(id)) markUnsynced(id, false);
       }
       write(merged);
       // Reintentamos los pendientes (fire & forget; si vuelven a fallar, siguen
@@ -521,7 +609,10 @@ function setupRefetch() {
   const onVisible = () => {
     // No refrescamos si hay push optimistas en vuelo: el server todavía no
     // tiene el último cambio y traerlo pisaría el cache con data vieja.
-    if (document.visibilityState === 'visible' && cloudReady() && _inflight === 0) hydrate();
+    if (document.visibilityState === 'visible' && cloudReady()) {
+      if (_inflight === 0) hydrate();
+      else scheduleRealtimeRefetch(); // ocupado: reintentar apenas se libere
+    }
   };
   window.addEventListener('focus', onVisible);
   document.addEventListener('visibilitychange', onVisible);
@@ -541,6 +632,7 @@ function scheduleRealtimeRefetch() {
     // El guard de hydrate (_writeSeq/_inflight) evita pisar un cambio propio en
     // vuelo; para cambios ajenos, trae lo nuevo.
     if (cloudReady() && _inflight === 0) hydrate().catch(() => {});
+    else if (cloudReady()) scheduleRealtimeRefetch(); // ocupado: reintentar, no descartar
   }, 250);
 }
 function setupRealtime() {
@@ -831,6 +923,7 @@ export function addAssignment({ weekKey, productoId, productoNombre, persona, cr
   };
   arr.push(nueva);
   write(arr);
+  markCreated(nueva.id, true); // insert pendiente: solo lo creado acá puede re-insertarse
   pushRow(nueva.id);
   // Aviso de "producto nuevo" (canal 1). Fire & forget; el server decide.
   notificarEventoDiscord(nueva, 'nuevo');
@@ -897,11 +990,14 @@ export function updateAssignment(id, patch) {
     updatedAt: new Date().toISOString(),
   };
   write(arr);
-  // updateAssignment normalmente NO toca `archivos` (eso va por addArchivos/
-  // removeArchivo) → skipArchivos para no pisar videos subidos en paralelo.
-  // EXCEPCIÓN: cuando el pase a Aprobado/Publicado acaba de marcar los ✓,
-  // la fila viaja completa — si no, los ✓ quedarían solo en este dispositivo.
-  pushRow(id, evento, { skipArchivos: !archivosAprobados });
+  // Push con PATCH: viajan solo las columnas que este cambio tocó (más
+  // archivos/aprobados cuando el pase a Aprobado marcó los ✓).
+  pushRow(id, evento, {
+    patch: {
+      ...patch,
+      ...(archivosAprobados ? { archivos: 1, videosAprobados: 1 } : {}),
+    },
+  });
   // Aviso a Discord del cambio de columna (fire & forget). Lo dispara quien hizo
   // el cambio (admin o editor); el server decide si hay webhook y si el estado
   // se notifica. Nunca frena la UI ni rompe si falla.
@@ -1043,7 +1139,7 @@ export function addArchivos(id, archivos) {
   const prev = arr[i].archivos || [];
   arr[i] = { ...arr[i], archivos: [...prev, ...archivos], updatedAt: new Date().toISOString() };
   write(arr);
-  pushRow(id);
+  pushRow(id, null, { patch: { archivos: 1 } });
   return arr[i];
 }
 
@@ -1060,7 +1156,7 @@ export function setArchivosFolder(id, { folderId, folderLink }) {
     f.destino === 'drive' ? { ...f, folderId, folderLink: folderLink || f.folderLink } : f);
   arr[i] = { ...arr[i], archivos, updatedAt: new Date().toISOString() };
   write(arr);
-  pushRow(id);
+  pushRow(id, null, { patch: { archivos: 1 } });
   return arr[i];
 }
 
@@ -1083,7 +1179,7 @@ export function replaceArchivo(id, ts, archivo) {
     updatedAt: new Date().toISOString(),
   };
   write(arr);
-  pushRow(id);
+  pushRow(id, null, { patch: { archivos: 1 } });
 }
 
 // Aprobación POR VIDEO (la marca el revisor con el ✓ de cada fila). Al
@@ -1111,7 +1207,7 @@ export function setAprobadoVideo(id, ts, on) {
     updatedAt: new Date().toISOString(),
   };
   write(arr);
-  pushRow(id);
+  pushRow(id, null, { patch: { archivos: 1, videosAprobados: 1 } });
 }
 
 // Marca TODOS los videos subidos como aprobados (botón "Aprobar todos").
@@ -1133,7 +1229,7 @@ export function aprobarTodosVideos(id) {
     updatedAt: new Date().toISOString(),
   };
   write(arr);
-  pushRow(id);
+  pushRow(id, null, { patch: { archivos: 1, videosAprobados: 1 } });
 }
 
 // Saca la marca verde "Corregido" de un video (la usa quien revisa con el
@@ -1153,7 +1249,7 @@ export function clearCorregidoVideo(id, ts) {
     updatedAt: new Date().toISOString(),
   };
   write(arr);
-  pushRow(id);
+  pushRow(id, null, { patch: { archivos: 1 } });
 }
 
 export function removeArchivo(id, ts) {
@@ -1162,7 +1258,7 @@ export function removeArchivo(id, ts) {
   if (i === -1) return;
   arr[i] = { ...arr[i], archivos: (arr[i].archivos || []).filter(f => f.ts !== ts), updatedAt: new Date().toISOString() };
   write(arr);
-  pushRow(id);
+  pushRow(id, null, { patch: { archivos: 1 } });
 }
 
 // Pide (o limpia) una corrección sobre un VIDEO puntual (por su ts). La
@@ -1185,7 +1281,7 @@ export function setCorreccionVideo(id, ts, texto) {
   const reabrir = !!txt && ['aprobado', 'publicado', 'archivado'].includes(arr[i].estado);
   arr[i] = { ...arr[i], archivos, ...(reabrir ? { estado: 'porhacer' } : {}), updatedAt: new Date().toISOString() };
   write(arr);
-  pushRow(id);
+  pushRow(id, null, { patch: { archivos: 1, ...(reabrir ? { estado: 1 } : {}) } });
   // Aviso a Discord (canal 'correccion'): antes pedir una corrección era 100%
   // silencioso. Solo cuando se SETEA (no al limpiar). Fire & forget; el server
   // decide si hay webhook y a quién menciona.

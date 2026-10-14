@@ -119,8 +119,16 @@ export async function pullMarketingFromCloud() {
       'bandejaIdeas',  // ahora vive en tabla marketing_ideas
     ]);
     const merged = { ...slim };
+    // LWW de la fila: lo usamos acá y en docs. null EXPLÍCITO en un cloud más
+    // nuevo = borrado intencional en otra PC (responsable quitado, stage
+    // reseteado por regeneración): NO resucitar desde local. undefined (campo
+    // que el cloud nunca tuvo, p.ej. breakEven viejo) se preserva igual.
+    const _localTsRow = Date.parse(localP.updated_at || localP.updatedAt || 0) || 0;
+    const _cloudTsRow = Date.parse(slim.updated_at || slim.updatedAt || row.updated_at || 0) || 0;
+    const cloudMasNuevo = _cloudTsRow > _localTsRow;
     for (const k of Object.keys(localP)) {
       if (EXCLUDED_FROM_PRESERVE.has(k)) continue;
+      if (cloudMasNuevo && merged[k] === null) continue;
       if (merged[k] == null && localP[k] != null) {
         merged[k] = localP[k];
       }
@@ -147,7 +155,9 @@ export async function pullMarketingFromCloud() {
       const cloudTs = Date.parse(slim.updated_at || slim.updatedAt || row.updated_at || 0) || 0;
       const cloudComps = Array.isArray(merged.competidores) ? merged.competidores : [];
       const localComps = Array.isArray(localP.competidores) ? localP.competidores : [];
-      if (cloudComps.length === 0 && localComps.length) {
+      if (cloudComps.length === 0 && localComps.length && localTs >= cloudTs) {
+        // Solo si local NO es más viejo: un cloud vacío MÁS NUEVO es un
+        // "borré todos" hecho en otra PC, no una pérdida a restaurar.
         merged.competidores = localComps;
       } else if (localComps.length && localTs > cloudTs) {
         const localIds = new Set(localComps.map(c => String(c.id)));
@@ -193,7 +203,7 @@ export async function pullMarketingFromCloud() {
       // video, aparece terminado y a los segundos ese bloque desaparece").
       const cloudTV = Array.isArray(merged.transcripcionesVideos) ? merged.transcripcionesVideos : [];
       const localTV = Array.isArray(localP.transcripcionesVideos) ? localP.transcripcionesVideos : [];
-      if (cloudTV.length === 0 && localTV.length) {
+      if (cloudTV.length === 0 && localTV.length && localTs >= cloudTs) {
         merged.transcripcionesVideos = localTV;
       } else if (localTV.length && localTs > cloudTs) {
         const localIds = new Set(localTV.map(t => String(t.id)));
@@ -203,13 +213,37 @@ export async function pullMarketingFromCloud() {
         const soloLocal = localTV.filter(t => !cloudIds.has(String(t.id)));
         if (soloLocal.length) merged.transcripcionesVideos = [...cloudTV, ...soloLocal];
       }
+
+      // TOMBSTONES de transcripciones — mismo patrón que competidoresBorrados:
+      // sin esto, la unión resucitaba videos borrados desde la otra PC.
+      {
+        const tombs = new Map();
+        for (const t of [
+          ...(Array.isArray(slim.transcripcionesBorradas) ? slim.transcripcionesBorradas : []),
+          ...(Array.isArray(localP.transcripcionesBorradas) ? localP.transcripcionesBorradas : []),
+        ]) {
+          const k = String(t?.id ?? '');
+          if (!k) continue;
+          const prev = tombs.get(k);
+          if (!prev || (t.ts || 0) > (prev.ts || 0)) tombs.set(k, { id: k, ts: t.ts || 0 });
+        }
+        if (tombs.size) {
+          merged.transcripcionesVideos = (Array.isArray(merged.transcripcionesVideos) ? merged.transcripcionesVideos : [])
+            .filter(t => !tombs.has(String(t.id)));
+          merged.transcripcionesBorradas = [...tombs.values()]
+            .sort((a, b) => (a.ts || 0) - (b.ts || 0))
+            .slice(-200);
+        }
+      }
     }
     if ((!merged.bandejaIdeas || merged.bandejaIdeas.length === 0) && localP.bandejaIdeas?.length) {
       merged.bandejaIdeas = localP.bandejaIdeas;
     }
     // Para docs: merge field-by-field (cloud puede tener research, local
     // puede tener avatar nuevo, etc).
-    if (localP.docs && typeof localP.docs === 'object') {
+    if (localP.docs && typeof localP.docs === 'object' && !cloudMasNuevo) {
+      // Con cloud estrictamente más nuevo NO se une: una regeneración que
+      // limpió docs en otra PC quedaba contaminada con los docs viejos.
       merged.docs = { ...localP.docs, ...(merged.docs || {}) };
       // Excepción: si local tiene un doc no-vacío y cloud tiene vacío/null,
       // preservar el local.
@@ -267,7 +301,12 @@ export async function pullMarketingFromCloud() {
   // 14-09-2026 (Nexocom y el resto de las apps del proyecto quedaron con
   // logins en timeout). Post-strip la comparación converge: si lo único
   // distinto son campos que el push no persiste, no se dispara push.
-  const cloudStr = JSON.stringify((productos || []).map(r => stripIdeas(r.data)));
+  // OJO: comparar SIN los tombstones de producto. productosArr se construye
+  // filtrando las filas _deleted, pero cloudStr las incluía → con UN producto
+  // borrado en la cuenta, mergeOccurred daba true en CADA pull para siempre
+  // → push de todos los productos cada ~5-10s por sesión abierta. Es la
+  // reintroducción exacta del loop del 14-09 (425k writes), vía lápidas.
+  const cloudStr = JSON.stringify((productos || []).filter(r => !r.data?._deleted).map(r => stripIdeas(r.data)));
   const mergedStr = JSON.stringify(productosArr.map(p => stripIdeas(p)));
   const mergeOccurred = cloudStr !== mergedStr;
   if (mergeOccurred) {
@@ -421,6 +460,22 @@ export async function pullMarketingFromCloud() {
   for (const [productoId, arr] of byProducto) {
     try { localStorage.setItem(`${KEYS.brandsPrefix}${productoId}`, JSON.stringify(arr)); } catch {}
   }
+  // Productos del user SIN brands en cloud: otra PC las borró todas — limpiar
+  // la key local (si no, el próximo mount de Inspiración las resucitaba).
+  // Gracia de 15 min para brands locales recién creadas sin push aterrizado.
+  for (const p of productosArr) {
+    if (byProducto.has(String(p.id))) continue;
+    try {
+      const key = `${KEYS.brandsPrefix}${p.id}`;
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      const arr = JSON.parse(raw);
+      if (!Array.isArray(arr) || arr.length === 0) continue;
+      const hace15 = Date.now() - 15 * 60 * 1000;
+      const hayReciente = arr.some(b => (Date.parse(b?.createdAt || b?.addedAt || 0) || 0) > hace15);
+      if (!hayReciente) localStorage.removeItem(key);
+    } catch {}
+  }
 
   // Marca de "último pull exitoso" — la usa el gate anti-resurrección de
   // arriba en el PRÓXIMO pull para distinguir un producto local nuevo (creado
@@ -458,6 +513,9 @@ function stripIdeas(producto) {
 }
 
 export async function pushProducto(producto) {
+  // Guard de tombstone (hallazgo #12): hoy nadie llama esta función, pero si
+  // vuelve a usarse no debe resucitar un producto borrado en otra sesión.
+  if (producto?._deleted) return { skipped: 'tombstone' };
   if (!supabase) throw new Error('Supabase no configurado');
   const user = await getCurrentUser();
   if (!user) throw new Error('No hay user logueado');
@@ -476,6 +534,11 @@ export async function pushProducto(producto) {
     const cloudSize = cloudCurrent?.data ? JSON.stringify(cloudCurrent.data).length : 0;
     const cloudTs = Date.parse(cloudCurrent?.data?.updated_at || cloudCurrent?.data?.updatedAt || cloudCurrent?.updated_at || 0) || 0;
     const localEsMasNuevo = localTs > 0 && localTs > cloudTs;
+    // Cloud estrictamente más nuevo: otra PC editó DESPUÉS de este snapshot —
+    // pushearlo pisaría esa edición. El próximo pull nos trae lo nuevo.
+    if (cloudTs > 0 && localTs > 0 && cloudTs > localTs) {
+      return { skipped: 'cloud-mas-nuevo' };
+    }
     if (!localEsMasNuevo && cloudSize > 500 && localSize < cloudSize * 0.5) {
       console.error(`[sync] 🔴 ANTI-WIPE: skip push de producto ${producto.id} (${producto.nombre}) por regresión: local ${localSize}B vs cloud ${cloudSize}B (local no es más nuevo)`);
       return;
@@ -573,6 +636,12 @@ export async function pushAllProductos(productos) {
     // iguales/ausentes) y además hay una regresión grande de tamaño — el caso
     // clásico de un localStorage sparse pisando un cloud lleno.
     const localEsMasNuevo = localTs > 0 && localTs > cloudTs;
+    // Cloud estrictamente más nuevo: otra PC editó DESPUÉS de este snapshot —
+    // pushearlo pisaría esa edición. El próximo pull nos trae lo nuevo.
+    if (cloudTs > 0 && localTs > 0 && cloudTs > localTs) {
+      skipped.push({ id: p.id, nombre: p.nombre, localSize, cloudSize, localTs, cloudTs, motivo: 'cloud-mas-nuevo' });
+      continue;
+    }
     if (!localEsMasNuevo && cloudSize > 500 && localSize < cloudSize * 0.5) {
       skipped.push({ id: p.id, nombre: p.nombre, localSize, cloudSize, localTs, cloudTs });
     } else {
@@ -694,14 +763,25 @@ export async function pushBrandsForProducto(productoId, brands) {
   // Diff-delete — siempre, aunque brands esté vacío.
   // brands=[] → borrar TODAS las brands del producto en cloud.
   const idsActuales = brands.map(b => String(b.id));
-  const { data: enServer } = await supabase
-    .from('marketing_brands')
-    .select('brand_id')
-    .eq('producto_id', String(productoId))
-    .eq('user_id', user.id);
+  // Pedimos created_at para no borrar brands recién creadas en OTRA PC que
+  // este snapshot local todavía no vio (el diff-delete no tiene LWW por
+  // brand). Si la columna no existe, caemos al comportamiento anterior.
+  let enServer = null, conCreatedAt = true;
+  {
+    const q = await supabase.from('marketing_brands').select('brand_id, created_at')
+      .eq('producto_id', String(productoId)).eq('user_id', user.id);
+    if (q.error) {
+      conCreatedAt = false;
+      const q2 = await supabase.from('marketing_brands').select('brand_id')
+        .eq('producto_id', String(productoId)).eq('user_id', user.id);
+      enServer = q2.data;
+    } else enServer = q.data;
+  }
+  const hace10 = Date.now() - 10 * 60 * 1000;
   const aBorrar = (enServer || [])
-    .map(r => r.brand_id)
-    .filter(id => !idsActuales.includes(id));
+    .filter(r => !idsActuales.includes(String(r.brand_id)))
+    .filter(r => !conCreatedAt || (Date.parse(r.created_at || 0) || 0) < hace10)
+    .map(r => r.brand_id);
   if (aBorrar.length > 0) {
     await supabase
       .from('marketing_brands')

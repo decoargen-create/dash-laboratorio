@@ -1,0 +1,216 @@
+<!-- Resumen de AdsLab para colaboradores — qué es y cómo funciona por dentro,
+     con ejemplos reales de la operación (oct 2026). Versión publicada:
+     https://claude.ai/artifact/NrXyEGhMcuq163hDJRK7JV -->
+<title>Resumen AdsLab</title>
+<style>
+  /* One-pager profundo de AdsLab para colaboradores — explica CÓMO funciona
+     cada pieza por dentro, no solo qué hay. Tema oscuro único (look de la app). */
+  :root{
+    --bg:#0a0e1d; --panel:#121a31; --panel2:#0d1428; --line:#20294a; --line2:#32406e;
+    --fg:#f1f4fd; --mut:#93a2c6; --mut2:#5e6d93;
+    --violeta:#8b5cf6; --violeta2:#a78bfa; --cian:#38bdf8; --rosa:#f472b6; --ambar:#fbbf24; --verde:#34d399;
+    color-scheme: dark;
+  }
+  body{background:var(--bg); color:var(--fg); margin:0; font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif; font-size:15px; line-height:1.65; padding-inline:16px; padding-block:40px 60px;}
+  *{box-sizing:border-box}
+  .wrap{max-width:880px; margin:0 auto; display:flex; flex-direction:column; gap:44px;}
+  h1,h2,h3{letter-spacing:-.02em; text-wrap:balance;}
+  h2{font-size:21px; margin:0 0 4px;}
+  .k{font-size:11px; font-weight:800; letter-spacing:.16em; text-transform:uppercase;
+    background:linear-gradient(92deg,var(--violeta2),var(--cian)); -webkit-background-clip:text; background-clip:text; color:transparent;}
+  .grad{background:linear-gradient(92deg,var(--violeta2),var(--cian),var(--rosa)); -webkit-background-clip:text; background-clip:text; color:transparent;}
+  .sub{color:var(--mut); font-size:14px; margin:6px 0 0; max-width:72ch;}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:22px; border-left:3px solid var(--acc, var(--line2));}
+  .card h3{font-size:16.5px; margin:0 0 4px; display:flex; align-items:center; gap:9px; flex-wrap:wrap;}
+  .card h3 .tagv{margin-left:auto; font-size:9.5px; font-weight:800; letter-spacing:.06em; color:var(--acc); border:1px solid var(--acc); border-radius:6px; padding:2px 8px; opacity:.9; white-space:nowrap;}
+  .card > p{font-size:13.5px; color:var(--mut); margin:6px 0 0;}
+  .card b{color:var(--fg); font-weight:700;}
+
+  /* flujo paso a paso dentro de una sección */
+  .flujo{display:grid; gap:9px; margin-top:14px;}
+  .fp{display:grid; grid-template-columns:30px 1fr; gap:12px; background:var(--panel2); border:1px solid var(--line); border-radius:11px; padding:11px 14px;}
+  .fp .n{width:26px;height:26px;border-radius:8px;background:color-mix(in srgb, var(--acc) 18%, transparent);border:1px solid color-mix(in srgb, var(--acc) 45%, transparent);color:var(--acc);display:grid;place-items:center;font-size:12px;font-weight:800;margin-top:1px;}
+  .fp .t{font-size:13px; color:var(--mut);}
+  .fp .t b{color:var(--fg);}
+
+  /* chips de criterios/ángulos */
+  .chips{display:flex; flex-wrap:wrap; gap:6px; margin-top:10px;}
+  .chip{font-size:11.5px; font-weight:700; border:1px solid var(--line2); background:var(--panel2); color:var(--mut); border-radius:999px; padding:4px 11px;}
+  .chip b{color:var(--acc);}
+
+  /* recuadro de ejemplo real por módulo */
+  .ej{margin-top:14px; background:color-mix(in srgb, var(--acc) 6%, transparent); border:1px dashed color-mix(in srgb, var(--acc) 45%, transparent); border-radius:12px; padding:12px 15px;}
+  .ej .ejk{font-size:9.5px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; color:var(--acc); display:block; margin-bottom:4px;}
+  .ej p{font-size:12.5px; color:var(--mut); margin:0; line-height:1.6;}
+  .ej b{color:var(--fg);}
+
+  header{text-align:center;}
+  .logo{display:inline-flex; align-items:center; gap:10px; font-weight:800; font-size:20px; margin-bottom:14px;}
+  .logo .cubo{width:36px;height:36px;border-radius:11px;background:linear-gradient(135deg,var(--violeta),var(--cian));display:grid;place-items:center;font-size:17px;}
+  header h1{font-size:clamp(26px,4.6vw,38px); margin:0; line-height:1.15;}
+  header p{color:var(--mut); max-width:60ch; margin:14px auto 0; font-size:15px;}
+
+  .loop{display:flex; flex-wrap:wrap; gap:6px; margin-top:16px;}
+  .paso{flex:1 1 150px; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px 14px; position:relative;}
+  .paso .pn{font-size:9.5px; font-weight:800; letter-spacing:.1em; color:var(--violeta2); text-transform:uppercase;}
+  .paso b{display:block; font-size:12.5px; margin:4px 0 2px;}
+  .paso span{font-size:11px; color:var(--mut); line-height:1.45; display:block;}
+  .paso::after{content:"→"; position:absolute; right:-10px; top:42%; color:var(--violeta2); font-weight:800; z-index:2;}
+  .paso:last-child::after{content:"↺"; right:10px; top:9px;}
+  @media (max-width:700px){ .paso::after{display:none} .paso{flex:1 1 45%} }
+
+  .cierre{text-align:center; background:radial-gradient(500px 200px at 50% -20%, rgba(139,92,246,.25), transparent), var(--panel); border:1px solid var(--line2); border-radius:20px; padding:36px 24px;}
+  .cierre h2{font-size:clamp(20px,3.4vw,27px);}
+  .cierre p{color:var(--mut); margin:8px auto 0; max-width:54ch; font-size:14px;}
+  .pie{text-align:center; color:var(--mut2); font-size:12px;}
+</style>
+
+<div class="wrap">
+  <header>
+    <span class="logo"><span class="cubo">⚗️</span>AdsLab</span>
+    <h1>Qué es AdsLab y <span class="grad">cómo funciona por dentro</span></h1>
+    <p>Una plataforma que maneja la operación completa de Meta Ads de una marca de e-commerce:
+    espía a la competencia, fabrica los creativos, organiza al equipo que produce los videos,
+    optimiza las campañas con los datos reales de la cuenta y detecta sola qué está vendiendo.
+    Todo conectado por producto — nada vive en planillas sueltas.</p>
+    <div class="loop">
+      <div class="paso"><span class="pn">1</span><b>Meta mide</b><span>Métricas en vivo con el break-even de cada producto.</span></div>
+      <div class="paso"><span class="pn">2</span><b>Optimizás</b><span>Pausar, escalar y presupuestos en minutos.</span></div>
+      <div class="paso"><span class="pn">3</span><b>Winners solos</b><span>El sistema detecta qué video vende, a diario.</span></div>
+      <div class="paso"><span class="pn">4</span><b>El equipo replica</b><span>Los editores producen sobre lo que funciona.</span></div>
+      <div class="paso"><span class="pn">5</span><b>Publicás</b><span>Campaña nueva con tu receta, un click.</span></div>
+    </div>
+  </header>
+
+  <!-- ═══ 1 · espionaje ═══ -->
+  <section class="card" style="--acc:var(--cian)">
+    <h3>🕵️ Espiar a la competencia — el scrapeador de la Ad Library <span class="tagv">PIPELINE AUTOMÁTICO</span></h3>
+    <p>Cargás las marcas que quieras monitorear (cualquiera, con su link) y el pipeline hace el resto:</p>
+    <div class="flujo">
+      <div class="fp"><span class="n">1</span><span class="t"><b>Scrapea la Biblioteca de Anuncios de Meta</b> de cada competidor: todos sus ads activos, con creatividades, textos, fechas y variantes.</span></div>
+      <div class="fp"><span class="n">2</span><span class="t"><b>Detecta los GANADORES con criterios de mercado</b>, no de opinión: un ad que lleva <b>semanas o meses corriendo</b> es un ad que vende (nadie banca uno perdedor), y uno con <b>muchas variantes activas</b> es uno que la marca está escalando. Antigüedad + vigencia + duplicación = señal de ganador.</span></div>
+      <div class="fp"><span class="n">3</span><span class="t"><b>Ordena y filtra</b>: los ganadores arriba con su trofeo y conteo (ej. "350 ads · 349 ganadores"), para que en un vistazo veas qué le está funcionando a cada marca y desde cuándo.</span></div>
+      <div class="fp"><span class="n">4</span><span class="t"><b>Los videos ganadores se transcriben solos</b> (speech-to-text): tenés el guión del ad que vende — gancho, estructura, oferta — como texto, listo para inspirar los tuyos.</span></div>
+    </div>
+    <div class="chips">
+      <span class="chip"><b>Criterios:</b> tiempo corriendo</span><span class="chip">sigue activo</span><span class="chip">cantidad de variantes</span><span class="chip">recencia del scrapeo</span>
+    </div>
+    <div class="ej"><span class="ejk">Ejemplo real · en la cuenta hoy</span>
+      <p>Competidores monitoreados con sus números de la última corrida: <b>Altierbeauty, 350 ads scrapeados → 349 ganadores</b>;
+      <b>Gardenbrite 243/243</b>; <b>Lipoh 260/256</b>. De un vistazo sabés que esas marcas están escalando fuerte y qué
+      piezas llevan meses vivas — esas son las que vale la pena replicar.</p>
+    </div>
+  </section>
+
+  <!-- ═══ 2 · estáticos ═══ -->
+  <section class="card" style="--acc:var(--rosa)">
+    <h3>🎨 Replicar y diversificar — cómo se fabrica un estático <span class="tagv">IA EN DOS ETAPAS</span></h3>
+    <p>De los ads ganadores de la competencia, <b>seleccionás los que querés replicar</b> — y sobre cada uno generás varias <b>diversificaciones</b> con tu producto. Así está craneado el motor:</p>
+    <div class="flujo">
+      <div class="fp"><span class="n">1</span><span class="t"><b>Un estratega IA analiza la referencia</b>: por qué funciona ese ad (estructura visual, gancho, promesa) y la cruza con TU producto — sus dolores reales, su oferta real (nunca inventa descuentos), su categoría (la escena correcta para un cosmético no es la de una lámpara de jardín).</span></div>
+      <div class="fp"><span class="n">2</span><span class="t"><b>Arma el plan del creativo</b>: ángulo de venta, texto, jerarquía visual — y recién ahí el generador de imágenes produce el estático <b>imitando la referencia pero con tu producto real</b> (recibe la foto del producto + la referencia), en alta calidad.</span></div>
+      <div class="fp"><span class="n">3</span><span class="t"><b>Diversificación por ángulos</b>: del mismo ganador salen variantes con enfoques distintos — cada una ataca otra motivación de compra del mismo cliente.</span></div>
+      <div class="fp"><span class="n">4</span><span class="t"><b>Modo evento</b>: elegís Día de la Madre, CyberMonday, BlackFriday… y el estratega reangula todo hacia la fecha — un evento de regalo posiciona el producto como regalo; uno de oferta va a urgencia con descuentos reales.</span></div>
+      <div class="fp"><span class="n">5</span><span class="t"><b>Nomenclatura automática y trazable</b>: cada pieza sale como <b>"Producto 14-10 Estatico Testimonio #a3f8"</b> — producto, fecha, formato, ángulo y un código único. Ese código después permite cruzar el ad en Meta con la pieza de la galería (clave para los winners).</span></div>
+      <div class="fp"><span class="n">6</span><span class="t"><b>Galería</b>: todo lo generado queda organizado, con regeneración/iteración sobre cualquier pieza, descarga por lotes y subida directa a la carpeta de Drive del producto.</span></div>
+    </div>
+    <div class="chips">
+      <span class="chip"><b>Ángulos:</b> problema→solución</span><span class="chip">testimonio</span><span class="chip">urgencia</span><span class="chip">antes/después</span><span class="chip">transformación</span>
+      <span class="chip"><b>Formatos:</b> cuadrado · story · horizontal</span>
+    </div>
+    <div class="ej"><span class="ejk">Ejemplo real · el estratega sabe de productos</span>
+      <p>Para una <b>lámpara solar de jardín</b>, el estratega aplica una regla propia: un producto que emite luz se
+      renderiza <b>prendido, en escena de atardecer/noche</b> — un render apagado de día es un creativo fallado. Para el
+      <b>Día de la Madre</b>, el aceite capilar se reposicionó como regalo manteniendo sus dolores reales. Cada pieza
+      salió nombrada tipo <b>«Aceite 12-10 Estatico Testimonio v2 #k4d9»</b> — y ese #código después la cruza con el
+      ad en Meta.</p>
+    </div>
+  </section>
+
+  <!-- ═══ 3 · producción ═══ -->
+  <section class="card" style="--acc:var(--violeta2)">
+    <h3>🎬 Producción — la parte creativa con el equipo adentro <span class="tagv">TODO ATADO AL PRODUCTO</span></h3>
+    <p>El reemplazo del grupo de WhatsApp y las planillas: un tablero donde la consigna, el material, el estado y el pago de cada tanda de videos viven juntos.</p>
+    <div class="flujo">
+      <div class="fp"><span class="n">1</span><span class="t"><b>Cualquiera del equipo crea tarjetas</b> (por semana y por producto) y las asigna: cada tarjeta dice qué se produce, para qué producto, quién lo hace y cuántos videos lleva.</span></div>
+      <div class="fp"><span class="n">2</span><span class="t"><b>La consigna viaja con la tarjeta</b>: etiqueta de tipo (Instagram, Winners, evento, diversificación, evergreen o libre), <b>prioridad</b> que ordena el tablero (alta arriba), referencias cargadas (los videos a imitar) y brief. Si una tarjeta queda sin consigna, avisa sola.</span></div>
+      <div class="fp"><span class="n">3</span><span class="t"><b>Cada editor tiene su propio acceso</b> y ve solo sus tarjetas, en su tablero: Por hacer → En revisión → Aprobado → Publicado. Sube los videos ahí mismo y van a la carpeta de <b>Drive</b> correcta con el nombre normalizado.</span></div>
+      <div class="fp"><span class="n">4</span><span class="t"><b>Cada cambio de estado avisa a Discord</b> al canal que corresponda, con link directo a la tarjeta — nadie persigue a nadie.</span></div>
+      <div class="fp"><span class="n">5</span><span class="t"><b>Los pagos salen solos</b>: cada tarjeta paga proporcional a los videos pedidos, agrupado por mes y por persona — a fin de mes el número ya está armado.</span></div>
+    </div>
+    <div class="ej"><span class="ejk">Ejemplo real · una tanda del equipo</span>
+      <p>Tarjeta de <b>7 videos</b> con etiqueta <b>⭐ Winners</b> y 2 referencias cargadas — la regla del equipo viaja
+      con la tarjeta: <b>2 referencias → 7 derivados</b> (3+3, y 1 libre del editor). El pago se ajustó solo al bajar
+      de 9 a 7 videos (<b>$35.000</b> contra la base de $45.000 por 9). Al pasar a "En revisión", Discord avisó al
+      canal con el link directo.</p>
+    </div>
+  </section>
+
+  <!-- ═══ 4 · meta/optimización ═══ -->
+  <section class="card" style="--acc:var(--verde)">
+    <h3>📊 Conexión con Meta — optimizar por producto <span class="tagv">LA DATA MANDA</span></h3>
+    <p>La cuenta publicitaria se conecta en 30 segundos y desde ahí todo se juzga <b>por producto, con SU punto de equilibrio</b> — no con un ROAS genérico. Las reglas (break-even por producto, pisos de gasto, cortes) se configuran una vez y todo el tablero las usa.</p>
+    <div class="flujo">
+      <div class="fp"><span class="n">1</span><span class="t"><b>Hoy — optimizar</b>: qué pausar y qué escalar HOY, con el monto en juego ("pausá: $45.000 en riesgo"), % de la inversión del día mal gastada, desglose por conjuntos y anuncios, y <b>presupuestos editables con doble click</b> — sin abrir el Ads Manager.</span></div>
+      <div class="fp"><span class="n">2</span><span class="t"><b>Testeos por semana</b>: cada tanda de creativos es una cohorte con su <b>eficiencia</b> (cuántos ganaron de los que tuvieron chance), ganadoras/perdedoras, gasto, facturación y ROAS — y cuando la semana cierra, los números se <b>congelan</b> para que el histórico no se reescriba. Es la medida real de si el equipo creativo está mejorando.</span></div>
+      <div class="fp"><span class="n">3</span><span class="t"><b>Campañas y anuncios</b>: la tabla clásica del Ads Manager (3 niveles, totales, orden por columna) con calendario a medida. <b>Embudo de compra</b>: dónde se cae la gente, de la impresión a la compra. <b>Prospectadores</b>: quién sigue trayendo clientes nuevos.</span></div>
+    </div>
+    <div class="ej"><span class="ejk">Ejemplo real · un día y una semana de la cuenta</span>
+      <p><b>Un día real:</b> $765K gastados, ROAS del día 1.98 — el tablero marcó <b>3 anuncios para pausar ($69K en
+      juego, el 9% del día: sano)</b> y le puso «📈 Subir presupuesto» a una campaña con <b>ROAS 6.58</b>.
+      <b>Una semana real (25–31/8):</b> 8 testeos, <b>eficiencia 67%</b> (4 ganadoras de 6 con veredicto),
+      $1.098.575 invertidos, ROAS 3.12 — y al cerrar, los números quedaron congelados en el histórico.</p>
+    </div>
+  </section>
+
+  <!-- ═══ 5 · winners ═══ -->
+  <section class="card" style="--acc:var(--ambar)">
+    <h3>⭐ Winners automáticos — la data le avisa al equipo <span class="tagv">EL DIFERENCIAL</span></h3>
+    <p>La pieza que cierra el circuito, y que no tiene nadie más:</p>
+    <div class="flujo">
+      <div class="fp"><span class="n">1</span><span class="t">Todos los días a las 9:00, el sistema <b>cruza las ventas reales de Meta con los videos de producción</b> (matchea los anuncios con los archivos por nombre).</span></div>
+      <div class="fp"><span class="n">2</span><span class="t">Aplica un <b>criterio validado contra decisiones reales históricas</b>: compras mínimas + ROAS mínimo, o el nº1 en ventas de su tanda — con alerta si quedó bajo el break-even.</span></div>
+      <div class="fp"><span class="n">3</span><span class="t">Los ganadores se <b>marcan con estrella en las tarjetas de los editores</b> (con link al archivo) y <b>Discord avisa al equipo</b> — que replica los winners sin que nadie les escriba. Solo actúa en productos con data; el resto queda manual.</span></div>
+    </div>
+    <div class="ej"><span class="ejk">Ejemplo real · la validación del criterio</span>
+      <p>Antes de automatizarlo, se corrió el criterio contra las <b>decisiones manuales históricas de agosto</b> con
+      las métricas reales de Meta: <b>reprodujo 6 de 6</b>. Casos: <b>«C1 Mecanismo»</b> — $300.815 invertidos, 15
+      compras, ROAS 3.78 → ⭐; <b>«C7 Testimonio»</b> — 14 compras, ROAS 2.90 → ⭐; y un retest con ROAS 2.11 quedó
+      correctamente afuera. Recién ahí se encendió la corrida diaria.</p>
+    </div>
+  </section>
+
+  <!-- ═══ 6 · publicador ═══ -->
+  <section class="card" style="--acc:var(--cian)">
+    <h3>🚀 Publicador de campañas <span class="tagv">EN EVOLUCIÓN</span></h3>
+    <p>Para que el ecosistema cierre completo y <b>todo pase acá adentro</b>: las recetas del equipo como formulario
+    — <b>CBO Deep Pocket</b> (sin tope de puja), <b>CBO Cost Cap</b> (con costo por compra objetivo) o <b>ABO Bid Cap</b>
+    (presupuesto por conjunto + tope de puja) — con presupuestos, pujas, público y los posts a usar. AdsLab crea
+    campaña + conjuntos + creativos + anuncios directo en Meta, <b>pausado para revisar</b> o activo, usando las
+    publicaciones existentes (conservan likes y comentarios). Ya funciona y se le sigue sumando (programación,
+    plantillas guardadas, lanzamiento desde la galería).</p>
+    <div class="ej"><span class="ejk">Ejemplo real · la receta de testeo del equipo</span>
+      <p><b>CBO Deep Pocket a $150.000/día, 1 conjunto, 6–7 anuncios</b> desde posts existentes — se crea pausada,
+      se revisa en Meta y se enciende. La nomenclatura con fecha hace que "Testeos por semana" la agarre sola
+      como cohorte de esa semana.</p>
+    </div>
+  </section>
+
+  <!-- ═══ 7 · infra ═══ -->
+  <section class="card" style="--acc:var(--mut2)">
+    <h3>🛡️ Y la plataforma se cuida sola</h3>
+    <p>Avisos por mail y Discord si se desconecta el Drive o la cuenta de Meta (con aviso preventivo antes de que
+    venza el token), multi-cuenta publicitaria, datos en la nube con sync entre dispositivos y equipos, y la app
+    se actualiza sola cuando hay versión nueva. Corre en producción hoy, con cuentas y plata reales, y evoluciona
+    a diario sobre el feedback del equipo que la opera.</p>
+  </section>
+
+  <!-- ═══ cierre ═══ -->
+  <div class="cierre">
+    <h2>¿Te copa? <span class="grad">Hablemos.</span></h2>
+    <p>La mejor forma de entenderla es verla andando con datos reales — una demo de 15 minutos alcanza
+    para recorrer el circuito completo.</p>
+  </div>
+
+  <p class="pie">AdsLab · resumen para colaboradores · octubre 2026</p>
+</div>

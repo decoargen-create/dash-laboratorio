@@ -28,20 +28,25 @@ export const META_COOKIE_MAX_AGE = 60 * 60 * 24 * 55; // 55 días (el long-lived
 // en la Meta Developer app (pero los scopes se piden en la URL del OAuth, no
 // están hardcodeados en el dashboard de Meta — salvo los que requieren review).
 //
-// MÍNIMO VIABLE PARA APP REVIEW (plataforma pública): pedimos SOLO ads_read.
-// AdsLab v1 para terceros es lectura (campañas + métricas + insights) — no
-// crea ni edita ads en nombre del user. Cada scope extra multiplica la
-// fricción del App Review de Meta:
-//   - ads_management (write) exige justificar creación de ads → v2, review
-//     separado cuando exista la feature de upload para terceros.
-//   - business_management casi nunca se aprueba para apps chicas y no lo
-//     necesitamos (me/adaccounts funciona con ads_read).
-//   - pages_show_list/pages_read_engagement eran para la Automatización IG,
-//     removida de la plataforma.
+// El publicador ESCRIBE en Meta (act/advideos, campaigns, adsets, ads,
+// adcreatives): con solo ads_read, todo POST falla con "Unsupported post
+// request / missing permissions". Para usuarios con rol en la Meta app
+// (admin/developer/tester) estos scopes funcionan con Standard Access, SIN
+// App Review — el review solo aplica si la app se abre a terceros. Si algún
+// día se publica para terceros, ads_management/business_management van a
+// necesitar review (o volver a un split lectura-pública / escritura-interna).
+//   - ads_management: crear/editar campañas, subir videos.
+//   - business_management: cuentas y páginas colgadas del Business Manager.
+//   - pages_show_list + pages_read_engagement: page token (resolver el IG
+//     vinculado) y creatives con page_id en object_story_spec.
 // El flujo por TOKEN pegado no pasa por acá — un system user token puede
 // tener los permisos que quieras (para tus cuentas propias).
 export const META_SCOPES = [
   'ads_read',
+  'ads_management',
+  'business_management',
+  'pages_show_list',
+  'pages_read_engagement',
 ].join(',');
 
 function b64url(input) {

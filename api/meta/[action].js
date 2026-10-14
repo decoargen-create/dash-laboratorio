@@ -25,7 +25,7 @@ import {
   isSupabaseConfigured, getUserIdFromAuth,
   listMetaConnections, insertMetaConnection,
   getMetaConnectionToken, deleteMetaConnection,
-  getServiceClient,
+  getServiceClient, getMiembroOwner,
 } from '../marketing/_supabase-server.js';
 
 // Resuelve el access token a usar para un request. Dos fuentes:
@@ -38,7 +38,13 @@ async function resolveAccessToken(req, url, extraConnId = null) {
   if (connId) {
     const userId = await getUserIdFromAuth(req);
     if (!userId) return { error: 'No autenticado — falta sesión de Supabase', status: 401 };
-    const token = await getMetaConnectionToken(userId, connId);
+    let token = await getMetaConnectionToken(userId, connId);
+    if (!token) {
+      // Cuentas POR ÁREA: un miembro con 'metricas' usa las conexiones de SU
+      // dueño (los productos del dueño ya traen el connection_id guardado).
+      const ownerId = await getMiembroOwner(userId, 'metricas');
+      if (ownerId) token = await getMetaConnectionToken(ownerId, connId);
+    }
     if (!token) return { error: 'Conexión no encontrada o sin acceso', status: 404 };
     return { token };
   }
@@ -1599,7 +1605,13 @@ async function handleConnections(req, res) {
     const userId = await getUserIdFromAuth(req);
     if (!userId) return respondJSON(res, 200, { supabase: true, authenticated: false, connections: [] });
     try {
-      const connections = await listMetaConnections(userId);
+      let connections = await listMetaConnections(userId);
+      // Cuentas POR ÁREA: un miembro con 'metricas' ve las conexiones de su
+      // dueño (de solo-uso: el token nunca viaja al cliente).
+      if (!connections?.length) {
+        const ownerId = await getMiembroOwner(userId, 'metricas');
+        if (ownerId) connections = await listMetaConnections(ownerId);
+      }
       return respondJSON(res, 200, { supabase: true, authenticated: true, connections });
     } catch (err) {
       return respondJSON(res, 502, { error: err.message });

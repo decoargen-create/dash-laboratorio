@@ -235,6 +235,24 @@ export async function getLatestMetaToken() {
   } catch { return null; }
 }
 
+// ¿De qué dueño es miembro este user (cuenta POR ÁREA, migración 0042)?
+// Devuelve el uuid del dueño si la membresía existe y tiene el área pedida
+// (area null = cualquier membresía); null si no es miembro.
+export async function getMiembroOwner(userId, area = null) {
+  const supabase = getClient();
+  if (!supabase || !userId) return null;
+  try {
+    const { data } = await supabase
+      .from('cuenta_miembros')
+      .select('owner_id, areas')
+      .eq('member_id', userId)
+      .maybeSingle();
+    if (!data?.owner_id) return null;
+    if (area && !(data.areas || []).includes(area)) return null;
+    return data.owner_id;
+  } catch { return null; }
+}
+
 // Conexión de Meta más nueva DE UN DUEÑO puntual (token descifrado). La usan
 // los procesos server-side por inquilino (cron de auto-winners): el token de
 // "cualquier usuario" servía con un solo dueño, pero con varias cuentas cada

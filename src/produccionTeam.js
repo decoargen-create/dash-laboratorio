@@ -35,3 +35,14 @@ export const resetPassword = (id, password) => call('reset-password', { id, pass
 export const removeMember = (id) => call('remove', { id });
 // Organigrama: quién responde a quién. liderId null = sin líder.
 export const setLider = (id, liderId) => call('set-lider', { id, liderId });
+
+// ── Cuentas POR ÁREA (miembros) ──────────────────────────────────────────────
+// Cuentas que el dueño crea para su equipo con acceso a secciones enteras del
+// tablero ("solamente producción", "solamente estáticos"...). profiles.role =
+// 'miembro' + fila en cuenta_miembros con las áreas habilitadas.
+export const listAreaMembers = () => call('list-members').then(d => d.members || []);
+export const createAreaMember = (email, password, displayName, areas) =>
+  call('create-member', { email, password, displayName, areas }).then(d => d.member);
+export const setAreaMemberAreas = (id, areas) => call('set-member-areas', { id, areas });
+export const resetAreaMemberPassword = (id, password) => call('reset-password-member', { id, password });
+export const removeAreaMember = (id) => call('remove-member', { id });

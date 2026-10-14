@@ -7,7 +7,8 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { X, UserPlus, Loader2, Trash2, KeyRound, Users, Mail, Copy, Check, Search, Wallet, Plus } from 'lucide-react';
-import { listTeam, createMember, resetPassword, removeMember, setLider } from './produccionTeam.js';
+import { listTeam, createMember, resetPassword, removeMember, setLider, listAreaMembers, createAreaMember, setAreaMemberAreas, resetAreaMemberPassword, removeAreaMember } from './produccionTeam.js';
+import { AREAS } from './miembroStore.js';
 import { personasEnTarjetas, assignCreator, allWeekKeys, listAssignments, getPagoConfig, setPagoConfig, DEFAULT_BONUS_TRAMOS, VIDEOS_POR_PRODUCTO } from './produccionStore.js';
 import ConfirmDialog from './ConfirmDialog.jsx';
 
@@ -17,6 +18,198 @@ function suggestPassword() {
   const w = words[Math.floor(Math.random() * words.length)];
   const n = Math.floor(1000 + Math.random() * 9000);
   return `${w}${n}`;
+}
+
+// ── Cuentas POR ÁREA ─────────────────────────────────────────────────────────
+// Cuentas que el dueño crea para su equipo con acceso a SECCIONES enteras del
+// tablero ("solamente Producción", "solamente estáticos"...). Distintas de las
+// de editores (que ven solo sus tarjetas): un miembro opera el área completa
+// del dueño, y nada más que esa área.
+function MiembrosPorArea({ addToast }) {
+  const [members, setMembers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [dlg, setDlg] = useState(null); // { type: 'removeM'|'resetM', m, pass? }
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState(() => suggestPassword());
+  const [areas, setAreas] = useState(['produccion']);
+  const [lastCreated, setLastCreated] = useState(null);
+  const [copied, setCopied] = useState('');
+
+  const reload = () => {
+    setLoading(true);
+    listAreaMembers().then(setMembers).catch(err => addToast?.({ type: 'error', message: err.message })).finally(() => setLoading(false));
+  };
+  useEffect(reload, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const copy = async (text, key) => {
+    try { await navigator.clipboard.writeText(text); setCopied(key); setTimeout(() => setCopied(''), 1500); } catch {}
+  };
+  const toggleArea = (k) => setAreas(a => (a.includes(k) ? a.filter(x => x !== k) : [...a, k]));
+
+  const onCreate = async (e) => {
+    e.preventDefault();
+    if (busy) return;
+    const em = email.trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)) { addToast?.({ type: 'warning', message: 'Email inválido' }); return; }
+    if (password.length < 6) { addToast?.({ type: 'warning', message: 'La contraseña necesita 6+ caracteres' }); return; }
+    if (!areas.length) { addToast?.({ type: 'warning', message: 'Elegí al menos un área' }); return; }
+    setBusy(true);
+    try {
+      await createAreaMember(em, password, name.trim(), areas);
+      const displayName = name.trim() || em.split('@')[0];
+      setLastCreated({ name: displayName, email: em, password });
+      addToast?.({ type: 'success', message: `Cuenta por área creada para ${displayName}.` });
+      setName(''); setEmail(''); setPassword(suggestPassword()); setAreas(['produccion']);
+      reload();
+    } catch (err) {
+      addToast?.({ type: 'error', message: err.message });
+    } finally { setBusy(false); }
+  };
+
+  const toggleAreaDe = async (m, k) => {
+    const next = m.areas.includes(k) ? m.areas.filter(x => x !== k) : [...m.areas, k];
+    if (!next.length) { addToast?.({ type: 'warning', message: 'La cuenta necesita al menos un área.' }); return; }
+    try {
+      await setAreaMemberAreas(m.id, next);
+      setMembers(ms => ms.map(x => (x.id === m.id ? { ...x, areas: next } : x)));
+    } catch (err) { addToast?.({ type: 'error', message: err.message }); }
+  };
+
+  return (
+    <div className="rounded-xl border border-violet-200 dark:border-violet-900/50 bg-violet-50/40 dark:bg-violet-900/10 p-4 space-y-3">
+      <div className="flex items-center gap-1.5 text-xs font-bold uppercase text-violet-700 dark:text-violet-300">
+        <Users size={13} /> Cuentas por área {members.length > 0 && `(${members.length})`}
+      </div>
+      <p className="text-[11px] text-violet-700/70 dark:text-violet-300/60 leading-relaxed -mt-1.5">
+        Cuentas para tu equipo que ven <b>solo las secciones que elijas</b> de tu tablero
+        (solo Producción, solo estáticos…). A diferencia de los editores, operan el área completa.
+      </p>
+
+      {/* Alta */}
+      <form onSubmit={onCreate} className="space-y-2">
+        <div className="grid sm:grid-cols-2 gap-2">
+          <input value={name} onChange={e => setName(e.target.value)} placeholder="Nombre"
+            className="px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500" />
+          <input value={email} onChange={e => setEmail(e.target.value)} type="email" placeholder="email@ejemplo.com"
+            className="px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500" />
+        </div>
+        <div className="flex items-center gap-2">
+          <input value={password} onChange={e => setPassword(e.target.value)} placeholder="Contraseña"
+            className="flex-1 px-3 py-2 text-sm font-mono bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500" />
+          <button type="button" onClick={() => copy(password, 'mnewpass')} title="Copiar contraseña"
+            className="p-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800">
+            {copied === 'mnewpass' ? <Check size={15} className="text-emerald-500" /> : <Copy size={15} />}
+          </button>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {AREAS.map(a => (
+            <button key={a.key} type="button" onClick={() => toggleArea(a.key)} title={a.desc}
+              className={`px-2.5 py-1 rounded-full text-[11px] font-bold border transition ${
+                areas.includes(a.key)
+                  ? 'bg-violet-600 text-white border-violet-600'
+                  : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:border-violet-400'
+              }`}>
+              {areas.includes(a.key) ? '✓ ' : ''}{a.label}
+            </button>
+          ))}
+        </div>
+        <button type="submit" disabled={busy}
+          className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-bold text-white bg-violet-600 hover:bg-violet-700 rounded-lg transition disabled:opacity-50">
+          {busy ? <><Loader2 size={15} className="animate-spin" /> Creando…</> : <><UserPlus size={15} /> Crear cuenta por área</>}
+        </button>
+      </form>
+
+      {/* Credenciales recién creadas */}
+      {lastCreated && (
+        <div className="rounded-lg border border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 p-3">
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <Check size={13} className="text-emerald-600" />
+            <span className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300">Cuenta de {lastCreated.name} lista — pasale estos datos</span>
+            <button onClick={() => setLastCreated(null)} className="ml-auto text-emerald-700/60 hover:text-emerald-800"><X size={14} /></button>
+          </div>
+          {[['Email', lastCreated.email, 'mem'], ['Contraseña', lastCreated.password, 'mpw']].map(([lbl, val, key]) => (
+            <div key={key} className="flex items-center gap-2 mb-1 last:mb-0">
+              <span className="text-[10px] font-bold uppercase text-emerald-700/70 dark:text-emerald-400/70 w-20">{lbl}</span>
+              <code className="flex-1 text-xs font-mono text-gray-800 dark:text-gray-100 bg-white dark:bg-gray-800 rounded px-2 py-1 border border-emerald-200 dark:border-emerald-800 truncate">{val}</code>
+              <button onClick={() => copy(val, key)} title="Copiar" className="p-1 rounded text-emerald-700 hover:bg-emerald-100 dark:hover:bg-emerald-900/40">
+                {copied === key ? <Check size={13} /> : <Copy size={13} />}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Lista */}
+      {loading ? (
+        <div className="flex items-center gap-2 text-sm text-gray-400 py-1"><Loader2 size={15} className="animate-spin" /> Cargando…</div>
+      ) : members.length === 0 ? (
+        <p className="text-xs text-gray-400">Todavía no creaste cuentas por área.</p>
+      ) : (
+        <div className="space-y-2">
+          {members.map(m => (
+            <div key={m.id} className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2.5">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-full bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 flex items-center justify-center text-sm font-bold uppercase shrink-0">
+                  {(m.display_name || m.email || '?').charAt(0)}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-semibold text-gray-800 dark:text-gray-100 truncate">{m.display_name || m.email}</div>
+                  <div className="text-xs text-gray-400 truncate inline-flex items-center gap-1"><Mail size={10} /> {m.email}</div>
+                </div>
+                <button onClick={() => setDlg({ type: 'resetM', m, pass: suggestPassword() })} title="Cambiar contraseña"
+                  className="p-1.5 rounded-md text-gray-400 hover:text-violet-600 hover:bg-gray-100 dark:hover:bg-gray-800"><KeyRound size={15} /></button>
+                <button onClick={() => setDlg({ type: 'removeM', m })} title="Eliminar la cuenta"
+                  className="p-1.5 rounded-md text-gray-400 hover:text-red-500 hover:bg-gray-100 dark:hover:bg-gray-800"><Trash2 size={15} /></button>
+              </div>
+              {/* Toggle de áreas en la misma fila: click = dar/sacar el área */}
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {AREAS.map(a => (
+                  <button key={a.key} type="button" onClick={() => toggleAreaDe(m, a.key)} title={a.desc}
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold border transition ${
+                      (m.areas || []).includes(a.key)
+                        ? 'bg-violet-600 text-white border-violet-600'
+                        : 'bg-white dark:bg-gray-800 text-gray-400 border-gray-300 dark:border-gray-600 hover:border-violet-400'
+                    }`}>
+                    {(m.areas || []).includes(a.key) ? '✓ ' : ''}{a.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={dlg?.type === 'removeM'}
+        title={`¿Eliminar la cuenta de ${dlg?.m?.display_name || dlg?.m?.email || ''}?`}
+        message="Se borra la cuenta y no va a poder entrar más. Los datos del tablero no se tocan (son tuyos)."
+        confirmLabel="Eliminar cuenta" tone="danger"
+        onConfirm={async () => {
+          const m = dlg.m; setDlg(null);
+          try { await removeAreaMember(m.id); addToast?.({ type: 'success', message: 'Cuenta eliminada.' }); reload(); }
+          catch (err) { addToast?.({ type: 'error', message: err.message }); }
+        }}
+        onClose={() => setDlg(null)}
+      />
+      <ConfirmDialog
+        open={dlg?.type === 'resetM'}
+        title={`Nueva contraseña para ${dlg?.m?.display_name || dlg?.m?.email || ''}`}
+        message="Pasásela después de cambiarla."
+        withInput inputLabel="Contraseña (mínimo 6)"
+        defaultValue={dlg?.pass || ''}
+        confirmLabel="Cambiar contraseña" tone="brand"
+        onConfirm={async (nueva) => {
+          if (!nueva || nueva.length < 6) { addToast?.({ type: 'warning', message: 'Mínimo 6 caracteres' }); return; }
+          const m = dlg.m; setDlg(null);
+          try { await resetAreaMemberPassword(m.id, nueva); addToast?.({ type: 'success', message: `Contraseña actualizada. Nueva: ${nueva}` }); }
+          catch (err) { addToast?.({ type: 'error', message: err.message }); }
+        }}
+        onClose={() => setDlg(null)}
+      />
+    </div>
+  );
 }
 
 // Editor de PAGO por persona: monto por producto completo + bono con tramos
@@ -366,6 +559,9 @@ export default function TeamModal({ onClose, addToast }) {
               </div>
             )}
           </div>
+
+          {/* Cuentas por área: acceso a secciones enteras del tablero */}
+          <MiembrosPorArea addToast={addToast} />
         </div>
 
         {/* Diálogos propios de la plataforma */}

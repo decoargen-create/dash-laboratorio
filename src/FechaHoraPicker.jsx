@@ -22,8 +22,9 @@ export default function FechaHoraPicker({ value = '', onChange, dias = 10, disab
     lista.push(d);
   }
   const [diaSel, horaSel] = value ? value.split('T') : [null, null];
-  // Hora por defecto al elegir un día: 19:00 (el horario que más se usa).
-  const mins = horaSel ? (+horaSel.slice(0, 2)) * 60 + (+horaSel.slice(3, 5) || 0) : 19 * 60;
+  // Hora por defecto al elegir un día: 05:00 (pedido del user — las campañas
+  // programadas arrancan a la madrugada para aprovechar el día completo).
+  const mins = horaSel ? (+horaSel.slice(0, 2)) * 60 + (+horaSel.slice(3, 5) || 0) : 5 * 60;
 
   const elegirDia = (d) => onChange(`${keyDe(d)}T${pad(Math.floor(mins / 60))}:${pad(mins % 60)}`);
   const moverHora = (delta) => {

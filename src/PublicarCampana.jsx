@@ -241,7 +241,8 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
   return (
     <div className="space-y-4">
       {/* receta */}
-      <div className="grid sm:grid-cols-3 gap-2.5">
+      {/* Las 4 recetas en UNA línea en pantallas anchas (pedido del user). */}
+      <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-2.5">
         {ESTRUCTURAS.map(e => (
           <button key={e.id} onClick={() => setEstructura(e.id)}
             className={`text-left rounded-xl border p-3 transition ${

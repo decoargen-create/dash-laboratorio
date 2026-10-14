@@ -2789,20 +2789,26 @@ async function handleVideosStatus(req, res) {
   const ids = String(url.searchParams.get('ids') || '').split(',').map(s => s.trim()).filter(s => /^\d+$/.test(s)).slice(0, 30);
   if (ids.length === 0) return respondJSON(res, 400, { error: 'Falta ids (coma-separados)' });
 
-  const videos = [];
-  for (const id of ids) {
-    try {
-      const d = await graphGet(id, token, { fields: 'status,picture' });
-      const st = d.status?.video_status || 'unknown';
-      // `ready` exige TAMBIÉN el thumbnail: el creative lleva picture como
-      // image_url OBLIGATORIO, y Meta suele publicar el picture un rato
-      // después del video_status ready. Sin esto, publicar "apenas está
-      // listo" creaba todos los creatives sin imagen y fallaban en bloque.
-      videos.push({ id, status: st, ready: st === 'ready' && !!d.picture, picture: d.picture || null });
-    } catch (e) {
-      videos.push({ id, status: 'error', ready: false, error: e.message });
-    }
+  // UN SOLO request por poll (?ids=a,b,c): el loop de 1 GET por video, cada
+  // 4s, con 30 videos era ~450 req/min y pegaba de lleno en el rate limit.
+  let lote = null;
+  try {
+    lote = await graphGet('', token, { ids: ids.join(','), fields: 'status,picture' });
+  } catch (e) {
+    // Fallo del LOTE entero (rate limit, glitch): es transitorio, no un
+    // estado de los videos. 503 para que el cliente reintente el poll.
+    return respondJSON(res, 503, { error: e.message });
   }
+  const videos = ids.map(id => {
+    const d = lote?.[id];
+    if (!d) return { id, status: 'pendiente', ready: false };
+    const st = d.status?.video_status || 'unknown';
+    // `ready` exige TAMBIÉN el thumbnail: el creative lleva picture como
+    // image_url OBLIGATORIO, y Meta suele publicar el picture un rato
+    // después del video_status ready. Sin esto, publicar "apenas está
+    // listo" creaba todos los creatives sin imagen y fallaban en bloque.
+    return { id, status: st, ready: st === 'ready' && !!d.picture, picture: d.picture || null };
+  });
   return respondJSON(res, 200, { videos, todosListos: videos.every(v => v.ready) });
 }
 
@@ -2860,7 +2866,14 @@ async function handleCreateCampaignStructure(req, res) {
     // Monedas sin centavos: el budget va en la unidad mínima — para ARS/USD
     // se multiplica por 100, para CLP/COP/PYG etc. NO (si no, gasta 100x).
     const SIN_CENTAVOS = new Set(['CLP', 'COP', 'PYG', 'VND', 'JPY', 'KRW', 'HUF', 'TWD', 'ISK', 'CRC']);
-    const currency = String(body.currency || '').toUpperCase();
+    // La moneda se resuelve ACÁ, contra la cuenta real: confiar en la del
+    // body (un cliente con cache vieja o vacía) podía multiplicar ×100 el
+    // presupuesto de una cuenta sin centavos. El body queda de fallback.
+    let currency = String(body.currency || '').toUpperCase();
+    try {
+      const acc = await graphGet(accountId, token, { fields: 'currency' });
+      if (acc?.currency) currency = String(acc.currency).toUpperCase();
+    } catch { /* sin lectura, va el fallback del body */ }
     const budgetMinUnit = Math.round(dailyBudget * (SIN_CENTAVOS.has(currency) ? 1 : 100));
 
     // 1. Campaña (CBO) — SIEMPRE nace PAUSED: si algo falla a mitad de
@@ -2977,22 +2990,32 @@ async function handleCreateCampaignStructure(req, res) {
     const okAds = resultados.filter(r => !r.ok ? false : true).length;
     huboAdsOk = okAds > 0;
     let estadoFinal = 'PAUSED';
+    let activacionError = null;
     if (estado === 'ACTIVE' && okAds > 0) {
-      await graphPost(camp.id, token, { status: 'ACTIVE' });
-      estadoFinal = 'ACTIVE';
-      log.push('✓ Campaña ACTIVADA');
+      // Si la activación falla, la campaña + ads YA existen: responder un
+      // error acá hacía que el cliente perdiera el log y reintentara todo
+      // de cero → campaña duplicada. Queda PAUSED y se avisa.
+      try {
+        await graphPost(camp.id, token, { status: 'ACTIVE' });
+        estadoFinal = 'ACTIVE';
+        log.push('✓ Campaña ACTIVADA');
+      } catch (e) {
+        activacionError = e.message;
+        log.push(`⚠ La campaña y los ads se crearon pero NO se pudo activar (${e.message}) — queda PAUSADA, activala desde Meta`);
+      }
     } else if (okAds === 0) {
       log.push('✗ Ningún ad se creó');
       await borrarCampana();
     }
 
     const fallaron = resultados.filter(r => !r.ok).length;
-    return respondJSON(res, fallaron === 0 ? 200 : 207, {
+    return respondJSON(res, fallaron === 0 && !activacionError ? 200 : 207, {
       campaignId: camp.id,
       adsetIds,
       resultados,
       log,
       estado: okAds === 0 ? 'DELETED' : estadoFinal,
+      ...(activacionError ? { activacionError } : {}),
     });
 
     } catch (errInterno) {

@@ -2504,11 +2504,9 @@ export default function MetricasSection({ addToast }) {
     ? { fija: true, label: 'Hoy' }
     : tab === 'prosp'
       ? { fija: true, label: `Últimos ${cfg.ventanaProspDias} días` }
-      : tab === 'publicar'
-        ? { fija: true, label: 'Nueva campaña' }
-        : tab === 'embudo'
-          ? { fija: false, valor: presetEmbudo, set: setPresetEmbudo, opciones: PRESETS_EMBUDO }
-          : { fija: false, valor: preset, set: setPreset, opciones: PRESETS_COHORTES };
+      : tab === 'embudo'
+        ? { fija: false, valor: presetEmbudo, set: setPresetEmbudo, opciones: PRESETS_EMBUDO }
+        : { fija: false, valor: preset, set: setPreset, opciones: PRESETS_COHORTES };
 
   const TABS = [
     { id: 'hoy', label: 'Hoy — optimizar', icon: Gauge },
@@ -2517,7 +2515,8 @@ export default function MetricasSection({ addToast }) {
     { id: 'semanas', label: 'Testeos por semana', icon: FlaskConical },
     { id: 'prosp', label: 'Prospectadores', icon: Radar },
     { id: 'winners', label: 'Winners', icon: Trophy },
-    { id: 'publicar', label: 'Publicar campaña', icon: Rocket },
+    // "Publicar campaña" salió de acá: ahora es el PUBLICADOR, entrada propia
+    // del menú (Área creativa), que junta videos de tarjetas y estáticos.
     { id: 'reglas', label: 'Reglas de la tienda', icon: SlidersHorizontal },
   ];
 
@@ -2664,7 +2663,6 @@ export default function MetricasSection({ addToast }) {
           />}
           {tab === 'manager' && <VistaManager accountId={accountId} connId={account?.connId} currency={currency} preset={preset}
             presupuestos={presupuestos} onPresupuesto={cambiarPresupuestoRow} />}
-          {tab === 'publicar' && <PublicarCampana accountId={accountId} connId={account?.connId} currency={currency} addToast={addToast} productosVisibles={productosEnCuenta} />}
           {tab === 'reglas' && <VistaReglas campaigns={data.campaigns} cfg={cfgRaw} setCfg={setCfgRaw} productos={productos} currency={currency} onWhy={setWhy} origen={origenCfg} />}
         </>
       )}

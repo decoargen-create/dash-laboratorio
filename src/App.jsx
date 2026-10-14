@@ -3,7 +3,7 @@ import {
   Menu, LogOut, Home, ShoppingCart, Package, Users, AlertCircle, CreditCard,
   UserCheck, TrendingUp, Plus, Filter, Eye, Edit2, Trash2, Calendar, DollarSign,
   ChevronDown, ChevronRight, Search, X, Command, Check, Bell,
-  AlignJustify, LayoutGrid, LayoutGrid as LayoutGridIcon, Columns3, Sparkles, Bot, Zap, Activity, FileText, Settings, Loader2, Calculator, Copy, Save, RotateCcw, Target, Play, Inbox, BarChart3, Instagram, SlidersHorizontal, ClipboardList, AlertTriangle, Trophy, Bookmark, Film, Wallet, Gauge,
+  AlignJustify, LayoutGrid, LayoutGrid as LayoutGridIcon, Columns3, Sparkles, Bot, Zap, Activity, FileText, Settings, Loader2, Calculator, Copy, Save, RotateCcw, Target, Play, Inbox, BarChart3, Instagram, SlidersHorizontal, ClipboardList, AlertTriangle, Trophy, Bookmark, Film, Wallet, Gauge, Rocket,
 } from 'lucide-react';
 import { VioraLogo, VioraMark, AdsLabLogo, AdsLabMark } from './logo.jsx';
 import { installDebugLog, exportDebugLog } from './debugLog.js';
@@ -29,6 +29,7 @@ import ConsultoriaSection from './Consultoria.jsx';
 import CampanasTracker from './CampanasTracker.jsx';
 import { MetaConnectButton } from './MetaConnect.jsx';
 import MetricasSection from './MetricasSection.jsx';
+import PublicarSection from './PublicarSection.jsx';
 import TesteosSection from './TesteosSection.jsx';
 import ProduccionSection from './ProduccionSection.jsx';
 import CreativaDashboard from './CreativaDashboard.jsx';
@@ -1485,7 +1486,7 @@ function AppShell({ onExit }) {
       // Si tenía una sección de Viora/Senydrop/MetaAds, defaulteamos a la
       // de Marketing. Lista de secciones válidas en las plataformas activas:
       const validSections = ['mk-home', 'mk-arranque', 'mk-bandeja', 'mk-copy', 'mk-meta', 'mk-metricas', 'mk-testeos',
-        'mk-inspiracion', 'mk-winners', 'mk-produccion', 'mk-landings', 'mk-creativa-dash', 'mk-gastos', 'mk-docs', 'con-acta'];
+        'mk-inspiracion', 'mk-winners', 'mk-produccion', 'mk-publicar', 'mk-landings', 'mk-creativa-dash', 'mk-gastos', 'mk-docs', 'con-acta'];
       return validSections.includes(saved) ? saved : 'mk-home';
     } catch { return 'mk-home'; }
   });
@@ -2292,7 +2293,7 @@ function AppShell({ onExit }) {
     const SECCIONES_AREA = {
       metricas: ['mk-home', 'mk-metricas'],
       productos: ['mk-home', 'mk-arranque'],
-      produccion: ['mk-home', 'mk-creativa-dash', 'mk-produccion'],
+      produccion: ['mk-home', 'mk-creativa-dash', 'mk-produccion', 'mk-publicar'],
       landings: ['mk-home', 'mk-landings'],
     };
     const permitidas = new Set((m.areas || []).flatMap(a => SECCIONES_AREA[a] || []));
@@ -2508,6 +2509,11 @@ function AppShell({ onExit }) {
                   {(!currentUser.miembro || currentUser.miembro.areas.includes('produccion')) && (<>
                     <NavItem icon={Wallet} label="Resumen" section="mk-creativa-dash" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                     <NavItem icon={Film} label="Producción" section="mk-produccion" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                    {/* El Publicador central: la cola de listos para publicar
+                        (videos de tarjetas + estáticos del producto). Pedido
+                        del user: entrada propia debajo de Producción; la
+                        pestaña "Publicar" de Métricas sale. */}
+                    <NavItem icon={Rocket} label="Publicador" section="mk-publicar" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                   </>)}
                   {(!currentUser.miembro || currentUser.miembro.areas.includes('landings')) && (
                     <NavItem icon={ClipboardList} label="Landings" section="mk-landings" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
@@ -2619,6 +2625,7 @@ function AppShell({ onExit }) {
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-inspiracion' && <InspiracionSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-meta' && <CampanasTracker addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-metricas' && <MetricasSection addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-publicar' && <PublicarSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-testeos' && <TesteosSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-winners' && <WinnersGlobalSection addToast={addToast} onGoToSection={setCurrentSection} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-creativa-dash' && <CreativaDashboard addToast={addToast} />}

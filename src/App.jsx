@@ -3,7 +3,7 @@ import {
   Menu, LogOut, Home, ShoppingCart, Package, Users, AlertCircle, CreditCard,
   UserCheck, TrendingUp, Plus, Filter, Eye, Edit2, Trash2, Calendar, DollarSign,
   ChevronDown, ChevronRight, Search, X, Command, Check, Bell,
-  AlignJustify, LayoutGrid, LayoutGrid as LayoutGridIcon, Columns3, Sparkles, Bot, Zap, Activity, FileText, Settings, Loader2, Calculator, Copy, Save, RotateCcw, Target, Play, Inbox, BarChart3, Instagram, SlidersHorizontal, ClipboardList, AlertTriangle, Trophy, Bookmark, Film, Wallet, Gauge,
+  AlignJustify, LayoutGrid, LayoutGrid as LayoutGridIcon, Columns3, Sparkles, Bot, Zap, Activity, FileText, Settings, Loader2, Calculator, Copy, Save, RotateCcw, Target, Play, Inbox, BarChart3, Instagram, SlidersHorizontal, ClipboardList, AlertTriangle, Trophy, Bookmark, Film, Wallet, Gauge, Rocket,
 } from 'lucide-react';
 import { VioraLogo, VioraMark, AdsLabLogo, AdsLabMark } from './logo.jsx';
 import { installDebugLog, exportDebugLog } from './debugLog.js';
@@ -29,6 +29,7 @@ import ConsultoriaSection from './Consultoria.jsx';
 import CampanasTracker from './CampanasTracker.jsx';
 import { MetaConnectButton } from './MetaConnect.jsx';
 import MetricasSection from './MetricasSection.jsx';
+import PublicarSection from './PublicarSection.jsx';
 import TesteosSection from './TesteosSection.jsx';
 import ProduccionSection from './ProduccionSection.jsx';
 import CreativaDashboard from './CreativaDashboard.jsx';
@@ -1484,7 +1485,7 @@ function AppShell({ onExit }) {
       // Si tenía una sección de Viora/Senydrop/MetaAds, defaulteamos a la
       // de Marketing. Lista de secciones válidas en las plataformas activas:
       const validSections = ['mk-home', 'mk-arranque', 'mk-bandeja', 'mk-copy', 'mk-meta', 'mk-metricas', 'mk-testeos',
-        'mk-inspiracion', 'mk-winners', 'mk-produccion', 'mk-landings', 'mk-creativa-dash', 'mk-gastos', 'mk-docs', 'con-acta'];
+        'mk-inspiracion', 'mk-winners', 'mk-produccion', 'mk-publicar', 'mk-landings', 'mk-creativa-dash', 'mk-gastos', 'mk-docs', 'con-acta'];
       return validSections.includes(saved) ? saved : 'mk-home';
     } catch { return 'mk-home'; }
   });
@@ -2425,6 +2426,7 @@ function AppShell({ onExit }) {
                 {/* Métricas y Testeos eran dos entradas que pedían lo mismo a
                     la misma cuenta. Ahora es una sola sección con pestañas. */}
                 <NavItem icon={Gauge} label="Métricas" section="mk-metricas" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                <NavItem icon={Rocket} label="Publicador" section="mk-publicar" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
               </NavSection>
               <NavSection title="Creación de estáticos" sectionKey="mk-estaticos" sidebarOpen={sidebarOpen}>
                 <NavItem icon={Play} label="Productos" section="mk-arranque" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
@@ -2544,6 +2546,7 @@ function AppShell({ onExit }) {
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-inspiracion' && <InspiracionSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-meta' && <CampanasTracker addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-metricas' && <MetricasSection addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-publicar' && <PublicarSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-testeos' && <TesteosSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-winners' && <WinnersGlobalSection addToast={addToast} onGoToSection={setCurrentSection} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-creativa-dash' && <CreativaDashboard addToast={addToast} />}

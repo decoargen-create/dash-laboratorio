@@ -52,6 +52,11 @@ export function etiquetaDeValor(value, opciones = []) {
 
 export default function MenuFecha({ value, onChange, opciones = [] }) {
   const [open, setOpen] = useState(false);
+  // De qué lado abre el panel: si el botón está cerca del borde derecho de la
+  // pantalla (lo normal, vive al final del toolbar), el panel se ancla a la
+  // DERECHA del botón — antes abría hacia la derecha y generaba scroll
+  // horizontal en toda la página.
+  const [alineaDerecha, setAlineaDerecha] = useState(true);
   const [presetSel, setPresetSel] = useState(value);
   const [selA, setSelA] = useState(null);
   const [selB, setSelB] = useState(null);
@@ -74,6 +79,12 @@ export default function MenuFecha({ value, onChange, opciones = [] }) {
       setCalBase(new Date(base.getFullYear(), base.getMonth(), 1));
     }
     setFase(0);
+    // ¿Entra el panel abriendo hacia la derecha? Si no, se ancla a la derecha.
+    try {
+      const rect = ref.current?.getBoundingClientRect();
+      const ancho = Math.min(window.innerWidth * 0.92, 560);
+      setAlineaDerecha(!!rect && rect.left + ancho > window.innerWidth - 16);
+    } catch { setAlineaDerecha(true); }
     setOpen(true);
   };
 
@@ -153,7 +164,7 @@ export default function MenuFecha({ value, onChange, opciones = [] }) {
       </button>
 
       {open && (
-        <div className="absolute z-40 mt-1.5 left-0 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl flex flex-col sm:flex-row overflow-hidden"
+        <div className={`absolute z-40 mt-1.5 ${alineaDerecha ? 'right-0' : 'left-0'} bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl flex flex-col sm:flex-row overflow-hidden max-h-[min(75vh,540px)] overflow-y-auto`}
           style={{ width: 'min(92vw, 560px)' }}>
           {/* presets */}
           <div className="sm:w-[180px] shrink-0 sm:border-r border-b sm:border-b-0 border-gray-100 dark:border-gray-700/60 p-2.5 max-h-[220px] sm:max-h-none overflow-y-auto">

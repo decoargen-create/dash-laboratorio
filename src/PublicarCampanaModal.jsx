@@ -70,7 +70,7 @@ function aplicarPatron(patron, { filename = '', index = 0, fecha = '' }) {
 // `soloPreset`: modo "configurar campaña base" desde el Setup del producto —
 // sin videos ni publicación; solo elegir cuenta + ad template + defaults y
 // guardarlos como preset del producto.
-export default function PublicarCampanaModal({ a, onClose, addToast, soloPreset = false }) {
+export default function PublicarCampanaModal({ a, onClose, addToast, soloPreset = false, onPublished = null }) {
   const preset = useMemo(() => leerPreset(a), [a]);
   const { connections, loading: connLoading, error: connError, reload: reloadConns } = useMetaConnections();
   const { accounts, loading: acctLoading, errors: acctErrors } = useMetaAdAccounts(connections);
@@ -293,6 +293,7 @@ export default function PublicarCampanaModal({ a, onClose, addToast, soloPreset 
       setResultado(cr);
       setFase('listo');
       guardarPresetActual(true); // publicación OK = el preset del producto se actualiza solo
+      try { onPublished?.(cr); } catch {}
       const okAds = (cr.resultados || []).filter(r => r.ok).length;
       addToast?.({
         type: okAds === adsListos.length ? 'success' : 'warning',

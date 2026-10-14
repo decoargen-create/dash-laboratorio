@@ -609,10 +609,16 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
                   return (
                     <button key={e.id} onClick={() => toggle(k)} disabled={fase === 'publicando'}
                       title={e.sourceHeadline || 'Estático'}
-                      className={`relative aspect-square rounded-lg overflow-hidden border-2 transition group ${on ? 'border-brand-500 ring-2 ring-brand-500/40' : 'border-transparent hover:border-gray-300 dark:hover:border-gray-600'}`}>
-                      {e.imageUrl
-                        ? <img src={e.imageUrl} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
-                        : <span className="absolute inset-0 flex items-center justify-center bg-gray-100 dark:bg-gray-800"><ImageIcon size={18} className="text-gray-400" /></span>}
+                      className={`relative aspect-square rounded-lg overflow-hidden border-2 transition group ${on ? 'border-brand-500 ring-2 ring-brand-500/40' : 'border-gray-200 dark:border-gray-700/70 hover:border-gray-300 dark:hover:border-gray-500'}`}>
+                      {/* El ícono queda SIEMPRE abajo del <img>: si la imagen falla
+                          (p. ej. signed URL vencida con la pestaña abierta mucho
+                          tiempo) se oculta sola y queda el fallback visible, en vez
+                          de una tarjeta invisible. */}
+                      <span className="absolute inset-0 flex items-center justify-center bg-gray-100 dark:bg-gray-800"><ImageIcon size={18} className="text-gray-400" /></span>
+                      {e.imageUrl && (
+                        <img src={e.imageUrl} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover"
+                          onError={(ev) => { ev.currentTarget.style.display = 'none'; }} />
+                      )}
                       <span className={`absolute top-1.5 left-1.5 w-5 h-5 rounded-md flex items-center justify-center text-white text-[11px] font-bold transition ${on ? 'bg-brand-600' : 'bg-black/40 opacity-0 group-hover:opacity-100'}`}>
                         {on ? '✓' : '+'}
                       </span>

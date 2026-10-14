@@ -23,14 +23,14 @@ import { confirmDialog } from './dialogs.jsx';
 const ESTRUCTURAS = [
   {
     id: 'cbo_deep', titulo: 'CBO · Deep Pocket', emoji: '💰',
-    desc: 'Presupuesto en la campaña, sin tope de puja. Meta reparte libre entre conjuntos. La receta de testeo de siempre.',
+    desc: 'La más simple: ponés un presupuesto para toda la campaña y Meta decide dónde gastarlo. La receta de testeo de siempre. Recomendada si estás empezando.',
     puja: null,
     conjuntos: 8,
     presupuesto: { ARS: 120000, USD: 120 },
   },
   {
     id: 'cbo_costcap', titulo: 'CBO · Cost Cap', emoji: '🎯',
-    desc: 'Presupuesto en la campaña + costo por compra OBJETIVO a nivel conjunto: Meta intenta comprar a ese CPA o mejor.',
+    desc: 'Le decís a Meta cuánto querés pagar como máximo por cada venta y compra a ese precio o mejor. Gasta más lento, pero más barato.',
     puja: 'Costo por compra objetivo',
     conjuntos: 1,
     presupuesto: { ARS: 60000, USD: 60 },
@@ -39,7 +39,7 @@ const ESTRUCTURAS = [
   },
   {
     id: 'abo_bidcap', titulo: 'ABO · Bid Cap', emoji: '🧢',
-    desc: 'Presupuesto POR CONJUNTO + tope de puja duro: Meta nunca puja por encima. Control total, escala más lenta.',
+    desc: 'Para expertos: tope duro por subasta y presupuesto separado por conjunto. Control total, crece más lento.',
     puja: 'Tope de puja',
     conjuntos: 1,
   },
@@ -328,7 +328,11 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
       {/* anuncios */}
       <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-3.5">
         <p className="text-[9.5px] font-bold uppercase tracking-[.08em] text-gray-400 mb-1.5">
-          Anuncios — uno por línea: «Nombre | post id» (acepta pageId_postId o el id pelado)
+          Anuncios — uno por línea: «Nombre | número de publicación»
+        </p>
+        <p className="text-[10.5px] text-gray-400 mb-1.5">
+          El número de publicación es el ID del posteo de Facebook/Instagram que querés usar como anuncio.
+          Lo encontrás en Meta Business Suite → la publicación → ⋯ → Copiar ID. Acepta «pageId_postId» o el número solo.
         </p>
         <textarea rows={6} className={`${inputCls} font-mono`} value={adsText} onChange={e => setAdsText(e.target.value)}
           placeholder={'Aceite 12-10 C1 Mecanismo | 122098765432101234\nAceite 12-10 C2 Testimonio | 17895695668004550\n122111222333444555'} />

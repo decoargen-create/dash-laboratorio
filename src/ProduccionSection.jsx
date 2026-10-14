@@ -293,11 +293,11 @@ function useEscape(onClose) {
 }
 
 const COLS = [
-  { key: 'porhacer', emoji: '🎬', dot: 'bg-slate-400', text: 'text-slate-500 dark:text-slate-400', hdr: 'bg-slate-200/60 dark:bg-slate-700/30', empty: '🎬 Agregá productos y ¡acción!' },
-  { key: 'revision', emoji: '👀', dot: 'bg-amber-400', text: 'text-amber-600 dark:text-amber-400', hdr: 'bg-amber-100/70 dark:bg-amber-900/20', empty: '👀 Nada en revisión — todo al día' },
-  { key: 'aprobado', emoji: '✅', dot: 'bg-emerald-500', text: 'text-emerald-600 dark:text-emerald-400', hdr: 'bg-emerald-100/70 dark:bg-emerald-900/20', empty: '✅ Acá caen los aprobados' },
-  { key: 'publicado', emoji: '🚀', dot: 'bg-violet-500', text: 'text-violet-600 dark:text-violet-400', hdr: 'bg-violet-100/70 dark:bg-violet-900/20', empty: '🚀 Listos para despegar' },
-  { key: 'archivado', emoji: '📦', dot: 'bg-gray-400', text: 'text-gray-500 dark:text-gray-400', hdr: 'bg-gray-200/60 dark:bg-gray-700/40', empty: '📦 Nada archivado' },
+  { key: 'porhacer', emoji: '🎬', dot: 'bg-slate-400', text: 'text-slate-500 dark:text-slate-400', hdr: 'bg-slate-200/60 dark:bg-slate-700/30', empty: '🎬 Nada pendiente. Tocá «Agregar producto» para encargar videos.', help: 'El editor tiene que hacer y subir los videos. Cuando sube todos, la tarjeta pasa sola a En revisión.' },
+  { key: 'revision', emoji: '👀', dot: 'bg-amber-400', text: 'text-amber-600 dark:text-amber-400', hdr: 'bg-amber-100/70 dark:bg-amber-900/20', empty: '👀 Cuando un editor suba todos sus videos, la tarjeta aparece acá.', help: 'Te toca a vos: mirá los videos y aprobalos o pedí cambios.' },
+  { key: 'aprobado', emoji: '✅', dot: 'bg-emerald-500', text: 'text-emerald-600 dark:text-emerald-400', hdr: 'bg-emerald-100/70 dark:bg-emerald-900/20', empty: '✅ Cuando apruebes una tarjeta, aparece acá.', help: 'Videos listos: ya cuentan para el pago del editor. Falta subirlos como anuncio.' },
+  { key: 'publicado', emoji: '🚀', dot: 'bg-violet-500', text: 'text-violet-600 dark:text-violet-400', hdr: 'bg-violet-100/70 dark:bg-violet-900/20', empty: '🚀 Cuando marques una tarjeta como publicada, aparece acá.', help: 'Ya están como anuncio. A las 48 h se archivan solas.' },
+  { key: 'archivado', emoji: '📦', dot: 'bg-gray-400', text: 'text-gray-500 dark:text-gray-400', hdr: 'bg-gray-200/60 dark:bg-gray-700/40', empty: '📦 Nada archivado', help: 'Tarjetas terminadas. Quedan acá de historial.' },
 ];
 
 // Colores por persona + tinte de tarjeta viven ahora en produccionColors.js
@@ -965,7 +965,9 @@ export default function ProduccionSection({ addToast }) {
           </div>
           <button onClick={() => setShowAdd(true)}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-brand-700 rounded-lg hover:from-brand-600 hover:to-brand-800 transition shadow-sm">
-            <Plus size={14} /> Agregar producto
+            <span title="Elegí producto(s) y a qué editor se los encargás: se crea una tarjeta en Por hacer.">
+              <Plus size={14} className="inline mr-1" />Encargar videos
+            </span>
           </button>
         </div>
       </div>
@@ -1161,7 +1163,7 @@ export default function ProduccionSection({ addToast }) {
               onDrop={e => onDrop(e, col.key)}
               className={`${col.key === mobileTabOk ? 'flex' : 'hidden'} lg:flex flex-col flex-1 lg:min-w-0 rounded-xl p-2.5 transition ${dragOver === col.key ? 'bg-brand-50 dark:bg-brand-900/20 ring-2 ring-brand-300 dark:ring-brand-700' : 'bg-gray-50 dark:bg-gray-800/40'}`}>
               {/* Cabecera tintada con el color del estado: se reconoce por zona */}
-              <div className={`flex items-center gap-2 px-2.5 py-1.5 mb-2 rounded-lg shrink-0 ${col.hdr}`}>
+              <div title={col.help} className={`flex items-center gap-2 px-2.5 py-1.5 mb-2 rounded-lg shrink-0 ${col.hdr}`}>
                 <span className="text-sm leading-none">{col.emoji}</span>
                 <span className={`text-xs font-bold uppercase tracking-wide ${col.text}`}>{ESTADO_LABELS[col.key]}</span>
                 <span className="ml-auto text-xs font-mono text-gray-400 tabular-nums">{cards.length}</span>
@@ -2543,7 +2545,7 @@ export function CardDetailModal({ a, personas, team = [], onClose, addToast, onT
                 cargó el admin, replicar winners, UGC, evergreen). */}
             <div className="flex flex-wrap gap-1 mt-1.5">
               {ETIQUETAS_TANDA.map(e => (
-                <button key={e.key} onClick={() => updateAssignment(a.id, { etiqueta: e.label })}
+                <button key={e.key} onClick={() => updateAssignment(a.id, { etiqueta: e.label })} title={e.desc}
                   className={`text-[11px] font-bold px-2 py-1 rounded-md transition ${a.etiqueta === e.label ? 'bg-sky-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200'}`}>
                   {e.label}
                 </button>
@@ -2747,7 +2749,7 @@ export function CardDetailModal({ a, personas, team = [], onClose, addToast, onT
             <button onClick={() => setPubOpen(true)}
               title="Publicar los videos de esta tarjeta como campaña nueva en Meta, clonando la config de un ad existente"
               className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-brand-600 dark:text-brand-300 border border-brand-300 dark:border-brand-800 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/20 transition">
-              🚀 Publicar campaña
+              🚀 Crear anuncio en Meta
             </button>
           )}
           <button onClick={() => (nCorr > 0 ? devolverParaCorregir() : setDlg('cambios'))}
@@ -2757,7 +2759,7 @@ export function CardDetailModal({ a, personas, team = [], onClose, addToast, onT
             className="ml-auto inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/30 hover:bg-amber-200 dark:hover:bg-amber-900/50 rounded-lg transition">
             <AlertTriangle size={14} /> {nCorr > 0 ? `Devolver para corregir · ${nCorr}` : 'Pedir cambios'}
           </button>
-          <button onClick={() => { saveAll(); onClose(); }} className="px-4 py-2 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition">Listo</button>
+          <button onClick={() => { saveAll(); onClose(); }} title="Los cambios se guardan solos" className="px-4 py-2 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition">Cerrar</button>
         </div>
 
         {/* Publicador de campañas (Ads Uploader propio) */}

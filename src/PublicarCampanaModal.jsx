@@ -291,6 +291,7 @@ export default function PublicarCampanaModal({ a, onClose, addToast, soloPreset 
         body: {
           account_id: account.id,
           currency: account.currency || '',
+          producto: a.productoNombre || '',
           campaignName: nombre.trim(),
           dailyBudget: Number(presupuesto),
           adsPerSet: Number(adsPorSet) || 3,
@@ -571,7 +572,7 @@ export default function PublicarCampanaModal({ a, onClose, addToast, soloPreset 
           ) : (<>
           <label className="inline-flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400 cursor-pointer shrink-0">
             <input type="checkbox" checked={enPausa} onChange={e => setEnPausa(e.target.checked)} disabled={!!fase} className="accent-brand-500" />
-            Publicar en pausa
+            Crear pausada <span className="hidden sm:inline">(recomendado: la revisás en Meta antes de prenderla)</span>
           </label>
           <span className="flex-1 min-w-0 text-[11px] text-amber-600 dark:text-amber-400 inline-flex items-center gap-1">
             <AlertTriangle size={12} className="shrink-0" />

@@ -483,15 +483,35 @@ async function handleAdsWithInsights(req, res) {
 
   if (!accountId) return respondJSON(res, 400, { error: 'Falta account_id (con prefijo act_)' });
 
-  // Ventanas de comparación: últimos 14d vs 14d previos (días -28 a -14).
-  // En DTC los creativos viven 60-90 días — 7d es muy ruidoso, 14d captura
-  // tendencia real con buffer de significancia estadística.
+  // Ventanas de comparación: la ELEGIDA en el calendario vs la previa del
+  // mismo largo. Default: últimos 14d vs 14d previos — en DTC los creativos
+  // viven 60-90 días; 7d es muy ruidoso, 14d captura tendencia real.
+  // date_preset acepta last_7d/14d/30d/90d, this_month, last_month y
+  // "custom_YYYY-MM-DD_YYYY-MM-DD" (el calendario libre que pidió el user).
+  const DIA = 24 * 60 * 60 * 1000;
   const now = new Date();
-  const recentSince = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
-  const recentRange = JSON.stringify({ since: ymd(recentSince), until: ymd(now) });
-  const prevSince = new Date(now.getTime() - 28 * 24 * 60 * 60 * 1000);
-  const prevUntil = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
-  const prevRange = JSON.stringify({ since: ymd(prevSince), until: ymd(prevUntil) });
+  let desde, hasta = now;
+  const presetWin = String(url.searchParams.get('date_preset') || 'last_14d');
+  const customWin = /^custom_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})$/.exec(presetWin);
+  if (customWin) {
+    desde = new Date(`${customWin[1]}T00:00:00Z`);
+    hasta = new Date(`${customWin[2]}T00:00:00Z`);
+  } else if (presetWin === 'this_month') {
+    desde = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  } else if (presetWin === 'last_month') {
+    desde = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+    hasta = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0));
+  } else {
+    const dias = { last_7d: 7, last_14d: 14, last_30d: 30, last_90d: 90 }[presetWin] || 14;
+    desde = new Date(now.getTime() - dias * DIA);
+  }
+  if (!(desde < hasta)) desde = new Date(hasta.getTime() - 14 * DIA);
+  const largo = Math.max(DIA, hasta.getTime() - desde.getTime());
+  const recentRange = JSON.stringify({ since: ymd(desde), until: ymd(hasta) });
+  const prevRange = JSON.stringify({
+    since: ymd(new Date(desde.getTime() - largo)),
+    until: ymd(new Date(desde.getTime() - DIA)),
+  });
 
   try {
     // Un solo call a Graph API con dos expansiones de insights.
@@ -1859,6 +1879,11 @@ async function handleTestingInsights(req, res) {
   // Rango personalizado del calendario: "custom_YYYY-MM-DD_YYYY-MM-DD".
   const custom = /^custom_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})$/.exec(preset);
   if (!custom && !allowed.includes(preset)) preset = 'last_30d';
+  // Ventana PROPIA de Prospectadores (independiente del preset de cohortes y
+  // de los benchmarks de "Hoy", que siguen clavados en 7 días).
+  let prospPreset = url.searchParams.get('prosp_preset') || 'last_7d';
+  const customProsp = /^custom_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})$/.test(prospPreset);
+  if (!customProsp && !allowed.includes(prospPreset)) prospPreset = 'last_7d';
   const insSel = custom
     ? `insights.time_range({"since":"${custom[1]}","until":"${custom[2]}"})`
     : `insights.date_preset(${preset})`;
@@ -1938,13 +1963,20 @@ async function handleTestingInsights(req, res) {
 
     // Trae insights a nivel anuncio para un período. Una sola llamada por
     // período: {cuenta}/insights?level=ad devuelve una fila por anuncio.
+    // Acepta presets de Meta ("last_7d") y rangos del calendario
+    // ("custom_YYYY-MM-DD_YYYY-MM-DD") — así Prospectadores puede usar el
+    // calendario libremente, como pidió el user.
+    const rangoDe = (p) => {
+      const c = /^custom_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})$/.exec(String(p || ''));
+      return c ? { time_range: JSON.stringify({ since: c[1], until: c[2] }) } : { date_preset: p };
+    };
     const adsDe = async (datePreset) => {
       const filas = [];
       let a = null, g = 0;
       do {
         const params = {
           level: 'ad',
-          date_preset: datePreset,
+          ...rangoDe(datePreset),
           fields: `ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,${INS}`,
           limit: 200,
         };
@@ -2028,14 +2060,20 @@ async function handleTestingInsights(req, res) {
     };
 
     // ── 3. TODO junto: campañas, conjuntos, hoy, 7 días y estados ──
-    const [campanas, adsets, adsToday, ads7d, campaignsToday, estadosAds] = await Promise.all([
+    // ads7d alimenta los benchmarks de "Hoy" (siempre 7 días). adsProsp es la
+    // ventana que el user eligió en Prospectadores; si coincide, es la misma
+    // llamada (no pagamos una consulta extra a Meta).
+    const [campanas, adsets, adsToday, ads7d, campaignsToday, estadosAds, adsProspRaw] = await Promise.all([
       traerCampanas(), traerAdsets(), adsDe('today'), adsDe('last_7d'), campanasHoy(), estadosDeAnuncios(),
+      prospPreset === 'last_7d' ? Promise.resolve(null) : adsDe(prospPreset),
     ]);
+    const adsProsp = adsProspRaw || ads7d;
 
     // Join de presupuestos: el del conjunto si es ABO, si no el de la campaña
     // (CBO). Es contra esto que se mide lo que queda por gastar.
     const budgetPorCampana = new Map(campanas.map(c => [c.id, c.dailyBudget]));
-    for (const ad of [...adsToday, ...ads7d]) {
+    const adsConJoin = adsProspRaw ? [...adsToday, ...ads7d, ...adsProspRaw] : [...adsToday, ...ads7d];
+    for (const ad of adsConJoin) {
       const conjunto = adsets.get(ad.adsetId) || null;
       ad.dailyBudget = conjunto?.dailyBudget ?? budgetPorCampana.get(ad.campaignId) ?? null;
       ad.nivelPresupuesto = conjunto?.dailyBudget != null ? 'conjunto' : 'campaña';
@@ -2045,7 +2083,7 @@ async function handleTestingInsights(req, res) {
     // Pegar el estado a cada fila. La campaña ya lo trae de la llamada 1.
     const estadoCampana = new Map(campanas.map(c => [c.id, { status: c.status, effectiveStatus: c.effectiveStatus }]));
     for (const c of campaignsToday) Object.assign(c, estadoCampana.get(c.id) || {});
-    for (const ad of [...adsToday, ...ads7d]) Object.assign(ad, estadosAds.get(ad.id) || {});
+    for (const ad of adsConJoin) Object.assign(ad, estadosAds.get(ad.id) || {});
 
     // Gasto de hoy por padre: sirve para prorratear la plata en riesgo de un
     // anuncio dentro de una campaña que reparte un presupuesto común.
@@ -2067,6 +2105,8 @@ async function handleTestingInsights(req, res) {
       campaignsToday,
       adsToday,
       ads7d,
+      adsProsp,
+      prospPreset,
       totales: {
         campanas: campanas.length,
         campanasHoy: campaignsToday.length,
@@ -2847,6 +2887,25 @@ async function handleCreateCampaignStructure(req, res) {
   if (ads.length === 0) return respondJSON(res, 400, { error: 'Sin videos listos para crear ads' });
   if (!template.pageId) return respondJSON(res, 400, { error: 'El template no tiene page_id — elegí otro ad de referencia' });
 
+  // Historial de publicaciones: una fila por intento (OK, parcial, rollback
+  // o error), escrita con el service role. Nunca rompe la publicación.
+  const usuarioId = isSupabaseConfigured() ? await getUserIdFromAuth(req) : null;
+  const registrarPublicacion = async (campos) => {
+    try {
+      const sb = getServiceClient();
+      if (!sb || !usuarioId) return;
+      await sb.from('marketing_publicaciones').insert({
+        user_id: usuarioId,
+        account_id: accountId,
+        campaign_name: campaignName,
+        producto: String(body.producto || '').slice(0, 120) || null,
+        ads_total: ads.length,
+        log,
+        ...campos,
+      });
+    } catch { /* historial best-effort */ }
+  };
+
   const log = [];
   try {
     // Objetivos legacy (pre-ODAX): Meta NO deja crear campañas nuevas con
@@ -3009,6 +3068,16 @@ async function handleCreateCampaignStructure(req, res) {
     }
 
     const fallaron = resultados.filter(r => !r.ok).length;
+<<<<<<< HEAD
+=======
+    await registrarPublicacion({
+      campaign_id: String(camp.id),
+      estado: okAds === 0 ? 'DELETED' : estadoFinal,
+      ads_ok: okAds,
+      resultados,
+      error: activacionError || null,
+    });
+>>>>>>> origin/main
     return respondJSON(res, fallaron === 0 && !activacionError ? 200 : 207, {
       campaignId: camp.id,
       adsetIds,
@@ -3022,12 +3091,30 @@ async function handleCreateCampaignStructure(req, res) {
       // Falló antes de crear ningún ad (p. ej. el primer conjunto): no
       // dejamos la campaña vacía tirada en el Ads Manager.
       await borrarCampana();
+      await registrarPublicacion({ campaign_id: String(camp.id), estado: 'ERROR', error: String(errInterno.message || '').slice(0, 500) });
       throw errInterno;
     }
   } catch (err) {
     log.push(`✗ ${err.message}`);
     return respondJSON(res, err.status || 502, { error: traducirErrorMetaEscritura(err.message), log });
   }
+}
+
+// Historial de publicaciones del Publicador (solo las del usuario logueado).
+async function handlePublicaciones(req, res) {
+  if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
+  if (!isSupabaseConfigured()) return respondJSON(res, 200, { publicaciones: [] });
+  const userId = await getUserIdFromAuth(req);
+  if (!userId) return respondJSON(res, 401, { error: 'No autenticado — falta sesión de Supabase' });
+  const sb = getServiceClient();
+  if (!sb) return respondJSON(res, 200, { publicaciones: [] });
+  const { data, error } = await sb.from('marketing_publicaciones')
+    .select('id, created_at, account_id, campaign_id, campaign_name, producto, estado, ads_ok, ads_total, error, log')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(60);
+  if (error) return respondJSON(res, 502, { error: error.message });
+  return respondJSON(res, 200, { publicaciones: data || [] });
 }
 
 // --- dispatcher ---
@@ -3053,6 +3140,7 @@ const actions = {
   'upload-ad-videos': handleUploadAdVideos,
   'videos-status': handleVideosStatus,
   'create-campaign-structure': handleCreateCampaignStructure,
+  publicaciones: handlePublicaciones,
   'ig-accounts': handleIgAccounts,
   'latest-ig-post': handleLatestIgPost,
   'campaigns': handleCampaigns,

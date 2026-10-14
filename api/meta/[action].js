@@ -960,6 +960,16 @@ async function handleCampaignAdsets(req, res) {
         effectiveStatus: s.effective_status,
         createdTime: s.created_time,
         updatedTime: s.updated_time,
+        // La LISTA COMPLETA de ads del conjunto — el publicador de campañas
+        // la usa como tercera columna del selector de template. Antes solo
+        // viajaba mainAd y el picker decía "Sin ads en este conjunto".
+        ads: ads.map(ad => ({
+          id: ad.id,
+          name: ad.name,
+          status: ad.status,
+          effectiveStatus: ad.effective_status,
+          thumbnailUrl: ad.creative?.thumbnail_url || null,
+        })),
         mainAd: mainAd ? {
           id: mainAd.id,
           name: mainAd.name,

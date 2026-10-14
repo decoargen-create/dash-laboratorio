@@ -2467,7 +2467,7 @@ async function handleLaunchCampaign(req, res) {
   if (!token) return respondJSON(res, authStatus || 401, { error: error || 'Meta no conectado' });
 
   const accountId = String(body.account_id || '').trim();
-  const estructura = ['cbo_deep', 'cbo_costcap', 'abo_bidcap'].includes(body.estructura) ? body.estructura : null;
+  const estructura = ['cbo_deep', 'cbo_costcap', 'abo_costcap', 'abo_bidcap'].includes(body.estructura) ? body.estructura : null;
   const nombre = String(body.nombre || '').trim();
   const presupuesto = Number(body.presupuesto);
   const puja = Number(body.puja || 0);
@@ -2493,8 +2493,8 @@ async function handleLaunchCampaign(req, res) {
   if (!estructura) return respondJSON(res, 400, { error: 'Estructura inválida' });
   if (!nombre) return respondJSON(res, 400, { error: 'Falta el nombre de la campaña' });
   if (!Number.isFinite(presupuesto) || presupuesto <= 0) return respondJSON(res, 400, { error: 'Presupuesto inválido' });
-  if ((estructura === 'cbo_costcap' || estructura === 'abo_bidcap') && (!Number.isFinite(puja) || puja <= 0)) {
-    return respondJSON(res, 400, { error: estructura === 'cbo_costcap' ? 'Falta la puja (costo por compra objetivo)' : 'Falta la puja (tope de puja)' });
+  if (estructura !== 'cbo_deep' && (!Number.isFinite(puja) || puja <= 0)) {
+    return respondJSON(res, 400, { error: estructura === 'abo_bidcap' ? 'Falta la puja (tope de puja)' : 'Falta la puja (costo por compra objetivo)' });
   }
   if (!pixelId) return respondJSON(res, 400, { error: 'Falta el píxel (va en promoted_object del conjunto)' });
   if (!ads.length) return respondJSON(res, 400, { error: 'Pasá al menos un anuncio (nombre + post id)' });
@@ -2510,8 +2510,8 @@ async function handleLaunchCampaign(req, res) {
 
   const estado = activar ? 'ACTIVE' : 'PAUSED';
   const bidStrategy = estructura === 'cbo_deep' ? 'LOWEST_COST_WITHOUT_CAP'
-    : estructura === 'cbo_costcap' ? 'COST_CAP' : 'LOWEST_COST_WITH_BID_CAP';
-  const esCbo = estructura !== 'abo_bidcap';
+    : estructura === 'abo_bidcap' ? 'LOWEST_COST_WITH_BID_CAP' : 'COST_CAP';
+  const esCbo = !estructura.startsWith('abo');
 
   const resumen = { campaignId: null, adsets: [], errores: [] };
   try {

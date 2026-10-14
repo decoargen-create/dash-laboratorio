@@ -38,6 +38,13 @@ const ESTRUCTURAS = [
     pujaDesdeCpa: true,
   },
   {
+    id: 'abo_costcap', titulo: 'ABO · Cost Cap', emoji: '🎯',
+    desc: 'Presupuesto POR CONJUNTO + costo por compra objetivo: control fino conjunto a conjunto, comprando a tu precio o mejor.',
+    puja: 'Costo por compra objetivo',
+    conjuntos: 1,
+    pujaDesdeCpa: true,
+  },
+  {
     id: 'abo_bidcap', titulo: 'ABO · Bid Cap', emoji: '🧢',
     desc: 'Para expertos: tope duro por subasta y presupuesto separado por conjunto. Control total, crece más lento.',
     puja: 'Tope de puja',
@@ -119,7 +126,9 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
     if (nombre) return;
     const hoy = new Date();
     const prod = productosVisibles[0]?.nombre?.split(' ')[0] || 'Producto';
-    const tag = estructura === 'cbo_deep' ? '[CBO Deep Poket]' : estructura === 'cbo_costcap' ? '[CBO Costcap]' : '[ABO Bidcap]';
+    const tag = estructura === 'cbo_deep' ? '[CBO Deep Poket]'
+      : estructura === 'cbo_costcap' ? '[CBO Costcap]'
+      : estructura === 'abo_costcap' ? '[ABO Costcap]' : '[ABO Bidcap]';
     setNombre(`${prod} ${hoy.getDate()}/${hoy.getMonth() + 1} ${tag}`);
   }, [productosVisibles, estructura]); // eslint-disable-line
 
@@ -188,7 +197,7 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
 
   const publicar = async () => {
     if (!listo || busy) return;
-    const presupuestoTxt = `$${num(presupuesto).toLocaleString('es-AR')}${estructura === 'abo_bidcap' ? ' por conjunto' : ''} / día`;
+    const presupuestoTxt = `$${num(presupuesto).toLocaleString('es-AR')}${estructura.startsWith('abo') ? ' por conjunto' : ''} / día`;
     const ok = await confirmDialog({
       title: `🚀 Crear "${nombre}" en Meta`,
       message: [
@@ -252,7 +261,7 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
             <input className={inputCls} value={nombre} onChange={e => setNombre(e.target.value)} />
           </Campo>
           <div className="grid grid-cols-2 gap-3">
-            <Campo label={estructura === 'abo_bidcap' ? `Presupuesto diario POR CONJUNTO (${currency || 'ARS'})` : `Presupuesto diario (${currency || 'ARS'})`}>
+            <Campo label={estructura.startsWith('abo') ? `Presupuesto diario POR CONJUNTO (${currency || 'ARS'})` : `Presupuesto diario (${currency || 'ARS'})`}>
               <input className={inputCls} value={presupuesto} onChange={e => setPresupuesto(e.target.value)} placeholder="150.000" inputMode="decimal" />
             </Campo>
             {receta.puja ? (

@@ -128,23 +128,10 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
   const [fechaCorta] = useState(() => new Date(Date.now() + 24 * 60 * 60 * 1000)
     .toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', day: 'numeric', month: 'numeric' }));
   const [nCampanas, setNCampanas] = useState(1);
-  // Receta: dónde vive el presupuesto (CBO campaña / ABO conjunto) y la puja.
-  const RECETAS = [
-    { id: 'cbo_deep', label: '💰 CBO Deep Pocket', tag: '[CBO Testeo Videos]', desc: 'La de testeo de siempre: presupuesto en la campaña, Meta reparte libre. Recomendada.' },
-    { id: 'cbo_costcap', label: '🎯 CBO Cost Cap', tag: '[CBO Costcap]', desc: 'Presupuesto en la campaña + costo por compra OBJETIVO: Meta compra a ese precio o mejor.' },
-    { id: 'abo_costcap', label: '🎯 ABO Cost Cap', tag: '[ABO Costcap]', desc: 'Presupuesto POR CONJUNTO + costo por compra objetivo.' },
-    { id: 'abo_bidcap', label: '🧢 ABO Bid Cap', tag: '[ABO Bidcap]', desc: 'Presupuesto POR CONJUNTO + tope de puja duro: control total, crece más lento.' },
-  ];
-  const [receta, setReceta] = useState('cbo_deep');
-  const [puja, setPuja] = useState('');
-  const esCbo = receta.startsWith('cbo');
-  const nombreDefault = (r) => `${producto} ${fechaCorta} ${RECETAS.find(x => x.id === r)?.tag || ''}`.trim();
-  const [nombreBase, setNombreBase] = useState(() => nombreDefault('cbo_deep'));
-  // Cambiar de receta actualiza el tag del nombre SOLO si no lo tocaste a mano.
-  const cambiarReceta = (r) => {
-    setNombreBase(prev => (prev === nombreDefault(receta) ? nombreDefault(r) : prev));
-    setReceta(r);
-  };
+  // El Armador publica TESTEOS (CBO simple, estilo Deep Pocket): las recetas
+  // de ESCALADO (Cost Cap / Bid Cap, desde ads existentes por post id) viven
+  // en la pestaña "Escalar" del Publicador — son otra cosa (pedido del user).
+  const [nombreBase, setNombreBase] = useState(`${producto} ${fechaCorta} [CBO Testeo Videos]`);
   const [presupuesto, setPresupuesto] = useState(preset?.budget ? String(preset.budget) : '');
   useEffect(() => { if (preset?.budget && !presupuesto) setPresupuesto(String(preset.budget)); }, [preset]); // eslint-disable-line react-hooks/exhaustive-deps
   const [adsPorSet, setAdsPorSet] = useState(preset?.adsPerSet || 3);
@@ -167,8 +154,7 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
   const [resultados, setResultados] = useState([]); // [{nombre, campaignId, okAds, total, estado}]
   const log = (l) => setLogs(prev => [...prev, l]);
 
-  const listo = account && template?.pageId && elegidos.length > 0 && Number(presupuesto) > 0 && nombreBase.trim()
-    && (receta === 'cbo_deep' || Number(puja) > 0) && !fase;
+  const listo = account && template?.pageId && elegidos.length > 0 && Number(presupuesto) > 0 && nombreBase.trim() && !fase;
   const loteMax = Math.max(0, ...lotes.map(l => l.length));
 
   const publicar = useCallback(async () => {
@@ -257,8 +243,6 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
             adsetNamePattern: adsetPattern,
             fecha: fechaCorta,
             status: enPausa ? 'PAUSED' : 'ACTIVE',
-            estructura: receta,
-            puja: receta === 'cbo_deep' ? null : Number(puja),
             template,
             message: mensaje,
             headline: titular,
@@ -290,7 +274,7 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
       setFase('error');
       addToast?.({ type: 'error', message: 'No se pudo crear ninguna campaña — mirá el detalle en el log.' });
     }
-  }, [listo, lotes, loteMax, account, template, preset, producto, presupuesto, adsPorSet, enPausa, nombreBase, fechaCorta, receta, puja, mensaje, titular, addToast, onPublicadas]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [listo, lotes, loteMax, account, template, preset, producto, presupuesto, adsPorSet, enPausa, nombreBase, fechaCorta, mensaje, titular, addToast, onPublicadas]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const input = 'w-full px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500';
 
@@ -480,30 +464,6 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
           </div>
 
           <div>
-            <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5"
-              title="Define dónde vive el presupuesto (CBO = en la campaña, ABO = en cada conjunto) y la estrategia de puja.">Receta</span>
-            <div className="grid grid-cols-2 gap-1.5">
-              {RECETAS.map(r => (
-                <button key={r.id} onClick={() => cambiarReceta(r.id)} disabled={fase === 'publicando'} title={r.desc}
-                  className={`px-2 py-1.5 rounded-lg text-[11px] font-bold border text-left transition ${receta === r.id
-                    ? 'bg-brand-600 text-white border-brand-600'
-                    : 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-brand-400'}`}>
-                  {r.label}
-                </button>
-              ))}
-            </div>
-            {receta !== 'cbo_deep' && (
-              <div className="mt-2">
-                <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1"
-                  title={receta === 'abo_bidcap' ? 'Meta nunca puja por encima de este valor en la subasta.' : 'Meta intenta comprar cada venta a este costo o mejor.'}>
-                  {receta === 'abo_bidcap' ? 'Tope de puja' : 'Costo por compra objetivo'}{account?.currency ? ` · ${account.currency}` : ''}
-                </span>
-                <input type="number" min="1" value={puja} onChange={e => setPuja(e.target.value)} className={input} disabled={fase === 'publicando'} placeholder="ej: 9000" />
-              </div>
-            )}
-          </div>
-
-          <div>
             <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Nombre base de campaña</span>
             <input value={nombreBase} onChange={e => setNombreBase(e.target.value)} className={input} disabled={fase === 'publicando'} />
             {lotes.length > 1 && <p className="text-[10px] text-gray-400 mt-1">Se numeran solas: «{nombreCampana(0)}», «{nombreCampana(1)}»…</p>}
@@ -512,8 +472,7 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
           <div className="grid grid-cols-2 gap-2.5">
             <div>
               <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5"
-                title={esCbo ? 'Presupuesto diario de CADA campaña (CBO: Meta lo reparte entre los conjuntos)' : 'Presupuesto diario de CADA CONJUNTO (ABO: cada conjunto gasta esto)'}>
-                {esCbo ? 'Presupuesto c/u' : 'Presupuesto por conjunto'}{account?.currency ? ` · ${account.currency}` : ''}</span>
+                title="Presupuesto diario de CADA campaña (CBO: Meta lo reparte entre los conjuntos)">Presupuesto c/u{account?.currency ? ` · ${account.currency}` : ''}</span>
               <input type="number" min="1" value={presupuesto} onChange={e => setPresupuesto(e.target.value)} className={input} disabled={fase === 'publicando'} placeholder="ej: 60000" />
             </div>
             <div>

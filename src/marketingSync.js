@@ -267,7 +267,12 @@ export async function pullMarketingFromCloud() {
   // 14-09-2026 (Nexocom y el resto de las apps del proyecto quedaron con
   // logins en timeout). Post-strip la comparación converge: si lo único
   // distinto son campos que el push no persiste, no se dispara push.
-  const cloudStr = JSON.stringify((productos || []).map(r => stripIdeas(r.data)));
+  // OJO: comparar SIN los tombstones de producto. productosArr se construye
+  // filtrando las filas _deleted, pero cloudStr las incluía → con UN producto
+  // borrado en la cuenta, mergeOccurred daba true en CADA pull para siempre
+  // → push de todos los productos cada ~5-10s por sesión abierta. Es la
+  // reintroducción exacta del loop del 14-09 (425k writes), vía lápidas.
+  const cloudStr = JSON.stringify((productos || []).filter(r => !r.data?._deleted).map(r => stripIdeas(r.data)));
   const mergedStr = JSON.stringify(productosArr.map(p => stripIdeas(p)));
   const mergeOccurred = cloudStr !== mergedStr;
   if (mergeOccurred) {

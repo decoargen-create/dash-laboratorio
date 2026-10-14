@@ -2481,6 +2481,18 @@ async function handleLaunchCampaign(req, res) {
   const duplicarAds = body.duplicarAds !== false;
   const pageId = String(body.pageId || '').trim();
   const pixelId = String(body.pixelId || '').trim();
+  // ABO: puja POR CONJUNTO (array alineado con los conjuntos); si un índice
+  // falta o es inválido, cae a la puja base.
+  const pujasArr = Array.isArray(body.pujas) ? body.pujas.map(Number) : null;
+  // Programación: la campaña/conjuntos arrancan en esta fecha (ISO con zona).
+  // Meta la muestra "Programada" y no gasta antes.
+  let startTime = null;
+  if (body.startTime) {
+    const d = new Date(String(body.startTime));
+    if (isNaN(d.getTime())) return respondJSON(res, 400, { error: 'Fecha de programación inválida' });
+    if (d.getTime() < Date.now() + 5 * 60 * 1000) return respondJSON(res, 400, { error: 'La fecha de programación tiene que ser al menos 5 minutos en el futuro' });
+    startTime = d.toISOString();
+  }
   const pais = /^[A-Z]{2}$/.test(String(body.pais || '').toUpperCase()) ? String(body.pais).toUpperCase() : 'AR';
   const edadMin = Math.min(65, Math.max(13, Math.round(Number(body.edadMin) || 18)));
   const edadMax = Math.min(65, Math.max(edadMin, Math.round(Number(body.edadMax) || 65)));
@@ -2493,8 +2505,13 @@ async function handleLaunchCampaign(req, res) {
   if (!estructura) return respondJSON(res, 400, { error: 'Estructura inválida' });
   if (!nombre) return respondJSON(res, 400, { error: 'Falta el nombre de la campaña' });
   if (!Number.isFinite(presupuesto) || presupuesto <= 0) return respondJSON(res, 400, { error: 'Presupuesto inválido' });
-  if (estructura !== 'cbo_deep' && (!Number.isFinite(puja) || puja <= 0)) {
-    return respondJSON(res, 400, { error: estructura === 'abo_bidcap' ? 'Falta la puja (tope de puja)' : 'Falta la puja (costo por compra objetivo)' });
+  const pujaDelSet = (i) => (pujasArr && Number.isFinite(pujasArr[i]) && pujasArr[i] > 0 ? pujasArr[i] : puja);
+  const pujasValidas = estructura === 'cbo_deep'
+    || (estructura.startsWith('abo')
+      ? Array.from({ length: conjuntos }).every((_, i) => pujaDelSet(i) > 0)
+      : (Number.isFinite(puja) && puja > 0));
+  if (!pujasValidas) {
+    return respondJSON(res, 400, { error: estructura === 'abo_bidcap' ? 'Falta la puja (tope de puja) en algún conjunto' : 'Falta la puja (costo por compra objetivo)' });
   }
   if (!pixelId) return respondJSON(res, 400, { error: 'Falta el píxel (va en promoted_object del conjunto)' });
   if (!ads.length) return respondJSON(res, 400, { error: 'Pasá al menos un anuncio (nombre + post id)' });
@@ -2560,7 +2577,8 @@ async function handleLaunchCampaign(req, res) {
         },
       };
       if (!esCbo) adsetParams.daily_budget = String(Math.round(presupuesto * 100));
-      if (estructura !== 'cbo_deep') adsetParams.bid_amount = String(Math.round(puja * 100));
+      if (estructura !== 'cbo_deep') adsetParams.bid_amount = String(Math.round(pujaDelSet(i) * 100));
+      if (startTime) adsetParams.start_time = startTime;
       let adset;
       try {
         adset = await graphPost(`${accountId}/adsets`, token, adsetParams);
@@ -3086,6 +3104,13 @@ async function handleCreateCampaignStructure(req, res) {
   //   cbo_costcap  → CBO + COST_CAP con costo por compra objetivo (puja)
   //   abo_costcap  → presupuesto POR CONJUNTO + COST_CAP (puja)
   //   abo_bidcap   → presupuesto POR CONJUNTO + tope de puja duro (puja)
+  let startTime = null;
+  if (body.startTime) {
+    const d = new Date(String(body.startTime));
+    if (isNaN(d.getTime())) return respondJSON(res, 400, { error: 'Fecha de programación inválida' });
+    if (d.getTime() < Date.now() + 5 * 60 * 1000) return respondJSON(res, 400, { error: 'La fecha de programación tiene que ser al menos 5 minutos en el futuro' });
+    startTime = d.toISOString();
+  }
   const ESTRUCTURAS_OK = ['cbo_deep', 'cbo_costcap', 'abo_costcap', 'abo_bidcap'];
   const estructura = ESTRUCTURAS_OK.includes(body.estructura) ? body.estructura : 'cbo_deep';
   const esCbo = estructura.startsWith('cbo');
@@ -3215,6 +3240,7 @@ async function handleCreateCampaignStructure(req, res) {
       // puja (en unidad mínima de la moneda) va como bid_amount del conjunto.
       if (!esCbo) payload.daily_budget = budgetMinUnit;
       if (estructura !== 'cbo_deep') payload.bid_amount = pujaMinUnit;
+      if (startTime) payload.start_time = startTime;
       const as = await graphPost(`${accountId}/adsets`, token, payload);
       adsetIds.push(as.id);
       log.push(`✓ Conjunto ${i + 1}/${nSets}: ${as.id}`);

@@ -102,13 +102,19 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
   const [nombre, setNombre] = useState('');
   const [presupuesto, setPresupuesto] = useState('');
   const [puja, setPuja] = useState('');
+  // ABO = cada conjunto con SU puja (pedido del user): overrides por índice;
+  // si un conjunto no se toca, usa la puja base de arriba.
+  const [pujas, setPujas] = useState({});
+  // Programación: fecha y hora (de Argentina) en que la campaña arranca.
+  // Vacío = arranca cuando la actives. Meta la deja "Programada" sin gastar.
+  const [programada, setProgramada] = useState('');
   const [conjuntos, setConjuntos] = useState(8);
   // Deep Pocket = conjuntos IDÉNTICOS: cada uno lleva todos los anuncios.
   const [duplicarAds, setDuplicarAds] = useState(true);
   const [cpaCuenta, setCpaCuenta] = useState(null);
-  const [pais, setPais] = useState('AR');
-  const [edadMin, setEdadMin] = useState(18);
-  const [edadMax, setEdadMax] = useState(65);
+  // País/edades no se piden (nunca se tocaban — pedido del user): siempre
+  // AR · 18-65 con Advantage+, que es como arma los testeos el equipo.
+  const pais = 'AR', edadMin = 18, edadMax = 65;
   const [pageId, setPageId] = useState('');
   const [pixelId, setPixelId] = useState('');
   const [adsText, setAdsText] = useState('');
@@ -141,6 +147,7 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
     const def = presupuestoDefault(receta, currency);
     setPresupuesto(def != null ? String(def) : '');
     setPuja(receta.pujaDesdeCpa && cpaCuenta ? String(Math.round(cpaCuenta)) : '');
+    setPujas({});
   }, [estructura, currency]); // eslint-disable-line
 
   // CPA real de la cuenta (últimos 30 días) para proponerlo como costo
@@ -192,8 +199,13 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
   const totalAds = duplicarAds ? adsOk.length * conjuntos : adsOk.length;
   const pasado = totalAds > MAX_ADS_CREADOS;
 
+  const esAbo = estructura.startsWith('abo');
+  const pujaDelSet = (i) => (pujas[i] != null && pujas[i] !== '' ? pujas[i] : puja);
+  const pujasOk = receta.puja == null ? true
+    : esAbo ? Array.from({ length: conjuntos }).every((_, i) => num(pujaDelSet(i)) > 0)
+    : num(puja) > 0;
   const listo = accountId && nombre.trim() && num(presupuesto) > 0 && adsOk.length > 0 && pixelId
-    && !pasado && (receta.puja == null || num(puja) > 0);
+    && !pasado && pujasOk;
 
   const publicar = async () => {
     if (!listo || busy) return;
@@ -205,9 +217,14 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
         duplicarAds && conjuntos > 1
           ? `${adsOk.length} anuncio${adsOk.length === 1 ? '' : 's'} en CADA conjunto → ${totalAds} anuncios en total`
           : `${adsOk.length} anuncio${adsOk.length === 1 ? '' : 's'} repartido${adsOk.length === 1 ? '' : 's'} entre los conjuntos`,
-        `Presupuesto: ${presupuestoTxt}${receta.puja ? ` · ${receta.puja.toLowerCase()}: $${num(puja).toLocaleString('es-AR')}` : ''}`,
+        `Presupuesto: ${presupuestoTxt}${receta.puja && !esAbo ? ` · ${receta.puja.toLowerCase()}: $${num(puja).toLocaleString('es-AR')}` : ''}`,
+        ...(receta.puja && esAbo
+          ? [`${receta.puja} por conjunto: ${Array.from({ length: conjuntos }, (_, i) => `C${i + 1} $${num(pujaDelSet(i)).toLocaleString('es-AR')}`).join(' · ')}`]
+          : []),
         `${pais} · ${edadMin}-${edadMax} años · Advantage+ audience y ubicaciones automáticas`,
-        activar ? '⚠️ Se crea ACTIVA: empieza a gastar al toque.' : 'Se crea PAUSADA: la revisás en Meta y la encendés.',
+        ...(programada ? [`🗓 Programada para el ${new Date(`${programada}:00-03:00`).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} hs (AR) — no gasta antes.`] : []),
+        activar ? (programada ? 'Se crea ACTIVA pero PROGRAMADA: arranca recién en esa fecha.' : '⚠️ Se crea ACTIVA: empieza a gastar al toque.')
+          : (programada ? '⚠️ Se crea PAUSADA: aunque esté programada, NO va a arrancar hasta que la actives en Meta.' : 'Se crea PAUSADA: la revisás en Meta y la encendés.'),
       ].join('\n'),
       confirmLabel: 'Crear en Meta',
       tone: activar ? 'danger' : 'brand',
@@ -223,6 +240,8 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
           connection_id: connId && connId !== '__cookie__' ? connId : undefined,
           estructura, nombre: nombre.trim(),
           presupuesto: num(presupuesto), puja: receta.puja ? num(puja) : 0,
+          pujas: receta.puja && esAbo ? Array.from({ length: conjuntos }, (_, i) => num(pujaDelSet(i))) : undefined,
+          startTime: programada ? `${programada}:00-03:00` : undefined,
           conjuntos, duplicarAds, pageId, pixelId, pais, edadMin, edadMax,
           ads: adsOk.map(a => ({ name: a.name, postId: a.postId })),
           activar,
@@ -265,7 +284,7 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
             <Campo label={estructura.startsWith('abo') ? `Presupuesto diario POR CONJUNTO (${currency || 'ARS'})` : `Presupuesto diario (${currency || 'ARS'})`}>
               <input className={inputCls} value={presupuesto} onChange={e => setPresupuesto(e.target.value)} placeholder="150.000" inputMode="decimal" />
             </Campo>
-            {receta.puja ? (
+            {receta.puja && !esAbo ? (
               <Campo label={`${receta.puja} (${currency || 'ARS'})`}
                 hint={receta.pujaDesdeCpa
                   ? (cpaCuenta
@@ -273,6 +292,10 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
                       : 'Va a nivel conjunto. Sin compras en 30 días no puedo sugerirte un CPA.')
                   : undefined}>
                 <input className={inputCls} value={puja} onChange={e => setPuja(e.target.value)} placeholder="28.000" inputMode="decimal" />
+              </Campo>
+            ) : receta.puja && esAbo ? (
+              <Campo label={`${receta.puja} (${currency || 'ARS'})`} hint="Es un ABO: cada conjunto lleva la suya — se cargan acá abajo, junto a los conjuntos.">
+                <span className="px-2.5 py-1.5 text-xs text-gray-400">Por conjunto ↓</span>
               </Campo>
             ) : (
               <Campo label="Puja"><span className="px-2.5 py-1.5 text-xs text-gray-400">Sin tope (deep pocket)</span></Campo>
@@ -296,20 +319,33 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
             </span>
           </label>
         )}
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+        {receta.puja && esAbo && (
+          <div>
+            <span className="text-[9.5px] font-bold uppercase tracking-[.08em] text-gray-400 block mb-1.5">
+              {receta.puja} POR CONJUNTO ({currency || 'ARS'})
+              {cpaCuenta ? ` — tu CPA real de 30 días: ${Math.round(cpaCuenta).toLocaleString('es-AR')}` : ''}
+            </span>
+            <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-8 gap-2">
+              {Array.from({ length: conjuntos }, (_, i) => (
+                <label key={i} className="grid gap-0.5">
+                  <span className="text-[9px] font-bold text-gray-400">C{i + 1}</span>
+                  <input className={inputCls} value={pujaDelSet(i)} inputMode="decimal"
+                    onChange={e => setPujas(prev => ({ ...prev, [i]: e.target.value }))}
+                    placeholder={cpaCuenta ? String(Math.round(cpaCuenta)) : '28.000'} />
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+        <div className="grid grid-cols-2 gap-3">
           <Campo label="Conjuntos">
             <select className={inputCls} value={conjuntos} onChange={e => setConjuntos(Number(e.target.value))}>
               {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20].map(n => <option key={n} value={n}>{n}</option>)}
             </select>
           </Campo>
-          <Campo label="País">
-            <input className={inputCls} value={pais} onChange={e => setPais(e.target.value.toUpperCase().slice(0, 2))} />
-          </Campo>
-          <Campo label="Edad mín.">
-            <input className={inputCls} type="number" min={13} max={65} value={edadMin} onChange={e => setEdadMin(Number(e.target.value))} />
-          </Campo>
-          <Campo label="Edad máx.">
-            <input className={inputCls} type="number" min={13} max={65} value={edadMax} onChange={e => setEdadMax(Number(e.target.value))} />
+          <Campo label="Programada para (opcional)"
+            hint="Hora de Argentina. Meta la deja «Programada» y no gasta hasta esa fecha — para eso creala ACTIVA.">
+            <input className={inputCls} type="datetime-local" value={programada} onChange={e => setProgramada(e.target.value)} />
           </Campo>
           <Campo label="Píxel (evento Compra)">
             <select className={inputCls} value={pixelId} onChange={e => setPixelId(e.target.value)}>

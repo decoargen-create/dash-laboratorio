@@ -51,7 +51,11 @@ function repartir(items, n) {
   return lotes.filter(l => l.length > 0);
 }
 
-export default function PublicarArmador({ producto, tarjetas, onVolver, onPublicadas, addToast }) {
+export default function PublicarArmador({ producto, tarjetas, onVolver, onPublicadas, addToast, embedded = false }) {
+  // Tarjetas DESGLOSABLES (pedido del user): cerradas muestran el resumen;
+  // se abren para tildar videos sueltos.
+  const [abiertas, setAbiertas] = useState(() => new Set());
+  const toggleAbierta = (id) => setAbiertas(prev => { const nn = new Set(prev); if (nn.has(id)) nn.delete(id); else nn.add(id); return nn; });
   // ── Preset + cuenta ──
   const [presetTick, setPresetTick] = useState(0);
   const preset = useMemo(() => leerPresetPublicar(producto), [producto, presetTick]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -136,6 +140,9 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
   useEffect(() => { if (preset?.budget && !presupuesto) setPresupuesto(String(preset.budget)); }, [preset]); // eslint-disable-line react-hooks/exhaustive-deps
   const [adsPorSet, setAdsPorSet] = useState(preset?.adsPerSet || 3);
   const [enPausa, setEnPausa] = useState(true);
+  // Programación: fecha y hora (de Argentina) en que arrancan las campañas.
+  // Vacío = arrancan cuando las actives. Meta las deja "Programadas".
+  const [programada, setProgramada] = useState('');
   // Textos del anuncio: a la vista y editables (antes salían del preset sin
   // que los vieras). Se precargan con el preset o el copy del ad modelo.
   const [mensaje, setMensaje] = useState(preset?.mensaje || '');
@@ -243,6 +250,7 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
             adsetNamePattern: adsetPattern,
             fecha: fechaCorta,
             status: enPausa ? 'PAUSED' : 'ACTIVE',
+            startTime: programada ? `${programada}:00-03:00` : undefined,
             template,
             message: mensaje,
             headline: titular,
@@ -274,7 +282,7 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
       setFase('error');
       addToast?.({ type: 'error', message: 'No se pudo crear ninguna campaña — mirá el detalle en el log.' });
     }
-  }, [listo, lotes, loteMax, account, template, preset, producto, presupuesto, adsPorSet, enPausa, nombreBase, fechaCorta, mensaje, titular, addToast, onPublicadas]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [listo, lotes, loteMax, account, template, preset, producto, presupuesto, adsPorSet, enPausa, nombreBase, fechaCorta, mensaje, titular, programada, addToast, onPublicadas]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const input = 'w-full px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500';
 
@@ -286,17 +294,21 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-6 space-y-5">
+    <div className={embedded ? 'space-y-5' : 'max-w-7xl mx-auto px-4 py-6 space-y-5'}>
       {/* Header */}
       <div className="flex items-center gap-3 flex-wrap">
-        <button onClick={onVolver} disabled={fase === 'publicando'}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-bold text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition disabled:opacity-40">
-          <ArrowLeft size={14} /> Volver
-        </button>
+        {!embedded && (
+          <button onClick={onVolver} disabled={fase === 'publicando'}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-bold text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition disabled:opacity-40">
+            <ArrowLeft size={14} /> Volver
+          </button>
+        )}
         <div className="min-w-0 flex-1">
-          <h1 className="text-xl font-black text-gray-900 dark:text-white flex items-center gap-2 truncate">
-            <Rocket size={19} className="text-brand-600 shrink-0" /> Armar publicación — {producto}
-          </h1>
+          {!embedded && (
+            <h1 className="text-xl font-black text-gray-900 dark:text-white flex items-center gap-2 truncate">
+              <Rocket size={19} className="text-brand-600 shrink-0" /> Armar publicación — {producto}
+            </h1>
+          )}
         </div>
         {/* Preset del producto: la config sale de acá e impacta en todos lados */}
         {preset?.adId && account ? (
@@ -343,32 +355,39 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
                   if (vids.length === 0) return null;
                   const keys = vids.map(f => `v:${t.id}:${f.ts}`);
                   const nSel = keys.filter(k => sel.has(k)).length;
+                  const abierta = abiertas.has(t.id);
                   return (
                     <div key={t.id} className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/60 overflow-hidden">
-                      <label className="flex items-center gap-2.5 px-3.5 py-2 border-b border-gray-100 dark:border-gray-700/60 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800">
+                      <div onClick={() => toggleAbierta(t.id)}
+                        className={`flex items-center gap-2.5 px-3.5 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 ${abierta ? 'border-b border-gray-100 dark:border-gray-700/60' : ''}`}>
                         <input type="checkbox" checked={nSel === keys.length} ref={el => { if (el) el.indeterminate = nSel > 0 && nSel < keys.length; }}
-                          onChange={() => toggleTarjeta(t)} disabled={fase === 'publicando'} className="w-4 h-4 accent-brand-600" />
+                          onClick={e => e.stopPropagation()} onChange={() => toggleTarjeta(t)} disabled={fase === 'publicando'}
+                          title="Tildar/destildar todos los videos de esta tarjeta"
+                          className="w-4 h-4 accent-brand-600" />
+                        {abierta ? <ChevronDown size={14} className="text-brand-500 shrink-0" /> : <ChevronRight size={14} className="text-gray-400 shrink-0" />}
                         <span className="text-sm font-bold text-gray-800 dark:text-gray-100 truncate">
                           {t.persona || 'Sin editor'} · {weekLabel(t.weekKey) || t.weekKey || ''}
                         </span>
                         <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${t.estado === 'aprobado' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-violet-500/10 text-violet-600 dark:text-violet-400'}`}>
                           {t.estado === 'aprobado' ? 'APROBADA' : 'PUBLICADA'}
                         </span>
-                        <span className="ml-auto text-[11px] text-gray-400 tabular-nums">{nSel}/{vids.length}</span>
-                      </label>
-                      <div className="grid sm:grid-cols-2 gap-x-2">
-                        {vids.map(f => {
-                          const k = `v:${t.id}:${f.ts}`;
-                          return (
-                            <label key={k} className="flex items-center gap-2 px-3.5 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer min-w-0">
-                              <input type="checkbox" checked={sel.has(k)} onChange={() => toggle(k)} disabled={fase === 'publicando'} className="accent-brand-500" />
-                              <Film size={12} className="text-gray-400 shrink-0" />
-                              <span className="flex-1 min-w-0 truncate text-xs text-gray-700 dark:text-gray-200" title={f.name}>{f.name}</span>
-                              {f.aprobado && <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 shrink-0">✓</span>}
-                            </label>
-                          );
-                        })}
+                        <span className="ml-auto text-[11px] text-gray-400 tabular-nums">{nSel}/{vids.length} video{vids.length === 1 ? '' : 's'}</span>
                       </div>
+                      {abierta && (
+                        <div className="grid sm:grid-cols-2 gap-x-2">
+                          {vids.map(f => {
+                            const k = `v:${t.id}:${f.ts}`;
+                            return (
+                              <label key={k} className="flex items-center gap-2 px-3.5 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer min-w-0">
+                                <input type="checkbox" checked={sel.has(k)} onChange={() => toggle(k)} disabled={fase === 'publicando'} className="accent-brand-500" />
+                                <Film size={12} className="text-gray-400 shrink-0" />
+                                <span className="flex-1 min-w-0 truncate text-xs text-gray-700 dark:text-gray-200" title={f.name}>{f.name}</span>
+                                {f.aprobado && <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 shrink-0">✓</span>}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -397,7 +416,7 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
             ) : estaticos.length === 0 ? (
               <p className="text-sm text-gray-400">Este producto todavía no tiene estáticos en la galería.</p>
             ) : (
-              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
+              <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-1.5">
                 {estaticos.map(e => {
                   const k = `i:${e.id}`;
                   const on = sel.has(k);
@@ -480,6 +499,16 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
                 title="Cuántos anuncios entran en cada conjunto de la campaña">Ads por conjunto</span>
               <input type="number" min="1" max="10" value={adsPorSet} onChange={e => setAdsPorSet(e.target.value === '' ? '' : Math.max(1, Math.min(10, Math.round(Number(e.target.value) || 1))))} className={input} disabled={fase === 'publicando'} />
             </div>
+          </div>
+
+          <div>
+            <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5"
+              title="Hora de Argentina. Meta deja las campañas «Programadas» y no gastan hasta esa fecha — para eso tienen que crearse ACTIVAS (destildá «Crear pausadas»).">
+              Programada para (opcional)</span>
+            <input type="datetime-local" value={programada} onChange={e => setProgramada(e.target.value)} className={input} disabled={fase === 'publicando'} />
+            {programada && enPausa && (
+              <p className="text-[10px] text-amber-500 mt-1">Ojo: pausada + programada no arranca sola — destildá «Crear pausadas» para que quede Programada de verdad.</p>
+            )}
           </div>
 
           <details className="rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2">

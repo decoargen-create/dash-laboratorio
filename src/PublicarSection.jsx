@@ -158,22 +158,15 @@ export default function PublicarSection({ addToast }) {
     return { grupos: gs, enRevision: rev };
   }, [asignaciones]);
 
-  // Selección de tarjetas por grupo (default: todas tildadas).
-  const [desmarcadas, setDesmarcadas] = useState(() => new Set());
-  const toggleTarjeta = (id) => setDesmarcadas(prev => {
-    const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n;
-  });
-
-  // ARMADOR a pantalla completa (estilo Meta uploader): se entra por producto
-  // con TODAS sus tarjetas con videos (aprobadas y publicadas, para repescar),
-  // y adentro se eligen videos sueltos + estáticos y se reparte en campañas.
-  const [armando, setArmando] = useState(null); // { producto, tarjetas }
-  const abrirArmador = useCallback((grupo) => {
-    const delProducto = asignaciones.filter(a =>
-      (a.productoNombre || 'Sin producto').trim() === grupo.producto &&
-      ['aprobado', 'publicado'].includes(a.estado) && videosDe(a).length > 0);
-    setArmando({ producto: grupo.producto, tarjetas: delProducto });
-  }, [asignaciones]);
+  // La cola ES el armador (pedido del user): primero elegís el PRODUCTO, y
+  // abajo quedan sus tarjetas (desglosables, video por video) y la galería de
+  // estáticos en miniatura — mezclás y publicás desde la misma pantalla.
+  const [productoSel, setProductoSel] = useState('');
+  const productoActivo = grupos.some(g => g.producto === productoSel) ? productoSel : (grupos[0]?.producto || '');
+  // Tarjetas del producto elegido: aprobadas Y publicadas (para repescar).
+  const tarjetasDe = useCallback((producto) => asignaciones.filter(a =>
+    (a.productoNombre || 'Sin producto').trim() === producto &&
+    ['aprobado', 'publicado'].includes(a.estado) && videosDe(a).length > 0), [asignaciones]);
 
   // Publicación OK → las tarjetas cuyos videos salieron pasan a Publicado.
   const alPublicar = useCallback((cardIds) => {
@@ -187,19 +180,6 @@ export default function PublicarSection({ addToast }) {
   }, [asignaciones, addToast]);
 
   const totalVideos = grupos.reduce((n, g) => n + g.tarjetas.reduce((m, t) => m + videosDe(t).length, 0), 0);
-
-  // Pantalla completa del armador (reemplaza la cola mientras está abierto).
-  if (armando) {
-    return (
-      <PublicarArmador
-        producto={armando.producto}
-        tarjetas={armando.tarjetas}
-        addToast={addToast}
-        onPublicadas={alPublicar}
-        onVolver={() => setArmando(null)}
-      />
-    );
-  }
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
@@ -238,58 +218,41 @@ export default function PublicarSection({ addToast }) {
           <p className="text-sm mt-1">Aprobá contenido en <b>Producción</b> y aparece acá, agrupado por producto y listo para un click.</p>
         </div>
       ) : (
-        <div className="space-y-5">
-          {grupos.map(g => {
-            const preset = leerPresetPublicar(g.producto);
-            const elegidas = g.tarjetas.filter(t => !desmarcadas.has(t.id));
-            const nVideos = elegidas.reduce((m, t) => m + videosDe(t).length, 0);
-            return (
-              <div key={g.producto} className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/60 overflow-hidden">
-                <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-gray-100 dark:border-gray-700/60 flex-wrap">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <span className="text-base font-extrabold text-gray-900 dark:text-white truncate">{g.producto}</span>
-                    {preset?.adId ? (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded-full px-2 py-0.5">
-                        <CheckCircle2 size={11} /> Campaña base lista
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-gray-500 dark:text-gray-400 bg-gray-500/10 border border-gray-400/30 rounded-full px-2 py-0.5">
-                        <Settings2 size={11} /> Sin preset — la elegís al publicar
-                      </span>
-                    )}
-                  </div>
-                  <button onClick={() => abrirArmador(g)}
-                    title="Abre el armador: elegís videos sueltos de cualquier tarjeta, sumás estáticos y repartís en una o varias campañas."
-                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition">
-                    <Rocket size={13} /> Armar publicación ({nVideos} video{nVideos === 1 ? '' : 's'}) <ChevronRight size={12} />
-                  </button>
-                </div>
-                <ul className="divide-y divide-gray-100 dark:divide-gray-700/50">
-                  {g.tarjetas.map(t => {
-                    const vids = videosDe(t);
-                    const aprob = vids.filter(f => f.aprobado).length;
-                    const incluida = !desmarcadas.has(t.id);
-                    return (
-                      <li key={t.id} className="flex items-center gap-3 px-4 py-2.5">
-                        <input type="checkbox" checked={incluida} onChange={() => toggleTarjeta(t.id)}
-                          className="w-4 h-4 accent-brand-600 cursor-pointer shrink-0" />
-                        <div className="min-w-0 flex-1">
-                          <p className={`text-sm font-semibold truncate ${incluida ? 'text-gray-800 dark:text-gray-100' : 'text-gray-400 dark:text-gray-500 line-through'}`}>
-                            {t.persona || 'Sin editor'} · {weekLabel(t.weekKey) || t.weekKey || ''}
-                          </p>
-                          {t.nota && <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{t.nota}</p>}
-                        </div>
-                        <span className="inline-flex items-center gap-1 text-xs font-semibold text-gray-600 dark:text-gray-300 shrink-0">
-                          <Film size={12} /> {vids.length} video{vids.length === 1 ? '' : 's'}
-                          {aprob > 0 && aprob < vids.length && <span className="text-emerald-600 dark:text-emerald-400">({aprob} aprob.)</span>}
-                        </span>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            );
-          })}
+        <div className="space-y-4">
+          {/* 1) Elegí el PRODUCTO — chips con su cola de videos */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {grupos.map(g => {
+              const nVid = g.tarjetas.reduce((m, t) => m + videosDe(t).length, 0);
+              const preset = leerPresetPublicar(g.producto);
+              const on = g.producto === productoActivo;
+              return (
+                <button key={g.producto} onClick={() => setProductoSel(g.producto)}
+                  title={preset?.adId ? 'Campaña base configurada ✓' : 'Sin campaña base todavía — se configura adentro'}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-bold border transition ${on
+                    ? 'bg-brand-600 text-white border-brand-600'
+                    : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:border-brand-400'}`}>
+                  {g.producto}
+                  <span className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded-full ${on ? 'bg-white/20' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-300'}`}>{nVid}</span>
+                  {preset?.adId && <CheckCircle2 size={12} className={on ? 'text-white' : 'text-emerald-500'} />}
+                </button>
+              );
+            })}
+            <span className="ml-auto text-xs text-gray-400">{totalVideos} video{totalVideos === 1 ? '' : 's'} en cola</span>
+          </div>
+
+          {/* 2) El armador del producto elegido, acá mismo: tarjetas
+                desglosables + galería de estáticos + armado a la derecha. */}
+          {productoActivo && (
+            <PublicarArmador
+              key={productoActivo}
+              embedded
+              producto={productoActivo}
+              tarjetas={tarjetasDe(productoActivo)}
+              addToast={addToast}
+              onPublicadas={alPublicar}
+              onVolver={() => {}}
+            />
+          )}
           <p className="text-xs text-gray-400 dark:text-gray-500 text-right">{totalVideos} video{totalVideos === 1 ? '' : 's'} en cola en total</p>
         </div>
       )}

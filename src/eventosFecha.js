@@ -24,11 +24,11 @@ export const EVENTOS_FECHA = [
 // fechas comerciales de arriba): dicen de DÓNDE sale la consigna. No viajan
 // al generador de creativos — son organización del tablero nada más.
 export const ETIQUETAS_TANDA = [
-  { key: 'instagram', label: '📸 Instagram' },  // sale de referencias de IG que cargó el admin
-  { key: 'winners',   label: '⭐ Winners' },     // tanda para replicar los winners actuales
-  { key: 'ugc',       label: '🎥 UGC' },
-  { key: 'diversificacion', label: '🧪 Diversificación' },
-  { key: 'evergreen', label: '🌿 Evergreen' },
+  { key: 'instagram', label: '📸 Instagram', desc: 'Basado en los reels de referencia que cargaste' },
+  { key: 'winners',   label: '⭐ Winners', desc: 'Versiones nuevas de los videos que mejor vendieron' },
+  { key: 'ugc',       label: '🎥 UGC', desc: 'Persona real hablando a cámara, como un cliente' },
+  { key: 'diversificacion', label: '🧪 Diversificación', desc: 'Probar ángulos o formatos que todavía no probamos' },
+  { key: 'evergreen', label: '🌿 Evergreen', desc: 'Sirve todo el año, no depende de una fecha' },
 ];
 
 export function eventoLabel(key) {

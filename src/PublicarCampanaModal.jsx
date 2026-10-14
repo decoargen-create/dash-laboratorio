@@ -16,12 +16,22 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import {
   Rocket, X, Loader2, Check, AlertTriangle, ChevronRight, ExternalLink, Film, Save, Pencil,
 } from 'lucide-react';
-import { useMetaConnections, useMetaAdAccounts, authHeaders } from './MetaConnect.jsx';
+import { useMetaConnections, useMetaAdAccounts, authHeaders, openMetaConnect } from './MetaConnect.jsx';
 import { linkMeta } from './testeosCore.js';
 
 const LS_ACCOUNT = 'adslab-testeos-account';
-const presetKey = (a) => `adslab-publicar-preset-v1-${a.productoId != null ? `id:${a.productoId}` : `nom:${(a.productoNombre || '').trim().toLowerCase()}`}`;
+// Clave por NOMBRE de producto (normalizado): es lo único que comparten la
+// tarjeta de Producción (catálogo del lab) y el producto de Marketing — así
+// el preset se puede preestablecer desde el Setup del producto y la tarjeta
+// lo encuentra igual. Fallback por id si no hay nombre.
+const presetKey = (a) => {
+  const nom = (a.productoNombre || '').trim().toLowerCase();
+  return `adslab-publicar-preset-v1-${nom ? `nom:${nom}` : `id:${a.productoId}`}`;
+};
 
+export function leerPresetPublicar(productoNombre) {
+  try { return JSON.parse(localStorage.getItem(presetKey({ productoNombre })) || 'null'); } catch { return null; }
+}
 function leerPreset(a) {
   try { return JSON.parse(localStorage.getItem(presetKey(a)) || 'null'); } catch { return null; }
 }
@@ -57,10 +67,13 @@ function aplicarPatron(patron, { filename = '', index = 0, fecha = '' }) {
     .slice(0, 100);
 }
 
-export default function PublicarCampanaModal({ a, onClose, addToast }) {
+// `soloPreset`: modo "configurar campaña base" desde el Setup del producto —
+// sin videos ni publicación; solo elegir cuenta + ad template + defaults y
+// guardarlos como preset del producto.
+export default function PublicarCampanaModal({ a, onClose, addToast, soloPreset = false }) {
   const preset = useMemo(() => leerPreset(a), [a]);
-  const { connections } = useMetaConnections();
-  const { accounts } = useMetaAdAccounts(connections);
+  const { connections, loading: connLoading, error: connError, reload: reloadConns } = useMetaConnections();
+  const { accounts, loading: acctLoading, errors: acctErrors } = useMetaAdAccounts(connections);
   const [accountId, setAccountId] = useState(() => preset?.accountId || (() => { try { return localStorage.getItem(LS_ACCOUNT) || ''; } catch { return ''; } })());
   const account = useMemo(() => accounts.find(x => x.id === accountId) || accounts[0] || null, [accounts, accountId]);
 
@@ -297,8 +310,8 @@ export default function PublicarCampanaModal({ a, onClose, addToast }) {
         <div className="shrink-0 flex items-center gap-2 px-5 py-4 border-b border-gray-100 dark:border-gray-800">
           <Rocket size={17} className="text-brand-500" />
           <div className="flex-1 min-w-0">
-            <h3 className="text-base font-bold text-gray-900 dark:text-gray-100">Publicar campaña en Meta</h3>
-            <p className="text-[11px] text-gray-400 truncate">{a.productoNombre} · {elegidos.length} video{elegidos.length === 1 ? '' : 's'} seleccionado{elegidos.length === 1 ? '' : 's'}</p>
+            <h3 className="text-base font-bold text-gray-900 dark:text-gray-100">{soloPreset ? 'Campaña base del producto' : 'Publicar campaña en Meta'}</h3>
+            <p className="text-[11px] text-gray-400 truncate">{a.productoNombre}{soloPreset ? ' · cuenta + ad template + defaults del publicador' : ` · ${elegidos.length} video${elegidos.length === 1 ? '' : 's'} seleccionado${elegidos.length === 1 ? '' : 's'}`}</p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
         </div>
@@ -322,12 +335,28 @@ export default function PublicarCampanaModal({ a, onClose, addToast }) {
           {/* Cuenta */}
           <div>
             <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Cuenta publicitaria</span>
-            <select value={account?.id || ''} onChange={e => setAccountId(e.target.value)} className={input} disabled={!!fase}>
-              {accounts.map(ac => <option key={ac.id} value={ac.id}>{ac.name || ac.id}{ac.currency ? ` (${ac.currency})` : ''}</option>)}
-            </select>
+            {(connLoading || acctLoading) && accounts.length === 0 ? (
+              <p className="text-sm text-gray-400 inline-flex items-center gap-1.5"><Loader2 size={13} className="animate-spin" /> Cargando tus cuentas de Meta…</p>
+            ) : accounts.length === 0 ? (
+              <div className="rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-3 py-2.5 text-xs text-amber-800 dark:text-amber-200 space-y-1.5">
+                <p className="font-bold inline-flex items-center gap-1"><AlertTriangle size={13} /> No encuentro tus cuentas publicitarias.</p>
+                {(connError || (acctErrors || []).length > 0) && (
+                  <p className="text-[11px] break-words">{connError || (acctErrors || []).join(' · ')}</p>
+                )}
+                <div className="flex gap-2 pt-0.5">
+                  <button onClick={() => reloadConns?.()} className="px-2.5 py-1 text-[11px] font-bold rounded-lg border border-amber-400 dark:border-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/40 transition">Reintentar</button>
+                  <button onClick={() => { onClose(); openMetaConnect(); }} className="px-2.5 py-1 text-[11px] font-bold rounded-lg border border-amber-400 dark:border-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/40 transition">Conectar Meta</button>
+                </div>
+              </div>
+            ) : (
+              <select value={account?.id || ''} onChange={e => setAccountId(e.target.value)} className={input} disabled={!!fase}>
+                {accounts.map(ac => <option key={ac.id} value={ac.id}>{ac.name || ac.id}{ac.currency ? ` (${ac.currency})` : ''}</option>)}
+              </select>
+            )}
           </div>
 
           {/* Videos */}
+          {!soloPreset && (
           <div>
             <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Videos de la tarjeta</span>
             {candidatos.length === 0 ? (
@@ -346,6 +375,7 @@ export default function PublicarCampanaModal({ a, onClose, addToast }) {
               </div>
             )}
           </div>
+          )}
 
           {/* Template picker (solo sin preset activo) */}
           {!usandoPreset && (
@@ -438,7 +468,7 @@ export default function PublicarCampanaModal({ a, onClose, addToast }) {
           </div>
 
           {/* Preview de la estructura */}
-          {elegidos.length > 0 && (
+          {!soloPreset && elegidos.length > 0 && (
             <div>
               <button onClick={() => setVerPreview(v => !v)} className="text-[11px] font-bold text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 inline-flex items-center gap-1">
                 <ChevronRight size={12} className={`transition-transform ${verPreview ? 'rotate-90' : ''}`} />
@@ -480,6 +510,15 @@ export default function PublicarCampanaModal({ a, onClose, addToast }) {
         </div>
 
         <div className="shrink-0 flex items-center gap-3 px-5 py-3.5 border-t border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
+          {soloPreset ? (
+            <>
+              <span className="flex-1 min-w-0 text-[11px] text-gray-400">Se guarda como preset del producto: al publicar desde una tarjeta ya viene todo precargado.</span>
+              <button onClick={() => { guardarPresetActual(false); onClose(); }} disabled={!account || !adSel}
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition disabled:opacity-50">
+                <Save size={14} /> Guardar campaña base
+              </button>
+            </>
+          ) : (<>
           <label className="inline-flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400 cursor-pointer shrink-0">
             <input type="checkbox" checked={enPausa} onChange={e => setEnPausa(e.target.checked)} disabled={!!fase} className="accent-brand-500" />
             Publicar en pausa
@@ -497,6 +536,7 @@ export default function PublicarCampanaModal({ a, onClose, addToast }) {
                 : <><Rocket size={14} /> Publicar {elegidos.length} ad{elegidos.length === 1 ? '' : 's'} <ChevronRight size={13} /></>}
             </button>
           )}
+          </>)}
         </div>
       </div>
     </div>

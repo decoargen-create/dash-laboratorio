@@ -63,9 +63,21 @@ export async function fetchMetaConnections() {
     const r = await fetch('/api/meta/connections', { headers: await authHeaders(false) });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
-    return (d.connections || []).map(c => ({
+    const conns = (d.connections || []).map(c => ({
       id: c.id, label: c.label, metaUserName: c.meta_user_name,
     }));
+    if (conns.length > 0) return conns;
+    // DB sin conexiones (o la sesión de Supabase no resolvió): si hay una
+    // conexión legacy en la COOKIE, la ofrecemos igual — resolveAccessToken
+    // del server la acepta en todos los endpoints. Sin esto, un usuario con
+    // el token en cookie veía TODOS los selectores de cuenta vacíos aunque
+    // sus métricas siguieran andando.
+    try {
+      const r2 = await fetch('/api/meta/me');
+      const d2 = await r2.json().catch(() => ({}));
+      if (d2.connected) return [{ id: '__cookie__', label: d2.user?.name || 'Cuenta Meta', metaUserName: d2.user?.name }];
+    } catch {}
+    return [];
   }
   const r = await fetch('/api/meta/me');
   const d = await r.json().catch(() => ({}));

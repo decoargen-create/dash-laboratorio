@@ -115,6 +115,7 @@ import GaleriaReferencialesModal from './GaleriaReferencialesModal.jsx';
 import { countReferencialesAllProductos } from './galeriaReferenciales.js';
 import TranscripcionVideosSection from './TranscripcionVideosSection.jsx';
 import ReferenciasSection from './ReferenciasSection.jsx';
+import PublicarCampanaModal, { leerPresetPublicar } from './PublicarCampanaModal.jsx';
 import { usePipelineRun } from './PipelineRunContext.jsx';
 import { getProductoImagen } from './productoImagen.js';
 import { setCompAds, getCompAds, hydrateCompetidoresAds, removeCompAds } from './competidorAdsIDB.js';
@@ -1244,6 +1245,8 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     [competidoresBase, compAdsByCompId]
   );
   const metaAccount = producto?.metaAccount || null;
+  // Campaña base del publicador (preset por producto) — modal de configuración.
+  const [campanaBaseOpen, setCampanaBaseOpen] = useState(false);
   // Setter de competidores que los guarda DENTRO del producto activo.
   const setCompetidores = (updater) => {
     setProductos(prev => prev.map(p => {
@@ -4312,6 +4315,39 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               ))}
             </ul>
           </div>
+        )}
+
+        {/* Campaña base del PUBLICADOR: cuenta + ad template + defaults que
+            quedan asignados al producto. Al publicar los videos de una
+            tarjeta de Producción, todo viene precargado de acá. */}
+        <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700/60">
+          {(() => {
+            const preset = leerPresetPublicar(producto?.nombre);
+            return (
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400">🚀 Campaña base (publicador)</span>
+                {preset?.adId ? (
+                  <span className="text-[11px] text-emerald-600 dark:text-emerald-400 truncate max-w-[280px]" title={preset.adLabel}>
+                    ✓ {preset.adLabel || preset.adId}{preset.budget ? ` · $${preset.budget}/día` : ''}
+                  </span>
+                ) : (
+                  <span className="text-[11px] text-gray-400">sin configurar — asignale el ad template y los defaults</span>
+                )}
+                <button onClick={() => setCampanaBaseOpen(true)}
+                  className="ml-auto inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold rounded-md border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition">
+                  {preset?.adId ? 'Editar' : 'Configurar'}
+                </button>
+              </div>
+            );
+          })()}
+        </div>
+        {campanaBaseOpen && (
+          <PublicarCampanaModal
+            soloPreset
+            a={{ productoId: null, productoNombre: producto?.nombre || '', archivos: [] }}
+            addToast={addToast}
+            onClose={() => setCampanaBaseOpen(false)}
+          />
         )}
       </WizardCard>
 

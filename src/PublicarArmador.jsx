@@ -20,7 +20,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Rocket, ArrowLeft, Loader2, Check, AlertTriangle, ExternalLink, Film,
-  Image as ImageIcon, Settings2, Trophy, ChevronRight,
+  Image as ImageIcon, Settings2, Trophy, ChevronRight, ChevronDown,
 } from 'lucide-react';
 import PublicarCampanaModal, {
   leerPresetPublicar, metaApi, esperar, amigable, sinExtension, aplicarPatron,

@@ -28,6 +28,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { anthropicCost } from './_costs.js';
+import { escenaConHumanos, realismoFotografico } from './_realismo.js';
 import {
   getUserIdFromAuth,
   uploadCreativoToBucket,
@@ -1367,6 +1368,13 @@ function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentCol
   parts.push(`  • Output aspect ratio: ${aspectRatio || '1:1'}. High resolution.`);
   parts.push('  • This variation differs from siblings in EXECUTION (model demographic/camera/prop/light) but the FORMULA stays identical.');
 
+  // Realismo fotográfico: solo si la escena planificada muestra personas/piel
+  // (en un packshot o gráfica flat este bloque diluye y puede romper estilos).
+  if (escenaConHumanos(plan, variation)) {
+    parts.push('');
+    parts.push(realismoFotografico());
+  }
+
   return parts.join('\n');
 }
 
@@ -1542,6 +1550,13 @@ function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio
   parts.push('  • Badges/seals from IMAGE 1: replicate as graphic shapes with their adapted content (or empty if no content was provided).');
   parts.push('  • FIDELITY — render ONLY the text overlays and badges explicitly listed above. Do NOT invent or add ANY extra headline, sticker, seal, ribbon, price tag, bullet list, feature icons or benefit callouts that were not listed. MATCH the reference\'s AMOUNT of text: if the reference is a clean packshot with little or no text, keep it minimal. Adding text/badges the reference does not have is a defect, not an improvement.');
   parts.push(`  • Output aspect ratio: ${aspectRatio || '1:1'}. High resolution.`);
+
+  // Realismo fotográfico: solo cuando el esqueleto de la referencia describe
+  // personas/manos/piel — ahí es donde gpt-image cae en el "AI look".
+  if (escenaConHumanos(skeleton, variantStyle)) {
+    parts.push('');
+    parts.push(realismoFotografico());
+  }
 
   return parts.join('\n');
 }

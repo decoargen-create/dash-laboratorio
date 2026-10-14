@@ -179,7 +179,15 @@ export async function graphPost(path, accessToken, body = {}) {
   });
   const data = await resp.json();
   if (!resp.ok || data.error) {
-    const msg = data.error?.message || `HTTP ${resp.status}`;
+    // "Invalid parameter" a secas no sirve para debuggear: Meta manda el
+    // motivo real en error_user_msg / error_subcode / blame_field_specs.
+    const e = data.error || {};
+    const extra = [
+      e.error_user_title, e.error_user_msg,
+      e.error_subcode ? `subcode ${e.error_subcode}` : null,
+      e.error_data?.blame_field_specs ? `campo: ${JSON.stringify(e.error_data.blame_field_specs)}` : null,
+    ].filter(Boolean).join(' · ');
+    const msg = (e.message || `HTTP ${resp.status}`) + (extra ? ` — ${extra}` : '');
     const err = new Error(msg);
     err.status = resp.status;
     err.data = data;

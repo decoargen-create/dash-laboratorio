@@ -1220,8 +1220,48 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
 // ========================================================================
 // Pestaña: SEMANAS (cohortes de testeo)
 // ========================================================================
-function VistaSemanas({ campaigns, cfg, productos, productoId, currency, accountId, onWhy, fotos }) {
+function VistaSemanas({ campaigns, cfg, productos, productoId, currency, accountId, connId, preset = 'last_30d', onWhy, fotos }) {
   const [abierto, setAbierto] = useState(null);
+  // Mix VIDEO vs IMAGEN por campaña (lazy, cache-first): qué % de cada semana
+  // fue video y qué % imagen, y cuál rindió mejor. Pedido del user.
+  const [mix, setMix] = useState(null); // null = cargando | {campaignId: {video, imagen}}
+  useEffect(() => {
+    if (!accountId) { setMix({}); return; }
+    let vivo = true;
+    const path = `semanas-mix?account_id=${encodeURIComponent(accountId)}&date_preset=${encodeURIComponent(preset)}`;
+    const cacheado = leerCacheMeta(path);
+    if (cacheado) setMix(cacheado.data.porCampana || {});
+    (async () => {
+      try {
+        const d = await fetchMeta(path, { connId });
+        if (vivo) setMix(d.porCampana || {});
+      } catch { if (vivo && !cacheado) setMix({}); }
+    })();
+    return () => { vivo = false; };
+  }, [accountId, connId, preset]);
+
+  // Agrega el mix de una semana sumando sus campañas.
+  const mixDe = (f) => {
+    if (!mix) return null;
+    const acc = { video: { ads: 0, spend: 0, compras: 0, revenue: 0 }, imagen: { ads: 0, spend: 0, compras: 0, revenue: 0 } };
+    let hubo = false;
+    for (const id of (f.idsTodas || [])) {
+      const m = mix[id];
+      if (!m) continue;
+      hubo = true;
+      for (const t of ['video', 'imagen']) {
+        acc[t].ads += m[t].ads; acc[t].spend += m[t].spend; acc[t].compras += m[t].compras; acc[t].revenue += m[t].revenue;
+      }
+    }
+    if (!hubo) return null;
+    const total = acc.video.spend + acc.imagen.spend;
+    return {
+      ...acc,
+      pctVideo: total > 0 ? (acc.video.spend / total) * 100 : 0,
+      roasV: acc.video.spend > 0 ? acc.video.revenue / acc.video.spend : 0,
+      roasI: acc.imagen.spend > 0 ? acc.imagen.revenue / acc.imagen.spend : 0,
+    };
+  };
   // Etapa: la eficiencia semanal se mide sobre los TESTEOS (renovaciones).
   // Las preescalas (deep pocket, mayor roas, cost cap, bid cap, only pocket)
   // y escalas se pueden mirar aparte con los chips, pero no mezclan.
@@ -1291,6 +1331,7 @@ function VistaSemanas({ campaigns, cfg, productos, productoId, currency, account
               <th className="text-right font-bold px-2 py-2">Gasto</th>
               <th className="text-right font-bold px-2 py-2">Facturado</th>
               <th className="text-right font-bold px-2 py-2" title={TIP_ROAS}>ROAS</th>
+              <th className="text-left font-bold px-2 py-2" title="Qué % del gasto de la semana fue a anuncios de VIDEO y qué % a IMAGEN, y el ROAS de cada tipo. En verde, el que rindió mejor.">🎥 / 🖼</th>
               <th className="px-2 py-2" />
             </tr>
           </thead>
@@ -1309,7 +1350,7 @@ function VistaSemanas({ campaigns, cfg, productos, productoId, currency, account
                 <React.Fragment key={f.semana || 'sin'}>
                   {nuevoMes && (
                     <tr className="bg-gray-50/80 dark:bg-gray-900/60">
-                      <td colSpan={9} className="px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                      <td colSpan={10} className="px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
                         {etiquetaMes(mes)}
                       </td>
                     </tr>
@@ -1348,6 +1389,25 @@ function VistaSemanas({ campaigns, cfg, productos, productoId, currency, account
                     <td className="px-2 py-2 text-right tabular-nums text-gray-600 dark:text-gray-300">{fmtM(f.totales.spend, currency)}</td>
                     <td className="px-2 py-2 text-right tabular-nums text-gray-600 dark:text-gray-300">{fmtM(f.totales.revenue, currency)}</td>
                     <td className={`px-2 py-2 text-right tabular-nums font-bold ${f.totales.roas >= 1.5 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>{fmtR(f.totales.roas)}</td>
+                    <td className="px-2 py-2 whitespace-nowrap">
+                      {(() => {
+                        const m = mixDe(f);
+                        if (!m) return <span className="text-gray-400 text-[10px]">{mix === null ? '…' : '—'}</span>;
+                        const soloUno = m.video.spend <= 0 || m.imagen.spend <= 0;
+                        const ganaVideo = m.roasV >= m.roasI;
+                        return (
+                          <span className="inline-flex flex-col leading-tight text-[10.5px] tabular-nums"
+                            title={`Video: ${m.video.ads} ads · ${fmtM(m.video.spend, currency)} · ${m.video.compras} compras · ROAS ${fmtR(m.roasV)}\nImagen: ${m.imagen.ads} ads · ${fmtM(m.imagen.spend, currency)} · ${m.imagen.compras} compras · ROAS ${fmtR(m.roasI)}`}>
+                            <span className={soloUno || ganaVideo ? (m.video.spend > 0 ? 'text-emerald-600 dark:text-emerald-400 font-semibold' : 'text-gray-400') : 'text-gray-500 dark:text-gray-400'}>
+                              🎥 {Math.round(m.pctVideo)}%{m.video.spend > 0 ? ` · ${fmtR(m.roasV)}` : ''}
+                            </span>
+                            <span className={soloUno || !ganaVideo ? (m.imagen.spend > 0 ? 'text-emerald-600 dark:text-emerald-400 font-semibold' : 'text-gray-400') : 'text-gray-500 dark:text-gray-400'}>
+                              🖼 {Math.round(100 - m.pctVideo)}%{m.imagen.spend > 0 ? ` · ${fmtR(m.roasI)}` : ''}
+                            </span>
+                          </span>
+                        );
+                      })()}
+                    </td>
                     <td className="px-2 py-2 text-right">
                       <MetaLink nivel="campaigns" accountId={accountId}
                         ids={f.idsGanadoras.length ? f.idsGanadoras : f.idsTodas}
@@ -1357,7 +1417,7 @@ function VistaSemanas({ campaigns, cfg, productos, productoId, currency, account
                     </td>
                   </tr>
                   {open && (
-                    <tr><td colSpan={9} className="bg-gray-50/60 dark:bg-gray-900/40 px-3.5 py-3">
+                    <tr><td colSpan={10} className="bg-gray-50/60 dark:bg-gray-900/40 px-3.5 py-3">
                       <div className="pl-5 overflow-x-auto">
                         <table className="w-full text-xs min-w-[780px]">
                           <thead>
@@ -2777,7 +2837,7 @@ export default function MetricasSection({ addToast }) {
               <VistaEmbudo totals={campanasEmbudo.totals} campaigns={campanasEmbudo.campaigns} total={campanasEmbudo.total} currency={currency} />
             )
           )}
-          {tab === 'semanas' && <VistaSemanas campaigns={data.campaigns} cfg={cfgRaw} productos={productos} productoId={productoId || null} currency={currency} accountId={accountId} onWhy={setWhy} fotos={fotos} />}
+          {tab === 'semanas' && <VistaSemanas campaigns={data.campaigns} cfg={cfgRaw} productos={productos} productoId={productoId || null} currency={currency} accountId={accountId} connId={account?.connId} preset={preset} onWhy={setWhy} fotos={fotos} />}
           {tab === 'prosp' && <VistaProspectadores
             ads={ads7d} cfg={cfg} currency={currency} accountId={accountId} connId={account?.connId}
             preset={presetProsp} onWhy={setWhy}

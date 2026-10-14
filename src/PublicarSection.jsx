@@ -10,7 +10,8 @@
 // =========================================================================
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Rocket, Film, CheckCircle2, Clock, Settings2, ChevronRight, PackageOpen, History, ExternalLink, Loader2, RefreshCw } from 'lucide-react';
-import PublicarCampanaModal, { leerPresetPublicar } from './PublicarCampanaModal.jsx';
+import { leerPresetPublicar } from './PublicarCampanaModal.jsx';
+import PublicarArmador from './PublicarArmador.jsx';
 import { authHeaders } from './MetaConnect.jsx';
 import {
   listAllAssignments, subscribeProduccion, updateAssignment, weekLabel,
@@ -126,33 +127,42 @@ export default function PublicarSection({ addToast }) {
     const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n;
   });
 
-  // Modal: se abre con una tarjeta SINTÉTICA que junta los videos de todas
-  // las tarjetas elegidas del producto. El ts se prefija con el id de la
-  // tarjeta para que no choquen entre tarjetas (el modal lo usa solo como
-  // clave de selección).
-  const [publicando, setPublicando] = useState(null); // { producto, cardIds, a }
-  const abrirPublicar = useCallback((grupo) => {
-    const elegidas = grupo.tarjetas.filter(t => !desmarcadas.has(t.id));
-    if (elegidas.length === 0) {
-      addToast?.({ type: 'warning', message: 'Tildá al menos una tarjeta del producto.' });
-      return;
-    }
-    const archivos = elegidas.flatMap(t => videosDe(t).map(f => ({ ...f, ts: `${t.id}:${f.ts}` })));
-    setPublicando({
-      producto: grupo.producto,
-      cardIds: elegidas.map(t => t.id),
-      a: { id: `cola-${grupo.producto}`, productoNombre: grupo.producto, archivos },
-    });
-  }, [desmarcadas, addToast]);
+  // ARMADOR a pantalla completa (estilo Meta uploader): se entra por producto
+  // con TODAS sus tarjetas con videos (aprobadas y publicadas, para repescar),
+  // y adentro se eligen videos sueltos + estáticos y se reparte en campañas.
+  const [armando, setArmando] = useState(null); // { producto, tarjetas }
+  const abrirArmador = useCallback((grupo) => {
+    const delProducto = asignaciones.filter(a =>
+      (a.productoNombre || 'Sin producto').trim() === grupo.producto &&
+      ['aprobado', 'publicado'].includes(a.estado) && videosDe(a).length > 0);
+    setArmando({ producto: grupo.producto, tarjetas: delProducto });
+  }, [asignaciones]);
 
-  // Publicación OK → las tarjetas incluidas pasan solas a Publicado.
-  const alPublicar = useCallback(() => {
-    if (!publicando) return;
-    for (const id of publicando.cardIds) updateAssignment(id, { estado: 'publicado' });
-    addToast?.({ type: 'success', message: `${publicando.cardIds.length} tarjeta${publicando.cardIds.length === 1 ? '' : 's'} marcada${publicando.cardIds.length === 1 ? '' : 's'} como Publicada 🚀` });
-  }, [publicando, addToast]);
+  // Publicación OK → las tarjetas cuyos videos salieron pasan a Publicado.
+  const alPublicar = useCallback((cardIds) => {
+    const ids = (cardIds || []).filter(Boolean);
+    let n = 0;
+    for (const id of ids) {
+      const t = asignaciones.find(a => a.id === id);
+      if (t && t.estado === 'aprobado') { updateAssignment(id, { estado: 'publicado' }); n++; }
+    }
+    if (n > 0) addToast?.({ type: 'success', message: `${n} tarjeta${n === 1 ? '' : 's'} marcada${n === 1 ? '' : 's'} como Publicada 🚀` });
+  }, [asignaciones, addToast]);
 
   const totalVideos = grupos.reduce((n, g) => n + g.tarjetas.reduce((m, t) => m + videosDe(t).length, 0), 0);
+
+  // Pantalla completa del armador (reemplaza la cola mientras está abierto).
+  if (armando) {
+    return (
+      <PublicarArmador
+        producto={armando.producto}
+        tarjetas={armando.tarjetas}
+        addToast={addToast}
+        onPublicadas={alPublicar}
+        onVolver={() => setArmando(null)}
+      />
+    );
+  }
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
@@ -210,9 +220,10 @@ export default function PublicarSection({ addToast }) {
                       </span>
                     )}
                   </div>
-                  <button onClick={() => abrirPublicar(g)} disabled={nVideos === 0}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition disabled:opacity-50">
-                    <Rocket size={13} /> Publicar {nVideos} video{nVideos === 1 ? '' : 's'} <ChevronRight size={12} />
+                  <button onClick={() => abrirArmador(g)}
+                    title="Abre el armador: elegís videos sueltos de cualquier tarjeta, sumás estáticos y repartís en una o varias campañas."
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition">
+                    <Rocket size={13} /> Armar publicación ({nVideos} video{nVideos === 1 ? '' : 's'}) <ChevronRight size={12} />
                   </button>
                 </div>
                 <ul className="divide-y divide-gray-100 dark:divide-gray-700/50">
@@ -245,14 +256,6 @@ export default function PublicarSection({ addToast }) {
         </div>
       )}
 
-      {publicando && (
-        <PublicarCampanaModal
-          a={publicando.a}
-          addToast={addToast}
-          onPublished={alPublicar}
-          onClose={() => setPublicando(null)}
-        />
-      )}
     </div>
   );
 }

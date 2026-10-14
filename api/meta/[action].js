@@ -2818,6 +2818,79 @@ async function handleUploadAdVideos(req, res) {
   });
 }
 
+// Sube IMÁGENES (estáticos) a la biblioteca de la cuenta (adimages) y
+// devuelve el hash de cada una — el creative de un image-ad lo necesita.
+// Las imágenes llegan por URL (image_url de la galería) o por storagePath
+// (bucket `creativos`); el server las baja y manda los bytes en base64.
+async function handleUploadAdImages(req, res) {
+  if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
+  let body;
+  try {
+    if (req.body && typeof req.body === 'object') body = req.body;
+    else {
+      const chunks = [];
+      for await (const c of req) chunks.push(c);
+      body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+    }
+  } catch { return respondJSON(res, 400, { error: 'Body JSON inválido' }); }
+
+  const origin = getOrigin(req);
+  const url = new URL(req.url, origin);
+  const { token, error, status } = await resolveAccessToken(req, url, body?.connection_id || null);
+  if (!token) return respondJSON(res, status || 401, { error: error || 'Meta no conectado' });
+
+  const accountId = String(body.account_id || '').trim();
+  const imagenes = Array.isArray(body.imagenes) ? body.imagenes.slice(0, 30) : [];
+  if (!accountId) return respondJSON(res, 400, { error: 'Falta account_id (con prefijo act_)' });
+  if (imagenes.length === 0) return respondJSON(res, 400, { error: 'Sin imágenes para subir' });
+
+  const sb = getServiceClient();
+  const MAX_BYTES = 8 * 1024 * 1024; // Meta acepta hasta 8MB por imagen
+
+  const subirUna = async (img) => {
+    const name = String(img?.name || 'imagen').slice(0, 90);
+    const index = Number.isInteger(img?.index) ? img.index : null;
+    try {
+      let fileUrl = String(img?.url || '').trim();
+      if (!fileUrl && img?.storagePath) {
+        if (!sb) throw new Error('Supabase no está configurado en el server — no puedo firmar la imagen');
+        const { data, error: e } = await sb.storage.from('creativos').createSignedUrl(String(img.storagePath), 3600);
+        if (e || !data?.signedUrl) throw new Error(`No pude firmar la imagen (${e?.message || 'sin URL'})`);
+        fileUrl = data.signedUrl;
+      }
+      if (!fileUrl) throw new Error('La imagen no tiene URL ni storagePath');
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 25000);
+      const r = await fetch(fileUrl, { redirect: 'follow', signal: ctl.signal });
+      clearTimeout(timer);
+      if (!r.ok) throw new Error(`No pude bajar la imagen (HTTP ${r.status})`);
+      const buf = Buffer.from(await r.arrayBuffer());
+      if (buf.length === 0) throw new Error('La imagen vino vacía');
+      if (buf.length > MAX_BYTES) throw new Error('La imagen pesa más de 8MB — Meta no la acepta');
+      const up = await graphPost(`${accountId}/adimages`, token, { bytes: buf.toString('base64') });
+      // Respuesta: { images: { bytes: { hash, url, ... } } } (la clave es el
+      // nombre del campo subido).
+      const first = up?.images ? Object.values(up.images)[0] : null;
+      if (!first?.hash) throw new Error('Meta no devolvió el hash de la imagen');
+      return { name, index, ok: true, imageHash: first.hash };
+    } catch (e) {
+      return { name, index, ok: false, error: traducirErrorMetaEscritura(e.message) || 'Error subiendo la imagen' };
+    }
+  };
+
+  const resultados = [];
+  for (let i = 0; i < imagenes.length; i += 4) {
+    const tanda = await Promise.all(imagenes.slice(i, i + 4).map(subirUna));
+    resultados.push(...tanda);
+  }
+  const fallaron = resultados.filter(r => !r.ok).length;
+  const code = fallaron === 0 ? 200 : (fallaron === resultados.length ? 502 : 207);
+  return respondJSON(res, code, {
+    ...(code === 502 ? { error: resultados.map(r => `${r.name}: ${r.error}`).join(' | ').slice(0, 600) } : {}),
+    resultados,
+  });
+}
+
 // Estado de procesamiento de los videos subidos (y su thumbnail, que el
 // creative necesita como image_url).
 async function handleVideosStatus(req, res) {
@@ -3004,27 +3077,41 @@ async function handleCreateCampaignStructure(req, res) {
     const crearAd = async (ad, j) => {
       const adsetId = adsetIds[Math.floor(j / adsPerSet)];
       try {
-        // El thumbnail es OBLIGATORIO en video_data: si el polling lo dejó
-        // pasar sin picture, se reintenta acá; sin picture el ad falla con
-        // mensaje claro en vez de mandar un POST inválido.
-        let picture = ad.picture || null;
-        if (!picture) {
-          try { picture = (await graphGet(String(ad.videoId), token, { fields: 'picture' })).picture || null; } catch {}
-        }
-        if (!picture) throw new Error('Meta todavía no generó el thumbnail del video — reintentá en 1 minuto');
+        let oss;
+        if (ad.imageHash) {
+          // ── IMAGEN (estático): link_data con image_hash. El link de destino
+          // es obligatorio — sale del ad modelo, como el resto de la config.
+          if (!template.link) throw new Error('El ad modelo no tiene link de destino — para publicar imágenes elegí una campaña base cuyo ad tenga link.');
+          const linkData = {
+            image_hash: String(ad.imageHash),
+            link: template.link,
+            message,
+          };
+          if (headline) linkData.name = headline;
+          linkData.call_to_action = { type: template.ctaType || 'SHOP_NOW', value: { link: template.link } };
+          oss = { page_id: String(template.pageId), link_data: linkData };
+        } else {
+          // ── VIDEO: el thumbnail es OBLIGATORIO en video_data; si el polling
+          // lo dejó pasar sin picture, se reintenta acá.
+          let picture = ad.picture || null;
+          if (!picture) {
+            try { picture = (await graphGet(String(ad.videoId), token, { fields: 'picture' })).picture || null; } catch {}
+          }
+          if (!picture) throw new Error('Meta todavía no generó el thumbnail del video — reintentá en 1 minuto');
 
-        const videoData = {
-          video_id: String(ad.videoId),
-          image_url: picture,
-          message,
-        };
-        if (headline) videoData.title = headline;
-        if (template.link) videoData.call_to_action = { type: template.ctaType || 'SHOP_NOW', value: { link: template.link } };
-        const oss = { page_id: String(template.pageId), video_data: videoData };
+          const videoData = {
+            video_id: String(ad.videoId),
+            image_url: picture,
+            message,
+          };
+          if (headline) videoData.title = headline;
+          if (template.link) videoData.call_to_action = { type: template.ctaType || 'SHOP_NOW', value: { link: template.link } };
+          oss = { page_id: String(template.pageId), video_data: videoData };
+        }
         if (template.instagramUserId) oss.instagram_user_id = String(template.instagramUserId);
 
         const creative = await graphPost(`${accountId}/adcreatives`, token, {
-          name: `${String(ad.name || 'video').slice(0, 80)} · creative`,
+          name: `${String(ad.name || (ad.imageHash ? 'imagen' : 'video')).slice(0, 80)} · creative`,
           object_story_spec: oss,
         });
         const nuevo = await graphPost(`${accountId}/ads`, token, {
@@ -3135,6 +3222,7 @@ const actions = {
   'ad-preview': handleAdPreview,
   'template-config': handleTemplateConfig,
   'upload-ad-videos': handleUploadAdVideos,
+  'upload-ad-images': handleUploadAdImages,
   'videos-status': handleVideosStatus,
   'create-campaign-structure': handleCreateCampaignStructure,
   publicaciones: handlePublicaciones,

@@ -39,7 +39,7 @@ function guardarPreset(a, preset) {
   try { localStorage.setItem(presetKey(a), JSON.stringify({ ...preset, ts: Date.now() })); } catch {}
 }
 
-async function metaApi(path, { connId, method = 'GET', body } = {}) {
+export async function metaApi(path, { connId, method = 'GET', body } = {}) {
   let u = `/api/meta/${path}`;
   if (connId && connId !== '__cookie__') {
     u += `${u.includes('?') ? '&' : '?'}connection_id=${encodeURIComponent(connId)}`;
@@ -54,18 +54,18 @@ async function metaApi(path, { connId, method = 'GET', body } = {}) {
   return d;
 }
 
-const esperar = (ms) => new Promise(r => setTimeout(r, ms));
+export const esperar = (ms) => new Promise(r => setTimeout(r, ms));
 // Errores de LECTURA de Meta que un buyer no tiene por qué descifrar.
-const amigable = (m) => {
+export const amigable = (m) => {
   const s = String(m || '');
   if (/request limit|#17\)|#80004/i.test(s)) return 'Meta está limitando las consultas — esperá un minuto y reintentá';
   if (/Unsupported get request|does not exist/i.test(s)) return 'Ese elemento ya no existe en Meta (¿lo borraron o archivaron?)';
   return s;
 };
-const sinExtension = (n) => String(n || '').replace(/\.[a-z0-9]{2,5}$/i, '');
+export const sinExtension = (n) => String(n || '').replace(/\.[a-z0-9]{2,5}$/i, '');
 
 // Patrones tipo adsuploader: {filename}, {index}, {index:01}, {date}.
-function aplicarPatron(patron, { filename = '', index = 0, fecha = '' }) {
+export function aplicarPatron(patron, { filename = '', index = 0, fecha = '' }) {
   return String(patron || '')
     .replaceAll('{filename}', filename)
     .replaceAll('{index:01}', String(index + 1).padStart(2, '0'))

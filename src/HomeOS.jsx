@@ -398,13 +398,6 @@ export default function HomeOS({ onNavigate, addToast }) {
               </button>
             }
           />
-          {/* Próximas integraciones: el ecosistema crece acá. */}
-          <div className="rounded-xl border border-dashed border-gray-300 dark:border-gray-700 p-4 flex items-center justify-center text-center">
-            <div>
-              <div className="text-[12px] font-bold text-gray-400">Próximamente</div>
-              <div className="text-[11px] text-gray-400/80">Shopify · TikTok Ads · Google Ads</div>
-            </div>
-          </div>
         </div>
       </section>
     </div>

@@ -2277,12 +2277,6 @@ function AppShell({ onExit }) {
     }
   }, [currentUser?.role, supabaseUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // "Meta Ads" se unificó dentro de Métricas (pestaña Campañas y anuncios):
-  // cualquier estado viejo que caiga en mk-meta redirige.
-  useEffect(() => {
-    if (currentPlatform === 'marketing' && currentSection === 'mk-meta') setCurrentSection('mk-metricas');
-  }, [currentPlatform, currentSection]);
-
   // Cuenta por área: vive en marketing y solo en las secciones de SUS áreas.
   // Si la sección actual no le corresponde (estado viejo de localStorage o
   // navegación directa), lo llevamos a la primera que sí.
@@ -2291,7 +2285,7 @@ function AppShell({ onExit }) {
     if (!m) return;
     if (currentPlatform !== 'marketing') { setCurrentPlatform('marketing'); return; }
     const SECCIONES_AREA = {
-      metricas: ['mk-home', 'mk-metricas'],
+      metricas: ['mk-home', 'mk-meta', 'mk-metricas'],
       productos: ['mk-home', 'mk-arranque'],
       produccion: ['mk-home', 'mk-creativa-dash', 'mk-produccion', 'mk-publicar'],
       landings: ['mk-home', 'mk-landings'],
@@ -2485,17 +2479,20 @@ function AppShell({ onExit }) {
                   Competencia y Creativos viven como tabs adentro de cada
                   producto en Arranque. */}
               {/* Cuenta por área (miembro): solo ve las secciones de SUS áreas. */}
+              {/* Orden del menú a gusto del user (captura 14/10): Publicador
+                  arriba en Operación y Meta Ads como entrada propia. */}
               <NavSection title="Operación" sectionKey="mk-op" sidebarOpen={sidebarOpen}>
                 <NavItem icon={LayoutGridIcon} label="Home" section="mk-home" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                {(!currentUser.miembro || currentUser.miembro.areas.includes('metricas')) && (
-                  /* "Meta Ads" y "Métricas" eran lo mismo (pedido del user 14/10):
-                     queda UNA entrada — Métricas ya incluye Campañas y anuncios.
-                     mk-meta sigue existiendo por estado viejo y redirige. */
+                {(!currentUser.miembro || currentUser.miembro.areas.includes('metricas')) && (<>
+                  <NavItem icon={BarChart3} label="Meta Ads" section="mk-meta" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                   <NavItem icon={Gauge} label="Métricas" section="mk-metricas" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                </>)}
+                {(!currentUser.miembro || currentUser.miembro.areas.includes('produccion')) && (
+                  <NavItem icon={Rocket} label="Publicador" section="mk-publicar" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                 )}
               </NavSection>
               {(!currentUser.miembro || currentUser.miembro.areas.includes('productos')) && (
-                <NavSection title="Productos" sectionKey="mk-estaticos" sidebarOpen={sidebarOpen}>
+                <NavSection title="Creación de estáticos" sectionKey="mk-estaticos" sidebarOpen={sidebarOpen}>
                   <NavItem icon={Play} label="Productos" section="mk-arranque" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                   {/* "Winners" (galería vieja de estáticos) y "Copy AI" salieron del
                       menú (14/10, no se usaban — los winners REALES viven en
@@ -2509,11 +2506,6 @@ function AppShell({ onExit }) {
                   {(!currentUser.miembro || currentUser.miembro.areas.includes('produccion')) && (<>
                     <NavItem icon={Wallet} label="Resumen" section="mk-creativa-dash" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                     <NavItem icon={Film} label="Producción" section="mk-produccion" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                    {/* El Publicador central: la cola de listos para publicar
-                        (videos de tarjetas + estáticos del producto). Pedido
-                        del user: entrada propia debajo de Producción; la
-                        pestaña "Publicar" de Métricas sale. */}
-                    <NavItem icon={Rocket} label="Publicador" section="mk-publicar" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                   </>)}
                   {(!currentUser.miembro || currentUser.miembro.areas.includes('landings')) && (
                     <NavItem icon={ClipboardList} label="Landings" section="mk-landings" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
@@ -2848,14 +2840,14 @@ function NavSection({ title, sectionKey, sidebarOpen, defaultOpen = true, childr
   }
   return (
     <div className="mt-3 first:mt-0">
-      {/* Título de categoría: presencia sin desbordar — 11px extrabold, tracking
-          moderado y en UNA línea (truncate) para títulos largos. */}
+      {/* Título de categoría tipo TÍTULO (pedido del user 14/10): el mismo
+          texto pero grande y protagonista, no la etiquetita uppercase. */}
       <button
         onClick={toggle}
         style={{ fontFamily: "'Sora', Inter, system-ui, sans-serif" }}
-        className="flex items-center gap-1.5 px-4 mb-1 text-[11.5px] font-extrabold uppercase tracking-[0.1em] text-white/70 hover:text-white transition w-full"
+        className="flex items-center gap-1.5 px-4 mb-1 text-[14.5px] font-extrabold tracking-tight text-white/90 hover:text-white transition w-full"
       >
-        <ChevronDown size={11} className={`shrink-0 transition-transform duration-200 ${open ? '' : '-rotate-90'}`} />
+        <ChevronDown size={13} className={`shrink-0 transition-transform duration-200 ${open ? '' : '-rotate-90'}`} />
         <span className="truncate text-left" title={title}>{title}</span>
       </button>
       {/* Ítems con leve sangría y ritmo parejo (misma altura para todos) */}

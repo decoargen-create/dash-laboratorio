@@ -20,7 +20,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Rocket, ArrowLeft, Loader2, Check, AlertTriangle, ExternalLink, Film,
-  Image as ImageIcon, Settings2, Trophy, ChevronRight, ChevronDown,
+  Image as ImageIcon, Settings2, Trophy, ChevronRight, ChevronDown, Maximize2, X,
 } from 'lucide-react';
 import PublicarCampanaModal, {
   leerPresetPublicar, metaApi, esperar, amigable, sinExtension, aplicarPatron,
@@ -94,6 +94,16 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
   const toggle = (k) => setSel(prev => { const n = new Set(prev); if (n.has(k)) n.delete(k); else n.add(k); return n; });
 
   const [estaticos, setEstaticos] = useState(null); // null = cargando
+  // Tamaño de las miniaturas (pedido del user: "maximizar más o menos") y
+  // vista en grande de una imagen (lightbox).
+  const [tamano, setTamano] = useState(() => { try { return localStorage.getItem('adslab-armador-estaticos-size') || 'chico'; } catch { return 'chico'; } });
+  const cambiarTamano = (t) => { setTamano(t); try { localStorage.setItem('adslab-armador-estaticos-size', t); } catch {} };
+  const GRILLAS = {
+    chico: 'grid-cols-4 sm:grid-cols-6 md:grid-cols-8',
+    medio: 'grid-cols-3 sm:grid-cols-4 md:grid-cols-6',
+    grande: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4',
+  };
+  const [preview, setPreview] = useState(null); // estático abierto en grande
   const productoId = useMemo(() => productoIdDeNombre(producto), [producto]);
   useEffect(() => {
     let vivo = true;
@@ -401,7 +411,13 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
               <ImageIcon size={14} className="text-brand-500" /> Estáticos del producto
               <span className="text-[11px] font-semibold text-gray-400">las imágenes de tu galería, publicables como anuncios</span>
               {(estaticos || []).length > 0 && (
-                <span className="ml-auto inline-flex gap-2 text-[11px] font-bold">
+                <span className="ml-auto inline-flex items-center gap-2 text-[11px] font-bold">
+                  <span className="inline-flex gap-0.5 p-0.5 rounded-lg bg-gray-100 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 mr-1" title="Tamaño de las miniaturas">
+                    {[['chico', 'S'], ['medio', 'M'], ['grande', 'L']].map(([t, l]) => (
+                      <button key={t} onClick={() => cambiarTamano(t)}
+                        className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold transition ${tamano === t ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}>{l}</button>
+                    ))}
+                  </span>
                   <button onClick={() => setSel(prev => { const nn = new Set(prev); for (const e of (estaticos || [])) nn.add(`i:${e.id}`); return nn; })}
                     disabled={fase === 'publicando'} className="text-brand-600 dark:text-brand-400 hover:underline">Todos</button>
                   <button onClick={() => setSel(prev => { const nn = new Set(prev); for (const k of prev) if (k.startsWith('i:')) nn.delete(k); return nn; })}
@@ -416,7 +432,7 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
             ) : estaticos.length === 0 ? (
               <p className="text-sm text-gray-400">Este producto todavía no tiene estáticos en la galería.</p>
             ) : (
-              <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-1.5">
+              <div className={`grid ${GRILLAS[tamano] || GRILLAS.chico} gap-1.5`}>
                 {estaticos.map(e => {
                   const k = `i:${e.id}`;
                   const on = sel.has(k);
@@ -431,6 +447,11 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
                         {on ? '✓' : '+'}
                       </span>
                       {e.winner && <Trophy size={12} className="absolute top-1.5 right-1.5 text-amber-400 drop-shadow" />}
+                      <span role="button" tabIndex={-1} title="Ver en grande"
+                        onClick={(ev) => { ev.stopPropagation(); setPreview(e); }}
+                        className="absolute bottom-1.5 right-1.5 w-6 h-6 rounded-md bg-black/50 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-black/70 transition">
+                        <Maximize2 size={13} />
+                      </span>
                     </button>
                   );
                 })}
@@ -551,6 +572,27 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
           )}
         </div>
       </div>
+
+      {/* Lightbox: un estático en grande, con tildar/destildar ahí mismo. */}
+      {preview && (
+        <div className="fixed inset-0 z-[70] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6" onClick={() => setPreview(null)}>
+          <div className="relative max-w-3xl max-h-[85vh] flex flex-col items-center gap-3" onClick={ev => ev.stopPropagation()}>
+            <img src={preview.imageUrl} alt="" className="max-h-[72vh] max-w-full rounded-xl shadow-2xl object-contain" />
+            <div className="flex items-center gap-2">
+              <button onClick={() => { toggle(`i:${preview.id}`); }}
+                className={`px-4 py-2 text-sm font-bold rounded-lg transition ${sel.has(`i:${preview.id}`)
+                  ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                  : 'bg-brand-600 text-white hover:bg-brand-700'}`}>
+                {sel.has(`i:${preview.id}`) ? '✓ Seleccionado — sacar' : '+ Seleccionar para publicar'}
+              </button>
+              <button onClick={() => setPreview(null)}
+                className="px-3 py-2 text-sm font-bold rounded-lg bg-white/10 text-white hover:bg-white/20 transition inline-flex items-center gap-1">
+                <X size={14} /> Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Configurar la campaña base (preset del producto) — reusa el modal en
           modo soloPreset; al cerrar, se relee el preset. */}

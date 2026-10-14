@@ -14,7 +14,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
-  Rocket, X, Loader2, Check, AlertTriangle, ChevronRight, ExternalLink, Film, Save, Pencil,
+  Rocket, X, Loader2, Check, AlertTriangle, ChevronRight, ExternalLink, Film, Save, Pencil, Image as ImageIcon, ArrowLeft,
 } from 'lucide-react';
 import { useMetaConnections, useMetaAdAccounts, authHeaders, openMetaConnect } from './MetaConnect.jsx';
 import { linkMeta } from './testeosCore.js';
@@ -39,7 +39,7 @@ function guardarPreset(a, preset) {
   try { localStorage.setItem(presetKey(a), JSON.stringify({ ...preset, ts: Date.now() })); } catch {}
 }
 
-async function metaApi(path, { connId, method = 'GET', body } = {}) {
+export async function metaApi(path, { connId, method = 'GET', body } = {}) {
   let u = `/api/meta/${path}`;
   if (connId && connId !== '__cookie__') {
     u += `${u.includes('?') ? '&' : '?'}connection_id=${encodeURIComponent(connId)}`;
@@ -55,6 +55,8 @@ async function metaApi(path, { connId, method = 'GET', body } = {}) {
 }
 
 const esperar = (ms) => new Promise(r => setTimeout(r, ms));
+// Estático vs video, por extensión del archivo.
+export const esImagen = (n) => /\.(jpe?g|png|webp|gif)$/i.test(String(n || ''));
 // Errores de LECTURA de Meta que un buyer no tiene por qué descifrar.
 const amigable = (m) => {
   const s = String(m || '');
@@ -77,7 +79,10 @@ function aplicarPatron(patron, { filename = '', index = 0, fecha = '' }) {
 // `soloPreset`: modo "configurar campaña base" desde el Setup del producto —
 // sin videos ni publicación; solo elegir cuenta + ad template + defaults y
 // guardarlos como preset del producto.
-export default function PublicarCampanaModal({ a, onClose, addToast, soloPreset = false, onPublished = null }) {
+// `pantalla`: en vez de pop-up, se renderiza como PÁGINA (el módulo
+// Publicador lo embebe a lo ancho, estilo adsuploader: media a la izquierda,
+// configuración a la derecha).
+export default function PublicarCampanaModal({ a, onClose, addToast, soloPreset = false, onPublished = null, pantalla = false }) {
   const preset = useMemo(() => leerPreset(a), [a]);
   const { connections, loading: connLoading, error: connError, reload: reloadConns } = useMetaConnections();
   const { accounts, loading: acctLoading, errors: acctErrors } = useMetaAdAccounts(connections);
@@ -232,20 +237,46 @@ export default function PublicarCampanaModal({ a, onClose, addToast, soloPreset 
     }
     setFase('subiendo'); setLogs([]); setResultado(null);
     try {
-      // 1. Subir videos a Meta (por URL — el server resuelve Drive/storage).
-      log(`Subiendo ${elegidos.length} video${elegidos.length === 1 ? '' : 's'} a Meta…`);
-      const up = await metaApi('upload-ad-videos', {
-        connId: account.connId, method: 'POST',
-        body: {
-          account_id: account.id,
-          videos: elegidos.map((f, i) => ({ name: f.name, index: i, driveId: f.driveId || null, storagePath: f.storagePath || null })),
-        },
-      });
-      const subidos = (up.resultados || []).filter(r => r.ok);
-      for (const r of (up.resultados || [])) log(r.ok ? `  ✓ ${r.name}` : `  ✗ ${r.name}: ${r.error}`);
-      if (subidos.length === 0) throw new Error('Ningún video se pudo subir a Meta.');
+      // Mixto: los VIDEOS se suben a Meta (act/advideos) y se espera el
+      // procesamiento; los ESTÁTICOS solo necesitan una URL firmada (van como
+      // link_data.picture en el creative). El índice es la posición en
+      // `elegidos`, para que los nombres {index}/{filename} queden alineados.
+      const vids = elegidos.filter(f => !esImagen(f.name));
+      const imgs = elegidos.filter(f => esImagen(f.name));
+
+      let subidos = [];
+      if (vids.length > 0) {
+        log(`Subiendo ${vids.length} video${vids.length === 1 ? '' : 's'} a Meta…`);
+        const up = await metaApi('upload-ad-videos', {
+          connId: account.connId, method: 'POST',
+          body: {
+            account_id: account.id,
+            videos: vids.map(f => ({ name: f.name, index: elegidos.indexOf(f), driveId: f.driveId || null, storagePath: f.storagePath || null })),
+          },
+        });
+        subidos = (up.resultados || []).filter(r => r.ok);
+        for (const r of (up.resultados || [])) log(r.ok ? `  ✓ ${r.name}` : `  ✗ ${r.name}: ${r.error}`);
+      }
+
+      let adsImagen = [];
+      if (imgs.length > 0) {
+        log(`Preparando ${imgs.length} estático${imgs.length === 1 ? '' : 's'}…`);
+        const sm = await metaApi('sign-media', {
+          connId: account.connId, method: 'POST',
+          body: { items: imgs.map(f => ({ index: elegidos.indexOf(f), storagePath: f.storagePath || null, driveId: f.driveId || null })) },
+        });
+        for (const it of (sm.items || [])) {
+          const f = elegidos[it.index];
+          if (it.ok) adsImagen.push({ name: nombresAds[it.index] || sinExtension(f?.name), imageUrl: it.url });
+          log(it.ok ? `  ✓ ${f?.name}` : `  ✗ ${f?.name}: ${it.error}`);
+        }
+      }
+
+      if (subidos.length === 0 && adsImagen.length === 0) throw new Error('Ningún creativo se pudo preparar.');
 
       // 2. Esperar procesamiento + thumbnail (el creative lo necesita).
+      let adsListos = [];
+      if (subidos.length > 0) {
       setFase('procesando');
       log('Esperando que Meta procese los videos (video + thumbnail)…');
       const ids = subidos.map(r => r.videoId);
@@ -275,13 +306,15 @@ export default function PublicarCampanaModal({ a, onClose, addToast, soloPreset 
       const porId = new Map(estados.map(v => [v.id, v]));
       // El server devuelve `index` (la posición que le mandamos): es la única
       // clave segura — mapear por nombre rompía con duplicados o >90 chars.
-      const adsListos = subidos
+      adsListos = subidos
         .filter(r => porId.get(r.videoId)?.ready)
         .map(r => {
           const i = Number.isInteger(r.index) ? r.index : 0;
           return { name: nombresAds[i] || sinExtension(r.name), videoId: r.videoId, picture: porId.get(r.videoId)?.picture || null };
         });
-      if (adsListos.length === 0) throw new Error('Meta no terminó de procesar ningún video — reintentá en unos minutos (ojo: el reintento vuelve a subirlos).');
+      if (adsListos.length === 0 && adsImagen.length === 0) throw new Error('Meta no terminó de procesar ningún video — reintentá en unos minutos (ojo: el reintento vuelve a subirlos).');
+      }
+      adsListos = [...adsListos, ...adsImagen];
 
       // 3. Crear la estructura (el server la crea PAUSADA y la activa al final).
       setFase('creando');
@@ -343,26 +376,77 @@ export default function PublicarCampanaModal({ a, onClose, addToast, soloPreset 
   const adsDelSet = adsets.find(s => s.id === adsetSel)?.ads || [];
   const input = 'w-full px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500';
 
+  const puedeCerrar = !fase || fase === 'listo' || fase === 'error';
   return (
-    <div className="fixed inset-0 z-[60] flex items-start justify-center p-4 overflow-y-auto bg-black/60 backdrop-blur-sm" onClick={() => { if (!fase || fase === 'listo' || fase === 'error') onClose(); }}>
-      <div className="w-full max-w-2xl my-6 flex flex-col max-h-[calc(100vh-5rem)] bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden" onClick={e => e.stopPropagation()}>
+    <div className={pantalla
+      ? 'w-full'
+      : 'fixed inset-0 z-[60] flex items-start justify-center p-4 overflow-y-auto bg-black/60 backdrop-blur-sm'}
+      onClick={pantalla ? undefined : () => { if (puedeCerrar) onClose(); }}>
+      <div className={pantalla
+        ? 'w-full flex flex-col bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden'
+        : 'w-full max-w-2xl my-6 flex flex-col max-h-[calc(100vh-5rem)] bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden'}
+        onClick={pantalla ? undefined : e => e.stopPropagation()}>
         <div className="shrink-0 flex items-center gap-2 px-5 py-4 border-b border-gray-100 dark:border-gray-800">
+          {pantalla && (
+            <button onClick={() => { if (puedeCerrar) onClose(); }} disabled={!puedeCerrar}
+              className="inline-flex items-center gap-1 text-xs font-bold text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 disabled:opacity-40 mr-1">
+              <ArrowLeft size={14} /> Cola
+            </button>
+          )}
           <Rocket size={17} className="text-brand-500" />
           <div className="flex-1 min-w-0">
             <h3 className="text-base font-bold text-gray-900 dark:text-gray-100">{soloPreset ? 'Campaña base del producto' : 'Publicar campaña en Meta'}</h3>
-            <p className="text-[11px] text-gray-400 truncate">{a.productoNombre}{soloPreset ? ' · cuenta + ad template + defaults del publicador' : ` · ${elegidos.length} video${elegidos.length === 1 ? '' : 's'} seleccionado${elegidos.length === 1 ? '' : 's'}`}</p>
+            <p className="text-[11px] text-gray-400 truncate">{a.productoNombre}{soloPreset ? ' · cuenta + ad template + defaults del publicador' : ` · ${elegidos.length} creativo${elegidos.length === 1 ? '' : 's'} seleccionado${elegidos.length === 1 ? '' : 's'}`}</p>
           </div>
           {/* En plena publicación la X no cierra: un cierre a mitad de camino
               dejaba el job corriendo invisible y el buyer, al no ver
               confirmación, publicaba de nuevo → campaña duplicada. */}
-          {(!fase || fase === 'listo' || fase === 'error') ? (
+          {!pantalla && (puedeCerrar ? (
             <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
           ) : (
             <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap">publicando…</span>
+          ))}
+          {pantalla && !puedeCerrar && <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap">publicando…</span>}
+        </div>
+
+        <div className={pantalla
+          ? 'p-6 grid grid-cols-1 lg:grid-cols-5 gap-x-8 gap-y-5 flex-1 min-h-0 overflow-y-auto items-start'
+          : 'p-5 space-y-5 flex-1 min-h-0 overflow-y-auto'}>
+        {/* Columna izquierda (en pantalla): los creativos */}
+        <div className={pantalla ? 'lg:col-span-2 space-y-5' : 'space-y-5'}>
+          {/* Creativos (videos + estáticos) */}
+          {!soloPreset && (
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400">Creativos</span>
+              <span className="text-[10px] text-gray-400">
+                {elegidos.filter(f => !esImagen(f.name)).length} video{elegidos.filter(f => !esImagen(f.name)).length === 1 ? '' : 's'} · {elegidos.filter(f => esImagen(f.name)).length} estático{elegidos.filter(f => esImagen(f.name)).length === 1 ? '' : 's'} elegidos
+              </span>
+            </div>
+            {candidatos.length === 0 ? (
+              <p className="text-sm text-gray-400">No hay videos ni estáticos subidos.</p>
+            ) : (
+              <div className={`space-y-1 overflow-y-auto pr-1 ${pantalla ? 'max-h-[34rem]' : 'max-h-44'}`}>
+                {candidatos.map(f => (
+                  <label key={f.ts} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer">
+                    <input type="checkbox" checked={sel.has(f.ts)} onChange={() => toggleSel(f.ts)} disabled={!!fase} className="accent-brand-500" />
+                    {esImagen(f.name)
+                      ? <ImageIcon size={13} className="text-sky-500 shrink-0" />
+                      : <Film size={13} className="text-gray-400 shrink-0" />}
+                    <span className="flex-1 min-w-0 truncate text-xs text-gray-800 dark:text-gray-100" title={f.name}>{f.name}</span>
+                    {f._origen && <span className="text-[9px] text-gray-400 shrink-0 max-w-[110px] truncate" title={f._origen}>{f._origen}</span>}
+                    {f.aprobado && <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 shrink-0">APROBADO</span>}
+                    <span className="text-[9px] text-gray-400 shrink-0">{f.driveId ? 'Drive' : 'AdsLab'}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
           )}
         </div>
 
-        <div className="p-5 space-y-5 flex-1 min-h-0 overflow-y-auto">
+        {/* Columna derecha (en pantalla): configuración */}
+        <div className={pantalla ? 'lg:col-span-3 space-y-5' : 'space-y-5'}>
           {/* Preset del producto */}
           {usandoPreset && (
             <div className="flex items-center gap-2 rounded-lg border border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 px-3 py-2.5">
@@ -400,28 +484,6 @@ export default function PublicarCampanaModal({ a, onClose, addToast, soloPreset 
               </select>
             )}
           </div>
-
-          {/* Videos */}
-          {!soloPreset && (
-          <div>
-            <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Videos de la tarjeta</span>
-            {candidatos.length === 0 ? (
-              <p className="text-sm text-gray-400">Esta tarjeta no tiene videos subidos.</p>
-            ) : (
-              <div className="space-y-1 max-h-44 overflow-y-auto pr-1">
-                {candidatos.map(f => (
-                  <label key={f.ts} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer">
-                    <input type="checkbox" checked={sel.has(f.ts)} onChange={() => toggleSel(f.ts)} disabled={!!fase} className="accent-brand-500" />
-                    <Film size={13} className="text-gray-400 shrink-0" />
-                    <span className="flex-1 min-w-0 truncate text-xs text-gray-800 dark:text-gray-100" title={f.name}>{f.name}</span>
-                    {f.aprobado && <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 shrink-0">APROBADO</span>}
-                    <span className="text-[9px] text-gray-400 shrink-0">{f.driveId ? 'Drive' : 'AdsLab'}</span>
-                  </label>
-                ))}
-              </div>
-            )}
-          </div>
-          )}
 
           {/* Template picker (solo sin preset activo) */}
           {!usandoPreset && (
@@ -495,7 +557,7 @@ export default function PublicarCampanaModal({ a, onClose, addToast, soloPreset 
             <div>
               <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Ads por conjunto</span>
               <input type="number" min="1" max="10" value={adsPorSet} onChange={e => { const v = e.target.value; setAdsPorSet(v === '' ? '' : Math.max(1, Math.min(10, Math.round(Number(v) || 1)))); }} className={input} disabled={!!fase} />
-              <p className="text-[10px] text-gray-400 mt-1">{elegidos.length} videos → {nSets} conjunto{nSets === 1 ? '' : 's'}</p>
+              <p className="text-[10px] text-gray-400 mt-1">{elegidos.length} creativos → {nSets} conjunto{nSets === 1 ? '' : 's'}</p>
             </div>
             <div>
               <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Patrón nombre de conjunto</span>
@@ -559,6 +621,7 @@ export default function PublicarCampanaModal({ a, onClose, addToast, soloPreset 
             </a>
           )}
         </div>
+        </div>
 
         <div className="shrink-0 flex items-center gap-3 px-5 py-3.5 border-t border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
           {soloPreset ? (
@@ -583,7 +646,7 @@ export default function PublicarCampanaModal({ a, onClose, addToast, soloPreset 
           ) : (
             <button onClick={publicar} disabled={!listo}
               className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition disabled:opacity-50">
-              {fase ? <><Loader2 size={14} className="animate-spin" /> {fase === 'subiendo' ? 'Subiendo videos…' : fase === 'procesando' ? 'Procesando en Meta…' : 'Creando campaña…'}</>
+              {fase ? <><Loader2 size={14} className="animate-spin" /> {fase === 'subiendo' ? 'Subiendo creativos…' : fase === 'procesando' ? 'Procesando en Meta…' : 'Creando campaña…'}</>
                 : <><Rocket size={14} /> Publicar {elegidos.length} ad{elegidos.length === 1 ? '' : 's'} <ChevronRight size={13} /></>}
             </button>
           )}

@@ -9,8 +9,8 @@
 // ve TODO lo publicable junto, sin navegar el tablero.
 // =========================================================================
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Rocket, Film, CheckCircle2, Clock, Settings2, ChevronRight, PackageOpen, History, ExternalLink, Loader2, RefreshCw } from 'lucide-react';
-import PublicarCampanaModal, { leerPresetPublicar } from './PublicarCampanaModal.jsx';
+import { Rocket, Film, CheckCircle2, Clock, Settings2, ChevronRight, PackageOpen, History, ExternalLink, Loader2, RefreshCw, Image as ImageIcon } from 'lucide-react';
+import PublicarCampanaModal, { leerPresetPublicar, esImagen } from './PublicarCampanaModal.jsx';
 import { authHeaders } from './MetaConnect.jsx';
 import {
   listAllAssignments, subscribeProduccion, updateAssignment, weekLabel,
@@ -137,13 +137,22 @@ export default function PublicarSection({ addToast }) {
       addToast?.({ type: 'warning', message: 'Tildá al menos una tarjeta del producto.' });
       return;
     }
-    const archivos = elegidas.flatMap(t => videosDe(t).map(f => ({ ...f, ts: `${t.id}:${f.ts}` })));
+    const archivos = elegidas.flatMap(t => videosDe(t).map(f => ({
+      ...f,
+      ts: `${t.id}:${f.ts}`,
+      _origen: [t.persona, weekLabel(t.weekKey)].filter(Boolean).join(' · '),
+    })));
     setPublicando({
       producto: grupo.producto,
       cardIds: elegidas.map(t => t.id),
       a: { id: `cola-${grupo.producto}`, productoNombre: grupo.producto, archivos },
     });
   }, [desmarcadas, addToast]);
+
+  // Configurar la campaña base (preset) de un producto SIN salir del módulo —
+  // usa el MISMO nombre de producto que la tarjeta, así la clave siempre
+  // matchea (configurarlo desde el Setup con otro nombre lo dejaba huérfano).
+  const [configurando, setConfigurando] = useState(null); // productoNombre
 
   // Publicación OK → las tarjetas incluidas pasan solas a Publicado.
   const alPublicar = useCallback(() => {
@@ -153,6 +162,22 @@ export default function PublicarSection({ addToast }) {
   }, [publicando, addToast]);
 
   const totalVideos = grupos.reduce((n, g) => n + g.tarjetas.reduce((m, t) => m + videosDe(t).length, 0), 0);
+
+  // Publicando: el flujo entero ocupa la PANTALLA (estilo adsuploader) en
+  // vez de un pop-up amontonado — media a la izquierda, config a la derecha.
+  if (publicando) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 py-6">
+        <PublicarCampanaModal
+          pantalla
+          a={publicando.a}
+          addToast={addToast}
+          onPublished={alPublicar}
+          onClose={() => setPublicando(null)}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
@@ -201,18 +226,20 @@ export default function PublicarSection({ addToast }) {
                   <div className="flex items-center gap-2.5 min-w-0">
                     <span className="text-base font-extrabold text-gray-900 dark:text-white truncate">{g.producto}</span>
                     {preset?.adId ? (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded-full px-2 py-0.5">
-                        <CheckCircle2 size={11} /> Campaña base lista
-                      </span>
+                      <button onClick={() => setConfigurando(g.producto)} title="Editar la campaña base de este producto"
+                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded-full px-2 py-0.5 hover:bg-emerald-500/20 transition">
+                        <CheckCircle2 size={11} /> Campaña base lista · editar
+                      </button>
                     ) : (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-gray-500 dark:text-gray-400 bg-gray-500/10 border border-gray-400/30 rounded-full px-2 py-0.5">
-                        <Settings2 size={11} /> Sin preset — la elegís al publicar
-                      </span>
+                      <button onClick={() => setConfigurando(g.producto)} title="Dejar configurada la campaña base: al publicar ya viene todo precargado"
+                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 dark:text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-full px-2 py-0.5 hover:bg-amber-500/20 transition">
+                        <Settings2 size={11} /> Sin campaña base — configurala acá
+                      </button>
                     )}
                   </div>
                   <button onClick={() => abrirPublicar(g)} disabled={nVideos === 0}
                     className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition disabled:opacity-50">
-                    <Rocket size={13} /> Publicar {nVideos} video{nVideos === 1 ? '' : 's'} <ChevronRight size={12} />
+                    <Rocket size={13} /> Publicar {nVideos} creativo{nVideos === 1 ? '' : 's'} <ChevronRight size={12} />
                   </button>
                 </div>
                 <ul className="divide-y divide-gray-100 dark:divide-gray-700/50">
@@ -230,8 +257,11 @@ export default function PublicarSection({ addToast }) {
                           </p>
                           {t.nota && <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{t.nota}</p>}
                         </div>
-                        <span className="inline-flex items-center gap-1 text-xs font-semibold text-gray-600 dark:text-gray-300 shrink-0">
-                          <Film size={12} /> {vids.length} video{vids.length === 1 ? '' : 's'}
+                        <span className="inline-flex items-center gap-2 text-xs font-semibold text-gray-600 dark:text-gray-300 shrink-0">
+                          {(() => { const nv = vids.filter(f => !esImagen(f.name)).length; const ni = vids.length - nv; return (<>
+                            {nv > 0 && <span className="inline-flex items-center gap-1"><Film size={12} /> {nv}</span>}
+                            {ni > 0 && <span className="inline-flex items-center gap-1 text-sky-600 dark:text-sky-400"><ImageIcon size={12} /> {ni}</span>}
+                          </>); })()}
                           {aprob > 0 && aprob < vids.length && <span className="text-emerald-600 dark:text-emerald-400">({aprob} aprob.)</span>}
                         </span>
                       </li>
@@ -241,16 +271,16 @@ export default function PublicarSection({ addToast }) {
               </div>
             );
           })}
-          <p className="text-xs text-gray-400 dark:text-gray-500 text-right">{totalVideos} video{totalVideos === 1 ? '' : 's'} en cola en total</p>
+          <p className="text-xs text-gray-400 dark:text-gray-500 text-right">{totalVideos} creativo{totalVideos === 1 ? '' : 's'} en cola en total</p>
         </div>
       )}
 
-      {publicando && (
+      {configurando && (
         <PublicarCampanaModal
-          a={publicando.a}
+          a={{ id: `preset-${configurando}`, productoNombre: configurando, archivos: [] }}
+          soloPreset
           addToast={addToast}
-          onPublished={alPublicar}
-          onClose={() => setPublicando(null)}
+          onClose={() => setConfigurando(null)}
         />
       )}
     </div>

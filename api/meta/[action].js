@@ -2661,17 +2661,7 @@ async function handleTemplateConfig(req, res) {
 
     // El GET de targeting trae campos read-only/deprecados que Graph RECHAZA
     // al re-postearlos en act/adsets (#100): se sanitiza acá, una sola vez.
-    const targeting = d.adset?.targeting ? { ...d.adset.targeting } : null;
-    if (targeting) {
-      delete targeting.targeting_optimization;
-      delete targeting.targeting_relaxation_types;
-      // Internos que Meta devuelve pero NO acepta en escritura — re-postearlos
-      // tira "(#3) Application does not have the capability" (verificado
-      // 14/10/2026 con un adset real de la cuenta Vya).
-      delete targeting.subscriber_universe;
-      delete targeting.user_age_unknown;
-      delete targeting.age_range;
-    }
+    const targeting = sanitizarTargeting(d.adset?.targeting);
 
     // instagram_actor_id legacy puede ser una cuenta PBIA que
     // instagram_user_id no acepta: lo resolvemos contra la página real y si
@@ -2712,6 +2702,80 @@ async function handleTemplateConfig(req, res) {
   }
 }
 
+// URL de descarga directa para un archivo de Drive. drive.usercontent es
+// el host que hoy sirve bytes directos; uc?export=download devuelve una
+// página interstitial (virus-scan) para archivos grandes y Meta terminaba
+// bajando HTML → "Video Fetch Failed". Validamos con un GET Range (1 byte;
+// algunos endpoints responden 405 a HEAD) que lo que se le manda a Meta sea
+// realmente media, para dar un error accionable.
+async function resolverDriveUrlDirecta(driveId, tipoEsperado = 'video') {
+  const id = encodeURIComponent(String(driveId));
+  const candidatas = [
+    `https://drive.usercontent.google.com/download?id=${id}&export=download&confirm=t`,
+    `https://drive.google.com/uc?export=download&id=${id}&confirm=t`,
+  ];
+  for (const u of candidatas) {
+    try {
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 12000);
+      const h = await fetch(u, { method: 'GET', redirect: 'follow', signal: ctl.signal, headers: { Range: 'bytes=0-0' } });
+      clearTimeout(timer);
+      try { h.body?.cancel?.(); } catch {}
+      const tipo = (h.headers.get('content-type') || '').toLowerCase();
+      const okTipo = tipoEsperado === 'imagen'
+        ? (tipo.startsWith('image/') || tipo.includes('octet-stream'))
+        : (tipo.startsWith('video/') || tipo.includes('octet-stream'));
+      if ((h.ok || h.status === 206) && okTipo) return u;
+    } catch { /* probamos la siguiente */ }
+  }
+  throw new Error('Drive no entrega el archivo directo (¿está compartido como "cualquiera con el link"? ¿pesa >100MB?)');
+}
+
+// Firma URLs de media de AdsLab (bucket creativos) o resuelve links de Drive
+// para que META pueda bajarlos — los estáticos van como link_data.picture en
+// el creative, así que necesitan una URL pública al momento de crear el ad.
+async function handleSignMedia(req, res) {
+  if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
+  let body;
+  try {
+    if (req.body && typeof req.body === 'object') body = req.body;
+    else {
+      const chunks = [];
+      for await (const c of req) chunks.push(c);
+      body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+    }
+  } catch { return respondJSON(res, 400, { error: 'Body JSON inválido' }); }
+  const origin = getOrigin(req);
+  const url = new URL(req.url, origin);
+  const { token, error, status } = await resolveAccessToken(req, url, body?.connection_id || null);
+  if (!token) return respondJSON(res, status || 401, { error: error || 'Meta no conectado' });
+
+  const items = (Array.isArray(body.items) ? body.items : []).slice(0, 30);
+  if (items.length === 0) return respondJSON(res, 400, { error: 'Sin items' });
+  const sb = getServiceClient();
+  const out = [];
+  for (const it of items) {
+    const index = Number.isInteger(it?.index) ? it.index : null;
+    try {
+      let mediaUrl = '';
+      if (it?.storagePath) {
+        if (!sb) throw new Error('Supabase no está configurado en el server');
+        const { data, error: e } = await sb.storage.from('creativos').createSignedUrl(String(it.storagePath), 3600);
+        if (e || !data?.signedUrl) throw new Error(`No pude firmar el archivo (${e?.message || 'sin URL'})`);
+        mediaUrl = data.signedUrl;
+      } else if (it?.driveId) {
+        mediaUrl = await resolverDriveUrlDirecta(it.driveId, 'imagen');
+      } else {
+        throw new Error('El archivo no tiene storagePath ni driveId');
+      }
+      out.push({ index, ok: true, url: mediaUrl });
+    } catch (e) {
+      out.push({ index, ok: false, error: e.message });
+    }
+  }
+  return respondJSON(res, 200, { items: out });
+}
+
 // Sube videos a act/advideos por URL. El server resuelve la URL de cada
 // archivo de la tarjeta: storagePath (bucket creativos, firmada con el rol
 // de servicio — el admin no puede firmar paths del editor desde el client) o
@@ -2740,33 +2804,7 @@ async function handleUploadAdVideos(req, res) {
   if (videos.length === 0) return respondJSON(res, 400, { error: 'Sin videos para subir' });
 
   const sb = getServiceClient();
-
-  // URL de descarga directa para un archivo de Drive. drive.usercontent es
-  // el host que hoy sirve bytes directos; uc?export=download devuelve una
-  // página interstitial (virus-scan) para archivos grandes y Meta terminaba
-  // bajando HTML → "Video Fetch Failed". Validamos con un HEAD que lo que se
-  // le manda a Meta sea realmente un video, para dar un error accionable.
-  const resolverDriveUrl = async (driveId) => {
-    const id = encodeURIComponent(String(driveId));
-    const candidatas = [
-      `https://drive.usercontent.google.com/download?id=${id}&export=download&confirm=t`,
-      `https://drive.google.com/uc?export=download&id=${id}&confirm=t`,
-    ];
-    for (const u of candidatas) {
-      try {
-        const ctl = new AbortController();
-        const timer = setTimeout(() => ctl.abort(), 12000);
-        // GET con Range (1 byte) en vez de HEAD: algunos endpoints de Drive
-        // responden 405 o sin content-type útil a HEAD.
-        const h = await fetch(u, { method: 'GET', redirect: 'follow', signal: ctl.signal, headers: { Range: 'bytes=0-0' } });
-        clearTimeout(timer);
-        try { h.body?.cancel?.(); } catch {}
-        const tipo = (h.headers.get('content-type') || '').toLowerCase();
-        if ((h.ok || h.status === 206) && (tipo.startsWith('video/') || tipo.includes('octet-stream'))) return u;
-      } catch { /* probamos la siguiente */ }
-    }
-    throw new Error('Drive no entrega el archivo directo (¿está compartido como "cualquiera con el link"? ¿pesa >100MB?)');
-  };
+  const resolverDriveUrl = (driveId) => resolverDriveUrlDirecta(driveId, 'video');
 
   const subirUno = async (v) => {
     const name = String(v?.name || 'video').slice(0, 90);
@@ -2867,7 +2905,7 @@ async function handleCreateCampaignStructure(req, res) {
   const template = body.template || {};
   const message = String(body.message || '').slice(0, 2000);
   const headline = String(body.headline || '').slice(0, 120);
-  const ads = (Array.isArray(body.ads) ? body.ads : []).filter(a => a?.videoId).slice(0, 30);
+  const ads = (Array.isArray(body.ads) ? body.ads : []).filter(a => a?.videoId || a?.imageUrl).slice(0, 30);
 
   if (!accountId) return respondJSON(res, 400, { error: 'Falta account_id' });
   if (!campaignName) return respondJSON(res, 400, { error: 'Falta el nombre de la campaña' });
@@ -2992,23 +3030,39 @@ async function handleCreateCampaignStructure(req, res) {
     const crearAd = async (ad, j) => {
       const adsetId = adsetIds[Math.floor(j / adsPerSet)];
       try {
-        // El thumbnail es OBLIGATORIO en video_data: si el polling lo dejó
-        // pasar sin picture, se reintenta acá; sin picture el ad falla con
-        // mensaje claro en vez de mandar un POST inválido.
-        let picture = ad.picture || null;
-        if (!picture) {
-          try { picture = (await graphGet(String(ad.videoId), token, { fields: 'picture' })).picture || null; } catch {}
-        }
-        if (!picture) throw new Error('Meta todavía no generó el thumbnail del video — reintentá en 1 minuto');
+        let oss;
+        if (ad.imageUrl) {
+          // ESTÁTICO: link_data con picture por URL (Meta la baja al crear).
+          // link es obligatorio en link_data — sin link en el template no hay
+          // forma de armar el ad de imagen.
+          if (!template.link) throw new Error('El template no tiene link de destino — los estáticos lo necesitan (elegí un ad base con CTA/link)');
+          const linkData = {
+            picture: String(ad.imageUrl),
+            link: template.link,
+            message,
+          };
+          if (headline) linkData.name = headline;
+          linkData.call_to_action = { type: template.ctaType || 'SHOP_NOW', value: { link: template.link } };
+          oss = { page_id: String(template.pageId), link_data: linkData };
+        } else {
+          // VIDEO: el thumbnail es OBLIGATORIO en video_data: si el polling lo
+          // dejó pasar sin picture, se reintenta acá; sin picture el ad falla
+          // con mensaje claro en vez de mandar un POST inválido.
+          let picture = ad.picture || null;
+          if (!picture) {
+            try { picture = (await graphGet(String(ad.videoId), token, { fields: 'picture' })).picture || null; } catch {}
+          }
+          if (!picture) throw new Error('Meta todavía no generó el thumbnail del video — reintentá en 1 minuto');
 
-        const videoData = {
-          video_id: String(ad.videoId),
-          image_url: picture,
-          message,
-        };
-        if (headline) videoData.title = headline;
-        if (template.link) videoData.call_to_action = { type: template.ctaType || 'SHOP_NOW', value: { link: template.link } };
-        const oss = { page_id: String(template.pageId), video_data: videoData };
+          const videoData = {
+            video_id: String(ad.videoId),
+            image_url: picture,
+            message,
+          };
+          if (headline) videoData.title = headline;
+          if (template.link) videoData.call_to_action = { type: template.ctaType || 'SHOP_NOW', value: { link: template.link } };
+          oss = { page_id: String(template.pageId), video_data: videoData };
+        }
         if (template.instagramUserId) oss.instagram_user_id = String(template.instagramUserId);
 
         const creative = await graphPost(`${accountId}/adcreatives`, token, {
@@ -3085,6 +3139,113 @@ async function handleCreateCampaignStructure(req, res) {
   }
 }
 
+// El GET de targeting trae campos que Graph devuelve pero RECHAZA al
+// re-postearlos: los read-only clásicos (#100) y los internos que tiran
+// "(#3) Application does not have the capability" (verificado 14/10/2026
+// con un adset real de la cuenta Vya).
+function sanitizarTargeting(t) {
+  if (!t) return null;
+  const targeting = { ...t };
+  delete targeting.targeting_optimization;
+  delete targeting.targeting_relaxation_types;
+  delete targeting.subscriber_universe;
+  delete targeting.user_age_unknown;
+  delete targeting.age_range;
+  return targeting;
+}
+
+// "Escalar ganador": duplica un ad que funciona a un CONJUNTO NUEVO de su
+// misma campaña reutilizando el POST del original (object_story_id) — el ad
+// nuevo conserva likes, comentarios y compartidos (social proof). Lo que
+// hoy se hace a mano en Ads Manager perdiendo o duplicando el post.
+async function handleEscalarAd(req, res) {
+  if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
+  let body;
+  try {
+    if (req.body && typeof req.body === 'object') body = req.body;
+    else {
+      const chunks = [];
+      for await (const c of req) chunks.push(c);
+      body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+    }
+  } catch { return respondJSON(res, 400, { error: 'Body JSON inválido' }); }
+
+  const origin = getOrigin(req);
+  const url = new URL(req.url, origin);
+  const { token, error, status: authStatus } = await resolveAccessToken(req, url, body?.connection_id || null);
+  if (!token) return respondJSON(res, authStatus || 401, { error: error || 'Meta no conectado' });
+
+  const accountId = String(body.account_id || '').trim();
+  const adId = String(body.ad_id || '').trim();
+  const nombreConjunto = String(body.adsetName || '').trim().slice(0, 100);
+  const estado = body.status === 'ACTIVE' ? 'ACTIVE' : 'PAUSED';
+  if (!accountId || !/^\d+$/.test(adId)) return respondJSON(res, 400, { error: 'Faltan account_id y/o ad_id' });
+  if (!nombreConjunto) return respondJSON(res, 400, { error: 'Falta el nombre del conjunto nuevo' });
+
+  const log = [];
+  try {
+    const d = await graphGet(adId, token, {
+      fields: 'id,name,creative{id,object_story_id,effective_object_story_id},adset{id,name,targeting,optimization_goal,billing_event,promoted_object,destination_type,bid_amount,campaign{id,name,daily_budget,lifetime_budget,bid_strategy,status}}',
+    });
+    const storyId = d.creative?.effective_object_story_id || d.creative?.object_story_id || null;
+    if (!storyId) return respondJSON(res, 400, { error: 'Este ad no tiene un post reutilizable (object_story_id) — no se puede escalar conservando el social proof.' });
+    const src = d.adset || {};
+    const camp = src.campaign || {};
+    if (!camp.id) return respondJSON(res, 400, { error: 'No pude leer la campaña del ad' });
+
+    // CBO (budget en la campaña) → el conjunto nuevo va sin presupuesto.
+    // ABO → el conjunto necesita su propio daily_budget.
+    const esCBO = !!(camp.daily_budget || camp.lifetime_budget);
+    const payload = {
+      name: nombreConjunto,
+      campaign_id: camp.id,
+      targeting: sanitizarTargeting(src.targeting) || { geo_locations: { countries: ['AR'] } },
+      optimization_goal: src.optimization_goal || 'OFFSITE_CONVERSIONS',
+      billing_event: src.billing_event || 'IMPRESSIONS',
+      status: estado,
+    };
+    if (src.promoted_object) payload.promoted_object = src.promoted_object;
+    if (src.destination_type && src.destination_type !== 'UNDEFINED') payload.destination_type = src.destination_type;
+    if (src.bid_amount) payload.bid_amount = src.bid_amount;
+    if (!esCBO) {
+      const dailyBudget = Number(body.dailyBudget);
+      if (!(dailyBudget > 0)) return respondJSON(res, 400, { error: 'La campaña no es CBO: pasá un presupuesto diario para el conjunto nuevo.' });
+      let currency = '';
+      try { currency = String((await graphGet(accountId, token, { fields: 'currency' }))?.currency || '').toUpperCase(); } catch {}
+      const SIN_CENTAVOS = new Set(['CLP', 'COP', 'PYG', 'VND', 'JPY', 'KRW', 'HUF', 'TWD', 'ISK', 'CRC']);
+      payload.daily_budget = Math.round(dailyBudget * (SIN_CENTAVOS.has(currency) ? 1 : 100));
+    }
+
+    const adset = await graphPost(`${accountId}/adsets`, token, payload);
+    log.push(`✓ Conjunto nuevo: ${adset.id} (${esCBO ? 'CBO: presupuesto en la campaña' : 'con presupuesto propio'})`);
+
+    const creative = await graphPost(`${accountId}/adcreatives`, token, {
+      name: `${String(d.name || 'ganador').slice(0, 70)} · escala`,
+      object_story_id: storyId,
+    });
+    const nuevo = await graphPost(`${accountId}/ads`, token, {
+      name: String(body.adName || d.name || 'Escala').slice(0, 100),
+      adset_id: adset.id,
+      creative: { creative_id: creative.id },
+      status: estado,
+    });
+    log.push(`✓ Ad escalado: ${nuevo.id} (mismo post → conserva likes/comentarios)`);
+
+    return respondJSON(res, 200, {
+      adsetId: adset.id,
+      adId: nuevo.id,
+      campaignId: camp.id,
+      campaignName: camp.name,
+      esCBO,
+      estado,
+      log,
+    });
+  } catch (err) {
+    log.push(`✗ ${err.message}`);
+    return respondJSON(res, err.status || 502, { error: traducirErrorMetaEscritura(err.message), log });
+  }
+}
+
 // Historial de publicaciones del Publicador (solo las del usuario logueado).
 async function handlePublicaciones(req, res) {
   if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
@@ -3123,9 +3284,11 @@ const actions = {
   'ad-preview': handleAdPreview,
   'template-config': handleTemplateConfig,
   'upload-ad-videos': handleUploadAdVideos,
+  'sign-media': handleSignMedia,
   'videos-status': handleVideosStatus,
   'create-campaign-structure': handleCreateCampaignStructure,
   publicaciones: handlePublicaciones,
+  'escalar-ad': handleEscalarAd,
   'ig-accounts': handleIgAccounts,
   'latest-ig-post': handleLatestIgPost,
   'campaigns': handleCampaigns,

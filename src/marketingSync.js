@@ -11,6 +11,11 @@
 // siguen 100% en localStorage.
 
 import { supabase, getCurrentUser } from './supabase.js';
+import { ownerEfectivo } from './miembroStore.js';
+// Dueño EFECTIVO de los datos: para una cuenta normal es su propio uuid; para
+// un miembro (cuenta por área) es el uuid de su dueño — la RLS de 0042 le
+// permite leer/escribir esas filas, y así ambos ven EL MISMO tablero.
+const uid = (user) => ownerEfectivo(user?.id);
 import { migrateBandejaIdeasFromProductos } from './cloudData.js';
 
 const KEYS = {
@@ -49,7 +54,7 @@ export async function pullMarketingFromCloud() {
   if (!supabase) throw new Error('Supabase no configurado');
   const user = await getCurrentUser();
   if (!user) throw new Error('No hay user logueado');
-  console.info(`[sync] pull arrancando para user ${user.id}`);
+  console.info(`[sync] pull arrancando para user ${uid(user)}`);
 
   // 0) Migración lazy: bandejaIdeas inline en producto → tabla marketing_ideas.
   // Idempotente — solo hace algo la primera vez tras el rollout.
@@ -528,7 +533,7 @@ export async function pushProducto(producto) {
     const { data: cloudCurrent } = await supabase
       .from('marketing_productos')
       .select('data, updated_at')
-      .eq('user_id', user.id)
+      .eq('user_id', uid(user))
       .eq('id', String(producto.id))
       .maybeSingle();
     const cloudSize = cloudCurrent?.data ? JSON.stringify(cloudCurrent.data).length : 0;
@@ -550,7 +555,7 @@ export async function pushProducto(producto) {
     .from('marketing_productos')
     .upsert({
       id: String(producto.id),
-      user_id: user.id,
+      user_id: uid(user),
       data: stripped,
       updated_at: stripped.updated_at || stripped.updatedAt || new Date().toISOString(),
     }, { onConflict: 'user_id,id' });
@@ -591,7 +596,7 @@ export async function pushAllProductos(productos) {
     const { data: cloudCurrent } = await supabase
       .from('marketing_productos')
       .select('id, data, updated_at')
-      .eq('user_id', user.id)
+      .eq('user_id', uid(user))
       .in('id', productos.map(p => String(p.id)));
     for (const row of cloudCurrent || []) {
       if (row.data?._deleted) {
@@ -663,7 +668,7 @@ export async function pushAllProductos(productos) {
 
   const rows = safe.map(p => ({
     id: String(p.id),
-    user_id: user.id,
+    user_id: uid(user),
     data: p,
     // Seteamos updated_at explícito: `default now()` solo aplica en INSERT, no
     // en UPDATE, así que sin esto la columna quedaba vieja en cada edición y
@@ -697,7 +702,7 @@ export async function deleteProducto(productoId) {
   await supabase
     .from('marketing_brands')
     .delete()
-    .eq('user_id', user.id)
+    .eq('user_id', uid(user))
     .eq('producto_id', idStr);
   // Creativos del producto (rows en marketing_creativos).
   // Para borrar también los bytes del Storage haría falta listar
@@ -707,7 +712,7 @@ export async function deleteProducto(productoId) {
   await supabase
     .from('marketing_creativos')
     .delete()
-    .eq('user_id', user.id)
+    .eq('user_id', uid(user))
     .eq('producto_id', idStr);
   // Producto al final — TOMBSTONE en vez de delete duro. Si elimináramos la
   // fila, cualquier otra sesión/PC que todavía tenga el producto en su
@@ -722,7 +727,7 @@ export async function deleteProducto(productoId) {
     .from('marketing_productos')
     .upsert({
       id: idStr,
-      user_id: user.id,
+      user_id: uid(user),
       data: { id: idStr, _deleted: true, deleted_at: nowIso, updated_at: nowIso },
       updated_at: nowIso,
     }, { onConflict: 'user_id,id' });
@@ -752,7 +757,7 @@ export async function pushBrandsForProducto(productoId, brands) {
     const rows = brands.map(b => ({
       producto_id: String(productoId),
       brand_id: String(b.id),
-      user_id: user.id,
+      user_id: uid(user),
       data: b,
     }));
     const { error } = await supabase
@@ -769,11 +774,11 @@ export async function pushBrandsForProducto(productoId, brands) {
   let enServer = null, conCreatedAt = true;
   {
     const q = await supabase.from('marketing_brands').select('brand_id, created_at')
-      .eq('producto_id', String(productoId)).eq('user_id', user.id);
+      .eq('producto_id', String(productoId)).eq('user_id', uid(user));
     if (q.error) {
       conCreatedAt = false;
       const q2 = await supabase.from('marketing_brands').select('brand_id')
-        .eq('producto_id', String(productoId)).eq('user_id', user.id);
+        .eq('producto_id', String(productoId)).eq('user_id', uid(user));
       enServer = q2.data;
     } else enServer = q.data;
   }
@@ -786,7 +791,7 @@ export async function pushBrandsForProducto(productoId, brands) {
     await supabase
       .from('marketing_brands')
       .delete()
-      .eq('user_id', user.id)
+      .eq('user_id', uid(user))
       .eq('producto_id', String(productoId))
       .in('brand_id', aBorrar);
   }
@@ -802,7 +807,7 @@ export async function pushPrefs(prefs) {
   const { error } = await supabase
     .from('marketing_prefs')
     .upsert({
-      user_id: user.id,
+      user_id: uid(user),
       active_producto_id: prefs.activeProductoId || null,
       gen_opts: prefs.genOpts || null,
     }, { onConflict: 'user_id' });

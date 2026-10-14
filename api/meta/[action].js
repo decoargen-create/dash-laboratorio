@@ -25,7 +25,7 @@ import {
   isSupabaseConfigured, getUserIdFromAuth,
   listMetaConnections, insertMetaConnection,
   getMetaConnectionToken, deleteMetaConnection,
-  getServiceClient,
+  getServiceClient, getMiembroOwner,
 } from '../marketing/_supabase-server.js';
 
 // Resuelve el access token a usar para un request. Dos fuentes:
@@ -38,7 +38,13 @@ async function resolveAccessToken(req, url, extraConnId = null) {
   if (connId) {
     const userId = await getUserIdFromAuth(req);
     if (!userId) return { error: 'No autenticado — falta sesión de Supabase', status: 401 };
-    const token = await getMetaConnectionToken(userId, connId);
+    let token = await getMetaConnectionToken(userId, connId);
+    if (!token) {
+      // Cuentas POR ÁREA: un miembro con 'metricas' usa las conexiones de SU
+      // dueño (los productos del dueño ya traen el connection_id guardado).
+      const ownerId = await getMiembroOwner(userId, 'metricas');
+      if (ownerId) token = await getMetaConnectionToken(ownerId, connId);
+    }
     if (!token) return { error: 'Conexión no encontrada o sin acceso', status: 404 };
     return { token };
   }
@@ -1619,7 +1625,13 @@ async function handleConnections(req, res) {
     const userId = await getUserIdFromAuth(req);
     if (!userId) return respondJSON(res, 200, { supabase: true, authenticated: false, connections: [] });
     try {
-      const connections = await listMetaConnections(userId);
+      let connections = await listMetaConnections(userId);
+      // Cuentas POR ÁREA: un miembro con 'metricas' ve las conexiones de su
+      // dueño (de solo-uso: el token nunca viaja al cliente).
+      if (!connections?.length) {
+        const ownerId = await getMiembroOwner(userId, 'metricas');
+        if (ownerId) connections = await listMetaConnections(ownerId);
+      }
       return respondJSON(res, 200, { supabase: true, authenticated: true, connections });
     } catch (err) {
       return respondJSON(res, 502, { error: err.message });
@@ -2455,7 +2467,7 @@ async function handleLaunchCampaign(req, res) {
   if (!token) return respondJSON(res, authStatus || 401, { error: error || 'Meta no conectado' });
 
   const accountId = String(body.account_id || '').trim();
-  const estructura = ['cbo_deep', 'cbo_costcap', 'abo_bidcap'].includes(body.estructura) ? body.estructura : null;
+  const estructura = ['cbo_deep', 'cbo_costcap', 'abo_costcap', 'abo_bidcap'].includes(body.estructura) ? body.estructura : null;
   const nombre = String(body.nombre || '').trim();
   const presupuesto = Number(body.presupuesto);
   const puja = Number(body.puja || 0);
@@ -2469,6 +2481,18 @@ async function handleLaunchCampaign(req, res) {
   const duplicarAds = body.duplicarAds !== false;
   const pageId = String(body.pageId || '').trim();
   const pixelId = String(body.pixelId || '').trim();
+  // ABO: puja POR CONJUNTO (array alineado con los conjuntos); si un índice
+  // falta o es inválido, cae a la puja base.
+  const pujasArr = Array.isArray(body.pujas) ? body.pujas.map(Number) : null;
+  // Programación: la campaña/conjuntos arrancan en esta fecha (ISO con zona).
+  // Meta la muestra "Programada" y no gasta antes.
+  let startTime = null;
+  if (body.startTime) {
+    const d = new Date(String(body.startTime));
+    if (isNaN(d.getTime())) return respondJSON(res, 400, { error: 'Fecha de programación inválida' });
+    if (d.getTime() < Date.now() + 5 * 60 * 1000) return respondJSON(res, 400, { error: 'La fecha de programación tiene que ser al menos 5 minutos en el futuro' });
+    startTime = d.toISOString();
+  }
   const pais = /^[A-Z]{2}$/.test(String(body.pais || '').toUpperCase()) ? String(body.pais).toUpperCase() : 'AR';
   const edadMin = Math.min(65, Math.max(13, Math.round(Number(body.edadMin) || 18)));
   const edadMax = Math.min(65, Math.max(edadMin, Math.round(Number(body.edadMax) || 65)));
@@ -2481,8 +2505,13 @@ async function handleLaunchCampaign(req, res) {
   if (!estructura) return respondJSON(res, 400, { error: 'Estructura inválida' });
   if (!nombre) return respondJSON(res, 400, { error: 'Falta el nombre de la campaña' });
   if (!Number.isFinite(presupuesto) || presupuesto <= 0) return respondJSON(res, 400, { error: 'Presupuesto inválido' });
-  if ((estructura === 'cbo_costcap' || estructura === 'abo_bidcap') && (!Number.isFinite(puja) || puja <= 0)) {
-    return respondJSON(res, 400, { error: estructura === 'cbo_costcap' ? 'Falta la puja (costo por compra objetivo)' : 'Falta la puja (tope de puja)' });
+  const pujaDelSet = (i) => (pujasArr && Number.isFinite(pujasArr[i]) && pujasArr[i] > 0 ? pujasArr[i] : puja);
+  const pujasValidas = estructura === 'cbo_deep'
+    || (estructura.startsWith('abo')
+      ? Array.from({ length: conjuntos }).every((_, i) => pujaDelSet(i) > 0)
+      : (Number.isFinite(puja) && puja > 0));
+  if (!pujasValidas) {
+    return respondJSON(res, 400, { error: estructura === 'abo_bidcap' ? 'Falta la puja (tope de puja) en algún conjunto' : 'Falta la puja (costo por compra objetivo)' });
   }
   if (!pixelId) return respondJSON(res, 400, { error: 'Falta el píxel (va en promoted_object del conjunto)' });
   if (!ads.length) return respondJSON(res, 400, { error: 'Pasá al menos un anuncio (nombre + post id)' });
@@ -2498,8 +2527,8 @@ async function handleLaunchCampaign(req, res) {
 
   const estado = activar ? 'ACTIVE' : 'PAUSED';
   const bidStrategy = estructura === 'cbo_deep' ? 'LOWEST_COST_WITHOUT_CAP'
-    : estructura === 'cbo_costcap' ? 'COST_CAP' : 'LOWEST_COST_WITH_BID_CAP';
-  const esCbo = estructura !== 'abo_bidcap';
+    : estructura === 'abo_bidcap' ? 'LOWEST_COST_WITH_BID_CAP' : 'COST_CAP';
+  const esCbo = !estructura.startsWith('abo');
 
   const resumen = { campaignId: null, adsets: [], errores: [] };
   try {
@@ -2548,7 +2577,8 @@ async function handleLaunchCampaign(req, res) {
         },
       };
       if (!esCbo) adsetParams.daily_budget = String(Math.round(presupuesto * 100));
-      if (estructura !== 'cbo_deep') adsetParams.bid_amount = String(Math.round(puja * 100));
+      if (estructura !== 'cbo_deep') adsetParams.bid_amount = String(Math.round(pujaDelSet(i) * 100));
+      if (startTime) adsetParams.start_time = startTime;
       let adset;
       try {
         adset = await graphPost(`${accountId}/adsets`, token, adsetParams);
@@ -2806,6 +2836,79 @@ async function handleUploadAdVideos(req, res) {
   });
 }
 
+// Sube IMÁGENES (estáticos) a la biblioteca de la cuenta (adimages) y
+// devuelve el hash de cada una — el creative de un image-ad lo necesita.
+// Las imágenes llegan por URL (image_url de la galería) o por storagePath
+// (bucket `creativos`); el server las baja y manda los bytes en base64.
+async function handleUploadAdImages(req, res) {
+  if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
+  let body;
+  try {
+    if (req.body && typeof req.body === 'object') body = req.body;
+    else {
+      const chunks = [];
+      for await (const c of req) chunks.push(c);
+      body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+    }
+  } catch { return respondJSON(res, 400, { error: 'Body JSON inválido' }); }
+
+  const origin = getOrigin(req);
+  const url = new URL(req.url, origin);
+  const { token, error, status } = await resolveAccessToken(req, url, body?.connection_id || null);
+  if (!token) return respondJSON(res, status || 401, { error: error || 'Meta no conectado' });
+
+  const accountId = String(body.account_id || '').trim();
+  const imagenes = Array.isArray(body.imagenes) ? body.imagenes.slice(0, 30) : [];
+  if (!accountId) return respondJSON(res, 400, { error: 'Falta account_id (con prefijo act_)' });
+  if (imagenes.length === 0) return respondJSON(res, 400, { error: 'Sin imágenes para subir' });
+
+  const sb = getServiceClient();
+  const MAX_BYTES = 8 * 1024 * 1024; // Meta acepta hasta 8MB por imagen
+
+  const subirUna = async (img) => {
+    const name = String(img?.name || 'imagen').slice(0, 90);
+    const index = Number.isInteger(img?.index) ? img.index : null;
+    try {
+      let fileUrl = String(img?.url || '').trim();
+      if (!fileUrl && img?.storagePath) {
+        if (!sb) throw new Error('Supabase no está configurado en el server — no puedo firmar la imagen');
+        const { data, error: e } = await sb.storage.from('creativos').createSignedUrl(String(img.storagePath), 3600);
+        if (e || !data?.signedUrl) throw new Error(`No pude firmar la imagen (${e?.message || 'sin URL'})`);
+        fileUrl = data.signedUrl;
+      }
+      if (!fileUrl) throw new Error('La imagen no tiene URL ni storagePath');
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 25000);
+      const r = await fetch(fileUrl, { redirect: 'follow', signal: ctl.signal });
+      clearTimeout(timer);
+      if (!r.ok) throw new Error(`No pude bajar la imagen (HTTP ${r.status})`);
+      const buf = Buffer.from(await r.arrayBuffer());
+      if (buf.length === 0) throw new Error('La imagen vino vacía');
+      if (buf.length > MAX_BYTES) throw new Error('La imagen pesa más de 8MB — Meta no la acepta');
+      const up = await graphPost(`${accountId}/adimages`, token, { bytes: buf.toString('base64') });
+      // Respuesta: { images: { bytes: { hash, url, ... } } } (la clave es el
+      // nombre del campo subido).
+      const first = up?.images ? Object.values(up.images)[0] : null;
+      if (!first?.hash) throw new Error('Meta no devolvió el hash de la imagen');
+      return { name, index, ok: true, imageHash: first.hash };
+    } catch (e) {
+      return { name, index, ok: false, error: traducirErrorMetaEscritura(e.message) || 'Error subiendo la imagen' };
+    }
+  };
+
+  const resultados = [];
+  for (let i = 0; i < imagenes.length; i += 4) {
+    const tanda = await Promise.all(imagenes.slice(i, i + 4).map(subirUna));
+    resultados.push(...tanda);
+  }
+  const fallaron = resultados.filter(r => !r.ok).length;
+  const code = fallaron === 0 ? 200 : (fallaron === resultados.length ? 502 : 207);
+  return respondJSON(res, code, {
+    ...(code === 502 ? { error: resultados.map(r => `${r.name}: ${r.error}`).join(' | ').slice(0, 600) } : {}),
+    resultados,
+  });
+}
+
 // Mix VIDEO vs IMAGEN por campaña (para "Testeos por semana"): cuánto del
 // gasto/ventas de cada campaña vino de ads de video y cuánto de imagen.
 // Dos llamadas: insights a nivel ad (la ventana elegida) + el tipo de
@@ -2994,7 +3097,27 @@ async function handleCreateCampaignStructure(req, res) {
   const template = body.template || {};
   const message = String(body.message || '').slice(0, 2000);
   const headline = String(body.headline || '').slice(0, 120);
-  const ads = (Array.isArray(body.ads) ? body.ads : []).filter(a => a?.videoId).slice(0, 30);
+  const ads = (Array.isArray(body.ads) ? body.ads : []).filter(a => a?.videoId || a?.imageHash).slice(0, 30);
+  // Receta de la campaña (las del equipo): define dónde vive el presupuesto
+  // (CBO = campaña / ABO = conjunto) y la estrategia de puja.
+  //   cbo_deep     → CBO sin tope de puja (default, la de testeo de siempre)
+  //   cbo_costcap  → CBO + COST_CAP con costo por compra objetivo (puja)
+  //   abo_costcap  → presupuesto POR CONJUNTO + COST_CAP (puja)
+  //   abo_bidcap   → presupuesto POR CONJUNTO + tope de puja duro (puja)
+  let startTime = null;
+  if (body.startTime) {
+    const d = new Date(String(body.startTime));
+    if (isNaN(d.getTime())) return respondJSON(res, 400, { error: 'Fecha de programación inválida' });
+    if (d.getTime() < Date.now() + 5 * 60 * 1000) return respondJSON(res, 400, { error: 'La fecha de programación tiene que ser al menos 5 minutos en el futuro' });
+    startTime = d.toISOString();
+  }
+  const ESTRUCTURAS_OK = ['cbo_deep', 'cbo_costcap', 'abo_costcap', 'abo_bidcap'];
+  const estructura = ESTRUCTURAS_OK.includes(body.estructura) ? body.estructura : 'cbo_deep';
+  const esCbo = estructura.startsWith('cbo');
+  const puja = Number(body.puja) || 0;
+  if (estructura !== 'cbo_deep' && !(puja > 0)) {
+    return respondJSON(res, 400, { error: `La receta ${estructura} necesita una puja (${estructura === 'abo_bidcap' ? 'tope de puja' : 'costo por compra objetivo'}) mayor a 0` });
+  }
 
   if (!accountId) return respondJSON(res, 400, { error: 'Falta account_id' });
   if (!campaignName) return respondJSON(res, 400, { error: 'Falta el nombre de la campaña' });
@@ -3053,15 +3176,20 @@ async function handleCreateCampaignStructure(req, res) {
     // 1. Campaña (CBO) — SIEMPRE nace PAUSED: si algo falla a mitad de
     // camino no queda una campaña activa a medias gastando. Se activa al
     // final, en una sola escritura, solo si hubo al menos un ad creado OK.
+    const bidStrategy = estructura === 'cbo_deep' ? 'LOWEST_COST_WITHOUT_CAP'
+      : (estructura === 'cbo_costcap' || estructura === 'abo_costcap') ? 'COST_CAP'
+      : 'LOWEST_COST_WITH_BID_CAP';
+    const pujaMinUnit = puja > 0 ? Math.round(puja * (SIN_CENTAVOS.has(currency) ? 1 : 100)) : 0;
     const camp = await graphPost(`${accountId}/campaigns`, token, {
       name: campaignName,
       objective,
       status: 'PAUSED',
       special_ad_categories: Array.isArray(template.campaign?.specialAdCategories) ? template.campaign.specialAdCategories : [],
-      daily_budget: budgetMinUnit,
-      bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
+      // ABO: el presupuesto vive en cada conjunto, no en la campaña.
+      ...(esCbo ? { daily_budget: budgetMinUnit } : {}),
+      bid_strategy: bidStrategy,
     });
-    log.push(`✓ Campaña creada: ${camp.id} (pausada hasta el final)`);
+    log.push(`✓ Campaña creada: ${camp.id} (${estructura}, pausada hasta el final)`);
 
     // Rollback: si de acá en adelante NADA útil se creó (ni un ad), borramos
     // la campaña para no dejar basura pausada en el Ads Manager.
@@ -3108,6 +3236,11 @@ async function handleCreateCampaignStructure(req, res) {
       };
       if (template.adset?.promotedObject) payload.promoted_object = template.adset.promotedObject;
       if (template.adset?.destinationType) payload.destination_type = template.adset.destinationType;
+      // ABO: el presupuesto diario vive en CADA conjunto. Cost/Bid Cap: la
+      // puja (en unidad mínima de la moneda) va como bid_amount del conjunto.
+      if (!esCbo) payload.daily_budget = budgetMinUnit;
+      if (estructura !== 'cbo_deep') payload.bid_amount = pujaMinUnit;
+      if (startTime) payload.start_time = startTime;
       const as = await graphPost(`${accountId}/adsets`, token, payload);
       adsetIds.push(as.id);
       log.push(`✓ Conjunto ${i + 1}/${nSets}: ${as.id}`);
@@ -3119,27 +3252,41 @@ async function handleCreateCampaignStructure(req, res) {
     const crearAd = async (ad, j) => {
       const adsetId = adsetIds[Math.floor(j / adsPerSet)];
       try {
-        // El thumbnail es OBLIGATORIO en video_data: si el polling lo dejó
-        // pasar sin picture, se reintenta acá; sin picture el ad falla con
-        // mensaje claro en vez de mandar un POST inválido.
-        let picture = ad.picture || null;
-        if (!picture) {
-          try { picture = (await graphGet(String(ad.videoId), token, { fields: 'picture' })).picture || null; } catch {}
-        }
-        if (!picture) throw new Error('Meta todavía no generó el thumbnail del video — reintentá en 1 minuto');
+        let oss;
+        if (ad.imageHash) {
+          // ── IMAGEN (estático): link_data con image_hash. El link de destino
+          // es obligatorio — sale del ad modelo, como el resto de la config.
+          if (!template.link) throw new Error('El ad modelo no tiene link de destino — para publicar imágenes elegí una campaña base cuyo ad tenga link.');
+          const linkData = {
+            image_hash: String(ad.imageHash),
+            link: template.link,
+            message,
+          };
+          if (headline) linkData.name = headline;
+          linkData.call_to_action = { type: template.ctaType || 'SHOP_NOW', value: { link: template.link } };
+          oss = { page_id: String(template.pageId), link_data: linkData };
+        } else {
+          // ── VIDEO: el thumbnail es OBLIGATORIO en video_data; si el polling
+          // lo dejó pasar sin picture, se reintenta acá.
+          let picture = ad.picture || null;
+          if (!picture) {
+            try { picture = (await graphGet(String(ad.videoId), token, { fields: 'picture' })).picture || null; } catch {}
+          }
+          if (!picture) throw new Error('Meta todavía no generó el thumbnail del video — reintentá en 1 minuto');
 
-        const videoData = {
-          video_id: String(ad.videoId),
-          image_url: picture,
-          message,
-        };
-        if (headline) videoData.title = headline;
-        if (template.link) videoData.call_to_action = { type: template.ctaType || 'SHOP_NOW', value: { link: template.link } };
-        const oss = { page_id: String(template.pageId), video_data: videoData };
+          const videoData = {
+            video_id: String(ad.videoId),
+            image_url: picture,
+            message,
+          };
+          if (headline) videoData.title = headline;
+          if (template.link) videoData.call_to_action = { type: template.ctaType || 'SHOP_NOW', value: { link: template.link } };
+          oss = { page_id: String(template.pageId), video_data: videoData };
+        }
         if (template.instagramUserId) oss.instagram_user_id = String(template.instagramUserId);
 
         const creative = await graphPost(`${accountId}/adcreatives`, token, {
-          name: `${String(ad.name || 'video').slice(0, 80)} · creative`,
+          name: `${String(ad.name || (ad.imageHash ? 'imagen' : 'video')).slice(0, 80)} · creative`,
           object_story_spec: oss,
         });
         const nuevo = await graphPost(`${accountId}/ads`, token, {
@@ -3250,6 +3397,7 @@ const actions = {
   'ad-preview': handleAdPreview,
   'template-config': handleTemplateConfig,
   'upload-ad-videos': handleUploadAdVideos,
+  'upload-ad-images': handleUploadAdImages,
   'videos-status': handleVideosStatus,
   'prosp-daily': handleProspDaily,
   'semanas-mix': handleSemanasMix,

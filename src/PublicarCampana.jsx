@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { authHeaders } from './MetaConnect.jsx';
 import { confirmDialog } from './dialogs.jsx';
+import FechaHoraPicker from './FechaHoraPicker.jsx';
 
 // Cada receta trae los números con los que el equipo la arma siempre. Son
 // defaults, no candados: se pisan escribiendo encima. El presupuesto va por
@@ -368,7 +369,7 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
         )}
 
         {/* Cuenta y programación */}
-        <div className="grid sm:grid-cols-3 gap-3 items-start">
+        <div className="grid sm:grid-cols-2 gap-3 items-start">
           <Campo label="Píxel (evento Compra)">
             <select className={inputCls} value={pixelId} onChange={e => setPixelId(e.target.value)}>
               {!prereqs && <option>Cargando…</option>}
@@ -382,11 +383,12 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
               {prereqs?.pages?.length === 0 && <option value="">Sin páginas visibles</option>}
             </select>
           </Campo>
-          <Campo label="Programada para (opcional)"
-            hint="Hora de Argentina. Meta la deja «Programada» y no gasta hasta esa fecha — para eso creala ACTIVA.">
-            <input className={inputCls} type="datetime-local" value={programada} onChange={e => setProgramada(e.target.value)} />
-          </Campo>
         </div>
+        {/* Programación a fila completa: la fila de días necesita aire. */}
+        <Campo label="Programada para (opcional)"
+          hint="Hora de Argentina. Meta la deja «Programada» y no gasta hasta esa fecha — para eso creala ACTIVA.">
+          <FechaHoraPicker value={programada} onChange={setProgramada} />
+        </Campo>
 
         <label className="flex items-center gap-2 cursor-pointer border-t border-gray-100 dark:border-gray-700/60 pt-3">
           <input type="checkbox" checked={activar} onChange={e => setActivar(e.target.checked)} className="accent-brand-500" />

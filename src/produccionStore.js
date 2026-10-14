@@ -254,7 +254,127 @@ function emitSyncError(msg) {
   try { window.dispatchEvent(new CustomEvent('viora:produccion-sync-error', { detail: { message: msg || 'error' } })); } catch {}
 }
 
-function pushRow(id, evento = null, opts = {}) { return enqueue(id, () => doPushRow(id, evento, opts)); }
+// Ids de tarjetas CREADAS en esta máquina cuyo INSERT todavía no llegó a la
+// nube. Distinto de _unsynced (updates fallidos): solo lo creado acá puede
+// re-insertarse en el hydrate — antes cualquier _unsynced "que no está en la
+// nube" se re-agregaba, y eso RESUCITABA tarjetas borradas por otra sesión.
+const CREATED_KEY = 'adslab-produccion-created-v1';
+let _created = (() => { try { return new Set(JSON.parse(localStorage.getItem(CREATED_KEY) || '[]')); } catch { return new Set(); } })();
+function persistCreated() { try { localStorage.setItem(CREATED_KEY, JSON.stringify([..._created])); } catch {} }
+function markCreated(id, bad) {
+  if (bad) { if (!_created.has(id)) { _created.add(id); persistCreated(); } }
+  else if (_created.delete(id)) { persistCreated(); }
+}
+
+// UPDATES POR COLUMNA (auditoría #1): cada push lleva SOLO las columnas que
+// ese cambio tocó, acumuladas acá por tarjeta. null = fila completa (callers
+// legacy / insert). Así el admin cambiando la etiqueta ya no pisa el estado
+// que el editor acaba de mover, ni al revés.
+const _patchKeys = new Map(); // id -> Set<claveLocal> | null (fila completa)
+function addPatchKeys(id, keys) {
+  if (!keys) { _patchKeys.set(id, null); return; }
+  const cur = _patchKeys.get(id);
+  if (cur === null) return;
+  const set = cur || new Set();
+  for (const k of keys) set.add(k);
+  _patchKeys.set(id, set);
+}
+// ── DELTAS DE ARCHIVOS (auditoría #2) ────────────────────────────────────────
+// Cada mutación de `archivos` registra acá QUÉ archivos tocó (upsert por su ts)
+// o borró. El push los manda por la RPC produccion_merge_archivos, que mergea
+// contra la lista REAL del server con lock de fila: el editor subiendo y el
+// admin aprobando a la vez ya no se pisan la lista entera. Si la base no tiene
+// la RPC (migración 0041 sin aplicar) se cae al camino viejo (columna completa).
+let _mergeRpc = null;   // null = sin probar; false = la base no la tiene
+let _winnersRpc = null; // ídem produccion_winners_apply
+const _archivoOps = new Map(); // id -> { up: Map(clave -> archivo), rm: Set(clave) }
+const archivoKey = (f) => String(f?.ts || f?.driveId || f?.name || '') || null;
+const esRpcInexistente = (e) =>
+  !!e && (e.code === 'PGRST202' || /does not exist|schema cache/i.test(String(e.message || '')));
+
+// `up` admite archivos con `_replaces: <ts viejo>` (flujo "Reemplazar": el
+// server lo pone EN EL LUGAR del viejo, conservando el número de video).
+function noteArchivoOps(id, { up = [], rm = [] } = {}) {
+  if (_mergeRpc === false) return; // sin RPC viaja la columna entera; no acumular
+  let ops = _archivoOps.get(id);
+  if (!ops) { ops = { up: new Map(), rm: new Set() }; _archivoOps.set(id, ops); }
+  for (const f of up) {
+    const kReal = archivoKey(f);
+    let k = f?._replaces || kReal;
+    if (!k) continue;
+    if (!f?._replaces && kReal) {
+      // Si hay un replace PENDIENTE que produce este mismo archivo (reemplazó y
+      // enseguida lo aprobaron, antes del push), actualizamos ESA entrada: si
+      // no, el push mandaría el reemplazo viejo más un duplicado al final.
+      let fusionado = false;
+      for (const [ke, fe] of ops.up) {
+        if (ke !== kReal && fe?._replaces && archivoKey(fe) === kReal) {
+          ops.up.set(ke, { ...f, _replaces: fe._replaces });
+          fusionado = true; break;
+        }
+      }
+      if (fusionado) continue;
+    }
+    ops.up.set(k, f);
+    ops.rm.delete(k);
+  }
+  for (const k of rm) {
+    if (!k) continue;
+    const ks = String(k);
+    ops.rm.add(ks);
+    ops.up.delete(ks);
+  }
+}
+// Saca de la cola los ops pendientes de una tarjeta (el caller los restaura si
+// el push falla). null = no hay nada que mandar por delta.
+function tomarArchivoOps(id) {
+  const ops = _archivoOps.get(id);
+  if (!ops || (ops.up.size === 0 && ops.rm.size === 0)) return null;
+  _archivoOps.delete(id);
+  return ops;
+}
+function restaurarArchivoOps(id, ops) {
+  if (!ops) return;
+  const cur = _archivoOps.get(id);
+  if (!cur) { _archivoOps.set(id, ops); return; }
+  // Lo anotado MIENTRAS el push fallido viajaba es más nuevo: le gana a lo restaurado.
+  for (const [k, f] of ops.up) if (!cur.up.has(k) && !cur.rm.has(k)) cur.up.set(k, f);
+  for (const k of ops.rm) if (!cur.up.has(k)) cur.rm.add(k);
+}
+// Manda los deltas de archivos de una tarjeta por la RPC de merge. Devuelve:
+// 'ok' (viajaron), 'sin-rpc' (la base no la tiene → columna completa),
+// 'nada' (no había deltas) o 'error' (transitorio: ops restaurados, reintentar).
+async function pushArchivosDelta(id) {
+  if (_mergeRpc === false) return 'sin-rpc';
+  const ops = tomarArchivoOps(id);
+  if (!ops) return 'nada';
+  const { error } = await supabase.rpc('produccion_merge_archivos', {
+    p_id: id,
+    p_up: [...ops.up.values()],
+    p_rm: [...ops.rm],
+  });
+  if (!error) { _mergeRpc = true; return 'ok'; }
+  if (esRpcInexistente(error)) { _mergeRpc = false; return 'sin-rpc'; }
+  console.warn('[produccion] merge archivos:', error.message);
+  restaurarArchivoOps(id, ops);
+  emitSyncError(error.message);
+  return 'error';
+}
+
+// clave local → columna de la tabla (subset de localToRow).
+const COLMAP = {
+  weekKey: 'week_key', productoId: 'producto_id', productoNombre: 'producto_nombre',
+  persona: 'persona', creatorId: 'creator_id', tipo: 'tipo', estado: 'estado',
+  videosTotal: 'videos_total', videosAprobados: 'videos_aprobados', brief: 'brief',
+  nota: 'nota', pagado: 'pagado', archivos: 'archivos', historial: 'historial',
+  materialLink: 'material_link', winners: 'winners', referencias: 'referencias',
+  etiqueta: 'etiqueta', prioridad: 'prioridad',
+};
+
+function pushRow(id, evento = null, opts = {}) {
+  addPatchKeys(id, opts.patch ? Object.keys(opts.patch) : null);
+  return enqueue(id, () => doPushRow(id, evento, opts));
+}
 function pushDelete(id) { return enqueue(id, () => doPushDelete(id)); }
 
 // Empuja una fila (insert/update) a la nube. Admin → tabla directa; creator →
@@ -265,25 +385,91 @@ async function doPushRow(id, evento = null, opts = {}) {
   const a = ensureCache().find(x => x.id === id);
   if (!a) return;
   if (_role === 'admin') {
-    // El historial ya está dentro de la fila (localToRow lo incluye si _histCloud).
-    const row = localToRow(a);
-    // Un update que NO toca archivos (estado / brief / nota / asignación) omite
-    // la columna `archivos` del upsert. Como el upsert solo pisa las columnas del
-    // payload, así NO borra videos que el editor subió concurrentemente (el
-    // last-writer-wins de la fila entera se los comía). Los cambios de archivos
-    // (addArchivos/removeArchivo/nueva tarjeta) NO pasan skipArchivos.
+    // INSERT solo para tarjetas creadas en ESTA máquina: un upsert de una
+    // tarjeta que otra sesión borró la resucitaría (auditoría #5).
+    if (_created.has(id)) {
+      const row = localToRow(a);
+      const { error } = await supabase.from(TABLE).upsert(row, { onConflict: 'id' });
+      if (error) { console.warn('[produccion] insert(admin):', error.message); markUnsynced(id, true); emitSyncError(error.message); }
+      else { markUnsynced(id, false); markCreated(id, false); _patchKeys.delete(id); }
+      return;
+    }
+    // UPDATE POR COLUMNA (auditoría #1): solo lo tocado desde el último push
+    // OK. Un update sobre fila borrada afecta 0 filas (no resucita nada), y
+    // dos sesiones editando CAMPOS distintos de la misma tarjeta ya no se
+    // pisan la fila entera. skipArchivos queda por compatibilidad: con
+    // patches, archivos solo viaja cuando el cambio lo tocó.
+    const keys = _patchKeys.get(id);
+    _patchKeys.delete(id);
+    // ARCHIVOS POR DELTA (auditoría #2): si este push tocó archivos y la base
+    // tiene la RPC de merge, los deltas viajan por ahí (el server mergea con
+    // lock) y la columna entera NO viaja — así no pisamos lo que otra sesión
+    // subió o aprobó en el medio. Sin RPC, 'archivos' queda en keys y viaja la
+    // columna completa como siempre.
+    if (keys && keys.has('archivos')) {
+      const r = await pushArchivosDelta(id);
+      // Solo si el delta viajó sacamos la columna del patch; con 'sin-rpc' o
+      // 'nada' (cambio sin delta anotado) viaja la columna completa (legacy).
+      if (r === 'ok') keys.delete('archivos');
+      else if (r === 'error') {
+        // Transitorio: re-anotar TODO el patch (los ops ya se restauraron) y
+        // reintentar en el próximo push — no mandamos la columna entera, que
+        // podría pisar al resto con nuestra cache.
+        addPatchKeys(id, [...keys]);
+        markUnsynced(id, true);
+        return;
+      }
+    } else if (keys == null) {
+      // Push de fila completa: la columna archivos viaja entera; los deltas
+      // pendientes quedan superseded.
+      _archivoOps.delete(id);
+    }
+    const full = localToRow(a);
+    let row;
+    if (keys == null) {
+      row = { ...full };
+      delete row.id; delete row.created_at; delete row.owner_id; delete row.creator_id;
+    } else {
+      row = {};
+      for (const k of keys) {
+        const col = COLMAP[k];
+        if (col && col in full) row[col] = full[col];
+      }
+      // Un cambio con evento registra historial; sin _histCloud no viaja.
+      if (evento && _histCloud) row.historial = full.historial;
+    }
     if (opts.skipArchivos) delete row.archivos;
-    const { error } = await supabase.from(TABLE).upsert(row, { onConflict: 'id' });
-    if (error) { console.warn('[produccion] push(admin):', error.message); markUnsynced(id, true); emitSyncError(error.message); }
-    else markUnsynced(id, false);
+    if (Object.keys(row).length === 0) { markUnsynced(id, false); return; }
+    const { data, error } = await supabase.from(TABLE).update(row).eq('id', id).select('id');
+    if (error) {
+      console.warn('[produccion] update(admin):', error.message);
+      addPatchKeys(id, keys ? [...keys] : null); // re-anotar lo no sincronizado
+      markUnsynced(id, true); emitSyncError(error.message);
+    } else if (!data || data.length === 0) {
+      // La fila ya no existe en la nube (borrada en otra sesión): no la
+      // resucitamos; el próximo hydrate la saca del cache local.
+      console.warn(`[produccion] update sobre tarjeta inexistente ${id} — borrada en otra sesión, se descarta`);
+      markUnsynced(id, false);
+    } else {
+      markUnsynced(id, false);
+    }
   } else if (_role === 'creator') {
     // Solo mandamos p_estado si ESTE push viene de un cambio de estado real
     // (evento tipo 'estado'). Un push de solo-archivos NO debe tocar el estado:
     // con cache vieja, mandar el estado local podía revertir una aprobación que
     // el admin acababa de hacer.
     const estado = (evento && evento.tipo === 'estado' && ESTADOS_CREATOR.includes(a.estado)) ? a.estado : null;
-    const params = { p_id: id, p_estado: estado, p_archivos: a.archivos || [] };
+    // ARCHIVOS POR DELTA también para el editor (la RPC de merge autoriza por
+    // creator_id): el editor subiendo y el admin aprobando a la vez ya no se
+    // pisan la lista. Sin RPC en la base, viaja la lista completa (legacy).
+    const r = await pushArchivosDelta(id);
+    if (r === 'error') { markUnsynced(id, true); return; }
+    const mandaArchivos = r === 'sin-rpc'; // con delta OK (o sin cambios) no se toca
+    const params = { p_id: id, p_estado: estado, p_archivos: mandaArchivos ? (a.archivos || []) : null };
     if (_histCloud && evento) params.p_evento = evento; // solo si la base lo soporta
+    // Si los archivos ya viajaron por delta y no hay estado ni evento, no queda
+    // nada que mandar por la RPC del creator.
+    if (!mandaArchivos && estado == null && !params.p_evento) { markUnsynced(id, false); return; }
     const { error } = await supabase.rpc('produccion_creator_update', params);
     if (error) { console.warn('[produccion] push(creator):', error.message); markUnsynced(id, true); emitSyncError(error.message); }
     else markUnsynced(id, false);
@@ -357,7 +543,12 @@ async function hydrate() {
     // Si mientras traíamos la data hubo un cambio optimista local (o quedan
     // push en vuelo), NO pisamos el cache: el push ya persiste en el server y
     // el próximo refetch reconcilia. Evita que un refetch revierta un cambio.
-    if (_writeSeq !== seqBefore || _inflight > 0) return;
+    if (_writeSeq !== seqBefore || _inflight > 0) {
+      // Antes se DESCARTABA el refetch y una sesión activa podía quedar con
+      // cache viejo indefinidamente (auditoría #4). Ahora se reintenta.
+      scheduleRealtimeRefetch();
+      return;
+    }
 
     const cloud = (data || []).map(rowToLocal);
     if (cloud.length > 0) {
@@ -386,8 +577,19 @@ async function hydrate() {
       // operación de admin: el creator no crea filas, solo actualiza las suyas.
       if (esAdmin) {
         for (const id of _unsynced) {
-          if (!cloudById.has(id) && !_deleted.has(id) && localById.has(id)) merged.push(localById.get(id));
+          // SOLO tarjetas creadas en esta máquina (insert pendiente). Un update
+          // fallido de una tarjeta que ya no está en la nube significa que OTRA
+          // sesión la borró — re-agregarla la resucitaba (auditoría #5).
+          if (!cloudById.has(id) && !_deleted.has(id) && localById.has(id) && _created.has(id)) {
+            merged.push(localById.get(id));
+          }
         }
+      }
+      // Limpieza de fantasmas (ambos roles): un pendiente cuya tarjeta ya no
+      // existe en la nube y NO fue creada acá no tiene nada que sincronizar —
+      // sin esto, el creator quedaba con una "tarjeta fantasma" permanente.
+      for (const id of [..._unsynced]) {
+        if (!cloudById.has(id) && !_created.has(id)) markUnsynced(id, false);
       }
       write(merged);
       // Reintentamos los pendientes (fire & forget; si vuelven a fallar, siguen
@@ -521,7 +723,10 @@ function setupRefetch() {
   const onVisible = () => {
     // No refrescamos si hay push optimistas en vuelo: el server todavía no
     // tiene el último cambio y traerlo pisaría el cache con data vieja.
-    if (document.visibilityState === 'visible' && cloudReady() && _inflight === 0) hydrate();
+    if (document.visibilityState === 'visible' && cloudReady()) {
+      if (_inflight === 0) hydrate();
+      else scheduleRealtimeRefetch(); // ocupado: reintentar apenas se libere
+    }
   };
   window.addEventListener('focus', onVisible);
   document.addEventListener('visibilitychange', onVisible);
@@ -541,6 +746,7 @@ function scheduleRealtimeRefetch() {
     // El guard de hydrate (_writeSeq/_inflight) evita pisar un cambio propio en
     // vuelo; para cambios ajenos, trae lo nuevo.
     if (cloudReady() && _inflight === 0) hydrate().catch(() => {});
+    else if (cloudReady()) scheduleRealtimeRefetch(); // ocupado: reintentar, no descartar
   }, 250);
 }
 function setupRealtime() {
@@ -779,16 +985,62 @@ export function esWinner(rec, productoId, productoNombre) {
   return winnersDeProducto(productoId, productoNombre).some(w => winnerKey(w) === k);
 }
 
+// Aplica una lista de winners a todas las tarjetas del producto SOLO en el
+// cache local (sin push por tarjeta): la usa el camino atómico, donde el server
+// ya escribió por la RPC y acá solo reflejamos.
+function aplicarWinnersLocal(productoId, productoNombre, winners) {
+  const lista = Array.isArray(winners) ? winners : [];
+  const target = JSON.stringify(lista);
+  const arr = read().slice();
+  let cambio = false;
+  for (let i = 0; i < arr.length; i++) {
+    const a = arr[i];
+    if (mismoProducto(a, productoId, productoNombre) && JSON.stringify(a.winners || []) !== target) {
+      arr[i] = { ...a, winners: lista, updatedAt: new Date().toISOString() };
+      cambio = true;
+    }
+  }
+  if (cambio) write(arr);
+}
+
 // Marca/desmarca un video como winner del producto. `rec` = { name, link,
 // driveId, fecha, ts }. Devuelve el nuevo estado (true = quedó marcado).
+//
+// Con nube: viaja por la RPC produccion_winners_apply (auditoría #3), que
+// RE-LEE los winners actuales del producto con lock y mergea el delta — dos
+// sesiones (o el cron de auto-winners) marcando a la vez ya no se pisan el
+// array entero. Sin nube o sin la RPC, camino viejo (columna por tarjeta).
 export function toggleWinner(rec, productoId, productoNombre) {
   const k = winnerKey(rec);
   const actuales = winnersDeProducto(productoId, productoNombre);
   const estaba = actuales.some(w => winnerKey(w) === k);
+  const nuevoRec = { name: rec.name || 'video', link: rec.link || null, driveId: rec.driveId || null, fecha: rec.fecha || '', ts: rec.ts || 0 };
   const nuevos = estaba
     ? actuales.filter(w => winnerKey(w) !== k)
-    : [{ name: rec.name || 'video', link: rec.link || null, driveId: rec.driveId || null, fecha: rec.fecha || '', ts: rec.ts || 0 }, ...actuales];
-  setWinnersProducto(productoId, productoNombre, nuevos);
+    : [nuevoRec, ...actuales];
+  if (cloudReady() && _role === 'admin' && _winnersRpc !== false) {
+    // Optimista: reflejo local ya, el server mergea atómico y reconciliamos.
+    aplicarWinnersLocal(productoId, productoNombre, nuevos);
+    supabase.rpc('produccion_winners_apply', {
+      p_producto_id: productoId != null ? String(productoId) : null,
+      p_producto_nombre: productoNombre || '',
+      p_add: estaba ? [] : [nuevoRec],
+      p_remove: estaba ? [k] : [],
+    }).then(({ data, error }) => {
+      if (error) {
+        if (esRpcInexistente(error)) _winnersRpc = false;
+        else console.warn('[produccion] winners rpc:', error.message);
+        // Fallback: el camino viejo (columna winners por tarjeta, con push).
+        setWinnersProducto(productoId, productoNombre, nuevos);
+      } else if (Array.isArray(data)) {
+        // Reconciliar con el merge REAL del server (pudo traer winners de otra
+        // sesión que no teníamos).
+        aplicarWinnersLocal(productoId, productoNombre, data);
+      }
+    });
+  } else {
+    setWinnersProducto(productoId, productoNombre, nuevos);
+  }
   return !estaba;
 }
 
@@ -831,6 +1083,7 @@ export function addAssignment({ weekKey, productoId, productoNombre, persona, cr
   };
   arr.push(nueva);
   write(arr);
+  markCreated(nueva.id, true); // insert pendiente: solo lo creado acá puede re-insertarse
   pushRow(nueva.id);
   // Aviso de "producto nuevo" (canal 1). Fire & forget; el server decide.
   notificarEventoDiscord(nueva, 'nuevo');
@@ -882,13 +1135,16 @@ export function updateAssignment(id, patch) {
   // setAprobadoVideo. La vuelta atrás (Aprobado → Revisión) NO desaprueba
   // nada: eso es información real que el revisor puede querer conservar.
   let archivosAprobados = null;
+  const aprobadosNuevos = []; // para el delta de archivos (solo los que cambian)
   const pasaACompleto = patch.estado && patch.estado !== before.estado
     && (patch.estado === 'aprobado' || patch.estado === 'publicado');
   if (pasaACompleto && (before.archivos || []).some(f => !f.aprobado)) {
     archivosAprobados = (before.archivos || []).map(f => {
       if (f.aprobado) return f;
       const { correccion, ...rest } = f;
-      return { ...rest, aprobado: { por: _actorName || 'Equipo', ts: new Date().toISOString() } };
+      const nuevo = { ...rest, aprobado: { por: _actorName || 'Equipo', ts: new Date().toISOString() } };
+      aprobadosNuevos.push(nuevo);
+      return nuevo;
     });
   }
   arr[i] = {
@@ -897,11 +1153,15 @@ export function updateAssignment(id, patch) {
     updatedAt: new Date().toISOString(),
   };
   write(arr);
-  // updateAssignment normalmente NO toca `archivos` (eso va por addArchivos/
-  // removeArchivo) → skipArchivos para no pisar videos subidos en paralelo.
-  // EXCEPCIÓN: cuando el pase a Aprobado/Publicado acaba de marcar los ✓,
-  // la fila viaja completa — si no, los ✓ quedarían solo en este dispositivo.
-  pushRow(id, evento, { skipArchivos: !archivosAprobados });
+  // Push con PATCH: viajan solo las columnas que este cambio tocó (más
+  // archivos/aprobados cuando el pase a Aprobado marcó los ✓).
+  if (aprobadosNuevos.length) noteArchivoOps(id, { up: aprobadosNuevos });
+  pushRow(id, evento, {
+    patch: {
+      ...patch,
+      ...(archivosAprobados ? { archivos: 1, videosAprobados: 1 } : {}),
+    },
+  });
   // Aviso a Discord del cambio de columna (fire & forget). Lo dispara quien hizo
   // el cambio (admin o editor); el server decide si hay webhook y si el estado
   // se notifica. Nunca frena la UI ni rompe si falla.
@@ -1043,7 +1303,8 @@ export function addArchivos(id, archivos) {
   const prev = arr[i].archivos || [];
   arr[i] = { ...arr[i], archivos: [...prev, ...archivos], updatedAt: new Date().toISOString() };
   write(arr);
-  pushRow(id);
+  noteArchivoOps(id, { up: archivos });
+  pushRow(id, null, { patch: { archivos: 1 } });
   return arr[i];
 }
 
@@ -1060,7 +1321,8 @@ export function setArchivosFolder(id, { folderId, folderLink }) {
     f.destino === 'drive' ? { ...f, folderId, folderLink: folderLink || f.folderLink } : f);
   arr[i] = { ...arr[i], archivos, updatedAt: new Date().toISOString() };
   write(arr);
-  pushRow(id);
+  noteArchivoOps(id, { up: archivos.filter(f => f.destino === 'drive') });
+  pushRow(id, null, { patch: { archivos: 1 } });
   return arr[i];
 }
 
@@ -1083,7 +1345,10 @@ export function replaceArchivo(id, ts, archivo) {
     updatedAt: new Date().toISOString(),
   };
   write(arr);
-  pushRow(id);
+  // Delta: si el archivo nuevo tiene OTRO ts, viaja con _replaces para que el
+  // server lo ponga en el lugar del viejo (conserva el número de video).
+  noteArchivoOps(id, { up: [conActor?.ts && conActor.ts !== ts ? { ...conActor, _replaces: ts } : conActor] });
+  pushRow(id, null, { patch: { archivos: 1 } });
 }
 
 // Aprobación POR VIDEO (la marca el revisor con el ✓ de cada fila). Al
@@ -1111,7 +1376,9 @@ export function setAprobadoVideo(id, ts, on) {
     updatedAt: new Date().toISOString(),
   };
   write(arr);
-  pushRow(id);
+  const mod = archivos.find(f => f.ts === ts);
+  if (mod) noteArchivoOps(id, { up: [mod] });
+  pushRow(id, null, { patch: { archivos: 1, videosAprobados: 1 } });
 }
 
 // Marca TODOS los videos subidos como aprobados (botón "Aprobar todos").
@@ -1121,10 +1388,13 @@ export function aprobarTodosVideos(id) {
   const arr = read().slice();
   const i = arr.findIndex(a => a.id === id);
   if (i === -1) return;
+  const cambiados = [];
   const archivos = (arr[i].archivos || []).map(f => {
     if (f.aprobado) return f;
     const { correccion, ...rest } = f;
-    return { ...rest, aprobado: { por: _actorName || 'Equipo', ts: new Date().toISOString() } };
+    const nuevo = { ...rest, aprobado: { por: _actorName || 'Equipo', ts: new Date().toISOString() } };
+    cambiados.push(nuevo);
+    return nuevo;
   });
   arr[i] = {
     ...arr[i],
@@ -1133,7 +1403,8 @@ export function aprobarTodosVideos(id) {
     updatedAt: new Date().toISOString(),
   };
   write(arr);
-  pushRow(id);
+  if (cambiados.length) noteArchivoOps(id, { up: cambiados });
+  pushRow(id, null, { patch: { archivos: 1, videosAprobados: 1 } });
 }
 
 // Saca la marca verde "Corregido" de un video (la usa quien revisa con el
@@ -1153,7 +1424,9 @@ export function clearCorregidoVideo(id, ts) {
     updatedAt: new Date().toISOString(),
   };
   write(arr);
-  pushRow(id);
+  const visto = (arr[i].archivos || []).find(f => f.ts === ts);
+  if (visto) noteArchivoOps(id, { up: [visto] });
+  pushRow(id, null, { patch: { archivos: 1 } });
 }
 
 export function removeArchivo(id, ts) {
@@ -1162,7 +1435,8 @@ export function removeArchivo(id, ts) {
   if (i === -1) return;
   arr[i] = { ...arr[i], archivos: (arr[i].archivos || []).filter(f => f.ts !== ts), updatedAt: new Date().toISOString() };
   write(arr);
-  pushRow(id);
+  noteArchivoOps(id, { rm: [ts] });
+  pushRow(id, null, { patch: { archivos: 1 } });
 }
 
 // Pide (o limpia) una corrección sobre un VIDEO puntual (por su ts). La
@@ -1185,7 +1459,9 @@ export function setCorreccionVideo(id, ts, texto) {
   const reabrir = !!txt && ['aprobado', 'publicado', 'archivado'].includes(arr[i].estado);
   arr[i] = { ...arr[i], archivos, ...(reabrir ? { estado: 'porhacer' } : {}), updatedAt: new Date().toISOString() };
   write(arr);
-  pushRow(id);
+  const tocado = archivos.find(f => f.ts === ts);
+  if (tocado) noteArchivoOps(id, { up: [tocado] });
+  pushRow(id, null, { patch: { archivos: 1, ...(reabrir ? { estado: 1 } : {}) } });
   // Aviso a Discord (canal 'correccion'): antes pedir una corrección era 100%
   // silencioso. Solo cuando se SETEA (no al limpiar). Fire & forget; el server
   // decide si hay webhook y a quién menciona.

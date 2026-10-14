@@ -1260,7 +1260,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       if (String(p.id) !== String(activeProductoId)) return p;
       const current = p.metaAccount || null;
       const next = typeof updater === 'function' ? updater(current) : updater;
-      return { ...p, metaAccount: next };
+      return { ...p, metaAccount: next, updated_at: new Date().toISOString() };
     }));
   };
 
@@ -1545,7 +1545,14 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   const stepsRef = useRef(pipelineRun.steps);
   useEffect(() => { stepsRef.current = pipelineRun.steps; }, [pipelineRun.steps]);
 
-  useEffect(() => { saveJSON(PRODUCTOS_KEY, productos); }, [productos]);
+  // Guard de primer render (como Marketing.jsx): sin esto, cada ENTRADA a la
+  // pantalla encolaba un push de todos los productos aunque nada cambió —
+  // amplificaba el loop de escrituras de tombstones.
+  const productosMountRef = useRef(false);
+  useEffect(() => {
+    if (!productosMountRef.current) { productosMountRef.current = true; return; }
+    saveJSON(PRODUCTOS_KEY, productos);
+  }, [productos]);
   useEffect(() => { saveJSON(GEN_CONFIG_KEY, genConfig); }, [genConfig]);
   useEffect(() => { saveJSON(RUN_HISTORY_KEY, runHistory); }, [runHistory]);
 
@@ -1940,6 +1947,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         ...p,
         competidores: (p.competidores || []).filter(c => c.id !== id),
         competidoresBorrados: [...(p.competidoresBorrados || []), { id: String(id), ts: Date.now() }].slice(-200),
+        updated_at: new Date().toISOString(),
       };
     }));
     // Limpiar el brand "auto-sincronizado" en Inspiración (fromCompetidorId)

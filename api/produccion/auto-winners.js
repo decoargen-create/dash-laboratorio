@@ -15,14 +15,21 @@
 //
 // Corre de dos maneras:
 //   - POST (botón en Métricas, con la cuenta elegida; la cuenta se aprende y
-//     queda en auto_winners_config.account_ids para las corridas siguientes).
-//   - Cron diario de las 09:00 AR (handleCronCreativeRefresh la importa).
+//     queda en auto_winners_owner_config.account_ids del DUEÑO para las
+//     corridas siguientes).
+//   - Cron diario de las 09:00 AR (handleCronCreativeRefresh la importa): corre
+//     una pasada POR DUEÑO con config, con SU token de Meta, SUS tarjetas y SU
+//     webhook — auditoría #6: antes usaba el token de "cualquier usuario" y
+//     leía/escribía tarjetas sin filtrar dueño (roto con más de un inquilino).
 //
 // Los winners quedan en produccion_asignaciones.winners (replicados en todas
 // las tarjetas del producto, mismo patrón que el marcado manual) con shape
 // compatible: { name, link, driveId, fecha, ts } + { auto, compras, roas, warn }.
+// La escritura va por la RPC produccion_winners_apply (auditoría #3): el server
+// re-lee los winners actuales CON LOCK y mergea — el cron ya no pisa marcados
+// manuales hechos mientras consultaba a Meta.
 
-import { getServiceClient, getUserIdFromAuth, getLatestMetaToken } from '../marketing/_supabase-server.js';
+import { getServiceClient, getUserIdFromAuth, getMetaTokenForUser, getLatestMetaToken } from '../marketing/_supabase-server.js';
 import { graphGet } from '../meta/_lib.js';
 import { pickAction, ACTION_ALIASES } from '../meta/_funnel.js';
 
@@ -50,11 +57,29 @@ function norm(s) {
 const winnerKey = (w) => String(w?.driveId || w?.link || w?.name || '').trim().toLowerCase();
 const productoKey = (r) => String(r.producto_id ?? '').trim() || `n:${String(r.producto_nombre || '').trim().toLowerCase()}`;
 
-async function getCfg(svc) {
+// Config del dueño (tabla por inquilino, migración 0041). Fallback a la fila
+// global legacy si la base todavía no tiene la tabla nueva.
+async function getCfgDueno(svc, ownerId) {
+  try {
+    const { data, error } = await svc.from('auto_winners_owner_config').select('*').eq('owner_id', ownerId).maybeSingle();
+    if (!error) return data || null;
+  } catch {}
   try {
     const { data } = await svc.from('auto_winners_config').select('*').eq('id', 1).maybeSingle();
     return data || null;
   } catch { return null; }
+}
+
+// Dueños con corrida habilitada (para el cron). Si la tabla nueva no existe o
+// está vacía, caemos al modo legacy: un solo dueño, el de la conexión de Meta
+// más nueva (el comportamiento de siempre con un solo inquilino).
+async function listarDuenos(svc) {
+  try {
+    const { data, error } = await svc.from('auto_winners_owner_config').select('owner_id').eq('enabled', true);
+    if (!error && Array.isArray(data) && data.length) return data.map(d => d.owner_id);
+  } catch {}
+  const conn = await getLatestMetaToken();
+  return conn?.userId ? [conn.userId] : [];
 }
 
 // Insights a nivel AD de una cuenta en la ventana. Suma compras/ingresos con
@@ -97,21 +122,23 @@ async function adsDeCuenta(accountId, token, ventanaDias) {
 function isDiscordWebhook(u) {
   return /^https:\/\/(discord\.com|discordapp\.com)\/api\/webhooks\//i.test(String(u || '').trim());
 }
-async function resolveWebhook(svc) {
-  const env = String(process.env.DISCORD_WEBHOOK_URL || '').trim();
-  if (isDiscordWebhook(env)) return env;
+async function resolveWebhook(svc, ownerId) {
+  // Primero el webhook configurado por ESTE dueño (multi-tenant); el env var
+  // global queda de fallback (el canal del equipo de la plataforma).
   try {
-    const { data } = await svc.from('produccion_notif_config').select('config').limit(1).maybeSingle();
+    const { data } = await svc.from('produccion_notif_config').select('config').eq('owner_id', ownerId).maybeSingle();
     const ev = data?.config?.eventos || data?.config?.estados || {};
     for (const k of Object.keys(ev)) {
       const w = String(ev[k]?.webhook || '').trim();
       if (isDiscordWebhook(w)) return w;
     }
   } catch {}
+  const env = String(process.env.DISCORD_WEBHOOK_URL || '').trim();
+  if (isDiscordWebhook(env)) return env;
   return null;
 }
-async function avisarDiscord(svc, marcados, cfg) {
-  const url = await resolveWebhook(svc);
+async function avisarDiscord(svc, ownerId, marcados, cfg) {
+  const url = await resolveWebhook(svc, ownerId);
   if (!url) return;
   const total = marcados.reduce((s, m) => s + m.nuevos.length, 0);
   try {
@@ -136,11 +163,27 @@ async function avisarDiscord(svc, marcados, cfg) {
 }
 
 // ── La corrida ───────────────────────────────────────────────────────────
-export async function correrAutoWinners({ extraAccountId = null } = {}) {
+// Sin ownerId (cron) corre una pasada POR CADA dueño habilitado y devuelve el
+// resumen de todas. Con ownerId (botón de Métricas) corre solo para ese dueño
+// y devuelve su resultado directo (la UI espera ese shape).
+export async function correrAutoWinners({ extraAccountId = null, ownerId = null } = {}) {
   const svc = getServiceClient();
   if (!svc) return { skipped: 'sin-supabase' };
 
-  const row = await getCfg(svc);
+  if (ownerId) return correrParaDueno(svc, ownerId, { extraAccountId });
+
+  const duenos = await listarDuenos(svc);
+  if (!duenos.length) return { skipped: 'sin-duenos' };
+  const corridas = [];
+  for (const d of duenos) {
+    try { corridas.push({ owner: d, ...(await correrParaDueno(svc, d, {})) }); }
+    catch (e) { corridas.push({ owner: d, error: e.message }); }
+  }
+  return { ok: true, corridas };
+}
+
+async function correrParaDueno(svc, ownerId, { extraAccountId = null } = {}) {
+  const row = await getCfgDueno(svc, ownerId);
   if (row && row.enabled === false) return { skipped: 'deshabilitado' };
   const cfg = {
     ventanaDias: Number(row?.ventana_dias ?? DEF.ventanaDias),
@@ -154,22 +197,25 @@ export async function correrAutoWinners({ extraAccountId = null } = {}) {
   const extra = extraAccountId ? String(extraAccountId).replace(/^act_/, '').trim() : null;
   if (extra && !accounts.includes(extra)) {
     accounts.push(extra);
-    // La cuenta se aprende: las corridas del cron la van a incluir.
+    // La cuenta se aprende: las corridas del cron la van a incluir (en la
+    // config de ESTE dueño).
     try {
-      await svc.from('auto_winners_config').upsert(
-        { id: 1, account_ids: accounts, updated_at: new Date().toISOString() },
-        { onConflict: 'id' },
+      await svc.from('auto_winners_owner_config').upsert(
+        { owner_id: ownerId, account_ids: accounts, updated_at: new Date().toISOString() },
+        { onConflict: 'owner_id' },
       );
     } catch {}
   }
   if (!accounts.length) return { skipped: 'sin-cuentas', hint: 'Corré una vez desde Métricas con una cuenta elegida: queda guardada para el cron.' };
 
-  const conn = await getLatestMetaToken();
+  // El token de Meta DEL DUEÑO (no "el más nuevo de cualquiera").
+  const conn = await getMetaTokenForUser(ownerId);
   if (!conn?.token) return { skipped: 'sin-conexion-meta' };
 
-  // Tarjetas con archivos (las últimas 400 alcanzan y sobran).
+  // Tarjetas con archivos DEL DUEÑO (las últimas 400 alcanzan y sobran).
   const { data: rows, error: errRows } = await svc.from(TABLE)
     .select('id, producto_id, producto_nombre, archivos, winners, created_at')
+    .eq('owner_id', ownerId)
     .order('created_at', { ascending: false })
     .limit(400);
   if (errRows) return { error: `No pude leer Producción: ${errRows.message}` };
@@ -285,8 +331,12 @@ export async function correrAutoWinners({ extraAccountId = null } = {}) {
     }
   }
 
-  // Escritura: merge con los winners existentes del producto (dedup por name/
-  // driveId/link), replicado en todas sus tarjetas — igual que el marcado manual.
+  // Escritura: por la RPC produccion_winners_apply — el server RE-LEE los
+  // winners actuales con lock y mergea (auditoría #3: entre nuestra lectura de
+  // tarjetas y este punto pasaron minutos de consultas a Meta; escribir el
+  // array computado con esa lectura vieja pisaba marcados manuales del medio).
+  // El dedup local de acá abajo es solo para el REPORTE (qué es realmente
+  // nuevo); la escritura deduplica de nuevo en el server.
   const marcados = [];
   for (const g of porProducto.values()) {
     const delProducto = cards.filter(c => productoKey(c) === productoKey(g));
@@ -299,13 +349,28 @@ export async function correrAutoWinners({ extraAccountId = null } = {}) {
     }
     const nuevos = g.recs.filter(r => !existentes.has(winnerKey(r)));
     if (!nuevos.length) continue;
-    const final = [...nuevos, ...existentes.values()];
-    for (const c of delProducto) {
-      try {
-        await svc.from(TABLE)
-          .update({ winners: final, updated_at: new Date().toISOString() })
-          .eq('id', c.id);
-      } catch {}
+    let escrito = false;
+    try {
+      const { error } = await svc.rpc('produccion_winners_apply', {
+        p_producto_id: g.producto_id != null ? String(g.producto_id) : null,
+        p_producto_nombre: g.producto_nombre || '',
+        p_add: nuevos,
+        p_remove: [],
+        p_owner: ownerId,
+      });
+      escrito = !error;
+      if (error) console.warn('[auto-winners] rpc winners_apply:', error.message);
+    } catch (e) { console.warn('[auto-winners] rpc winners_apply:', e.message); }
+    if (!escrito) {
+      // Fallback (base sin la migración 0041): el camino viejo, fila por fila.
+      const final = [...nuevos, ...existentes.values()];
+      for (const c of delProducto) {
+        try {
+          await svc.from(TABLE)
+            .update({ winners: final, updated_at: new Date().toISOString() })
+            .eq('id', c.id);
+        } catch {}
+      }
     }
     marcados.push({
       producto: g.producto_nombre || g.producto_id,
@@ -327,7 +392,7 @@ export async function correrAutoWinners({ extraAccountId = null } = {}) {
       .map(c => [productoKey(c), c.producto_nombre || c.producto_id]),
   ).values()];
 
-  if (marcados.length) await avisarDiscord(svc, marcados, cfg);
+  if (marcados.length) await avisarDiscord(svc, ownerId, marcados, cfg);
 
   return {
     ok: true,
@@ -358,7 +423,8 @@ export default async function handler(req, res) {
   }
 
   try {
-    const out = await correrAutoWinners({ extraAccountId: body?.accountId || null });
+    // La corrida manual es DEL usuario logueado: su config, su token, sus tarjetas.
+    const out = await correrAutoWinners({ extraAccountId: body?.accountId || null, ownerId: userId });
     return respondJSON(res, 200, out);
   } catch (e) {
     return respondJSON(res, 500, { error: e.message });

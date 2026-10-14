@@ -183,7 +183,16 @@ export default function TranscripcionVideosSection({ addToast, forcedProductoId,
       if (String(p.id) !== String(forcedProductoId)) return p;
       const current = Array.isArray(p.transcripcionesVideos) ? p.transcripcionesVideos : [];
       nextItems = updater(current);
-      return { ...p, transcripcionesVideos: nextItems, updated_at: new Date().toISOString() };
+      // TOMBSTONES: los ids que estaban y ya no están quedan registrados en
+      // transcripcionesBorradas — el merge del sync los respeta y el borrado
+      // no resucita desde otra PC (mismo patrón que competidoresBorrados).
+      const nextIds = new Set((nextItems || []).map(x => String(x.id)));
+      const borradosAhora = current.filter(x => !nextIds.has(String(x.id)))
+        .map(x => ({ id: String(x.id), ts: Date.now() }));
+      const tombs = borradosAhora.length
+        ? [...(p.transcripcionesBorradas || []), ...borradosAhora].slice(-200)
+        : (p.transcripcionesBorradas || []);
+      return { ...p, transcripcionesVideos: nextItems, transcripcionesBorradas: tombs, updated_at: new Date().toISOString() };
     });
     try {
       localStorage.setItem(PRODUCTOS_KEY, JSON.stringify(updated));

@@ -16,23 +16,44 @@ import {
 import { authHeaders } from './MetaConnect.jsx';
 import { confirmDialog } from './dialogs.jsx';
 
+// Cada receta trae los números con los que el equipo la arma siempre. Son
+// defaults, no candados: se pisan escribiendo encima. El presupuesto va por
+// moneda porque 120.000 en pesos y 120 en dólares son la misma plata en la
+// cabeza de quien lanza, pero números muy distintos.
 const ESTRUCTURAS = [
   {
     id: 'cbo_deep', titulo: 'CBO · Deep Pocket', emoji: '💰',
     desc: 'Presupuesto en la campaña, sin tope de puja. Meta reparte libre entre conjuntos. La receta de testeo de siempre.',
     puja: null,
+    conjuntos: 8,
+    presupuesto: { ARS: 120000, USD: 120 },
   },
   {
     id: 'cbo_costcap', titulo: 'CBO · Cost Cap', emoji: '🎯',
-    desc: 'Presupuesto en la campaña + costo por compra OBJETIVO: Meta intenta comprar a ese CPA o mejor.',
+    desc: 'Presupuesto en la campaña + costo por compra OBJETIVO a nivel conjunto: Meta intenta comprar a ese CPA o mejor.',
     puja: 'Costo por compra objetivo',
+    conjuntos: 1,
+    presupuesto: { ARS: 60000, USD: 60 },
+    // La puja arranca con el CPA real de la cuenta — ver cpaSugerido.
+    pujaDesdeCpa: true,
   },
   {
     id: 'abo_bidcap', titulo: 'ABO · Bid Cap', emoji: '🧢',
     desc: 'Presupuesto POR CONJUNTO + tope de puja duro: Meta nunca puja por encima. Control total, escala más lenta.',
     puja: 'Tope de puja',
+    conjuntos: 1,
   },
 ];
+
+// El default de presupuesto solo se ofrece en las monedas que el equipo usa.
+// Para cualquier otra se deja vacío: inventar un número en una moneda que no
+// conocemos es peor que pedirlo.
+const presupuestoDefault = (receta, currency) =>
+  receta?.presupuesto?.[String(currency || 'ARS').toUpperCase()] ?? null;
+
+// Mismo tope que el server (ver MAX_ADS_CREADOS en api/meta/[action].js): se
+// avisa acá para no mandar una tirada que el backend va a rebotar igual.
+const MAX_ADS_CREADOS = 120;
 
 const num = (s) => Number(String(s).replace(/[^\d.,]/g, '').replace(/\./g, '').replace(',', '.'));
 
@@ -74,7 +95,10 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
   const [nombre, setNombre] = useState('');
   const [presupuesto, setPresupuesto] = useState('');
   const [puja, setPuja] = useState('');
-  const [conjuntos, setConjuntos] = useState(1);
+  const [conjuntos, setConjuntos] = useState(8);
+  // Deep Pocket = conjuntos IDÉNTICOS: cada uno lleva todos los anuncios.
+  const [duplicarAds, setDuplicarAds] = useState(true);
+  const [cpaCuenta, setCpaCuenta] = useState(null);
   const [pais, setPais] = useState('AR');
   const [edadMin, setEdadMin] = useState(18);
   const [edadMax, setEdadMax] = useState(65);
@@ -99,6 +123,42 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
     setNombre(`${prod} ${hoy.getDate()}/${hoy.getMonth() + 1} ${tag}`);
   }, [productosVisibles, estructura]); // eslint-disable-line
 
+  // Cambiar de receta trae SUS números: es lo que hace que sea una receta y no
+  // un formulario vacío. Pisa lo que haya escrito a propósito — elegir otra
+  // receta es justamente pedir otra configuración.
+  useEffect(() => {
+    if (!receta) return;
+    setConjuntos(receta.conjuntos ?? 1);
+    const def = presupuestoDefault(receta, currency);
+    setPresupuesto(def != null ? String(def) : '');
+    setPuja(receta.pujaDesdeCpa && cpaCuenta ? String(Math.round(cpaCuenta)) : '');
+  }, [estructura, currency]); // eslint-disable-line
+
+  // CPA real de la cuenta (últimos 30 días) para proponerlo como costo
+  // objetivo del Cost Cap. Es un punto de partida con base, no una adivinanza:
+  // pedir "a cuánto querés comprar" sin decir a cuánto estás comprando hoy es
+  // pedirle al usuario que haga la cuenta que la plataforma ya tiene hecha.
+  useEffect(() => {
+    if (!accountId) return;
+    let muerto = false;
+    (async () => {
+      try {
+        const qs = new URLSearchParams({ account_id: accountId, date_preset: 'last_30d' });
+        if (connId && connId !== '__cookie__') qs.set('connection_id', connId);
+        const r = await fetch(`/api/meta/funnel-insights?${qs}`, { headers: await authHeaders(false) });
+        const d = await r.json().catch(() => ({}));
+        const cpa = Number(d?.totals?.cpa);
+        if (!muerto && Number.isFinite(cpa) && cpa > 0) setCpaCuenta(cpa);
+      } catch { /* sin CPA se pide a mano, no es un error */ }
+    })();
+    return () => { muerto = true; };
+  }, [accountId, connId]);
+
+  // Cuando el CPA llega tarde, completa la puja si todavía está vacía.
+  useEffect(() => {
+    if (receta?.pujaDesdeCpa && cpaCuenta && !puja) setPuja(String(Math.round(cpaCuenta)));
+  }, [cpaCuenta, estructura]); // eslint-disable-line
+
   // Páginas + píxeles de la cuenta (para promoted_object y los post ids pelados).
   useEffect(() => {
     if (!accountId) return;
@@ -118,8 +178,13 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
     return () => { muerto = true; };
   }, [accountId, connId]); // eslint-disable-line
 
+  // Lo que REALMENTE se va a crear en Meta. Con conjuntos duplicados, 5 post
+  // ids en 8 conjuntos no son 5 anuncios: son 40.
+  const totalAds = duplicarAds ? adsOk.length * conjuntos : adsOk.length;
+  const pasado = totalAds > MAX_ADS_CREADOS;
+
   const listo = accountId && nombre.trim() && num(presupuesto) > 0 && adsOk.length > 0 && pixelId
-    && (receta.puja == null || num(puja) > 0);
+    && !pasado && (receta.puja == null || num(puja) > 0);
 
   const publicar = async () => {
     if (!listo || busy) return;
@@ -127,7 +192,10 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
     const ok = await confirmDialog({
       title: `🚀 Crear "${nombre}" en Meta`,
       message: [
-        `${receta.emoji} ${receta.titulo} · ${conjuntos} conjunto${conjuntos === 1 ? '' : 's'} · ${adsOk.length} anuncio${adsOk.length === 1 ? '' : 's'}`,
+        `${receta.emoji} ${receta.titulo} · ${conjuntos} conjunto${conjuntos === 1 ? '' : 's'}`,
+        duplicarAds && conjuntos > 1
+          ? `${adsOk.length} anuncio${adsOk.length === 1 ? '' : 's'} en CADA conjunto → ${totalAds} anuncios en total`
+          : `${adsOk.length} anuncio${adsOk.length === 1 ? '' : 's'} repartido${adsOk.length === 1 ? '' : 's'} entre los conjuntos`,
         `Presupuesto: ${presupuestoTxt}${receta.puja ? ` · ${receta.puja.toLowerCase()}: $${num(puja).toLocaleString('es-AR')}` : ''}`,
         `${pais} · ${edadMin}-${edadMax} años · Advantage+ audience y ubicaciones automáticas`,
         activar ? '⚠️ Se crea ACTIVA: empieza a gastar al toque.' : 'Se crea PAUSADA: la revisás en Meta y la encendés.',
@@ -146,7 +214,7 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
           connection_id: connId && connId !== '__cookie__' ? connId : undefined,
           estructura, nombre: nombre.trim(),
           presupuesto: num(presupuesto), puja: receta.puja ? num(puja) : 0,
-          conjuntos, pageId, pixelId, pais, edadMin, edadMax,
+          conjuntos, duplicarAds, pageId, pixelId, pais, edadMin, edadMax,
           ads: adsOk.map(a => ({ name: a.name, postId: a.postId })),
           activar,
         }),
@@ -188,7 +256,12 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
               <input className={inputCls} value={presupuesto} onChange={e => setPresupuesto(e.target.value)} placeholder="150.000" inputMode="decimal" />
             </Campo>
             {receta.puja ? (
-              <Campo label={`${receta.puja} (${currency || 'ARS'})`}>
+              <Campo label={`${receta.puja} (${currency || 'ARS'})`}
+                hint={receta.pujaDesdeCpa
+                  ? (cpaCuenta
+                      ? `Tu CPA real de los últimos 30 días: ${Math.round(cpaCuenta).toLocaleString('es-AR')}`
+                      : 'Va a nivel conjunto. Sin compras en 30 días no puedo sugerirte un CPA.')
+                  : undefined}>
                 <input className={inputCls} value={puja} onChange={e => setPuja(e.target.value)} placeholder="28.000" inputMode="decimal" />
               </Campo>
             ) : (
@@ -196,10 +269,27 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
             )}
           </div>
         </div>
+        {pasado && (
+          <p className="text-[11px] font-semibold text-red-600 dark:text-red-400">
+            Son {totalAds} anuncios ({adsOk.length} × {conjuntos} conjuntos) y el máximo por tirada es {MAX_ADS_CREADOS}.
+            Bajá los conjuntos o los anuncios.
+          </p>
+        )}
+        {conjuntos > 1 && (
+          <label className="flex items-start gap-2 text-[11px] text-gray-600 dark:text-gray-300 cursor-pointer">
+            <input type="checkbox" className="mt-0.5 accent-[#1877F2]" checked={duplicarAds}
+              onChange={e => setDuplicarAds(e.target.checked)} />
+            <span>
+              <b>Los mismos anuncios en cada conjunto</b> — {conjuntos} conjuntos idénticos compitiendo
+              ({adsOk.length || 'N'} × {conjuntos} = <b>{(adsOk.length || 0) * conjuntos || 'N'}</b> anuncios).
+              {' '}Destildado, los anuncios se <b>reparten</b> entre los conjuntos.
+            </span>
+          </label>
+        )}
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
           <Campo label="Conjuntos">
             <select className={inputCls} value={conjuntos} onChange={e => setConjuntos(Number(e.target.value))}>
-              {[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>{n}</option>)}
+              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20].map(n => <option key={n} value={n}>{n}</option>)}
             </select>
           </Campo>
           <Campo label="País">

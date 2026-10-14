@@ -160,7 +160,7 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
       const k = `i:${e.id}`;
       if (sel.has(k)) {
         const nombre = sinExtension(e.sourceHeadline || '') || `${producto} estatico ${String(e.id).slice(0, 6)}`;
-        out.push({ key: k, tipo: 'imagen', name: nombre.slice(0, 90), storagePath: e.storagePath || null, url: e.imageUrl || null });
+        out.push({ key: k, tipo: 'imagen', id: e.id, name: nombre.slice(0, 90), storagePath: e.storagePath || null, url: e.imageUrl || null });
       }
     }
     return out;
@@ -260,7 +260,10 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
           }
         }
 
-        // 2. Imágenes → adimages (hash).
+        // 2. Imágenes → adimages (hash). Guardamos id de galería ↔ nombre de
+        // ad: las que efectivamente salgan como anuncio se ARCHIVAN solas (la
+        // galería activa queda solo con lo no publicado — pedido del user).
+        const imagenesSubidas = [];
         if (imgs.length > 0) {
           log(`  Subiendo ${imgs.length} imagen${imgs.length === 1 ? '' : 'es'} a Meta…`);
           const up = await metaApi('upload-ad-images', {
@@ -271,6 +274,8 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
             if (!r.ok) { log(`  ✗ ${r.name}: ${r.error}`); continue; }
             const nombreAd = aplicarPatron(adPattern, { filename: r.name, index: adsListos.length, fecha: fechaCorta }) || r.name;
             adsListos.push({ name: nombreAd, imageHash: r.imageHash });
+            const idGaleria = Number.isInteger(r.index) ? imgs[r.index]?.id : null;
+            if (idGaleria) imagenesSubidas.push({ id: idGaleria, nombreAd });
           }
         }
 
@@ -303,6 +308,24 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
         if (okAds === 0 || cr.estado === 'DELETED') throw new Error('Ningún anuncio se pudo crear — la campaña se deshizo sola.');
         hechos.push({ nombre, campaignId: cr.campaignId, okAds, total: adsListos.length, estado: cr.estado, cardIds: [...new Set(vids.map(v => v.cardId))] });
         log(`  ✓ Campaña ${c + 1} lista: ${okAds}/${adsListos.length} ads (${cr.estado === 'ACTIVE' ? 'ACTIVA' : 'EN PAUSA'})`);
+        // Archivar los estáticos que salieron como anuncio: la galería activa
+        // queda solo con lo pendiente de publicar.
+        const okNombres = new Set((cr.resultados || []).filter(r => r.ok).map(r => r.name));
+        const aArchivar = imagenesSubidas.filter(x => okNombres.has(x.nombreAd)).map(x => x.id);
+        if (aArchivar.length > 0 && supabase) {
+          try {
+            const { error: eArch } = await supabase.from('marketing_creativos')
+              .update({ archivado: true, archivado_at: new Date().toISOString() })
+              .in('id', aArchivar);
+            if (eArch) throw new Error(eArch.message);
+            log(`  🗄 ${aArchivar.length} estático${aArchivar.length === 1 ? '' : 's'} archivado${aArchivar.length === 1 ? '' : 's'} (ya publicado${aArchivar.length === 1 ? '' : 's'})`);
+            const idsArch = new Set(aArchivar);
+            setEstaticos(prev => (prev || []).filter(e => !idsArch.has(e.id)));
+            setSel(prev => { const nn = new Set(prev); for (const id of aArchivar) nn.delete(`i:${id}`); return nn; });
+          } catch (e) {
+            log(`  ⚠ No pude archivar los estáticos publicados (${e.message}) — archivalos a mano en la galería`);
+          }
+        }
       } catch (e) {
         huboError = true;
         log(`  ✗ Campaña ${c + 1}: ${e.message}`);

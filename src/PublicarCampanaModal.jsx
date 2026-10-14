@@ -235,9 +235,22 @@ export default function PublicarCampanaModal({ a, onClose, addToast, soloPreset 
       log('Esperando que Meta procese los videos (video + thumbnail)…');
       const ids = subidos.map(r => r.videoId);
       let estados = [];
+      // Errores transitorios (rate limit de Meta, un 500 suelto) NO cortan el
+      // polling: los videos ya están subidos y procesándose igual. Solo
+      // abandonamos tras varios errores seguidos.
+      let erroresSeguidos = 0;
       for (let i = 0; i < 45; i++) {
         await esperar(4000);
-        const st = await metaApi(`videos-status?ids=${ids.join(',')}`, { connId: account.connId });
+        let st;
+        try {
+          st = await metaApi(`videos-status?ids=${ids.join(',')}`, { connId: account.connId });
+          erroresSeguidos = 0;
+        } catch (e) {
+          erroresSeguidos++;
+          log(`  ⚠ chequeo falló (${e.message}) — reintento…`);
+          if (erroresSeguidos >= 6) throw new Error(`Meta no responde el estado de los videos (${e.message}). Los videos YA quedaron subidos: reintentá la publicación en unos minutos.`);
+          continue;
+        }
         estados = st.videos || [];
         const listos = estados.filter(v => v.ready).length;
         if (i % 3 === 0) log(`  ${listos}/${ids.length} listos…`);

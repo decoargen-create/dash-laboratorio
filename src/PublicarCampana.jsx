@@ -41,14 +41,14 @@ const ESTRUCTURAS = [
     id: 'abo_costcap', titulo: 'ABO · Cost Cap', emoji: '🎯',
     desc: 'Presupuesto POR CONJUNTO + costo por compra objetivo: control fino conjunto a conjunto, comprando a tu precio o mejor.',
     puja: 'Costo por compra objetivo',
-    conjuntos: 1,
+    conjuntos: 6,
     pujaDesdeCpa: true,
   },
   {
     id: 'abo_bidcap', titulo: 'ABO · Bid Cap', emoji: '🧢',
     desc: 'Para expertos: tope duro por subasta y presupuesto separado por conjunto. Control total, crece más lento.',
     puja: 'Tope de puja',
-    conjuntos: 1,
+    conjuntos: 6,
   },
 ];
 

@@ -15,7 +15,7 @@ import PublicarArmador from './PublicarArmador.jsx';
 import PublicarCampana from './PublicarCampana.jsx';
 import { authHeaders, useMetaConnections, useMetaAdAccounts } from './MetaConnect.jsx';
 import {
-  listAllAssignments, subscribeProduccion, updateAssignment, weekLabel,
+  listAllAssignments, subscribeProduccion, updateAssignment, weekLabel, marcarVideosPublicados,
 } from './produccionStore.js';
 
 // ── Historial de publicaciones (lo escribe el server en cada intento) ──
@@ -168,16 +168,34 @@ export default function PublicarSection({ addToast }) {
     (a.productoNombre || 'Sin producto').trim() === producto &&
     ['aprobado', 'publicado'].includes(a.estado) && videosDe(a).length > 0), [asignaciones]);
 
-  // Publicación OK → las tarjetas cuyos videos salieron pasan a Publicado.
-  const alPublicar = useCallback((cardIds) => {
-    const ids = (cardIds || []).filter(Boolean);
-    let n = 0;
-    for (const id of ids) {
-      const t = asignaciones.find(a => a.id === id);
-      if (t && t.estado === 'aprobado') { updateAssignment(id, { estado: 'publicado' }); n++; }
+  // Publicación OK → se marca VIDEO POR VIDEO (publicadoAd). La tarjeta pasa
+  // a Publicado recién cuando no le queda ningún video publicable sin salir:
+  // si publicaste 5 de 7, la tarjeta sigue aprobada con los 2 restantes a la
+  // vista para la próxima.
+  const alPublicar = useCallback((videosPublicados) => {
+    const porCard = new Map();
+    for (const v of (videosPublicados || [])) {
+      if (!v?.cardId || !v?.ts) continue;
+      if (!porCard.has(v.cardId)) porCard.set(v.cardId, []);
+      porCard.get(v.cardId).push(v.ts);
     }
-    if (n > 0) addToast?.({ type: 'success', message: `${n} tarjeta${n === 1 ? '' : 's'} marcada${n === 1 ? '' : 's'} como Publicada 🚀` });
-  }, [asignaciones, addToast]);
+    let marcados = 0, completas = 0;
+    for (const [cardId, tss] of porCard) {
+      const r = marcarVideosPublicados(cardId, tss);
+      marcados += r.marcados;
+      if (r.completo && r.estado === 'aprobado') {
+        updateAssignment(cardId, { estado: 'publicado' });
+        completas++;
+      }
+    }
+    if (marcados > 0) {
+      addToast?.({
+        type: 'success',
+        message: `${marcados} video${marcados === 1 ? '' : 's'} marcado${marcados === 1 ? '' : 's'} como publicado${marcados === 1 ? '' : 's'} 🚀${completas > 0 ? ` · ${completas} tarjeta${completas === 1 ? '' : 's'} completa${completas === 1 ? '' : 's'} pasó a Publicado` : ''}`,
+        duration: 6000,
+      });
+    }
+  }, [addToast]);
 
   const totalVideos = grupos.reduce((n, g) => n + g.tarjetas.reduce((m, t) => m + videosDe(t).length, 0), 0);
 

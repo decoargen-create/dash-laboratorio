@@ -1429,6 +1429,35 @@ export function clearCorregidoVideo(id, ts) {
   pushRow(id, null, { patch: { archivos: 1 } });
 }
 
+// Publicación POR VIDEO (pedido del user): al salir como anuncio en Meta,
+// cada video queda marcado con publicadoAd (fecha ISO). El Publicador los
+// oculta por defecto; la tarjeta recién pasa a Publicado cuando no le queda
+// ningún video publicable sin marcar.
+export function marcarVideosPublicados(id, tsList) {
+  const arr = read().slice();
+  const i = arr.findIndex(a => a.id === id);
+  if (i === -1) return { completo: false, marcados: 0, estado: null };
+  const setTs = new Set((tsList || []).map(String));
+  const nuevos = [];
+  const archivos = (arr[i].archivos || []).map(f => {
+    if (!setTs.has(String(f.ts)) || f.publicadoAd) return f;
+    const nuevo = { ...f, publicadoAd: new Date().toISOString() };
+    nuevos.push(nuevo);
+    return nuevo;
+  });
+  if (nuevos.length === 0) {
+    const pub = (arr[i].archivos || []).filter(f => f.driveId || f.storagePath);
+    return { completo: pub.length > 0 && pub.every(f => f.publicadoAd), marcados: 0, estado: arr[i].estado };
+  }
+  arr[i] = { ...arr[i], archivos, updatedAt: new Date().toISOString() };
+  write(arr);
+  noteArchivoOps(id, { up: nuevos });
+  pushRow(id, null, { patch: { archivos: 1 } });
+  const publicables = archivos.filter(f => f.driveId || f.storagePath);
+  const completo = publicables.length > 0 && publicables.every(f => f.publicadoAd);
+  return { completo, marcados: nuevos.length, estado: arr[i].estado };
+}
+
 export function removeArchivo(id, ts) {
   const arr = read().slice();
   const i = arr.findIndex(a => a.id === id);

@@ -2541,6 +2541,19 @@ async function handleLaunchCampaign(req, res) {
 //   3. create-campaign-structure → campaña + conjuntos + creatives + ads.
 // ========================================================================
 
+// Meta devuelve el MISMO error críptico ("Unsupported post request. Object
+// with ID 'act_X' does not exist, cannot be loaded due to missing
+// permissions...") cuando el token puede LEER la cuenta pero no ESCRIBIR —
+// p. ej. una conexión OAuth hecha cuando AdsLab pedía solo ads_read. Lo
+// traducimos a algo accionable en vez de mandar al usuario a la doc de Graph.
+function traducirErrorMetaEscritura(msg) {
+  const m = String(msg || '');
+  if (/Unsupported post request|missing permissions|\(#200\)|\(#10\)|requires (the extended permission|ads_management)/i.test(m)) {
+    return 'Tu conexión de Meta no tiene permisos de ESCRITURA (se conectó pidiendo solo lectura). Andá a Conectar Meta, reconectá la cuenta aceptando los permisos nuevos (gestión de anuncios y páginas) y reintentá. Detalle de Meta: ' + m.slice(0, 220);
+  }
+  return m;
+}
+
 // Config normalizada del ad template: lo que se clona al publicar.
 async function handleTemplateConfig(req, res) {
   if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
@@ -2682,7 +2695,7 @@ async function handleUploadAdVideos(req, res) {
       const up = await graphPost(`${accountId}/advideos`, token, { file_url: fileUrl, name });
       return { name, index, ok: true, videoId: up.id };
     } catch (e) {
-      return { name, index, ok: false, error: e.message || 'Error subiendo a Meta' };
+      return { name, index, ok: false, error: traducirErrorMetaEscritura(e.message) || 'Error subiendo a Meta' };
     }
   };
 
@@ -2871,7 +2884,7 @@ async function handleCreateCampaignStructure(req, res) {
         });
         return { name: ad.name, ok: true, adId: nuevo.id, adsetId };
       } catch (e) {
-        return { name: ad.name, ok: false, error: e.message };
+        return { name: ad.name, ok: false, error: traducirErrorMetaEscritura(e.message) };
       }
     };
     const resultados = [];
@@ -2902,7 +2915,7 @@ async function handleCreateCampaignStructure(req, res) {
     });
   } catch (err) {
     log.push(`✗ ${err.message}`);
-    return respondJSON(res, err.status || 502, { error: err.message, log });
+    return respondJSON(res, err.status || 502, { error: traducirErrorMetaEscritura(err.message), log });
   }
 }
 

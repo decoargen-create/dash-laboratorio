@@ -25,6 +25,7 @@ import {
   isSupabaseConfigured, getUserIdFromAuth,
   listMetaConnections, insertMetaConnection,
   getMetaConnectionToken, deleteMetaConnection,
+  getServiceClient,
 } from '../marketing/_supabase-server.js';
 
 // Resuelve el access token a usar para un request. Dos fuentes:
@@ -861,11 +862,13 @@ async function fetchIgPostLikes(igMediaId, accessToken) {
 // transitorios como IN_PROCESS o WITH_ISSUES.
 async function handleCampaigns(req, res) {
   if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
-  const session = readMetaCookie(req);
-  if (!session?.accessToken) return respondJSON(res, 401, { error: 'Meta no conectado' });
-
   const origin = getOrigin(req);
   const url = new URL(req.url, origin);
+  // resolveAccessToken en vez de solo la cookie legacy: así el selector de
+  // campañas funciona también en modo conexiones multi-cuenta (connection_id).
+  const { token, error, status } = await resolveAccessToken(req, url);
+  if (!token) return respondJSON(res, status || 401, { error: error || 'Meta no conectado' });
+  const session = { accessToken: token };
   const accountId = url.searchParams.get('account_id');
   if (!accountId) return respondJSON(res, 400, { error: 'Falta account_id' });
 
@@ -919,11 +922,12 @@ async function handleCampaigns(req, res) {
 // varios segundos si hay muchos ad sets.
 async function handleCampaignAdsets(req, res) {
   if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
-  const session = readMetaCookie(req);
-  if (!session?.accessToken) return respondJSON(res, 401, { error: 'Meta no conectado' });
-
   const origin = getOrigin(req);
   const url = new URL(req.url, origin);
+  // Ídem handleCampaigns: cookie legacy O conexión guardada (connection_id).
+  const { token, error, status } = await resolveAccessToken(req, url);
+  if (!token) return respondJSON(res, status || 401, { error: error || 'Meta no conectado' });
+  const session = { accessToken: token };
   const campaignId = url.searchParams.get('campaign_id');
   const withAds = url.searchParams.get('with_ads') === '1';
   if (!campaignId) return respondJSON(res, 400, { error: 'Falta campaign_id' });
@@ -2496,6 +2500,253 @@ async function handleLaunchCampaign(req, res) {
   }
 }
 
+// ========================================================================
+// PUBLICAR CAMPAÑAS — el "Ads Uploader" propio: los videos aprobados de una
+// tarjeta de Producción se suben a Meta y se crea campaña → conjuntos → ads
+// clonando la configuración (targeting, pixel, página, CTA) de un ad
+// template elegido por el usuario. Todo con el token de la conexión (los
+// writes ya estaban probados por set-status / run-creative-refresh).
+//
+// El flujo es en 3 pasos orquestados por el front (así ningún request de
+// Vercel espera el procesamiento de video de Meta):
+//   1. upload-ad-videos  → act/advideos con file_url (Meta baja el archivo).
+//   2. videos-status     → polling hasta que cada video esté ready + picture.
+//   3. create-campaign-structure → campaña + conjuntos + creatives + ads.
+// ========================================================================
+
+// Config normalizada del ad template: lo que se clona al publicar.
+async function handleTemplateConfig(req, res) {
+  if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
+  const origin = getOrigin(req);
+  const url = new URL(req.url, origin);
+  const { token, error, status } = await resolveAccessToken(req, url);
+  if (!token) return respondJSON(res, status || 401, { error: error || 'Meta no conectado' });
+  const adId = url.searchParams.get('ad_id');
+  if (!adId || !/^\d+$/.test(adId)) return respondJSON(res, 400, { error: 'Falta ad_id (numérico)' });
+
+  try {
+    const d = await graphGet(adId, token, {
+      fields: 'id,name,campaign{id,name,objective},adset{id,name,targeting,optimization_goal,billing_event,promoted_object,destination_type},creative{id,object_story_spec}',
+    });
+    const oss = d.creative?.object_story_spec || {};
+    const vd = oss.video_data || {};
+    const ld = oss.link_data || {};
+    const cta = vd.call_to_action || ld.call_to_action || null;
+    return respondJSON(res, 200, {
+      adName: d.name,
+      campaign: { id: d.campaign?.id || null, name: d.campaign?.name || null, objective: d.campaign?.objective || null },
+      adset: {
+        id: d.adset?.id || null,
+        name: d.adset?.name || null,
+        targeting: d.adset?.targeting || null,
+        optimizationGoal: d.adset?.optimization_goal || null,
+        billingEvent: d.adset?.billing_event || null,
+        promotedObject: d.adset?.promoted_object || null,
+        destinationType: d.adset?.destination_type || null,
+      },
+      pageId: oss.page_id || null,
+      instagramUserId: oss.instagram_user_id || oss.instagram_actor_id || null,
+      link: cta?.value?.link || ld.link || null,
+      ctaType: cta?.type || 'SHOP_NOW',
+      defaultMessage: vd.message || ld.message || '',
+    });
+  } catch (err) {
+    return respondJSON(res, err.status || 502, { error: err.message });
+  }
+}
+
+// Sube videos a act/advideos por URL. El server resuelve la URL de cada
+// archivo de la tarjeta: storagePath (bucket creativos, firmada con el rol
+// de servicio — el admin no puede firmar paths del editor desde el client) o
+// driveId (link directo de descarga de Drive; funciona con archivos
+// compartidos por link, que es como viven las carpetas de Producción).
+async function handleUploadAdVideos(req, res) {
+  if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
+  let body;
+  try {
+    if (req.body && typeof req.body === 'object') body = req.body;
+    else {
+      const chunks = [];
+      for await (const c of req) chunks.push(c);
+      body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+    }
+  } catch { return respondJSON(res, 400, { error: 'Body JSON inválido' }); }
+
+  const origin = getOrigin(req);
+  const url = new URL(req.url, origin);
+  const { token, error, status } = await resolveAccessToken(req, url, body?.connection_id || null);
+  if (!token) return respondJSON(res, status || 401, { error: error || 'Meta no conectado' });
+
+  const accountId = String(body.account_id || '').trim();
+  const videos = Array.isArray(body.videos) ? body.videos.slice(0, 30) : [];
+  if (!accountId) return respondJSON(res, 400, { error: 'Falta account_id (con prefijo act_)' });
+  if (videos.length === 0) return respondJSON(res, 400, { error: 'Sin videos para subir' });
+
+  const sb = getServiceClient();
+  const resultados = [];
+  for (const v of videos) {
+    const name = String(v?.name || 'video').slice(0, 90);
+    try {
+      let fileUrl = String(v?.fileUrl || '').trim();
+      if (!fileUrl && v?.storagePath && sb) {
+        const { data, error: e } = await sb.storage.from('creativos').createSignedUrl(String(v.storagePath), 3600);
+        if (e || !data?.signedUrl) throw new Error(`No pude firmar el archivo (${e?.message || 'sin URL'})`);
+        fileUrl = data.signedUrl;
+      }
+      if (!fileUrl && v?.driveId) {
+        fileUrl = `https://drive.google.com/uc?export=download&id=${encodeURIComponent(String(v.driveId))}`;
+      }
+      if (!fileUrl) throw new Error('El archivo no tiene storagePath ni driveId');
+      const up = await graphPost(`${accountId}/advideos`, token, { file_url: fileUrl, name });
+      resultados.push({ name, ok: true, videoId: up.id });
+    } catch (e) {
+      resultados.push({ name, ok: false, error: e.message || 'Error subiendo a Meta' });
+    }
+  }
+  const fallaron = resultados.filter(r => !r.ok).length;
+  const code = fallaron === 0 ? 200 : (fallaron === resultados.length ? 502 : 207);
+  return respondJSON(res, code, { resultados });
+}
+
+// Estado de procesamiento de los videos subidos (y su thumbnail, que el
+// creative necesita como image_url).
+async function handleVideosStatus(req, res) {
+  if (req.method !== 'GET') return respondJSON(res, 405, { error: 'Method not allowed' });
+  const origin = getOrigin(req);
+  const url = new URL(req.url, origin);
+  const { token, error, status } = await resolveAccessToken(req, url);
+  if (!token) return respondJSON(res, status || 401, { error: error || 'Meta no conectado' });
+  const ids = String(url.searchParams.get('ids') || '').split(',').map(s => s.trim()).filter(s => /^\d+$/.test(s)).slice(0, 30);
+  if (ids.length === 0) return respondJSON(res, 400, { error: 'Falta ids (coma-separados)' });
+
+  const videos = [];
+  for (const id of ids) {
+    try {
+      const d = await graphGet(id, token, { fields: 'status,picture' });
+      const st = d.status?.video_status || 'unknown';
+      videos.push({ id, status: st, ready: st === 'ready', picture: d.picture || null });
+    } catch (e) {
+      videos.push({ id, status: 'error', ready: false, error: e.message });
+    }
+  }
+  return respondJSON(res, 200, { videos, todosListos: videos.every(v => v.ready) });
+}
+
+// Crea campaña → conjuntos → creatives → ads con la config del template.
+// CBO: el presupuesto vive en la campaña; los conjuntos van sin budget.
+async function handleCreateCampaignStructure(req, res) {
+  if (req.method !== 'POST') return respondJSON(res, 405, { error: 'Method not allowed' });
+  let body;
+  try {
+    if (req.body && typeof req.body === 'object') body = req.body;
+    else {
+      const chunks = [];
+      for await (const c of req) chunks.push(c);
+      body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+    }
+  } catch { return respondJSON(res, 400, { error: 'Body JSON inválido' }); }
+
+  const origin = getOrigin(req);
+  const url = new URL(req.url, origin);
+  const { token, error, status: authStatus } = await resolveAccessToken(req, url, body?.connection_id || null);
+  if (!token) return respondJSON(res, authStatus || 401, { error: error || 'Meta no conectado' });
+
+  const accountId = String(body.account_id || '').trim();
+  const campaignName = String(body.campaignName || '').trim();
+  const dailyBudget = Number(body.dailyBudget);
+  const adsPerSet = Math.max(1, Math.min(10, Number(body.adsPerSet) || 3));
+  const estado = body.status === 'PAUSED' ? 'PAUSED' : 'ACTIVE';
+  const template = body.template || {};
+  const message = String(body.message || '').slice(0, 2000);
+  const headline = String(body.headline || '').slice(0, 120);
+  const ads = (Array.isArray(body.ads) ? body.ads : []).filter(a => a?.videoId).slice(0, 30);
+
+  if (!accountId) return respondJSON(res, 400, { error: 'Falta account_id' });
+  if (!campaignName) return respondJSON(res, 400, { error: 'Falta el nombre de la campaña' });
+  if (!(dailyBudget > 0)) return respondJSON(res, 400, { error: 'Presupuesto diario inválido' });
+  if (ads.length === 0) return respondJSON(res, 400, { error: 'Sin videos listos para crear ads' });
+  if (!template.pageId) return respondJSON(res, 400, { error: 'El template no tiene page_id — elegí otro ad de referencia' });
+
+  const log = [];
+  try {
+    // 1. Campaña (CBO).
+    const camp = await graphPost(`${accountId}/campaigns`, token, {
+      name: campaignName,
+      objective: template.campaign?.objective || 'OUTCOME_SALES',
+      status: estado,
+      special_ad_categories: [],
+      daily_budget: Math.round(dailyBudget * 100),
+      bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
+    });
+    log.push(`✓ Campaña creada: ${camp.id}`);
+
+    // 2. Conjuntos — clonando targeting/optimización/pixel del template.
+    const nSets = Math.ceil(ads.length / adsPerSet);
+    const adsetIds = [];
+    for (let i = 0; i < nSets; i++) {
+      const payload = {
+        name: `Ad Set ${String(i + 1).padStart(2, '0')}`,
+        campaign_id: camp.id,
+        targeting: template.adset?.targeting || { geo_locations: { countries: ['AR'] } },
+        optimization_goal: template.adset?.optimizationGoal || 'OFFSITE_CONVERSIONS',
+        billing_event: template.adset?.billingEvent || 'IMPRESSIONS',
+        status: estado,
+      };
+      if (template.adset?.promotedObject) payload.promoted_object = template.adset.promotedObject;
+      if (template.adset?.destinationType) payload.destination_type = template.adset.destinationType;
+      const as = await graphPost(`${accountId}/adsets`, token, payload);
+      adsetIds.push(as.id);
+      log.push(`✓ Conjunto ${i + 1}/${nSets}: ${as.id}`);
+    }
+
+    // 3. Creatives + ads.
+    const resultados = [];
+    for (let j = 0; j < ads.length; j++) {
+      const ad = ads[j];
+      const adsetId = adsetIds[Math.floor(j / adsPerSet)];
+      try {
+        const videoData = {
+          video_id: String(ad.videoId),
+          message,
+        };
+        if (ad.picture) videoData.image_url = ad.picture;
+        if (headline) videoData.title = headline;
+        if (template.link) videoData.call_to_action = { type: template.ctaType || 'SHOP_NOW', value: { link: template.link } };
+        const oss = { page_id: String(template.pageId), video_data: videoData };
+        if (template.instagramUserId) oss.instagram_user_id = String(template.instagramUserId);
+
+        const creative = await graphPost(`${accountId}/adcreatives`, token, {
+          name: `${String(ad.name || 'video').slice(0, 80)} · creative`,
+          object_story_spec: oss,
+        });
+        const nuevo = await graphPost(`${accountId}/ads`, token, {
+          name: String(ad.name || `Ad ${j + 1}`).slice(0, 100),
+          adset_id: adsetId,
+          creative: { creative_id: creative.id },
+          status: estado,
+        });
+        resultados.push({ name: ad.name, ok: true, adId: nuevo.id, adsetId });
+        log.push(`✓ Ad ${j + 1}/${ads.length}: ${nuevo.id}`);
+      } catch (e) {
+        resultados.push({ name: ad.name, ok: false, error: e.message });
+        log.push(`✗ Ad ${j + 1}/${ads.length}: ${e.message}`);
+      }
+    }
+
+    const fallaron = resultados.filter(r => !r.ok).length;
+    return respondJSON(res, fallaron === 0 ? 200 : 207, {
+      campaignId: camp.id,
+      adsetIds,
+      resultados,
+      log,
+      estado,
+    });
+  } catch (err) {
+    log.push(`✗ ${err.message}`);
+    return respondJSON(res, err.status || 502, { error: err.message, log });
+  }
+}
+
 // --- dispatcher ---
 
 const actions = {
@@ -2515,6 +2766,10 @@ const actions = {
   'ad-performance': handleAdPerformance,
   'video-source': handleVideoSource,
   'ad-preview': handleAdPreview,
+  'template-config': handleTemplateConfig,
+  'upload-ad-videos': handleUploadAdVideos,
+  'videos-status': handleVideosStatus,
+  'create-campaign-structure': handleCreateCampaignStructure,
   'ig-accounts': handleIgAccounts,
   'latest-ig-post': handleLatestIgPost,
   'campaigns': handleCampaigns,

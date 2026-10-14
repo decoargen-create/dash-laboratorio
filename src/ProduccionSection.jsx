@@ -30,6 +30,7 @@ import { CreativosSection, subirParaTarjeta, VIDEO_ACCEPT, probeDrive, aprobarTo
 import { numerarDuplicados, columnaEfectiva, monthOfWeek } from './produccionCalc.js';
 import { registrarColoresPersonas, personaColor, CHIP_CLS } from './produccionColors.js';
 import TarjetaProduccion, { CAPS_ADMIN } from './produccionCard.jsx';
+import PublicarCampanaModal from './PublicarCampanaModal.jsx';
 import { listTeam, createMember, removeMember } from './produccionTeam.js';
 import { driveStatus, connectDrive, disconnectDrive } from './produccionDrive.js';
 import { analizar as analizarCarpetas, reparar as repararCarpetas, tarjetasConVideosEnDrive } from './produccionRepararCarpetas.js';
@@ -2417,6 +2418,8 @@ export function CardDetailModal({ a, personas, team = [], onClose, addToast, onT
   // del mp4 vía /api/marketing/referencias) y queda en ESTA tarjeta. El
   // análisis IA / guion se hacen desde Marketing → Referencias.
   const [refUrl, setRefUrl] = useState('');
+  // Publicar los videos de la tarjeta como campaña en Meta (Ads Uploader propio).
+  const [pubOpen, setPubOpen] = useState(false);
   const [refBusy, setRefBusy] = useState(false);
   const agregarReferencia = async () => {
     const url = refUrl.trim();
@@ -2740,6 +2743,13 @@ export function CardDetailModal({ a, personas, team = [], onClose, addToast, onT
             className="inline-flex items-center gap-1.5 text-xs font-bold text-red-500 hover:text-red-600 transition">
             <Trash2 size={14} /> Eliminar tarjeta
           </button>
+          {(a.archivos || []).length > 0 && (
+            <button onClick={() => setPubOpen(true)}
+              title="Publicar los videos de esta tarjeta como campaña nueva en Meta, clonando la config de un ad existente"
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-brand-600 dark:text-brand-300 border border-brand-300 dark:border-brand-800 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/20 transition">
+              🚀 Publicar campaña
+            </button>
+          )}
           <button onClick={() => (nCorr > 0 ? devolverParaCorregir() : setDlg('cambios'))}
             title={nCorr > 0
               ? `Devolver a «Por hacer» con las ${nCorr} correcciones ya escritas — sin pedir otra nota`
@@ -2749,6 +2759,9 @@ export function CardDetailModal({ a, personas, team = [], onClose, addToast, onT
           </button>
           <button onClick={() => { saveAll(); onClose(); }} className="px-4 py-2 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition">Listo</button>
         </div>
+
+        {/* Publicador de campañas (Ads Uploader propio) */}
+        {pubOpen && <PublicarCampanaModal a={a} addToast={addToast} onClose={() => setPubOpen(false)} />}
 
         {/* Diálogos propios de la plataforma */}
         <ConfirmDialog

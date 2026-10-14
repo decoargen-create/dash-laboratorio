@@ -1531,6 +1531,20 @@ async function handleConnectToken(req, res) {
     return respondJSON(res, 401, { error: `Token inválido: ${msg}` });
   }
 
+  // CANJE A LARGA DURACIÓN: un token pegado a mano suele ser el corto del
+  // Graph Explorer (horas) — guardarlo tal cual era una desconexión segura a
+  // los pocos días. Si el canje falla (token de otra app, o de System User,
+  // que no vence y no se canjea), se guarda el original: no es fatal.
+  let tokenFinal = accessToken;
+  const appId = process.env.META_APP_ID;
+  const appSecret = process.env.META_APP_SECRET;
+  if (appId && appSecret) {
+    try {
+      const long = await exchangeForLongLived(appId, appSecret, accessToken);
+      if (long?.access_token) tokenFinal = long.access_token;
+    } catch { /* token de otra app o de System User → se usa el original */ }
+  }
+
   // Si hay Supabase + JWT del user, guardamos la conexión en DB (multi-cuenta):
   // así se pueden tener varias cuentas/clientes conectados a la vez.
   const userId = isSupabaseConfigured() ? await getUserIdFromAuth(req) : null;
@@ -1540,7 +1554,7 @@ async function handleConnectToken(req, res) {
         label: body?.label,
         metaUserId: me.id,
         metaUserName: me.name || null,
-        accessToken,
+        accessToken: tokenFinal,
       });
       // Token nuevo OK → resetear el flag de "Meta caído".
       try { const { markMetaHealthy } = await import('./_alert.js'); await markMetaHealthy(); } catch {}
@@ -1556,7 +1570,7 @@ async function handleConnectToken(req, res) {
 
   // Fallback legacy: sin Supabase guardamos en cookie (una sola conexión).
   const cookiePayload = {
-    accessToken,
+    accessToken: tokenFinal,
     metaUserId: me.id,
     metaUserName: me.name || null,
     iat: Math.floor(Date.now() / 1000),
@@ -2539,17 +2553,12 @@ async function handleTemplateConfig(req, res) {
 
   try {
     const d = await graphGet(adId, token, {
-<<<<<<< HEAD
       fields: 'id,name,campaign{id,name,objective,special_ad_categories},adset{id,name,targeting,optimization_goal,billing_event,promoted_object,destination_type},creative{id,object_story_spec}',
-=======
-      fields: 'id,name,campaign{id,name,objective},adset{id,name,targeting,optimization_goal,billing_event,promoted_object,destination_type},creative{id,object_story_spec}',
->>>>>>> origin/main
     });
     const oss = d.creative?.object_story_spec || {};
     const vd = oss.video_data || {};
     const ld = oss.link_data || {};
     const cta = vd.call_to_action || ld.call_to_action || null;
-<<<<<<< HEAD
 
     // El GET de targeting trae campos read-only/deprecados que Graph RECHAZA
     // al re-postearlos en act/adsets (#100): se sanitiza acá, una sola vez.
@@ -2582,26 +2591,13 @@ async function handleTemplateConfig(req, res) {
         id: d.adset?.id || null,
         name: d.adset?.name || null,
         targeting,
-=======
-    return respondJSON(res, 200, {
-      adName: d.name,
-      campaign: { id: d.campaign?.id || null, name: d.campaign?.name || null, objective: d.campaign?.objective || null },
-      adset: {
-        id: d.adset?.id || null,
-        name: d.adset?.name || null,
-        targeting: d.adset?.targeting || null,
->>>>>>> origin/main
         optimizationGoal: d.adset?.optimization_goal || null,
         billingEvent: d.adset?.billing_event || null,
         promotedObject: d.adset?.promoted_object || null,
         destinationType: d.adset?.destination_type || null,
       },
       pageId: oss.page_id || null,
-<<<<<<< HEAD
       instagramUserId,
-=======
-      instagramUserId: oss.instagram_user_id || oss.instagram_actor_id || null,
->>>>>>> origin/main
       link: cta?.value?.link || ld.link || null,
       ctaType: cta?.type || 'SHOP_NOW',
       defaultMessage: vd.message || ld.message || '',
@@ -2639,7 +2635,6 @@ async function handleUploadAdVideos(req, res) {
   if (videos.length === 0) return respondJSON(res, 400, { error: 'Sin videos para subir' });
 
   const sb = getServiceClient();
-<<<<<<< HEAD
 
   // URL de descarga directa para un archivo de Drive. drive.usercontent es
   // el host que hoy sirve bytes directos; uc?export=download devuelve una
@@ -2678,19 +2673,10 @@ async function handleUploadAdVideos(req, res) {
       let fileUrl = String(v?.fileUrl || '').trim();
       if (!fileUrl && v?.storagePath) {
         if (!sb) throw new Error('Supabase no está configurado en el server (SUPABASE_SERVICE_ROLE_KEY) — no puedo firmar archivos de AdsLab');
-=======
-  const resultados = [];
-  for (const v of videos) {
-    const name = String(v?.name || 'video').slice(0, 90);
-    try {
-      let fileUrl = String(v?.fileUrl || '').trim();
-      if (!fileUrl && v?.storagePath && sb) {
->>>>>>> origin/main
         const { data, error: e } = await sb.storage.from('creativos').createSignedUrl(String(v.storagePath), 3600);
         if (e || !data?.signedUrl) throw new Error(`No pude firmar el archivo (${e?.message || 'sin URL'})`);
         fileUrl = data.signedUrl;
       }
-<<<<<<< HEAD
       if (!fileUrl && v?.driveId) fileUrl = await resolverDriveUrl(v.driveId);
       if (!fileUrl) throw new Error('El archivo no tiene storagePath ni driveId');
       const up = await graphPost(`${accountId}/advideos`, token, { file_url: fileUrl, name });
@@ -2713,21 +2699,6 @@ async function handleUploadAdVideos(req, res) {
     ...(code === 502 ? { error: resultados.map(r => `${r.name}: ${r.error}`).join(' | ').slice(0, 600) } : {}),
     resultados,
   });
-=======
-      if (!fileUrl && v?.driveId) {
-        fileUrl = `https://drive.google.com/uc?export=download&id=${encodeURIComponent(String(v.driveId))}`;
-      }
-      if (!fileUrl) throw new Error('El archivo no tiene storagePath ni driveId');
-      const up = await graphPost(`${accountId}/advideos`, token, { file_url: fileUrl, name });
-      resultados.push({ name, ok: true, videoId: up.id });
-    } catch (e) {
-      resultados.push({ name, ok: false, error: e.message || 'Error subiendo a Meta' });
-    }
-  }
-  const fallaron = resultados.filter(r => !r.ok).length;
-  const code = fallaron === 0 ? 200 : (fallaron === resultados.length ? 502 : 207);
-  return respondJSON(res, code, { resultados });
->>>>>>> origin/main
 }
 
 // Estado de procesamiento de los videos subidos (y su thumbnail, que el
@@ -2746,15 +2717,11 @@ async function handleVideosStatus(req, res) {
     try {
       const d = await graphGet(id, token, { fields: 'status,picture' });
       const st = d.status?.video_status || 'unknown';
-<<<<<<< HEAD
       // `ready` exige TAMBIÉN el thumbnail: el creative lleva picture como
       // image_url OBLIGATORIO, y Meta suele publicar el picture un rato
       // después del video_status ready. Sin esto, publicar "apenas está
       // listo" creaba todos los creatives sin imagen y fallaban en bloque.
       videos.push({ id, status: st, ready: st === 'ready' && !!d.picture, picture: d.picture || null });
-=======
-      videos.push({ id, status: st, ready: st === 'ready', picture: d.picture || null });
->>>>>>> origin/main
     } catch (e) {
       videos.push({ id, status: 'error', ready: false, error: e.message });
     }
@@ -2799,7 +2766,6 @@ async function handleCreateCampaignStructure(req, res) {
 
   const log = [];
   try {
-<<<<<<< HEAD
     // Objetivos legacy (pre-ODAX): Meta NO deja crear campañas nuevas con
     // ellos — si el template es viejo, se mapea al OUTCOME_* equivalente.
     const ODAX = {
@@ -2848,29 +2814,13 @@ async function handleCreateCampaignStructure(req, res) {
         .trim()
         .slice(0, 100) || `Ad Set ${i + 1}`;
     };
-=======
-    // 1. Campaña (CBO).
-    const camp = await graphPost(`${accountId}/campaigns`, token, {
-      name: campaignName,
-      objective: template.campaign?.objective || 'OUTCOME_SALES',
-      status: estado,
-      special_ad_categories: [],
-      daily_budget: Math.round(dailyBudget * 100),
-      bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
-    });
-    log.push(`✓ Campaña creada: ${camp.id}`);
->>>>>>> origin/main
 
     // 2. Conjuntos — clonando targeting/optimización/pixel del template.
     const nSets = Math.ceil(ads.length / adsPerSet);
     const adsetIds = [];
     for (let i = 0; i < nSets; i++) {
       const payload = {
-<<<<<<< HEAD
         name: nombreConjunto(i),
-=======
-        name: `Ad Set ${String(i + 1).padStart(2, '0')}`,
->>>>>>> origin/main
         campaign_id: camp.id,
         targeting: template.adset?.targeting || { geo_locations: { countries: ['AR'] } },
         optimization_goal: template.adset?.optimizationGoal || 'OFFSITE_CONVERSIONS',
@@ -2884,7 +2834,6 @@ async function handleCreateCampaignStructure(req, res) {
       log.push(`✓ Conjunto ${i + 1}/${nSets}: ${as.id}`);
     }
 
-<<<<<<< HEAD
     // 3. Creatives + ads — en tandas de 4 (71 POSTs secuenciales rozaban el
     // maxDuration de Vercel; en tandas entra holgado sin reventar el rate
     // limit de Marketing API).
@@ -2905,19 +2854,6 @@ async function handleCreateCampaignStructure(req, res) {
           image_url: picture,
           message,
         };
-=======
-    // 3. Creatives + ads.
-    const resultados = [];
-    for (let j = 0; j < ads.length; j++) {
-      const ad = ads[j];
-      const adsetId = adsetIds[Math.floor(j / adsPerSet)];
-      try {
-        const videoData = {
-          video_id: String(ad.videoId),
-          message,
-        };
-        if (ad.picture) videoData.image_url = ad.picture;
->>>>>>> origin/main
         if (headline) videoData.title = headline;
         if (template.link) videoData.call_to_action = { type: template.ctaType || 'SHOP_NOW', value: { link: template.link } };
         const oss = { page_id: String(template.pageId), video_data: videoData };
@@ -2933,7 +2869,6 @@ async function handleCreateCampaignStructure(req, res) {
           creative: { creative_id: creative.id },
           status: estado,
         });
-<<<<<<< HEAD
         return { name: ad.name, ok: true, adId: nuevo.id, adsetId };
       } catch (e) {
         return { name: ad.name, ok: false, error: e.message };
@@ -2955,14 +2890,6 @@ async function handleCreateCampaignStructure(req, res) {
       log.push('✓ Campaña ACTIVADA');
     } else if (okAds === 0) {
       log.push('✗ Ningún ad se creó — la campaña queda PAUSADA (borrala desde Meta si no la vas a usar)');
-=======
-        resultados.push({ name: ad.name, ok: true, adId: nuevo.id, adsetId });
-        log.push(`✓ Ad ${j + 1}/${ads.length}: ${nuevo.id}`);
-      } catch (e) {
-        resultados.push({ name: ad.name, ok: false, error: e.message });
-        log.push(`✗ Ad ${j + 1}/${ads.length}: ${e.message}`);
-      }
->>>>>>> origin/main
     }
 
     const fallaron = resultados.filter(r => !r.ok).length;
@@ -2971,11 +2898,7 @@ async function handleCreateCampaignStructure(req, res) {
       adsetIds,
       resultados,
       log,
-<<<<<<< HEAD
       estado: estadoFinal,
-=======
-      estado,
->>>>>>> origin/main
     });
   } catch (err) {
     log.push(`✗ ${err.message}`);

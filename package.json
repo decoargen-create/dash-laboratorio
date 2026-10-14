@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node tests/logic.test.mjs"
+    "test": "node tests/logic.test.mjs && node scripts/check-api-syntax.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.89.0",

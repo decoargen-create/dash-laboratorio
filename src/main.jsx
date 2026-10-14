@@ -215,3 +215,18 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     </ErrorBoundary>
   </StrictMode>,
 )
+
+// ── Badge de ENTORNO ──────────────────────────────────────────────────────
+// Cualquier dominio que NO sea producción (adslab-studio.vercel.app) muestra
+// un chip fijo "DEV" abajo a la izquierda: en el entorno de prueba
+// (dev-ecosistema y previews) se experimenta sin miedo, pero que se note
+// dónde estás parado. En localhost no molesta.
+if (typeof window !== 'undefined'
+  && !['adslab-studio.vercel.app', 'localhost', '127.0.0.1'].includes(window.location.hostname)) {
+  const chip = document.createElement('div');
+  chip.textContent = '🧪 ENTORNO DEV — esto no es producción';
+  chip.style.cssText = 'position:fixed;left:12px;bottom:12px;z-index:99999;background:#7c3aed;color:#fff;' +
+    'font:800 11px/1 Inter,system-ui,sans-serif;letter-spacing:.04em;padding:7px 12px;border-radius:999px;' +
+    'box-shadow:0 6px 20px rgba(124,58,237,.5);pointer-events:none;';
+  document.body.appendChild(chip);
+}

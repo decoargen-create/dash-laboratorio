@@ -680,7 +680,6 @@ function ProductTabs({ activeTab, onChange }) {
       tabs: [
         { id: 'bandeja', label: 'Bandeja', emoji: '📥' },
         { id: 'inspiracion', label: 'Inspiración', emoji: '✨' },
-        { id: 'referencias', label: 'Referencias', emoji: '🎞️' },
         { id: 'creativos', label: 'Creativos', emoji: '🎨' },
         { id: 'guiones', label: 'Guiones IA', emoji: '🎬' },
         { id: 'galeria', label: 'Galería', emoji: '🖼️' },
@@ -3982,10 +3981,6 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
       {productoTab === 'guiones' && (
         <TranscripcionVideosSection addToast={addToast} forcedProductoId={String(producto.id)} embedded />
-      )}
-
-      {productoTab === 'referencias' && (
-        <ReferenciasSection producto={producto} addToast={addToast} />
       )}
 
       {productoTab === 'galeria' && (

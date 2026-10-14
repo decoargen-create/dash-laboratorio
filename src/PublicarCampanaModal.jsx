@@ -55,6 +55,13 @@ async function metaApi(path, { connId, method = 'GET', body } = {}) {
 }
 
 const esperar = (ms) => new Promise(r => setTimeout(r, ms));
+// Errores de LECTURA de Meta que un buyer no tiene por qué descifrar.
+const amigable = (m) => {
+  const s = String(m || '');
+  if (/request limit|#17\)|#80004/i.test(s)) return 'Meta está limitando las consultas — esperá un minuto y reintentá';
+  if (/Unsupported get request|does not exist/i.test(s)) return 'Ese elemento ya no existe en Meta (¿lo borraron o archivaron?)';
+  return s;
+};
 const sinExtension = (n) => String(n || '').replace(/\.[a-z0-9]{2,5}$/i, '');
 
 // Patrones tipo adsuploader: {filename}, {index}, {index:01}, {date}.
@@ -123,20 +130,23 @@ export default function PublicarCampanaModal({ a, onClose, addToast, soloPreset 
       try {
         const d = await metaApi(`campaigns?account_id=${encodeURIComponent(account.id)}`, { connId: account.connId });
         if (vivo) setCampanas(d.campaigns || []);
-      } catch (e) { if (vivo) addToast?.({ type: 'error', message: `Campañas: ${e.message}` }); }
+      } catch (e) { if (vivo) addToast?.({ type: 'error', message: `Campañas: ${amigable(e.message)}` }); }
     })();
     return () => { vivo = false; };
   }, [account?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     setAdsets([]); setAdsetSel('');
+    // Elegir OTRA campaña invalida el ad template anterior: sin esto se podía
+    // publicar con el targeting/pixel de un ad que ya no estaba a la vista.
+    if (campSel) { setAdSel(''); setTemplate(null); }
     if (!campSel || !account) return;
     let vivo = true;
     (async () => {
       try {
         const d = await metaApi(`campaign-adsets?campaign_id=${encodeURIComponent(campSel)}&with_ads=1`, { connId: account.connId });
         if (vivo) setAdsets(d.adsets || []);
-      } catch (e) { if (vivo) addToast?.({ type: 'error', message: `Conjuntos: ${e.message}` }); }
+      } catch (e) { if (vivo) addToast?.({ type: 'error', message: `Conjuntos: ${amigable(e.message)}` }); }
     })();
     return () => { vivo = false; };
   }, [campSel]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -155,8 +165,10 @@ export default function PublicarCampanaModal({ a, onClose, addToast, soloPreset 
           setMensaje(prev => prev || preset?.mensaje || d.defaultMessage || '');
         }
       } catch (e) {
-        if (vivo) addToast?.({ type: 'error', message: `Template: ${e.message}` });
-        if (vivo && usandoPreset) setUsandoPreset(false); // preset roto → picker
+        if (vivo) addToast?.({ type: 'error', message: `Template: ${amigable(e.message)}` });
+        // Preset/elección rota → volver al picker LIMPIO: sin resetear adSel,
+        // re-elegir el mismo ad no disparaba el effect y quedaba muerto.
+        if (vivo) { setUsandoPreset(false); setAdSel(''); }
       } finally { if (vivo) setCargandoTpl(false); }
     })();
     return () => { vivo = false; };
@@ -165,8 +177,11 @@ export default function PublicarCampanaModal({ a, onClose, addToast, soloPreset 
   // ── Config de la campaña nueva ──
   // La fecha del nombre es EL DÍA SIGUIENTE (regla del equipo: la campaña se
   // arma hoy para que corra mañana).
-  const manana = new Date(Date.now() + 24 * 60 * 60 * 1000);
-  const fechaCorta = `${manana.getDate()}/${manana.getMonth() + 1}`;
+  // Congelada al montar y en huso AR: calcularla por render descoordinaba el
+  // nombre de campaña y el {date} de los conjuntos si la medianoche caía en
+  // el medio, y el reloj del navegador podía no ser el de Argentina.
+  const [fechaCorta] = useState(() => new Date(Date.now() + 24 * 60 * 60 * 1000)
+    .toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', day: 'numeric', month: 'numeric' }));
   const [nombre, setNombre] = useState(`${a.productoNombre || 'Producto'} ${fechaCorta} [CBO Testeo Videos]`);
   const [presupuesto, setPresupuesto] = useState(preset?.budget ? String(preset.budget) : '');
   const [adsPorSet, setAdsPorSet] = useState(preset?.adsPerSet || 3);
@@ -248,7 +263,7 @@ export default function PublicarCampanaModal({ a, onClose, addToast, soloPreset 
         } catch (e) {
           erroresSeguidos++;
           log(`  ⚠ chequeo falló (${e.message}) — reintento…`);
-          if (erroresSeguidos >= 6) throw new Error(`Meta no responde el estado de los videos (${e.message}). Los videos YA quedaron subidos: reintentá la publicación en unos minutos.`);
+          if (erroresSeguidos >= 6) throw new Error(`Meta no responde el estado de los videos (${amigable(e.message)}). Reintentá en unos minutos (ojo: el reintento vuelve a subirlos).`);
           continue;
         }
         estados = st.videos || [];
@@ -266,7 +281,7 @@ export default function PublicarCampanaModal({ a, onClose, addToast, soloPreset 
           const i = Number.isInteger(r.index) ? r.index : 0;
           return { name: nombresAds[i] || sinExtension(r.name), videoId: r.videoId, picture: porId.get(r.videoId)?.picture || null };
         });
-      if (adsListos.length === 0) throw new Error('Meta no terminó de procesar ningún video — reintentá en unos minutos (ya quedaron subidos).');
+      if (adsListos.length === 0) throw new Error('Meta no terminó de procesar ningún video — reintentá en unos minutos (ojo: el reintento vuelve a subirlos).');
 
       // 3. Crear la estructura (el server la crea PAUSADA y la activa al final).
       setFase('creando');
@@ -290,17 +305,26 @@ export default function PublicarCampanaModal({ a, onClose, addToast, soloPreset 
       });
       for (const l of (cr.log || [])) log(l);
       if (cr.error) throw new Error(cr.error);
+      const okAds = (cr.resultados || []).filter(r => r.ok).length;
+      // 0 ads OK = el server ya hizo rollback (estado DELETED): esto es un
+      // ERROR, no un "creada en pausa" con link a una campaña que no existe.
+      if (okAds === 0 || cr.estado === 'DELETED') {
+        throw new Error('Ningún anuncio se pudo crear — la campaña se deshizo sola. Mirá el detalle por video acá arriba.');
+      }
       setResultado(cr);
       setFase('listo');
       guardarPresetActual(true); // publicación OK = el preset del producto se actualiza solo
       try { onPublished?.(cr); } catch {}
-      const okAds = (cr.resultados || []).filter(r => r.ok).length;
-      addToast?.({
-        type: okAds === adsListos.length ? 'success' : 'warning',
-        message: cr.estado === 'ACTIVE'
-          ? `Campaña publicada ACTIVA: ${okAds}/${adsListos.length} ads 🚀`
-          : `Campaña creada EN PAUSA: ${okAds}/${adsListos.length} ads — revisala en Meta`,
-      });
+      if (cr.activacionError) {
+        addToast?.({ type: 'warning', message: `Campaña creada con ${okAds}/${adsListos.length} ads pero NO se pudo activar (${cr.activacionError}) — quedó PAUSADA: activala desde Meta.` });
+      } else {
+        addToast?.({
+          type: okAds === adsListos.length ? 'success' : 'warning',
+          message: cr.estado === 'ACTIVE'
+            ? `Campaña publicada ACTIVA: ${okAds}/${adsListos.length} ads 🚀`
+            : `Campaña creada EN PAUSA: ${okAds}/${adsListos.length} ads — revisala en Meta`,
+        });
+      }
     } catch (e) {
       log(`✗ ${e.message}`);
       setFase('error');
@@ -327,7 +351,14 @@ export default function PublicarCampanaModal({ a, onClose, addToast, soloPreset 
             <h3 className="text-base font-bold text-gray-900 dark:text-gray-100">{soloPreset ? 'Campaña base del producto' : 'Publicar campaña en Meta'}</h3>
             <p className="text-[11px] text-gray-400 truncate">{a.productoNombre}{soloPreset ? ' · cuenta + ad template + defaults del publicador' : ` · ${elegidos.length} video${elegidos.length === 1 ? '' : 's'} seleccionado${elegidos.length === 1 ? '' : 's'}`}</p>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+          {/* En plena publicación la X no cierra: un cierre a mitad de camino
+              dejaba el job corriendo invisible y el buyer, al no ver
+              confirmación, publicaba de nuevo → campaña duplicada. */}
+          {(!fase || fase === 'listo' || fase === 'error') ? (
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+          ) : (
+            <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap">publicando…</span>
+          )}
         </div>
 
         <div className="p-5 space-y-5 flex-1 min-h-0 overflow-y-auto">
@@ -431,10 +462,15 @@ export default function PublicarCampanaModal({ a, onClose, addToast, soloPreset 
           )}
 
           {cargandoTpl && !usandoPreset && <p className="text-[11px] text-gray-400 inline-flex items-center gap-1"><Loader2 size={11} className="animate-spin" /> Leyendo configuración del ad…</p>}
-          {template && (
+          {template && !template.pageId && (
+            <p className="text-[11px] font-semibold text-amber-600 dark:text-amber-400 inline-flex items-center gap-1">
+              <AlertTriangle size={12} /> Este ad no tiene página de Facebook asociada — no sirve de template, elegí otro.
+            </p>
+          )}
+          {template && template.pageId && (
             <div className="flex items-start gap-2 flex-wrap">
               <p className="flex-1 min-w-0 text-[11px] text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1 flex-wrap">
-                <Check size={12} /> Config lista: {template.campaign?.objective || 'objetivo'} · {template.adset?.optimizationGoal || 'optimización'} · página {template.pageId}{template.link ? ` · CTA ${template.ctaType} → ${String(template.link).slice(0, 36)}…` : ''}
+                <Check size={12} /> Config lista: {template.adName ? `"${String(template.adName).slice(0, 32)}" · ` : ''}{template.campaign?.objective || 'objetivo'} · {template.adset?.optimizationGoal || 'optimización'} · página {template.pageId}{template.link ? ` · CTA ${template.ctaType} → ${String(template.link).slice(0, 36)}…` : ''}
               </p>
               <button onClick={() => guardarPresetActual(false)} disabled={!!fase}
                 title="Asigna esta cuenta + este ad base al producto: la próxima publicación viene todo precargado"
@@ -457,7 +493,7 @@ export default function PublicarCampanaModal({ a, onClose, addToast, soloPreset 
             </div>
             <div>
               <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Ads por conjunto</span>
-              <input type="number" min="1" max="10" value={adsPorSet} onChange={e => setAdsPorSet(e.target.value)} className={input} disabled={!!fase} />
+              <input type="number" min="1" max="10" value={adsPorSet} onChange={e => { const v = e.target.value; setAdsPorSet(v === '' ? '' : Math.max(1, Math.min(10, Math.round(Number(v) || 1)))); }} className={input} disabled={!!fase} />
               <p className="text-[10px] text-gray-400 mt-1">{elegidos.length} videos → {nSets} conjunto{nSets === 1 ? '' : 's'}</p>
             </div>
             <div>

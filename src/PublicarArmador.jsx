@@ -164,7 +164,7 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
     for (const e of (estaticos || [])) {
       const k = `i:${e.id}`;
       if (sel.has(k)) {
-        const nombre = sinExtension(e.sourceHeadline || '') || `${producto} estatico ${String(e.id).slice(0, 6)}`;
+        const nombre = sinExtension(e.sourceHeadline || '').replace(/\{\{[^}]*\}\}/g, '').trim() || `${producto} estatico ${String(e.id).slice(0, 6)}`;
         out.push({ key: k, tipo: 'imagen', id: e.id, name: nombre.slice(0, 90), storagePath: e.storagePath || null, url: e.imageUrl || null });
       }
     }
@@ -232,6 +232,11 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
   // ── Publicación (en serie, campaña por campaña) ──
   const [fase, setFase] = useState(null); // null | 'publicando' | 'listo' | 'error'
   const [logs, setLogs] = useState([]);
+  // Panel flotante de progreso (pedido del user): abajo a la derecha, muestra
+  // el paso a paso en vivo mientras publica — podés seguir mirando la página.
+  const [panelMin, setPanelMin] = useState(false);
+  const logRef = React.useRef(null);
+  useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [logs]);
   const [resultados, setResultados] = useState([]); // [{nombre, campaignId, okAds, total, estado}]
   const log = (l) => setLogs(prev => [...prev, l]);
 
@@ -577,20 +582,6 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
             )}
           </section>
 
-          {/* Log de publicación */}
-          {logs.length > 0 && (
-            <pre className="text-[11px] text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-gray-800/60 rounded-lg p-3 border border-gray-200 dark:border-gray-700 whitespace-pre-wrap max-h-72 overflow-y-auto font-mono">{logs.join('\n')}</pre>
-          )}
-          {resultados.length > 0 && (
-            <div className="space-y-1.5">
-              {resultados.map(r => (
-                <a key={r.campaignId} href={linkMeta({ accountId: account?.id, nivel: 'campaigns', ids: [r.campaignId] })} target="_blank" rel="noopener noreferrer"
-                  className="flex items-center gap-2 text-sm font-semibold text-brand-600 dark:text-brand-300 hover:underline">
-                  <Check size={14} className="text-emerald-500" /> {r.nombre} — {r.okAds}/{r.total} ads ({r.estado === 'ACTIVE' ? 'activa' : 'en pausa'}) <ExternalLink size={12} />
-                </a>
-              ))}
-            </div>
-          )}
         </div>
 
         {/* ── DERECHA: armado (sticky) ── */}
@@ -741,6 +732,50 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
           )}
         </div>
       </div>
+
+      {/* Panel flotante de progreso: paso a paso en vivo, abajo a la derecha */}
+      {fase && (
+        <div className="fixed bottom-4 right-4 z-[65] w-[min(400px,calc(100vw-2rem))] rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-2xl overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/60">
+            {fase === 'publicando'
+              ? <Loader2 size={15} className="animate-spin text-brand-500 shrink-0" />
+              : fase === 'listo'
+                ? <Check size={15} className="text-emerald-500 shrink-0" />
+                : <AlertTriangle size={15} className="text-rose-500 shrink-0" />}
+            <span className="flex-1 min-w-0 truncate text-sm font-bold text-gray-900 dark:text-gray-100">
+              {fase === 'publicando' ? `Publicando ${lotes.length} campaña${lotes.length === 1 ? '' : 's'}…`
+                : fase === 'listo' ? 'Publicación terminada ✓'
+                : resultados.length > 0 ? 'Terminó con detalles' : 'La publicación falló'}
+            </span>
+            {fase === 'publicando' && <span className="text-[10px] text-amber-500 font-semibold shrink-0">no cierres la pestaña</span>}
+            <button onClick={() => setPanelMin(m => !m)} title={panelMin ? 'Expandir' : 'Minimizar'}
+              className="p-1 rounded-md text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200/60 dark:hover:bg-gray-700">
+              {panelMin ? <ChevronRight size={14} className="-rotate-90" /> : <ChevronRight size={14} className="rotate-90" />}
+            </button>
+            {(fase === 'listo' || fase === 'error') && (
+              <button onClick={() => { setFase(null); setLogs([]); setPanelMin(false); }} title="Cerrar"
+                className="p-1 rounded-md text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200/60 dark:hover:bg-gray-700"><X size={14} /></button>
+            )}
+          </div>
+          {!panelMin && (
+            <div className="p-3 space-y-2">
+              <pre ref={logRef} className="text-[10.5px] text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-gray-800/60 rounded-lg p-2.5 border border-gray-100 dark:border-gray-700/60 whitespace-pre-wrap max-h-56 overflow-y-auto font-mono leading-relaxed">{logs.join('\n') || 'Arrancando…'}</pre>
+              {resultados.length > 0 && (
+                <div className="space-y-1">
+                  {resultados.map(r => (
+                    <a key={r.campaignId} href={linkMeta({ accountId: account?.id, nivel: 'campaigns', ids: [r.campaignId] })} target="_blank" rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 text-xs font-semibold text-brand-600 dark:text-brand-300 hover:underline">
+                      <Check size={12} className="text-emerald-500 shrink-0" /> <span className="truncate">{r.nombre}</span>
+                      <span className="text-gray-400 font-normal shrink-0">{r.okAds}/{r.total} ads · {r.estado === 'ACTIVE' ? 'activa' : 'pausa'}</span>
+                      <ExternalLink size={11} className="shrink-0" />
+                    </a>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Reproductor de video (tipo Drive) */}
       {videoPrev && (

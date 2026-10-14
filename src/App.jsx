@@ -40,7 +40,7 @@ import PipelineRunOverlay from './PipelineRunOverlay.jsx';
 import ExecutionsTray from './ExecutionsTray.jsx';
 import SelfHealingBanner from './SelfHealingBanner.jsx';
 import ClaudeProactivoSidebar from './ClaudeProactivoSidebar.jsx';
-import MarketingDashboard from './MarketingDashboard.jsx';
+import HomeOS from './HomeOS.jsx';
 import CopyGeneratorSection from './CopyGeneratorSection.jsx';
 import SlashCommand from './SlashCommand.jsx';
 import BulkProgressBarGlobal from './BulkProgressBarGlobal.jsx';
@@ -2276,6 +2276,12 @@ function AppShell({ onExit }) {
     }
   }, [currentUser?.role, supabaseUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // "Meta Ads" se unificó dentro de Métricas (pestaña Campañas y anuncios):
+  // cualquier estado viejo que caiga en mk-meta redirige.
+  useEffect(() => {
+    if (currentPlatform === 'marketing' && currentSection === 'mk-meta') setCurrentSection('mk-metricas');
+  }, [currentPlatform, currentSection]);
+
   // Cuenta por área: vive en marketing y solo en las secciones de SUS áreas.
   // Si la sección actual no le corresponde (estado viejo de localStorage o
   // navegación directa), lo llevamos a la primera que sí.
@@ -2284,7 +2290,7 @@ function AppShell({ onExit }) {
     if (!m) return;
     if (currentPlatform !== 'marketing') { setCurrentPlatform('marketing'); return; }
     const SECCIONES_AREA = {
-      metricas: ['mk-home', 'mk-meta', 'mk-metricas'],
+      metricas: ['mk-home', 'mk-metricas'],
       productos: ['mk-home', 'mk-arranque'],
       produccion: ['mk-home', 'mk-creativa-dash', 'mk-produccion'],
       landings: ['mk-home', 'mk-landings'],
@@ -2480,15 +2486,15 @@ function AppShell({ onExit }) {
               {/* Cuenta por área (miembro): solo ve las secciones de SUS áreas. */}
               <NavSection title="Operación" sectionKey="mk-op" sidebarOpen={sidebarOpen}>
                 <NavItem icon={LayoutGridIcon} label="Home" section="mk-home" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                {(!currentUser.miembro || currentUser.miembro.areas.includes('metricas')) && (<>
-                  <NavItem icon={BarChart3} label="Meta Ads" section="mk-meta" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                  {/* Métricas y Testeos eran dos entradas que pedían lo mismo a
-                      la misma cuenta. Ahora es una sola sección con pestañas. */}
+                {(!currentUser.miembro || currentUser.miembro.areas.includes('metricas')) && (
+                  /* "Meta Ads" y "Métricas" eran lo mismo (pedido del user 14/10):
+                     queda UNA entrada — Métricas ya incluye Campañas y anuncios.
+                     mk-meta sigue existiendo por estado viejo y redirige. */
                   <NavItem icon={Gauge} label="Métricas" section="mk-metricas" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                </>)}
+                )}
               </NavSection>
               {(!currentUser.miembro || currentUser.miembro.areas.includes('productos')) && (
-                <NavSection title="Creación de estáticos" sectionKey="mk-estaticos" sidebarOpen={sidebarOpen}>
+                <NavSection title="Productos" sectionKey="mk-estaticos" sidebarOpen={sidebarOpen}>
                   <NavItem icon={Play} label="Productos" section="mk-arranque" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                   {/* "Winners" (galería vieja de estáticos) y "Copy AI" salieron del
                       menú (14/10, no se usaban — los winners REALES viven en
@@ -2604,7 +2610,7 @@ function AppShell({ onExit }) {
           {/* Gate doble de Supabase removido — ahora la auth Supabase es la
               ÚNICA puerta global (ver checkpoint arriba). Si llegamos acá,
               ya hay supabaseUser. */}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-home' && <MarketingDashboard onNavigate={(s) => setCurrentSection(s)} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-home' && <HomeOS onNavigate={(s) => setCurrentSection(s)} addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-copy' && <CopyGeneratorSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-arranque' && <ArranqueSection addToast={addToast} onGoToSection={setCurrentSection} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-bandeja' && <BandejaSection addToast={addToast} />}

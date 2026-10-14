@@ -3079,7 +3079,20 @@ async function handleCreateCampaignStructure(req, res) {
   const template = body.template || {};
   const message = String(body.message || '').slice(0, 2000);
   const headline = String(body.headline || '').slice(0, 120);
-  const ads = (Array.isArray(body.ads) ? body.ads : []).filter(a => a?.videoId).slice(0, 30);
+  const ads = (Array.isArray(body.ads) ? body.ads : []).filter(a => a?.videoId || a?.imageHash).slice(0, 30);
+  // Receta de la campaña (las del equipo): define dónde vive el presupuesto
+  // (CBO = campaña / ABO = conjunto) y la estrategia de puja.
+  //   cbo_deep     → CBO sin tope de puja (default, la de testeo de siempre)
+  //   cbo_costcap  → CBO + COST_CAP con costo por compra objetivo (puja)
+  //   abo_costcap  → presupuesto POR CONJUNTO + COST_CAP (puja)
+  //   abo_bidcap   → presupuesto POR CONJUNTO + tope de puja duro (puja)
+  const ESTRUCTURAS_OK = ['cbo_deep', 'cbo_costcap', 'abo_costcap', 'abo_bidcap'];
+  const estructura = ESTRUCTURAS_OK.includes(body.estructura) ? body.estructura : 'cbo_deep';
+  const esCbo = estructura.startsWith('cbo');
+  const puja = Number(body.puja) || 0;
+  if (estructura !== 'cbo_deep' && !(puja > 0)) {
+    return respondJSON(res, 400, { error: `La receta ${estructura} necesita una puja (${estructura === 'abo_bidcap' ? 'tope de puja' : 'costo por compra objetivo'}) mayor a 0` });
+  }
 
   if (!accountId) return respondJSON(res, 400, { error: 'Falta account_id' });
   if (!campaignName) return respondJSON(res, 400, { error: 'Falta el nombre de la campaña' });
@@ -3138,15 +3151,20 @@ async function handleCreateCampaignStructure(req, res) {
     // 1. Campaña (CBO) — SIEMPRE nace PAUSED: si algo falla a mitad de
     // camino no queda una campaña activa a medias gastando. Se activa al
     // final, en una sola escritura, solo si hubo al menos un ad creado OK.
+    const bidStrategy = estructura === 'cbo_deep' ? 'LOWEST_COST_WITHOUT_CAP'
+      : (estructura === 'cbo_costcap' || estructura === 'abo_costcap') ? 'COST_CAP'
+      : 'LOWEST_COST_WITH_BID_CAP';
+    const pujaMinUnit = puja > 0 ? Math.round(puja * (SIN_CENTAVOS.has(currency) ? 1 : 100)) : 0;
     const camp = await graphPost(`${accountId}/campaigns`, token, {
       name: campaignName,
       objective,
       status: 'PAUSED',
       special_ad_categories: Array.isArray(template.campaign?.specialAdCategories) ? template.campaign.specialAdCategories : [],
-      daily_budget: budgetMinUnit,
-      bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
+      // ABO: el presupuesto vive en cada conjunto, no en la campaña.
+      ...(esCbo ? { daily_budget: budgetMinUnit } : {}),
+      bid_strategy: bidStrategy,
     });
-    log.push(`✓ Campaña creada: ${camp.id} (pausada hasta el final)`);
+    log.push(`✓ Campaña creada: ${camp.id} (${estructura}, pausada hasta el final)`);
 
     // Rollback: si de acá en adelante NADA útil se creó (ni un ad), borramos
     // la campaña para no dejar basura pausada en el Ads Manager.
@@ -3193,6 +3211,10 @@ async function handleCreateCampaignStructure(req, res) {
       };
       if (template.adset?.promotedObject) payload.promoted_object = template.adset.promotedObject;
       if (template.adset?.destinationType) payload.destination_type = template.adset.destinationType;
+      // ABO: el presupuesto diario vive en CADA conjunto. Cost/Bid Cap: la
+      // puja (en unidad mínima de la moneda) va como bid_amount del conjunto.
+      if (!esCbo) payload.daily_budget = budgetMinUnit;
+      if (estructura !== 'cbo_deep') payload.bid_amount = pujaMinUnit;
       const as = await graphPost(`${accountId}/adsets`, token, payload);
       adsetIds.push(as.id);
       log.push(`✓ Conjunto ${i + 1}/${nSets}: ${as.id}`);

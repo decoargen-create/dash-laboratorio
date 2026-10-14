@@ -2542,6 +2542,9 @@ async function handleLaunchCampaign(req, res) {
       status: estado,
     };
     if (esCbo) campParams.daily_budget = String(Math.round(presupuesto * 100));
+    // ABO: Meta ahora EXIGE declarar si los conjuntos comparten presupuesto
+    // (error subcode 4834011 si falta). false = cada conjunto con su plata.
+    else campParams.is_adset_budget_sharing_enabled = 'false';
     const camp = await graphPost(`${accountId}/campaigns`, token, campParams);
     resumen.campaignId = camp.id;
 
@@ -3205,8 +3208,9 @@ async function handleCreateCampaignStructure(req, res) {
       objective,
       status: 'PAUSED',
       special_ad_categories: Array.isArray(template.campaign?.specialAdCategories) ? template.campaign.specialAdCategories : [],
-      // ABO: el presupuesto vive en cada conjunto, no en la campaña.
-      ...(esCbo ? { daily_budget: budgetMinUnit } : {}),
+      // ABO: el presupuesto vive en cada conjunto, no en la campaña. Meta
+      // exige declarar si los conjuntos comparten presupuesto (subcode 4834011).
+      ...(esCbo ? { daily_budget: budgetMinUnit } : { is_adset_budget_sharing_enabled: 'false' }),
       bid_strategy: bidStrategy,
     });
     log.push(`✓ Campaña creada: ${camp.id} (${estructura}, pausada hasta el final)`);

@@ -31,10 +31,10 @@ import {
 const STEPS = [
   { key: 'impressions',      label: 'Impresiones',      icon: Eye,               rate: null,             cost: null,               help: 'Veces que se mostró el anuncio.' },
   { key: 'linkClicks',       label: 'Clicks al enlace',  icon: MousePointerClick, rate: 'linkCtr',        cost: 'costPerLinkClick', help: 'Clicks que van a tu sitio (no incluye likes ni clicks en el perfil).', fueraDeCompetencia: true },
-  { key: 'landingPageViews', label: 'Vieron la landing', icon: FileText,          rate: 'lpvRate',        cost: 'costPerLpv',       help: 'La página terminó de cargar. La diferencia contra los clicks es gente que se fue antes de que cargue.' },
-  { key: 'addToCart',        label: 'Agregaron al carrito', icon: ShoppingCart,   rate: 'atcRate',        cost: 'costPerAtc',       help: 'Evento AddToCart del pixel.' },
-  { key: 'initiateCheckout', label: 'Iniciaron el pago', icon: CreditCard,        rate: 'checkoutRate',   cost: 'costPerCheckout',  help: 'Evento InitiateCheckout del pixel.' },
-  { key: 'purchases',        label: 'Compraron',         icon: BadgeCheck,        rate: 'purchaseRate',   cost: 'cpa',              help: 'Evento Purchase del pixel.' },
+  { key: 'landingPageViews', label: 'Llegaron a tu página', icon: FileText,          rate: 'lpvRate',        cost: 'costPerLpv',       help: 'La página terminó de cargar. La diferencia contra los clicks es gente que se fue antes de que cargue.' },
+  { key: 'addToCart',        label: 'Agregaron al carrito', icon: ShoppingCart,   rate: 'atcRate',        cost: 'costPerAtc',       help: 'Gente que agregó algo al carrito.' },
+  { key: 'initiateCheckout', label: 'Iniciaron el pago', icon: CreditCard,        rate: 'checkoutRate',   cost: 'costPerCheckout',  help: 'Gente que empezó a pagar.' },
+  { key: 'purchases',        label: 'Compraron',         icon: BadgeCheck,        rate: 'purchaseRate',   cost: 'cpa',              help: 'Gente que terminó de comprar.' },
 ];
 
 // --- formato ---
@@ -125,10 +125,7 @@ export function Funnel({ totals, currency }) {
         <Filter size={15} className="text-brand-600 dark:text-brand-400" />
         <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Embudo de compra</h3>
         <span className="text-[10px] text-gray-400 dark:text-gray-500">
-          la barra es cuánta gente llega a cada paso — solo puede achicarse
-        </span>
-        <span className="ml-auto text-[10px] text-gray-400 dark:text-gray-500">
-          la «mayor caída» se busca de la landing para abajo — el CTR se mide contra el benchmark, no contra el resto
+          cada barra es cuánta gente llegó a ese paso — en rojo, el paso donde más gente se te va
         </span>
       </div>
 
@@ -240,13 +237,13 @@ export function FunnelTable({ campaigns, currency }) {
               <th className="text-left font-bold px-3 py-2.5 sticky left-0 bg-gray-50 dark:bg-gray-900/50">Campaña</th>
               <th className="text-right font-bold px-2 py-2.5">Gasto</th>
               <th className="text-right font-bold px-2 py-2.5" title="Clicks al enlace">Clicks</th>
-              <th className="text-right font-bold px-2 py-2.5" title="Landing page views">Landing</th>
-              <th className="text-right font-bold px-2 py-2.5" title="Add to cart">Carrito</th>
+              <th className="text-right font-bold px-2 py-2.5" title="Cuánta gente llegó a tu página">Llegaron</th>
+              <th className="text-right font-bold px-2 py-2.5" title="Agregaron al carrito">Carrito</th>
               <th className="text-right font-bold px-2 py-2.5" title="Iniciar pago">Pago</th>
               <th className="text-right font-bold px-2 py-2.5">Compras</th>
               <th className="text-right font-bold px-2 py-2.5" title="Compras / clicks al enlace">Conv.</th>
-              <th className="text-right font-bold px-2 py-2.5">CPA</th>
-              <th className="text-right font-bold px-2 py-2.5">ROAS</th>
+              <th className="text-right font-bold px-2 py-2.5" title="Cuánto gastaste en anuncios para conseguir cada compra.">Costo por venta</th>
+              <th className="text-right font-bold px-2 py-2.5" title="Cuánto vendiste por cada $1 que pusiste en anuncios. 2,00 = por cada $1 volvieron $2.">ROAS</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 dark:divide-gray-700">

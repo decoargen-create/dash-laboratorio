@@ -594,7 +594,7 @@ function RunHistoryCard({ history, onClear }) {
 // abierto/cerrado se persiste.
 const FLOW_STEPS = [
   { emoji: '⚙️', tab: 'setup', titulo: 'Setup', desc: 'Cargá el producto (foto, oferta) y sus competidores.' },
-  { emoji: '▶️', tab: null, titulo: 'Correr pipeline', desc: 'Leemos los ads ganadores de la competencia y armamos ideas.' },
+  { emoji: '▶️', tab: null, titulo: 'Analizar y generar ideas', desc: 'Miramos los anuncios ganadores de tu competencia y te armamos ideas.' },
   { emoji: '📥', tab: 'bandeja', titulo: 'Bandeja', desc: 'Revisás cada idea y generás el creativo ahí mismo.' },
   { emoji: '🎨', tab: 'creativos', titulo: 'Creativos', desc: 'Ves los estáticos generados, listos para descargar.' },
   { emoji: '🧠', tab: 'copiloto', titulo: 'Santi', desc: 'Hablale a Santi — el cerebro de la plataforma. Pedíle variantes, ajustes o feedback en lenguaje natural.' },
@@ -4531,7 +4531,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       {/* Paso 4 — Correr pipeline */}
       <WizardCard
         num="4"
-        title="Correr el pipeline"
+        title="Analizar y generar ideas"
         done={false}
         disabled={!prodReady}
         badge={null}
@@ -4541,8 +4541,15 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         ) : (
           <>
             <p className="text-xs text-gray-600 dark:text-gray-300 mb-3">
-              Si tu producto aún no tiene research doc, el sistema lo genera primero (~4 min). Después infiere el stage del prospect, scrapea los ads de los competidores que cargaste, detecta ganadores, genera ideas y scorea los hooks. Primera corrida: 8-15 min. Corridas siguientes: 2-5 min. Necesitás al menos 1 competidor cargado.
+              Analizamos tu producto, miramos los anuncios de tus competidores y detectamos cuáles les funcionan.
+              Con eso te armamos ideas de anuncios para revisar en la Bandeja. La primera vez tarda 10-15 min
+              (podés seguir usando la app); después, 2-5 min.
             </p>
+            {competidores.length === 0 && (
+              <p className="mb-3 p-2.5 rounded-lg text-xs bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200">
+                ⚠ Te falta agregar al menos 1 competidor (paso 3): sin eso no tenemos de dónde sacar ideas.
+              </p>
+            )}
 
             {/* Config del generador — colapsable */}
             <div className="mb-3 p-3 bg-gray-50 dark:bg-gray-900/30 border border-gray-200 dark:border-gray-700 rounded-lg">
@@ -4646,7 +4653,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               {!running ? (
                 <button onClick={runPipeline}
                   className="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-bold text-white bg-gradient-to-br from-brand-500 to-brand-600 rounded-lg hover:from-brand-700 hover:to-brand-600 shadow-sm transition">
-                  <Play size={14} /> Correr pipeline
+                  <Play size={14} /> Analizar y generar ideas
                 </button>
               ) : (
                 <button onClick={handleCancel}

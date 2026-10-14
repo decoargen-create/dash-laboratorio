@@ -274,8 +274,8 @@ export default function TarjetaProduccion({ a, num, personas = [], team = [], on
             editor no sabe qué laburar sobre ella ("este no tiene nada"). */}
         {!a.etiqueta && !(a.brief || '').trim() && !(a.referencias || []).length && (
           <span className="inline-flex items-center gap-1 font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-800 px-1.5 py-0.5 rounded-md"
-            title="Sin etiqueta, sin brief y sin referencias: el editor no sabe qué va acá. Abrí la tarjeta y completala.">
-            ⚠️ sin consigna
+            title="El editor no sabe qué video hacer: no tiene etiqueta, ni brief, ni referencias. Abrí la tarjeta y completá las indicaciones o pegá un reel de referencia.">
+            ⚠️ sin instrucciones
           </span>
         )}
         {fmtFechaCorta(a.createdAt) && (
@@ -375,19 +375,21 @@ export default function TarjetaProduccion({ a, num, personas = [], team = [], on
             {folderLink && (
               <a href={folderLink} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
                 className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 text-xs font-extrabold text-gray-500 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:border-pink-400 hover:text-pink-600 dark:hover:text-pink-300 rounded-lg transition">
-                ▶ Drive
+                <span title="Abrir en Drive la carpeta con los videos de esta tarjeta">▶ Drive</span>
               </a>
             )}
             {caps.approve && a.estado === 'revision' && subidos > 0 && (
               <button onClick={aprobarTodos}
+                title="Aprueba TODOS los videos de esta tarjeta y la pasa a Aprobado. Desde ahí cuenta para el pago del editor."
                 className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 text-xs font-extrabold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 rounded-lg transition">
-                <CheckCircle2 size={13} /> Aprobar
+                <CheckCircle2 size={13} /> Aprobar todo
               </button>
             )}
             {caps.publish && a.estado === 'aprobado' && (
               <button onClick={publicar}
+                title="Solo mueve la tarjeta a Publicado (registro interno). NO sube nada a Meta: para crear el anuncio, abrí la tarjeta y usá «Publicar campaña»."
                 className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 text-xs font-extrabold text-white bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 rounded-lg transition shadow-sm">
-                🚀 Publicar
+                ✓ Ya la publiqué
               </button>
             )}
           </div>

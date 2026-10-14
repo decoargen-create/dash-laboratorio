@@ -105,18 +105,23 @@ function useHoy(productos) {
   return { ...estado, recargar: cargar, hayCuentas: cuentas.length > 0 };
 }
 
-function KPI({ label, value, tone = 'default', sub }) {
+// KPI con onda de panel de resultados (pedido del user: "más marketinero"):
+// número GRANDE, color según cómo viene, y un acento de gradiente arriba.
+function KPI({ label, value, tone = 'default', sub, destacado = false }) {
   const tones = {
-    default: 'text-gray-900 dark:text-gray-100',
-    good: 'text-emerald-600 dark:text-emerald-400',
-    warn: 'text-amber-600 dark:text-amber-400',
-    bad: 'text-red-600 dark:text-red-400',
+    default: { txt: 'text-gray-900 dark:text-gray-100', top: 'from-violet-500/70 to-sky-400/50' },
+    good: { txt: 'text-emerald-500', top: 'from-emerald-500 to-emerald-300' },
+    warn: { txt: 'text-amber-500', top: 'from-amber-500 to-amber-300' },
+    bad: { txt: 'text-red-500', top: 'from-red-500 to-red-300' },
   };
+  const t = tones[tone] || tones.default;
   return (
-    <div className="rounded-xl border border-gray-200 dark:border-gray-700/70 bg-white dark:bg-gray-900 px-4 py-3">
+    <div className={`relative overflow-hidden rounded-2xl border bg-white dark:bg-gray-900 px-4 pt-4 pb-3 ${
+      destacado ? 'border-violet-400/40 dark:border-violet-600/40 shadow-lg shadow-violet-500/10' : 'border-gray-200 dark:border-gray-700/70'}`}>
+      <span aria-hidden className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${t.top}`} />
       <div className="text-[10px] font-bold uppercase tracking-wide text-gray-400">{label}</div>
-      <div className={`text-xl font-extrabold tabular-nums ${tones[tone]}`}>{value}</div>
-      {sub && <div className="text-[10px] text-gray-400 mt-0.5">{sub}</div>}
+      <div className={`${destacado ? 'text-4xl' : 'text-[26px]'} font-black tabular-nums leading-tight ${t.txt}`}>{value}</div>
+      {sub && <div className="text-[10.5px] text-gray-400 mt-0.5">{sub}</div>}
     </div>
   );
 }
@@ -170,21 +175,38 @@ function useIntegraciones({ addToast }) {
   return { meta, drive, discord, conectarDrive, recargarMeta: cargarMeta };
 }
 
+// Estado INEQUÍVOCO de una integración (pedido del user: "si está conectado,
+// algún tilde o algo de verificado"): tilde verde grande sobre el ícono +
+// pill con el ✓. Ámbar = necesita atención; gris = sin conectar.
 function EstadoPill({ ok, warn, textoOk, textoWarn, textoNo }) {
   const [cls, txt] = ok
-    ? ['bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30', textoOk]
+    ? ['bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/40', `✓ ${textoOk}`]
     : warn
-      ? ['bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30', textoWarn]
+      ? ['bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30', `⚠ ${textoWarn}`]
       : ['bg-gray-500/10 text-gray-500 dark:text-gray-400 border-gray-500/20', textoNo];
-  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border ${cls}`}>{txt}</span>;
+  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10.5px] font-extrabold border whitespace-nowrap ${cls}`}>{txt}</span>;
 }
 
-function CardIntegracion({ icon: Icon, nombre, desc, estado, accion }) {
+function CardIntegracion({ icon: Icon, nombre, desc, ok = false, warn = false, estado, accion }) {
   return (
-    <div className="rounded-xl border border-gray-200 dark:border-gray-700/70 bg-white dark:bg-gray-900 p-4 flex flex-col gap-2">
+    <div className={`rounded-xl border bg-white dark:bg-gray-900 p-4 flex flex-col gap-2 transition ${
+      ok ? 'border-emerald-500/30 shadow-sm shadow-emerald-500/10'
+        : warn ? 'border-amber-500/30'
+        : 'border-gray-200 dark:border-gray-700/70'}`}>
       <div className="flex items-center gap-2.5">
-        <div className="w-9 h-9 rounded-lg bg-violet-500/10 text-violet-600 dark:text-violet-400 flex items-center justify-center shrink-0">
-          <Icon size={17} />
+        <div className={`relative w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+          ok ? 'bg-emerald-500/15 text-emerald-500' : warn ? 'bg-amber-500/15 text-amber-500' : 'bg-violet-500/10 text-violet-600 dark:text-violet-400'}`}>
+          <Icon size={18} />
+          {ok && (
+            <span className="absolute -bottom-1 -right-1 w-[18px] h-[18px] rounded-full bg-emerald-500 text-white flex items-center justify-center ring-2 ring-white dark:ring-gray-900"
+              title="Conectado y funcionando">
+              <CheckCircle2 size={12} />
+            </span>
+          )}
+          {warn && (
+            <span className="absolute -bottom-1 -right-1 w-[18px] h-[18px] rounded-full bg-amber-500 text-white flex items-center justify-center ring-2 ring-white dark:ring-gray-900 text-[10px] font-black"
+              title="Necesita atención">!</span>
+          )}
         </div>
         <div className="min-w-0 flex-1">
           <div className="text-sm font-bold text-gray-900 dark:text-gray-100">{nombre}</div>
@@ -301,11 +323,13 @@ export default function HomeOS({ onNavigate, addToast }) {
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+              <KPI label="ROAS del día" destacado value={hoy.totals ? hoy.totals.roas.toFixed(2) : '—'}
+                tone={hoy.totals ? (hoy.totals.roas >= 2 ? 'good' : hoy.totals.roas >= 1.6 ? 'warn' : 'bad') : 'default'}
+                sub={hoy.totals ? `por cada $1 volvieron $${hoy.totals.roas.toFixed(2)}` : ''} />
+              <KPI label="Facturado hoy" value={hoy.totals ? fmtAr(hoy.totals.revenue) : '—'} tone="good" />
               <KPI label="Inversión hoy" value={hoy.totals ? fmtAr(hoy.totals.spend) : '—'} />
-              <KPI label="Compras" value={hoy.totals ? hoy.totals.compras : '—'} />
-              <KPI label="ROAS" value={hoy.totals ? hoy.totals.roas.toFixed(2) : '—'}
-                tone={hoy.totals ? (hoy.totals.roas >= 2 ? 'good' : hoy.totals.roas >= 1.6 ? 'warn' : 'bad') : 'default'} />
+              <KPI label="Compras" value={hoy.totals ? hoy.totals.compras : '—'} sub={hoy.totals?.compras > 0 ? `CPA ${fmtAr(hoy.totals.spend / hoy.totals.compras)}` : ''} />
               <KPI label="Mal invertido" value={hoy.totals ? `${Math.round(pctMalo)}%` : '—'} tone={toneMalo}
                 sub={hoy.totals?.malo > 0 ? `${fmtAr(hoy.totals.malo)} bajo el break-even` : 'todo sobre el break-even'} />
             </div>
@@ -315,15 +339,23 @@ export default function HomeOS({ onNavigate, addToast }) {
               <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {hoy.porProducto.map(p => (
                   <button key={p.id} onClick={() => onNavigate?.('mk-arranque')}
-                    className="text-left rounded-xl border border-gray-200 dark:border-gray-700/70 bg-white dark:bg-gray-900 p-4 hover:border-violet-400 dark:hover:border-violet-600 transition group">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Package size={14} className="text-violet-500 shrink-0" />
-                      <span className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate flex-1">{p.nombre}</span>
-                      <span className={`text-sm font-extrabold tabular-nums ${roasTone(p.roas, p.breakEven)}`}>{p.roas.toFixed(2)}</span>
+                    className="text-left rounded-2xl border border-gray-200 dark:border-gray-700/70 bg-white dark:bg-gray-900 p-4 hover:border-violet-400 dark:hover:border-violet-600 transition group">
+                    <div className="flex items-start gap-2 mb-1.5">
+                      <Package size={14} className="text-violet-500 shrink-0 mt-1" />
+                      <span className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate flex-1 mt-0.5">{p.nombre}</span>
+                      <span className="text-right leading-none">
+                        <span className={`block text-2xl font-black tabular-nums ${roasTone(p.roas, p.breakEven)}`}>{p.roas.toFixed(2)}</span>
+                        <span className="text-[9px] font-bold uppercase text-gray-400">ROAS</span>
+                      </span>
+                    </div>
+                    {/* Barra contra el break-even del producto: llena = 2× el BE */}
+                    <div className="h-1.5 rounded-full bg-gray-100 dark:bg-gray-800 overflow-hidden mb-2" title={`Break-even del producto: ${p.breakEven.toFixed(2)}`}>
+                      <div className={`h-full rounded-full transition-all ${p.roas >= p.breakEven ? 'bg-gradient-to-r from-emerald-500 to-emerald-400' : 'bg-gradient-to-r from-red-500 to-amber-400'}`}
+                        style={{ width: `${Math.min(100, (p.roas / (p.breakEven * 2)) * 100)}%` }} />
                     </div>
                     <div className="flex items-center justify-between text-[11px] text-gray-400 tabular-nums">
                       <span>{fmtAr(p.spend)} invertidos</span>
-                      <span>{p.compras} compra{p.compras !== 1 ? 's' : ''}</span>
+                      <span className="font-semibold text-gray-500 dark:text-gray-300">{p.compras} compra{p.compras !== 1 ? 's' : ''}</span>
                       <span>{p.campanas} camp.</span>
                     </div>
                     {p.malo > 0 && (
@@ -359,13 +391,13 @@ export default function HomeOS({ onNavigate, addToast }) {
         </div>
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <CardIntegracion
-            icon={TrendingUp} nombre="Meta Ads"
+            icon={TrendingUp} nombre="Meta Ads" ok={integ.meta.conexiones.length > 0}
             desc={integ.meta.conexiones.length ? integ.meta.conexiones.map(c => c.label || c.meta_user_name).filter(Boolean).join(' · ') || 'Conectado' : 'Campañas, métricas y winners automáticos'}
             estado={<EstadoPill ok={integ.meta.conexiones.length > 0} textoOk={`${integ.meta.conexiones.length} conexión${integ.meta.conexiones.length !== 1 ? 'es' : ''}`} textoNo="Sin conectar" />}
             accion={<MetaConnectButton addToast={addToast} />}
           />
           <CardIntegracion
-            icon={HardDrive} nombre="Google Drive"
+            icon={HardDrive} nombre="Google Drive" ok={integ.drive.working} warn={integ.drive.connected && !integ.drive.working}
             desc={integ.drive.email || 'Los videos del equipo, ordenados en carpetas solos'}
             estado={<EstadoPill ok={integ.drive.working} warn={integ.drive.connected && !integ.drive.working}
               textoOk="Funcionando" textoWarn="Permiso vencido" textoNo="Sin conectar" />}
@@ -377,7 +409,7 @@ export default function HomeOS({ onNavigate, addToast }) {
             }
           />
           <CardIntegracion
-            icon={Bell} nombre="Discord"
+            icon={Bell} nombre="Discord" ok={integ.discord.configurado}
             desc="Avisos de entregas, aprobaciones y winners al canal"
             estado={<EstadoPill ok={integ.discord.configurado} textoOk="Configurado" textoNo="Sin configurar" />}
             accion={

@@ -84,11 +84,12 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
   // ── Creativos: videos por tarjeta + estáticos de la galería ──
   const videosDe = (a) => (a.archivos || []).filter(f => f && (f.driveId || f.storagePath));
   const [sel, setSel] = useState(() => {
-    // Default: los videos APROBADOS de las tarjetas aprobadas.
+    // Default: los videos APROBADOS (y todavía no publicados como anuncio)
+    // de las tarjetas aprobadas.
     const s = new Set();
     for (const t of tarjetas) {
       if (t.estado !== 'aprobado') continue;
-      for (const f of videosDe(t)) if (f.aprobado) s.add(`v:${t.id}:${f.ts}`);
+      for (const f of videosDe(t)) if (f.aprobado && !f.publicadoAd) s.add(`v:${t.id}:${f.ts}`);
     }
     return s;
   });
@@ -101,6 +102,10 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
   // Filtro de tarjetas (pedido del user): por defecto solo las APROBADAS (las
   // que están para publicar); "Todas" suma las ya publicadas para repescar.
   const [filtroTarjetas, setFiltroTarjetas] = useState('aprobadas'); // 'aprobadas' | 'todas'
+  // Videos YA publicados como anuncio (publicadoAd): ocultos por defecto —
+  // si de una tarjeta salieron 5 de 7, la próxima ves solo los 2 restantes.
+  const [verPublicados, setVerPublicados] = useState(false);
+  const videosVisiblesDe = (a) => videosDe(a).filter(f => verPublicados || !f.publicadoAd);
   const tarjetasVisibles = useMemo(() => (
     filtroTarjetas === 'aprobadas' ? tarjetas.filter(t => t.estado === 'aprobado') : tarjetas
   ), [tarjetas, filtroTarjetas]);
@@ -153,7 +158,7 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
     for (const t of tarjetas) {
       for (const f of videosDe(t)) {
         const k = `v:${t.id}:${f.ts}`;
-        if (sel.has(k)) out.push({ key: k, tipo: 'video', name: f.name, driveId: f.driveId || null, storagePath: f.storagePath || null, cardId: t.id });
+        if (sel.has(k)) out.push({ key: k, tipo: 'video', name: f.name, ts: f.ts, driveId: f.driveId || null, storagePath: f.storagePath || null, cardId: t.id });
       }
     }
     for (const e of (estaticos || [])) {
@@ -241,6 +246,7 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
     }
     setFase('publicando'); setLogs([]); setResultados([]);
     const hechos = [];
+    const videosPublicados = []; // [{ cardId, ts }] — para marcar publicadoAd
     const adsetPattern = preset?.adsetPattern || 'Ad Set {index:01}';
     const adPattern = preset?.adPattern || '{filename}';
     let huboError = false;
@@ -263,6 +269,7 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
           });
           const subidos = (up.resultados || []).filter(r => r.ok);
           for (const r of (up.resultados || [])) if (!r.ok) log(`  ✗ ${r.name}: ${r.error}`);
+          var videosSubidosLote = []; // id de tarjeta + ts + nombre final del ad
           if (subidos.length > 0) {
             log('  Esperando que Meta procese los videos…');
             const ids = subidos.map(r => r.videoId);
@@ -285,6 +292,7 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
               const i = Number.isInteger(r.index) ? r.index : 0;
               const nombreAd = aplicarPatron(adPattern, { filename: sinExtension(vids[i]?.name || r.name), index: adsListos.length, fecha: fechaCorta }) || sinExtension(r.name);
               adsListos.push({ name: nombreAd, videoId: r.videoId, picture: porId.get(r.videoId)?.picture || null });
+              if (vids[i]?.cardId && vids[i]?.ts) videosSubidosLote.push({ cardId: vids[i].cardId, ts: vids[i].ts, nombreAd });
             }
           }
         }
@@ -340,6 +348,8 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
         // Archivar los estáticos que salieron como anuncio: la galería activa
         // queda solo con lo pendiente de publicar.
         const okNombres = new Set((cr.resultados || []).filter(r => r.ok).map(r => r.name));
+        // Videos cuyo ad se creó OK → se marcan publicadoAd al final.
+        for (const v of (videosSubidosLote || [])) if (okNombres.has(v.nombreAd)) videosPublicados.push({ cardId: v.cardId, ts: v.ts });
         const aArchivar = imagenesSubidas.filter(x => okNombres.has(x.nombreAd)).map(x => x.id);
         if (aArchivar.length > 0 && supabase) {
           try {
@@ -364,8 +374,7 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
     setResultados(hechos);
     if (hechos.length > 0) {
       setFase(huboError ? 'error' : 'listo');
-      const cardIds = [...new Set(hechos.flatMap(h => h.cardIds))];
-      try { onPublicadas?.(cardIds); } catch {}
+      try { onPublicadas?.(videosPublicados); } catch {}
       addToast?.({
         type: huboError ? 'warning' : 'success',
         message: `${hechos.length}/${lotes.length} campaña${lotes.length === 1 ? '' : 's'} creada${hechos.length === 1 ? '' : 's'}${enPausa ? ' en pausa' : ''} 🚀`,
@@ -439,8 +448,13 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
                   </button>
                 ))}
               </span>
+              <label className="inline-flex items-center gap-1 text-[10.5px] text-gray-400 cursor-pointer select-none"
+                title="Los videos que ya salieron como anuncio se ocultan — tildá para verlos (quedan marcados con 🚀).">
+                <input type="checkbox" checked={verPublicados} onChange={e => setVerPublicados(e.target.checked)} className="accent-brand-500 scale-90" />
+                ver ya publicados
+              </label>
               <span className="ml-auto inline-flex gap-2 text-[11px] font-bold">
-                <button onClick={() => setSel(prev => { const nn = new Set(prev); for (const t of tarjetasVisibles) for (const f of videosDe(t)) nn.add(`v:${t.id}:${f.ts}`); return nn; })}
+                <button onClick={() => setSel(prev => { const nn = new Set(prev); for (const t of tarjetasVisibles) for (const f of videosVisiblesDe(t)) nn.add(`v:${t.id}:${f.ts}`); return nn; })}
                   disabled={fase === 'publicando'} className="text-brand-600 dark:text-brand-400 hover:underline">Todos</button>
                 <button onClick={() => setSel(prev => { const nn = new Set(prev); for (const k of prev) if (k.startsWith('v:')) nn.delete(k); return nn; })}
                   disabled={fase === 'publicando'} className="text-gray-400 hover:underline">Ninguno</button>
@@ -455,8 +469,9 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
             ) : (
               <div className="space-y-3">
                 {tarjetasVisibles.map(t => {
-                  const vids = videosDe(t);
-                  if (vids.length === 0) return null;
+                  const vids = videosVisiblesDe(t);
+                  const ocultos = videosDe(t).length - vids.length;
+                  if (vids.length === 0 && ocultos === 0) return null;
                   const keys = vids.map(f => `v:${t.id}:${f.ts}`);
                   const nSel = keys.filter(k => sel.has(k)).length;
                   const abierta = abiertas.has(t.id);
@@ -475,7 +490,10 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
                         <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${t.estado === 'aprobado' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-violet-500/10 text-violet-600 dark:text-violet-400'}`}>
                           {t.estado === 'aprobado' ? 'APROBADA' : 'PUBLICADA'}
                         </span>
-                        <span className="ml-auto text-[11px] text-gray-400 tabular-nums">{nSel}/{vids.length} video{vids.length === 1 ? '' : 's'}</span>
+                        <span className="ml-auto text-[11px] text-gray-400 tabular-nums">
+                          {nSel}/{vids.length} video{vids.length === 1 ? '' : 's'}
+                          {ocultos > 0 && !verPublicados && <span className="text-gray-500"> · 🚀 {ocultos} ya publicado{ocultos === 1 ? '' : 's'}</span>}
+                        </span>
                       </div>
                       {abierta && (
                         <div className="flex flex-col">
@@ -486,6 +504,7 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
                                 <input type="checkbox" checked={sel.has(k)} onChange={() => toggle(k)} disabled={fase === 'publicando'} className="accent-brand-500" />
                                 <Film size={12} className="text-gray-400 shrink-0" />
                                 <span className="flex-1 min-w-0 truncate text-xs text-gray-700 dark:text-gray-200" title={f.name}>{f.name}</span>
+                                {f.publicadoAd && <span className="text-[9px] font-bold text-violet-500 shrink-0" title={`Ya salió como anuncio el ${new Date(f.publicadoAd).toLocaleDateString('es-AR')}`}>🚀</span>}
                                 <button type="button" onClick={(ev) => { ev.preventDefault(); ev.stopPropagation(); verVideo(f); }}
                                   title="Ver el video"
                                   className="shrink-0 w-6 h-6 rounded-md flex items-center justify-center text-gray-400 hover:text-brand-500 hover:bg-brand-500/10 opacity-0 group-hover/v:opacity-100 transition">

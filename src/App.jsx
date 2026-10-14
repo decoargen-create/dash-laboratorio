@@ -47,7 +47,10 @@ import SlashCommand from './SlashCommand.jsx';
 import BulkProgressBarGlobal from './BulkProgressBarGlobal.jsx';
 import BalanceBar from './BalanceBar.jsx';
 import CurrencyToggle from './CurrencyToggle.jsx';
+import DolarBlue from './DolarBlue.jsx';
 import ActivityBell from './ActivityBell.jsx';
+import { logActivity } from './activityLogStore.js';
+import { esAdminPlataforma, subscribeAdminPlataforma } from './platformAdmin.js';
 import SyncStatusBadge from './SyncStatusBadge.jsx';
 import { getRemaining, subscribeBalance } from './balanceStore.js';
 import SupabaseAuthScreen from './SupabaseAuth.jsx';
@@ -1575,6 +1578,21 @@ function AppShell({ onExit }) {
     const id = Date.now() + Math.random();
     setToasts(prev => [...prev, { id, ...toast }]);
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), toast.duration || 3500);
+    // Los ERRORES también quedan en la campanita de actividad (pedido del
+    // user): el toast dura segundos y si no estabas mirando, el error se
+    // perdía sin rastro. Ahora queda en el histórico con badge de no-leído.
+    if (toast?.type === 'error' && toast?.message) {
+      try {
+        logActivity({
+          id: `toast-${id}`,
+          label: String(toast.message).slice(0, 140),
+          kind: 'error',
+          status: 'error',
+          message: String(toast.message),
+          finishedAt: new Date().toISOString(),
+        });
+      } catch {}
+    }
   }, []);
 
   // Sacar un toast a mano: lo usa el botón de acción ("Deshacer"), que una vez
@@ -2534,7 +2552,7 @@ function AppShell({ onExit }) {
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-creativa-dash' && <CreativaDashboard addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-produccion' && <ProduccionSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-landings' && <LandingsSection addToast={addToast} />}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-gastos' && <GastosStackSection addToast={addToast} />}
+          {currentUser.role === 'admin' && esAdminPlataforma() && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-gastos' && <GastosStackSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-docs' && (
             <MarketingSection
               addToast={addToast}
@@ -2694,8 +2712,12 @@ function ProductNavInSidebar({ sidebarOpen }) {
 // crédito. En sidebar colapsado se oculta.
 function SidebarStats({ sidebarOpen, onNavGastos }) {
   const [, force] = useState(0);
+  const [esAdminPlat, setEsAdminPlat] = useState(() => esAdminPlataforma());
   useEffect(() => subscribeBalance(() => force(x => x + 1)), []);
-  if (!sidebarOpen) return null;
+  useEffect(() => subscribeAdminPlataforma(() => setEsAdminPlat(esAdminPlataforma())), []);
+  // Saldos de OpenAI/Anthropic/Apify: costos internos de la plataforma, solo
+  // los ve el admin de plataforma (una cuenta registrada normal, no).
+  if (!sidebarOpen || !esAdminPlat) return null;
   const oa = getRemaining('openai');
   const an = getRemaining('anthropic');
   const ap = getRemaining('apify');
@@ -8785,6 +8807,8 @@ function AppearanceMenu({ textSize, setTextSize, uiFont, setUiFont, accentColor,
 
 function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, textSize, setTextSize, uiFont, setUiFont, accentColor, setAccentColor, onOpenMobileMenu, bgTasks = [], showMetaConnect = false, addToast }) {
   const [scrolled, setScrolled] = useState(false);
+  const [esAdminPlat, setEsAdminPlat] = useState(() => esAdminPlataforma());
+  useEffect(() => subscribeAdminPlataforma(() => setEsAdminPlat(esAdminPlataforma())), []);
   const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform);
 
   useEffect(() => {
@@ -8827,7 +8851,10 @@ function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, textSize, set
         {showMetaConnect && <MetaConnectButton addToast={addToast} />}
         <SyncStatusBadge />
         <ActivityBell />
-        <BalanceBar />
+        {/* Costos internos de la plataforma: SOLO el admin de plataforma. Una
+            cuenta registrada normal no ve cuánto gastamos en APIs. */}
+        {esAdminPlat && <BalanceBar />}
+        <DolarBlue />
         <CurrencyToggle />
         {bgTasks.length > 0 && (
           <div

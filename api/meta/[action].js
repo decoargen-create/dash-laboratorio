@@ -2548,6 +2548,11 @@ async function handleLaunchCampaign(req, res) {
 // traducimos a algo accionable en vez de mandar al usuario a la doc de Graph.
 function traducirErrorMetaEscritura(msg) {
   const m = String(msg || '');
+  // subcode 1885183: la Meta app está en modo Desarrollo — Meta deja subir
+  // videos pero rechaza CREAR anuncios hasta que la app esté en modo Activo.
+  if (/1885183|modo de desarrollo|development mode/i.test(m)) {
+    return 'La app de Meta (developers.facebook.com) está en MODO DESARROLLO y Meta no permite crear anuncios así. Entrá a developers.facebook.com → tu app → pasá el modo de "Desarrollo" a "Activo" (puede pedirte cargar una URL de política de privacidad en Configuración → Información básica) y reintentá. Detalle: ' + m.slice(0, 180);
+  }
   if (/Unsupported post request|missing permissions|\(#200\)|\(#10\)|requires (the extended permission|ads_management)/i.test(m)) {
     return 'Tu conexión de Meta no tiene permisos de ESCRITURA (se conectó pidiendo solo lectura). Andá a Conectar Meta, reconectá la cuenta aceptando los permisos nuevos (gestión de anuncios y páginas) y reintentá. Detalle de Meta: ' + m.slice(0, 220);
   }

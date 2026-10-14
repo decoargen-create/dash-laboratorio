@@ -281,7 +281,7 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
       {/* config — filas parejas: 1) nombre+plata, 2) estructura (conjuntos →
           pujas por conjunto), 3) cuenta (píxel/página/programación), 4) activar. */}
       <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-3.5 grid gap-3.5">
-        <div className="grid sm:grid-cols-3 gap-3">
+        <div className="grid sm:grid-cols-3 gap-3 items-start">
           <div className="sm:col-span-2">
             <Campo label="Nombre de la campaña" hint="Con la fecha y la receta en el nombre, Testeos por semana la agarra sola.">
               <input className={inputCls} value={nombre} onChange={e => setNombre(e.target.value)} />
@@ -306,6 +306,7 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
         </div>
 
         {/* Estructura: conjuntos primero; las pujas por conjunto dependen de él */}
+        {/* 2-B: misma grilla de 3 columnas en todas las filas, alineadas arriba */}
         <div className="grid sm:grid-cols-3 gap-3 items-start">
           <Campo label="Conjuntos">
             <select className={inputCls} value={conjuntos} onChange={e => setConjuntos(Number(e.target.value))}>
@@ -314,19 +315,35 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
           </Campo>
           {receta.puja && esAbo && (
             <div className="sm:col-span-2">
-              <span className="text-[9.5px] font-bold uppercase tracking-[.08em] text-gray-400 block mb-1">
-                {receta.puja} por conjunto ({currency || 'ARS'})
+              <span className="text-[9.5px] font-bold uppercase tracking-[.08em] text-gray-400 block mb-1.5">
+                Conjuntos y pujas
                 {cpaCuenta ? ` — tu CPA real de 30 días: ${Math.round(cpaCuenta).toLocaleString('es-AR')}` : ''}
               </span>
-              <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
-                {Array.from({ length: conjuntos }, (_, i) => (
-                  <label key={i} className="grid gap-0.5">
-                    <span className="text-[9px] font-bold text-gray-400">C{i + 1}</span>
-                    <input className={inputCls} value={pujaDelSet(i)} inputMode="decimal"
-                      onChange={e => setPujas(prev => ({ ...prev, [i]: e.target.value }))}
-                      placeholder={cpaCuenta ? String(Math.round(cpaCuenta)) : '28.000'} />
-                  </label>
-                ))}
+              <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-gray-50 dark:bg-gray-900/50 text-gray-400 text-[9.5px] uppercase tracking-wider">
+                      <th className="text-left font-bold px-3 py-1.5">Conjunto</th>
+                      <th className="text-left font-bold px-2 py-1.5">Presupuesto/día</th>
+                      <th className="text-right font-bold px-3 py-1.5">{receta.puja} ({currency || 'ARS'})</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 dark:divide-gray-700/60">
+                    {Array.from({ length: conjuntos }, (_, i) => (
+                      <tr key={i}>
+                        <td className="px-3 py-1.5 font-bold text-gray-700 dark:text-gray-200">Conjunto {i + 1}</td>
+                        <td className="px-2 py-1.5 text-gray-500 dark:text-gray-400 tabular-nums">
+                          {num(presupuesto) > 0 ? `$${num(presupuesto).toLocaleString('es-AR')}` : '—'}
+                        </td>
+                        <td className="px-3 py-1.5 text-right">
+                          <input className={`${inputCls} max-w-[130px] ml-auto text-right tabular-nums`} value={pujaDelSet(i)} inputMode="decimal"
+                            onChange={e => setPujas(prev => ({ ...prev, [i]: e.target.value }))}
+                            placeholder={cpaCuenta ? String(Math.round(cpaCuenta)) : '28.000'} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}
@@ -350,7 +367,7 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
         )}
 
         {/* Cuenta y programación */}
-        <div className="grid sm:grid-cols-3 gap-3">
+        <div className="grid sm:grid-cols-3 gap-3 items-start">
           <Campo label="Píxel (evento Compra)">
             <select className={inputCls} value={pixelId} onChange={e => setPixelId(e.target.value)}>
               {!prereqs && <option>Cargando…</option>}

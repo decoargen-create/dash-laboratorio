@@ -200,12 +200,13 @@ export default function PublicarSection({ addToast }) {
       </div>
 
       <div className="flex gap-1.5">
-        {[['cola', 'Cola de listos', Rocket], ['escalar', 'Escalar', TrendingUp], ['historial', 'Historial', History]].map(([k, label, Icono]) => (
+        {/* Pestañas chicas tipo filtro (prototipo 1-C elegido por el user). */}
+        {[['cola', 'Publicar', Rocket], ['escalar', 'Escalar', TrendingUp], ['historial', 'Historial', History]].map(([k, label, Icono]) => (
           <button key={k} onClick={() => setTab(k)}
-            className={`inline-flex items-center gap-2 px-4 py-2.5 text-base font-extrabold rounded-xl transition ${tab === k
-              ? 'bg-brand-600 text-white shadow-sm'
-              : 'text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800'}`}>
-            <Icono size={16} /> {label}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-[12.5px] font-bold rounded-lg transition ${tab === k
+              ? 'bg-brand-600 text-white'
+              : 'text-gray-500 dark:text-gray-400 border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800'}`}>
+            <Icono size={13} /> {label}
           </button>
         ))}
       </div>

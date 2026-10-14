@@ -193,7 +193,36 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
 
   const n = Math.max(1, Math.min(6, Number(nCampanas) || 1));
   const lotes = useMemo(() => repartir(elegidos, n), [elegidos, n]);
-  const nombreCampana = (i) => (lotes.length > 1 ? `${nombreBase.trim()} · C${i + 1}` : nombreBase.trim());
+  // Cada campaña puede llevar SU nombre (pedido del user): el input por
+  // campaña pisa el default (base + · C1/C2…).
+  const [nombresCampanas, setNombresCampanas] = useState({});
+  const nombreCampana = (i) => {
+    const custom = (nombresCampanas[i] || '').trim();
+    if (custom) return custom;
+    return lotes.length > 1 ? `${nombreBase.trim()} · C${i + 1}` : nombreBase.trim();
+  };
+  // Preview de la ESTRUCTURA: cómo queda cada campaña con sus conjuntos y
+  // anuncios (el mismo reparto que arma el server: de a `adsPorSet`).
+  const estructuraPreview = useMemo(() => {
+    const perSet = Math.max(1, Number(adsPorSet) || 3);
+    const adsetPattern = preset?.adsetPattern || 'Ad Set {index:01}';
+    const adPattern = preset?.adPattern || '{filename}';
+    return lotes.map((lote, c) => {
+      const sets = [];
+      for (let i = 0; i < lote.length; i += perSet) {
+        const items = lote.slice(i, i + perSet).map((x, j) => ({
+          tipo: x.tipo,
+          nombre: aplicarPatron(adPattern, { filename: sinExtension(x.name), index: i + j, fecha: fechaCorta }) || sinExtension(x.name),
+        }));
+        sets.push({
+          nombre: aplicarPatron(adsetPattern, { filename: '', index: sets.length, fecha: fechaCorta }) || `Ad Set ${sets.length + 1}`,
+          items,
+        });
+      }
+      return { nombre: nombreCampana(c), sets, total: lote.length };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lotes, adsPorSet, preset, fechaCorta, nombreBase, nombresCampanas]);
 
   // ── Publicación (en serie, campaña por campaña) ──
   const [fase, setFase] = useState(null); // null | 'publicando' | 'listo' | 'error'
@@ -345,7 +374,7 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
       setFase('error');
       addToast?.({ type: 'error', message: 'No se pudo crear ninguna campaña — mirá el detalle en el log.' });
     }
-  }, [listo, lotes, loteMax, account, template, preset, producto, presupuesto, adsPorSet, enPausa, nombreBase, fechaCorta, mensaje, titular, programada, addToast, onPublicadas]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [listo, lotes, loteMax, account, template, preset, producto, presupuesto, adsPorSet, enPausa, nombreBase, fechaCorta, mensaje, titular, programada, nombresCampanas, addToast, onPublicadas]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const input = 'w-full px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500';
 
@@ -574,9 +603,22 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
           </div>
 
           <div>
-            <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">Nombre base de campaña</span>
+            <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 block mb-1.5">{lotes.length > 1 ? 'Nombre base de campaña' : 'Nombre de la campaña'}</span>
             <input value={nombreBase} onChange={e => setNombreBase(e.target.value)} className={input} disabled={fase === 'publicando'} />
-            {lotes.length > 1 && <p className="text-[10px] text-gray-400 mt-1">Se numeran solas: «{nombreCampana(0)}», «{nombreCampana(1)}»…</p>}
+            {/* Nombre propio POR CAMPAÑA (pedido del user): editás el que
+                quieras; vacío = base + número automático. */}
+            {lotes.length > 1 && (
+              <div className="mt-2 space-y-1.5">
+                {lotes.map((_, i) => (
+                  <div key={i} className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-bold text-gray-400 w-7 shrink-0">C{i + 1}</span>
+                    <input value={nombresCampanas[i] ?? ''} placeholder={`${nombreBase.trim()} · C${i + 1}`}
+                      onChange={e => setNombresCampanas(prev => ({ ...prev, [i]: e.target.value }))}
+                      className={`${input} text-xs`} disabled={fase === 'publicando'} />
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-2.5">
@@ -628,6 +670,37 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
           )}
           {nImagenes > 0 && template && !template.link && (
             <p className="text-[11px] text-rose-500">El ad modelo no tiene link de destino: las imágenes lo necesitan. Elegí otra campaña base.</p>
+          )}
+
+          {/* Cómo queda: campaña → conjuntos → anuncios, con el reparto real */}
+          {elegidos.length > 0 && (
+            <details className="rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2" open={lotes.length > 1}>
+              <summary className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 cursor-pointer select-none">
+                📋 Así queda la estructura
+              </summary>
+              <div className="mt-2 space-y-2.5 max-h-64 overflow-y-auto pr-1">
+                {estructuraPreview.map((c, i) => (
+                  <div key={i}>
+                    <p className="text-xs font-bold text-gray-800 dark:text-gray-100 truncate" title={c.nombre}>
+                      📦 {c.nombre}
+                      <span className="font-normal text-gray-400"> · {Number(presupuesto) > 0 ? `$${Number(presupuesto).toLocaleString('es-AR')}/día · ` : ''}{c.sets.length} conjunto{c.sets.length === 1 ? '' : 's'} · {c.total} ads</span>
+                    </p>
+                    {c.sets.map((st, j) => (
+                      <div key={j} className="ml-3 mt-1">
+                        <p className="text-[11px] font-semibold text-gray-600 dark:text-gray-300">└ {st.nombre} <span className="text-gray-400 font-normal">({st.items.length} ad{st.items.length === 1 ? '' : 's'})</span></p>
+                        <div className="ml-4">
+                          {st.items.map((it, k) => (
+                            <p key={k} className="text-[10.5px] text-gray-500 dark:text-gray-400 truncate" title={it.nombre}>
+                              {it.tipo === 'video' ? '🎥' : '🖼'} {it.nombre}
+                            </p>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </details>
           )}
 
           {fase === 'listo' || fase === 'error' ? (

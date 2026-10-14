@@ -338,14 +338,15 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
       {/* anuncios */}
       <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-3.5">
         <p className="text-[9.5px] font-bold uppercase tracking-[.08em] text-gray-400 mb-1.5">
-          Anuncios — uno por línea: «Nombre | número de publicación»
+          Anuncios — uno por línea, con el número de publicación al final
         </p>
         <p className="text-[10.5px] text-gray-400 mb-1.5">
-          El número de publicación es el ID del posteo de Facebook/Instagram que querés usar como anuncio.
-          Lo encontrás en Meta Business Suite → la publicación → ⋯ → Copiar ID. Acepta «pageId_postId» o el número solo.
+          Pegá la lista como la tengas: «Nombre 122235409…» o «Nombre | 122235409…» — tomamos el número del final
+          de cada línea. El número de publicación es el ID del posteo de Facebook/Instagram (Meta Business Suite →
+          la publicación → ⋯ → Copiar ID); acepta «pageId_postId» o el número solo.
         </p>
         <textarea rows={6} className={`${inputCls} font-mono`} value={adsText} onChange={e => setAdsText(e.target.value)}
-          placeholder={'Aceite 12-10 C1 Mecanismo | 122098765432101234\nAceite 12-10 C2 Testimonio | 17895695668004550\n122111222333444555'} />
+          placeholder={'[C5][Francisco][27-9][esto es rapidisimo BOF] 122235409610504562\nAceite 12-10 C2 Testimonio | 17895695668004550\n122111222333444555'} />
         {ads.length > 0 && (
           <p className="text-[11px] mt-1.5 text-gray-500 dark:text-gray-400">
             {adsOk.length} válido{adsOk.length === 1 ? '' : 's'}

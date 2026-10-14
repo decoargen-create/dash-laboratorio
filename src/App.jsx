@@ -40,6 +40,7 @@ import ExecutionsTray from './ExecutionsTray.jsx';
 import SelfHealingBanner from './SelfHealingBanner.jsx';
 import ClaudeProactivoSidebar from './ClaudeProactivoSidebar.jsx';
 import HomeOS from './HomeOS.jsx';
+import PlanSection from './PlanSection.jsx';
 import CopyGeneratorSection from './CopyGeneratorSection.jsx';
 import SlashCommand from './SlashCommand.jsx';
 import BulkProgressBarGlobal from './BulkProgressBarGlobal.jsx';
@@ -1484,7 +1485,7 @@ function AppShell({ onExit }) {
       // Si tenía una sección de Viora/Senydrop/MetaAds, defaulteamos a la
       // de Marketing. Lista de secciones válidas en las plataformas activas:
       const validSections = ['mk-home', 'mk-arranque', 'mk-bandeja', 'mk-copy', 'mk-metricas', 'mk-testeos',
-        'mk-inspiracion', 'mk-winners', 'mk-produccion', 'mk-publicar', 'mk-landings', 'mk-gastos', 'mk-docs', 'con-acta'];
+        'mk-inspiracion', 'mk-winners', 'mk-produccion', 'mk-publicar', 'mk-landings', 'mk-gastos', 'mk-docs', 'mk-plan', 'con-acta'];
       return validSections.includes(saved) ? saved : 'mk-home';
     } catch { return 'mk-home'; }
   });
@@ -2510,6 +2511,12 @@ function AppShell({ onExit }) {
                   )}
                 </NavSection>
               )}
+              {/* Plan y facturación: solo el dueño de la cuenta (no miembros). */}
+              {!currentUser.miembro && (
+                <NavSection title="Cuenta" sectionKey="mk-cuenta" sidebarOpen={sidebarOpen} defaultOpen={false}>
+                  <NavItem icon={CreditCard} label="Plan y facturación" section="mk-plan" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                </NavSection>
+              )}
               {/* "Finanzas → Gastos del stack" salió del menú (pedido del user):
                   la sección sigue viva y se llega desde las stats de saldo del
                   pie del sidebar (SidebarStats → onNavGastos). */}
@@ -2617,6 +2624,7 @@ function AppShell({ onExit }) {
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-publicar' && <PublicarSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-testeos' && <TesteosSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-winners' && <WinnersGlobalSection addToast={addToast} onGoToSection={setCurrentSection} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-plan' && <PlanSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-produccion' && <ProduccionSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-landings' && <LandingsSection addToast={addToast} />}
           {currentUser.role === 'admin' && esAdminPlataforma() && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-gastos' && <GastosStackSection addToast={addToast} />}

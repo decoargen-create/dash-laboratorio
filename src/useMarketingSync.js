@@ -214,10 +214,16 @@ export function useMarketingSync({ addToast } = {}) {
           const raw = localStorage.getItem(KEYS.productos);
           if (raw) {
             const productos = safeParse(raw) || [];
-            const updated = productos.map(p => ({
-              ...p,
-              bandejaIdeas: byProducto.get(String(p.id)) || [],
-            }));
+            const hace15 = Date.now() - 15 * 60 * 1000;
+            const updated = productos.map(p => {
+              const cloud = byProducto.get(String(p.id)) || [];
+              const cloudIds = new Set(cloud.map(i => String(i.id)));
+              // Ideas locales recién creadas cuyo insert a marketing_ideas aún
+              // no aterrizó: no pisarlas (misma gracia de 15 min que el pull).
+              const localesRecientes = (p.bandejaIdeas || []).filter(i =>
+                !cloudIds.has(String(i.id)) && (Date.parse(i?.createdAt || i?.at || 0) || 0) > hace15);
+              return { ...p, bandejaIdeas: [...cloud, ...localesRecientes] };
+            });
             // safeSetItem swallows quota errors (Safari private mode crash)
             // y emite warning — pero dispatch event SIEMPRE para que el state
             // in-memory se actualice aunque la persistencia falle.

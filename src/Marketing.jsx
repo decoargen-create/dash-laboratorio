@@ -1386,7 +1386,7 @@ export default function MarketingSection({ addToast, bgAnalysis, onStart, onCanc
                     onDownloadSingle={handleDownloadSingle}
                     onDownloadPack={handleDownloadPack}
                     onDelete={() => handleDeleteProducto(p.id)}
-                    onUpdateProduct={(patch) => setProductos(prev => prev.map(x => x.id === p.id ? { ...x, ...patch, updatedAt: new Date().toISOString() } : x))}
+                    onUpdateProduct={(patch) => setProductos(prev => prev.map(x => x.id === p.id ? { ...x, ...patch, updatedAt: new Date().toISOString(), updated_at: new Date().toISOString() } : x))}
                     addToast={addToast}
                   />
                 )}

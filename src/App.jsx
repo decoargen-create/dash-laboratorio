@@ -26,7 +26,6 @@ import BandejaSection from './Bandeja.jsx';
 import InspiracionSection from './InspiracionSection.jsx';
 import WinnersGlobalSection from './WinnersGlobalSection.jsx';
 import ConsultoriaSection from './Consultoria.jsx';
-import CampanasTracker from './CampanasTracker.jsx';
 import { MetaConnectButton } from './MetaConnect.jsx';
 import MetricasSection from './MetricasSection.jsx';
 import PublicarSection from './PublicarSection.jsx';
@@ -1484,7 +1483,7 @@ function AppShell({ onExit }) {
       const saved = guardada === 'mk-testeos' ? 'mk-metricas' : guardada;
       // Si tenía una sección de Viora/Senydrop/MetaAds, defaulteamos a la
       // de Marketing. Lista de secciones válidas en las plataformas activas:
-      const validSections = ['mk-home', 'mk-arranque', 'mk-bandeja', 'mk-copy', 'mk-meta', 'mk-metricas', 'mk-testeos',
+      const validSections = ['mk-home', 'mk-arranque', 'mk-bandeja', 'mk-copy', 'mk-metricas', 'mk-testeos',
         'mk-inspiracion', 'mk-winners', 'mk-produccion', 'mk-publicar', 'mk-landings', 'mk-gastos', 'mk-docs', 'con-acta'];
       return validSections.includes(saved) ? saved : 'mk-home';
     } catch { return 'mk-home'; }
@@ -2284,7 +2283,7 @@ function AppShell({ onExit }) {
     if (!m) return;
     if (currentPlatform !== 'marketing') { setCurrentPlatform('marketing'); return; }
     const SECCIONES_AREA = {
-      metricas: ['mk-home', 'mk-meta', 'mk-metricas'],
+      metricas: ['mk-home', 'mk-metricas'],
       productos: ['mk-home', 'mk-arranque'],
       produccion: ['mk-home', 'mk-produccion', 'mk-publicar'],
       landings: ['mk-home', 'mk-landings'],
@@ -2482,10 +2481,10 @@ function AppShell({ onExit }) {
                   arriba en Operación y Meta Ads como entrada propia. */}
               <NavSection title="Operación" sectionKey="mk-op" sidebarOpen={sidebarOpen}>
                 <NavItem icon={LayoutGridIcon} label="Home" section="mk-home" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                {(!currentUser.miembro || currentUser.miembro.areas.includes('metricas')) && (<>
-                  <NavItem icon={BarChart3} label="Meta Ads" section="mk-meta" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                {/* Meta Ads salió del menú: es la pestaña "Cuentas de Meta" adentro de Métricas. */}
+                {(!currentUser.miembro || currentUser.miembro.areas.includes('metricas')) && (
                   <NavItem icon={Gauge} label="Métricas" section="mk-metricas" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                </>)}
+                )}
                 {(!currentUser.miembro || currentUser.miembro.areas.includes('produccion')) && (
                   <NavItem icon={Rocket} label="Publicador" section="mk-publicar" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                 )}
@@ -2614,7 +2613,6 @@ function AppShell({ onExit }) {
           {/* mk-competencia (sidebar legacy) está redirigido por el effect
               de arriba a mk-arranque — no necesita su propio render. */}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-inspiracion' && <InspiracionSection addToast={addToast} />}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-meta' && <CampanasTracker addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-metricas' && <MetricasSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-publicar' && <PublicarSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-testeos' && <TesteosSection addToast={addToast} />}
@@ -8495,7 +8493,6 @@ function getSectionTitle(user, section) {
     'mk-copy': 'Marketing · Generador de copy',
     'mk-bandeja': 'Marketing · Bandeja de ideas',
     'mk-docs': 'Marketing · Documentación de producto',
-    'mk-meta': 'Marketing · Meta Ads',
     'mk-metricas': 'Marketing · Métricas',
     'mk-testeos': 'Marketing · Testeos',
     'mk-inspiracion': 'Marketing · Inspiración',

@@ -43,6 +43,7 @@ import { alertDialog } from './dialogs.jsx';
 import { supabase } from './supabase.js';
 import MenuFecha from './MenuFecha.jsx';
 import PublicarCampana from './PublicarCampana.jsx';
+import CampanasTracker from './CampanasTracker.jsx';
 import { referenciasApi } from './referenciasApi.js';
 import { fetchMeta, leerCacheMeta, pathTestingInsights, pathAdsWithInsights, recordarConnId } from './metricasCache.js';
 import { VistaEmbudo } from './EmbudoVista.jsx';
@@ -2709,12 +2710,18 @@ export default function MetricasSection({ addToast }) {
     // "Publicar campaña" salió de acá (solo en dev): es el PUBLICADOR, entrada
     // propia del menú (Área creativa), que junta videos de tarjetas y estáticos.
     { id: 'reglas', label: 'Reglas de la tienda', icon: SlidersHorizontal, desc: 'Tus números de corte: desde cuánto algo es ganador o hay que apagarlo.' },
+    // Meta Ads salió del menú lateral (pedido del user): el tracker de cuentas
+    // y conexiones vive acá como pestaña.
+    { id: 'cuentas', label: 'Cuentas de Meta', icon: Plug, desc: 'Conectá y administrá tus cuentas publicitarias (tokens y conexiones).' },
   ];
 
   return (
     <div className="max-w-6xl mx-auto space-y-4">
       {header}
 
+      {/* La barra de cuenta/calendario no aplica en "Cuentas de Meta": el
+          tracker tiene sus propios selectores. */}
+      {tab !== 'cuentas' && (
       <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-2.5 flex flex-wrap gap-2 items-center">
         <div className="relative flex-1 min-w-[210px]">
           <select value={accountId} onChange={e => setAccountId(e.target.value)}
@@ -2770,6 +2777,7 @@ export default function MetricasSection({ addToast }) {
           <RefreshCw size={12} className={loading ? 'animate-spin' : ''} /> Refrescar
         </button>
       </div>
+      )}
 
       <div className="flex gap-1 border-b border-gray-200 dark:border-gray-700 overflow-x-auto">
         {TABS.map(t => {
@@ -2789,7 +2797,11 @@ export default function MetricasSection({ addToast }) {
         )}
       </div>
 
-      {error ? (
+      {tab === 'cuentas' ? (
+        /* Tracker de cuentas (ex "Meta Ads" del menú): anda sin cuenta elegida
+           arriba, así que va antes de los gates de error/carga/data. */
+        <CampanasTracker addToast={addToast} />
+      ) : error ? (
         <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl flex items-start gap-3">
           <AlertCircle size={17} className="text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
           <div className="min-w-0">

@@ -79,12 +79,19 @@ export async function fetchMeta(path, { connId } = {}) {
   return p;
 }
 
-export function pathTestingInsights(accountId, preset) {
-  return `testing-insights?account_id=${encodeURIComponent(accountId)}&date_preset=${encodeURIComponent(preset)}`;
+export function pathTestingInsights(accountId, preset, prospPreset) {
+  let p = `testing-insights?account_id=${encodeURIComponent(accountId)}&date_preset=${encodeURIComponent(preset)}`;
+  // Ventana propia de Prospectadores. Solo viaja cuando difiere del default,
+  // así las keys de cache existentes siguen valiendo.
+  if (prospPreset && prospPreset !== 'last_7d') p += `&prosp_preset=${encodeURIComponent(prospPreset)}`;
+  return p;
 }
 
-export function pathAdsWithInsights(accountId) {
-  return `ads-with-insights?account_id=${encodeURIComponent(accountId)}&limit=100`;
+export function pathAdsWithInsights(accountId, preset) {
+  let p = `ads-with-insights?account_id=${encodeURIComponent(accountId)}&limit=100`;
+  // Ventana de Winners (default del server: últimos 14 días).
+  if (preset && preset !== 'last_14d') p += `&date_preset=${encodeURIComponent(preset)}`;
+  return p;
 }
 
 // Precarga en segundo plano de la ÚLTIMA cuenta usada: el tablero de hoy +

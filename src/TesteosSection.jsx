@@ -264,9 +264,9 @@ function VistaHoy({ ads, cfg, currency, accountId, onWhy, nivel, setNivel }) {
               {filas.map(a => {
                 const p = a.pausa, i = a.insights;
                 const open = abierto === a.id;
-                const tone = p.accion === 'pausar' ? 'bad' : p.accion === 'dejar-correr' ? 'warn'
+                const tone = p.accion === 'pausar' ? 'bad' : (p.accion === 'dejar-correr' || p.accion === 'testeo') ? 'warn'
                   : i.spend < cfg.pisoGastoPausar ? 'mute' : 'ok';
-                const label = p.accion === 'pausar' ? 'Pausar' : p.accion === 'dejar-correr' ? 'Dejalo correr'
+                const label = p.accion === 'pausar' ? 'Pausar' : p.accion === 'dejar-correr' ? 'Dejalo correr' : p.accion === 'testeo' ? '🧪 Testeo'
                   : i.spend < cfg.pisoGastoPausar ? 'Sin datos aún' : 'Va bien';
                 return (
                   <React.Fragment key={a.id}>

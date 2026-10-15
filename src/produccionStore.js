@@ -876,18 +876,24 @@ const mismoProducto = (a, productoId, productoNombre) => {
     : (a.productoNombre || '').trim().toLowerCase() === (productoNombre || '').trim().toLowerCase();
 };
 
-// Winners de un producto: unión (dedup) de los winners de todas sus tarjetas,
-// más recientes primero.
+// Winners de un producto: unión de los winners de todas sus tarjetas, más
+// recientes primero. Pedido del user (14/10): solo los que tienen link de
+// Drive (sin link no sirven como referencia para el editor), y si el mismo
+// video quedó marcado varias veces (semanas distintas, con y sin driveId),
+// queda UNO solo — el actualizado más reciente.
 export function winnersDeProducto(productoId, productoNombre) {
-  const seen = new Set(); const out = [];
+  const porClave = new Map();
   for (const a of read()) {
     if (!mismoProducto(a, productoId, productoNombre)) continue;
     for (const w of (a.winners || [])) {
-      const k = winnerKey(w);
-      if (k && !seen.has(k)) { seen.add(k); out.push(w); }
+      if (!w?.link) continue; // sin Drive, afuera
+      const k = String(w.name || '').trim().toLowerCase() || winnerKey(w);
+      if (!k) continue;
+      const prev = porClave.get(k);
+      if (!prev || (w.ts || 0) > (prev.ts || 0)) porClave.set(k, w);
     }
   }
-  return out.sort((x, y) => (y.ts || 0) - (x.ts || 0));
+  return [...porClave.values()].sort((x, y) => (y.ts || 0) - (x.ts || 0));
 }
 
 // Escribe la lista de winners en TODAS las tarjetas del producto (así queda igual

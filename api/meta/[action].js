@@ -327,8 +327,35 @@ async function handleAdAccounts(req, res) {
       after = data.paging?.next && data.paging?.cursors?.after ? data.paging.cursors.after : null;
       if (!after) break;
     }
+    // me/adaccounts solo trae cuentas con ROL DIRECTO del usuario: las de
+    // Business Managers SOCIOS (compartidas entre BMs) no aparecen ahí. Se
+    // completan con los edges de negocio (requiere business_management; si
+    // el token no lo tiene, seguimos solo con lo directo).
+    try {
+      const biz = await graphGet('me/businesses', token, { fields: 'id,name', limit: 25 });
+      for (const b of (biz.data || []).slice(0, 15)) {
+        for (const edge of ['owned_ad_accounts', 'client_ad_accounts']) {
+          let cursor = null;
+          for (let p = 0; p < 4; p++) {
+            const params = {
+              fields: 'id,account_id,name,account_status,currency,timezone_name,business_name',
+              limit: 100,
+            };
+            if (cursor) params.after = cursor;
+            let d;
+            try { d = await graphGet(`${b.id}/${edge}`, token, params); } catch { break; }
+            for (const a of (d.data || [])) todas.push({ ...a, business_name: a.business_name || b.name });
+            cursor = d.paging?.next && d.paging?.cursors?.after ? d.paging.cursors.after : null;
+            if (!cursor) break;
+          }
+        }
+      }
+    } catch { /* sin business_management no hay edges de negocio */ }
+
     // account_status: 1=ACTIVE, 2=DISABLED, 3=UNSETTLED, 7=PENDING_RISK_REVIEW, ...
+    const vistos = new Set();
     const accounts = todas
+      .filter(a => a && a.id && !vistos.has(a.id) && vistos.add(a.id))
       .filter(a => a.account_status === 1)
       .sort((x, y) => String(x.name || '').localeCompare(String(y.name || ''), 'es'))
       .map(a => ({

@@ -310,13 +310,27 @@ async function handleAdAccounts(req, res) {
   if (!token) return respondJSON(res, status || 401, { error: error || 'Meta no conectado' });
 
   try {
-    const data = await graphGet('me/adaccounts', token, {
-      fields: 'id,account_id,name,account_status,currency,timezone_name,business_name',
-      limit: 100,
-    });
+    // PAGINADO COMPLETO: me/adaccounts viene en páginas y un usuario que es
+    // socio de varios Business Managers junta 40+ cuentas — quedarse con la
+    // primera página dejaba cuentas reales (p. ej. las del BM socio) fuera
+    // del selector sin ningún error visible.
+    const todas = [];
+    let after = null;
+    for (let pagina = 0; pagina < 8; pagina++) { // tope ~800 cuentas
+      const params = {
+        fields: 'id,account_id,name,account_status,currency,timezone_name,business_name',
+        limit: 100,
+      };
+      if (after) params.after = after;
+      const data = await graphGet('me/adaccounts', token, params);
+      todas.push(...(data.data || []));
+      after = data.paging?.next && data.paging?.cursors?.after ? data.paging.cursors.after : null;
+      if (!after) break;
+    }
     // account_status: 1=ACTIVE, 2=DISABLED, 3=UNSETTLED, 7=PENDING_RISK_REVIEW, ...
-    const accounts = (data.data || [])
+    const accounts = todas
       .filter(a => a.account_status === 1)
+      .sort((x, y) => String(x.name || '').localeCompare(String(y.name || ''), 'es'))
       .map(a => ({
         id: a.id, // con prefijo act_
         accountId: a.account_id,

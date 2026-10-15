@@ -2437,7 +2437,7 @@ function AppShell({ onExit }) {
         {/* Divisor sutil */}
         <div aria-hidden="true" className="mx-4 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
 
-        <nav className="relative flex-1 p-3 space-y-1 overflow-y-auto">
+        <nav className="relative flex-1 p-3 space-y-1 overflow-y-auto flex flex-col">
           {currentUser.role === 'admin' && currentPlatform === 'viora' && (
             <>
               <NavSection title="Operación" sectionKey="vi-op" sidebarOpen={sidebarOpen}>
@@ -2511,11 +2511,14 @@ function AppShell({ onExit }) {
                   )}
                 </NavSection>
               )}
-              {/* Plan y facturación: solo el dueño de la cuenta (no miembros). */}
+              {/* Plan y facturación: solo el dueño (no miembros), clavado ABAJO
+                  de todo el menú (!mt-auto gana al space-y del nav). */}
               {!currentUser.miembro && (
-                <NavSection title="Cuenta" sectionKey="mk-cuenta" sidebarOpen={sidebarOpen} defaultOpen={false}>
-                  <NavItem icon={CreditCard} label="Plan y facturación" section="mk-plan" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                </NavSection>
+                <div className="!mt-auto pt-4">
+                  <NavSection title="Cuenta" sectionKey="mk-cuenta" sidebarOpen={sidebarOpen} defaultOpen={false}>
+                    <NavItem icon={CreditCard} label="Plan y facturación" section="mk-plan" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                  </NavSection>
+                </div>
               )}
               {/* "Finanzas → Gastos del stack" salió del menú (pedido del user):
                   la sección sigue viva y se llega desde las stats de saldo del

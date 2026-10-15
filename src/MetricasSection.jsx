@@ -950,6 +950,9 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
   // sobre estos: incluir las que ya pausaste haría que el contador mienta y
   // que confirmar un "Pausar 6" pause 2.
   const pausables = r.aPausar.filter(a => estadoVisible(a, cambios) === 'ACTIVE');
+  // Cuántas siguen prendidas HOY (con gasto): el "cuántas tengo corriendo" de
+  // un vistazo, al nivel que se esté mirando (campañas o anuncios).
+  const prendidas = conGasto.filter(a => estadoVisible(a, cambios) === 'ACTIVE').length;
 
   // Termómetro del día: qué % de la inversión de HOY se fue a lo que está
   // para pausar. No es lo mismo pausar 69K gastando 765K (9%, un día normal)
@@ -988,7 +991,13 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
         productoId={productoId} currency={currency}
         abierto={verCriterios} onToggle={() => setVerCriterios(v => !v)} />
 
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-2">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        <Kpi label="Prendidas" value={String(prendidas)} tone="ok"
+          sub={esCampana ? 'campañas activas con gasto hoy' : 'anuncios activos con gasto hoy'} />
+        <Kpi label="Para apagar" value={String(pausables.length)} tone={pausables.length > 0 ? 'bad' : 'ok'}
+          sub={pausables.length > 0
+            ? (esCampana ? 'cumplen los criterios y siguen prendidas' : 'cumplen los criterios y siguen prendidos')
+            : 'nada cumple los criterios de pausa'} />
         <Kpi label="Plata que podés frenar hoy" title="Lo que esos anuncios iban a gastar de acá a la noche si no los apagás." value={fmtM(r.plataEnJuego, currency)} tone="bad"
           sub={r.plataRedirigible > 0 && r.ahorroPotencial > 0
             ? `${fmtM(r.ahorroPotencial, currency)} se ahorra · ${fmtM(r.plataRedirigible, currency)} se redirige`
